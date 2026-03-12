@@ -1,0 +1,94 @@
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use crate::{
+    expr::Expr,
+    intervention::Intervention,
+    observation::ObservationModel,
+    ode_equation::OdeEquation,
+    parameter::Parameter,
+    table::Table,
+    time_func::TimeFunction,
+    transition::Transition,
+};
+
+// ── Compartment ───────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CompartmentKind {
+    Integer,
+    Real,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Compartment {
+    pub name: String,
+    pub kind: CompartmentKind,
+}
+
+// ── Initial conditions ────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum InitialConditions {
+    Explicit(HashMap<String, f64>),
+    Parameterized(HashMap<String, Expr>),
+    FromDistribution(HashMap<String, crate::parameter::PriorDist>),
+}
+
+// ── Output ────────────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RegularOutputSchedule {
+    pub start: f64,
+    pub step:  f64,
+    pub end:   f64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OutputSchedule {
+    Regular(RegularOutputSchedule),
+    AtTimes(Vec<f64>),
+    MatchObservations,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct OutputConfig {
+    pub times:        OutputSchedule,
+    pub format:       String,
+    pub trajectory:   bool,
+    pub observations: bool,
+}
+
+// ── Simulation config ─────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SimulationConfig {
+    pub t_start:        f64,
+    pub t_end:          f64,
+    pub time_semantics: String,
+    pub dt:             Option<f64>,
+    pub rng_seed:       Option<i64>,
+}
+
+// ── Top-level model ───────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Model {
+    pub name:               String,
+    pub version:            String,
+    pub description:        Option<String>,
+    pub compartments:       Vec<Compartment>,
+    pub transitions:        Vec<Transition>,
+    pub ode_equations:      Vec<OdeEquation>,
+    pub time_functions:     Vec<TimeFunction>,
+    pub tables:             Vec<Table>,
+    pub interventions:      Vec<Intervention>,
+    pub observations:       Vec<ObservationModel>,
+    pub parameters:         Vec<Parameter>,
+    pub initial_conditions: InitialConditions,
+    pub data_contract:      Option<serde_json::Value>,
+    pub output:             OutputConfig,
+    pub simulation:         SimulationConfig,
+}

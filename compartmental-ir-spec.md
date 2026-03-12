@@ -276,7 +276,7 @@ expr :=
   | Cond(expr, expr, expr)          -- if pred > 0 then second else third
                                    --   pred is any expr; truthy iff > 0, falsy iff ≤ 0
   | TimeFunc(string)                -- named time-varying function (see 3.3)
-  | TableLookup(string, expr)       -- named table, index expression (see 3.4)
+  | TableLookup(string, expr list)  -- named table, multi-index (see 3.4); len must equal len(shape)
 
 op  := Add | Sub | Mul | Div | Pow | Min | Max
 uop := Neg | Exp | Log | Sqrt | Abs | Floor | Ceil
@@ -342,24 +342,32 @@ a `Sinusoidal` definition.
 
 ### 3.4 Table Lookups
 
-`TableLookup(name, index_expr)` provides random access into a named data array.
+`TableLookup(name, indices)` provides multi-index random access into a named
+data array. `indices` is a non-empty list of index expressions, one per
+dimension.
 
 ```
 tables: [{
-  name: string,
-  values: float list,         -- 1D array, indexed by integer
+  name:          string,
+  shape:         int list,        -- e.g. [3, 3] for a 3×3 matrix; [n] for 1D
+  values:        float list,      -- row-major flat storage; length = product(shape)
   out_of_bounds: oob_policy
 }]
 
 oob_policy := Clamp | Wrap | Error
 ```
 
-Tables are 1D. Multi-dimensional lookups (e.g., contact matrix `C[i,j]`) are
-flattened: `TableLookup("C_age", BinOp(Add, BinOp(Mul, i, n_strata), j))`.
-Verbose but simple.
+Each index expression is evaluated and `floor`'d to an integer. The flat offset
+is computed using row-major (C-order) strides: for shape `[d0, d1, ..., dn]`,
+strides are `[d1*d2*...*dn, d2*...*dn, ..., 1]`. Strides are precomputed at
+model load time and must not be recomputed in the hot loop.
 
-The index expression is evaluated and `floor`'d to an integer. Tables are
-immutable data, not state.
+Validation requires `len(indices) == len(shape)`. A mismatch is a model error,
+not a warning.
+
+For 1D tables, `shape = [n]` and `indices = [expr]`. Contact matrices are 2D:
+`shape = [n_age, n_age]`, `indices = [i_expr, j_expr]`. The OCaml expander
+produces the index expressions directly — no manual stride arithmetic needed.
 
 **Why tables are essential.** Without them, the OCaml expander must inline every
 age-specific rate as a literal `Const`, producing enormous IR files for
@@ -377,9 +385,9 @@ Not IR primitives — patterns the OCaml expander produces:
 ```
 Mul(Param("beta"), Mul(Pop("S_child"),
   Add(
-    Mul(TableLookup("C_age", Const(0)),
+    Mul(TableLookup("C_age", [Const(0), Const(0)]),   -- C[child, child]
         Div(Pop("I_child"), PopSum(["S_child","E_child","I_child","R_child"]))),
-    Mul(TableLookup("C_age", Const(1)),
+    Mul(TableLookup("C_age", [Const(0), Const(1)]),   -- C[child, adult]
         Div(Pop("I_adult"), PopSum(["S_adult","E_adult","I_adult","R_adult"]))))))
 ```
 

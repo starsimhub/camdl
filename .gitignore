@@ -1,0 +1,36 @@
+# Claude Code
+.claire/
+
+# Rust
+rust/target/
+
+# OCaml / Dune
+ocaml/_build/
+*.install
+*.byte
+*.native
+*.cmo
+*.cmi
+*.cmx
+*.cmt
+*.cmti
+*.o
+*.a
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# macOS
+.DS_Store
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Generated / output
+ir/expected/
+tests/snapshots/

@@ -1,0 +1,790 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/camdl/camdl/ir/schema.json",
+  "title": "Camdl IR",
+  "description": "Stochastic compartmental model IR schema v0.3",
+  "type": "object",
+  "required": [
+    "name", "version", "compartments", "transitions", "ode_equations",
+    "time_functions", "tables", "interventions", "observations",
+    "parameters", "initial_conditions", "output", "simulation"
+  ],
+  "properties": {
+    "name":        {"type": "string"},
+    "version":     {"type": "string"},
+    "description": {"type": ["string", "null"]},
+
+    "compartments": {
+      "type": "array",
+      "items": {"$ref": "#/definitions/compartment"}
+    },
+
+    "transitions": {
+      "type": "array",
+      "items": {"$ref": "#/definitions/transition"}
+    },
+
+    "ode_equations": {
+      "type": "array",
+      "items": {"$ref": "#/definitions/ode_equation"}
+    },
+
+    "time_functions": {
+      "type": "array",
+      "items": {"$ref": "#/definitions/time_function"}
+    },
+
+    "tables": {
+      "type": "array",
+      "items": {"$ref": "#/definitions/table"}
+    },
+
+    "interventions": {
+      "type": "array",
+      "items": {"$ref": "#/definitions/intervention"}
+    },
+
+    "observations": {
+      "type": "array",
+      "items": {"$ref": "#/definitions/observation_model"}
+    },
+
+    "parameters": {
+      "type": "array",
+      "items": {"$ref": "#/definitions/parameter"}
+    },
+
+    "initial_conditions": {"$ref": "#/definitions/initial_conditions"},
+
+    "data_contract": {
+      "oneOf": [{"type": "null"}, {"type": "object"}]
+    },
+
+    "output": {"$ref": "#/definitions/output_config"},
+
+    "simulation": {"$ref": "#/definitions/simulation_config"}
+  },
+
+  "definitions": {
+
+    "compartment": {
+      "type": "object",
+      "required": ["name", "kind"],
+      "properties": {
+        "name": {"type": "string"},
+        "kind": {"type": "string", "enum": ["integer", "real"]}
+      }
+    },
+
+    "expr": {
+      "type": "object",
+      "oneOf": [
+        {
+          "required": ["const"],
+          "properties": {
+            "const": {"type": "number"}
+          },
+          "additionalProperties": false
+        },
+        {
+          "required": ["param"],
+          "properties": {
+            "param": {"type": "string"}
+          },
+          "additionalProperties": false
+        },
+        {
+          "required": ["pop"],
+          "properties": {
+            "pop": {"type": "string"}
+          },
+          "additionalProperties": false
+        },
+        {
+          "required": ["pop_sum"],
+          "properties": {
+            "pop_sum": {"type": "array", "items": {"type": "string"}}
+          },
+          "additionalProperties": false
+        },
+        {
+          "required": ["time"],
+          "properties": {
+            "time": {"type": "null"}
+          },
+          "additionalProperties": false
+        },
+        {
+          "required": ["bin_op"],
+          "properties": {
+            "bin_op": {
+              "type": "object",
+              "required": ["op", "left", "right"],
+              "properties": {
+                "op": {"type": "string", "enum": ["add","sub","mul","div","pow","min","max"]},
+                "left":  {"$ref": "#/definitions/expr"},
+                "right": {"$ref": "#/definitions/expr"}
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "required": ["un_op"],
+          "properties": {
+            "un_op": {
+              "type": "object",
+              "required": ["op", "arg"],
+              "properties": {
+                "op":  {"type": "string", "enum": ["neg","exp","log","sqrt","abs","floor","ceil"]},
+                "arg": {"$ref": "#/definitions/expr"}
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "required": ["cond"],
+          "properties": {
+            "cond": {
+              "type": "object",
+              "required": ["pred", "then", "else"],
+              "properties": {
+                "pred": {"$ref": "#/definitions/expr"},
+                "then": {"$ref": "#/definitions/expr"},
+                "else": {"$ref": "#/definitions/expr"}
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "required": ["time_func"],
+          "properties": {
+            "time_func": {
+              "type": "object",
+              "required": ["name"],
+              "properties": {
+                "name": {"type": "string"}
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "required": ["table_lookup"],
+          "properties": {
+            "table_lookup": {
+              "type": "object",
+              "required": ["table", "indices"],
+              "properties": {
+                "table":   {"type": "string"},
+                "indices": {"type": "array", "items": {"$ref": "#/definitions/expr"}, "minItems": 1}
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "required": ["projected"],
+          "properties": {
+            "projected": {"type": "null"}
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+
+    "stoichiometry_entry": {
+      "type": "array",
+      "items": [{"type": "string"}, {"type": "integer"}],
+      "minItems": 2,
+      "maxItems": 2
+    },
+
+    "transition_metadata": {
+      "type": "object",
+      "properties": {
+        "origin_kind":        {"type": ["string", "null"]},
+        "source_compartment": {"type": ["string", "null"]},
+        "dest_compartment":   {"type": ["string", "null"]}
+      }
+    },
+
+    "transition": {
+      "type": "object",
+      "required": ["name", "stoichiometry", "rate"],
+      "properties": {
+        "name": {"type": "string"},
+        "stoichiometry": {
+          "type": "array",
+          "items": {"$ref": "#/definitions/stoichiometry_entry"}
+        },
+        "rate":      {"$ref": "#/definitions/expr"},
+        "event_key": {"type": ["string", "null"]},
+        "metadata":  {
+          "oneOf": [
+            {"type": "null"},
+            {"$ref": "#/definitions/transition_metadata"}
+          ]
+        }
+      }
+    },
+
+    "ode_equation": {
+      "type": "object",
+      "required": ["compartment", "derivative"],
+      "properties": {
+        "compartment": {"type": "string"},
+        "derivative":  {"$ref": "#/definitions/expr"}
+      }
+    },
+
+    "time_func_kind": {
+      "type": "object",
+      "oneOf": [
+        {
+          "required": ["sinusoidal"],
+          "properties": {
+            "sinusoidal": {
+              "type": "object",
+              "required": ["amplitude", "period", "phase", "baseline"],
+              "properties": {
+                "amplitude": {"type": "number"},
+                "period":    {"type": "number"},
+                "phase":     {"type": "number"},
+                "baseline":  {"type": "number"}
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "required": ["piecewise"],
+          "properties": {
+            "piecewise": {
+              "type": "object",
+              "required": ["breakpoints", "values"],
+              "properties": {
+                "breakpoints": {"type": "array", "items": {"type": "number"}},
+                "values":      {"type": "array", "items": {"type": "number"}}
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "required": ["interpolated"],
+          "properties": {
+            "interpolated": {
+              "type": "object",
+              "required": ["times", "values", "method"],
+              "properties": {
+                "times":  {"type": "array", "items": {"type": "number"}},
+                "values": {"type": "array", "items": {"type": "number"}},
+                "method": {"type": "string", "enum": ["linear", "spline"]}
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "required": ["periodic"],
+          "properties": {
+            "periodic": {
+              "type": "object",
+              "required": ["period", "values"],
+              "properties": {
+                "period": {"type": "number"},
+                "values": {"type": "array", "items": {"type": "number"}}
+              }
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+
+    "time_function": {
+      "type": "object",
+      "required": ["name", "kind"],
+      "properties": {
+        "name": {"type": "string"},
+        "kind": {"$ref": "#/definitions/time_func_kind"}
+      }
+    },
+
+    "table": {
+      "type": "object",
+      "required": ["name", "values", "out_of_bounds"],
+      "properties": {
+        "name":          {"type": "string"},
+        "values":        {"type": "array", "items": {"type": "number"}},
+        "out_of_bounds": {"type": "string", "enum": ["clamp", "wrap", "error"]}
+      }
+    },
+
+    "intervention_schedule": {
+      "type": "object",
+      "oneOf": [
+        {
+          "required": ["at_times"],
+          "properties": {
+            "at_times": {"type": "array", "items": {"type": "number"}}
+          },
+          "additionalProperties": false
+        },
+        {
+          "required": ["recurring"],
+          "properties": {
+            "recurring": {
+              "type": "object",
+              "required": ["start", "period", "end"],
+              "properties": {
+                "start":  {"type": "number"},
+                "period": {"type": "number"},
+                "end":    {"type": "number"}
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "required": ["external"],
+          "properties": {
+            "external": {"type": "string"}
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+
+    "action": {
+      "type": "object",
+      "oneOf": [
+        {
+          "required": ["fraction_transfer"],
+          "properties": {
+            "fraction_transfer": {
+              "type": "object",
+              "required": ["src", "dst", "fraction"],
+              "properties": {
+                "src":      {"type": "string"},
+                "dst":      {"type": "string"},
+                "fraction": {"$ref": "#/definitions/expr"}
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "required": ["absolute_transfer"],
+          "properties": {
+            "absolute_transfer": {
+              "type": "object",
+              "required": ["src", "dst", "count"],
+              "properties": {
+                "src":   {"type": "string"},
+                "dst":   {"type": "string"},
+                "count": {"$ref": "#/definitions/expr"}
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "required": ["set"],
+          "properties": {
+            "set": {
+              "type": "object",
+              "required": ["compartment", "value"],
+              "properties": {
+                "compartment": {"type": "string"},
+                "value":       {"$ref": "#/definitions/expr"}
+              }
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+
+    "intervention": {
+      "type": "object",
+      "required": ["name", "schedule", "actions"],
+      "properties": {
+        "name":     {"type": "string"},
+        "schedule": {"$ref": "#/definitions/intervention_schedule"},
+        "actions":  {"type": "array", "items": {"$ref": "#/definitions/action"}}
+      }
+    },
+
+    "projection": {
+      "type": "object",
+      "oneOf": [
+        {
+          "required": ["cumulative_flow"],
+          "properties": {
+            "cumulative_flow": {"type": "string"}
+          },
+          "additionalProperties": false
+        },
+        {
+          "required": ["current_pop"],
+          "properties": {
+            "current_pop": {"type": "string"}
+          },
+          "additionalProperties": false
+        },
+        {
+          "required": ["current_pop_sum"],
+          "properties": {
+            "current_pop_sum": {"type": "array", "items": {"type": "string"}}
+          },
+          "additionalProperties": false
+        },
+        {
+          "required": ["derived_expr"],
+          "properties": {
+            "derived_expr": {"$ref": "#/definitions/expr"}
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+
+    "likelihood": {
+      "type": "object",
+      "oneOf": [
+        {
+          "required": ["poisson"],
+          "properties": {
+            "poisson": {
+              "type": "object",
+              "required": ["rate"],
+              "properties": {
+                "rate": {"$ref": "#/definitions/expr"}
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "required": ["neg_binomial"],
+          "properties": {
+            "neg_binomial": {
+              "type": "object",
+              "required": ["mean", "dispersion"],
+              "properties": {
+                "mean":       {"$ref": "#/definitions/expr"},
+                "dispersion": {"$ref": "#/definitions/expr"}
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "required": ["normal"],
+          "properties": {
+            "normal": {
+              "type": "object",
+              "required": ["mean", "sd"],
+              "properties": {
+                "mean": {"$ref": "#/definitions/expr"},
+                "sd":   {"$ref": "#/definitions/expr"}
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "required": ["binomial"],
+          "properties": {
+            "binomial": {
+              "type": "object",
+              "required": ["n", "p"],
+              "properties": {
+                "n": {"$ref": "#/definitions/expr"},
+                "p": {"$ref": "#/definitions/expr"}
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "required": ["beta_binomial"],
+          "properties": {
+            "beta_binomial": {
+              "type": "object",
+              "required": ["n", "alpha", "beta"],
+              "properties": {
+                "n":     {"$ref": "#/definitions/expr"},
+                "alpha": {"$ref": "#/definitions/expr"},
+                "beta":  {"$ref": "#/definitions/expr"}
+              }
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+
+    "observation_schedule": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["at_times"],
+          "properties": {
+            "at_times": {"type": "array", "items": {"type": "number"}}
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["regular"],
+          "properties": {
+            "regular": {
+              "type": "object",
+              "required": ["start", "step", "end"],
+              "properties": {
+                "start": {"type": "number"},
+                "step":  {"type": "number"},
+                "end":   {"type": "number"}
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "string",
+          "enum": ["from_data"]
+        }
+      ]
+    },
+
+    "observation_model": {
+      "type": "object",
+      "required": ["name", "data_stream", "schedule", "projection", "likelihood"],
+      "properties": {
+        "name":        {"type": "string"},
+        "data_stream": {"type": "string"},
+        "schedule":    {"$ref": "#/definitions/observation_schedule"},
+        "projection":  {"$ref": "#/definitions/projection"},
+        "likelihood":  {"$ref": "#/definitions/likelihood"}
+      }
+    },
+
+    "prior_dist": {
+      "type": "object",
+      "oneOf": [
+        {
+          "required": ["uniform"],
+          "properties": {
+            "uniform": {
+              "type": "object",
+              "required": ["lower", "upper"],
+              "properties": {
+                "lower": {"type": "number"},
+                "upper": {"type": "number"}
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "required": ["normal"],
+          "properties": {
+            "normal": {
+              "type": "object",
+              "required": ["mean", "sd"],
+              "properties": {
+                "mean": {"type": "number"},
+                "sd":   {"type": "number"}
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "required": ["log_normal"],
+          "properties": {
+            "log_normal": {
+              "type": "object",
+              "required": ["mu", "sigma"],
+              "properties": {
+                "mu":    {"type": "number"},
+                "sigma": {"type": "number"}
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "required": ["half_normal"],
+          "properties": {
+            "half_normal": {
+              "type": "object",
+              "required": ["sigma"],
+              "properties": {
+                "sigma": {"type": "number"}
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "required": ["beta"],
+          "properties": {
+            "beta": {
+              "type": "object",
+              "required": ["alpha", "beta"],
+              "properties": {
+                "alpha": {"type": "number"},
+                "beta":  {"type": "number"}
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "required": ["gamma"],
+          "properties": {
+            "gamma": {
+              "type": "object",
+              "required": ["shape", "rate"],
+              "properties": {
+                "shape": {"type": "number"},
+                "rate":  {"type": "number"}
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "required": ["exponential"],
+          "properties": {
+            "exponential": {
+              "type": "object",
+              "required": ["rate"],
+              "properties": {
+                "rate": {"type": "number"}
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "required": ["fixed"],
+          "properties": {
+            "fixed": {"type": "number"}
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+
+    "parameter": {
+      "type": "object",
+      "required": ["name", "value"],
+      "properties": {
+        "name":          {"type": "string"},
+        "value":         {"type": "number"},
+        "prior":         {"oneOf": [{"type": "null"}, {"$ref": "#/definitions/prior_dist"}]},
+        "transform":     {"oneOf": [{"type": "null"}, {"type": "string", "enum": ["log","logit","identity"]}]},
+        "initial_value": {"type": ["number", "null"]}
+      }
+    },
+
+    "initial_conditions": {
+      "type": "object",
+      "oneOf": [
+        {
+          "required": ["explicit"],
+          "properties": {
+            "explicit": {
+              "type": "object",
+              "additionalProperties": {"type": "number"}
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "required": ["parameterized"],
+          "properties": {
+            "parameterized": {
+              "type": "object",
+              "additionalProperties": {"$ref": "#/definitions/expr"}
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "required": ["from_distribution"],
+          "properties": {
+            "from_distribution": {
+              "type": "object",
+              "additionalProperties": {"$ref": "#/definitions/prior_dist"}
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+
+    "output_schedule": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["regular"],
+          "properties": {
+            "regular": {
+              "type": "object",
+              "required": ["start", "step", "end"],
+              "properties": {
+                "start": {"type": "number"},
+                "step":  {"type": "number"},
+                "end":   {"type": "number"}
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["at_times"],
+          "properties": {
+            "at_times": {"type": "array", "items": {"type": "number"}}
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "string",
+          "enum": ["match_observations"]
+        }
+      ]
+    },
+
+    "output_config": {
+      "type": "object",
+      "required": ["times", "format", "trajectory", "observations"],
+      "properties": {
+        "times":        {"$ref": "#/definitions/output_schedule"},
+        "format":       {"type": "string", "enum": ["tsv", "csv"]},
+        "trajectory":   {"type": "boolean"},
+        "observations": {"type": "boolean"}
+      }
+    },
+
+    "simulation_config": {
+      "type": "object",
+      "required": ["t_start", "t_end", "time_semantics"],
+      "properties": {
+        "t_start":         {"type": "number"},
+        "t_end":           {"type": "number"},
+        "time_semantics":  {"type": "string", "enum": ["continuous", "discrete"]},
+        "dt":              {"type": ["number", "null"]},
+        "rng_seed":        {"type": ["integer", "null"]}
+      }
+    }
+  }
+}

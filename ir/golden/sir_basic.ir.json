@@ -1,0 +1,90 @@
+{
+  "name": "sir_basic",
+  "version": "0.3",
+  "description": "Simplest SIR: 3 compartments, 2 transitions, frequency-dependent transmission",
+  "compartments": [
+    {"name": "S", "kind": "integer"},
+    {"name": "I", "kind": "integer"},
+    {"name": "R", "kind": "integer"}
+  ],
+  "transitions": [
+    {
+      "name": "infection",
+      "stoichiometry": [["S", -1], ["I", 1]],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": {
+            "bin_op": {
+              "op": "mul",
+              "left": {"param": "beta"},
+              "right": {"pop": "S"}
+            }
+          },
+          "right": {
+            "bin_op": {
+              "op": "div",
+              "left": {"pop": "I"},
+              "right": {"pop_sum": ["S", "I", "R"]}
+            }
+          }
+        }
+      },
+      "event_key": "infection:{firing_index}",
+      "metadata": {"origin_kind": "transmission", "source_compartment": "S", "dest_compartment": "I"}
+    },
+    {
+      "name": "recovery",
+      "stoichiometry": [["I", -1], ["R", 1]],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": {"param": "gamma"},
+          "right": {"pop": "I"}
+        }
+      },
+      "event_key": "recovery:{firing_index}",
+      "metadata": {"origin_kind": "intrinsic", "source_compartment": "I", "dest_compartment": "R"}
+    }
+  ],
+  "ode_equations": [],
+  "time_functions": [],
+  "tables": [],
+  "interventions": [],
+  "observations": [
+    {
+      "name": "reported_cases",
+      "data_stream": "cases",
+      "schedule": {"regular": {"start": 7.0, "step": 7.0, "end": 365.0}},
+      "projection": {"cumulative_flow": "infection"},
+      "likelihood": {
+        "neg_binomial": {
+          "mean": {"projected": null},
+          "dispersion": {"param": "rho"}
+        }
+      }
+    }
+  ],
+  "parameters": [
+    {"name": "beta",  "value": 0.3,  "prior": null, "transform": null, "initial_value": null},
+    {"name": "gamma", "value": 0.1,  "prior": null, "transform": null, "initial_value": null},
+    {"name": "rho",   "value": 10.0, "prior": null, "transform": null, "initial_value": null}
+  ],
+  "initial_conditions": {
+    "explicit": {"S": 990, "I": 10, "R": 0}
+  },
+  "data_contract": null,
+  "output": {
+    "times": {"regular": {"start": 0.0, "step": 7.0, "end": 365.0}},
+    "format": "tsv",
+    "trajectory": true,
+    "observations": true
+  },
+  "simulation": {
+    "t_start": 0.0,
+    "t_end": 365.0,
+    "time_semantics": "continuous",
+    "dt": null,
+    "rng_seed": 42
+  }
+}

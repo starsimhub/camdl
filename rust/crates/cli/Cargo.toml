@@ -1,0 +1,14 @@
+[package]
+name = "cli"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "camdl"
+path = "src/main.rs"
+
+[dependencies]
+ir      = { path = "../ir" }
+sim     = { path = "../sim" }
+observe = { path = "../observe" }
+io      = { path = "../io" }

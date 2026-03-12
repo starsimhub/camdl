@@ -1,0 +1,23 @@
+[package]
+name = "camdl-tests"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[workspace]
+members = [
+    ".",
+    "crates/ir",
+    "crates/sim",
+    "crates/observe",
+    "crates/io",
+    "crates/cli",
+]
+resolver = "2"
+
+[[test]]
+name = "golden_deser"
+path = "tests/golden_deser.rs"
+
+[dev-dependencies]
+ir = { path = "crates/ir" }
