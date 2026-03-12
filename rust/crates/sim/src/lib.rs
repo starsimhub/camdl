@@ -1,1 +1,22 @@
-// Stub — simulation backends not yet implemented.
+pub mod config;
+pub mod error;
+pub mod state;
+pub mod compiled_model;
+pub mod propensity;
+pub mod output;
+pub mod ekrng;
+pub mod ode_integrator;
+pub mod gillespie;
+pub mod tau_leap;
+pub mod chain_binomial;
+pub mod intervention;
+pub mod simulate;
+
+pub use config::{GillespieConfig, TauLeapConfig, ChainBinomialConfig, SimConfig};
+pub use error::SimError;
+pub use state::{IntState, RealState, FlowVec, Snapshot, Trajectory};
+pub use compiled_model::CompiledModel;
+pub use simulate::Simulate;
+pub use gillespie::GillespieSim;
+pub use tau_leap::TauLeapSim;
+pub use chain_binomial::ChainBinomialSim;
