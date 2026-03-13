@@ -6,12 +6,12 @@ publish = false
 
 [workspace]
 members = [
-    ".",
-    "crates/ir",
-    "crates/sim",
-    "crates/observe",
-    "crates/io",
-    "crates/cli",
+  ".",
+  "crates/cli",
+  "crates/io",
+  "crates/ir",
+  "crates/observe",
+  "crates/sim",
 ]
 resolver = "2"
 

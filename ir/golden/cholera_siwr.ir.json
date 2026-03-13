@@ -3,10 +3,10 @@
   "version": "0.3",
   "description": "SIWR cholera model: integer S/I/R + real-valued water reservoir W. PDMP coupling.",
   "compartments": [
-    {"name": "S", "kind": "integer"},
-    {"name": "I", "kind": "integer"},
-    {"name": "R", "kind": "integer"},
-    {"name": "W", "kind": "real"}
+    { "name": "S", "kind": "integer" },
+    { "name": "I", "kind": "integer" },
+    { "name": "R", "kind": "integer" },
+    { "name": "W", "kind": "real" }
   ],
   "transitions": [
     {
@@ -15,19 +15,19 @@
       "rate": {
         "bin_op": {
           "op": "mul",
-          "left": {"pop": "S"},
+          "left": { "pop": "S" },
           "right": {
             "bin_op": {
               "op": "add",
               "left": {
                 "bin_op": {
                   "op": "mul",
-                  "left": {"param": "beta_I"},
+                  "left": { "param": "beta_I" },
                   "right": {
                     "bin_op": {
                       "op": "div",
-                      "left": {"pop": "I"},
-                      "right": {"pop_sum": ["S", "I", "R"]}
+                      "left": { "pop": "I" },
+                      "right": { "pop_sum": ["S", "I", "R"] }
                     }
                   }
                 }
@@ -38,15 +38,15 @@
                   "left": {
                     "bin_op": {
                       "op": "mul",
-                      "left": {"param": "beta_W"},
-                      "right": {"pop": "W"}
+                      "left": { "param": "beta_W" },
+                      "right": { "pop": "W" }
                     }
                   },
                   "right": {
                     "bin_op": {
                       "op": "add",
-                      "left": {"pop": "W"},
-                      "right": {"param": "kappa"}
+                      "left": { "pop": "W" },
+                      "right": { "param": "kappa" }
                     }
                   }
                 }
@@ -56,7 +56,7 @@
         }
       },
       "event_key": "infection:{firing_index}",
-      "metadata": {"origin_kind": "transmission", "source_compartment": "S", "dest_compartment": "I"}
+      "metadata": { "origin_kind": "transmission", "source_compartment": "S", "dest_compartment": "I" }
     },
     {
       "name": "recovery",
@@ -64,12 +64,12 @@
       "rate": {
         "bin_op": {
           "op": "mul",
-          "left": {"param": "gamma"},
-          "right": {"pop": "I"}
+          "left": { "param": "gamma" },
+          "right": { "pop": "I" }
         }
       },
       "event_key": "recovery:{firing_index}",
-      "metadata": {"origin_kind": "intrinsic", "source_compartment": "I", "dest_compartment": "R"}
+      "metadata": { "origin_kind": "intrinsic", "source_compartment": "I", "dest_compartment": "R" }
     },
     {
       "name": "waning",
@@ -77,12 +77,12 @@
       "rate": {
         "bin_op": {
           "op": "mul",
-          "left": {"param": "omega_R"},
-          "right": {"pop": "R"}
+          "left": { "param": "omega_R" },
+          "right": { "pop": "R" }
         }
       },
       "event_key": "waning:{firing_index}",
-      "metadata": {"origin_kind": "transfer", "source_compartment": "R", "dest_compartment": "S"}
+      "metadata": { "origin_kind": "transfer", "source_compartment": "R", "dest_compartment": "S" }
     }
   ],
   "ode_equations": [
@@ -94,15 +94,15 @@
           "left": {
             "bin_op": {
               "op": "mul",
-              "left": {"param": "xi"},
-              "right": {"pop": "I"}
+              "left": { "param": "xi" },
+              "right": { "pop": "I" }
             }
           },
           "right": {
             "bin_op": {
               "op": "mul",
-              "left": {"param": "omega_W"},
-              "right": {"pop": "W"}
+              "left": { "param": "omega_W" },
+              "right": { "pop": "W" }
             }
           }
         }
@@ -116,32 +116,32 @@
     {
       "name": "reported_cases",
       "data_stream": "cases",
-      "schedule": {"regular": {"start": 7.0, "step": 7.0, "end": 365.0}},
-      "projection": {"cumulative_flow": "infection"},
+      "schedule": { "regular": { "start": 7.0, "step": 7.0, "end": 365.0 } },
+      "projection": { "cumulative_flow": "infection" },
       "likelihood": {
         "neg_binomial": {
-          "mean": {"projected": null},
-          "dispersion": {"param": "rho"}
+          "mean": { "projected": null },
+          "dispersion": { "param": "rho" }
         }
       }
     }
   ],
   "parameters": [
-    {"name": "beta_I",  "value": 0.5,   "prior": null, "transform": null, "initial_value": null},
-    {"name": "beta_W",  "value": 0.3,   "prior": null, "transform": null, "initial_value": null},
-    {"name": "kappa",   "value": 0.0001,"prior": null, "transform": null, "initial_value": null},
-    {"name": "gamma",   "value": 0.25,  "prior": null, "transform": null, "initial_value": null},
-    {"name": "omega_R", "value": 0.02,  "prior": null, "transform": null, "initial_value": null},
-    {"name": "xi",      "value": 1.0,   "prior": null, "transform": null, "initial_value": null},
-    {"name": "omega_W", "value": 0.5,   "prior": null, "transform": null, "initial_value": null},
-    {"name": "rho",     "value": 5.0,   "prior": null, "transform": null, "initial_value": null}
+    { "name": "beta_I", "value": 0.5, "prior": null, "transform": null, "initial_value": null },
+    { "name": "beta_W", "value": 0.3, "prior": null, "transform": null, "initial_value": null },
+    { "name": "kappa", "value": 0.0001, "prior": null, "transform": null, "initial_value": null },
+    { "name": "gamma", "value": 0.25, "prior": null, "transform": null, "initial_value": null },
+    { "name": "omega_R", "value": 0.02, "prior": null, "transform": null, "initial_value": null },
+    { "name": "xi", "value": 1.0, "prior": null, "transform": null, "initial_value": null },
+    { "name": "omega_W", "value": 0.5, "prior": null, "transform": null, "initial_value": null },
+    { "name": "rho", "value": 5.0, "prior": null, "transform": null, "initial_value": null }
   ],
   "initial_conditions": {
-    "explicit": {"S": 990, "I": 10, "R": 0, "W": 0.0}
+    "explicit": { "S": 990, "I": 10, "R": 0, "W": 0.0 }
   },
   "data_contract": null,
   "output": {
-    "times": {"regular": {"start": 0.0, "step": 7.0, "end": 365.0}},
+    "times": { "regular": { "start": 0.0, "step": 7.0, "end": 365.0 } },
     "format": "tsv",
     "trajectory": true,
     "observations": true

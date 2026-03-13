@@ -3,14 +3,14 @@
   "version": "0.3",
   "description": "Age-stratified SEIR with two age groups (child/adult) and a 2x2 contact matrix.",
   "compartments": [
-    {"name": "S_child", "kind": "integer"},
-    {"name": "E_child", "kind": "integer"},
-    {"name": "I_child", "kind": "integer"},
-    {"name": "R_child", "kind": "integer"},
-    {"name": "S_adult", "kind": "integer"},
-    {"name": "E_adult", "kind": "integer"},
-    {"name": "I_adult", "kind": "integer"},
-    {"name": "R_adult", "kind": "integer"}
+    { "name": "S_child", "kind": "integer" },
+    { "name": "E_child", "kind": "integer" },
+    { "name": "I_child", "kind": "integer" },
+    { "name": "R_child", "kind": "integer" },
+    { "name": "S_adult", "kind": "integer" },
+    { "name": "E_adult", "kind": "integer" },
+    { "name": "I_adult", "kind": "integer" },
+    { "name": "R_adult", "kind": "integer" }
   ],
   "transitions": [
     {
@@ -22,8 +22,8 @@
           "left": {
             "bin_op": {
               "op": "mul",
-              "left": {"param": "beta"},
-              "right": {"pop": "S_child"}
+              "left": { "param": "beta" },
+              "right": { "pop": "S_child" }
             }
           },
           "right": {
@@ -32,12 +32,12 @@
               "left": {
                 "bin_op": {
                   "op": "mul",
-                  "left": {"table_lookup": {"table": "C_age", "indices": [{"const": 0.0}, {"const": 0.0}]}},
+                  "left": { "table_lookup": { "table": "C_age", "indices": [{ "const": 0.0 }, { "const": 0.0 }] } },
                   "right": {
                     "bin_op": {
                       "op": "div",
-                      "left": {"pop": "I_child"},
-                      "right": {"pop_sum": ["S_child", "E_child", "I_child", "R_child"]}
+                      "left": { "pop": "I_child" },
+                      "right": { "pop_sum": ["S_child", "E_child", "I_child", "R_child"] }
                     }
                   }
                 }
@@ -45,12 +45,12 @@
               "right": {
                 "bin_op": {
                   "op": "mul",
-                  "left": {"table_lookup": {"table": "C_age", "indices": [{"const": 0.0}, {"const": 1.0}]}},
+                  "left": { "table_lookup": { "table": "C_age", "indices": [{ "const": 0.0 }, { "const": 1.0 }] } },
                   "right": {
                     "bin_op": {
                       "op": "div",
-                      "left": {"pop": "I_adult"},
-                      "right": {"pop_sum": ["S_adult", "E_adult", "I_adult", "R_adult"]}
+                      "left": { "pop": "I_adult" },
+                      "right": { "pop_sum": ["S_adult", "E_adult", "I_adult", "R_adult"] }
                     }
                   }
                 }
@@ -60,7 +60,7 @@
         }
       },
       "event_key": "infection_child:{firing_index}",
-      "metadata": {"origin_kind": "transmission", "source_compartment": "S_child", "dest_compartment": "E_child"}
+      "metadata": { "origin_kind": "transmission", "source_compartment": "S_child", "dest_compartment": "E_child" }
     },
     {
       "name": "infection_adult",
@@ -71,8 +71,8 @@
           "left": {
             "bin_op": {
               "op": "mul",
-              "left": {"param": "beta"},
-              "right": {"pop": "S_adult"}
+              "left": { "param": "beta" },
+              "right": { "pop": "S_adult" }
             }
           },
           "right": {
@@ -81,12 +81,12 @@
               "left": {
                 "bin_op": {
                   "op": "mul",
-                  "left": {"table_lookup": {"table": "C_age", "indices": [{"const": 1.0}, {"const": 0.0}]}},
+                  "left": { "table_lookup": { "table": "C_age", "indices": [{ "const": 1.0 }, { "const": 0.0 }] } },
                   "right": {
                     "bin_op": {
                       "op": "div",
-                      "left": {"pop": "I_child"},
-                      "right": {"pop_sum": ["S_child", "E_child", "I_child", "R_child"]}
+                      "left": { "pop": "I_child" },
+                      "right": { "pop_sum": ["S_child", "E_child", "I_child", "R_child"] }
                     }
                   }
                 }
@@ -94,12 +94,12 @@
               "right": {
                 "bin_op": {
                   "op": "mul",
-                  "left": {"table_lookup": {"table": "C_age", "indices": [{"const": 1.0}, {"const": 1.0}]}},
+                  "left": { "table_lookup": { "table": "C_age", "indices": [{ "const": 1.0 }, { "const": 1.0 }] } },
                   "right": {
                     "bin_op": {
                       "op": "div",
-                      "left": {"pop": "I_adult"},
-                      "right": {"pop_sum": ["S_adult", "E_adult", "I_adult", "R_adult"]}
+                      "left": { "pop": "I_adult" },
+                      "right": { "pop_sum": ["S_adult", "E_adult", "I_adult", "R_adult"] }
                     }
                   }
                 }
@@ -109,7 +109,7 @@
         }
       },
       "event_key": "infection_adult:{firing_index}",
-      "metadata": {"origin_kind": "transmission", "source_compartment": "S_adult", "dest_compartment": "E_adult"}
+      "metadata": { "origin_kind": "transmission", "source_compartment": "S_adult", "dest_compartment": "E_adult" }
     },
     {
       "name": "progression_child",
@@ -117,12 +117,12 @@
       "rate": {
         "bin_op": {
           "op": "mul",
-          "left": {"param": "sigma"},
-          "right": {"pop": "E_child"}
+          "left": { "param": "sigma" },
+          "right": { "pop": "E_child" }
         }
       },
       "event_key": "progression_child:{firing_index}",
-      "metadata": {"origin_kind": "intrinsic", "source_compartment": "E_child", "dest_compartment": "I_child"}
+      "metadata": { "origin_kind": "intrinsic", "source_compartment": "E_child", "dest_compartment": "I_child" }
     },
     {
       "name": "progression_adult",
@@ -130,12 +130,12 @@
       "rate": {
         "bin_op": {
           "op": "mul",
-          "left": {"param": "sigma"},
-          "right": {"pop": "E_adult"}
+          "left": { "param": "sigma" },
+          "right": { "pop": "E_adult" }
         }
       },
       "event_key": "progression_adult:{firing_index}",
-      "metadata": {"origin_kind": "intrinsic", "source_compartment": "E_adult", "dest_compartment": "I_adult"}
+      "metadata": { "origin_kind": "intrinsic", "source_compartment": "E_adult", "dest_compartment": "I_adult" }
     },
     {
       "name": "recovery_child",
@@ -143,12 +143,12 @@
       "rate": {
         "bin_op": {
           "op": "mul",
-          "left": {"param": "gamma"},
-          "right": {"pop": "I_child"}
+          "left": { "param": "gamma" },
+          "right": { "pop": "I_child" }
         }
       },
       "event_key": "recovery_child:{firing_index}",
-      "metadata": {"origin_kind": "intrinsic", "source_compartment": "I_child", "dest_compartment": "R_child"}
+      "metadata": { "origin_kind": "intrinsic", "source_compartment": "I_child", "dest_compartment": "R_child" }
     },
     {
       "name": "recovery_adult",
@@ -156,12 +156,12 @@
       "rate": {
         "bin_op": {
           "op": "mul",
-          "left": {"param": "gamma"},
-          "right": {"pop": "I_adult"}
+          "left": { "param": "gamma" },
+          "right": { "pop": "I_adult" }
         }
       },
       "event_key": "recovery_adult:{firing_index}",
-      "metadata": {"origin_kind": "intrinsic", "source_compartment": "I_adult", "dest_compartment": "R_adult"}
+      "metadata": { "origin_kind": "intrinsic", "source_compartment": "I_adult", "dest_compartment": "R_adult" }
     }
   ],
   "ode_equations": [],
@@ -179,33 +179,33 @@
     {
       "name": "cases_child",
       "data_stream": "cases_child",
-      "schedule": {"regular": {"start": 7.0, "step": 7.0, "end": 365.0}},
-      "projection": {"cumulative_flow": "infection_child"},
+      "schedule": { "regular": { "start": 7.0, "step": 7.0, "end": 365.0 } },
+      "projection": { "cumulative_flow": "infection_child" },
       "likelihood": {
         "neg_binomial": {
-          "mean": {"projected": null},
-          "dispersion": {"param": "rho"}
+          "mean": { "projected": null },
+          "dispersion": { "param": "rho" }
         }
       }
     },
     {
       "name": "cases_adult",
       "data_stream": "cases_adult",
-      "schedule": {"regular": {"start": 7.0, "step": 7.0, "end": 365.0}},
-      "projection": {"cumulative_flow": "infection_adult"},
+      "schedule": { "regular": { "start": 7.0, "step": 7.0, "end": 365.0 } },
+      "projection": { "cumulative_flow": "infection_adult" },
       "likelihood": {
         "neg_binomial": {
-          "mean": {"projected": null},
-          "dispersion": {"param": "rho"}
+          "mean": { "projected": null },
+          "dispersion": { "param": "rho" }
         }
       }
     }
   ],
   "parameters": [
-    {"name": "beta",  "value": 0.3,  "prior": null, "transform": null, "initial_value": null},
-    {"name": "sigma", "value": 0.2,  "prior": null, "transform": null, "initial_value": null},
-    {"name": "gamma", "value": 0.1,  "prior": null, "transform": null, "initial_value": null},
-    {"name": "rho",   "value": 10.0, "prior": null, "transform": null, "initial_value": null}
+    { "name": "beta", "value": 0.3, "prior": null, "transform": null, "initial_value": null },
+    { "name": "sigma", "value": 0.2, "prior": null, "transform": null, "initial_value": null },
+    { "name": "gamma", "value": 0.1, "prior": null, "transform": null, "initial_value": null },
+    { "name": "rho", "value": 10.0, "prior": null, "transform": null, "initial_value": null }
   ],
   "initial_conditions": {
     "explicit": {
@@ -221,7 +221,7 @@
   },
   "data_contract": null,
   "output": {
-    "times": {"regular": {"start": 0.0, "step": 7.0, "end": 365.0}},
+    "times": { "regular": { "start": 0.0, "step": 7.0, "end": 365.0 } },
     "format": "tsv",
     "trajectory": true,
     "observations": true

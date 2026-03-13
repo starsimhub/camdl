@@ -8,7 +8,7 @@ name = "camdl"
 path = "src/main.rs"
 
 [dependencies]
-ir      = { path = "../ir" }
-sim     = { path = "../sim" }
+io = { path = "../io" }
+ir = { path = "../ir" }
 observe = { path = "../observe" }
-io      = { path = "../io" }
+sim = { path = "../sim" }

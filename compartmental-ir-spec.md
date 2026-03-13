@@ -84,8 +84,8 @@ compartments: [compartment]
 **Integer compartments** are the standard: non-negative integer population
 counts. **Real compartments** hold continuous float values (e.g. bacteria
 concentration in a water supply) and are governed by ODE equations declared
-separately (§2.4). Real compartments do **not** appear in stoichiometry lists
-— they are not subject to stochastic jumps.
+separately (§2.4). Real compartments do **not** appear in stoichiometry lists —
+they are not subject to stochastic jumps.
 
 At runtime, integer compartment state is an `i64 array` and real compartment
 state is an `f64 array`, both indexed by their respective ordinals within each
@@ -218,8 +218,8 @@ ode_equations: [ode_equation]
 
 Every `real` compartment must have exactly one entry in `ode_equations`. The
 `derivative` expression uses the full expression language and may reference
-`Pop(name)` for both integer and real compartments (bidirectional coupling),
-as well as `Param`, `Time`, `TableLookup`, and `TimeFunc`.
+`Pop(name)` for both integer and real compartments (bidirectional coupling), as
+well as `Param`, `Time`, `TableLookup`, and `TimeFunc`.
 
 **Coupling semantics.** Real compartments can drive integer-compartment
 propensities (e.g. a bacteria concentration `W` appearing in an infection rate
@@ -232,8 +232,8 @@ from the updated state.
 
 **Backend notes:**
 
-- **Tau-leaping `[v0.1]`:** within each step `[t, t+τ]`, integrate the ODE
-  (e.g. RK4) with the end-of-step integer state held fixed.
+- **Tau-leaping `[v0.1]`:** within each step `[t, t+τ]`, integrate the ODE (e.g.
+  RK4) with the end-of-step integer state held fixed.
 - **Discrete-time `[v0.1]`:** real compartments advance by Euler integration at
   each step before the binomial draws.
 - **Gillespie `[v0.1]`:** propensities that depend on real compartments vary
@@ -308,12 +308,15 @@ Common uses:
   semantically required for Gillespie correctness (a transition must never fire
   from an empty compartment).
 
-- **Cross-immunity guard:** `Cond(BinOp(Sub, Const(1.0), TableLookup("X_strain", idx)), <rate>, Const(0.0))` — applies the rate only when cross-immunity is
-  incomplete (i.e., `1 - X[i,j] > 0`, meaning `X[i,j] < 1`). When cross-immunity
-  is total (`X[i,j] = 1`), the predicate is `≤ 0` and the rate is zeroed.
+- **Cross-immunity guard:**
+  `Cond(BinOp(Sub, Const(1.0), TableLookup("X_strain", idx)), <rate>, Const(0.0))`
+  — applies the rate only when cross-immunity is incomplete (i.e.,
+  `1 - X[i,j] > 0`, meaning `X[i,j] < 1`). When cross-immunity is total
+  (`X[i,j] = 1`), the predicate is `≤ 0` and the rate is zeroed.
 
-- **Threshold guard:** `Cond(BinOp(Sub, Pop("W"), Const(threshold)), <rate>, Const(0.0))` — activates a transition only when a real compartment exceeds a
-  threshold.
+- **Threshold guard:**
+  `Cond(BinOp(Sub, Pop("W"), Const(threshold)), <rate>, Const(0.0))` — activates
+  a transition only when a real compartment exceeds a threshold.
 
 ### 3.3 Time-Varying Functions
 
@@ -655,8 +658,8 @@ initial_conditions :=
 ```
 
 `Parameterized` is the most common: fix total `N`, set `I₀` as a parameter,
-compute `S₀ = N - I₀`. Real compartments use the same form: `W₀ = Param("W_init")`
-or `W₀ = Const(0.0)`.
+compute `S₀ = N - I₀`. Real compartments use the same form:
+`W₀ = Param("W_init")` or `W₀ = Const(0.0)`.
 
 ---
 
@@ -1323,10 +1326,10 @@ integer count.
   "description": "SIWR cholera model with environmental transmission route",
 
   "compartments": [
-    {"name": "S", "kind": "integer"},
-    {"name": "I", "kind": "integer"},
-    {"name": "R", "kind": "integer"},
-    {"name": "W", "kind": "real"}
+    { "name": "S", "kind": "integer" },
+    { "name": "I", "kind": "integer" },
+    { "name": "R", "kind": "integer" },
+    { "name": "W", "kind": "real" }
   ],
 
   "ode_equations": [
@@ -1335,8 +1338,8 @@ integer count.
       "derivative": {
         "op": "sub",
         "args": [
-          {"op": "mul", "args": [{"param": "xi"},    {"pop": "I"}]},
-          {"op": "mul", "args": [{"param": "delta"}, {"pop": "W"}]}
+          { "op": "mul", "args": [{ "param": "xi" }, { "pop": "I" }] },
+          { "op": "mul", "args": [{ "param": "delta" }, { "pop": "W" }] }
         ]
       }
     }
@@ -1349,12 +1352,14 @@ integer count.
       "rate": {
         "op": "mul",
         "args": [
-          {"pop": "S"},
-          {"op": "div",
-           "args": [
-             {"op": "mul", "args": [{"param": "beta_W"}, {"pop": "W"}]},
-             {"op": "add", "args": [{"param": "K"},      {"pop": "W"}]}
-           ]}
+          { "pop": "S" },
+          {
+            "op": "div",
+            "args": [
+              { "op": "mul", "args": [{ "param": "beta_W" }, { "pop": "W" }] },
+              { "op": "add", "args": [{ "param": "K" }, { "pop": "W" }] }
+            ]
+          }
         ]
       },
       "event_key": "infection_water:{firing_index}"
@@ -1365,9 +1370,12 @@ integer count.
       "rate": {
         "op": "mul",
         "args": [
-          {"param": "beta_P"},
-          {"pop": "S"},
-          {"op": "div", "args": [{"pop": "I"}, {"pop_sum": ["S","I","R"]}]}
+          { "param": "beta_P" },
+          { "pop": "S" },
+          {
+            "op": "div",
+            "args": [{ "pop": "I" }, { "pop_sum": ["S", "I", "R"] }]
+          }
         ]
       },
       "event_key": "infection_person:{firing_index}"
@@ -1375,27 +1383,27 @@ integer count.
     {
       "name": "recovery",
       "stoichiometry": [["I", -1], ["R", 1]],
-      "rate": {"op": "mul", "args": [{"param": "gamma"}, {"pop": "I"}]},
+      "rate": { "op": "mul", "args": [{ "param": "gamma" }, { "pop": "I" }] },
       "event_key": "recovery:{firing_index}"
     }
   ],
 
   "parameters": [
-    {"name": "beta_W", "value": 0.5,      "prior": null, "transform": null},
-    {"name": "beta_P", "value": 0.1,      "prior": null, "transform": null},
-    {"name": "K",      "value": 1000000,  "prior": null, "transform": null},
-    {"name": "xi",     "value": 10.0,     "prior": null, "transform": null},
-    {"name": "delta",  "value": 0.2,      "prior": null, "transform": null},
-    {"name": "gamma",  "value": 0.25,     "prior": null, "transform": null}
+    { "name": "beta_W", "value": 0.5, "prior": null, "transform": null },
+    { "name": "beta_P", "value": 0.1, "prior": null, "transform": null },
+    { "name": "K", "value": 1000000, "prior": null, "transform": null },
+    { "name": "xi", "value": 10.0, "prior": null, "transform": null },
+    { "name": "delta", "value": 0.2, "prior": null, "transform": null },
+    { "name": "gamma", "value": 0.25, "prior": null, "transform": null }
   ],
 
   "initial_conditions": {
     "kind": "parameterized",
     "values": [
-      ["S", {"op": "sub", "args": [{"const": 100000}, {"param": "I0"}]}],
-      ["I", {"param": "I0"}],
-      ["R", {"const": 0}],
-      ["W", {"const": 0.0}]
+      ["S", { "op": "sub", "args": [{ "const": 100000 }, { "param": "I0" }] }],
+      ["I", { "param": "I0" }],
+      ["R", { "const": 0 }],
+      ["W", { "const": 0.0 }]
     ]
   },
 
@@ -1406,7 +1414,7 @@ integer count.
   "data_contract": null,
 
   "output": {
-    "times": {"kind": "regular", "start": 0, "step": 1, "end": 180},
+    "times": { "kind": "regular", "start": 0, "step": 1, "end": 180 },
     "format": "tsv",
     "trajectory": true,
     "observations": false
@@ -1435,15 +1443,15 @@ The Flexmod prototype is an OCaml IR/DSL for **agent-based models**: per-agent
 fields, contact networks, staged phase-based updates, per-agent event guards.
 The compartmental IR operates at population level.
 
-| Concern           | Flexmod (ABM)                       | Compartmental IR                          |
-| ----------------- | ----------------------------------- | ----------------------------------------- |
+| Concern           | Flexmod (ABM)                       | Compartmental IR                           |
+| ----------------- | ----------------------------------- | ------------------------------------------ |
 | State             | Per-agent field arrays              | Integer population vector + real ODE state |
-| Events            | Per-agent with guards + intensities | Population-level propensities             |
-| Contacts          | Explicit relations (patch, network) | Contact matrices in rate expressions      |
-| Stochasticity     | Per-agent Bernoulli draws           | Gillespie / tau-leaping / chain binomial  |
-| Spatial structure | Agent-to-patch assignment           | Stratification (expanded at compile time) |
-| EKRNG             | Keys = (agent_id, event_type, t)    | Keys = (transition_name, firing_index)    |
-| Time              | Tick-based (discrete, fixed dt)     | Continuous or discrete                    |
+| Events            | Per-agent with guards + intensities | Population-level propensities              |
+| Contacts          | Explicit relations (patch, network) | Contact matrices in rate expressions       |
+| Stochasticity     | Per-agent Bernoulli draws           | Gillespie / tau-leaping / chain binomial   |
+| Spatial structure | Agent-to-patch assignment           | Stratification (expanded at compile time)  |
+| EKRNG             | Keys = (agent_id, event_type, t)    | Keys = (transition_name, firing_index)     |
+| Time              | Tick-based (discrete, fixed dt)     | Continuous or discrete                     |
 
 The correct architecture is **two IRs, one inference engine**: both compile to
 `{simulate, log_likelihood, log_prior}` and the inference layer consumes them
@@ -1564,7 +1572,7 @@ breaks.
 **Applies to:** The Rust backend (simulation, observation sampling, expression
 evaluation, EKRNG). This is designed to catch the specific classes of bugs that
 occur in stochastic simulation runtimes — bugs that are invisible in single runs
-because the output is *supposed* to be noisy.
+because the output is _supposed_ to be noisy.
 
 ---
 
@@ -1593,8 +1601,8 @@ multinomial competing-risks correction.
 
 #### A.1.2 Population Conservation (Closed Models)
 
-For models where every transition has equal total stoichiometry magnitude on both
-sides (i.e., `Σ_i stoich[i] = 0` for all transitions), total population is
+For models where every transition has equal total stoichiometry magnitude on
+both sides (i.e., `Σ_i stoich[i] = 0` for all transitions), total population is
 invariant:
 
 ```
@@ -1676,10 +1684,11 @@ The simplest non-trivial CTMC: one compartment `I` with initial population
 `I₀ = N`, one transition (outflow) at rate `γ * Pop("I")`. No births, no
 infection, no other compartments.
 
-The number remaining at time `t` is `Binomial(N, exp(-γt))`. The distribution
-of `I(t)` over seeds should match this exactly.
+The number remaining at time `t` is `Binomial(N, exp(-γt))`. The distribution of
+`I(t)` over seeds should match this exactly.
 
 **Test procedure:**
+
 1. Construct a pure-death IR with `I₀ = 100`, `γ = 0.1`.
 2. Simulate 10,000 seeds. Record `I(t=10)` for each.
 3. Compare empirical distribution to `Binomial(100, exp(-1.0))` via
@@ -1718,26 +1727,26 @@ E[B] = N * k₁/(k₁ + k₂)
 
 And the distribution of `A` is `Binomial(N, k₂/(k₁+k₂))`.
 
-**Test procedure:** N=50, k₁=0.3, k₂=0.7. Run 5,000 seeds, sample `A(t=100)`.
-KS test against `Binomial(50, 0.7)`.
+**Test procedure:** N=50, k₁=0.3, k₂=0.7. Run 5,000 seeds, sample `A(t=100)`. KS
+test against `Binomial(50, 0.7)`.
 
 **What it catches:** Subtle errors in transition selection (e.g., selecting
 transition with probability proportional to rate, but off by a constant factor).
 
 #### A.2.4 SIR Final Size (Epidemiological Ground Truth)
 
-For a closed SIR model with `S₀ ≈ N`, `I₀ = 1`, `R₀ = 0`, the final size
-`R(∞)` satisfies the implicit equation:
+For a closed SIR model with `S₀ ≈ N`, `I₀ = 1`, `R₀ = 0`, the final size `R(∞)`
+satisfies the implicit equation:
 
 ```
 R(∞)/N = 1 - exp(-R₀_basic * R(∞)/N)
 ```
 
 where `R₀_basic = β*N/γ` for density-dependent transmission, or `R₀_basic =
-β/γ` for frequency-dependent. The *mean* final size over many stochastic
-realizations should approach this, adjusted for stochastic extinction
-probability (when `I₀ = 1`, there's a `1/R₀` probability of immediate
-extinction).
+β/γ`
+for frequency-dependent. The _mean_ final size over many stochastic realizations
+should approach this, adjusted for stochastic extinction probability (when
+`I₀ = 1`, there's a `1/R₀` probability of immediate extinction).
 
 **Test procedure:** Closed SIR, `N = 1000`, `β = 0.3` (frequency-dependent),
 `γ = 0.1`, so `R₀ = 3.0`. Expected final size ≈ 94.0% of N (from the implicit
@@ -1754,6 +1763,7 @@ For large populations, Gillespie trajectories should converge to the ODE
 solution (law of large numbers for density-dependent Markov chains).
 
 **Test procedure:**
+
 1. Take the age-stratified SEIR golden model.
 2. Scale population to N = 10⁶.
 3. Run ODE backend: produces a single deterministic trajectory.
@@ -1761,8 +1771,8 @@ solution (law of large numbers for density-dependent Markov chains).
 5. Assert: mean Gillespie trajectory is within 2% of ODE trajectory at all
    output times (after the initial transient).
 
-Also check: the standard deviation of Gillespie trajectories scales as
-`O(1/√N)` — doubling N should halve the coefficient of variation.
+Also check: the standard deviation of Gillespie trajectories scales as `O(1/√N)`
+— doubling N should halve the coefficient of variation.
 
 **What it catches:** Systematic bias in the Gillespie implementation. Expression
 evaluator bugs that cancel out in Gillespie's relative-rate selection but affect
@@ -1774,6 +1784,7 @@ For small enough `τ`, tau-leaping should approximate Gillespie closely. Run bot
 on the same model with the same seeds (EKRNG ensures matching):
 
 **Test procedure:**
+
 1. SIR model, `N = 1000`, `β = 0.3`, `γ = 0.1`.
 2. Gillespie: 1,000 seeds.
 3. Tau-leaping with `τ = 0.01`: 1,000 seeds (same EKRNG seeds).
@@ -1793,46 +1804,50 @@ These tests specifically target the interaction between stochastic integer
 dynamics and ODE real-compartment dynamics. This is where the subtlest numerical
 bugs live.
 
-**A.2.7.1 Environmental reservoir steady state.**
-The Cholera SIWR model at equilibrium has a known steady-state bacteria
-concentration: `W* = xi * I* / delta`. Run the cholera golden model to steady
-state, collect `W(t_end)` across 500 seeds. Check:
+**A.2.7.1 Environmental reservoir steady state.** The Cholera SIWR model at
+equilibrium has a known steady-state bacteria concentration:
+`W* = xi * I* / delta`. Run the cholera golden model to steady state, collect
+`W(t_end)` across 500 seeds. Check:
+
 - Mean `W` ≈ `xi * E[I] / delta` (± Monte Carlo tolerance)
 - `W ≥ 0` always (non-negativity holds for real compartments)
 
-**A.2.7.2 Coupling direction: integer → real.**
-Use a model where `I₀ = 5` (small). Record `I(t)` and `W(t)` across many seeds.
-Verify:
+**A.2.7.2 Coupling direction: integer → real.** Use a model where `I₀ = 5`
+(small). Record `I(t)` and `W(t)` across many seeds. Verify:
+
 - When `I` reaches 0 (stochastic extinction), `W` decays to 0 exponentially at
   rate `delta` — not instantaneously, and not staying elevated.
 - Spikes in `W` follow spikes in `I` with the correct lag (`1/delta` timescale).
 
-**A.2.7.3 Coupling direction: real → integer.**
-Set `xi = 0` and drive `W` with a known `TimeFunc` (no stochastic feedback).
-Verify the infection rate `beta_W * S * W / (K + W)` tracks it:
+**A.2.7.3 Coupling direction: real → integer.** Set `xi = 0` and drive `W` with
+a known `TimeFunc` (no stochastic feedback). Verify the infection rate
+`beta_W * S * W / (K + W)` tracks it:
+
 - At low `W`: rate ≈ `beta_W * S * W / K` (linear)
 - At high `W`: rate ≈ `beta_W * S` (saturated)
 - KS-test infection counts over many seeds against the expected Poisson process
   with the time-varying rate.
 
-**A.2.7.4 ODE integration accuracy across tau step sizes.**
-Simulate the cholera model with tau = 0.001 (near-ground-truth), tau = 0.01,
-tau = 0.1. Verify:
+**A.2.7.4 ODE integration accuracy across tau step sizes.** Simulate the cholera
+model with tau = 0.001 (near-ground-truth), tau = 0.01, tau = 0.1. Verify:
+
 - Error in `W(t)` scales as `O(tau)` for Euler or `O(tau⁴)` for RK4.
 - No instability (W does not oscillate or go negative) for tau up to the ODE
   stability limit `2/delta`.
 
-**A.2.7.5 Intervention on real compartment.**
-Apply `Set("W", 0.0)` at `t = 50` (water treatment event). Verify:
+**A.2.7.5 Intervention on real compartment.** Apply `Set("W", 0.0)` at `t = 50`
+(water treatment event). Verify:
+
 - `W(50+ε) = 0.0` exactly.
 - `W` re-accumulates after the intervention (driven by `xi * I`).
 - Stochastic propensities immediately reflect the cleared `W` — the
   post-intervention event-time distribution matches `Exp(Λ_post)` where `Λ_post`
   is computed with `W = 0`.
 
-**A.2.7.6 Non-negativity of real compartments.**
-The exact solution of `dW/dt = xi*I - delta*W` with `W(0) ≥ 0` stays
-non-negative, but numerical integration with large steps can violate this.
+**A.2.7.6 Non-negativity of real compartments.** The exact solution of
+`dW/dt = xi*I - delta*W` with `W(0) ≥ 0` stays non-negative, but numerical
+integration with large steps can violate this.
+
 - Run 10,000 seeds. Assert `W(t) ≥ 0` at every output time.
 - Test with large tau (tau = `5/delta`) to stress the integrator. Detect and
   report step sizes that induce negativity.
@@ -1856,8 +1871,8 @@ for _ in 0..10_000 {
 }
 ```
 
-Also: different keys produce different values (with high probability — test
-that collisions are < 1 in 10⁶ for 10⁶ random key pairs).
+Also: different keys produce different values (with high probability — test that
+collisions are < 1 in 10⁶ for 10⁶ random key pairs).
 
 #### A.3.2 Order Independence
 
@@ -1886,6 +1901,7 @@ to baseline when using EKRNG, but **different** trajectories when using stateful
 PRNG.
 
 **Test procedure:**
+
 1. Construct SIR model (baseline).
 2. Construct SIR model + a "placebo" transition that fires at rate ε ≈ 0 (or a
    scheduled intervention that does nothing but would consume a draw under
@@ -1893,7 +1909,7 @@ PRNG.
 3. Simulate both with EKRNG, same seed. Assert trajectories are identical
    (bitwise, for Gillespie; statistically, for tau-leaping if τ differs).
 4. (Optional, for documentation:) Simulate both with stateful PRNG fallback.
-   Show that trajectories *diverge*. This is the demonstration of why EKRNG
+   Show that trajectories _diverge_. This is the demonstration of why EKRNG
    matters.
 
 #### A.3.4 Scenario Coupling
@@ -1903,6 +1919,7 @@ at t=100) should share identical trajectories up to t=100 when using the same
 EKRNG seed, then diverge:
 
 **Test procedure:**
+
 1. Baseline: SIR for t ∈ [0, 200].
 2. Intervention: SIR + move 50% of S to R at t=100.
 3. Same seed, EKRNG enabled.
@@ -2027,6 +2044,7 @@ intervention, the new inter-event time must be drawn from the
 **post-intervention** propensity.
 
 **Test:** Schedule an intervention at `t = 10.0`. Over many seeds, verify:
+
 - The post-intervention event-time distribution matches `Exp(Λ_post)`.
 - No events are attributed to times before the intervention that actually fired
   after it.
@@ -2034,6 +2052,7 @@ intervention, the new inter-event time must be drawn from the
 #### A.5.3 Multiple Interventions at Same Time
 
 Two interventions at `t = 50.0` in document order:
+
 - A: `FractionTransfer("S", "V", 0.5)` → S = 50, V = 50
 - B: `FractionTransfer("S", "R", 0.5)` → S = 25, R = 25
 - Result: S = 25, V = 50, R = 25
@@ -2085,9 +2104,9 @@ The `CumulativeFlow` projection must exactly match the transition fire count:
 
 #### A.7.1 Very Small Populations (Extinction Dynamics)
 
-`N = 1`, `I₀ = 1`, SIR. The model should reach the absorbing state (`I = 0`)
-and terminate — not loop forever. **Test:** 1,000 seeds with N=1. All must
-terminate in finite time.
+`N = 1`, `I₀ = 1`, SIR. The model should reach the absorbing state (`I = 0`) and
+terminate — not loop forever. **Test:** 1,000 seeds with N=1. All must terminate
+in finite time.
 
 #### A.7.2 Very Large Populations
 
@@ -2135,6 +2154,7 @@ seir_age_seasonal (N=10⁶, t=730):    target < 200ms  (TimeFunc eval overhead)
 #### A.8.2 Propensity Evaluation Hot Loop
 
 The inner Gillespie loop must have:
+
 - No allocations (all buffers pre-allocated)
 - Expression evaluation branchless where possible (`Cond` is the exception)
 - `TableLookup` as a direct array index, not a hash map lookup
@@ -2162,7 +2182,8 @@ Described in §A.2.6.
 
 Chain binomial with `dt=0.01` should converge to Gillespie. Also verify the
 rate-to-probability conversion explicitly: for `rate * dt = 0.001`, discrete
-probability ≈ 0.001; for `rate * dt = 1.0`, discrete probability ≈ `1 - exp(-1)
+probability ≈ 0.001; for `rate * dt = 1.0`, discrete probability ≈
+`1 - exp(-1)
 ≈ 0.632`.
 
 #### A.9.4 Intervention Handling Across Backends
@@ -2177,19 +2198,19 @@ error). Validated via distributional comparison.
 
 #### Where tests live
 
-| Test category             | Location                               | When it runs          |
-| ------------------------- | -------------------------------------- | --------------------- |
-| Invariant assertions      | Inline in Rust runtime (`debug_assert!`) | Debug builds        |
-| Expression evaluator      | `rust/crates/sim/tests/expr_*`         | `cargo test`          |
-| Golden model deser        | `rust/tests/golden_deser.rs`           | `cargo test`          |
-| Golden model simulation   | `rust/tests/golden_simulate.rs`        | `cargo test`          |
-| EKRNG determinism         | `rust/crates/sim/tests/ekrng_*`        | `cargo test`          |
-| Intervention correctness  | `rust/crates/sim/tests/intervention_*` | `cargo test`          |
-| Observation sampling      | `rust/crates/observe/tests/*`          | `cargo test`          |
-| Statistical distribution  | `rust/tests/statistical_*.rs`          | Nightly CI (`--ignored`) |
-| Cross-backend consistency | `rust/tests/cross_backend_*.rs`        | Nightly CI            |
-| Performance benchmarks    | `rust/benches/*.rs`                    | Weekly CI (criterion) |
-| Integration (OCaml→Rust)  | `tests/test_ocaml_to_rust.sh`          | CI on every push      |
+| Test category             | Location                                 | When it runs             |
+| ------------------------- | ---------------------------------------- | ------------------------ |
+| Invariant assertions      | Inline in Rust runtime (`debug_assert!`) | Debug builds             |
+| Expression evaluator      | `rust/crates/sim/tests/expr_*`           | `cargo test`             |
+| Golden model deser        | `rust/tests/golden_deser.rs`             | `cargo test`             |
+| Golden model simulation   | `rust/tests/golden_simulate.rs`          | `cargo test`             |
+| EKRNG determinism         | `rust/crates/sim/tests/ekrng_*`          | `cargo test`             |
+| Intervention correctness  | `rust/crates/sim/tests/intervention_*`   | `cargo test`             |
+| Observation sampling      | `rust/crates/observe/tests/*`            | `cargo test`             |
+| Statistical distribution  | `rust/tests/statistical_*.rs`            | Nightly CI (`--ignored`) |
+| Cross-backend consistency | `rust/tests/cross_backend_*.rs`          | Nightly CI               |
+| Performance benchmarks    | `rust/benches/*.rs`                      | Weekly CI (criterion)    |
+| Integration (OCaml→Rust)  | `tests/test_ocaml_to_rust.sh`            | CI on every push         |
 
 #### Test model inventory
 

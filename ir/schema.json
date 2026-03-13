@@ -5,74 +5,83 @@
   "description": "Stochastic compartmental model IR schema v0.3",
   "type": "object",
   "required": [
-    "name", "version", "compartments", "transitions", "ode_equations",
-    "time_functions", "tables", "interventions", "observations",
-    "parameters", "initial_conditions", "output", "simulation"
+    "name",
+    "version",
+    "compartments",
+    "transitions",
+    "ode_equations",
+    "time_functions",
+    "tables",
+    "interventions",
+    "observations",
+    "parameters",
+    "initial_conditions",
+    "output",
+    "simulation"
   ],
   "properties": {
-    "name":        {"type": "string"},
-    "version":     {"type": "string"},
-    "description": {"type": ["string", "null"]},
+    "name": { "type": "string" },
+    "version": { "type": "string" },
+    "description": { "type": ["string", "null"] },
 
     "compartments": {
       "type": "array",
-      "items": {"$ref": "#/definitions/compartment"}
+      "items": { "$ref": "#/definitions/compartment" }
     },
 
     "transitions": {
       "type": "array",
-      "items": {"$ref": "#/definitions/transition"}
+      "items": { "$ref": "#/definitions/transition" }
     },
 
     "ode_equations": {
       "type": "array",
-      "items": {"$ref": "#/definitions/ode_equation"}
+      "items": { "$ref": "#/definitions/ode_equation" }
     },
 
     "time_functions": {
       "type": "array",
-      "items": {"$ref": "#/definitions/time_function"}
+      "items": { "$ref": "#/definitions/time_function" }
     },
 
     "tables": {
       "type": "array",
-      "items": {"$ref": "#/definitions/table"}
+      "items": { "$ref": "#/definitions/table" }
     },
 
     "interventions": {
       "type": "array",
-      "items": {"$ref": "#/definitions/intervention"}
+      "items": { "$ref": "#/definitions/intervention" }
     },
 
     "observations": {
       "type": "array",
-      "items": {"$ref": "#/definitions/observation_model"}
+      "items": { "$ref": "#/definitions/observation_model" }
     },
 
     "parameters": {
       "type": "array",
-      "items": {"$ref": "#/definitions/parameter"}
+      "items": { "$ref": "#/definitions/parameter" }
     },
 
-    "initial_conditions": {"$ref": "#/definitions/initial_conditions"},
+    "initial_conditions": { "$ref": "#/definitions/initial_conditions" },
 
     "data_contract": {
-      "oneOf": [{"type": "null"}, {"type": "object"}]
+      "oneOf": [{ "type": "null" }, { "type": "object" }]
     },
 
-    "output": {"$ref": "#/definitions/output_config"},
+    "output": { "$ref": "#/definitions/output_config" },
 
-    "simulation": {"$ref": "#/definitions/simulation_config"}
+    "simulation": { "$ref": "#/definitions/simulation_config" }
   },
 
   "definitions": {
-
     "compartment": {
       "type": "object",
       "required": ["name", "kind"],
       "properties": {
-        "name": {"type": "string"},
-        "kind": {"type": "string", "enum": ["integer", "real"]}
+        "name": { "type": "string" },
+        "kind": { "type": "string", "enum": ["integer", "real"] }
       }
     },
 
@@ -82,35 +91,35 @@
         {
           "required": ["const"],
           "properties": {
-            "const": {"type": "number"}
+            "const": { "type": "number" }
           },
           "additionalProperties": false
         },
         {
           "required": ["param"],
           "properties": {
-            "param": {"type": "string"}
+            "param": { "type": "string" }
           },
           "additionalProperties": false
         },
         {
           "required": ["pop"],
           "properties": {
-            "pop": {"type": "string"}
+            "pop": { "type": "string" }
           },
           "additionalProperties": false
         },
         {
           "required": ["pop_sum"],
           "properties": {
-            "pop_sum": {"type": "array", "items": {"type": "string"}}
+            "pop_sum": { "type": "array", "items": { "type": "string" } }
           },
           "additionalProperties": false
         },
         {
           "required": ["time"],
           "properties": {
-            "time": {"type": "null"}
+            "time": { "type": "null" }
           },
           "additionalProperties": false
         },
@@ -121,9 +130,9 @@
               "type": "object",
               "required": ["op", "left", "right"],
               "properties": {
-                "op": {"type": "string", "enum": ["add","sub","mul","div","pow","min","max"]},
-                "left":  {"$ref": "#/definitions/expr"},
-                "right": {"$ref": "#/definitions/expr"}
+                "op": { "type": "string", "enum": ["add", "sub", "mul", "div", "pow", "min", "max"] },
+                "left": { "$ref": "#/definitions/expr" },
+                "right": { "$ref": "#/definitions/expr" }
               }
             }
           },
@@ -136,8 +145,8 @@
               "type": "object",
               "required": ["op", "arg"],
               "properties": {
-                "op":  {"type": "string", "enum": ["neg","exp","log","sqrt","abs","floor","ceil"]},
-                "arg": {"$ref": "#/definitions/expr"}
+                "op": { "type": "string", "enum": ["neg", "exp", "log", "sqrt", "abs", "floor", "ceil"] },
+                "arg": { "$ref": "#/definitions/expr" }
               }
             }
           },
@@ -150,9 +159,9 @@
               "type": "object",
               "required": ["pred", "then", "else"],
               "properties": {
-                "pred": {"$ref": "#/definitions/expr"},
-                "then": {"$ref": "#/definitions/expr"},
-                "else": {"$ref": "#/definitions/expr"}
+                "pred": { "$ref": "#/definitions/expr" },
+                "then": { "$ref": "#/definitions/expr" },
+                "else": { "$ref": "#/definitions/expr" }
               }
             }
           },
@@ -165,7 +174,7 @@
               "type": "object",
               "required": ["name"],
               "properties": {
-                "name": {"type": "string"}
+                "name": { "type": "string" }
               }
             }
           },
@@ -178,8 +187,8 @@
               "type": "object",
               "required": ["table", "indices"],
               "properties": {
-                "table":   {"type": "string"},
-                "indices": {"type": "array", "items": {"$ref": "#/definitions/expr"}, "minItems": 1}
+                "table": { "type": "string" },
+                "indices": { "type": "array", "items": { "$ref": "#/definitions/expr" }, "minItems": 1 }
               }
             }
           },
@@ -188,7 +197,7 @@
         {
           "required": ["projected"],
           "properties": {
-            "projected": {"type": "null"}
+            "projected": { "type": "null" }
           },
           "additionalProperties": false
         }
@@ -197,7 +206,7 @@
 
     "stoichiometry_entry": {
       "type": "array",
-      "items": [{"type": "string"}, {"type": "integer"}],
+      "items": [{ "type": "string" }, { "type": "integer" }],
       "minItems": 2,
       "maxItems": 2
     },
@@ -205,9 +214,9 @@
     "transition_metadata": {
       "type": "object",
       "properties": {
-        "origin_kind":        {"type": ["string", "null"]},
-        "source_compartment": {"type": ["string", "null"]},
-        "dest_compartment":   {"type": ["string", "null"]}
+        "origin_kind": { "type": ["string", "null"] },
+        "source_compartment": { "type": ["string", "null"] },
+        "dest_compartment": { "type": ["string", "null"] }
       }
     },
 
@@ -215,17 +224,17 @@
       "type": "object",
       "required": ["name", "stoichiometry", "rate"],
       "properties": {
-        "name": {"type": "string"},
+        "name": { "type": "string" },
         "stoichiometry": {
           "type": "array",
-          "items": {"$ref": "#/definitions/stoichiometry_entry"}
+          "items": { "$ref": "#/definitions/stoichiometry_entry" }
         },
-        "rate":      {"$ref": "#/definitions/expr"},
-        "event_key": {"type": ["string", "null"]},
-        "metadata":  {
+        "rate": { "$ref": "#/definitions/expr" },
+        "event_key": { "type": ["string", "null"] },
+        "metadata": {
           "oneOf": [
-            {"type": "null"},
-            {"$ref": "#/definitions/transition_metadata"}
+            { "type": "null" },
+            { "$ref": "#/definitions/transition_metadata" }
           ]
         }
       }
@@ -235,8 +244,8 @@
       "type": "object",
       "required": ["compartment", "derivative"],
       "properties": {
-        "compartment": {"type": "string"},
-        "derivative":  {"$ref": "#/definitions/expr"}
+        "compartment": { "type": "string" },
+        "derivative": { "$ref": "#/definitions/expr" }
       }
     },
 
@@ -250,10 +259,10 @@
               "type": "object",
               "required": ["amplitude", "period", "phase", "baseline"],
               "properties": {
-                "amplitude": {"type": "number"},
-                "period":    {"type": "number"},
-                "phase":     {"type": "number"},
-                "baseline":  {"type": "number"}
+                "amplitude": { "type": "number" },
+                "period": { "type": "number" },
+                "phase": { "type": "number" },
+                "baseline": { "type": "number" }
               }
             }
           },
@@ -266,8 +275,8 @@
               "type": "object",
               "required": ["breakpoints", "values"],
               "properties": {
-                "breakpoints": {"type": "array", "items": {"type": "number"}},
-                "values":      {"type": "array", "items": {"type": "number"}}
+                "breakpoints": { "type": "array", "items": { "type": "number" } },
+                "values": { "type": "array", "items": { "type": "number" } }
               }
             }
           },
@@ -280,9 +289,9 @@
               "type": "object",
               "required": ["times", "values", "method"],
               "properties": {
-                "times":  {"type": "array", "items": {"type": "number"}},
-                "values": {"type": "array", "items": {"type": "number"}},
-                "method": {"type": "string", "enum": ["linear", "spline"]}
+                "times": { "type": "array", "items": { "type": "number" } },
+                "values": { "type": "array", "items": { "type": "number" } },
+                "method": { "type": "string", "enum": ["linear", "spline"] }
               }
             }
           },
@@ -295,8 +304,8 @@
               "type": "object",
               "required": ["period", "values"],
               "properties": {
-                "period": {"type": "number"},
-                "values": {"type": "array", "items": {"type": "number"}}
+                "period": { "type": "number" },
+                "values": { "type": "array", "items": { "type": "number" } }
               }
             }
           },
@@ -309,8 +318,8 @@
       "type": "object",
       "required": ["name", "kind"],
       "properties": {
-        "name": {"type": "string"},
-        "kind": {"$ref": "#/definitions/time_func_kind"}
+        "name": { "type": "string" },
+        "kind": { "$ref": "#/definitions/time_func_kind" }
       }
     },
 
@@ -318,9 +327,9 @@
       "type": "object",
       "required": ["name", "values", "out_of_bounds"],
       "properties": {
-        "name":          {"type": "string"},
-        "values":        {"type": "array", "items": {"type": "number"}},
-        "out_of_bounds": {"type": "string", "enum": ["clamp", "wrap", "error"]}
+        "name": { "type": "string" },
+        "values": { "type": "array", "items": { "type": "number" } },
+        "out_of_bounds": { "type": "string", "enum": ["clamp", "wrap", "error"] }
       }
     },
 
@@ -330,7 +339,7 @@
         {
           "required": ["at_times"],
           "properties": {
-            "at_times": {"type": "array", "items": {"type": "number"}}
+            "at_times": { "type": "array", "items": { "type": "number" } }
           },
           "additionalProperties": false
         },
@@ -341,9 +350,9 @@
               "type": "object",
               "required": ["start", "period", "end"],
               "properties": {
-                "start":  {"type": "number"},
-                "period": {"type": "number"},
-                "end":    {"type": "number"}
+                "start": { "type": "number" },
+                "period": { "type": "number" },
+                "end": { "type": "number" }
               }
             }
           },
@@ -352,7 +361,7 @@
         {
           "required": ["external"],
           "properties": {
-            "external": {"type": "string"}
+            "external": { "type": "string" }
           },
           "additionalProperties": false
         }
@@ -369,9 +378,9 @@
               "type": "object",
               "required": ["src", "dst", "fraction"],
               "properties": {
-                "src":      {"type": "string"},
-                "dst":      {"type": "string"},
-                "fraction": {"$ref": "#/definitions/expr"}
+                "src": { "type": "string" },
+                "dst": { "type": "string" },
+                "fraction": { "$ref": "#/definitions/expr" }
               }
             }
           },
@@ -384,9 +393,9 @@
               "type": "object",
               "required": ["src", "dst", "count"],
               "properties": {
-                "src":   {"type": "string"},
-                "dst":   {"type": "string"},
-                "count": {"$ref": "#/definitions/expr"}
+                "src": { "type": "string" },
+                "dst": { "type": "string" },
+                "count": { "$ref": "#/definitions/expr" }
               }
             }
           },
@@ -399,8 +408,8 @@
               "type": "object",
               "required": ["compartment", "value"],
               "properties": {
-                "compartment": {"type": "string"},
-                "value":       {"$ref": "#/definitions/expr"}
+                "compartment": { "type": "string" },
+                "value": { "$ref": "#/definitions/expr" }
               }
             }
           },
@@ -413,9 +422,9 @@
       "type": "object",
       "required": ["name", "schedule", "actions"],
       "properties": {
-        "name":     {"type": "string"},
-        "schedule": {"$ref": "#/definitions/intervention_schedule"},
-        "actions":  {"type": "array", "items": {"$ref": "#/definitions/action"}}
+        "name": { "type": "string" },
+        "schedule": { "$ref": "#/definitions/intervention_schedule" },
+        "actions": { "type": "array", "items": { "$ref": "#/definitions/action" } }
       }
     },
 
@@ -425,28 +434,28 @@
         {
           "required": ["cumulative_flow"],
           "properties": {
-            "cumulative_flow": {"type": "string"}
+            "cumulative_flow": { "type": "string" }
           },
           "additionalProperties": false
         },
         {
           "required": ["current_pop"],
           "properties": {
-            "current_pop": {"type": "string"}
+            "current_pop": { "type": "string" }
           },
           "additionalProperties": false
         },
         {
           "required": ["current_pop_sum"],
           "properties": {
-            "current_pop_sum": {"type": "array", "items": {"type": "string"}}
+            "current_pop_sum": { "type": "array", "items": { "type": "string" } }
           },
           "additionalProperties": false
         },
         {
           "required": ["derived_expr"],
           "properties": {
-            "derived_expr": {"$ref": "#/definitions/expr"}
+            "derived_expr": { "$ref": "#/definitions/expr" }
           },
           "additionalProperties": false
         }
@@ -463,7 +472,7 @@
               "type": "object",
               "required": ["rate"],
               "properties": {
-                "rate": {"$ref": "#/definitions/expr"}
+                "rate": { "$ref": "#/definitions/expr" }
               }
             }
           },
@@ -476,8 +485,8 @@
               "type": "object",
               "required": ["mean", "dispersion"],
               "properties": {
-                "mean":       {"$ref": "#/definitions/expr"},
-                "dispersion": {"$ref": "#/definitions/expr"}
+                "mean": { "$ref": "#/definitions/expr" },
+                "dispersion": { "$ref": "#/definitions/expr" }
               }
             }
           },
@@ -490,8 +499,8 @@
               "type": "object",
               "required": ["mean", "sd"],
               "properties": {
-                "mean": {"$ref": "#/definitions/expr"},
-                "sd":   {"$ref": "#/definitions/expr"}
+                "mean": { "$ref": "#/definitions/expr" },
+                "sd": { "$ref": "#/definitions/expr" }
               }
             }
           },
@@ -504,8 +513,8 @@
               "type": "object",
               "required": ["n", "p"],
               "properties": {
-                "n": {"$ref": "#/definitions/expr"},
-                "p": {"$ref": "#/definitions/expr"}
+                "n": { "$ref": "#/definitions/expr" },
+                "p": { "$ref": "#/definitions/expr" }
               }
             }
           },
@@ -518,9 +527,9 @@
               "type": "object",
               "required": ["n", "alpha", "beta"],
               "properties": {
-                "n":     {"$ref": "#/definitions/expr"},
-                "alpha": {"$ref": "#/definitions/expr"},
-                "beta":  {"$ref": "#/definitions/expr"}
+                "n": { "$ref": "#/definitions/expr" },
+                "alpha": { "$ref": "#/definitions/expr" },
+                "beta": { "$ref": "#/definitions/expr" }
               }
             }
           },
@@ -535,7 +544,7 @@
           "type": "object",
           "required": ["at_times"],
           "properties": {
-            "at_times": {"type": "array", "items": {"type": "number"}}
+            "at_times": { "type": "array", "items": { "type": "number" } }
           },
           "additionalProperties": false
         },
@@ -547,9 +556,9 @@
               "type": "object",
               "required": ["start", "step", "end"],
               "properties": {
-                "start": {"type": "number"},
-                "step":  {"type": "number"},
-                "end":   {"type": "number"}
+                "start": { "type": "number" },
+                "step": { "type": "number" },
+                "end": { "type": "number" }
               }
             }
           },
@@ -566,11 +575,11 @@
       "type": "object",
       "required": ["name", "data_stream", "schedule", "projection", "likelihood"],
       "properties": {
-        "name":        {"type": "string"},
-        "data_stream": {"type": "string"},
-        "schedule":    {"$ref": "#/definitions/observation_schedule"},
-        "projection":  {"$ref": "#/definitions/projection"},
-        "likelihood":  {"$ref": "#/definitions/likelihood"}
+        "name": { "type": "string" },
+        "data_stream": { "type": "string" },
+        "schedule": { "$ref": "#/definitions/observation_schedule" },
+        "projection": { "$ref": "#/definitions/projection" },
+        "likelihood": { "$ref": "#/definitions/likelihood" }
       }
     },
 
@@ -584,8 +593,8 @@
               "type": "object",
               "required": ["lower", "upper"],
               "properties": {
-                "lower": {"type": "number"},
-                "upper": {"type": "number"}
+                "lower": { "type": "number" },
+                "upper": { "type": "number" }
               }
             }
           },
@@ -598,8 +607,8 @@
               "type": "object",
               "required": ["mean", "sd"],
               "properties": {
-                "mean": {"type": "number"},
-                "sd":   {"type": "number"}
+                "mean": { "type": "number" },
+                "sd": { "type": "number" }
               }
             }
           },
@@ -612,8 +621,8 @@
               "type": "object",
               "required": ["mu", "sigma"],
               "properties": {
-                "mu":    {"type": "number"},
-                "sigma": {"type": "number"}
+                "mu": { "type": "number" },
+                "sigma": { "type": "number" }
               }
             }
           },
@@ -626,7 +635,7 @@
               "type": "object",
               "required": ["sigma"],
               "properties": {
-                "sigma": {"type": "number"}
+                "sigma": { "type": "number" }
               }
             }
           },
@@ -639,8 +648,8 @@
               "type": "object",
               "required": ["alpha", "beta"],
               "properties": {
-                "alpha": {"type": "number"},
-                "beta":  {"type": "number"}
+                "alpha": { "type": "number" },
+                "beta": { "type": "number" }
               }
             }
           },
@@ -653,8 +662,8 @@
               "type": "object",
               "required": ["shape", "rate"],
               "properties": {
-                "shape": {"type": "number"},
-                "rate":  {"type": "number"}
+                "shape": { "type": "number" },
+                "rate": { "type": "number" }
               }
             }
           },
@@ -667,7 +676,7 @@
               "type": "object",
               "required": ["rate"],
               "properties": {
-                "rate": {"type": "number"}
+                "rate": { "type": "number" }
               }
             }
           },
@@ -676,7 +685,7 @@
         {
           "required": ["fixed"],
           "properties": {
-            "fixed": {"type": "number"}
+            "fixed": { "type": "number" }
           },
           "additionalProperties": false
         }
@@ -687,11 +696,11 @@
       "type": "object",
       "required": ["name", "value"],
       "properties": {
-        "name":          {"type": "string"},
-        "value":         {"type": "number"},
-        "prior":         {"oneOf": [{"type": "null"}, {"$ref": "#/definitions/prior_dist"}]},
-        "transform":     {"oneOf": [{"type": "null"}, {"type": "string", "enum": ["log","logit","identity"]}]},
-        "initial_value": {"type": ["number", "null"]}
+        "name": { "type": "string" },
+        "value": { "type": "number" },
+        "prior": { "oneOf": [{ "type": "null" }, { "$ref": "#/definitions/prior_dist" }] },
+        "transform": { "oneOf": [{ "type": "null" }, { "type": "string", "enum": ["log", "logit", "identity"] }] },
+        "initial_value": { "type": ["number", "null"] }
       }
     },
 
@@ -703,7 +712,7 @@
           "properties": {
             "explicit": {
               "type": "object",
-              "additionalProperties": {"type": "number"}
+              "additionalProperties": { "type": "number" }
             }
           },
           "additionalProperties": false
@@ -713,7 +722,7 @@
           "properties": {
             "parameterized": {
               "type": "object",
-              "additionalProperties": {"$ref": "#/definitions/expr"}
+              "additionalProperties": { "$ref": "#/definitions/expr" }
             }
           },
           "additionalProperties": false
@@ -723,7 +732,7 @@
           "properties": {
             "from_distribution": {
               "type": "object",
-              "additionalProperties": {"$ref": "#/definitions/prior_dist"}
+              "additionalProperties": { "$ref": "#/definitions/prior_dist" }
             }
           },
           "additionalProperties": false
@@ -741,9 +750,9 @@
               "type": "object",
               "required": ["start", "step", "end"],
               "properties": {
-                "start": {"type": "number"},
-                "step":  {"type": "number"},
-                "end":   {"type": "number"}
+                "start": { "type": "number" },
+                "step": { "type": "number" },
+                "end": { "type": "number" }
               }
             }
           },
@@ -753,7 +762,7 @@
           "type": "object",
           "required": ["at_times"],
           "properties": {
-            "at_times": {"type": "array", "items": {"type": "number"}}
+            "at_times": { "type": "array", "items": { "type": "number" } }
           },
           "additionalProperties": false
         },
@@ -768,10 +777,10 @@
       "type": "object",
       "required": ["times", "format", "trajectory", "observations"],
       "properties": {
-        "times":        {"$ref": "#/definitions/output_schedule"},
-        "format":       {"type": "string", "enum": ["tsv", "csv"]},
-        "trajectory":   {"type": "boolean"},
-        "observations": {"type": "boolean"}
+        "times": { "$ref": "#/definitions/output_schedule" },
+        "format": { "type": "string", "enum": ["tsv", "csv"] },
+        "trajectory": { "type": "boolean" },
+        "observations": { "type": "boolean" }
       }
     },
 
@@ -779,11 +788,11 @@
       "type": "object",
       "required": ["t_start", "t_end", "time_semantics"],
       "properties": {
-        "t_start":         {"type": "number"},
-        "t_end":           {"type": "number"},
-        "time_semantics":  {"type": "string", "enum": ["continuous", "discrete"]},
-        "dt":              {"type": ["number", "null"]},
-        "rng_seed":        {"type": ["integer", "null"]}
+        "t_start": { "type": "number" },
+        "t_end": { "type": "number" },
+        "time_semantics": { "type": "string", "enum": ["continuous", "discrete"] },
+        "dt": { "type": ["number", "null"] },
+        "rng_seed": { "type": ["integer", "null"] }
       }
     }
   }

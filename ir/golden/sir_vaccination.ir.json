@@ -3,9 +3,9 @@
   "version": "0.3",
   "description": "SIR with a scheduled supplementary immunisation activity (SIA) at day 100",
   "compartments": [
-    {"name": "S", "kind": "integer"},
-    {"name": "I", "kind": "integer"},
-    {"name": "R", "kind": "integer"}
+    { "name": "S", "kind": "integer" },
+    { "name": "I", "kind": "integer" },
+    { "name": "R", "kind": "integer" }
   ],
   "transitions": [
     {
@@ -17,21 +17,21 @@
           "left": {
             "bin_op": {
               "op": "mul",
-              "left": {"param": "beta"},
-              "right": {"pop": "S"}
+              "left": { "param": "beta" },
+              "right": { "pop": "S" }
             }
           },
           "right": {
             "bin_op": {
               "op": "div",
-              "left": {"pop": "I"},
-              "right": {"pop_sum": ["S", "I", "R"]}
+              "left": { "pop": "I" },
+              "right": { "pop_sum": ["S", "I", "R"] }
             }
           }
         }
       },
       "event_key": "infection:{firing_index}",
-      "metadata": {"origin_kind": "transmission", "source_compartment": "S", "dest_compartment": "I"}
+      "metadata": { "origin_kind": "transmission", "source_compartment": "S", "dest_compartment": "I" }
     },
     {
       "name": "recovery",
@@ -39,12 +39,12 @@
       "rate": {
         "bin_op": {
           "op": "mul",
-          "left": {"param": "gamma"},
-          "right": {"pop": "I"}
+          "left": { "param": "gamma" },
+          "right": { "pop": "I" }
         }
       },
       "event_key": "recovery:{firing_index}",
-      "metadata": {"origin_kind": "intrinsic", "source_compartment": "I", "dest_compartment": "R"}
+      "metadata": { "origin_kind": "intrinsic", "source_compartment": "I", "dest_compartment": "R" }
     }
   ],
   "ode_equations": [],
@@ -53,13 +53,13 @@
   "interventions": [
     {
       "name": "sia_campaign",
-      "schedule": {"at_times": [100.0]},
+      "schedule": { "at_times": [100.0] },
       "actions": [
         {
           "fraction_transfer": {
             "src": "S",
             "dst": "R",
-            "fraction": {"param": "vaccine_coverage"}
+            "fraction": { "param": "vaccine_coverage" }
           }
         }
       ]
@@ -69,28 +69,28 @@
     {
       "name": "reported_cases",
       "data_stream": "cases",
-      "schedule": {"regular": {"start": 7.0, "step": 7.0, "end": 365.0}},
-      "projection": {"cumulative_flow": "infection"},
+      "schedule": { "regular": { "start": 7.0, "step": 7.0, "end": 365.0 } },
+      "projection": { "cumulative_flow": "infection" },
       "likelihood": {
         "neg_binomial": {
-          "mean": {"projected": null},
-          "dispersion": {"param": "rho"}
+          "mean": { "projected": null },
+          "dispersion": { "param": "rho" }
         }
       }
     }
   ],
   "parameters": [
-    {"name": "beta",             "value": 0.3,  "prior": null, "transform": null, "initial_value": null},
-    {"name": "gamma",            "value": 0.1,  "prior": null, "transform": null, "initial_value": null},
-    {"name": "vaccine_coverage", "value": 0.5,  "prior": null, "transform": null, "initial_value": null},
-    {"name": "rho",              "value": 10.0, "prior": null, "transform": null, "initial_value": null}
+    { "name": "beta", "value": 0.3, "prior": null, "transform": null, "initial_value": null },
+    { "name": "gamma", "value": 0.1, "prior": null, "transform": null, "initial_value": null },
+    { "name": "vaccine_coverage", "value": 0.5, "prior": null, "transform": null, "initial_value": null },
+    { "name": "rho", "value": 10.0, "prior": null, "transform": null, "initial_value": null }
   ],
   "initial_conditions": {
-    "explicit": {"S": 990, "I": 10, "R": 0}
+    "explicit": { "S": 990, "I": 10, "R": 0 }
   },
   "data_contract": null,
   "output": {
-    "times": {"regular": {"start": 0.0, "step": 7.0, "end": 365.0}},
+    "times": { "regular": { "start": 0.0, "step": 7.0, "end": 365.0 } },
     "format": "tsv",
     "trajectory": true,
     "observations": true

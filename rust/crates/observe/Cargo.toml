@@ -4,5 +4,5 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-ir  = { path = "../ir" }
+ir = { path = "../ir" }
 sim = { path = "../sim" }

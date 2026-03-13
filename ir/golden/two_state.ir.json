@@ -3,8 +3,8 @@
   "version": "0.3",
   "description": "Reversible two-state Markov chain A ↔ B. Analytic equilibrium: A/(A+B) = beta_r/(alpha+beta_r).",
   "compartments": [
-    {"name": "A", "kind": "integer"},
-    {"name": "B", "kind": "integer"}
+    { "name": "A", "kind": "integer" },
+    { "name": "B", "kind": "integer" }
   ],
   "transitions": [
     {
@@ -13,12 +13,12 @@
       "rate": {
         "bin_op": {
           "op": "mul",
-          "left": {"param": "alpha"},
-          "right": {"pop": "A"}
+          "left": { "param": "alpha" },
+          "right": { "pop": "A" }
         }
       },
       "event_key": "forward:{firing_index}",
-      "metadata": {"origin_kind": "transfer", "source_compartment": "A", "dest_compartment": "B"}
+      "metadata": { "origin_kind": "transfer", "source_compartment": "A", "dest_compartment": "B" }
     },
     {
       "name": "backward",
@@ -26,12 +26,12 @@
       "rate": {
         "bin_op": {
           "op": "mul",
-          "left": {"param": "beta_r"},
-          "right": {"pop": "B"}
+          "left": { "param": "beta_r" },
+          "right": { "pop": "B" }
         }
       },
       "event_key": "backward:{firing_index}",
-      "metadata": {"origin_kind": "transfer", "source_compartment": "B", "dest_compartment": "A"}
+      "metadata": { "origin_kind": "transfer", "source_compartment": "B", "dest_compartment": "A" }
     }
   ],
   "ode_equations": [],
@@ -42,23 +42,23 @@
     {
       "name": "state_A",
       "data_stream": "A_obs",
-      "schedule": {"regular": {"start": 1.0, "step": 1.0, "end": 100.0}},
-      "projection": {"current_pop": "A"},
+      "schedule": { "regular": { "start": 1.0, "step": 1.0, "end": 100.0 } },
+      "projection": { "current_pop": "A" },
       "likelihood": {
-        "poisson": {"rate": {"projected": null}}
+        "poisson": { "rate": { "projected": null } }
       }
     }
   ],
   "parameters": [
-    {"name": "alpha",  "value": 0.5, "prior": null, "transform": null, "initial_value": null},
-    {"name": "beta_r", "value": 0.3, "prior": null, "transform": null, "initial_value": null}
+    { "name": "alpha", "value": 0.5, "prior": null, "transform": null, "initial_value": null },
+    { "name": "beta_r", "value": 0.3, "prior": null, "transform": null, "initial_value": null }
   ],
   "initial_conditions": {
-    "explicit": {"A": 80, "B": 20}
+    "explicit": { "A": 80, "B": 20 }
   },
   "data_contract": null,
   "output": {
-    "times": {"regular": {"start": 0.0, "step": 1.0, "end": 100.0}},
+    "times": { "regular": { "start": 0.0, "step": 1.0, "end": 100.0 } },
     "format": "tsv",
     "trajectory": true,
     "observations": true
