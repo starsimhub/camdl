@@ -63,10 +63,10 @@ let collect_declarations ctx decls =
 (* ── Unit conversion to days ─────────────────────────────────────────────── *)
 
 let days_per = function
-  | Days     -> 1.0 | PerDay   -> 1.0
-  | Weeks    -> 7.0 | PerWeek  -> 7.0
-  | Months   -> 30.0| PerMonth -> 30.0
-  | Years    -> 365.0| PerYear -> 365.0
+  | Days     -> 1.0    | PerDay   -> 1.0
+  | Weeks    -> 7.0    | PerWeek  -> 7.0
+  | Months   -> 30.4375| PerMonth -> 30.4375  (* 365.25 / 12 *)
+  | Years    -> 365.25 | PerYear  -> 365.25
 
 (* ── Stratification helpers ──────────────────────────────────────────────── *)
 
@@ -261,7 +261,7 @@ and resolve_ident_name ctx name =
   else if List.exists (fun pd -> pd.pname = name) ctx.param_decls then
     Ir.Param name
   else
-    Ir.Param name
+    failwith (Printf.sprintf "unbound identifier '%s' (not a compartment, parameter, or let binding)" name)
 
 (* ── Stoichiometry ────────────────────────────────────────────────────────── *)
 
@@ -416,6 +416,117 @@ let expand_transitions ctx =
     ) combos
   ) ctx.transitions
 
+(* ── Coupling sugar desugaring ────────────────────────────────────────────── *)
+
+(** Build the auto-denominator for stratum b: sum of all integer compartments
+    each indexed by [b].  E.g. for S I R → S[b] + I[b] + R[b]. *)
+let auto_denom_expr b ctx =
+  let int_comps = List.filter_map (fun cd ->
+    match cd.ckind with Integer -> Some cd.cname | Real -> None
+  ) ctx.comp_decls in
+  match int_comps with
+  | [] -> EConst 1.0
+  | first :: rest ->
+    List.fold_left (fun acc c ->
+      EBinOp (Add, acc, EIndex (c, [IPosn (EIdent b)]))
+    ) (EIndex (first, [IPosn (EIdent b)])) rest
+
+(** Collect bare compartment names referenced in an AST expression. *)
+let rec collect_comp_idents ctx = function
+  | EIdent name when List.exists (fun cd -> cd.cname = name) ctx.comp_decls -> [name]
+  | EBinOp (_, l, r) -> collect_comp_idents ctx l @ collect_comp_idents ctx r
+  | EUnOp  (_, e)    -> collect_comp_idents ctx e
+  | _                -> []
+
+(** True if a let-binding body references every integer compartment exactly
+    once (i.e. it is a total-population expression like N = S + I + R). *)
+let is_total_pop_binding ctx lbody =
+  let int_comps = List.filter_map (fun cd ->
+    match cd.ckind with Integer -> Some cd.cname | Real -> None
+  ) ctx.comp_decls in
+  let found    = List.sort_uniq compare (collect_comp_idents ctx lbody) in
+  let expected = List.sort_uniq compare int_comps in
+  found = expected && found <> []
+
+(** Walk an AST rate expression and substitute for one coupling dimension:
+    - bare source compartment (src_name)  → comp[a]  (self-index)
+    - bare non-source compartments        → comp[b]  (sum-index)
+    - already-indexed compartments        → append a or b as appropriate
+    - total-population let-binding        → auto_denom_expr b ctx
+    - parameters and other non-comp idents remain unchanged *)
+let rec subst_for_coupling ctx src_name a b = function
+  | EIdent name as e ->
+    if name = src_name then
+      EIndex (name, [IPosn (EIdent a)])
+    else if List.exists (fun cd -> cd.cname = name) ctx.comp_decls then
+      EIndex (name, [IPosn (EIdent b)])
+    else begin
+      match List.find_opt (fun lb -> lb.lname = name) ctx.let_bindings with
+      | Some lb when is_total_pop_binding ctx lb.lbody ->
+        auto_denom_expr b ctx
+      | _ -> e  (* parameter or other — leave as-is *)
+    end
+  | EIndex (name, idxs) ->
+    (* For an already-indexed compartment, append the new dimension index. *)
+    if name = src_name then
+      EIndex (name, idxs @ [IPosn (EIdent a)])
+    else if List.exists (fun cd -> cd.cname = name) ctx.comp_decls then
+      EIndex (name, idxs @ [IPosn (EIdent b)])
+    else
+      (* Non-compartment index expression (e.g. table row variable) — recurse
+         only into the index arguments, not the name. *)
+      EIndex (name, List.map (function
+        | IPosn e       -> IPosn  (subst_for_coupling ctx src_name a b e)
+        | INamed (k, e) -> INamed (k, subst_for_coupling ctx src_name a b e)
+      ) idxs)
+  | EBinOp (op, l, r) ->
+    EBinOp (op,
+      subst_for_coupling ctx src_name a b l,
+      subst_for_coupling ctx src_name a b r)
+  | EUnOp  (op, e)     -> EUnOp (op, subst_for_coupling ctx src_name a b e)
+  | ECond  (p, t, el)  ->
+    ECond (subst_for_coupling ctx src_name a b p,
+           subst_for_coupling ctx src_name a b t,
+           subst_for_coupling ctx src_name a b el)
+  | ESum   (v, d, body) ->
+    ESum (v, d, subst_for_coupling ctx src_name a b body)
+  | other -> other
+
+(** Desugar all coupling declarations on one transition into explicit index
+    bindings + a contact-matrix-weighted sum rate.
+
+    coupling(dim) = M  →
+      add IBind(a, dim) to trindices;
+      localize src/dst to [a];
+      rate → sum(b in dim, M[a,b] * rate_with_src→src[a]_others→others[b]) *)
+let desugar_coupling ctx tr =
+  if tr.trcoupling = [] then tr
+  else begin
+    let src_name = Option.map (fun (cname, _) -> cname) tr.trsrc in
+    List.fold_left (fun tr_acc (dim, matrix_name) ->
+      let a = "_ca_" ^ dim in   (* self-index variable, e.g. _ca_age *)
+      let b = "_cb_" ^ dim in   (* sum-index variable,  e.g. _cb_age *)
+      let add_idx idxs = idxs @ [IPosn (EIdent a)] in
+      let inner = match src_name with
+        | Some sn -> subst_for_coupling ctx sn a b tr_acc.trrate
+        | None    -> tr_acc.trrate
+      in
+      let new_rate =
+        ESum (b, dim,
+          EBinOp (Mul,
+            EIndex (matrix_name, [IPosn (EIdent a); IPosn (EIdent b)]),
+            inner))
+      in
+      { tr_acc with
+        trindices  = tr_acc.trindices @ [IBind (a, dim)];
+        trsrc      = Option.map (fun (c, idxs) -> (c, add_idx idxs)) tr_acc.trsrc;
+        trdst      = Option.map (fun (c, idxs) -> (c, add_idx idxs)) tr_acc.trdst;
+        trrate     = new_rate;
+        trcoupling = [];
+      }
+    ) tr tr.trcoupling
+  end
+
 (* ── Parameter expansion ─────────────────────────────────────────────────── *)
 
 let expand_parameters ctx =
@@ -541,6 +652,8 @@ let expand_output ctx =
 let expand (name : string) (decls : declaration list) : Ir.model =
   let ctx = empty_context () in
   collect_declarations ctx decls;
+  (* Desugar coupling sugar before expansion *)
+  ctx.transitions <- List.map (desugar_coupling ctx) ctx.transitions;
   {
     Ir.name               = name;
     Ir.version            = "0.3";

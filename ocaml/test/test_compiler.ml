@@ -7,7 +7,7 @@ let golden_dir =
     "../../golden";          (* from _build/default/test *)
     "../golden";
     "golden";
-    "/Users/vsb/projects/work/camdl/ocaml/golden";
+    "/Users/vsb/projects/work/camdl/.claude/worktrees/dsl/ocaml/golden";
   ] in
   List.find (fun d ->
     Sys.file_exists d && Sys.is_directory d
@@ -48,5 +48,6 @@ let () =
       Alcotest.test_case "seir_age"       `Quick (test_golden "seir_age");
       Alcotest.test_case "sir_five_age"   `Quick (test_golden "sir_five_age");
       Alcotest.test_case "seir_erlang"    `Quick (test_golden "seir_erlang");
+      Alcotest.test_case "sir_coupling"   `Quick (test_golden "sir_coupling");
     ]
   ]

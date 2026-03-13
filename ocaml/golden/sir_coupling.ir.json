@@ -1,0 +1,267 @@
+{
+  "name": "sir_coupling",
+  "version": "0.3",
+  "description": null,
+  "compartments": [
+    { "name": "S_young", "kind": "integer" },
+    { "name": "S_old", "kind": "integer" },
+    { "name": "I_young", "kind": "integer" },
+    { "name": "I_old", "kind": "integer" },
+    { "name": "R_young", "kind": "integer" },
+    { "name": "R_old", "kind": "integer" }
+  ],
+  "transitions": [
+    {
+      "name": "infection_young",
+      "stoichiometry": [ [ "S_young", -1 ], [ "I_young", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "add",
+          "left": {
+            "bin_op": {
+              "op": "mul",
+              "left": {
+                "table_lookup": {
+                  "table": "C_age",
+                  "indices": [ { "const": 0.0 }, { "const": 0.0 } ]
+                }
+              },
+              "right": {
+                "bin_op": {
+                  "op": "div",
+                  "left": {
+                    "bin_op": {
+                      "op": "mul",
+                      "left": {
+                        "bin_op": {
+                          "op": "mul",
+                          "left": { "param": "beta" },
+                          "right": { "pop": "S_young" }
+                        }
+                      },
+                      "right": { "pop": "I_young" }
+                    }
+                  },
+                  "right": { "pop_sum": [ "S_young", "I_young", "R_young" ] }
+                }
+              }
+            }
+          },
+          "right": {
+            "bin_op": {
+              "op": "mul",
+              "left": {
+                "table_lookup": {
+                  "table": "C_age",
+                  "indices": [ { "const": 0.0 }, { "const": 1.0 } ]
+                }
+              },
+              "right": {
+                "bin_op": {
+                  "op": "div",
+                  "left": {
+                    "bin_op": {
+                      "op": "mul",
+                      "left": {
+                        "bin_op": {
+                          "op": "mul",
+                          "left": { "param": "beta" },
+                          "right": { "pop": "S_young" }
+                        }
+                      },
+                      "right": { "pop": "I_old" }
+                    }
+                  },
+                  "right": { "pop_sum": [ "S_old", "I_old", "R_old" ] }
+                }
+              }
+            }
+          }
+        }
+      },
+      "event_key": "infection_young:{firing_index}",
+      "metadata": {
+        "origin_kind": "transmission",
+        "source_compartment": "S_young",
+        "dest_compartment": "I_young"
+      }
+    },
+    {
+      "name": "infection_old",
+      "stoichiometry": [ [ "S_old", -1 ], [ "I_old", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "add",
+          "left": {
+            "bin_op": {
+              "op": "mul",
+              "left": {
+                "table_lookup": {
+                  "table": "C_age",
+                  "indices": [ { "const": 1.0 }, { "const": 0.0 } ]
+                }
+              },
+              "right": {
+                "bin_op": {
+                  "op": "div",
+                  "left": {
+                    "bin_op": {
+                      "op": "mul",
+                      "left": {
+                        "bin_op": {
+                          "op": "mul",
+                          "left": { "param": "beta" },
+                          "right": { "pop": "S_old" }
+                        }
+                      },
+                      "right": { "pop": "I_young" }
+                    }
+                  },
+                  "right": { "pop_sum": [ "S_young", "I_young", "R_young" ] }
+                }
+              }
+            }
+          },
+          "right": {
+            "bin_op": {
+              "op": "mul",
+              "left": {
+                "table_lookup": {
+                  "table": "C_age",
+                  "indices": [ { "const": 1.0 }, { "const": 1.0 } ]
+                }
+              },
+              "right": {
+                "bin_op": {
+                  "op": "div",
+                  "left": {
+                    "bin_op": {
+                      "op": "mul",
+                      "left": {
+                        "bin_op": {
+                          "op": "mul",
+                          "left": { "param": "beta" },
+                          "right": { "pop": "S_old" }
+                        }
+                      },
+                      "right": { "pop": "I_old" }
+                    }
+                  },
+                  "right": { "pop_sum": [ "S_old", "I_old", "R_old" ] }
+                }
+              }
+            }
+          }
+        }
+      },
+      "event_key": "infection_old:{firing_index}",
+      "metadata": {
+        "origin_kind": "transmission",
+        "source_compartment": "S_old",
+        "dest_compartment": "I_old"
+      }
+    },
+    {
+      "name": "recovery_young",
+      "stoichiometry": [ [ "I_young", -1 ], [ "R_young", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": { "param": "gamma" },
+          "right": { "pop": "I_young" }
+        }
+      },
+      "event_key": "recovery_young:{firing_index}",
+      "metadata": {
+        "origin_kind": "intrinsic",
+        "source_compartment": "I_young",
+        "dest_compartment": "R_young"
+      }
+    },
+    {
+      "name": "recovery_old",
+      "stoichiometry": [ [ "I_old", -1 ], [ "R_old", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": { "param": "gamma" },
+          "right": { "pop": "I_old" }
+        }
+      },
+      "event_key": "recovery_old:{firing_index}",
+      "metadata": {
+        "origin_kind": "intrinsic",
+        "source_compartment": "I_old",
+        "dest_compartment": "R_old"
+      }
+    }
+  ],
+  "ode_equations": [],
+  "time_functions": [],
+  "tables": [
+    {
+      "name": "C_age",
+      "values": [ 10.0, 3.0, 3.0, 7.0 ],
+      "out_of_bounds": "error"
+    }
+  ],
+  "interventions": [],
+  "observations": [],
+  "parameters": [
+    {
+      "name": "beta",
+      "value": 0.0,
+      "prior": null,
+      "transform": null,
+      "initial_value": null
+    },
+    {
+      "name": "gamma",
+      "value": 0.0,
+      "prior": null,
+      "transform": null,
+      "initial_value": null
+    },
+    {
+      "name": "N0",
+      "value": 0.0,
+      "prior": null,
+      "transform": null,
+      "initial_value": null
+    },
+    {
+      "name": "I0",
+      "value": 0.0,
+      "prior": null,
+      "transform": null,
+      "initial_value": null
+    }
+  ],
+  "initial_conditions": {
+    "parameterized": {
+      "S_young": {
+        "bin_op": {
+          "op": "sub",
+          "left": { "param": "N0" },
+          "right": { "param": "I0" }
+        }
+      },
+      "S_old": { "param": "N0" },
+      "I_young": { "param": "I0" }
+    }
+  },
+  "data_contract": null,
+  "output": {
+    "times": { "regular": { "start": 0.0, "step": 1.0, "end": 100.0 } },
+    "format": "tsv",
+    "trajectory": true,
+    "observations": true
+  },
+  "simulation": {
+    "t_start": 0.0,
+    "t_end": 100.0,
+    "time_semantics": "continuous",
+    "dt": null,
+    "rng_seed": null
+  }
+}

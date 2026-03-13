@@ -1,0 +1,24 @@
+time_unit = 'days
+
+compartments { S, I, R }
+stratify(by=age, values=[young, old])
+
+tables {
+  C_age : age × age = [[10.0, 3.0], [3.0, 7.0]]
+}
+
+parameters { beta : rate  gamma : rate  N0 : count  I0 : count }
+
+let N = S + I + R
+
+transitions {
+  infection : S --> I {
+    rate = beta * S * I / N
+    coupling[age = C_age]
+  }
+  recovery[a in age] : I[a] --> R[a] @ gamma * I[a]
+}
+
+init { S[young] = N0 - I0  S[old] = N0  I[young] = I0 }
+
+simulate { from = 0 'days  to = 100 'days }
