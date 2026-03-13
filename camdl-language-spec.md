@@ -574,7 +574,7 @@ migrate[c in compartments, a in age, src in patch, dst in patch]
 
 # Only adults reproduce
 birth_from[a in age, p in patch] : --> S[child, p]
-  @ fertility[a] * N[a, p]
+  @ fertility[a] * N_local[a, p]
   where a != child
 
 # Compound guard
