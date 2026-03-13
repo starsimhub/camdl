@@ -1,0 +1,37 @@
+# SEIR with age mixing (§23.3, primitive form)
+time_unit = 'days
+
+compartments { S, E, I, R }
+
+stratify(by = age, values = [child, adult])
+
+let N_local[a in age] = S[a] + E[a] + I[a] + R[a]
+
+parameters {
+  beta  : rate
+  sigma : rate
+  gamma : rate
+}
+
+tables {
+  C_age : age × age = [[12.0, 4.0], [4.0, 8.0]]
+}
+
+transitions {
+  infection[a in age] : S[a] --> E[a]
+    @ beta * S[a] * sum(b in age, C_age[a, b] * I[b] / N_local[b])
+
+  progression[a in age] : E[a] --> I[a]  @ sigma * E[a]
+  recovery[a in age]    : I[a] --> R[a]  @ gamma * I[a]
+}
+
+init {
+  S[child] = 4990
+  S[adult] = 5000
+  I[child] = 10
+}
+
+simulate {
+  from = 0 'days
+  to   = 365 'days
+}

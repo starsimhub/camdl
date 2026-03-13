@@ -50,6 +50,7 @@ dependencies = [
  "io",
  "ir",
  "observe",
+ "serde_json",
  "sim",
 ]
 

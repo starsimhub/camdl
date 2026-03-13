@@ -1,0 +1,33 @@
+# SIR with demography (§23.2)
+time_unit = 'days
+
+compartments { S, I, R }
+
+let N = S + I + R
+
+parameters {
+  beta  : rate
+  gamma : rate
+  mu    : rate
+  N0    : count
+  I0    : count
+}
+
+transitions {
+  infection : S --> I  @ beta * S * (I / N)
+  recovery  : I --> R  @ gamma * I
+  birth     :     --> S  @ mu * N
+  death_S   : S -->    @ mu * S
+  death_I   : I -->    @ mu * I
+  death_R   : R -->    @ mu * R
+}
+
+init {
+  S = N0 - I0
+  I = I0
+}
+
+simulate {
+  from = 0 'days
+  to   = 5 'years
+}

@@ -1,0 +1,194 @@
+{
+  "name": "sir_demography",
+  "version": "0.3",
+  "description": null,
+  "compartments": [
+    { "name": "S", "kind": "integer" },
+    { "name": "I", "kind": "integer" },
+    { "name": "R", "kind": "integer" }
+  ],
+  "transitions": [
+    {
+      "name": "infection",
+      "stoichiometry": [ [ "S", -1 ], [ "I", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": {
+            "bin_op": {
+              "op": "mul",
+              "left": { "param": "beta" },
+              "right": { "pop": "S" }
+            }
+          },
+          "right": {
+            "bin_op": {
+              "op": "div",
+              "left": { "pop": "I" },
+              "right": { "pop_sum": [ "S", "I", "R" ] }
+            }
+          }
+        }
+      },
+      "event_key": "infection:{firing_index}",
+      "metadata": {
+        "origin_kind": "transmission",
+        "source_compartment": "S",
+        "dest_compartment": "I"
+      }
+    },
+    {
+      "name": "recovery",
+      "stoichiometry": [ [ "I", -1 ], [ "R", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": { "param": "gamma" },
+          "right": { "pop": "I" }
+        }
+      },
+      "event_key": "recovery:{firing_index}",
+      "metadata": {
+        "origin_kind": "intrinsic",
+        "source_compartment": "I",
+        "dest_compartment": "R"
+      }
+    },
+    {
+      "name": "birth",
+      "stoichiometry": [ [ "S", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": { "param": "mu" },
+          "right": { "pop_sum": [ "S", "I", "R" ] }
+        }
+      },
+      "event_key": "birth:{firing_index}",
+      "metadata": {
+        "origin_kind": "inflow",
+        "source_compartment": null,
+        "dest_compartment": "S"
+      }
+    },
+    {
+      "name": "death_S",
+      "stoichiometry": [ [ "S", -1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": { "param": "mu" },
+          "right": { "pop": "S" }
+        }
+      },
+      "event_key": "death_S:{firing_index}",
+      "metadata": {
+        "origin_kind": "outflow",
+        "source_compartment": "S",
+        "dest_compartment": null
+      }
+    },
+    {
+      "name": "death_I",
+      "stoichiometry": [ [ "I", -1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": { "param": "mu" },
+          "right": { "pop": "I" }
+        }
+      },
+      "event_key": "death_I:{firing_index}",
+      "metadata": {
+        "origin_kind": "outflow",
+        "source_compartment": "I",
+        "dest_compartment": null
+      }
+    },
+    {
+      "name": "death_R",
+      "stoichiometry": [ [ "R", -1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": { "param": "mu" },
+          "right": { "pop": "R" }
+        }
+      },
+      "event_key": "death_R:{firing_index}",
+      "metadata": {
+        "origin_kind": "outflow",
+        "source_compartment": "R",
+        "dest_compartment": null
+      }
+    }
+  ],
+  "ode_equations": [],
+  "time_functions": [],
+  "tables": [],
+  "interventions": [],
+  "observations": [],
+  "parameters": [
+    {
+      "name": "beta",
+      "value": 0.0,
+      "prior": null,
+      "transform": null,
+      "initial_value": null
+    },
+    {
+      "name": "gamma",
+      "value": 0.0,
+      "prior": null,
+      "transform": null,
+      "initial_value": null
+    },
+    {
+      "name": "mu",
+      "value": 0.0,
+      "prior": null,
+      "transform": null,
+      "initial_value": null
+    },
+    {
+      "name": "N0",
+      "value": 0.0,
+      "prior": null,
+      "transform": null,
+      "initial_value": null
+    },
+    {
+      "name": "I0",
+      "value": 0.0,
+      "prior": null,
+      "transform": null,
+      "initial_value": null
+    }
+  ],
+  "initial_conditions": {
+    "parameterized": {
+      "S": {
+        "bin_op": {
+          "op": "sub",
+          "left": { "param": "N0" },
+          "right": { "param": "I0" }
+        }
+      },
+      "I": { "param": "I0" }
+    }
+  },
+  "data_contract": null,
+  "output": {
+    "times": { "regular": { "start": 0.0, "step": 1.0, "end": 1825.0 } },
+    "format": "tsv",
+    "trajectory": true,
+    "observations": true
+  },
+  "simulation": {
+    "t_start": 0.0,
+    "t_end": 1825.0,
+    "time_semantics": "continuous",
+    "dt": null,
+    "rng_seed": null
+  }
+}

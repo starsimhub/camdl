@@ -1,0 +1,46 @@
+# SIR with 5 age groups and consecutive aging (§23.6, simplified)
+time_unit = 'days
+
+compartments { S, I, R }
+
+stratify(by = age, values = [age_0_5, age_5_15, age_15_50, age_50_65, age_65p])
+
+let N_local[a in age] = S[a] + I[a] + R[a]
+
+parameters {
+  beta  : rate
+  gamma : rate
+  mu    : rate
+}
+
+tables {
+  age_dur : age 'years = [5, 10, 35, 15, 20]
+}
+
+transitions {
+  infection[a in age] : S[a] --> I[a]
+    @ beta * S[a] * sum(b in age, I[b] / N_local[b])
+
+  recovery[a in age] : I[a] --> R[a]
+    @ gamma * I[a]
+
+  aging[c in compartments, (a, a_next) in consecutive(age)]
+    : c[a] --> c[a_next]
+    @ (1 / age_dur[a]) * c[a]
+
+  death[c in compartments, a in age] : c[a] -->
+    @ mu * c[a]
+
+  birth : --> S[age_0_5]
+    @ mu * sum(a in age, N_local[a])
+}
+
+init {
+  S[age_0_5] = 1000
+  I[age_0_5] = 10
+}
+
+simulate {
+  from = 0 'days
+  to   = 365 'days
+}

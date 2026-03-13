@@ -1,0 +1,8 @@
+(library
+ (name compiler)
+ (wrapped false)
+ (libraries ir yojson))
+
+(ocamllex (modules lexer))
+
+(menhir (modules parser))

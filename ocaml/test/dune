@@ -1,3 +1,7 @@
 (test
  (name test_ir_roundtrip)
  (libraries ir alcotest))
+
+(test
+ (name test_compiler)
+ (libraries compiler ir alcotest))

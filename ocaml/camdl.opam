@@ -5,6 +5,7 @@ synopsis: "Stochastic compartmental epidemic modelling"
 depends: [
   "ocaml"   {>= "5.0"}
   "dune"    {>= "3.0"}
+  "menhir"  {>= "20200211"}
   "yojson"  {>= "2.0"}
   "alcotest" {with-test}
 ]

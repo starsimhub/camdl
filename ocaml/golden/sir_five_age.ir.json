@@ -1,0 +1,1250 @@
+{
+  "name": "sir_five_age",
+  "version": "0.3",
+  "description": null,
+  "compartments": [
+    { "name": "S_age_0_5", "kind": "integer" },
+    { "name": "S_age_5_15", "kind": "integer" },
+    { "name": "S_age_15_50", "kind": "integer" },
+    { "name": "S_age_50_65", "kind": "integer" },
+    { "name": "S_age_65p", "kind": "integer" },
+    { "name": "I_age_0_5", "kind": "integer" },
+    { "name": "I_age_5_15", "kind": "integer" },
+    { "name": "I_age_15_50", "kind": "integer" },
+    { "name": "I_age_50_65", "kind": "integer" },
+    { "name": "I_age_65p", "kind": "integer" },
+    { "name": "R_age_0_5", "kind": "integer" },
+    { "name": "R_age_5_15", "kind": "integer" },
+    { "name": "R_age_15_50", "kind": "integer" },
+    { "name": "R_age_50_65", "kind": "integer" },
+    { "name": "R_age_65p", "kind": "integer" }
+  ],
+  "transitions": [
+    {
+      "name": "infection_age_0_5",
+      "stoichiometry": [ [ "S_age_0_5", -1 ], [ "I_age_0_5", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": {
+            "bin_op": {
+              "op": "mul",
+              "left": { "param": "beta" },
+              "right": { "pop": "S_age_0_5" }
+            }
+          },
+          "right": {
+            "bin_op": {
+              "op": "add",
+              "left": {
+                "bin_op": {
+                  "op": "add",
+                  "left": {
+                    "bin_op": {
+                      "op": "add",
+                      "left": {
+                        "bin_op": {
+                          "op": "add",
+                          "left": {
+                            "bin_op": {
+                              "op": "div",
+                              "left": { "pop": "I_age_0_5" },
+                              "right": {
+                                "pop_sum": [
+                                  "S_age_0_5", "I_age_0_5", "R_age_0_5"
+                                ]
+                              }
+                            }
+                          },
+                          "right": {
+                            "bin_op": {
+                              "op": "div",
+                              "left": { "pop": "I_age_5_15" },
+                              "right": {
+                                "pop_sum": [
+                                  "S_age_5_15", "I_age_5_15", "R_age_5_15"
+                                ]
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "right": {
+                        "bin_op": {
+                          "op": "div",
+                          "left": { "pop": "I_age_15_50" },
+                          "right": {
+                            "pop_sum": [
+                              "S_age_15_50", "I_age_15_50", "R_age_15_50"
+                            ]
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "right": {
+                    "bin_op": {
+                      "op": "div",
+                      "left": { "pop": "I_age_50_65" },
+                      "right": {
+                        "pop_sum": [
+                          "S_age_50_65", "I_age_50_65", "R_age_50_65"
+                        ]
+                      }
+                    }
+                  }
+                }
+              },
+              "right": {
+                "bin_op": {
+                  "op": "div",
+                  "left": { "pop": "I_age_65p" },
+                  "right": {
+                    "pop_sum": [ "S_age_65p", "I_age_65p", "R_age_65p" ]
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "event_key": "infection_age_0_5:{firing_index}",
+      "metadata": {
+        "origin_kind": "transmission",
+        "source_compartment": "S_age_0_5",
+        "dest_compartment": "I_age_0_5"
+      }
+    },
+    {
+      "name": "infection_age_5_15",
+      "stoichiometry": [ [ "S_age_5_15", -1 ], [ "I_age_5_15", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": {
+            "bin_op": {
+              "op": "mul",
+              "left": { "param": "beta" },
+              "right": { "pop": "S_age_5_15" }
+            }
+          },
+          "right": {
+            "bin_op": {
+              "op": "add",
+              "left": {
+                "bin_op": {
+                  "op": "add",
+                  "left": {
+                    "bin_op": {
+                      "op": "add",
+                      "left": {
+                        "bin_op": {
+                          "op": "add",
+                          "left": {
+                            "bin_op": {
+                              "op": "div",
+                              "left": { "pop": "I_age_0_5" },
+                              "right": {
+                                "pop_sum": [
+                                  "S_age_0_5", "I_age_0_5", "R_age_0_5"
+                                ]
+                              }
+                            }
+                          },
+                          "right": {
+                            "bin_op": {
+                              "op": "div",
+                              "left": { "pop": "I_age_5_15" },
+                              "right": {
+                                "pop_sum": [
+                                  "S_age_5_15", "I_age_5_15", "R_age_5_15"
+                                ]
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "right": {
+                        "bin_op": {
+                          "op": "div",
+                          "left": { "pop": "I_age_15_50" },
+                          "right": {
+                            "pop_sum": [
+                              "S_age_15_50", "I_age_15_50", "R_age_15_50"
+                            ]
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "right": {
+                    "bin_op": {
+                      "op": "div",
+                      "left": { "pop": "I_age_50_65" },
+                      "right": {
+                        "pop_sum": [
+                          "S_age_50_65", "I_age_50_65", "R_age_50_65"
+                        ]
+                      }
+                    }
+                  }
+                }
+              },
+              "right": {
+                "bin_op": {
+                  "op": "div",
+                  "left": { "pop": "I_age_65p" },
+                  "right": {
+                    "pop_sum": [ "S_age_65p", "I_age_65p", "R_age_65p" ]
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "event_key": "infection_age_5_15:{firing_index}",
+      "metadata": {
+        "origin_kind": "transmission",
+        "source_compartment": "S_age_5_15",
+        "dest_compartment": "I_age_5_15"
+      }
+    },
+    {
+      "name": "infection_age_15_50",
+      "stoichiometry": [ [ "S_age_15_50", -1 ], [ "I_age_15_50", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": {
+            "bin_op": {
+              "op": "mul",
+              "left": { "param": "beta" },
+              "right": { "pop": "S_age_15_50" }
+            }
+          },
+          "right": {
+            "bin_op": {
+              "op": "add",
+              "left": {
+                "bin_op": {
+                  "op": "add",
+                  "left": {
+                    "bin_op": {
+                      "op": "add",
+                      "left": {
+                        "bin_op": {
+                          "op": "add",
+                          "left": {
+                            "bin_op": {
+                              "op": "div",
+                              "left": { "pop": "I_age_0_5" },
+                              "right": {
+                                "pop_sum": [
+                                  "S_age_0_5", "I_age_0_5", "R_age_0_5"
+                                ]
+                              }
+                            }
+                          },
+                          "right": {
+                            "bin_op": {
+                              "op": "div",
+                              "left": { "pop": "I_age_5_15" },
+                              "right": {
+                                "pop_sum": [
+                                  "S_age_5_15", "I_age_5_15", "R_age_5_15"
+                                ]
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "right": {
+                        "bin_op": {
+                          "op": "div",
+                          "left": { "pop": "I_age_15_50" },
+                          "right": {
+                            "pop_sum": [
+                              "S_age_15_50", "I_age_15_50", "R_age_15_50"
+                            ]
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "right": {
+                    "bin_op": {
+                      "op": "div",
+                      "left": { "pop": "I_age_50_65" },
+                      "right": {
+                        "pop_sum": [
+                          "S_age_50_65", "I_age_50_65", "R_age_50_65"
+                        ]
+                      }
+                    }
+                  }
+                }
+              },
+              "right": {
+                "bin_op": {
+                  "op": "div",
+                  "left": { "pop": "I_age_65p" },
+                  "right": {
+                    "pop_sum": [ "S_age_65p", "I_age_65p", "R_age_65p" ]
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "event_key": "infection_age_15_50:{firing_index}",
+      "metadata": {
+        "origin_kind": "transmission",
+        "source_compartment": "S_age_15_50",
+        "dest_compartment": "I_age_15_50"
+      }
+    },
+    {
+      "name": "infection_age_50_65",
+      "stoichiometry": [ [ "S_age_50_65", -1 ], [ "I_age_50_65", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": {
+            "bin_op": {
+              "op": "mul",
+              "left": { "param": "beta" },
+              "right": { "pop": "S_age_50_65" }
+            }
+          },
+          "right": {
+            "bin_op": {
+              "op": "add",
+              "left": {
+                "bin_op": {
+                  "op": "add",
+                  "left": {
+                    "bin_op": {
+                      "op": "add",
+                      "left": {
+                        "bin_op": {
+                          "op": "add",
+                          "left": {
+                            "bin_op": {
+                              "op": "div",
+                              "left": { "pop": "I_age_0_5" },
+                              "right": {
+                                "pop_sum": [
+                                  "S_age_0_5", "I_age_0_5", "R_age_0_5"
+                                ]
+                              }
+                            }
+                          },
+                          "right": {
+                            "bin_op": {
+                              "op": "div",
+                              "left": { "pop": "I_age_5_15" },
+                              "right": {
+                                "pop_sum": [
+                                  "S_age_5_15", "I_age_5_15", "R_age_5_15"
+                                ]
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "right": {
+                        "bin_op": {
+                          "op": "div",
+                          "left": { "pop": "I_age_15_50" },
+                          "right": {
+                            "pop_sum": [
+                              "S_age_15_50", "I_age_15_50", "R_age_15_50"
+                            ]
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "right": {
+                    "bin_op": {
+                      "op": "div",
+                      "left": { "pop": "I_age_50_65" },
+                      "right": {
+                        "pop_sum": [
+                          "S_age_50_65", "I_age_50_65", "R_age_50_65"
+                        ]
+                      }
+                    }
+                  }
+                }
+              },
+              "right": {
+                "bin_op": {
+                  "op": "div",
+                  "left": { "pop": "I_age_65p" },
+                  "right": {
+                    "pop_sum": [ "S_age_65p", "I_age_65p", "R_age_65p" ]
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "event_key": "infection_age_50_65:{firing_index}",
+      "metadata": {
+        "origin_kind": "transmission",
+        "source_compartment": "S_age_50_65",
+        "dest_compartment": "I_age_50_65"
+      }
+    },
+    {
+      "name": "infection_age_65p",
+      "stoichiometry": [ [ "S_age_65p", -1 ], [ "I_age_65p", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": {
+            "bin_op": {
+              "op": "mul",
+              "left": { "param": "beta" },
+              "right": { "pop": "S_age_65p" }
+            }
+          },
+          "right": {
+            "bin_op": {
+              "op": "add",
+              "left": {
+                "bin_op": {
+                  "op": "add",
+                  "left": {
+                    "bin_op": {
+                      "op": "add",
+                      "left": {
+                        "bin_op": {
+                          "op": "add",
+                          "left": {
+                            "bin_op": {
+                              "op": "div",
+                              "left": { "pop": "I_age_0_5" },
+                              "right": {
+                                "pop_sum": [
+                                  "S_age_0_5", "I_age_0_5", "R_age_0_5"
+                                ]
+                              }
+                            }
+                          },
+                          "right": {
+                            "bin_op": {
+                              "op": "div",
+                              "left": { "pop": "I_age_5_15" },
+                              "right": {
+                                "pop_sum": [
+                                  "S_age_5_15", "I_age_5_15", "R_age_5_15"
+                                ]
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "right": {
+                        "bin_op": {
+                          "op": "div",
+                          "left": { "pop": "I_age_15_50" },
+                          "right": {
+                            "pop_sum": [
+                              "S_age_15_50", "I_age_15_50", "R_age_15_50"
+                            ]
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "right": {
+                    "bin_op": {
+                      "op": "div",
+                      "left": { "pop": "I_age_50_65" },
+                      "right": {
+                        "pop_sum": [
+                          "S_age_50_65", "I_age_50_65", "R_age_50_65"
+                        ]
+                      }
+                    }
+                  }
+                }
+              },
+              "right": {
+                "bin_op": {
+                  "op": "div",
+                  "left": { "pop": "I_age_65p" },
+                  "right": {
+                    "pop_sum": [ "S_age_65p", "I_age_65p", "R_age_65p" ]
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "event_key": "infection_age_65p:{firing_index}",
+      "metadata": {
+        "origin_kind": "transmission",
+        "source_compartment": "S_age_65p",
+        "dest_compartment": "I_age_65p"
+      }
+    },
+    {
+      "name": "recovery_age_0_5",
+      "stoichiometry": [ [ "I_age_0_5", -1 ], [ "R_age_0_5", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": { "param": "gamma" },
+          "right": { "pop": "I_age_0_5" }
+        }
+      },
+      "event_key": "recovery_age_0_5:{firing_index}",
+      "metadata": {
+        "origin_kind": "intrinsic",
+        "source_compartment": "I_age_0_5",
+        "dest_compartment": "R_age_0_5"
+      }
+    },
+    {
+      "name": "recovery_age_5_15",
+      "stoichiometry": [ [ "I_age_5_15", -1 ], [ "R_age_5_15", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": { "param": "gamma" },
+          "right": { "pop": "I_age_5_15" }
+        }
+      },
+      "event_key": "recovery_age_5_15:{firing_index}",
+      "metadata": {
+        "origin_kind": "intrinsic",
+        "source_compartment": "I_age_5_15",
+        "dest_compartment": "R_age_5_15"
+      }
+    },
+    {
+      "name": "recovery_age_15_50",
+      "stoichiometry": [ [ "I_age_15_50", -1 ], [ "R_age_15_50", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": { "param": "gamma" },
+          "right": { "pop": "I_age_15_50" }
+        }
+      },
+      "event_key": "recovery_age_15_50:{firing_index}",
+      "metadata": {
+        "origin_kind": "intrinsic",
+        "source_compartment": "I_age_15_50",
+        "dest_compartment": "R_age_15_50"
+      }
+    },
+    {
+      "name": "recovery_age_50_65",
+      "stoichiometry": [ [ "I_age_50_65", -1 ], [ "R_age_50_65", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": { "param": "gamma" },
+          "right": { "pop": "I_age_50_65" }
+        }
+      },
+      "event_key": "recovery_age_50_65:{firing_index}",
+      "metadata": {
+        "origin_kind": "intrinsic",
+        "source_compartment": "I_age_50_65",
+        "dest_compartment": "R_age_50_65"
+      }
+    },
+    {
+      "name": "recovery_age_65p",
+      "stoichiometry": [ [ "I_age_65p", -1 ], [ "R_age_65p", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": { "param": "gamma" },
+          "right": { "pop": "I_age_65p" }
+        }
+      },
+      "event_key": "recovery_age_65p:{firing_index}",
+      "metadata": {
+        "origin_kind": "intrinsic",
+        "source_compartment": "I_age_65p",
+        "dest_compartment": "R_age_65p"
+      }
+    },
+    {
+      "name": "aging_S_age_0_5",
+      "stoichiometry": [ [ "S_age_0_5", -1 ], [ "S_age_5_15", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": {
+            "bin_op": {
+              "op": "div",
+              "left": { "const": 1.0 },
+              "right": {
+                "table_lookup": {
+                  "table": "age_dur",
+                  "indices": [ { "const": 0.0 } ]
+                }
+              }
+            }
+          },
+          "right": { "pop": "S_age_0_5" }
+        }
+      },
+      "event_key": "aging_S_age_0_5:{firing_index}",
+      "metadata": {
+        "origin_kind": "intrinsic",
+        "source_compartment": "S_age_0_5",
+        "dest_compartment": "S_age_5_15"
+      }
+    },
+    {
+      "name": "aging_S_age_5_15",
+      "stoichiometry": [ [ "S_age_5_15", -1 ], [ "S_age_15_50", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": {
+            "bin_op": {
+              "op": "div",
+              "left": { "const": 1.0 },
+              "right": {
+                "table_lookup": {
+                  "table": "age_dur",
+                  "indices": [ { "const": 1.0 } ]
+                }
+              }
+            }
+          },
+          "right": { "pop": "S_age_5_15" }
+        }
+      },
+      "event_key": "aging_S_age_5_15:{firing_index}",
+      "metadata": {
+        "origin_kind": "intrinsic",
+        "source_compartment": "S_age_5_15",
+        "dest_compartment": "S_age_15_50"
+      }
+    },
+    {
+      "name": "aging_S_age_15_50",
+      "stoichiometry": [ [ "S_age_15_50", -1 ], [ "S_age_50_65", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": {
+            "bin_op": {
+              "op": "div",
+              "left": { "const": 1.0 },
+              "right": {
+                "table_lookup": {
+                  "table": "age_dur",
+                  "indices": [ { "const": 2.0 } ]
+                }
+              }
+            }
+          },
+          "right": { "pop": "S_age_15_50" }
+        }
+      },
+      "event_key": "aging_S_age_15_50:{firing_index}",
+      "metadata": {
+        "origin_kind": "intrinsic",
+        "source_compartment": "S_age_15_50",
+        "dest_compartment": "S_age_50_65"
+      }
+    },
+    {
+      "name": "aging_S_age_50_65",
+      "stoichiometry": [ [ "S_age_50_65", -1 ], [ "S_age_65p", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": {
+            "bin_op": {
+              "op": "div",
+              "left": { "const": 1.0 },
+              "right": {
+                "table_lookup": {
+                  "table": "age_dur",
+                  "indices": [ { "const": 3.0 } ]
+                }
+              }
+            }
+          },
+          "right": { "pop": "S_age_50_65" }
+        }
+      },
+      "event_key": "aging_S_age_50_65:{firing_index}",
+      "metadata": {
+        "origin_kind": "intrinsic",
+        "source_compartment": "S_age_50_65",
+        "dest_compartment": "S_age_65p"
+      }
+    },
+    {
+      "name": "aging_I_age_0_5",
+      "stoichiometry": [ [ "I_age_0_5", -1 ], [ "I_age_5_15", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": {
+            "bin_op": {
+              "op": "div",
+              "left": { "const": 1.0 },
+              "right": {
+                "table_lookup": {
+                  "table": "age_dur",
+                  "indices": [ { "const": 0.0 } ]
+                }
+              }
+            }
+          },
+          "right": { "pop": "I_age_0_5" }
+        }
+      },
+      "event_key": "aging_I_age_0_5:{firing_index}",
+      "metadata": {
+        "origin_kind": "intrinsic",
+        "source_compartment": "I_age_0_5",
+        "dest_compartment": "I_age_5_15"
+      }
+    },
+    {
+      "name": "aging_I_age_5_15",
+      "stoichiometry": [ [ "I_age_5_15", -1 ], [ "I_age_15_50", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": {
+            "bin_op": {
+              "op": "div",
+              "left": { "const": 1.0 },
+              "right": {
+                "table_lookup": {
+                  "table": "age_dur",
+                  "indices": [ { "const": 1.0 } ]
+                }
+              }
+            }
+          },
+          "right": { "pop": "I_age_5_15" }
+        }
+      },
+      "event_key": "aging_I_age_5_15:{firing_index}",
+      "metadata": {
+        "origin_kind": "intrinsic",
+        "source_compartment": "I_age_5_15",
+        "dest_compartment": "I_age_15_50"
+      }
+    },
+    {
+      "name": "aging_I_age_15_50",
+      "stoichiometry": [ [ "I_age_15_50", -1 ], [ "I_age_50_65", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": {
+            "bin_op": {
+              "op": "div",
+              "left": { "const": 1.0 },
+              "right": {
+                "table_lookup": {
+                  "table": "age_dur",
+                  "indices": [ { "const": 2.0 } ]
+                }
+              }
+            }
+          },
+          "right": { "pop": "I_age_15_50" }
+        }
+      },
+      "event_key": "aging_I_age_15_50:{firing_index}",
+      "metadata": {
+        "origin_kind": "intrinsic",
+        "source_compartment": "I_age_15_50",
+        "dest_compartment": "I_age_50_65"
+      }
+    },
+    {
+      "name": "aging_I_age_50_65",
+      "stoichiometry": [ [ "I_age_50_65", -1 ], [ "I_age_65p", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": {
+            "bin_op": {
+              "op": "div",
+              "left": { "const": 1.0 },
+              "right": {
+                "table_lookup": {
+                  "table": "age_dur",
+                  "indices": [ { "const": 3.0 } ]
+                }
+              }
+            }
+          },
+          "right": { "pop": "I_age_50_65" }
+        }
+      },
+      "event_key": "aging_I_age_50_65:{firing_index}",
+      "metadata": {
+        "origin_kind": "intrinsic",
+        "source_compartment": "I_age_50_65",
+        "dest_compartment": "I_age_65p"
+      }
+    },
+    {
+      "name": "aging_R_age_0_5",
+      "stoichiometry": [ [ "R_age_0_5", -1 ], [ "R_age_5_15", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": {
+            "bin_op": {
+              "op": "div",
+              "left": { "const": 1.0 },
+              "right": {
+                "table_lookup": {
+                  "table": "age_dur",
+                  "indices": [ { "const": 0.0 } ]
+                }
+              }
+            }
+          },
+          "right": { "pop": "R_age_0_5" }
+        }
+      },
+      "event_key": "aging_R_age_0_5:{firing_index}",
+      "metadata": {
+        "origin_kind": "intrinsic",
+        "source_compartment": "R_age_0_5",
+        "dest_compartment": "R_age_5_15"
+      }
+    },
+    {
+      "name": "aging_R_age_5_15",
+      "stoichiometry": [ [ "R_age_5_15", -1 ], [ "R_age_15_50", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": {
+            "bin_op": {
+              "op": "div",
+              "left": { "const": 1.0 },
+              "right": {
+                "table_lookup": {
+                  "table": "age_dur",
+                  "indices": [ { "const": 1.0 } ]
+                }
+              }
+            }
+          },
+          "right": { "pop": "R_age_5_15" }
+        }
+      },
+      "event_key": "aging_R_age_5_15:{firing_index}",
+      "metadata": {
+        "origin_kind": "intrinsic",
+        "source_compartment": "R_age_5_15",
+        "dest_compartment": "R_age_15_50"
+      }
+    },
+    {
+      "name": "aging_R_age_15_50",
+      "stoichiometry": [ [ "R_age_15_50", -1 ], [ "R_age_50_65", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": {
+            "bin_op": {
+              "op": "div",
+              "left": { "const": 1.0 },
+              "right": {
+                "table_lookup": {
+                  "table": "age_dur",
+                  "indices": [ { "const": 2.0 } ]
+                }
+              }
+            }
+          },
+          "right": { "pop": "R_age_15_50" }
+        }
+      },
+      "event_key": "aging_R_age_15_50:{firing_index}",
+      "metadata": {
+        "origin_kind": "intrinsic",
+        "source_compartment": "R_age_15_50",
+        "dest_compartment": "R_age_50_65"
+      }
+    },
+    {
+      "name": "aging_R_age_50_65",
+      "stoichiometry": [ [ "R_age_50_65", -1 ], [ "R_age_65p", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": {
+            "bin_op": {
+              "op": "div",
+              "left": { "const": 1.0 },
+              "right": {
+                "table_lookup": {
+                  "table": "age_dur",
+                  "indices": [ { "const": 3.0 } ]
+                }
+              }
+            }
+          },
+          "right": { "pop": "R_age_50_65" }
+        }
+      },
+      "event_key": "aging_R_age_50_65:{firing_index}",
+      "metadata": {
+        "origin_kind": "intrinsic",
+        "source_compartment": "R_age_50_65",
+        "dest_compartment": "R_age_65p"
+      }
+    },
+    {
+      "name": "death_S_age_0_5",
+      "stoichiometry": [ [ "S_age_0_5", -1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": { "param": "mu" },
+          "right": { "pop": "S_age_0_5" }
+        }
+      },
+      "event_key": "death_S_age_0_5:{firing_index}",
+      "metadata": {
+        "origin_kind": "outflow",
+        "source_compartment": "S_age_0_5",
+        "dest_compartment": null
+      }
+    },
+    {
+      "name": "death_S_age_5_15",
+      "stoichiometry": [ [ "S_age_5_15", -1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": { "param": "mu" },
+          "right": { "pop": "S_age_5_15" }
+        }
+      },
+      "event_key": "death_S_age_5_15:{firing_index}",
+      "metadata": {
+        "origin_kind": "outflow",
+        "source_compartment": "S_age_5_15",
+        "dest_compartment": null
+      }
+    },
+    {
+      "name": "death_S_age_15_50",
+      "stoichiometry": [ [ "S_age_15_50", -1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": { "param": "mu" },
+          "right": { "pop": "S_age_15_50" }
+        }
+      },
+      "event_key": "death_S_age_15_50:{firing_index}",
+      "metadata": {
+        "origin_kind": "outflow",
+        "source_compartment": "S_age_15_50",
+        "dest_compartment": null
+      }
+    },
+    {
+      "name": "death_S_age_50_65",
+      "stoichiometry": [ [ "S_age_50_65", -1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": { "param": "mu" },
+          "right": { "pop": "S_age_50_65" }
+        }
+      },
+      "event_key": "death_S_age_50_65:{firing_index}",
+      "metadata": {
+        "origin_kind": "outflow",
+        "source_compartment": "S_age_50_65",
+        "dest_compartment": null
+      }
+    },
+    {
+      "name": "death_S_age_65p",
+      "stoichiometry": [ [ "S_age_65p", -1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": { "param": "mu" },
+          "right": { "pop": "S_age_65p" }
+        }
+      },
+      "event_key": "death_S_age_65p:{firing_index}",
+      "metadata": {
+        "origin_kind": "outflow",
+        "source_compartment": "S_age_65p",
+        "dest_compartment": null
+      }
+    },
+    {
+      "name": "death_I_age_0_5",
+      "stoichiometry": [ [ "I_age_0_5", -1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": { "param": "mu" },
+          "right": { "pop": "I_age_0_5" }
+        }
+      },
+      "event_key": "death_I_age_0_5:{firing_index}",
+      "metadata": {
+        "origin_kind": "outflow",
+        "source_compartment": "I_age_0_5",
+        "dest_compartment": null
+      }
+    },
+    {
+      "name": "death_I_age_5_15",
+      "stoichiometry": [ [ "I_age_5_15", -1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": { "param": "mu" },
+          "right": { "pop": "I_age_5_15" }
+        }
+      },
+      "event_key": "death_I_age_5_15:{firing_index}",
+      "metadata": {
+        "origin_kind": "outflow",
+        "source_compartment": "I_age_5_15",
+        "dest_compartment": null
+      }
+    },
+    {
+      "name": "death_I_age_15_50",
+      "stoichiometry": [ [ "I_age_15_50", -1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": { "param": "mu" },
+          "right": { "pop": "I_age_15_50" }
+        }
+      },
+      "event_key": "death_I_age_15_50:{firing_index}",
+      "metadata": {
+        "origin_kind": "outflow",
+        "source_compartment": "I_age_15_50",
+        "dest_compartment": null
+      }
+    },
+    {
+      "name": "death_I_age_50_65",
+      "stoichiometry": [ [ "I_age_50_65", -1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": { "param": "mu" },
+          "right": { "pop": "I_age_50_65" }
+        }
+      },
+      "event_key": "death_I_age_50_65:{firing_index}",
+      "metadata": {
+        "origin_kind": "outflow",
+        "source_compartment": "I_age_50_65",
+        "dest_compartment": null
+      }
+    },
+    {
+      "name": "death_I_age_65p",
+      "stoichiometry": [ [ "I_age_65p", -1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": { "param": "mu" },
+          "right": { "pop": "I_age_65p" }
+        }
+      },
+      "event_key": "death_I_age_65p:{firing_index}",
+      "metadata": {
+        "origin_kind": "outflow",
+        "source_compartment": "I_age_65p",
+        "dest_compartment": null
+      }
+    },
+    {
+      "name": "death_R_age_0_5",
+      "stoichiometry": [ [ "R_age_0_5", -1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": { "param": "mu" },
+          "right": { "pop": "R_age_0_5" }
+        }
+      },
+      "event_key": "death_R_age_0_5:{firing_index}",
+      "metadata": {
+        "origin_kind": "outflow",
+        "source_compartment": "R_age_0_5",
+        "dest_compartment": null
+      }
+    },
+    {
+      "name": "death_R_age_5_15",
+      "stoichiometry": [ [ "R_age_5_15", -1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": { "param": "mu" },
+          "right": { "pop": "R_age_5_15" }
+        }
+      },
+      "event_key": "death_R_age_5_15:{firing_index}",
+      "metadata": {
+        "origin_kind": "outflow",
+        "source_compartment": "R_age_5_15",
+        "dest_compartment": null
+      }
+    },
+    {
+      "name": "death_R_age_15_50",
+      "stoichiometry": [ [ "R_age_15_50", -1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": { "param": "mu" },
+          "right": { "pop": "R_age_15_50" }
+        }
+      },
+      "event_key": "death_R_age_15_50:{firing_index}",
+      "metadata": {
+        "origin_kind": "outflow",
+        "source_compartment": "R_age_15_50",
+        "dest_compartment": null
+      }
+    },
+    {
+      "name": "death_R_age_50_65",
+      "stoichiometry": [ [ "R_age_50_65", -1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": { "param": "mu" },
+          "right": { "pop": "R_age_50_65" }
+        }
+      },
+      "event_key": "death_R_age_50_65:{firing_index}",
+      "metadata": {
+        "origin_kind": "outflow",
+        "source_compartment": "R_age_50_65",
+        "dest_compartment": null
+      }
+    },
+    {
+      "name": "death_R_age_65p",
+      "stoichiometry": [ [ "R_age_65p", -1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": { "param": "mu" },
+          "right": { "pop": "R_age_65p" }
+        }
+      },
+      "event_key": "death_R_age_65p:{firing_index}",
+      "metadata": {
+        "origin_kind": "outflow",
+        "source_compartment": "R_age_65p",
+        "dest_compartment": null
+      }
+    },
+    {
+      "name": "birth",
+      "stoichiometry": [ [ "S_age_0_5", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": { "param": "mu" },
+          "right": {
+            "pop_sum": [
+              "S_age_0_5", "I_age_0_5", "R_age_0_5", "S_age_5_15",
+              "I_age_5_15", "R_age_5_15", "S_age_15_50", "I_age_15_50",
+              "R_age_15_50", "S_age_50_65", "I_age_50_65", "R_age_50_65",
+              "S_age_65p", "I_age_65p", "R_age_65p"
+            ]
+          }
+        }
+      },
+      "event_key": "birth:{firing_index}",
+      "metadata": {
+        "origin_kind": "inflow",
+        "source_compartment": null,
+        "dest_compartment": "S_age_0_5"
+      }
+    }
+  ],
+  "ode_equations": [],
+  "time_functions": [],
+  "tables": [
+    {
+      "name": "age_dur",
+      "values": [ 5.0, 10.0, 35.0, 15.0, 20.0 ],
+      "out_of_bounds": "error"
+    }
+  ],
+  "interventions": [],
+  "observations": [],
+  "parameters": [
+    {
+      "name": "beta",
+      "value": 0.0,
+      "prior": null,
+      "transform": null,
+      "initial_value": null
+    },
+    {
+      "name": "gamma",
+      "value": 0.0,
+      "prior": null,
+      "transform": null,
+      "initial_value": null
+    },
+    {
+      "name": "mu",
+      "value": 0.0,
+      "prior": null,
+      "transform": null,
+      "initial_value": null
+    }
+  ],
+  "initial_conditions": {
+    "explicit": { "S_age_0_5": 1000.0, "I_age_0_5": 10.0 }
+  },
+  "data_contract": null,
+  "output": {
+    "times": { "regular": { "start": 0.0, "step": 1.0, "end": 365.0 } },
+    "format": "tsv",
+    "trajectory": true,
+    "observations": true
+  },
+  "simulation": {
+    "t_start": 0.0,
+    "t_end": 365.0,
+    "time_semantics": "continuous",
+    "dt": null,
+    "rng_seed": null
+  }
+}

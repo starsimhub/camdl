@@ -1,0 +1,3 @@
+(executable
+ (name camdlc)
+ (libraries compiler ir))
