@@ -4,4 +4,5 @@
 
 (test
  (name test_compiler)
- (libraries compiler ir alcotest))
+ (libraries compiler ir alcotest)
+ (deps (source_tree ../golden)))

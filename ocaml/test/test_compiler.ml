@@ -7,7 +7,7 @@ let golden_dir =
     "../../golden";          (* from _build/default/test *)
     "../golden";
     "golden";
-    "/Users/vsb/projects/work/camdl/.claude/worktrees/dsl/ocaml/golden";
+
   ] in
   List.find (fun d ->
     Sys.file_exists d && Sys.is_directory d
