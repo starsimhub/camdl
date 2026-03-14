@@ -212,15 +212,27 @@ let rec resolve_expr ctx (env : (string * string) list) (e : expr) : Ir.expr =
     let base_name =
       match List.assoc_opt name env with Some n -> n | None -> name
     in
-    (* 1. Table? → TableLookup with integer dimension indices *)
+    (* 1. Table? → TableLookup with a single flattened linear index.
+       For a table of dims [d1; d2; ...] with sizes [n1; n2; ...], the
+       linear index is: i1*n2*n3*... + i2*n3*... + ... + iN.
+       The IR and Rust runtime always expect exactly one index. *)
     let tdims = table_dims ctx base_name in
     if tdims <> [] then
-      let idx_exprs = List.mapi (fun i item ->
-        let dim     = List.nth tdims i in
+      let per_dim = List.mapi (fun i item ->
+        let dim      = List.nth tdims i in
         let val_name = index_item_to_str env item in
-        Ir.Const (dim_value_index ctx dim val_name)
+        (int_of_float (dim_value_index ctx dim val_name),
+         List.length (dim_values ctx dim))
       ) items in
-      Ir.TableLookup (base_name, idx_exprs)
+      (* stride for dimension i = product of sizes of all later dimensions *)
+      let n = List.length per_dim in
+      let linear = List.fold_left (fun (acc, pos) (idx, _) ->
+        let stride = List.fold_left (fun s j ->
+          s * snd (List.nth per_dim j)
+        ) 1 (List.init (n - pos - 1) (fun k -> pos + 1 + k)) in
+        (acc + idx * stride, pos + 1)
+      ) (0, 0) per_dim |> fst in
+      Ir.TableLookup (base_name, [Ir.Const (float_of_int linear)])
     else
     (* 2. Indexed let binding? → inline body with index vars substituted *)
     match List.find_opt (fun lb -> lb.lname = base_name) ctx.let_bindings with

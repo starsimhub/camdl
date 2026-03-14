@@ -38,7 +38,7 @@
                       "left": {
                         "table_lookup": {
                           "table": "C_age",
-                          "indices": [ { "const": 0.0 }, { "const": 0.0 } ]
+                          "indices": [ { "const": 0.0 } ]
                         }
                       },
                       "right": { "pop": "I_child" }
@@ -58,7 +58,7 @@
                       "left": {
                         "table_lookup": {
                           "table": "C_age",
-                          "indices": [ { "const": 0.0 }, { "const": 1.0 } ]
+                          "indices": [ { "const": 1.0 } ]
                         }
                       },
                       "right": { "pop": "I_adult" }
@@ -105,7 +105,7 @@
                       "left": {
                         "table_lookup": {
                           "table": "C_age",
-                          "indices": [ { "const": 1.0 }, { "const": 0.0 } ]
+                          "indices": [ { "const": 2.0 } ]
                         }
                       },
                       "right": { "pop": "I_child" }
@@ -125,7 +125,7 @@
                       "left": {
                         "table_lookup": {
                           "table": "C_age",
-                          "indices": [ { "const": 1.0 }, { "const": 1.0 } ]
+                          "indices": [ { "const": 3.0 } ]
                         }
                       },
                       "right": { "pop": "I_adult" }
