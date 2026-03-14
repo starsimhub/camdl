@@ -96,11 +96,16 @@ pub struct Snapshot {
 #[derive(Debug, Clone)]
 pub struct Trajectory {
     pub snapshots: Vec<Snapshot>,
+    /// Per-transition firing diagnostics (populated by Gillespie; empty for tau-leap/chain-binomial).
+    pub transition_diagnostics: Vec<crate::transition_diagnostics::TransitionDiagnostics>,
 }
 
 impl Trajectory {
     pub fn new() -> Self {
-        Trajectory { snapshots: Vec::new() }
+        Trajectory {
+            snapshots: Vec::new(),
+            transition_diagnostics: Vec::new(),
+        }
     }
 
     pub fn push(&mut self, snap: Snapshot) {

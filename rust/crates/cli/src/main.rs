@@ -2,6 +2,7 @@ use sim::{
     CompiledModel, GillespieSim, TauLeapSim, ChainBinomialSim,
     config::{GillespieConfig, TauLeapConfig, ChainBinomialConfig, SimConfig},
     simulate::Simulate,
+    write_diagnostics_tsv, warn_zero_firings,
 };
 use std::collections::HashMap;
 
@@ -83,6 +84,18 @@ fn main() {
         "chain_binomial" => ChainBinomialSim.run(&compiled, &params, seed, &config),
         _ => unreachable!(),
     }.unwrap_or_else(|e| { eprintln!("simulation error: {:?}", e); std::process::exit(1); });
+
+    // Write diagnostics.tsv unconditionally
+    if !traj.transition_diagnostics.is_empty() {
+        match write_diagnostics_tsv("diagnostics.tsv", &traj.transition_diagnostics) {
+            Ok(zero_count) => {
+                if zero_count > 0 {
+                    warn_zero_firings(&traj.transition_diagnostics);
+                }
+            }
+            Err(e) => eprintln!("warning: could not write diagnostics.tsv: {}", e),
+        }
+    }
 
     // TSV header
     let int_names: Vec<&str> = model.compartments.iter()

@@ -1,5 +1,18 @@
 (* AST for the camdl DSL — mirrors the surface syntax before expansion. *)
 
+(** Source location for error reporting. *)
+type loc = {
+  file     : string;
+  line     : int;   (* 1-indexed *)
+  col      : int;   (* 1-indexed *)
+  end_line : int;
+  end_col  : int;
+}
+
+type 'a located = { value : 'a; loc : loc }
+
+let dummy_loc = { file = ""; line = 0; col = 0; end_line = 0; end_col = 0 }
+
 type unit_lit =
   | Days | Weeks | Months | Years
   | PerDay | PerWeek | PerMonth | PerYear
@@ -24,7 +37,7 @@ and index_binding =
 and expr =
   | EConst  of float
   | EUnit   of float * unit_lit
-  | EIdent  of string                        (* unresolved name *)
+  | EIdent  of string * loc                  (* unresolved name + source loc *)
   | EIndex  of string * index_item list      (* S[child] *)
   | EBinOp  of bin_op * expr * expr
   | EUnOp   of un_op * expr

@@ -341,20 +341,20 @@ output_kv:
         | "trajectories" ->
           let every = List.assoc_opt "every" kvs |> Option.value ~default:(EConst 1.0) in
           let fmt   = (match List.assoc_opt "format" kvs with
-                       | Some (EIdent s) | Some (EFuncCall (s, [])) -> s
+                       | Some (EIdent (s, _)) | Some (EFuncCall (s, [])) -> s
                        | _ -> "tsv") in
           let rest  = List.filter (fun (k,_) -> k <> "every" && k <> "format") kvs in
           `Traj { otevery = every; otquantities = rest; otformat = fmt }
         | "flows" ->
           let every = List.assoc_opt "every" kvs |> Option.value ~default:(EConst 1.0) in
           let fmt   = (match List.assoc_opt "format" kvs with
-                       | Some (EIdent s) | Some (EFuncCall (s, [])) -> s
+                       | Some (EIdent (s, _)) | Some (EFuncCall (s, [])) -> s
                        | _ -> "tsv") in
           let rest  = List.filter (fun (k,_) -> k <> "every" && k <> "format") kvs in
           `Flows { otevery = every; otquantities = rest; otformat = fmt }
         | "summary" ->
           let fmt   = (match List.assoc_opt "format" kvs with
-                       | Some (EIdent s) | Some (EFuncCall (s, [])) -> s
+                       | Some (EIdent (s, _)) | Some (EFuncCall (s, [])) -> s
                        | _ -> "tsv") in
           let rest  = List.filter (fun (k,_) -> k <> "format") kvs in
           `Summ { osquantities = rest; osformat = fmt }
@@ -445,7 +445,16 @@ atom_expr:
       { ESum (v, d, body) }
   | name = IDENT LBRACKET items = separated_list(COMMA, index_item) RBRACKET
       { EIndex (name, items) }
-  | name = IDENT               { EIdent name }
+  | name = IDENT
+      { let l =
+          let open Lexing in
+          { file     = $startpos.pos_fname;
+            line     = $startpos.pos_lnum;
+            col      = $startpos.pos_cnum - $startpos.pos_bol + 1;
+            end_line = $endpos.pos_lnum;
+            end_col  = $endpos.pos_cnum - $endpos.pos_bol + 1 }
+        in
+        EIdent (name, l) }
   | LPAREN e = expr RPAREN     { e }
   | LBRACKET es = separated_list(COMMA, expr) RBRACKET
       { EList es }

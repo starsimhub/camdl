@@ -9,6 +9,7 @@ use crate::{
     propensity::eval_propensities,
     simulate::Simulate,
     state::{FlowVec, IntState, RealState, Snapshot, Trajectory},
+    transition_diagnostics::TransitionDiagnostics,
 };
 
 pub struct GillespieSim;
@@ -42,6 +43,11 @@ fn run_gillespie(
 
     let n_transitions = model.model.transitions.len();
     let n_real = real_s.values.len();
+
+    // Per-transition firing diagnostics
+    let mut diag_vec: Vec<TransitionDiagnostics> = model.model.transitions.iter()
+        .map(|t| TransitionDiagnostics::new(t.name.clone()))
+        .collect();
 
     // Propensity buffer — allocated once, reused
     let mut propensities: Vec<f64> = Vec::with_capacity(n_transitions);
@@ -177,6 +183,9 @@ fn run_gillespie(
         }
         t = t_next;
 
+        // Record firing diagnostics
+        diag_vec[fired_idx].record_firing(t, propensities[fired_idx]);
+
         // Apply stoichiometry
         for &(local, delta) in &model.transition_stoich[fired_idx] {
             int_s.counts[local] += delta;
@@ -222,6 +231,7 @@ fn run_gillespie(
         output_idx += 1;
     }
 
+    traj.transition_diagnostics = diag_vec;
     Ok(traj)
 }
 

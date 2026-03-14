@@ -1,0 +1,11 @@
+# E100: compartment referenced in rate but not declared
+compartments { S, I }
+parameters { beta: rate
+             gamma: rate }
+transitions {
+  infection : S --> I @ beta * S * I
+  recovery  : I --> R @ gamma * I * R   # R is undeclared
+}
+init { S = 990
+       I = 10 }
+simulate { from = 0 'days  to = 100 'days }

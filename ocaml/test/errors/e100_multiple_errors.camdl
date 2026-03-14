@@ -1,0 +1,12 @@
+# E100 x3: multiple undeclared names — shows that compilation continues
+# after the first error and collects all of them
+compartments { S, I, R }
+parameters { gamma: rate }
+transitions {
+  infection  : S --> I @ beta * S * force_of_infection
+  recovery   : I --> R @ gamma * I
+  importation: --> I   @ epsilon
+}
+init { S = 990
+       I = 10 }
+simulate { from = 0 'days  to = 100 'days }

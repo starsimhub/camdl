@@ -1,0 +1,6 @@
+# E001: lex error — unterminated string literal
+compartments { S, I, R }
+parameters { beta: rate }
+transitions {
+  infection : S --> I @ "unterminated
+}

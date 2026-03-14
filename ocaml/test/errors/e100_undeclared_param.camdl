@@ -1,0 +1,10 @@
+# E100: undeclared parameter in rate expression
+compartments { S, I, R }
+parameters { gamma: rate }
+transitions {
+  infection : S --> I @ beta * S * I
+  recovery  : I --> R @ gamma * I
+}
+init { S = 990
+       I = 10 }
+simulate { from = 0 'days  to = 100 'days }

@@ -1,0 +1,15 @@
+# E100: table C_contact referenced in rate but never declared
+# Note: error message shows expanded name e.g. 'C_contact_child_adult'
+compartments { S, I, R }
+stratify(by = age, values = [child, adult])
+parameters { beta: rate
+             gamma: rate }
+transitions {
+  infection[a in age] : S[a] --> I[a]
+    @ beta * S[a] * sum(b in age, C_contact[a, b] * I[b])
+  recovery[a in age] : I[a] --> R[a] @ gamma * I[a]
+}
+init { S[child] = 490
+       S[adult] = 500
+       I[child] = 10 }
+simulate { from = 0 'days  to = 100 'days }

@@ -11,6 +11,7 @@ pub mod tau_leap;
 pub mod chain_binomial;
 pub mod intervention;
 pub mod simulate;
+pub mod transition_diagnostics;
 
 pub use config::{GillespieConfig, TauLeapConfig, ChainBinomialConfig, SimConfig};
 pub use error::SimError;
@@ -20,3 +21,4 @@ pub use simulate::Simulate;
 pub use gillespie::GillespieSim;
 pub use tau_leap::TauLeapSim;
 pub use chain_binomial::ChainBinomialSim;
+pub use transition_diagnostics::{TransitionDiagnostics, write_tsv as write_diagnostics_tsv, warn_zero_firings};

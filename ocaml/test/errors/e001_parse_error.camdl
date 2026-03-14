@@ -1,0 +1,6 @@
+# E001: syntax error — missing @ before rate expression
+compartments { S, I, R }
+parameters { beta: rate }
+transitions {
+  infection : S --> I  beta * S * I
+}

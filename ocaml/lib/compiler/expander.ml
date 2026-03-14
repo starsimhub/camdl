@@ -5,39 +5,58 @@ open Ast
 (* ── Context ─────────────────────────────────────────────────────────────── *)
 
 type context = {
-  mutable time_unit    : unit_lit;
-  mutable description  : string option;
-  mutable comp_decls   : compartment_decl list;
-  mutable param_decls  : param_decl list;
-  mutable let_bindings : let_binding list;
-  mutable stratifies   : stratify_decl list;
-  mutable transitions  : transition_decl list;
-  mutable init_entries : init_entry list;
-  mutable simulate     : simulate_decl option;
-  mutable ode_decls    : ode_decl list;
-  mutable func_decls   : func_decl list;
-  mutable obs_decls    : obs_decl list;
-  mutable interv_decls : intervention_decl list;
-  mutable output_decl  : output_decl option;
-  mutable table_decls  : table_decl list;
+  mutable time_unit       : unit_lit;
+  mutable description     : string option;
+  mutable comp_decls      : compartment_decl list;
+  mutable param_decls     : param_decl list;
+  mutable let_bindings    : let_binding list;
+  mutable stratifies      : stratify_decl list;
+  mutable transitions     : transition_decl list;  (* post-desugar *)
+  mutable orig_transitions: transition_decl list;  (* pre-desugar original *)
+  mutable init_entries    : init_entry list;
+  mutable simulate        : simulate_decl option;
+  mutable ode_decls       : ode_decl list;
+  mutable func_decls      : func_decl list;
+  mutable obs_decls       : obs_decl list;
+  mutable interv_decls    : intervention_decl list;
+  mutable output_decl     : output_decl option;
+  mutable table_decls     : table_decl list;
+  mutable diags           : Diagnostics.t;  (* collected errors/warnings *)
 }
 
 let empty_context () = {
-  time_unit    = Days;
-  description  = None;
-  comp_decls   = [];
-  param_decls  = [];
-  let_bindings = [];
-  stratifies   = [];
-  transitions  = [];
-  init_entries = [];
-  simulate     = None;
-  ode_decls    = [];
-  func_decls   = [];
-  obs_decls    = [];
-  interv_decls = [];
-  output_decl  = None;
-  table_decls  = [];
+  time_unit        = Days;
+  description      = None;
+  comp_decls       = [];
+  param_decls      = [];
+  let_bindings     = [];
+  stratifies       = [];
+  transitions      = [];
+  orig_transitions = [];
+  init_entries     = [];
+  simulate         = None;
+  ode_decls        = [];
+  func_decls       = [];
+  obs_decls        = [];
+  interv_decls     = [];
+  output_decl      = None;
+  table_decls      = [];
+  diags            = Diagnostics.create ();
+}
+
+(* ── Model summary ────────────────────────────────────────────────────────── *)
+
+type model_summary = {
+  base_compartment_count    : int;
+  expanded_compartment_count: int;
+  base_transition_count     : int;
+  expanded_transition_count : int;
+  filtered_transition_count : int;
+  let_binding_count         : int;
+  table_count               : int;
+  param_count               : int;
+  obs_count                 : int;
+  interv_count              : int;
 }
 
 let collect_declarations ctx decls =
@@ -58,7 +77,8 @@ let collect_declarations ctx decls =
     | DOutput od         -> ctx.output_decl <- Some od
     | DTables tds        -> ctx.table_decls <- ctx.table_decls @ tds
     | DTimepoints _      -> ()
-  ) decls
+  ) decls;
+  ctx.orig_transitions <- ctx.transitions
 
 (* ── Unit conversion to days ─────────────────────────────────────────────── *)
 
@@ -163,12 +183,16 @@ let ir_un_op = function
 
 (* ── Expression resolver ─────────────────────────────────────────────────── *)
 
+let diag_loc_of_ast (l : Ast.loc) : Diagnostics.loc =
+  { Diagnostics.file = l.file; line = l.line; col = l.col;
+    end_line = l.end_line; end_col = l.end_col }
+
 let index_item_to_str env item =
   match item with
-  | IPosn (EIdent s)     -> (match List.assoc_opt s env with Some v -> v | None -> s)
-  | IPosn _              -> "?"
-  | INamed (_, EIdent s) -> (match List.assoc_opt s env with Some v -> v | None -> s)
-  | INamed (_, _)        -> "?"
+  | IPosn (EIdent (s, _))     -> (match List.assoc_opt s env with Some v -> v | None -> s)
+  | IPosn _                   -> "?"
+  | INamed (_, EIdent (s, _)) -> (match List.assoc_opt s env with Some v -> v | None -> s)
+  | INamed (_, _)             -> "?"
 
 let rec resolve_expr ctx (env : (string * string) list) (e : expr) : Ir.expr =
   match e with
@@ -178,10 +202,11 @@ let rec resolve_expr ctx (env : (string * string) list) (e : expr) : Ir.expr =
       | Days | Weeks | Months | Years       -> f *. days_per u
       | PerDay | PerWeek | PerMonth | PerYear -> f /. days_per u
     )
-  | EIdent name -> (
+  | EIdent (name, l) -> (
+    let loc = diag_loc_of_ast l in
     match List.assoc_opt name env with
-    | Some concrete -> resolve_ident_name ctx concrete
-    | None          -> resolve_ident_name ctx name
+    | Some concrete -> resolve_ident_name ctx concrete ~loc
+    | None          -> resolve_ident_name ctx name ~loc
   )
   | EIndex (name, items) -> (
     let base_name =
@@ -217,7 +242,7 @@ let rec resolve_expr ctx (env : (string * string) list) (e : expr) : Ir.expr =
     (* 3. Compartment with indices → concatenate to concrete name *)
     let idx_vals = List.map (index_item_to_str env) items in
     let concrete = String.concat "_" (base_name :: idx_vals) in
-    resolve_ident_name ctx concrete
+    resolve_ident_name ctx concrete ~loc:Diagnostics.no_loc
   )
   | EBinOp (op, l, r) ->
     let ir_l = resolve_expr ctx env l in
@@ -244,7 +269,7 @@ let rec resolve_expr ctx (env : (string * string) list) (e : expr) : Ir.expr =
   | EFuncCall _ -> Ir.Const 0.0
   | EList _     -> Ir.Const 0.0
 
-and resolve_ident_name ctx name =
+and resolve_ident_name ctx name ~loc =
   (* 1. Let binding? Inline it. *)
   match List.find_opt (fun lb -> lb.lname = name) ctx.let_bindings with
   | Some lb ->
@@ -260,8 +285,15 @@ and resolve_ident_name ctx name =
   end
   else if List.exists (fun pd -> pd.pname = name) ctx.param_decls then
     Ir.Param name
-  else
-    failwith (Printf.sprintf "unbound identifier '%s' (not a compartment, parameter, or let binding)" name)
+  else begin
+    Diagnostics.error ctx.diags
+      ~code:"E100"
+      ~loc
+      ~message:(Printf.sprintf "undeclared name '%s'" name)
+      ~hint:"check spelling, or add a declaration in compartments/parameters/let/tables"
+      ();
+    Ir.Const 0.0  (* placeholder — compilation continues to collect more errors *)
+  end
 
 (* ── Stoichiometry ────────────────────────────────────────────────────────── *)
 
@@ -372,15 +404,16 @@ let rec eval_guard env = function
 
 (* ── Transition expansion ────────────────────────────────────────────────── *)
 
-let expand_transitions ctx =
-  List.concat_map (fun tr ->
+let expand_transitions_counted ctx =
+  let filtered = ref 0 in
+  let expanded = List.concat_map (fun tr ->
     let combos = cartesian_product tr.trindices ctx in
     List.filter_map (fun env ->
       let pass_guard = match tr.trguard with
         | None   -> true
         | Some g -> eval_guard env g
       in
-      if not pass_guard then None
+      if not pass_guard then (incr filtered; None)
       else begin
         let src_name = Option.map (resolve_stoich_ref ctx env) tr.trsrc in
         let dst_name = Option.map (resolve_stoich_ref ctx env) tr.trdst in
@@ -414,7 +447,11 @@ let expand_transitions ctx =
         }
       end
     ) combos
-  ) ctx.transitions
+  ) ctx.transitions in
+  (expanded, !filtered)
+
+let expand_transitions ctx =
+  fst (expand_transitions_counted ctx)
 
 (* ── Coupling sugar desugaring ────────────────────────────────────────────── *)
 
@@ -428,12 +465,12 @@ let auto_denom_expr b ctx =
   | [] -> EConst 1.0
   | first :: rest ->
     List.fold_left (fun acc c ->
-      EBinOp (Add, acc, EIndex (c, [IPosn (EIdent b)]))
-    ) (EIndex (first, [IPosn (EIdent b)])) rest
+      EBinOp (Add, acc, EIndex (c, [IPosn (EIdent (b, dummy_loc))]))
+    ) (EIndex (first, [IPosn (EIdent (b, dummy_loc))])) rest
 
 (** Collect bare compartment names referenced in an AST expression. *)
 let rec collect_comp_idents ctx = function
-  | EIdent name when List.exists (fun cd -> cd.cname = name) ctx.comp_decls -> [name]
+  | EIdent (name, _) when List.exists (fun cd -> cd.cname = name) ctx.comp_decls -> [name]
   | EBinOp (_, l, r) -> collect_comp_idents ctx l @ collect_comp_idents ctx r
   | EUnOp  (_, e)    -> collect_comp_idents ctx e
   | _                -> []
@@ -455,11 +492,11 @@ let is_total_pop_binding ctx lbody =
     - total-population let-binding        → auto_denom_expr b ctx
     - parameters and other non-comp idents remain unchanged *)
 let rec subst_for_coupling ctx src_name a b = function
-  | EIdent name as e ->
+  | EIdent (name, _) as e ->
     if name = src_name then
-      EIndex (name, [IPosn (EIdent a)])
+      EIndex (name, [IPosn (EIdent (a, dummy_loc))])
     else if List.exists (fun cd -> cd.cname = name) ctx.comp_decls then
-      EIndex (name, [IPosn (EIdent b)])
+      EIndex (name, [IPosn (EIdent (b, dummy_loc))])
     else begin
       match List.find_opt (fun lb -> lb.lname = name) ctx.let_bindings with
       | Some lb when is_total_pop_binding ctx lb.lbody ->
@@ -469,9 +506,9 @@ let rec subst_for_coupling ctx src_name a b = function
   | EIndex (name, idxs) ->
     (* For an already-indexed compartment, append the new dimension index. *)
     if name = src_name then
-      EIndex (name, idxs @ [IPosn (EIdent a)])
+      EIndex (name, idxs @ [IPosn (EIdent (a, dummy_loc))])
     else if List.exists (fun cd -> cd.cname = name) ctx.comp_decls then
-      EIndex (name, idxs @ [IPosn (EIdent b)])
+      EIndex (name, idxs @ [IPosn (EIdent (b, dummy_loc))])
     else
       (* Non-compartment index expression (e.g. table row variable) — recurse
          only into the index arguments, not the name. *)
@@ -506,7 +543,7 @@ let desugar_coupling ctx tr =
     List.fold_left (fun tr_acc (dim, matrix_name) ->
       let a = "_ca_" ^ dim in   (* self-index variable, e.g. _ca_age *)
       let b = "_cb_" ^ dim in   (* sum-index variable,  e.g. _cb_age *)
-      let add_idx idxs = idxs @ [IPosn (EIdent a)] in
+      let add_idx idxs = idxs @ [IPosn (EIdent (a, dummy_loc))] in
       let inner = match src_name with
         | Some sn -> subst_for_coupling ctx sn a b tr_acc.trrate
         | None    -> tr_acc.trrate
@@ -514,7 +551,7 @@ let desugar_coupling ctx tr =
       let new_rate =
         ESum (b, dim,
           EBinOp (Mul,
-            EIndex (matrix_name, [IPosn (EIdent a); IPosn (EIdent b)]),
+            EIndex (matrix_name, [IPosn (EIdent (a, dummy_loc)); IPosn (EIdent (b, dummy_loc))]),
             inner))
       in
       { tr_acc with
@@ -602,10 +639,10 @@ let expand_init ctx =
       if ie.iindices = [] then ie.icomp
       else
         let idx_vals = List.map (function
-          | IPosn (EIdent s)     -> s
-          | IPosn (EConst f)     -> string_of_float f
-          | INamed (_, EIdent s) -> s
-          | _                    -> "?"
+          | IPosn (EIdent (s, _)) -> s
+          | IPosn (EConst f)      -> string_of_float f
+          | INamed (_, EIdent (s, _)) -> s
+          | _                     -> "?"
         ) ie.iindices in
         String.concat "_" (ie.icomp :: idx_vals)
     in
@@ -649,17 +686,22 @@ let expand_output ctx =
 
 (* ── Top-level expand ─────────────────────────────────────────────────────── *)
 
-let expand (name : string) (decls : declaration list) : Ir.model =
+let expand_detail (name : string) (decls : declaration list)
+    : Ir.model * context * model_summary =
   let ctx = empty_context () in
   collect_declarations ctx decls;
+  (* Save original transitions before desugaring *)
+  ctx.orig_transitions <- ctx.transitions;
   (* Desugar coupling sugar before expansion *)
   ctx.transitions <- List.map (desugar_coupling ctx) ctx.transitions;
-  {
+  let expanded_comps = expand_compartments ctx in
+  let (expanded_trs, filtered_n) = expand_transitions_counted ctx in
+  let model = {
     Ir.name               = name;
     Ir.version            = "0.3";
     Ir.description        = ctx.description;
-    Ir.compartments       = expand_compartments ctx;
-    Ir.transitions        = expand_transitions ctx;
+    Ir.compartments       = expanded_comps;
+    Ir.transitions        = expanded_trs;
     Ir.ode_equations      = [];
     Ir.time_functions     = [];
     Ir.tables             = expand_tables ctx;
@@ -670,4 +712,21 @@ let expand (name : string) (decls : declaration list) : Ir.model =
     Ir.data_contract      = None;
     Ir.output             = expand_output ctx;
     Ir.simulation         = expand_simulate ctx;
-  }
+  } in
+  let summary = {
+    base_compartment_count     = List.length ctx.comp_decls;
+    expanded_compartment_count = List.length expanded_comps;
+    base_transition_count      = List.length ctx.orig_transitions;
+    expanded_transition_count  = List.length expanded_trs;
+    filtered_transition_count  = filtered_n;
+    let_binding_count          = List.length ctx.let_bindings;
+    table_count                = List.length ctx.table_decls;
+    param_count                = List.length ctx.param_decls;
+    obs_count                  = List.length ctx.obs_decls;
+    interv_count               = List.length ctx.interv_decls;
+  } in
+  (model, ctx, summary)
+
+let expand (name : string) (decls : declaration list) : Ir.model =
+  let (model, _, _) = expand_detail name decls in
+  model

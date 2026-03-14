@@ -1,7 +1,7 @@
 (library
  (name compiler)
  (wrapped false)
- (libraries ir yojson))
+ (libraries ir yojson fmt))
 
 (ocamllex (modules lexer))
 
