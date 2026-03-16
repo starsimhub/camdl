@@ -201,7 +201,12 @@
   "tables": [
     {
       "name": "C_age",
-      "values": [ 10.0, 3.0, 3.0, 7.0 ],
+      "values": [
+        { "const": 10.0 },
+        { "const": 3.0 },
+        { "const": 3.0 },
+        { "const": 7.0 }
+      ],
       "out_of_bounds": "error"
     }
   ],

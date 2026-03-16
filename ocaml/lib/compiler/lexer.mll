@@ -48,6 +48,7 @@
     "description",   DESCRIPTION;
     "tag",           TAG;
     "null",          NULL;
+    "transfer",      TRANSFER;
   ]
 
   let lookup_kw s =

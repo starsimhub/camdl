@@ -21,6 +21,7 @@ let prec_binop = function
   | Ir.Mul | Ir.Div -> 7
   | Ir.Pow          -> 8
   | Ir.Min | Ir.Max -> 5
+  | Ir.Eq | Ir.Neq | Ir.Lt | Ir.Gt | Ir.Le | Ir.Ge -> 4
 
 let prec_expr : Ir.expr -> int = function
   | Ir.Const _ | Ir.Param _ | Ir.Pop _ | Ir.PopSum _
@@ -37,6 +38,8 @@ let op_str ~ascii = function
   | Ir.Pow -> "^"
   | Ir.Min -> "min"
   | Ir.Max -> "max"
+  | Ir.Eq  -> "==" | Ir.Neq -> "!=" | Ir.Lt -> "<"
+  | Ir.Gt  -> ">"  | Ir.Le  -> "<=" | Ir.Ge -> ">="
 
 let un_op_str = function
   | Ir.Neg   -> "-"

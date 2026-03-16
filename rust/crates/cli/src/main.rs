@@ -54,6 +54,29 @@ fn main() {
 
     let ir_path = ir_path.unwrap_or_else(|| { eprintln!("missing IR file argument"); usage(); });
 
+    // If given a .camdl source file, compile it via camdlc (outputs JSON to stdout)
+    let (ir_path, _tmpfile) = if ir_path.ends_with(".camdl") {
+        let tmp = std::env::temp_dir().join(format!("camdl_{}.ir.json", std::process::id()));
+        let camdlc = std::env::var("CAMDLC").unwrap_or_else(|_| "camdlc".to_string());
+        let out = std::process::Command::new(&camdlc)
+            .arg(&ir_path)
+            .output()
+            .unwrap_or_else(|e| {
+                eprintln!("error: could not run camdlc: {}", e);
+                eprintln!("Make sure camdlc is on your PATH (run 'dune build' in the ocaml/ directory).");
+                std::process::exit(1);
+            });
+        if !out.status.success() {
+            let _ = std::io::Write::write_all(&mut std::io::stderr(), &out.stderr);
+            std::process::exit(out.status.code().unwrap_or(1));
+        }
+        std::fs::write(&tmp, &out.stdout)
+            .unwrap_or_else(|e| { eprintln!("error writing temp IR: {}", e); std::process::exit(1); });
+        (tmp.to_string_lossy().into_owned(), Some(tmp))
+    } else {
+        (ir_path, None)
+    };
+
     // Load and parse IR
     let src = std::fs::read_to_string(&ir_path)
         .unwrap_or_else(|e| { eprintln!("cannot read {}: {}", ir_path, e); std::process::exit(1); });
@@ -75,6 +98,10 @@ fn main() {
         "gillespie"      => SimConfig::Gillespie(GillespieConfig { t_start, t_end, output_dt: None }),
         "tau_leap"       => SimConfig::TauLeap(TauLeapConfig { t_start, t_end, dt }),
         "chain_binomial" => SimConfig::ChainBinomial(ChainBinomialConfig { t_start, t_end, dt }),
+        "ode" => {
+            eprintln!("error: ODE backend not yet implemented. Use --backend gillespie (default), tau_leap, or chain_binomial.");
+            std::process::exit(1);
+        }
         s => { eprintln!("unknown backend: {}", s); usage(); }
     };
 

@@ -1,8 +1,61 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 use ir::{Model, model::CompartmentKind};
+use ir::expr::{BinOp, Expr, UnOp};
 use crate::error::SimError;
 use crate::state::{IntState, RealState};
+
+/// Evaluate a table value expression using only params (no compartment state).
+/// Table values may only reference constants and parameters.
+fn eval_table_expr(
+    expr: &Expr,
+    param_index: &HashMap<String, usize>,
+    params: &[f64],
+) -> Result<f64, SimError> {
+    match expr {
+        Expr::Const(c) => Ok(c.value),
+        Expr::Param(p) => {
+            let idx = param_index.get(p.param.as_str())
+                .copied()
+                .ok_or_else(|| SimError::UnknownParameter(p.param.clone()))?;
+            Ok(params[idx])
+        }
+        Expr::BinOp(w) => {
+            let a = eval_table_expr(&w.bin_op.left, param_index, params)?;
+            let b = eval_table_expr(&w.bin_op.right, param_index, params)?;
+            Ok(match w.bin_op.op {
+                BinOp::Add => a + b,
+                BinOp::Sub => a - b,
+                BinOp::Mul => a * b,
+                BinOp::Div => if b == 0.0 { 0.0 } else { a / b },
+                BinOp::Pow => a.powf(b),
+                BinOp::Min => a.min(b),
+                BinOp::Max => a.max(b),
+                BinOp::Eq  => if a == b { 1.0 } else { 0.0 },
+                BinOp::Neq => if a != b { 1.0 } else { 0.0 },
+                BinOp::Lt  => if a <  b { 1.0 } else { 0.0 },
+                BinOp::Gt  => if a >  b { 1.0 } else { 0.0 },
+                BinOp::Le  => if a <= b { 1.0 } else { 0.0 },
+                BinOp::Ge  => if a >= b { 1.0 } else { 0.0 },
+            })
+        }
+        Expr::UnOp(w) => {
+            let a = eval_table_expr(&w.un_op.arg, param_index, params)?;
+            Ok(match w.un_op.op {
+                UnOp::Neg   => -a,
+                UnOp::Exp   => a.exp(),
+                UnOp::Log   => a.ln(),
+                UnOp::Sqrt  => a.sqrt(),
+                UnOp::Abs   => a.abs(),
+                UnOp::Floor => a.floor(),
+                UnOp::Ceil  => a.ceil(),
+            })
+        }
+        _ => Err(SimError::Validation(format!(
+            "unsupported expression type in table values (only Const and Param are valid)"
+        ))),
+    }
+}
 
 pub struct CompiledModel {
     pub model: Arc<Model>,
@@ -48,6 +101,10 @@ pub struct CompiledModel {
 
     /// For each ODE equation, the local real-compartment index.
     pub ode_real_indices: Vec<usize>,
+
+    /// Per-table evaluated values (params resolved at load time).
+    /// Indexed in the same order as model.tables / table_index.
+    pub table_values_cache: Vec<Vec<f64>>,
 }
 
 impl CompiledModel {
@@ -133,6 +190,15 @@ impl CompiledModel {
             ode_real_indices.push(local);
         }
 
+        // Evaluate table value expressions at load time using default params.
+        let mut table_values_cache: Vec<Vec<f64>> = Vec::with_capacity(model.tables.len());
+        for table in &model.tables {
+            let vals: Result<Vec<f64>, SimError> = table.values.iter()
+                .map(|expr| eval_table_expr(expr, &param_index, &default_params))
+                .collect();
+            table_values_cache.push(vals?);
+        }
+
         Ok(CompiledModel {
             model: Arc::new(model),
             comp_index,
@@ -148,6 +214,7 @@ impl CompiledModel {
             default_params,
             transition_stoich,
             ode_real_indices,
+            table_values_cache,
         })
     }
 

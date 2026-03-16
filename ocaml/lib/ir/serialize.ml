@@ -19,6 +19,8 @@ let int  n    : Yojson.Safe.t = `Int n
 let bin_op_str = function
   | Add -> "add" | Sub -> "sub" | Mul -> "mul"
   | Div -> "div" | Pow -> "pow" | Min -> "min" | Max -> "max"
+  | Eq  -> "eq"  | Neq -> "neq" | Lt  -> "lt"  | Gt  -> "gt"
+  | Le  -> "le"  | Ge  -> "ge"
 
 let un_op_str = function
   | Neg -> "neg" | Exp -> "exp" | Log -> "log"
@@ -131,7 +133,7 @@ let oob_policy_to_json = function
 let table_to_json (t : table) : Yojson.Safe.t =
   obj [
     ("name",          str t.name);
-    ("values",        arr (List.map flt t.values));
+    ("values",        arr (List.map expr_to_json t.values));
     ("out_of_bounds", oob_policy_to_json t.out_of_bounds);
   ]
 

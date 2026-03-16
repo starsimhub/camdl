@@ -57,6 +57,8 @@ let opt_null f = function
 let bin_op_of_str = function
   | "add" -> Add | "sub" -> Sub | "mul" -> Mul
   | "div" -> Div | "pow" -> Pow | "min" -> Min | "max" -> Max
+  | "eq"  -> Eq  | "neq" -> Neq | "lt"  -> Lt  | "gt"  -> Gt
+  | "le"  -> Le  | "ge"  -> Ge
   | s -> fail "unknown bin_op '%s'" s
 
 let un_op_of_str = function
@@ -195,7 +197,7 @@ let oob_policy_of_json j =
 
 let table_of_json j =
   { name          = as_string (member "name" j);
-    values        = List.map as_float (as_list (member "values" j));
+    values        = List.map expr_of_json (as_list (member "values" j));
     out_of_bounds = oob_policy_of_json (member "out_of_bounds" j) }
 
 (* ── Interventions ───────────────────────────────────────────────────────── *)

@@ -1,0 +1,60 @@
+#!/bin/sh
+# camdl — unified entry point for the camdl toolchain.
+#
+# Compilation/inspection subcommands are routed to camdlc (OCaml).
+# Simulation subcommands are routed to camdl-sim (Rust).
+#
+# Usage:
+#   camdl compile   <model.camdl> [--set K=V ...]   → IR JSON on stdout
+#   camdl check     <model.camdl>
+#   camdl inspect   <model.camdl> [OPTIONS]
+#   camdl simulate  <model.camdl|model.ir.json> [--set K=V ...] [OPTIONS]
+#
+# Both camdlc and camdl-sim must be on PATH, or set:
+#   CAMDLC   path to camdlc binary  (default: camdlc)
+#   CAMDL_SIM  path to camdl-sim binary  (default: camdl-sim)
+
+set -e
+
+CAMDLC=${CAMDLC:-camdlc}
+CAMDL_SIM=${CAMDL_SIM:-camdl-sim}
+
+if [ $# -eq 0 ]; then
+  echo "usage: camdl <compile|check|inspect|simulate>" >&2
+  exit 1
+fi
+
+case "$1" in
+  compile)
+    shift
+    exec "$CAMDLC" "$@"
+    ;;
+  check|inspect)
+    exec "$CAMDLC" "$@"
+    ;;
+  simulate)
+    exec "$CAMDL_SIM" "$@"
+    ;;
+  --help|-h|help)
+    cat >&2 <<'EOF'
+camdl — stochastic compartmental model toolchain
+
+Subcommands:
+  compile   Compile a .camdl model to IR JSON (output on stdout)
+  check     Parse and validate a .camdl model (no output)
+  inspect   Inspect compiled IR (compartments, transitions, parameters, ...)
+  simulate  Run a forward simulation (accepts .camdl or .ir.json)
+
+Examples:
+  camdl compile sir.camdl > sir.ir.json
+  camdl compile sir.camdl --set beta=0.3 > sir.ir.json
+  camdl simulate sir.camdl --set beta=0.3 --set gamma=0.1 --set N0=1000 --set I0=10
+  camdl simulate sir.ir.json --backend gillespie --seed 42
+EOF
+    exit 0
+    ;;
+  *)
+    echo "camdl: unknown subcommand '$1'. Use compile, check, inspect, or simulate." >&2
+    exit 1
+    ;;
+esac

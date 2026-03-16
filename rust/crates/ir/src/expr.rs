@@ -12,6 +12,12 @@ pub enum BinOp {
     Pow,
     Min,
     Max,
+    Eq,
+    Neq,
+    Lt,
+    Gt,
+    Le,
+    Ge,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

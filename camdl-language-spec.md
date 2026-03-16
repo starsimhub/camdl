@@ -1,12 +1,11 @@
 # The camdl Language Specification
 
-**Version:** 0.3-draft
-**Date:** 2026-03-13
+**Version:** 0.3-draft **Date:** 2026-03-13
 
-*camdl (Compartmental Model Description Language) is a domain-specific language
+_camdl (Compartmental Model Description Language) is a domain-specific language
 for specifying stochastic compartmental models. A `.camdl` file defines model
-structure. Parameter values, inference configuration, and scenario selection
-are supplied externally.*
+structure. Parameter values, inference configuration, and scenario selection are
+supplied externally._
 
 ---
 
@@ -18,32 +17,32 @@ write the explicit form. All design effort focuses on getting a minimal,
 extensible, composable, non-blocking, flexible set of core primitives right.
 Sugar is never added before the primitives it replaces are solid.
 
-**Explicit over terse.** Named keywords everywhere. No hidden multiplication,
-no auto-localization, no implicit scope rules. Every rate expression is a total
-propensity — the compiler never silently multiplies by a population count.
-If a rate is per-capita, the user writes the `* Pop` factor explicitly.
+**Explicit over terse.** Named keywords everywhere. No hidden multiplication, no
+auto-localization, no implicit scope rules. Every rate expression is a total
+propensity — the compiler never silently multiplies by a population count. If a
+rate is per-capita, the user writes the `* Pop` factor explicitly.
 
 **Model ≠ parameterization.** The `.camdl` file defines M (parameter space) and
-C (configuration). Parameter values come from external TOML files, CLI flags,
-or inference engines. The seed is always a CLI argument. This follows the
-grammar of model parameters (Buffalo 2026): the model is structurally stable
-across all analyses — forward simulation, calibration, scenario comparison,
-and forecasting all use the same `.camdl` file with different external
-configuration. This separation means the model file can be committed to git,
-shared in paper supplements, and reviewed independently of any particular
-parameter values or analysis choices.
+C (configuration). Parameter values come from external TOML files, CLI flags, or
+inference engines. The seed is always a CLI argument. This follows the grammar
+of model parameters (Buffalo 2026): the model is structurally stable across all
+analyses — forward simulation, calibration, scenario comparison, and forecasting
+all use the same `.camdl` file with different external configuration. This
+separation means the model file can be committed to git, shared in paper
+supplements, and reviewed independently of any particular parameter values or
+analysis choices.
 
 **Typed and checked.** Index dimensions, table shapes, compartment arities,
 parameter domains, and unit dimensions are compiler-checked with clear error
-messages. The compiler tracks which dimension each index variable belongs to
-and rejects mismatches at compile time, not simulation time.
+messages. The compiler tracks which dimension each index variable belongs to and
+rejects mismatches at compile time, not simulation time.
 
 **No auto-localization.** After stratification, bare compartment names always
 refer to the global total (sum over all strata). `S` means "all susceptibles."
 `S[child]` means "susceptible children." The compiler never guesses which
 stratum you meant. Stratification rules (coupling sugar) handle the
-transformation from global to per-stratum formulas mechanically; the user
-writes the base model with global names and specifies how dimensions interact.
+transformation from global to per-stratum formulas mechanically; the user writes
+the base model with global names and specifies how dimensions interact.
 
 ### 1.1 Syntax Conventions
 
@@ -88,8 +87,8 @@ Unit literals are distinguished from identifiers by the `'` prefix:
 Supported units: `'days`, `'weeks`, `'months`, `'years`, `'per_day`,
 `'per_week`, `'per_month`, `'per_year`.
 
-Conversions: 1 'week = 7 'days, 1 'month = 30.4375 'days (365.25/12),
-1 'year = 365.25 'days. The compiler uses exact rational arithmetic.
+Conversions: 1 'week = 7 'days, 1 'month = 30.4375 'days (365.25/12), 1 'year =
+365.25 'days. The compiler uses exact rational arithmetic.
 
 ### 2.2 Dimensional Type System
 
@@ -102,6 +101,7 @@ through expressions and rejects mismatches:
 ```
 
 Valid operations:
+
 ```
 5 'days + 3 'days         → 8 'days (time + time = time)
 1 / (14 'days)            → rate (1/time)
@@ -110,6 +110,7 @@ Valid operations:
 ```
 
 Invalid operations:
+
 ```
 5 'days + 0.1 'per_day    → ERROR: cannot add time and rate
 5 'days * 3 'days         → ERROR: time² has no meaning in this system
@@ -131,8 +132,8 @@ tables {
 ```
 
 `fertility : age 'per_day` means "every value in this table is in units of
-'per_day." The compiler normalizes to the model time unit. Dimensionless
-tables (contact matrices, weights) have no unit annotation.
+'per_day." The compiler normalizes to the model time unit. Dimensionless tables
+(contact matrices, weights) have no unit annotation.
 
 ---
 
@@ -152,8 +153,8 @@ compartments {
 ```
 
 After stratification, compartments gain index dimensions (see §5). Access is
-always via explicit indexing: `S[child]`, `S[child, female]`, or bare `S`
-(= sum over all strata).
+always via explicit indexing: `S[child]`, `S[child, female]`, or bare `S` (= sum
+over all strata).
 
 ---
 
@@ -228,12 +229,12 @@ incidence(infection[patch = p])   # sum over age, specific patch
 ```
 
 Named indexing is useful when a compartment or transition has multiple
-dimensions and you want to index a non-first dimension. The compiler
-resolves named indices to positional and validates dimension membership.
+dimensions and you want to index a non-first dimension. The compiler resolves
+named indices to positional and validates dimension membership.
 
-Positional and named indexing can be mixed: `S[child, sex = female]` is
-valid (first positional = age, second named = sex). But for clarity, use
-one style consistently.
+Positional and named indexing can be mixed: `S[child, sex = female]` is valid
+(first positional = age, second named = sex). But for clarity, use one style
+consistently.
 
 **Omitting a dimension sums over it.** The compiler knows each compartment's
 arity and checks every access.
@@ -318,9 +319,9 @@ tables {
   Using `C_age[i, s]` where `s : sex` is a compile error.
 - **Documentation.** The annotation tells you what each axis means.
 
-The optional unit annotation (e.g., `: age 'per_day`) specifies the unit for
-all values. The compiler normalizes to the model time unit and checks
-dimensional consistency when table values appear in expressions.
+The optional unit annotation (e.g., `: age 'per_day`) specifies the unit for all
+values. The compiler normalizes to the model time unit and checks dimensional
+consistency when table values appear in expressions.
 
 Multi-dimensional: `: age × sex × risk` for 3D tables. Inline via nested
 brackets. For large tables, use `read_csv`.
@@ -340,14 +341,14 @@ compiler generates transitions only for nonzero entries.
 
 ### 6.3 External Table Loading
 
-External tables are loaded at compile time and inlined into the IR. The IR
-is self-contained — no file references at runtime. For very large tables
-(>1M entries), binary IR format (msgpack) is recommended over JSON.
+External tables are loaded at compile time and inlined into the IR. The IR is
+self-contained — no file references at runtime. For very large tables (>1M
+entries), binary IR format (msgpack) is recommended over JSON.
 
 ### 6.4 Parameterized Table Entries
 
-Inline table values can be parameter names or arithmetic expressions, not
-just numeric literals:
+Inline table values can be parameter names or arithmetic expressions, not just
+numeric literals:
 
 ```
 tables {
@@ -356,13 +357,14 @@ tables {
 }
 ```
 
-Here `beta_mf` and `beta_fm` are parameters. In the IR, these entries are
-stored as `Param("beta_mf")` expression nodes, not resolved floats. The
-table is fully resolved only when parameter values are supplied at simulation
-time. This enables inference over contact matrix entries.
+Here `beta_mf` and `beta_fm` are parameters. In the IR, these entries are stored
+as `Param("beta_mf")` expression nodes, not resolved floats. The table is fully
+resolved only when parameter values are supplied at simulation time. This
+enables inference over contact matrix entries.
 
-Tables mixing literals and parameter expressions are valid: `[[0.0, beta_mf], ...]`
-has a constant zero and a parameter reference in the same row.
+Tables mixing literals and parameter expressions are valid:
+`[[0.0, beta_mf], ...]` has a constant zero and a parameter reference in the
+same row.
 
 ---
 
@@ -424,9 +426,9 @@ effects on case reporting.
 
 ## 8. Let Bindings
 
-`let` declarations are **top-level** — they appear between blocks, never
-inside a block. They are resolved after the full file is parsed (order does
-not matter between `let` and other declarations).
+`let` declarations are **top-level** — they appear between blocks, never inside
+a block. They are resolved after the full file is parsed (order does not matter
+between `let` and other declarations).
 
 ```
 let N = S + E + I + R
@@ -436,9 +438,9 @@ let foi[a in age, p in patch] = sum(b in age, C_age[a,b] * I[b,p] / N_local[b,p]
 
 ### 8.1 Scope Rules
 
-**Bare names are always global.** `let N = S + E + I + R` means the total
-across ALL strata. After age stratification, N is still the global total.
-No auto-localization, ever.
+**Bare names are always global.** `let N = S + E + I + R` means the total across
+ALL strata. After age stratification, N is still the global total. No
+auto-localization, ever.
 
 **Indexed let bindings** define computed quantities over dimensions:
 
@@ -447,8 +449,8 @@ let N_local[a in age] = S[a] + E[a] + I[a] + R[a]   # per-age-group total
 let mig[i in patch, j in patch] = theta * pop[j] / (distance[i,j] ^ 2)
 ```
 
-The dimension annotation is inferred from the index bindings. `N_local` has
-type `: age`, `mig` has type `: patch × patch`.
+The dimension annotation is inferred from the index bindings. `N_local` has type
+`: age`, `mig` has type `: patch × patch`.
 
 **Let binding names must be unique.** Two bindings with the same name but
 different index signatures (e.g., `let N_local[a in age]` and
@@ -459,9 +461,9 @@ arity. Use distinct names: `N_age`, `N_age_sex`.
 
 These are two different operations with a common binding syntax:
 
-`let f[i in age] = expr` **defines a family of values** — one per index
-value. It is a function from age-index to value. `f[child]` evaluates `expr`
-with `i = child`; `f[adult]` evaluates `expr` with `i = adult`.
+`let f[i in age] = expr` **defines a family of values** — one per index value.
+It is a function from age-index to value. `f[child]` evaluates `expr` with
+`i = child`; `f[adult]` evaluates `expr` with `i = adult`.
 
 `sum(i in age, expr)` **reduces** — it evaluates `expr` for all values of `i`
 and adds the results, producing a scalar.
@@ -488,9 +490,9 @@ let N = S + I + R
 infection : S --> I  @ beta * S * I / N    # global N, no indices
 ```
 
-After stratification, the compiler transforms this based on the coupling
-rules (see §10). The user writes the base model with global names. The
-coupling rules produce the correct indexed formulas in the IR.
+After stratification, the compiler transforms this based on the coupling rules
+(see §10). The user writes the base model with global names. The coupling rules
+produce the correct indexed formulas in the IR.
 
 For explicit per-stratum FOI, the user writes the indexed form directly:
 
@@ -499,8 +501,8 @@ infection[a in age] : S[a] --> I[a]
   @ beta * S[a] * sum(b in age, C_age[a,b] * I[b] / N_local[b])
 ```
 
-Both paths produce the same IR. The first uses sugar (§10); the second is
-the primitive.
+Both paths produce the same IR. The first uses sugar (§10); the second is the
+primitive.
 
 ---
 
@@ -532,8 +534,8 @@ infection_water : S --> I {
 
 - `rate` (required): the total propensity expression
 - `tag` (optional): a string label that compiles to the IR `metadata` field.
-  Used for output filtering, visualization grouping, and documentation. Has
-  no effect on simulation dynamics.
+  Used for output filtering, visualization grouping, and documentation. Has no
+  effect on simulation dynamics.
 
 **Inflows** (`-->` with nothing on the left) model individuals entering the
 system from outside: births, importation, immigration. There is no source
@@ -558,8 +560,8 @@ transition_name[i in dim1, j in dim2, ...] : from --> to  @ rate
 ```
 
 The `[i in dim]` clause binds index variables. The compiler generates one
-concrete IR transition per combination of index values. Dimensionality is
-known at compile time: `|dim1| × |dim2| × ...` transitions.
+concrete IR transition per combination of index values. Dimensionality is known
+at compile time: `|dim1| × |dim2| × ...` transitions.
 
 ### 9.3 Guard Clauses (`where`)
 
@@ -593,10 +595,10 @@ guard := index_var '!=' index_val_or_var
        | '(' guard ')'
 ```
 
-Guards reference **index variables only** (not parameters or compartments).
-They are evaluated at **compile time** — the compiler instantiates all index
-combinations, evaluates the guard for each, and emits IR transitions only
-for combinations where the guard is true. The IR has no concept of guards.
+Guards reference **index variables only** (not parameters or compartments). They
+are evaluated at **compile time** — the compiler instantiates all index
+combinations, evaluates the guard for each, and emits IR transitions only for
+combinations where the guard is true. The IR has no concept of guards.
 
 Guards compose with all iteration forms: regular `[i in dim]`, `consecutive`,
 and `c in compartments`.
@@ -616,9 +618,9 @@ four transitions per compartment per patch: `age_0_5→age_5_15`,
 `age_5_15→age_15_50`, `age_15_50→age_50_65`, `age_50_65→age_65p`. The last
 stratum has no outgoing aging transition.
 
-This is a general-purpose primitive for any sequential transfer along an
-ordered dimension. It also handles **Erlang sub-staging** for non-exponential
-waiting times:
+This is a general-purpose primitive for any sequential transfer along an ordered
+dimension. It also handles **Erlang sub-staging** for non-exponential waiting
+times:
 
 ```
 # Erlang-3 latent period: E passes through 3 sub-stages
@@ -633,8 +635,8 @@ progression_final : E[e3] --> I
   @ 3 * sigma * E[e3]
 ```
 
-This gives an Erlang(k=3, rate=sigma) distributed latent period. The mean is
-the same as exponential (1/sigma), but the variance is reduced by factor k,
+This gives an Erlang(k=3, rate=sigma) distributed latent period. The mean is the
+same as exponential (1/sigma), but the variance is reduced by factor k,
 producing a more peaked distribution — closer to real disease progression.
 
 ### 9.5 Compartment Iteration
@@ -655,30 +657,31 @@ migrate[c in compartments, a in age, src in patch, dst in patch]
 
 **`compartments` means integer compartments only** (the safe default). Real-
 valued compartments (like environmental reservoirs `W : real`) are excluded
-because population-level operations (death, migration) don't apply to
-continuous state.
+because population-level operations (death, migration) don't apply to continuous
+state.
 
 **Partial stratification and `c in compartments`.** When compartments have
 different arities (e.g., R has `[age, patch, immunity]` but S has
-`[age, patch]`), the compiler **expands over all omitted dimensions**.
-For `death[c in compartments, a in age, p in patch] : c[a,p] --> @ mu * c[a,p]`:
+`[age, patch]`), the compiler **expands over all omitted dimensions**. For
+`death[c in compartments, a in age, p in patch] : c[a,p] --> @ mu * c[a,p]`:
 
-- For S (dims: [age, patch]): generates `death_S[a, p] : S[a,p] --> @ mu * S[a,p]`
+- For S (dims: [age, patch]): generates
+  `death_S[a, p] : S[a,p] --> @ mu * S[a,p]`
 - For R (dims: [age, patch, immunity]): generates **separate transitions per
-  immunity value**: `death_R[a, p, natural] : R[a,p,natural] --> @ mu * R[a,p,natural]`
-  and `death_R[a, p, vaccine] : R[a,p,vaccine] --> @ mu * R[a,p,vaccine]`
+  immunity value**:
+  `death_R[a, p, natural] : R[a,p,natural] --> @ mu * R[a,p,natural]` and
+  `death_R[a, p, vaccine] : R[a,p,vaccine] --> @ mu * R[a,p,vaccine]`
 
 This is correct: the stoichiometry rule (§5.1) requires all dimensions to be
 specified for source/destination. The `c in compartments` iterator automatically
-fills in omitted dimensions by iterating over them. The user writes `c[a,p]`
-and the compiler expands to the correct full-arity transitions for each
-compartment.
+fills in omitted dimensions by iterating over them. The user writes `c[a,p]` and
+the compiler expands to the correct full-arity transitions for each compartment.
 
 ### 9.6 Rate Expressions
 
-The `@` rate is always the **total propensity** — the absolute event rate.
-No hidden per-capita multiplication. If you want per-capita semantics, write
-the population factor explicitly:
+The `@` rate is always the **total propensity** — the absolute event rate. No
+hidden per-capita multiplication. If you want per-capita semantics, write the
+population factor explicitly:
 
 ```
 death_S[a in age] : S[a] -->  @ mu * S[a]     # mu per capita, explicit * S[a]
@@ -702,9 +705,9 @@ Precedence  Operators        Associativity
 ```
 
 Standard mathematical convention: `a + b * c` parses as `a + (b * c)`.
-Exponentiation is right-associative: `a ^ b ^ c` = `a ^ (b ^ c)`.
-Comparisons cannot be chained: `a < b < c` is a parse error (use
-`a < b and b < c` in `where` guards).
+Exponentiation is right-associative: `a ^ b ^ c` = `a ^ (b ^ c)`. Comparisons
+cannot be chained: `a < b < c` is a parse error (use `a < b and b < c` in
+`where` guards).
 
 **Full grammar:**
 
@@ -730,8 +733,8 @@ index := expr                             # positional: S[child]
 Comparison operators are available for `where` guards and summary expressions.
 `sum` is a keyword, not a user-definable function.
 
-**Compile-time vs runtime `if/else`.** The `if/then/else` expression has
-two evaluation modes depending on context:
+**Compile-time vs runtime `if/else`.** The `if/then/else` expression has two
+evaluation modes depending on context:
 
 - **In `let` bindings with index variables**: if the condition involves only
   index variables and constants, it is evaluated at **compile time**. The
@@ -752,15 +755,15 @@ two evaluation modes depending on context:
   This becomes `Cond(Pop("I"), <rate_expr>, Const(0.0))` in the IR.
 
 Names are resolved in order: **compartments → parameters → let bindings →
-functions → tables**. The compiler reports an error if a name exists in
-multiple namespaces. User names cannot shadow reserved identifiers (see §15).
+functions → tables**. The compiler reports an error if a name exists in multiple
+namespaces. User names cannot shadow reserved identifiers (see §15).
 
 ### 9.8 Event-Keyed Random Number Generation (EKRNG)
 
 Each transition in the IR carries an event key — a stable identifier for
-counter-based RNG (Philox/Threefry). This decouples random draws from
-execution order, enabling valid counterfactual coupling between scenario
-pairs (Buffalo, Pearson, Klein 2026).
+counter-based RNG (Philox/Threefry). This decouples random draws from execution
+order, enabling valid counterfactual coupling between scenario pairs (Buffalo,
+Pearson, Klein 2026).
 
 The compiler generates event keys from the transition name and index values:
 
@@ -770,11 +773,11 @@ The compiler generates event keys from the transition name and index values:
 ```
 
 The `{firing_index}` is a monotonically increasing counter per transition,
-filled by the runtime. Combined with the base seed, every event firing gets
-a globally unique key.
+filled by the runtime. Combined with the base seed, every event firing gets a
+globally unique key.
 
-EKRNG is automatic — the user does not write event keys. The compiler
-generates them from the transition's name and index bindings.
+EKRNG is automatic — the user does not write event keys. The compiler generates
+them from the transition's name and index bindings.
 
 ---
 
@@ -806,21 +809,21 @@ infection : S --> E @ beta * S * I / N {
 }
 ```
 
-Both produce the **same IR**. The sugar is pure convenience — the spec
-documents exactly what it expands to, and the user can always write the
-primitive form instead.
+Both produce the **same IR**. The sugar is pure convenience — the spec documents
+exactly what it expands to, and the user can always write the primitive form
+instead.
 
 ### 10.2 Expansion Rules
 
-The expansion of `coupling(dim) = M` transforms the base transmission rate
-as follows. Starting from `@ beta * S * I / N`:
+The expansion of `coupling(dim) = M` transforms the base transmission rate as
+follows. Starting from `@ beta * S * I / N`:
 
 1. The compiler adds index variables for each coupling dimension
 2. `S` becomes `S[i]` (localized to the transition's stratum)
-3. `I / N` becomes `sum(j in dim, M[i,j] * I[j] / N_j)` where `N_j` is the
-   total population in stratum `j`
-4. `N_j` is auto-generated: `sum(c in compartments, c[j])` — the compiler
-   always knows the total population per stratum without any user-defined binding
+3. `I / N` becomes `sum(j in dim, M[i,j] * I[j] / N_j)` where `N_j` is the total
+   population in stratum `j`
+4. `N_j` is auto-generated: `sum(c in compartments, c[j])` — the compiler always
+   knows the total population per stratum without any user-defined binding
 
 Multiple `coupling` lines nest the sums:
 
@@ -833,22 +836,22 @@ infection[a in age, s in sex] : S[a,s] --> E[a,s]
     ))
 ```
 
-The denominator `sum(c in compartments, c[b,t])` is generated automatically.
-It equals the total population of stratum `(age=b, sex=t)` across all
-compartments. No user-defined `N_local` binding is required — the sugar is
-fully self-contained.
+The denominator `sum(c in compartments, c[b,t])` is generated automatically. It
+equals the total population of stratum `(age=b, sex=t)` across all compartments.
+No user-defined `N_local` binding is required — the sugar is fully
+self-contained.
 
 ### 10.3 What the Matrices Mean
 
-All coupling structures are expressed through the same mechanism — a rate
-matrix `M[i,j]` weighting contact between strata i and j:
+All coupling structures are expressed through the same mechanism — a rate matrix
+`M[i,j]` weighting contact between strata i and j:
 
-| Matrix structure        | Effect                                  | Example                     |
-|-------------------------|-----------------------------------------|-----------------------------|
-| Dense                   | General mixing                          | Age contact matrix          |
-| Off-diagonal only       | Directed (no within-group transmission) | STI sex-structured          |
-| Identity                | Within-stratum only                     | Same as no coupling         |
-| All ones                | Homogeneous mixing                      | No structure                |
+| Matrix structure  | Effect                                  | Example             |
+| ----------------- | --------------------------------------- | ------------------- |
+| Dense             | General mixing                          | Age contact matrix  |
+| Off-diagonal only | Directed (no within-group transmission) | STI sex-structured  |
+| Identity          | Within-stratum only                     | Same as no coupling |
+| All ones          | Homogeneous mixing                      | No structure        |
 
 ```
 tables {
@@ -860,19 +863,19 @@ tables {
 }
 ```
 
-There is no separate `directed` or `mixing` keyword — they are all matrices.
-The matrix structure determines the coupling semantics. This is the right
-primitive: one concept (rate matrix), many structures.
+There is no separate `directed` or `mixing` keyword — they are all matrices. The
+matrix structure determines the coupling semantics. This is the right primitive:
+one concept (rate matrix), many structures.
 
 ### 10.4 Multi-Strain Models
 
-Multi-strain models are complex enough that coupling sugar is not provided.
-Use the primitive indexed transition form instead.
+Multi-strain models are complex enough that coupling sugar is not provided. Use
+the primitive indexed transition form instead.
 
 The key structural insight: in a multi-strain compartmental model, **S is a
 shared pool** — a susceptible person isn't "susceptible to wild-type," they're
-just susceptible. The strain dimension belongs on E, I, R (tracking which
-strain you're infected with / recovered from), not on S.
+just susceptible. The strain dimension belongs on E, I, R (tracking which strain
+you're infected with / recovered from), not on S.
 
 ```
 compartments { S, E, I, R }
@@ -905,22 +908,21 @@ transitions {
 }
 ```
 
-The cross-immunity factor
-`(1 - sum(w in strain, X[w,v] * R[a,w]) / N_local[a])` is a population-level
-mean-field approximation: it reduces the infection rate for strain `v` based on
-the fraction of the population recovered from each strain `w`, weighted by
-cross-protection `X[w,v]`. When no one has recovered (all in S), the factor
-is 1.0 (no reduction). As more people recover from strain `w`, susceptibility
-to strain `v` decreases proportionally.
+The cross-immunity factor `(1 - sum(w in strain, X[w,v] * R[a,w]) / N_local[a])`
+is a population-level mean-field approximation: it reduces the infection rate
+for strain `v` based on the fraction of the population recovered from each
+strain `w`, weighted by cross-protection `X[w,v]`. When no one has recovered
+(all in S), the factor is 1.0 (no reduction). As more people recover from strain
+`w`, susceptibility to strain `v` decreases proportionally.
 
-This is the standard approximation for compartmental multi-strain models.
-Exact individual-level immunity tracking requires an ABM.
+This is the standard approximation for compartmental multi-strain models. Exact
+individual-level immunity tracking requires an ABM.
 
 **Negativity guard.** The cross-immunity factor can go negative if
 `sum(w, X[w,v] * R[a,w]) > N_local[a]` — possible with large cross-protection
 values and high recovery fractions. For well-specified matrices with
-`X[w,v] ∈ [0,1]` and proper population fractions this does not occur, but
-for safety the rate expression should clamp:
+`X[w,v] ∈ [0,1]` and proper population fractions this does not occur, but for
+safety the rate expression should clamp:
 `max(0.0, 1 - sum(w in strain, X_strain[w,v] * R[a,w]) / N_local[a])`.
 
 ---
@@ -966,9 +968,9 @@ data {
 }
 ```
 
-The compiler distinguishes features from observations by usage: if a data
-column appears in a rate expression or function, it's a feature (always loaded).
-If it appears in an `observations` block, it's an observation target.
+The compiler distinguishes features from observations by usage: if a data column
+appears in a rate expression or function, it's a feature (always loaded). If it
+appears in an `observations` block, it's an observation target.
 
 Feature data is inlined into the IR as `Interpolated` time functions or tables
 at compile time. The IR remains self-contained.
@@ -1126,9 +1128,9 @@ at(I, midpoint)     # value of I at declared midpoint
 at(N, t_start)      # value of N at simulation start
 ```
 
-If `simulate` is absent (e.g., during `camdl check`), `t_start` and `t_end`
-are undefined. Expressions referencing them produce a compile warning:
-"t_end referenced but no simulate block present."
+If `simulate` is absent (e.g., during `camdl check`), `t_start` and `t_end` are
+undefined. Expressions referencing them produce a compile warning: "t_end
+referenced but no simulate block present."
 
 ### 15.2 Reserved Identifiers
 
@@ -1167,8 +1169,8 @@ Unlisted compartments default to 0. Expressions can reference parameters.
 
 ### 16.2 Stratified Models
 
-When compartments have index dimensions, **bare names are a compile error.**
-The compiler cannot guess how to distribute a total across strata.
+When compartments have index dimensions, **bare names are a compile error.** The
+compiler cannot guess how to distribute a total across strata.
 
 ```
 # ERROR: S has dimensions [age, patch], must specify strata
@@ -1192,9 +1194,9 @@ init {
 }
 ```
 
-Unlisted stratum combinations default to 0. For a 774-patch model, only
-the patches mentioned in init are nonzero — the rest start empty. This
-is common for initialization from a single-patch seeding event.
+Unlisted stratum combinations default to 0. For a 774-patch model, only the
+patches mentioned in init are nonzero — the rest start empty. This is common for
+initialization from a single-patch seeding event.
 
 ### 16.3 Init from Tables (v0.2)
 
@@ -1265,17 +1267,17 @@ metadata.json         # run provenance (see §20)
 ### 17.2 IR Mapping
 
 **Trajectories and flows** are IR-level outputs. The IR `output` section
-specifies two schedules: one for state snapshots (trajectories) and one for
-flow counts (flows). The runtime writes both directly during simulation.
-Named quantities in `trajectories { quantities { ... } }` are compiled to
-IR expressions evaluated at each output time. Named flow quantities
-reference `CumulativeFlow` projections in the IR.
+specifies two schedules: one for state snapshots (trajectories) and one for flow
+counts (flows). The runtime writes both directly during simulation. Named
+quantities in `trajectories { quantities { ... } }` are compiled to IR
+expressions evaluated at each output time. Named flow quantities reference
+`CumulativeFlow` projections in the IR.
 
-**Summary** is computed **post-simulation** by the CLI from trajectory and
-flow data. The runtime does not compute summaries — it writes the trajectory,
-and the CLI reads it back to evaluate summary expressions. For large spatial
-models, the CLI processes the trajectory in streaming fashion to avoid loading
-the full parquet into memory.
+**Summary** is computed **post-simulation** by the CLI from trajectory and flow
+data. The runtime does not compute summaries — it writes the trajectory, and the
+CLI reads it back to evaluate summary expressions. For large spatial models, the
+CLI processes the trajectory in streaming fashion to avoid loading the full
+parquet into memory.
 
 **Synthetic observations** are generated by the runtime's `sample_observations`
 method using the observation model definitions.
@@ -1342,9 +1344,9 @@ Inside `set = { PARAM = EXPR }`, the RHS expression can reference:
 - Other parameters (their pre-patch values)
 - Literal constants
 
-Compartment state, time, and other scenario settings are NOT in scope —
-scenario patches are static transformations of parameter values, not
-runtime-dependent operations.
+Compartment state, time, and other scenario settings are NOT in scope — scenario
+patches are static transformations of parameter values, not runtime-dependent
+operations.
 
 ### 18.3 External Experiment Files
 
@@ -1387,19 +1389,20 @@ experiment("Nigeria SIA evaluation") {
 
 The `compare` block drives paired scenario simulation with EKRNG coupling:
 
-- `pairs` lists 2-tuples of `(reference_scenario, test_scenario)`. The
-  keyword `baseline` refers to the identity patch (no scenario modifications).
+- `pairs` lists 2-tuples of `(reference_scenario, test_scenario)`. The keyword
+  `baseline` refers to the identity patch (no scenario modifications).
 - `seeds = N to M` is range syntax generating integers N, N+1, ..., M.
-- For each pair and each seed, both scenarios are simulated with the same
-  EKRNG seed, producing coupled trajectories.
+- For each pair and each seed, both scenarios are simulated with the same EKRNG
+  seed, producing coupled trajectories.
 
 Inside the experiment's `output.summary`, two special names are available:
+
 - `baseline.QUANTITY` — summary value from the reference scenario
 - `scenario.QUANTITY` — summary value from the test scenario
 
-These are only valid inside experiment `compare` output blocks. `QUANTITY`
-must match a name declared in the model's `output { summary { ... } }` block
-(e.g., `total_cases`, `peak_I`).
+These are only valid inside experiment `compare` output blocks. `QUANTITY` must
+match a name declared in the model's `output { summary { ... } }` block (e.g.,
+`total_cases`, `peak_I`).
 
 ---
 
@@ -1512,14 +1515,14 @@ Same inputs → same hash → skip simulation. `--force` to re-run.
 
 ```toml
 # params.toml
-beta  = 0.3
+beta = 0.3
 gamma = 0.1
 sigma = 0.2
-mu    = 0.0000548
-rho   = 0.4
-k     = 5.0
-N0    = 1000000
-I0    = 10
+mu = 0.0000548
+rho = 0.4
+k = 5.0
+N0 = 1000000
+I0 = 10
 ```
 
 ### 21.2 Priors (v0.2+)
@@ -1527,17 +1530,17 @@ I0    = 10
 ```toml
 # priors.toml
 [beta]
-value     = 0.3
-prior     = "log_normal"
-mu        = 0.0
-sigma     = 1.0
+value = 0.3
+prior = "log_normal"
+mu = 0.0
+sigma = 1.0
 transform = "log"
 
 [rho]
-value     = 0.4
-prior     = "beta"
-alpha     = 2.0
-beta      = 5.0
+value = 0.4
+prior = "beta"
+alpha = 2.0
+beta = 5.0
 transform = "logit"
 
 [mu]
@@ -1562,19 +1565,19 @@ held fixed at their values from `params.toml`. Views are only relevant for
 The parameter grammar (Buffalo 2026) defines the formal framework for
 partitioning and manipulating model inputs. camdl implements each concept:
 
-| Grammar concept | camdl implementation |
-|---|---|
-| **M** (parameter space) | `parameters { }` block — all tuneable knobs |
-| **C** (configuration) | Model structure + `simulate` + `output` |
-| **S** (seed) | CLI `--seed`, never in model file |
-| **Point m ∈ M** | `params.toml` |
-| **Scenario σ** | `scenarios { }` — patch operations |
-| **Baseline σ₀** | Identity patch — model as defined |
-| **View V** | `view.toml` — free vs fixed |
-| **Transform T_V** | Per-parameter `transform` in `priors.toml` |
-| **Reparameterization R** | Future: `reparam.toml` |
-| **Sim(m, c, s) → y** | `camdl simulate` |
-| **Sim_σ,V,T(z, s) → y** | `camdl fit` (v0.2+) |
+| Grammar concept          | camdl implementation                        |
+| ------------------------ | ------------------------------------------- |
+| **M** (parameter space)  | `parameters { }` block — all tuneable knobs |
+| **C** (configuration)    | Model structure + `simulate` + `output`     |
+| **S** (seed)             | CLI `--seed`, never in model file           |
+| **Point m ∈ M**          | `params.toml`                               |
+| **Scenario σ**           | `scenarios { }` — patch operations          |
+| **Baseline σ₀**          | Identity patch — model as defined           |
+| **View V**               | `view.toml` — free vs fixed                 |
+| **Transform T_V**        | Per-parameter `transform` in `priors.toml`  |
+| **Reparameterization R** | Future: `reparam.toml`                      |
+| **Sim(m, c, s) → y**     | `camdl simulate`                            |
+| **Sim_σ,V,T(z, s) → y**  | `camdl fit` (v0.2+)                         |
 
 The downward chain from inference coordinates to simulation output:
 
@@ -1594,8 +1597,8 @@ m ∈ M       complete parameter set
 y ∈ Y       trajectory, observations
 ```
 
-Every arrow is defined by external configuration. The `.camdl` file defines
-the structural skeleton; the parameter grammar fills in the rest.
+Every arrow is defined by external configuration. The `.camdl` file defines the
+structural skeleton; the parameter grammar fills in the rest.
 
 ---
 
@@ -1628,8 +1631,8 @@ camdl verify    RUN_DIR
 camdl experiment FILE
 ```
 
-`camdl compile` produces the IR with symbolic `Param("beta")` nodes — no
-values needed. Tables that reference parameters inline (like
+`camdl compile` produces the IR with symbolic `Param("beta")` nodes — no values
+needed. Tables that reference parameters inline (like
 `B_sex = [[0.0, beta_mf], ...]`) store `Param("beta_mf")` in the IR, not a
 resolved float. When `--params` is provided to `compile`, parameters are
 resolved to concrete values in the IR (useful for inspection/debugging).
@@ -1638,9 +1641,8 @@ resolved to concrete values in the IR (useful for inspection/debugging).
 
 ## 23. Worked Examples
 
-These examples progress from trivial to complex, showing how primitives
-compose. Each shows the DSL source and key points about what the compiler
-generates.
+These examples progress from trivial to complex, showing how primitives compose.
+Each shows the DSL source and key points about what the compiler generates.
 
 ### 23.1 Bare SIR (Simplest Possible Model)
 
@@ -1673,9 +1675,9 @@ simulate {
 }
 ```
 
-10 lines of model structure. No stratification, no demography, no
-observations. The compiler generates 2 IR transitions with flat rate
-expressions. This is the minimal golden test model.
+10 lines of model structure. No stratification, no demography, no observations.
+The compiler generates 2 IR transitions with flat rate expressions. This is the
+minimal golden test model.
 
 ### 23.2 SIR with Demography (Explicit Transitions)
 
@@ -1716,14 +1718,13 @@ simulate {
 ```
 
 6 transitions total. Every rate is a total propensity — `death_S` rate is
-`mu * S` (per-capita rate times population count, explicit). Birth is an
-inflow at rate `mu * N` (population-dependent, balances deaths in
-expectation).
+`mu * S` (per-capita rate times population count, explicit). Birth is an inflow
+at rate `mu * N` (population-dependent, balances deaths in expectation).
 
 ### 23.3 SEIR with Age Mixing (Introducing Stratification)
 
-Two versions shown: the **primitive** form (explicit indexed transitions)
-and the **coupling sugar** form. Both produce identical IR.
+Two versions shown: the **primitive** form (explicit indexed transitions) and
+the **coupling sugar** form. Both produce identical IR.
 
 **Primitive form:**
 
@@ -1785,10 +1786,10 @@ transitions {
 ```
 
 The sugar version has no index variables, no `sum`, no `N_local`. The
-`coupling(age) = C_age` declaration tells the compiler to transform
-`S * I / N` into the per-stratum formula with contact-matrix-weighted
-summation. Progression and recovery are automatically replicated within
-each stratum (default behavior when no coupling is declared).
+`coupling(age) = C_age` declaration tells the compiler to transform `S * I / N`
+into the per-stratum formula with contact-matrix-weighted summation. Progression
+and recovery are automatically replicated within each stratum (default behavior
+when no coupling is declared).
 
 ### 23.4 STI with Directed Transmission (Off-Diagonal Matrix)
 
@@ -1824,8 +1825,8 @@ transitions {
 The zero diagonal in `B_sex` means no within-sex transmission. The
 `sum(t in sex, ...)` sums over both sexes, but the zero entries eliminate
 same-sex terms. `infection_female` rate becomes
-`S[female] * beta_mf * I[male] / N_local[male]`. No special `directed`
-keyword needed — the matrix structure does all the work.
+`S[female] * beta_mf * I[male] / N_local[male]`. No special `directed` keyword
+needed — the matrix structure does all the work.
 
 ### 23.5 Cholera with Environmental Reservoir (Real Compartment + ODE)
 
@@ -1860,14 +1861,14 @@ ode {
 }
 ```
 
-`W : real` is continuous-valued — not a population count. The `ode` block
-gives `dW/dt`. Between stochastic events (infections, recoveries), W evolves
-deterministically. This is a piecewise-deterministic Markov process (PDMP).
-`W` appears in the infection rate via the dose-response term
-`beta_W * W / (K + W)` — coupling the continuous and discrete dynamics.
+`W : real` is continuous-valued — not a population count. The `ode` block gives
+`dW/dt`. Between stochastic events (infections, recoveries), W evolves
+deterministically. This is a piecewise-deterministic Markov process (PDMP). `W`
+appears in the infection rate via the dose-response term `beta_W * W / (K + W)`
+— coupling the continuous and discrete dynamics.
 
-Note: `c in compartments` would NOT iterate over `W` (integer compartments
-only by default).
+Note: `c in compartments` would NOT iterate over `W` (integer compartments only
+by default).
 
 ### 23.6 Five-Age-Group Model with Consecutive Aging
 
@@ -1914,13 +1915,13 @@ transitions {
 }
 ```
 
-`consecutive(age)` generates pairs: `(age_0_5, age_5_15)`, `(age_5_15, age_15_50)`,
-`(age_15_50, age_50_65)`, `(age_50_65, age_65p)`. With 3 compartments, this
-produces 3 × 4 = 12 aging transitions. The last age group (`age_65p`) has
-no outgoing aging — individuals stay until death.
+`consecutive(age)` generates pairs: `(age_0_5, age_5_15)`,
+`(age_5_15, age_15_50)`, `(age_15_50, age_50_65)`, `(age_50_65, age_65p)`. With
+3 compartments, this produces 3 × 4 = 12 aging transitions. The last age group
+(`age_65p`) has no outgoing aging — individuals stay until death.
 
-Total transitions: 5 infections + 5 recoveries + 12 aging + 15 deaths +
-1 birth = 38.
+Total transitions: 5 infections + 5 recoveries + 12 aging + 15 deaths + 1 birth
+= 38.
 
 ### 23.7 Erlang Sub-Staging (Non-Exponential Waiting Times)
 
@@ -1955,9 +1956,9 @@ transitions {
 
 The Erlang-3 latent period has the same mean (1/sigma) as exponential but
 reduced variance (variance = 1/(k·sigma²)). The distribution is more peaked,
-closer to real disease progression. Note: `infection` destination is
-`E[e1]` — entering the first sub-stage. Partial stratification (`only = [E]`)
-means S, I, R don't have the `latent_stage` dimension.
+closer to real disease progression. Note: `infection` destination is `E[e1]` —
+entering the first sub-stage. Partial stratification (`only = [E]`) means S, I,
+R don't have the `latent_stage` dimension.
 
 ---
 
@@ -2208,27 +2209,27 @@ declaration :=
 **Mandatory** for `camdl check` (validation only): `compartments` and
 `parameters`. No `simulate` or `init` required.
 
-**Expander** (OCaml): indexed transitions → flat IR transitions, coupling
-sugar → explicit sums, `c in compartments` → per-compartment transitions,
-`consecutive` → adjacent pair transitions, `where` → compile-time filtering,
-let bindings → inlined expressions, unit normalization.
+**Expander** (OCaml): indexed transitions → flat IR transitions, coupling sugar
+→ explicit sums, `c in compartments` → per-compartment transitions,
+`consecutive` → adjacent pair transitions, `where` → compile-time filtering, let
+bindings → inlined expressions, unit normalization.
 
 **Validator**: compartment arity checking, table dimension checking, index
 variable scoping, parameter reference resolution, dimensional analysis.
 
 **Serializer**: expanded IR → JSON (v0.1) or msgpack (large models).
 
-**Runtime** (Rust): deserializes IR, evaluates propensities, simulates,
-writes output. Knows nothing about the DSL — sees only flat compartments,
-transitions, and expression ASTs.
+**Runtime** (Rust): deserializes IR, evaluates propensities, simulates, writes
+output. Knows nothing about the DSL — sees only flat compartments, transitions,
+and expression ASTs.
 
 ---
 
 ## 26. Expansion Rules (DSL → IR Mapping)
 
 Every DSL construct compiles to specific IR structures. This section documents
-the mapping for each construct — the contract between the OCaml frontend and
-the Rust backend.
+the mapping for each construct — the contract between the OCaml frontend and the
+Rust backend.
 
 ### 26.1 Let Bindings
 
@@ -2277,9 +2278,9 @@ birth[p in patch] : --> S[child, p]
   event_key: "birth_p1:{firing_index}" }
 ```
 
-`sum(a in age, N_local[a, p])` expands to the sum of all compartments in
-patch p across all age groups — the compiler generates the `PopSum` from
-the known compartment list and index bindings.
+`sum(a in age, N_local[a, p])` expands to the sum of all compartments in patch p
+across all age groups — the compiler generates the `PopSum` from the known
+compartment list and index bindings.
 
 ### 26.4 Projections
 
@@ -2356,8 +2357,8 @@ infection[a in age] : S[a] --> E[a]
             PopSum(["S_adult","E_adult","I_adult","R_adult"])))))) }
 ```
 
-The auto-generated denominator `sum(c in compartments, c[b])` becomes
-`PopSum` of all compartments in stratum `b`.
+The auto-generated denominator `sum(c in compartments, c[b])` becomes `PopSum`
+of all compartments in stratum `b`.
 
 ### 26.7 Consecutive Pairs
 
@@ -2395,8 +2396,8 @@ Both `a` and `a_next` are available in the rate expression. The last stratum
 ### 26.8 Guard Clauses (`where`)
 
 Guards are evaluated at compile time. The compiler instantiates all index
-combinations, evaluates the guard, and **omits** transitions where the guard
-is false. The IR has no concept of guards.
+combinations, evaluates the guard, and **omits** transitions where the guard is
+false. The IR has no concept of guards.
 
 ```
 # DSL:
@@ -2419,8 +2420,8 @@ migrate[src in patch, dst in patch] : S[src] --> S[dst]
 
 The compiler expands `c in compartments` by substituting each integer
 compartment name. When a compartment has more dimensions than the index
-signature provides, the compiler **iterates over the omitted dimensions**
-to satisfy the stoichiometry rule (§5.1).
+signature provides, the compiler **iterates over the omitted dimensions** to
+satisfy the stoichiometry rule (§5.1).
 
 ```
 # DSL:
@@ -2463,15 +2464,15 @@ sia_round_1 : transfer(fraction = 0.80, from = S, to = V) {
   ] }
 ```
 
-Each `FractionTransfer` is atomic: `delta = floor(source * fraction)`
-from pre-intervention state, then `source -= delta, dest += delta`.
+Each `FractionTransfer` is atomic: `delta = floor(source * fraction)` from
+pre-intervention state, then `source -= delta, dest += delta`.
 
 ---
 
 ## 27. Errors and Validation
 
-The compiler produces clear, domain-specific error messages. Errors are
-caught at compile time, not simulation time.
+The compiler produces clear, domain-specific error messages. Errors are caught
+at compile time, not simulation time.
 
 ### 27.1 Dimension Errors
 
@@ -2592,8 +2593,8 @@ functions → tables. The compiler reports errors for:
 - **Duplicate declarations**: two parameters named `beta`, two compartments
   named `S`.
 - **Ambiguous references**: a name exists in multiple namespaces (e.g., a
-  parameter and a compartment both named `N`). The compiler errors rather
-  than guessing.
+  parameter and a compartment both named `N`). The compiler errors rather than
+  guessing.
 
 ### 27.11 Compiler Reporting
 

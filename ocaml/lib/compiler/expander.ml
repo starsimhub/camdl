@@ -173,8 +173,9 @@ let rec normalize_expr (e : Ir.expr) : Ir.expr =
 let ir_bin_op = function
   | Ast.Add -> Ir.Add | Ast.Sub -> Ir.Sub | Ast.Mul -> Ir.Mul
   | Ast.Div -> Ir.Div | Ast.Pow -> Ir.Pow
-  | Ast.Eq | Ast.Neq | Ast.Lt | Ast.Gt | Ast.Le | Ast.Ge ->
-    failwith "comparison operators not supported in rates"
+  | Ast.Eq  -> Ir.Eq  | Ast.Neq -> Ir.Neq
+  | Ast.Lt  -> Ir.Lt  | Ast.Gt  -> Ir.Gt
+  | Ast.Le  -> Ir.Le  | Ast.Ge  -> Ir.Ge
 
 let ir_un_op = function
   | Ast.Neg   -> Ir.Neg  | Ast.Exp   -> Ir.Exp  | Ast.Log  -> Ir.Log
@@ -278,7 +279,10 @@ let rec resolve_expr ctx (env : (string * string) list) (e : expr) : Ir.expr =
       List.fold_left (fun acc t ->
         Ir.BinOp { op = Ir.Add; left = acc; right = t }
       ) (List.hd terms) (List.tl terms)
-  | EFuncCall _ -> Ir.Const 0.0
+  | EFuncCall (fname, _args) ->
+    if List.exists (fun (fd : func_decl) -> fd.fname = fname) ctx.func_decls
+    then Ir.TimeFunc fname
+    else Ir.Const 0.0
   | EList _     -> Ir.Const 0.0
 
 and resolve_ident_name ctx name ~loc =
@@ -604,18 +608,18 @@ let expand_compartments ctx =
 
 (* ── Table expansion ─────────────────────────────────────────────────────── *)
 
-let rec flatten_elist = function
-  | EList es     -> List.concat_map flatten_elist es
-  | EConst f     -> [f]
+let rec flatten_expr_list ctx = function
+  | EList es     -> List.concat_map (flatten_expr_list ctx) es
+  | EConst f     -> [Ir.Const f]
   | EUnit (f, u) ->
     (match u with
-     | Days | Weeks | Months | Years       -> [f *. days_per u]
-     | PerDay | PerWeek | PerMonth | PerYear -> [f /. days_per u])
-  | _            -> []
+     | Days | Weeks | Months | Years       -> [Ir.Const (f *. days_per u)]
+     | PerDay | PerWeek | PerMonth | PerYear -> [Ir.Const (f /. days_per u)])
+  | other        -> [resolve_expr ctx [] other]
 
 let expand_tables ctx =
   List.filter_map (fun td ->
-    let flat_vals = flatten_elist td.tvalue in
+    let flat_vals = flatten_expr_list ctx td.tvalue in
     if flat_vals = [] then None
     else Some {
       Ir.name          = td.tname;
@@ -690,11 +694,193 @@ let expand_output ctx =
     | None    -> 100.0
     | Some sd -> resolve_float_expr ctx sd.sim_to
   in
-  { Ir.times        = Ir.OutRegular { Ir.start = 0.0; Ir.step = 1.0; Ir.end_ = t_end };
-    Ir.format       = "tsv";
+  let step = match ctx.output_decl with
+    | Some od -> (match od.out_trajectories with
+      | Some ot -> resolve_float_expr ctx ot.otevery
+      | None    -> 1.0)
+    | None    -> 1.0
+  in
+  let format = match ctx.output_decl with
+    | Some od -> (match od.out_trajectories with
+      | Some ot -> ot.otformat
+      | None    -> "tsv")
+    | None    -> "tsv"
+  in
+  { Ir.times        = Ir.OutRegular { Ir.start = 0.0; Ir.step = step; Ir.end_ = t_end };
+    Ir.format       = format;
     Ir.trajectory   = true;
     Ir.observations = true;
   }
+
+(* ── Intervention expansion ──────────────────────────────────────────────── *)
+
+let resolve_comp_name ctx env e =
+  match resolve_expr ctx env e with
+  | Ir.Pop name -> name
+  | _ -> "?"
+
+(* ── Time function expansion ──────────────────────────────────────────────── *)
+
+(** Convert a func_decl's (string * expr) kwargs to a float, using resolve_float_expr.
+    Raises if the key is missing. *)
+let get_float_kwarg ctx kwargs key =
+  match List.assoc_opt key kwargs with
+  | None   -> failwith (Printf.sprintf "time function missing required argument '%s'" key)
+  | Some e -> resolve_float_expr ctx e
+
+let get_float_list_kwarg ctx kwargs key =
+  match List.assoc_opt key kwargs with
+  | None   -> failwith (Printf.sprintf "time function missing required argument '%s'" key)
+  | Some e -> match e with
+    | EList es -> List.map (resolve_float_expr ctx) es
+    | _ -> [resolve_float_expr ctx e]
+
+let expand_time_functions ctx : Ir.time_function list =
+  List.map (fun (fd : func_decl) ->
+    let kind = match fd.fkind with
+      | "sinusoidal" ->
+        Ir.Sinusoidal {
+          amplitude = get_float_kwarg ctx fd.fargs "amplitude";
+          period    = get_float_kwarg ctx fd.fargs "period";
+          phase     = get_float_kwarg ctx fd.fargs "phase";
+          baseline  = get_float_kwarg ctx fd.fargs "baseline";
+        }
+      | "piecewise" ->
+        Ir.Piecewise {
+          breakpoints = get_float_list_kwarg ctx fd.fargs "breakpoints";
+          values      = get_float_list_kwarg ctx fd.fargs "values";
+        }
+      | "interpolated" ->
+        let method_ = match List.assoc_opt "method" fd.fargs with
+          | Some (EConst _) | None -> "linear"
+          | Some e -> (match e with
+            | EIdent (s, _) -> s
+            | _ -> "linear")
+        in
+        Ir.Interpolated {
+          times   = get_float_list_kwarg ctx fd.fargs "times";
+          values  = get_float_list_kwarg ctx fd.fargs "values";
+          method_;
+        }
+      | "periodic" ->
+        Ir.Periodic {
+          period = get_float_kwarg ctx fd.fargs "period";
+          values = get_float_list_kwarg ctx fd.fargs "values";
+        }
+      | k -> failwith (Printf.sprintf "unknown time function kind '%s'" k)
+    in
+    { Ir.name = fd.fname; Ir.kind }
+  ) ctx.func_decls
+
+let expand_interventions ctx =
+  List.map (fun iv ->
+    let schedule = match iv.ivschedule with
+      | SAtTimes exprs ->
+        Ir.AtTimes (List.map (resolve_float_expr ctx) exprs)
+      | SRecurring (every, from_, until) ->
+        let period = resolve_float_expr ctx every in
+        let start  = resolve_float_expr ctx from_  in
+        let end_   = resolve_float_expr ctx until in
+        Ir.Recurring { Ir.start; Ir.period; Ir.end_ }
+    in
+    let actions = match iv.ivaction with
+      | ATransfer kwargs ->
+        let src = match List.assoc_opt "from" kwargs with
+          | Some e -> resolve_comp_name ctx [] e
+          | None   -> "?"
+        in
+        let dst = match List.assoc_opt "to" kwargs with
+          | Some e -> resolve_comp_name ctx [] e
+          | None   -> "?"
+        in
+        (match List.assoc_opt "fraction" kwargs with
+        | Some fe ->
+          [Ir.FractionTransfer { Ir.src; Ir.dst; Ir.fraction = resolve_expr ctx [] fe }]
+        | None ->
+          match List.assoc_opt "count" kwargs with
+          | Some ce ->
+            [Ir.AbsoluteTransfer { Ir.src; Ir.dst; Ir.count = resolve_expr ctx [] ce }]
+          | None -> [])
+      | ASet (comp, idxs, expr) ->
+        let idx_vals = List.map (index_item_to_str []) idxs in
+        let concrete = if idx_vals = [] then comp
+          else String.concat "_" (comp :: idx_vals) in
+        [Ir.Set { Ir.compartment = concrete; Ir.value = resolve_expr ctx [] expr }]
+    in
+    { Ir.name = iv.ivname; Ir.schedule; Ir.actions }
+  ) ctx.interv_decls
+
+(* ── Observation model expansion ─────────────────────────────────────────── *)
+
+let expand_observations ctx =
+  List.map (fun od ->
+    let t_start = match ctx.simulate with
+      | None    -> 0.0
+      | Some sd -> resolve_float_expr ctx sd.sim_from
+    in
+    let t_end = match ctx.simulate with
+      | None    -> 100.0
+      | Some sd -> resolve_float_expr ctx sd.sim_to
+    in
+    let schedule = match od.oschedule with
+      | ObsEvery every ->
+        let step = resolve_float_expr ctx every in
+        Ir.ObsRegular { Ir.start = t_start; Ir.step; Ir.end_ = t_end }
+      | ObsTimes ts ->
+        Ir.ObsAtTimes (List.map (resolve_float_expr ctx) ts)
+    in
+    let projection = match od.oprojection with
+      | ProjIncidence (name, idxs) ->
+        let idx_vals = List.map (index_item_to_str []) idxs in
+        let concrete = if idx_vals = [] then name
+          else String.concat "_" (name :: idx_vals) in
+        Ir.CumulativeFlow concrete
+      | ProjPrevalence (name, idxs) ->
+        let idx_vals = List.map (index_item_to_str []) idxs in
+        let concrete = if idx_vals = [] then name
+          else String.concat "_" (name :: idx_vals) in
+        Ir.CurrentPop concrete
+      | ProjDerived e ->
+        Ir.DerivedExpr (resolve_expr ctx [] e)
+    in
+    let resolve_kw kwargs name =
+      match List.assoc_opt name kwargs with
+      | Some e -> resolve_expr ctx [] e
+      | None   -> Ir.Const 0.0
+    in
+    let likelihood = match od.olikelihood with
+      | LikNegBinomial kwargs ->
+        Ir.NegBinomial {
+          Ir.mean       = resolve_kw kwargs "mean";
+          Ir.dispersion = resolve_kw kwargs "r";
+        }
+      | LikPoisson kwargs ->
+        Ir.Poisson { Ir.rate = resolve_kw kwargs "rate" }
+      | LikNormal kwargs ->
+        Ir.Normal {
+          Ir.mean = resolve_kw kwargs "mean";
+          Ir.sd   = resolve_kw kwargs "sd";
+        }
+      | LikBinomial kwargs ->
+        Ir.Binomial {
+          Ir.n = resolve_kw kwargs "n";
+          Ir.p = resolve_kw kwargs "p";
+        }
+      | LikBetaBinomial kwargs ->
+        Ir.BetaBinomial {
+          Ir.n     = resolve_kw kwargs "n";
+          Ir.alpha = resolve_kw kwargs "alpha";
+          Ir.beta  = resolve_kw kwargs "beta";
+        }
+    in
+    let data_stream = Option.value ~default:od.oname od.odata_stream in
+    { Ir.name        = od.oname;
+      Ir.data_stream;
+      Ir.schedule;
+      Ir.projection;
+      Ir.likelihood;
+    }
+  ) ctx.obs_decls
 
 (* ── Top-level expand ─────────────────────────────────────────────────────── *)
 
@@ -715,10 +901,10 @@ let expand_detail (name : string) (decls : declaration list)
     Ir.compartments       = expanded_comps;
     Ir.transitions        = expanded_trs;
     Ir.ode_equations      = [];
-    Ir.time_functions     = [];
+    Ir.time_functions     = expand_time_functions ctx;
     Ir.tables             = expand_tables ctx;
-    Ir.interventions      = [];
-    Ir.observations       = [];
+    Ir.interventions      = expand_interventions ctx;
+    Ir.observations       = expand_observations ctx;
     Ir.parameters         = expand_parameters ctx;
     Ir.initial_conditions = expand_init ctx;
     Ir.data_contract      = None;

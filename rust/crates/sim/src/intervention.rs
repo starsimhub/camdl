@@ -77,7 +77,7 @@ fn apply_intervention(
                     model.global_to_int[src_global],
                     model.global_to_int[dst_global],
                 ) {
-                    let transfer = ((int_s.counts[s_local] as f64) * frac).round() as i64;
+                    let transfer = ((int_s.counts[s_local] as f64) * frac).floor() as i64;
                     int_s.counts[s_local] -= transfer;
                     int_s.counts[d_local] += transfer;
                 } else if let (Some(s_local), Some(d_local)) = (

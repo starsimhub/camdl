@@ -1,7 +1,7 @@
 use crate::{
     compiled_model::CompiledModel,
     config::{ChainBinomialConfig, SimConfig},
-    ekrng::EkRng,
+    ekrng::StatefulRng,
     error::SimError,
     intervention::{all_intervention_times, apply_interventions_at},
     ode_integrator::rk4_step,
@@ -42,8 +42,7 @@ fn run_chain_binomial(
     let n_transitions = model.model.transitions.len();
     let n_real = real_s.values.len();
 
-    let ekrng = EkRng::new(seed);
-    let mut step_counts: Vec<u64> = vec![0; n_transitions];
+    let mut rng = StatefulRng::new(seed);
     let mut propensities = Vec::with_capacity(n_transitions);
 
     let output_times = get_output_times(&model.model.output.times);
@@ -63,8 +62,6 @@ fn run_chain_binomial(
         output_idx += 1;
     }
 
-    let mut step_idx: u64 = 0;
-
     while t < cfg.t_end {
         let dt = cfg.dt.min(cfg.t_end - t);
         if dt <= 1e-15 { break; }
@@ -82,7 +79,7 @@ fn run_chain_binomial(
         // p = 1 - exp(-rate * dt) converts continuous-time rate to per-step probability
         for (i, &rate) in propensities.iter().enumerate() {
             let p = 1.0 - (-rate * dt).exp();
-            if p <= 0.0 { step_counts[i] += 1; continue; }
+            if p <= 0.0 { continue; }
 
             // Source population for this transition (first compartment with negative delta)
             let n_src: i64 = model.transition_stoich[i].iter()
@@ -92,24 +89,16 @@ fn run_chain_binomial(
                 .unwrap_or(0)
                 .max(0);
 
-            if n_src == 0 { step_counts[i] += 1; continue; }
+            if n_src == 0 { continue; }
 
-            // Use Poisson(n*p) as approximation for Binomial(n, p) via EKRNG
+            // Poisson(n*p) approximates Binomial(n, p); CRN via stateful RNG
             let lambda = (n_src as f64) * p;
-            let event_key = &model.model.transitions[i].event_key;
-            let count = if let Some(key) = event_key {
-                let resolved = key.replace("{firing_index}", &step_idx.to_string());
-                ekrng.poisson_keyed(&resolved, step_counts[i], lambda)
-            } else {
-                ekrng.poisson_keyed(&format!("__cb_{}_{}", i, step_idx), step_counts[i], lambda)
-            };
-            let count = count.min(n_src as u64);
+            let count = rng.poisson(lambda).min(n_src as u64);
 
             for &(local, delta) in &model.transition_stoich[i] {
                 int_s.counts[local] += delta * count as i64;
             }
             current_flows.add(i, count);
-            step_counts[i] += 1;
         }
 
         let clamped = int_s.clamp_nonneg();
@@ -122,7 +111,6 @@ fn run_chain_binomial(
         );
 
         t += dt;
-        step_idx += 1;
 
         // Interventions
         if iv_times.get(iv_idx).copied().map_or(false, |iv| (iv - t).abs() < cfg.dt * 0.5) {

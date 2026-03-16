@@ -1,7 +1,7 @@
 use crate::{
     compiled_model::CompiledModel,
     config::{SimConfig, TauLeapConfig},
-    ekrng::EkRng,
+    ekrng::StatefulRng,
     error::SimError,
     intervention::{all_intervention_times, apply_interventions_at},
     ode_integrator::rk4_step,
@@ -42,8 +42,7 @@ fn run_tau_leap(
     let n_transitions = model.model.transitions.len();
     let n_real = real_s.values.len();
 
-    let ekrng = EkRng::new(seed);
-    let mut step_counts: Vec<u64> = vec![0; n_transitions];
+    let mut rng = StatefulRng::new(seed);
     let mut propensities = Vec::with_capacity(n_transitions);
 
     let output_times = get_output_times(&model.model.output.times);
@@ -66,8 +65,6 @@ fn run_tau_leap(
         current_flows.reset();
         output_idx += 1;
     }
-
-    let mut global_step: u64 = 0;
 
     while t < cfg.t_end {
         // Determine actual step (might be truncated by boundary)
@@ -102,24 +99,15 @@ fn run_tau_leap(
         // Evaluate propensities at current state
         eval_propensities(model, &int_s, &real_s, params, t, &mut propensities)?;
 
-        // Draw Poisson counts for each transition (EKRNG-keyed by transition + step)
+        // Draw Poisson counts for each transition via CRN (stateful RNG, same seed = same draws)
         for (i, &lambda) in propensities.iter().enumerate() {
-            let event_key = &model.model.transitions[i].event_key;
-            let count = if let Some(key) = event_key {
-                // Replace {firing_index} template with global step
-                let resolved = key.replace("{firing_index}", &global_step.to_string());
-                ekrng.poisson_keyed(&resolved, step_counts[i], lambda * dt)
-            } else {
-                // No event key — should use stateful, but EkRng can substitute
-                ekrng.poisson_keyed(&format!("__stateful_{}_{}", i, global_step), step_counts[i], lambda * dt)
-            };
+            let count = rng.poisson(lambda * dt);
 
             // Apply stoichiometry
             for &(local, delta) in &model.transition_stoich[i] {
                 int_s.counts[local] += delta * count as i64;
             }
             current_flows.add(i, count);
-            step_counts[i] += 1;
         }
 
         // Clamp
@@ -139,7 +127,6 @@ fn run_tau_leap(
         }
 
         t += dt;
-        global_step += 1;
 
         // Apply intervention if now at that time
         if iv_times.get(iv_idx).copied().map_or(false, |iv| (iv - t).abs() < 1e-10) {

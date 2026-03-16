@@ -3,7 +3,7 @@
 
 (* ── Expression ─────────────────────────────────────────────────────────────── *)
 
-type bin_op = Add | Sub | Mul | Div | Pow | Min | Max
+type bin_op = Add | Sub | Mul | Div | Pow | Min | Max | Eq | Neq | Lt | Gt | Le | Ge
 
 type un_op = Neg | Exp | Log | Sqrt | Abs | Floor | Ceil
 
@@ -84,7 +84,7 @@ type oob_policy = Clamp | Wrap | Error
 
 type table = {
   name:          string;
-  values:        float list;
+  values:        expr list;
   out_of_bounds: oob_policy;
 }
 

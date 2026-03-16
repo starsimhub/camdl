@@ -1,6 +1,6 @@
 [@@@warning "-30-50"]  (* allow duplicate record field names; suppress docstring warning *)
 
-type bin_op = Add | Sub | Mul | Div | Pow | Min | Max
+type bin_op = Add | Sub | Mul | Div | Pow | Min | Max | Eq | Neq | Lt | Gt | Le | Ge
 type un_op  = Neg | Exp | Log | Sqrt | Abs | Floor | Ceil
 
 type bin_op_expr      = { op: bin_op; left: expr; right: expr }
@@ -53,7 +53,7 @@ type time_func_kind =
 type time_function = { name: string; kind: time_func_kind }
 
 type oob_policy = Clamp | Wrap | Error
-type table      = { name: string; values: float list; out_of_bounds: oob_policy }
+type table      = { name: string; values: expr list; out_of_bounds: oob_policy }
 
 type recurring_schedule    = { start: float; period: float; end_: float }
 type intervention_schedule =

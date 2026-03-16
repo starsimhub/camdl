@@ -1,7 +1,7 @@
 use crate::{
     compiled_model::CompiledModel,
     config::{GillespieConfig, SimConfig},
-    ekrng::{EkRng, StatefulRng},
+    ekrng::StatefulRng,
     error::SimError,
     intervention::{all_intervention_times, apply_interventions_at},
     ode_integrator::rk4_step,
@@ -52,10 +52,13 @@ fn run_gillespie(
     // Propensity buffer — allocated once, reused
     let mut propensities: Vec<f64> = Vec::with_capacity(n_transitions);
 
-    // TODO(v0.2): switch to next-reaction method (Gibson & Bruck 2000) and key each
-    // per-transition waiting-time draw via EkRng::exp_keyed. The direct method used here
-    // draws one global τ ~ Exp(Λ) which cannot be tied to a single event_key; EKRNG
-    // requires per-transition draws to guarantee order-independence across scenarios.
+    // Scenario coupling via Common Random Numbers (CRN): run baseline and intervention
+    // with the same seed. Before the intervention time, states and propensities are
+    // identical → sequential draws are identical → trajectories are identical.
+    // After the intervention, trajectories diverge naturally.
+    // EKRNG (per-transition keyed draws) would add per-event hash overhead with marginal
+    // variance reduction for compartmental models — reserved for future ABM / conditional
+    // SMC use cases (ekrng.rs is available if needed).
     let mut stateful_rng = StatefulRng::new(seed);
 
     // Sorted output times

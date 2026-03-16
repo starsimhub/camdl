@@ -251,3 +251,68 @@ fn test_cond_pred_negative() {
     let result = eval_expr(&expr, &model, &int_s, &real_s, &[], 0.0).unwrap();
     assert_eq!(result, 99.0);
 }
+
+#[test]
+fn test_binop_gt_true() {
+    let model = CompiledModel::new(minimal_model(vec![int_comp("S")], vec![])).unwrap();
+    let int_s = IntState::new(1);
+    let real_s = RealState::new(0);
+    let expr = Expr::BinOp(BinOpWrap {
+        bin_op: BinOpExpr {
+            op: BinOp::Gt,
+            left: Box::new(Expr::Const(ConstExpr { value: 5.0 })),
+            right: Box::new(Expr::Const(ConstExpr { value: 3.0 })),
+        },
+    });
+    let result = eval_expr(&expr, &model, &int_s, &real_s, &[], 0.0).unwrap();
+    assert_eq!(result, 1.0);
+}
+
+#[test]
+fn test_binop_gt_false() {
+    let model = CompiledModel::new(minimal_model(vec![int_comp("S")], vec![])).unwrap();
+    let int_s = IntState::new(1);
+    let real_s = RealState::new(0);
+    let expr = Expr::BinOp(BinOpWrap {
+        bin_op: BinOpExpr {
+            op: BinOp::Gt,
+            left: Box::new(Expr::Const(ConstExpr { value: 2.0 })),
+            right: Box::new(Expr::Const(ConstExpr { value: 5.0 })),
+        },
+    });
+    let result = eval_expr(&expr, &model, &int_s, &real_s, &[], 0.0).unwrap();
+    assert_eq!(result, 0.0);
+}
+
+#[test]
+fn test_binop_eq_true() {
+    let model = CompiledModel::new(minimal_model(vec![int_comp("S")], vec![])).unwrap();
+    let int_s = IntState::new(1);
+    let real_s = RealState::new(0);
+    let expr = Expr::BinOp(BinOpWrap {
+        bin_op: BinOpExpr {
+            op: BinOp::Eq,
+            left: Box::new(Expr::Const(ConstExpr { value: 4.0 })),
+            right: Box::new(Expr::Const(ConstExpr { value: 4.0 })),
+        },
+    });
+    let result = eval_expr(&expr, &model, &int_s, &real_s, &[], 0.0).unwrap();
+    assert_eq!(result, 1.0);
+}
+
+#[test]
+fn test_binop_le() {
+    let model = CompiledModel::new(minimal_model(vec![int_comp("S")], vec![])).unwrap();
+    let int_s = IntState::new(1);
+    let real_s = RealState::new(0);
+    // 3 <= 3 → true (1.0)
+    let expr = Expr::BinOp(BinOpWrap {
+        bin_op: BinOpExpr {
+            op: BinOp::Le,
+            left: Box::new(Expr::Const(ConstExpr { value: 3.0 })),
+            right: Box::new(Expr::Const(ConstExpr { value: 3.0 })),
+        },
+    });
+    let result = eval_expr(&expr, &model, &int_s, &real_s, &[], 0.0).unwrap();
+    assert_eq!(result, 1.0);
+}

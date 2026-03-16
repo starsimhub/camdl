@@ -30,7 +30,7 @@
 %token TRANSITIONS OBSERVATIONS INTERVENTIONS ODE OUTPUT SIMULATE
 %token INIT TIMEPOINTS SCENARIOS STRATIFY LET FROM TO WHERE SUM
 %token CONSECUTIVE IN BY VALUES ONLY REAL INTEGER RATE PROBABILITY POSITIVE COUNT
-%token AND OR NOT IF THEN ELSE COUPLING EVERY AT_KW FORMAT DESCRIPTION TAG NULL
+%token AND OR NOT IF THEN ELSE COUPLING EVERY AT_KW FORMAT DESCRIPTION TAG NULL TRANSFER
 
 %token EOF
 
@@ -302,6 +302,13 @@ intervention_decl:
           | `Schedule s -> sched := s
         ) iv_kvs;
         { ivname = name; ivaction = !action; ivschedule = !sched } }
+  | name = IDENT COLON TRANSFER LPAREN kwargs = separated_list(COMMA, transfer_kwarg) RPAREN AT_KW LBRACKET ts = separated_list(COMMA, expr) RBRACKET
+      { { ivname = name; ivaction = ATransfer kwargs; ivschedule = SAtTimes ts } }
+
+transfer_kwarg:
+  | k = IDENT EQ e = expr { (k, e) }
+  | FROM EQ e = expr       { ("from", e) }
+  | TO EQ e = expr         { ("to", e) }
 
 iv_kv:
   | AT_KW EQ LBRACKET ts = separated_list(COMMA, expr) RBRACKET

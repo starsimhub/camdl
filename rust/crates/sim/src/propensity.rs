@@ -73,6 +73,12 @@ pub fn eval_expr(
                 BinOp::Pow => a.powf(b),
                 BinOp::Min => a.min(b),
                 BinOp::Max => a.max(b),
+                BinOp::Eq  => if a == b { 1.0 } else { 0.0 },
+                BinOp::Neq => if a != b { 1.0 } else { 0.0 },
+                BinOp::Lt  => if a <  b { 1.0 } else { 0.0 },
+                BinOp::Gt  => if a >  b { 1.0 } else { 0.0 },
+                BinOp::Le  => if a <= b { 1.0 } else { 0.0 },
+                BinOp::Ge  => if a >= b { 1.0 } else { 0.0 },
             })
         }
 
@@ -110,6 +116,7 @@ pub fn eval_expr(
                 .copied()
                 .ok_or_else(|| SimError::UnknownTable(w.table_lookup.table.clone()))?;
             let table = &model.model.tables[idx];
+            let cached = &model.table_values_cache[idx];
             // Only single-index lookups supported
             if w.table_lookup.indices.len() != 1 {
                 return Err(SimError::TableLookup(format!(
@@ -119,7 +126,7 @@ pub fn eval_expr(
             }
             let raw = eval_expr(&w.table_lookup.indices[0], model, int_s, real_s, params, t)?;
             let table_idx = raw.floor() as i64;
-            table_lookup(table, table_idx)
+            table_lookup(table, cached, table_idx)
         }
 
         Expr::Projected(_) => {
@@ -128,10 +135,10 @@ pub fn eval_expr(
     }
 }
 
-/// Perform a table lookup using the table's OobPolicy.
-fn table_lookup(table: &ir::table::Table, idx: i64) -> Result<f64, SimError> {
+/// Perform a table lookup using the table's OobPolicy and pre-evaluated cached values.
+fn table_lookup(table: &ir::table::Table, cached: &[f64], idx: i64) -> Result<f64, SimError> {
     use ir::table::OobPolicy;
-    let n = table.values.len() as i64;
+    let n = cached.len() as i64;
     let i = match table.out_of_bounds {
         OobPolicy::Clamp => idx.clamp(0, n - 1),
         OobPolicy::Wrap  => {
@@ -147,7 +154,7 @@ fn table_lookup(table: &ir::table::Table, idx: i64) -> Result<f64, SimError> {
             idx
         }
     };
-    Ok(table.values[i as usize])
+    Ok(cached[i as usize])
 }
 
 /// Evaluate a time function kind at time `t`.
