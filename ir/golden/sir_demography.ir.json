@@ -1,61 +1,31 @@
 {
   "name": "sir_demography",
   "version": "0.3",
-  "description": "SIR with births into S and deaths from all compartments (open population)",
+  "description": null,
   "compartments": [
-    {
-      "name": "S",
-      "kind": "integer"
-    },
-    {
-      "name": "I",
-      "kind": "integer"
-    },
-    {
-      "name": "R",
-      "kind": "integer"
-    }
+    { "name": "S", "kind": "integer" },
+    { "name": "I", "kind": "integer" },
+    { "name": "R", "kind": "integer" }
   ],
   "transitions": [
     {
       "name": "infection",
-      "stoichiometry": [
-        [
-          "S",
-          -1
-        ],
-        [
-          "I",
-          1
-        ]
-      ],
+      "stoichiometry": [ [ "S", -1 ], [ "I", 1 ] ],
       "rate": {
         "bin_op": {
           "op": "mul",
           "left": {
             "bin_op": {
               "op": "mul",
-              "left": {
-                "param": "beta"
-              },
-              "right": {
-                "pop": "S"
-              }
+              "left": { "param": "beta" },
+              "right": { "pop": "S" }
             }
           },
           "right": {
             "bin_op": {
               "op": "div",
-              "left": {
-                "pop": "I"
-              },
-              "right": {
-                "pop_sum": [
-                  "S",
-                  "I",
-                  "R"
-                ]
-              }
+              "left": { "pop": "I" },
+              "right": { "pop_sum": [ "S", "I", "R" ] }
             }
           }
         }
@@ -69,25 +39,12 @@
     },
     {
       "name": "recovery",
-      "stoichiometry": [
-        [
-          "I",
-          -1
-        ],
-        [
-          "R",
-          1
-        ]
-      ],
+      "stoichiometry": [ [ "I", -1 ], [ "R", 1 ] ],
       "rate": {
         "bin_op": {
           "op": "mul",
-          "left": {
-            "param": "gamma"
-          },
-          "right": {
-            "pop": "I"
-          }
+          "left": { "param": "gamma" },
+          "right": { "pop": "I" }
         }
       },
       "event_key": "recovery:{firing_index}",
@@ -99,25 +56,12 @@
     },
     {
       "name": "birth",
-      "stoichiometry": [
-        [
-          "S",
-          1
-        ]
-      ],
+      "stoichiometry": [ [ "S", 1 ] ],
       "rate": {
         "bin_op": {
           "op": "mul",
-          "left": {
-            "param": "mu"
-          },
-          "right": {
-            "pop_sum": [
-              "S",
-              "I",
-              "R"
-            ]
-          }
+          "left": { "param": "mu" },
+          "right": { "pop_sum": [ "S", "I", "R" ] }
         }
       },
       "event_key": "birth:{firing_index}",
@@ -129,21 +73,12 @@
     },
     {
       "name": "death_S",
-      "stoichiometry": [
-        [
-          "S",
-          -1
-        ]
-      ],
+      "stoichiometry": [ [ "S", -1 ] ],
       "rate": {
         "bin_op": {
           "op": "mul",
-          "left": {
-            "param": "mu"
-          },
-          "right": {
-            "pop": "S"
-          }
+          "left": { "param": "mu" },
+          "right": { "pop": "S" }
         }
       },
       "event_key": "death_S:{firing_index}",
@@ -155,21 +90,12 @@
     },
     {
       "name": "death_I",
-      "stoichiometry": [
-        [
-          "I",
-          -1
-        ]
-      ],
+      "stoichiometry": [ [ "I", -1 ] ],
       "rate": {
         "bin_op": {
           "op": "mul",
-          "left": {
-            "param": "mu"
-          },
-          "right": {
-            "pop": "I"
-          }
+          "left": { "param": "mu" },
+          "right": { "pop": "I" }
         }
       },
       "event_key": "death_I:{firing_index}",
@@ -181,21 +107,12 @@
     },
     {
       "name": "death_R",
-      "stoichiometry": [
-        [
-          "R",
-          -1
-        ]
-      ],
+      "stoichiometry": [ [ "R", -1 ] ],
       "rate": {
         "bin_op": {
           "op": "mul",
-          "left": {
-            "param": "mu"
-          },
-          "right": {
-            "pop": "R"
-          }
+          "left": { "param": "mu" },
+          "right": { "pop": "R" }
         }
       },
       "event_key": "death_R:{firing_index}",
@@ -210,77 +127,68 @@
   "time_functions": [],
   "tables": [],
   "interventions": [],
-  "observations": [
-    {
-      "name": "reported_cases",
-      "data_stream": "cases",
-      "schedule": {
-        "regular": {
-          "start": 7.0,
-          "step": 7.0,
-          "end": 365.0
-        }
-      },
-      "projection": {
-        "cumulative_flow": "infection"
-      },
-      "likelihood": {
-        "poisson": {
-          "rate": {
-            "projected": null
-          }
-        }
-      }
-    }
-  ],
+  "observations": [],
   "parameters": [
     {
       "name": "beta",
-      "value": 0.3,
+      "value": 0.0,
       "prior": null,
       "transform": null,
       "initial_value": null
     },
     {
       "name": "gamma",
-      "value": 0.1,
+      "value": 0.0,
       "prior": null,
       "transform": null,
       "initial_value": null
     },
     {
       "name": "mu",
-      "value": 4.6e-05,
+      "value": 0.0,
+      "prior": null,
+      "transform": null,
+      "initial_value": null
+    },
+    {
+      "name": "N0",
+      "value": 0.0,
+      "prior": null,
+      "transform": null,
+      "initial_value": null
+    },
+    {
+      "name": "I0",
+      "value": 0.0,
       "prior": null,
       "transform": null,
       "initial_value": null
     }
   ],
   "initial_conditions": {
-    "explicit": {
-      "S": 9990,
-      "I": 10,
-      "R": 0
+    "parameterized": {
+      "S": {
+        "bin_op": {
+          "op": "sub",
+          "left": { "param": "N0" },
+          "right": { "param": "I0" }
+        }
+      },
+      "I": { "param": "I0" }
     }
   },
   "data_contract": null,
   "output": {
-    "times": {
-      "regular": {
-        "start": 0.0,
-        "step": 7.0,
-        "end": 365.0
-      }
-    },
+    "times": { "regular": { "start": 0.0, "step": 1.0, "end": 1826.25 } },
     "format": "tsv",
     "trajectory": true,
     "observations": true
   },
   "simulation": {
     "t_start": 0.0,
-    "t_end": 365.0,
+    "t_end": 1826.25,
     "time_semantics": "continuous",
     "dt": null,
-    "rng_seed": 42
+    "rng_seed": null
   }
 }

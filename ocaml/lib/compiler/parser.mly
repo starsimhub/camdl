@@ -15,7 +15,6 @@
 %token EQ          (* = *)
 %token COLON       (* : *)
 %token COMMA       (* , *)
-%token DOT         (* . *)
 %token LBRACE RBRACE
 %token LBRACKET RBRACKET
 %token LPAREN RPAREN
@@ -35,7 +34,7 @@
 %token EOF
 
 (* ── Precedences (lowest → highest) ────────────────────────────────────── *)
-%nonassoc IF THEN ELSE
+%nonassoc ELSE
 %left  OR
 %left  AND
 %nonassoc EQ2 NEQ LT GT LE GE
@@ -43,7 +42,6 @@
 %left  STAR SLASH CROSS
 %right CARET
 %nonassoc UMINUS
-%nonassoc LBRACKET LPAREN DOT
 
 %start <Ast.declaration list> file
 
@@ -285,7 +283,6 @@ obs_kv:
         | s -> failwith ("unknown likelihood: " ^ s)) }
 
 obs_projection:
-  | name = IDENT idxs = index_items_opt { ProjIncidence (name, idxs) }
   | e = expr { ProjDerived e }
 
 (* ── Interventions block ─────────────────────────────────────────────────── *)

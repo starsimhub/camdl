@@ -94,7 +94,7 @@ fn run_gillespie(
 
         if lambda_total <= 0.0 {
             // Absorbing state — advance to next output/intervention or end
-            let next_special = next_time(t, cfg.t_end, output_idx, &output_times, iv_idx, &iv_times);
+            let next_special = next_time(cfg.t_end, output_idx, &output_times, iv_idx, &iv_times);
             // Flush outputs up to end
             flush_outputs(
                 t, next_special, &mut output_idx, &output_times,
@@ -243,7 +243,7 @@ fn next_iv(t: f64, iv_idx: usize, iv_times: &[f64]) -> Option<f64> {
 }
 
 fn next_time(
-    t: f64, t_end: f64,
+    t_end: f64,
     out_idx: usize, out_times: &[f64],
     iv_idx: usize, iv_times: &[f64],
 ) -> f64 {

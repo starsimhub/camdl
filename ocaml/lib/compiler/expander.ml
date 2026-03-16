@@ -840,6 +840,13 @@ let expand_observations ctx =
         let concrete = if idx_vals = [] then name
           else String.concat "_" (name :: idx_vals) in
         Ir.CurrentPop concrete
+      | ProjDerived (EIdent (name, _)) ->
+        (* bare compartment/transition name → cumulative flow *)
+        Ir.CumulativeFlow name
+      | ProjDerived (EIndex (name, idxs)) ->
+        let idx_vals = List.map (index_item_to_str []) idxs in
+        let concrete = String.concat "_" (name :: idx_vals) in
+        Ir.CumulativeFlow concrete
       | ProjDerived e ->
         Ir.DerivedExpr (resolve_expr ctx [] e)
     in

@@ -12,15 +12,13 @@ model.camdl  →  camdlc  →  model.ir.json  →  camdl-sim  →  trajectory (s
 ## Build
 
 ```bash
-cd ocaml && dune build
-cd rust  && cargo build --release
+make build       # build both OCaml and Rust
+make install     # copy binaries to ~/.local/bin
 ```
 
-Binaries after build:
-- `ocaml/_build/default/bin/camdlc.exe` — compiler/inspector
-- `rust/target/release/camdl-sim` — simulator
-
-Add both to `PATH`, or use the `bin/camdl` wrapper (see below).
+`make install` puts `camdlc`, `camdl-sim`, and `camdl` in `~/.local/bin`.
+Make sure that's on your `PATH`. (Dune names its output `camdlc.exe`
+internally — `make install` strips the suffix.)
 
 ## Quick start
 
@@ -28,40 +26,24 @@ Add both to `PATH`, or use the `bin/camdl` wrapper (see below).
 
 ```bash
 # 1. Compile to IR JSON
-ocaml/_build/default/bin/camdlc.exe ocaml/golden/sir_basic.camdl > /tmp/sir.ir.json
+camdlc ocaml/golden/sir_basic.camdl > /tmp/sir.ir.json
 
-# 2. Simulate from IR (output is TSV on stdout)
-rust/target/release/camdl-sim simulate /tmp/sir.ir.json \
+# 2. Simulate (TSV on stdout)
+camdl-sim simulate /tmp/sir.ir.json \
   --set beta=0.3 --set gamma=0.1 --set N0=1000 --set I0=10 \
   --seed 42
 ```
 
 ### Compile and simulate in one command
 
-The `bin/camdl` wrapper routes to the right binary. With `camdlc` and
-`camdl-sim` on `PATH`:
-
 ```bash
 camdl simulate ocaml/golden/sir_basic.camdl \
   --set beta=0.3 --set gamma=0.1 --set N0=1000 --set I0=10
 ```
 
-Or point to them explicitly:
-
-```bash
-CAMDLC=ocaml/_build/default/bin/camdlc.exe \
-CAMDL_SIM=rust/target/release/camdl-sim \
-  bin/camdl simulate ocaml/golden/sir_basic.camdl \
-  --set beta=0.3 --set gamma=0.1 --set N0=1000 --set I0=10
-```
-
-`camdl-sim` accepts `.camdl` files directly using the same `$CAMDLC` env var:
-
-```bash
-CAMDLC=ocaml/_build/default/bin/camdlc.exe \
-  rust/target/release/camdl-sim simulate ocaml/golden/sir_basic.camdl \
-  --set beta=0.3 --set gamma=0.1 --set N0=1000 --set I0=10
-```
+`camdl` is a thin wrapper in `bin/camdl` that routes `compile`/`check`/`inspect`
+to `camdlc` and `simulate` to `camdl-sim`. Both must be on `PATH`, or override
+via `$CAMDLC` and `$CAMDL_SIM`.
 
 ---
 
@@ -357,9 +339,8 @@ camdl-sim simulate ir/golden/sir_basic.ir.json \
   --backend tau_leap --dt 1.0 \
   --set beta=0.3 --set gamma=0.1 --set N0=10000 --set I0=100
 
-# Directly from source (CAMDLC must be set or on PATH)
-CAMDLC=ocaml/_build/default/bin/camdlc.exe \
-  camdl-sim simulate ocaml/golden/seir_age.camdl \
+# Directly from source (camdlc must be on PATH)
+camdl-sim simulate ocaml/golden/seir_age.camdl \
   --set beta=0.4 --set sigma=0.2 --set gamma=0.1
 
 # Reproducible pair (same seed, different beta)
@@ -372,36 +353,38 @@ camdl-sim simulate ir/golden/sir_basic.ir.json --set beta=0.5 ... --seed 1
 ## Testing
 
 ```bash
-# OCaml: all compiler tests + IR round-trip
-cd ocaml && dune runtest
+make test          # all OCaml + Rust tests
+make test-ocaml    # OCaml compiler tests + IR round-trip only
+make test-rust     # Rust unit + integration tests only
+```
 
-# Rust: all unit + integration tests
-cd rust && cargo test --workspace
+Individual Rust test files (from `rust/`):
 
-# Specific Rust test files
-cd rust && cargo test --test golden_deser     # IR deserialisation
-cd rust && cargo test --test expr_eval        # expression evaluator
-cd rust && cargo test --test interventions    # intervention floor/fraction
-cd rust && cargo test --test gillespie_determinism  # CRN reproducibility
+```bash
+cargo test --test golden_deser          # IR deserialisation
+cargo test --test expr_eval             # expression evaluator
+cargo test --test interventions         # FractionTransfer floor behaviour
+cargo test --test gillespie_determinism # CRN seed reproducibility
 ```
 
 ### Golden files
 
-| Directory | Contents | Tests |
+| Directory | Contents | Tested by |
 |---|---|---|
 | `ocaml/golden/` | `.camdl` sources + compiled `.ir.json` | OCaml compiler tests |
 | `ir/golden/` | Canonical `.ir.json` files | Rust deserialization tests |
 
-Both sets are committed. Changes require regenerating them manually:
+Both sets are committed. Regenerate after compiler changes:
 
 ```bash
-# Recompile one OCaml golden:
-camdlc ocaml/golden/sir_basic.camdl > ocaml/golden/sir_basic.ir.json
+make update-golden   # recompile all DSL fixtures → ocaml/golden/*.ir.json
+                     # and sync the shared models into ir/golden/
+```
 
-# Recompile all OCaml goldens:
-for f in ocaml/golden/*.camdl; do
-  camdlc "$f" > "${f%.camdl}.ir.json"
-done
+To regenerate a single file:
+
+```bash
+camdlc ocaml/golden/sir_basic.camdl > ocaml/golden/sir_basic.ir.json
 ```
 
 ---
@@ -409,6 +392,7 @@ done
 ## Repository layout
 
 ```
+Makefile                 build / test / install / update-golden / sim
 bin/
   camdl                  Wrapper script: routes compile/inspect → camdlc,
                          simulate → camdl-sim

@@ -110,7 +110,7 @@ rule token = parse
   | '='     { EQ }
   | ':'     { COLON }
   | ','     { COMMA }
-  | '.'     { DOT }
+  | '.'     { raise (LexError ("unexpected character: '.'")) }
   | '{'     { LBRACE }
   | '}'     { RBRACE }
   | '['     { LBRACKET }
