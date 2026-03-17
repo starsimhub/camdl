@@ -52,8 +52,11 @@ type time_func_kind =
   | Periodic     of periodic
 type time_function = { name: string; kind: time_func_kind }
 
-type oob_policy = Clamp | Wrap | Error
-type table      = { name: string; values: expr list; out_of_bounds: oob_policy }
+type oob_policy  = Clamp | Wrap | Error
+type table_source =
+  | Inline   of expr list
+  | External of string
+type table = { name: string; source: table_source; out_of_bounds: oob_policy }
 
 type recurring_schedule    = { start: float; period: float; end_: float }
 type intervention_schedule =

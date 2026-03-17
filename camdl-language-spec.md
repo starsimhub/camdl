@@ -1,6 +1,6 @@
 # The camdl Language Specification
 
-**Version:** 0.3-draft **Date:** 2026-03-13
+**Version:** 0.3-draft **Date:** 2026-03-16
 
 _camdl (Compartmental Model Description Language) is a domain-specific language
 for specifying stochastic compartmental models. A `.camdl` file defines model
@@ -173,8 +173,9 @@ parameters {
 }
 ```
 
-Parameters are **declared** here. Values are **never** set in the model file —
-they come from external `params.toml`, CLI flags, or inference engines.
+Parameters are **declared** here. Default values may optionally be specified
+in the model file. Concrete values for inference are supplied externally via
+CLI flags or inference engines.
 
 ### 4.1 Parameter Types
 
@@ -188,6 +189,74 @@ real        : unconstrained (default if omitted).
 
 Types enable: validation of supplied values, default inference transforms,
 dimensional checking in rate expressions.
+
+### 4.2 Default Values
+
+Parameters may have an optional default value specified with `=`:
+
+```
+parameters {
+  gamma    : positive = 0.1     # default 0.1; overridable via --set gamma=0.2
+  rho      : probability = 0.5
+  beta     : rate               # no default; must be supplied externally
+}
+```
+
+Defaults are stored in the IR and used by the simulator unless overridden at
+runtime via `--set NAME=VALUE`. They do not affect inference — inference
+engines always supply their own values.
+
+### 4.3 Indexed Parameters
+
+Parameters may be declared with a single dimension index, creating one scalar
+parameter per stratum:
+
+```
+parameters {
+  gamma    : positive = 0.1
+  N[patch] : positive = 1000.0   # expands to N_urban, N_rural, ...
+  R0[patch]: positive = 2.5      # expands to R0_urban, R0_rural, ...
+}
+```
+
+The index must refer to a declared `stratify` dimension. Each expanded scalar
+parameter carries the same default value. In expressions, indexed parameters
+are accessed with `[index]`:
+
+```
+let beta[p in patch] = R0[p] * gamma   # R0[p] → Param("R0_urban") etc.
+```
+
+**Index namespace rule.** Inside `[...]` on a parameter reference, the compiler
+checks only:
+1. The current substitution environment (bound index variables like `p`)
+2. The literal dimension values (e.g., `R0[urban]` → `Param("R0_urban")`)
+
+Let bindings and other parameters are never checked in index position. `R0[urban]`
+always means the stratum value `urban`, even if a let binding named `urban` exists.
+
+**Shadowing warning W103.** The compiler emits W103 when a let binding name
+matches a stratum value in any dimension:
+
+```
+let urban = 1.0   # W103: let binding 'urban' shadows stratum value 'urban'
+                  #   in dimension 'patch'. This is allowed but consider renaming.
+```
+
+**IR representation.** Indexed parameter declarations expand to flat scalar
+parameters:
+
+```
+N[patch] : positive = 1000.0  →  { name: "N_urban",  value: 1000.0, kind: "positive" }
+                                   { name: "N_rural",  value: 1000.0, kind: "positive" }
+```
+
+**Runtime override.** Use `--set-vec PREFIX=FILE` to supply per-stratum values
+at runtime (see §22):
+
+```bash
+camdl-sim simulate model.ir.json --set-vec R0=/tmp/r0_posterior.tsv
+```
 
 ---
 
@@ -804,8 +873,8 @@ declare how each dimension interacts:
 ```
 # Sugar: base model + coupling declarations
 infection : S --> E @ beta * S * I / N {
-  coupling(age) = C_age
-  coupling(sex) = B_sex
+  coupling[age = C_age]
+  coupling[sex = B_sex]
 }
 ```
 
@@ -815,7 +884,7 @@ instead.
 
 ### 10.2 Expansion Rules
 
-The expansion of `coupling(dim) = M` transforms the base transmission rate as
+The expansion of `coupling[dim = M]` transforms the base transmission rate as
 follows. Starting from `@ beta * S * I / N`:
 
 1. The compiler adds index variables for each coupling dimension
@@ -828,7 +897,7 @@ follows. Starting from `@ beta * S * I / N`:
 Multiple `coupling` lines nest the sums:
 
 ```
-# coupling(age) = C_age, coupling(sex) = B_sex expands to:
+# coupling[age = C_age], coupling[sex = B_sex] expands to:
 infection[a in age, s in sex] : S[a,s] --> E[a,s]
   @ beta * S[a,s] * sum(b in age, sum(t in sex,
       C_age[a,b] * B_sex[s,t] * I[b,t]
@@ -929,6 +998,10 @@ safety the rate expression should clamp:
 
 ## 11. ODE Block
 
+> **Not yet implemented (v0.2).** The `ode { }` block is parsed but currently
+> discarded by the expander. Real-valued compartments (`W : real`) and ODE
+> evolution are planned for v0.2.
+
 For real-valued compartments:
 
 ```
@@ -944,6 +1017,10 @@ compartments, ODE evolution for real compartments between events.
 ---
 
 ## 12. Data
+
+> **Not yet implemented (v0.2).** The `data { }` block is not yet supported
+> by the parser or expander. External data loading and observation targets
+> backed by data files are planned for v0.2.
 
 External data for features (always loaded) and observation targets.
 
@@ -1109,6 +1186,12 @@ camdl simulate model.camdl --enable sia_round_1 --seed 42
 ---
 
 ## 15. Timepoints and Reserved Identifiers
+
+> **Partially implemented.** The `timepoints { }` block is parsed but the
+> declared timepoint values are currently discarded by the expander and not
+> available in expressions. Full timepoint support is planned for v0.2.
+> The built-in reserved identifiers `t_start` and `t_end` are always
+> available regardless.
 
 ```
 timepoints {
@@ -1295,6 +1378,10 @@ time_when(pred)            first time predicate becomes true
 ---
 
 ## 18. Scenarios
+
+> **Not yet implemented (v0.2).** The `scenarios { }` block token is
+> recognized by the lexer but has no grammar rules or expander support.
+> Scenario management is planned for v0.2.
 
 Patch-based modifications to the baseline (Buffalo 2026). Baseline is the
 identity patch — the model as defined, no modifications.
@@ -1604,38 +1691,94 @@ structural skeleton; the parameter grammar fills in the rest.
 
 ## 22. CLI
 
+The toolchain has two binaries: **`camdlc`** (OCaml compiler) and
+**`camdl-sim`** (Rust simulator). The planned unified `camdl` binary is a
+future integration.
+
+### 22.1 camdlc — Compiler (OCaml)
+
 ```bash
-# Forward simulation (--params required: runtime needs concrete values)
-camdl simulate MODEL --params PARAMS [--seed N] [--seeds N:M]
-                     [--scenario NAME] [--enable INTERVENTION]
-                     [--backend gillespie|tau_leap|ode|chain_binomial]
-                     [--from T] [--to T] [--set PARAM=VAL]
-                     [--output-dir DIR] [--force]
+# Compile a .camdl file to IR JSON (stdout)
+camdlc FILE.camdl [--set NAME=VALUE ...]
 
-# Compile to IR (--params optional: IR stores symbolic Param references)
-camdl compile   MODEL [-o OUTPUT.ir.json] [--params PARAMS]
+# Validate model structure without producing IR
+camdlc check FILE.camdl
 
-# Run all in-file scenarios and compare (--params required)
-camdl compare   MODEL --params PARAMS [--seeds N:M]
-
-# Validate model structure (no params, no simulation)
-camdl check     MODEL
-
-# Display model info (compartments, parameters, dimensions, transition count)
-camdl info      MODEL
-
-# Verify a cached run matches its metadata
-camdl verify    RUN_DIR
-
-# Run an experiment file
-camdl experiment FILE
+# Inspect model: summary, compartments, transitions, let bindings, rates
+camdlc inspect FILE.camdl [--summary] [--compartments]
+                           [--transitions [PATTERN]] [--count]
+                           [--transition NAME --rate]
+                           [--let NAME] [--expansion NAME]
+                           [--ir] [--ascii] [--no-color]
 ```
 
-`camdl compile` produces the IR with symbolic `Param("beta")` nodes — no values
-needed. Tables that reference parameters inline (like
-`B_sex = [[0.0, beta_mf], ...]`) store `Param("beta_mf")` in the IR, not a
-resolved float. When `--params` is provided to `compile`, parameters are
-resolved to concrete values in the IR (useful for inspection/debugging).
+`camdlc FILE.camdl` produces the IR with `Param("beta")` nodes for undeclared
+defaults and concrete float values for declared defaults. Output is written to
+stdout as JSON. Redirect with `camdlc model.camdl > model.ir.json`.
+
+The `--set NAME=VALUE` flag overrides a parameter value in the emitted IR
+(useful for inspection and debugging; not for inference).
+
+### 22.2 camdl-sim — Simulator (Rust)
+
+```bash
+# Simulate from an IR JSON file (output: TSV to stdout)
+camdl-sim simulate MODEL.ir.json [OPTIONS]
+camdl-sim MODEL.ir.json [OPTIONS]       # 'simulate' subcommand is optional
+
+# Simulate directly from a .camdl source (compiles via camdlc automatically)
+camdl-sim MODEL.camdl [OPTIONS]         # requires camdlc on PATH (or $CAMDLC)
+
+Options:
+  --backend  gillespie|tau_leap|chain_binomial  (default: gillespie)
+  --dt       DT     step size for tau_leap / chain_binomial
+  --seed     N      RNG seed (default: 1)
+  --set      NAME=VALUE    override a scalar parameter value
+  --set-vec  PREFIX=FILE   override indexed params from a keyed TSV
+  --table    NAME=FILE     supply a runtime external() table from CSV/TSV/JSON
+```
+
+**`--set NAME=VALUE`** overrides a single parameter. Can be repeated:
+```bash
+camdl-sim model.ir.json --set gamma=0.1 --set beta=0.3
+```
+
+**`--set-vec PREFIX=FILE`** loads a two-column keyed TSV (`name<TAB>value`)
+and applies it as per-stratum parameter overrides. The full parameter name is
+constructed as `PREFIX_name`:
+```bash
+# r0_values.tsv:
+#   urban   2.1
+#   rural   1.8
+camdl-sim model.ir.json --set-vec R0=r0_values.tsv
+# Sets R0_urban=2.1, R0_rural=1.8
+```
+Unknown keys (constructed parameter name not in model) cause an immediate
+error with a clear message.
+
+**`--table NAME=FILE`** supplies a runtime external table. Models that declare
+`external("NAME")` tables require this flag; simulation fails if any external
+table is not provided.
+
+Output is a TSV to stdout with columns: `t`, one column per integer
+compartment, one column per real compartment, and `flow_<name>` per
+transition. A `diagnostics.tsv` is written unconditionally alongside.
+
+### 22.3 Planned CLI (v0.2+)
+
+The following commands are **planned** but not yet implemented:
+
+```bash
+# Planned unified CLI
+camdl simulate MODEL --params PARAMS [--seed N] [--seeds N:M]
+                     [--scenario NAME]
+                     [--backend gillespie|tau_leap|chain_binomial]
+                     [--set PARAM=VAL] [--output-dir DIR]
+
+camdl compare   MODEL --params PARAMS [--seeds N:M]
+camdl verify    RUN_DIR
+camdl experiment FILE
+```
 
 ---
 
@@ -1778,7 +1921,7 @@ tables {
 
 transitions {
   infection : S --> E @ beta * S * I / N {
-    coupling(age) = C_age
+    coupling[age = C_age]
   }
   progression : E --> I  @ sigma * E
   recovery    : I --> R  @ gamma * I
@@ -1786,7 +1929,7 @@ transitions {
 ```
 
 The sugar version has no index variables, no `sum`, no `N_local`. The
-`coupling(age) = C_age` declaration tells the compiler to transform `S * I / N`
+`coupling[age = C_age]` declaration tells the compiler to transform `S * I / N`
 into the per-stratum formula with contact-matrix-weighted summation. Progression
 and recovery are automatically replicated within each stratum (default behavior
 when no coupling is declared).
@@ -1828,7 +1971,7 @@ same-sex terms. `infection_female` rate becomes
 `S[female] * beta_mf * I[male] / N_local[male]`. No special `directed` keyword
 needed — the matrix structure does all the work.
 
-### 23.5 Cholera with Environmental Reservoir (Real Compartment + ODE)
+### 23.5 Cholera with Environmental Reservoir (Real Compartment + ODE) _(planned v0.2)_
 
 ```
 time_unit = 'days
@@ -2334,7 +2477,7 @@ sia_round_1 : transfer(fraction = 0.80, from = S, to = V) {
 ```
 # DSL:
 infection : S --> E @ beta * S * I / N {
-  coupling(age) = C_age
+  coupling[age = C_age]
 }
 # with age = [child, adult]
 
@@ -2473,6 +2616,29 @@ pre-intervention state, then `source -= delta, dest += delta`.
 
 The compiler produces clear, domain-specific error messages. Errors are caught
 at compile time, not simulation time.
+
+### 27.0 Diagnostic Codes
+
+Diagnostics carry a numeric code for programmatic consumption (e.g.,
+`--json-errors` mode):
+
+| Code | Kind    | Description |
+|------|---------|-------------|
+| E100 | Error   | Unknown index value in `[...]` — not a bound variable and not a member of any dimension |
+| E200 | Error   | Undeclared compartment or parameter referenced in expression |
+| E201 | Error   | Duplicate declaration (two parameters named `beta`, etc.) |
+| E202 | Error   | Wrong number of indices for compartment |
+| E203 | Error   | Index belongs to wrong dimension (e.g., `C_age[i, s]` where `s : sex`) |
+| E204 | Error   | Partial-stratification stoichiometry: destination compartment dimensions incompletely specified |
+| W002 | Warning | Zero-firing transition (emitted at simulation time by `camdl-sim`) |
+| W103 | Warning | Let binding name shadows a stratum value in some dimension |
+
+Diagnostics can be emitted as structured JSON by passing `--json-errors` to
+`camdlc`:
+
+```bash
+camdlc check model.camdl --json-errors 2>errors.json
+```
 
 ### 27.1 Dimension Errors
 

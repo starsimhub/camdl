@@ -162,6 +162,57 @@ Action kinds: `transfer(fraction=..., from=..., to=...)`,
 (`name = value`). Schedule kinds: `at [t1, t2, ...]` and
 `every E from F to T`.
 
+### Erlang-staged compartments (linear chain trick)
+
+A single compartment has an exponentially distributed residence time — often
+too memoryless to be realistic. To get a Gamma-distributed duration (sharply
+peaked around the mean), split the compartment into `n` sequential sub-stages,
+each at rate `n * sigma`. This is the linear chain trick.
+
+With 3 latent sub-stages written out explicitly:
+
+```
+compartments { S, E, I, R }
+stratify(by = latent_stage, values = [e1, e2, e3], only = [E])
+
+parameters { beta : rate  sigma : rate  gamma : rate }
+
+transitions {
+  infection  : S     --> E[e1]  @ beta * S * I / (S + E + I + R)
+  latent_1_2 : E[e1] --> E[e2]  @ 3 * sigma * E[e1]
+  latent_2_3 : E[e2] --> E[e3]  @ 3 * sigma * E[e2]
+  onset      : E[e3] --> I      @ 3 * sigma * E[e3]
+  recovery   : I     --> R      @ gamma * I
+}
+```
+
+`E` is only stratified (via `only = [E]`) — `S`, `I`, `R` remain scalar. The
+three sub-transitions `latent_1_2` and `latent_2_3` are identical in structure,
+differing only in which stage index they reference.
+
+The `consecutive` iterator is sugar that generates exactly those transitions
+without listing them individually:
+
+```
+transitions {
+  infection : S --> E[e1]  @ beta * S * I / (S + E + I + R)
+
+  latent[(s, s_next) in consecutive(latent_stage)]
+    : E[s] --> E[s_next]
+    @ 3 * sigma * E[s]
+
+  onset    : E[e3] --> I  @ 3 * sigma * E[e3]
+  recovery : I    --> R   @ gamma * I
+}
+```
+
+`consecutive(latent_stage)` produces the pairs `(e1, e2)` and `(e2, e3)` —
+one transition per pair. The transition family is named `latent`; the IR
+contains `latent_e1_e2` and `latent_e2_e3`. Both forms compile to identical IR.
+
+Use `n` sub-stages and rate `n * sigma` to control the shape: more stages →
+narrower distribution → more realistic incubation or infectious period modelling.
+
 ### Key language features
 
 - **Stratification**: `stratify(by = dim, values = [...])` — adds index
@@ -299,7 +350,7 @@ MODEL may be an .ir.json file or a .camdl source file (compiled via $CAMDLC).
 Options:
   --backend  gillespie|tau_leap|chain_binomial  (default: gillespie)
   --dt       DT     time step for tau_leap / chain_binomial
-  --seed     N      RNG seed (default: 42)
+  --seed     N      RNG seed (default: 1)
   --set      NAME=VALUE  override a parameter value
 ```
 

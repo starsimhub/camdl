@@ -131,9 +131,13 @@ let oob_policy_to_json = function
   | Error -> str "error"
 
 let table_to_json (t : table) : Yojson.Safe.t =
+  let source_field = match t.source with
+    | Inline vs  -> ("values",   arr (List.map expr_to_json vs))
+    | External n -> ("external", str n)
+  in
   obj [
     ("name",          str t.name);
-    ("values",        arr (List.map expr_to_json t.values));
+    source_field;
     ("out_of_bounds", oob_policy_to_json t.out_of_bounds);
   ]
 

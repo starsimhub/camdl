@@ -4,7 +4,61 @@ use sim::{
     simulate::Simulate,
     write_diagnostics_tsv, warn_zero_firings,
 };
+use ir::table::TableSource;
 use std::collections::HashMap;
+
+/// Load a flat Vec<Expr::Const> from a CSV, TSV, or JSON file.
+/// CSV/TSV: rows of numbers, row-major. JSON: `[n, ...]` or `[[n,...],...]`.
+fn load_table_file(path: &str) -> Result<Vec<ir::expr::Expr>, String> {
+    use ir::expr::Expr;
+    let content = std::fs::read_to_string(path)
+        .map_err(|e| format!("{}: {}", path, e))?;
+    let ext = std::path::Path::new(path)
+        .extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
+
+    if ext == "json" {
+        let v: serde_json::Value = serde_json::from_str(&content)
+            .map_err(|e| format!("JSON parse error in {}: {}", path, e))?;
+        let mut out = Vec::new();
+        match &v {
+            serde_json::Value::Array(rows) => {
+                for row in rows {
+                    match row {
+                        serde_json::Value::Array(cols) => {
+                            for cell in cols {
+                                let f = cell.as_f64().ok_or_else(||
+                                    format!("expected number in {}", path))?;
+                                out.push(Expr::const_(f));
+                            }
+                        }
+                        _ => {
+                            let f = row.as_f64().ok_or_else(||
+                                format!("expected number in {}", path))?;
+                            out.push(Expr::const_(f));
+                        }
+                    }
+                }
+            }
+            _ => return Err(format!("expected JSON array in {}", path)),
+        }
+        Ok(out)
+    } else {
+        // CSV or TSV
+        let sep = if ext == "tsv" { '\t' } else { ',' };
+        let mut out = Vec::new();
+        for line in content.lines() {
+            let line = line.trim();
+            if line.is_empty() || line.starts_with('#') { continue; }
+            for cell in line.split(sep) {
+                let cell = cell.trim();
+                let f: f64 = cell.parse()
+                    .map_err(|_| format!("expected number, got '{}' in {}", cell, path))?;
+                out.push(Expr::const_(f));
+            }
+        }
+        Ok(out)
+    }
+}
 
 fn usage() -> ! {
     eprintln!("camdl simulate MODEL.ir.json [OPTIONS]");
@@ -12,9 +66,34 @@ fn usage() -> ! {
     eprintln!("Options:");
     eprintln!("  --backend  gillespie|tau_leap|chain_binomial  (default: gillespie)");
     eprintln!("  --dt       DT   step size for tau_leap / chain_binomial");
-    eprintln!("  --seed     N    RNG seed (default: 42)");
-    eprintln!("  --set      NAME=VALUE  override a parameter value");
+    eprintln!("  --seed     N    RNG seed (default: 1)");
+    eprintln!("  --set      NAME=VALUE    override a parameter value");
+    eprintln!("  --set-vec  PREFIX=FILE   override indexed params from a keyed TSV (name<TAB>value)");
+    eprintln!("  --table    NAME=FILE     supply a runtime external() table from CSV/TSV/JSON");
     std::process::exit(1);
+}
+
+/// Load a keyed TSV file (two columns: name<TAB>value) for --set-vec.
+/// Returns Vec<(key, value)>. Skips blank lines and # comments.
+fn load_keyed_tsv(path: &str) -> Result<Vec<(String, f64)>, String> {
+    let content = std::fs::read_to_string(path)
+        .map_err(|e| format!("{}: {}", path, e))?;
+    let mut out = Vec::new();
+    for (lineno, line) in content.lines().enumerate() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') { continue; }
+        let mut parts = line.splitn(2, '\t');
+        let key = parts.next()
+            .ok_or_else(|| format!("{}:{}: expected key<TAB>value", path, lineno + 1))?
+            .trim().to_string();
+        let val_str = parts.next()
+            .ok_or_else(|| format!("{}:{}: missing value column", path, lineno + 1))?
+            .trim();
+        let val: f64 = val_str.parse()
+            .map_err(|_| format!("{}:{}: expected number, got '{}'", path, lineno + 1, val_str))?;
+        out.push((key, val));
+    }
+    Ok(out)
 }
 
 fn main() {
@@ -28,8 +107,12 @@ fn main() {
     let mut ir_path:   Option<String> = None;
     let mut backend  = "gillespie".to_string();
     let mut dt       = 1.0_f64;
-    let mut seed     = 42_u64;
+    let mut seed     = 1_u64;
     let mut overrides: HashMap<String, f64> = HashMap::new();
+    let mut table_files: HashMap<String, String> = HashMap::new();
+
+    // Collect --set-vec PREFIX=FILE entries for deferred validation after model load
+    let mut set_vec_entries: Vec<(String, String)> = Vec::new();
 
     let mut i = 0;
     while i < args.len() {
@@ -45,6 +128,22 @@ fn main() {
                 let v: f64 = parts.next().and_then(|s| s.parse().ok())
                     .expect("--set value must be a number");
                 overrides.insert(k, v);
+            }
+            "--set-vec" => {
+                i += 1;
+                let kv = &args[i];
+                let mut parts = kv.splitn(2, '=');
+                let prefix = parts.next().expect("--set-vec needs PREFIX=FILE").to_string();
+                let file   = parts.next().expect("--set-vec needs PREFIX=FILE").to_string();
+                set_vec_entries.push((prefix, file));
+            }
+            "--table"   => {
+                i += 1;
+                let kv = &args[i];
+                let mut parts = kv.splitn(2, '=');
+                let k = parts.next().expect("--table needs NAME=FILE").to_string();
+                let v = parts.next().expect("--table needs NAME=FILE").to_string();
+                table_files.insert(k, v);
             }
             s if s.starts_with("--") => { eprintln!("unknown flag: {}", s); usage(); }
             path => { ir_path = Some(path.to_string()); }
@@ -86,6 +185,54 @@ fn main() {
     // Apply --set overrides
     for p in &mut model.parameters {
         if let Some(&v) = overrides.get(&p.name) { p.value = v; }
+    }
+
+    // Apply --set-vec PREFIX=FILE overrides (keyed TSV: name<TAB>value)
+    if !set_vec_entries.is_empty() {
+        let known_param_names: std::collections::HashSet<String> =
+            model.parameters.iter().map(|p| p.name.clone()).collect();
+        // Load and validate all entries first, then apply
+        let mut resolved: Vec<(String, f64)> = Vec::new();
+        for (prefix, file) in &set_vec_entries {
+            let entries = load_keyed_tsv(file).unwrap_or_else(|e| {
+                eprintln!("error: --set-vec {}: {}", prefix, e);
+                std::process::exit(1);
+            });
+            for (key, val) in entries {
+                let full_name = format!("{}_{}", prefix, key);
+                if !known_param_names.contains(&full_name) {
+                    eprintln!("error: --set-vec {}: unknown parameter '{}'", prefix, full_name);
+                    std::process::exit(1);
+                }
+                resolved.push((full_name, val));
+            }
+        }
+        for (full_name, val) in resolved {
+            for p in &mut model.parameters {
+                if p.name == full_name { p.value = val; }
+            }
+        }
+    }
+
+    // Fill external() tables from --table NAME=FILE
+    for table in &mut model.tables {
+        if let TableSource::External { external: ref name } = table.source {
+            let logical_name = name.clone();
+            match table_files.get(&logical_name) {
+                None => {
+                    eprintln!("error: table '{}' is declared as external() but --table {}=<file> was not provided",
+                        logical_name, logical_name);
+                    std::process::exit(1);
+                }
+                Some(path) => {
+                    let values = load_table_file(path).unwrap_or_else(|e| {
+                        eprintln!("error loading table '{}' from {}: {}", logical_name, path, e);
+                        std::process::exit(1);
+                    });
+                    table.source = TableSource::Inline { values };
+                }
+            }
+        }
     }
 
     let compiled = CompiledModel::new(model.clone())

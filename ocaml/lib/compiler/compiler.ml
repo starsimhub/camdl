@@ -24,9 +24,7 @@ let compile_detail_result ?(name = "model") ?(filename = "<input>") (src : strin
           ~loc:(Diagnostics.loc_of_positions ~file:filename pos pos)
           ~message:(Printf.sprintf "lex error: %s" msg)
           ();
-        Fmt.set_style_renderer Fmt.stderr `Ansi_tty;
-        Diagnostics.render_all diags source Fmt.stderr;
-        exit 1
+        Diagnostics.report_and_exit diags source
       | Parser.Error ->
         let pos = lexbuf.Lexing.lex_curr_p in
         let diags = Diagnostics.create () in
@@ -35,17 +33,16 @@ let compile_detail_result ?(name = "model") ?(filename = "<input>") (src : strin
           ~loc:(Diagnostics.loc_of_positions ~file:filename pos pos)
           ~message:"syntax error"
           ();
-        Fmt.set_style_renderer Fmt.stderr `Ansi_tty;
-        Diagnostics.render_all diags source Fmt.stderr;
-        exit 1
+        Diagnostics.report_and_exit diags source
     in
-    let (model, ctx, summary) = Expander.expand_detail name decls in
+    let source_dir =
+      if filename = "<input>" then ""
+      else Filename.dirname filename
+    in
+    let (model, ctx, summary) = Expander.expand_detail ~source_dir name decls in
     (* Surface any diagnostics collected during expansion *)
-    if Diagnostics.has_errors ctx.diags then (
-      Fmt.set_style_renderer Fmt.stderr `Ansi_tty;
-      Diagnostics.render_all ctx.diags source Fmt.stderr;
-      exit 1
-    );
+    if Diagnostics.has_errors ctx.diags then
+      Diagnostics.report_and_exit ctx.diags source;
     Ok { model; ctx; summary; source }
   with
   | Failure msg -> Error msg

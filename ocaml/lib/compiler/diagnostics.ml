@@ -124,6 +124,44 @@ let render_one ppf cache (d : diagnostic) =
   ) related;
   Fmt.pf ppf "@\n"
 
+(* ── JSON serialisation ──────────────────────────────────────────────────── *)
+
+let json_errors_mode = ref false
+
+let severity_string = function
+  | Error   -> "error"
+  | Warning -> "warning"
+
+let loc_to_json (l : loc) : Yojson.Safe.t =
+  `Assoc [
+    ("file",     `String l.file);
+    ("line",     `Int    l.line);
+    ("col",      `Int    l.col);
+    ("end_line", `Int    l.end_line);
+    ("end_col",  `Int    l.end_col);
+  ]
+
+let diagnostic_to_json (d : diagnostic) : Yojson.Safe.t =
+  let fields : (string * Yojson.Safe.t) list = [
+    ("severity", `String (severity_string d.severity));
+    ("code",     `String d.code);
+    ("message",  `String d.message);
+    ("loc",      loc_to_json d.loc);
+  ] in
+  let fields = match d.detail with
+    | None   -> fields
+    | Some s -> fields @ [("detail", `String s)]
+  in
+  let fields = match d.hint with
+    | None   -> fields
+    | Some s -> fields @ [("hint", `String s)]
+  in
+  `Assoc fields
+
+let to_json_string (t : t) : string =
+  let arr = `List (List.rev_map diagnostic_to_json t.diags) in
+  Yojson.Safe.to_string arr
+
 let render_all t cache ppf =
   let sorted =
     List.sort_uniq (fun a b ->
@@ -137,6 +175,17 @@ let render_all t cache ppf =
     ) t.diags
   in
   List.iter (render_one ppf cache) (List.rev sorted)
+
+(** Render diagnostics to stderr and exit 1. Respects [json_errors_mode]. *)
+let report_and_exit t cache =
+  if !json_errors_mode then (
+    Printf.eprintf "%s\n" (to_json_string t);
+    exit 1
+  ) else (
+    Fmt.set_style_renderer Fmt.stderr `Ansi_tty;
+    render_all t cache Fmt.stderr;
+    exit 1
+  )
 
 (* ── Shorthand constructors ──────────────────────────────────────────────── *)
 

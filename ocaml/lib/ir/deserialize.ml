@@ -195,10 +195,18 @@ let oob_policy_of_json j =
   | "clamp" -> Clamp | "wrap" -> Wrap | "error" -> Error
   | s -> fail "unknown oob_policy '%s'" s
 
+let table_source_of_json j =
+  match j with
+  | `Assoc kvs when List.mem_assoc "external" kvs ->
+    let name = as_string (List.assoc "external" kvs) in
+    (Ir.External name : Ir.table_source)
+  | _ ->
+    (Ir.Inline (List.map expr_of_json (as_list (member "values" j))) : Ir.table_source)
+
 let table_of_json j =
-  { name          = as_string (member "name" j);
-    values        = List.map expr_of_json (as_list (member "values" j));
-    out_of_bounds = oob_policy_of_json (member "out_of_bounds" j) }
+  { Ir.name          = as_string (member "name" j);
+    Ir.source        = table_source_of_json j;
+    Ir.out_of_bounds = oob_policy_of_json (member "out_of_bounds" j) }
 
 (* ── Interventions ───────────────────────────────────────────────────────── *)
 

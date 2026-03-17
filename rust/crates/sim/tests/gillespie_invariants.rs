@@ -148,7 +148,9 @@ fn test_determinism_same_seed() {
 
 #[test]
 fn test_different_seeds_different_trajectories() {
-    let model = load_model(&golden_path("sir_basic"));
+    // Use two_state which has non-zero default params (alpha=0.5, beta_r=0.3)
+    // so events actually fire and seeds matter.
+    let model = load_model(&golden_path("two_state"));
     let compiled = CompiledModel::new(model.clone()).unwrap();
     let params = &compiled.default_params.clone();
     let config = gillespie_config(&model);
@@ -156,7 +158,7 @@ fn test_different_seeds_different_trajectories() {
     let traj1 = GillespieSim.run(&compiled, params, 1, &config).unwrap();
     let traj2 = GillespieSim.run(&compiled, params, 2, &config).unwrap();
 
-    // Very unlikely to be identical
+    // Very unlikely to be identical with a stochastic model
     let identical = traj1.snapshots.iter().zip(&traj2.snapshots)
         .all(|(s1, s2)| s1.int_state == s2.int_state);
     assert!(!identical, "different seeds produced identical trajectories");

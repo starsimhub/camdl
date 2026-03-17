@@ -121,7 +121,13 @@ param_list:
 
 param_decl:
   | name = IDENT COLON pk = param_kind
-      { { pname = name; pkind = pk } }
+      { PScalar { pname = name; pkind = pk; pdefault = None } }
+  | name = IDENT COLON pk = param_kind EQ e = expr
+      { PScalar { pname = name; pkind = pk; pdefault = Some e } }
+  | name = IDENT LBRACKET dim = IDENT RBRACKET COLON pk = param_kind
+      { PIndexed { pname = name; pdims = [dim]; pkind = pk; pdefault = None } }
+  | name = IDENT LBRACKET dim = IDENT RBRACKET COLON pk = param_kind EQ e = expr
+      { PIndexed { pname = name; pdims = [dim]; pkind = pk; pdefault = Some e } }
 
 param_kind:
   | RATE        { PRate }
@@ -401,19 +407,24 @@ timepoint_decl:
 
 stratify_args:
   | kvs = separated_list(COMMA, stratify_kv)
-      { let dim    = ref "" in
-        let vals   = ref [] in
-        let only   = ref None in
+      { let dim       = ref "" in
+        let vals_src  = ref (Ast.SValuesLit []) in
+        let only      = ref None in
         List.iter (function
-          | `By d    -> dim  := d
-          | `Values vs -> vals := vs
-          | `Only cs   -> only := Some cs
+          | `By d          -> dim  := d
+          | `Values src    -> vals_src := src
+          | `Only cs       -> only := Some cs
         ) kvs;
-        { sdim = !dim; svalues = !vals; sonly = !only } }
+        let svalues = match !vals_src with
+          | Ast.SValuesLit vs -> vs
+          | Ast.SValuesFile _ -> []  (* populated later by expander *)
+        in
+        { sdim = !dim; svalues; svalues_src = !vals_src; sonly = !only } }
 
 stratify_kv:
   | BY EQ d = IDENT { `By d }
-  | VALUES EQ LBRACKET vs = separated_list(COMMA, IDENT) RBRACKET { `Values vs }
+  | VALUES EQ LBRACKET vs = separated_list(COMMA, IDENT) RBRACKET { `Values (Ast.SValuesLit vs) }
+  | VALUES EQ _name = IDENT LPAREN path = STRING RPAREN { `Values (Ast.SValuesFile path) }
   | ONLY EQ LBRACKET cs = separated_list(COMMA, IDENT) RBRACKET { `Only cs }
 
 (* ── Expression grammar ──────────────────────────────────────────────────── *)
@@ -441,6 +452,7 @@ atom_expr:
   | f = FLOAT                  { EConst f }
   | n = INT    u = unit_lit    { EUnit (float_of_int n, u) }
   | f = FLOAT  u = unit_lit    { EUnit (f, u) }
+  | s = STRING                 { EIdent (s, dummy_loc) }   (* string literal usable as path arg *)
   | NULL                       { EConst 0.0 }
   | name = IDENT LPAREN args = separated_list(COMMA, kw_expr) RPAREN
       (* function call with optional keyword args *)

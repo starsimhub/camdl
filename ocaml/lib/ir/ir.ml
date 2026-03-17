@@ -82,9 +82,13 @@ type time_function = {
 
 type oob_policy = Clamp | Wrap | Error
 
+type table_source =
+  | Inline   of expr list  (** values resolved at compile time *)
+  | External of string     (** logical name; values supplied via --table name=file at runtime *)
+
 type table = {
   name:          string;
-  values:        expr list;
+  source:        table_source;
   out_of_bounds: oob_policy;
 }
 

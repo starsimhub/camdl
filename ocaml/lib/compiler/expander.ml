@@ -22,9 +22,10 @@ type context = {
   mutable output_decl     : output_decl option;
   mutable table_decls     : table_decl list;
   mutable diags           : Diagnostics.t;  (* collected errors/warnings *)
+  mutable source_dir      : string;         (* directory of the source file, for read_json/read_values *)
 }
 
-let empty_context () = {
+let empty_context ?(source_dir = "") () = {
   time_unit        = Days;
   description      = None;
   comp_decls       = [];
@@ -42,6 +43,7 @@ let empty_context () = {
   output_decl      = None;
   table_decls      = [];
   diags            = Diagnostics.create ();
+  source_dir;
 }
 
 (* ── Model summary ────────────────────────────────────────────────────────── *)
@@ -59,6 +61,230 @@ type model_summary = {
   interv_count              : int;
 }
 
+(* ── JSON data loading helpers ───────────────────────────────────────────── *)
+
+(** Resolve a path relative to source_dir.  Absolute paths pass through. *)
+let resolve_data_path ctx path =
+  if Filename.is_relative path && ctx.source_dir <> "" then
+    Filename.concat ctx.source_dir path
+  else path
+
+(** Read and parse a JSON file, emitting a diagnostic and returning None on failure. *)
+let load_json_file ctx path =
+  let abs_path = resolve_data_path ctx path in
+  if not (Sys.file_exists abs_path) then begin
+    Diagnostics.error ctx.diags
+      ~code:"E200"
+      ~loc:Diagnostics.no_loc
+      ~message:(Printf.sprintf "data file not found: %s" path)
+      ~hint:"check the path is relative to the .camdl source file"
+      ();
+    None
+  end else begin
+    try Some (Yojson.Basic.from_file abs_path)
+    with Yojson.Json_error msg ->
+      Diagnostics.error ctx.diags
+        ~code:"E201"
+        ~loc:Diagnostics.no_loc
+        ~message:(Printf.sprintf "invalid JSON in %s: %s" path msg)
+        ();
+      None
+  end
+
+(** Load a `read_values(path)` file → list of strings.
+    Accepts:
+    - JSON array of strings: ["a", "b", ...]
+    - Plain text, one name per line (any extension other than .json) *)
+let load_values_file ctx path =
+  let abs_path = resolve_data_path ctx path in
+  if not (Sys.file_exists abs_path) then begin
+    Diagnostics.error ctx.diags
+      ~code:"E200"
+      ~loc:Diagnostics.no_loc
+      ~message:(Printf.sprintf "data file not found: %s" path)
+      ~hint:"check the path is relative to the .camdl source file"
+      ();
+    []
+  end else
+  (* Plain text: one name per line *)
+  let ext = String.lowercase_ascii (Filename.extension path) in
+  if ext <> ".json" then begin
+    let ic = open_in abs_path in
+    let lines = ref [] in
+    (try while true do
+      let line = String.trim (input_line ic) in
+      if line <> "" then lines := line :: !lines
+    done with End_of_file -> ());
+    close_in ic;
+    List.rev !lines
+  end else
+  (* JSON array *)
+  match load_json_file ctx path with
+  | None -> []
+  | Some json ->
+    (match json with
+     | `List items ->
+       List.filter_map (fun item ->
+         match item with
+         | `String s -> Some s
+         | _ ->
+           Diagnostics.error ctx.diags
+             ~code:"E202"
+             ~loc:Diagnostics.no_loc
+             ~message:(Printf.sprintf "read_values: expected array of strings in %s" path)
+             ();
+           None
+       ) items
+     | _ ->
+       Diagnostics.error ctx.diags
+         ~code:"E202"
+         ~loc:Diagnostics.no_loc
+         ~message:(Printf.sprintf "read_values: expected a JSON array of strings in %s" path)
+         ();
+       [])
+
+(** Load a `read_json(path)` JSON file → flat list of floats (1D or 2D, row-major). *)
+let load_json_floats ctx path =
+  match load_json_file ctx path with
+  | None -> []
+  | Some json ->
+    let extract_float item =
+      match item with
+      | `Float f -> Some f
+      | `Int n   -> Some (float_of_int n)
+      | _ ->
+        Diagnostics.error ctx.diags
+          ~code:"E203"
+          ~loc:Diagnostics.no_loc
+          ~message:(Printf.sprintf "read_json: expected number in %s" path)
+          ();
+        None
+    in
+    (match json with
+     | `List items ->
+       (match items with
+        | [] -> []
+        | first :: _ ->
+          (match first with
+           | `List _ ->
+             (* 2D: array of arrays, flatten row-major *)
+             List.concat_map (fun row ->
+               match row with
+               | `List cols -> List.filter_map extract_float cols
+               | _ ->
+                 Diagnostics.error ctx.diags
+                   ~code:"E203"
+                   ~loc:Diagnostics.no_loc
+                   ~message:(Printf.sprintf "read_json: expected array of arrays in %s" path)
+                   ();
+                 []
+             ) items
+           | _ ->
+             (* 1D: array of numbers *)
+             List.filter_map extract_float items))
+     | _ ->
+       Diagnostics.error ctx.diags
+         ~code:"E203"
+         ~loc:Diagnostics.no_loc
+         ~message:(Printf.sprintf "read_json: expected a JSON array in %s" path)
+         ();
+       [])
+
+(** Parse a single cell from a CSV/TSV row into a float, or return None. *)
+let parse_csv_float ctx path s =
+  let s = String.trim s in
+  match float_of_string_opt s with
+  | Some f -> Some f
+  | None ->
+    Diagnostics.error ctx.diags
+      ~code:"E204"
+      ~loc:Diagnostics.no_loc
+      ~message:(Printf.sprintf "read_csv: expected a number, got '%s' in %s" s path)
+      ();
+    None
+
+(** Load a `read_csv(path)` or `read_tsv(path)` file → flat list of floats (row-major).
+    Dense format: rows of comma- or tab-separated values, no header.
+    Sparse format (format=sparse): rows of "i,j,value" triplets (0-based), rest defaults to default_val. *)
+let load_csv_floats ctx path ~sparse ~default_val ~n_rows ~n_cols =
+  let abs_path = resolve_data_path ctx path in
+  if not (Sys.file_exists abs_path) then begin
+    Diagnostics.error ctx.diags
+      ~code:"E200"
+      ~loc:Diagnostics.no_loc
+      ~message:(Printf.sprintf "data file not found: %s" path)
+      ~hint:"check the path is relative to the .camdl source file"
+      ();
+    []
+  end else begin
+    let ext  = String.lowercase_ascii (Filename.extension path) in
+    let sep  = if ext = ".tsv" then '\t' else ',' in
+    let split_line line =
+      let parts = ref [] in
+      let buf   = Buffer.create 16 in
+      String.iter (fun c ->
+        if c = sep then (parts := Buffer.contents buf :: !parts; Buffer.clear buf)
+        else Buffer.add_char buf c
+      ) line;
+      parts := Buffer.contents buf :: !parts;
+      List.rev !parts
+    in
+    let ic = open_in abs_path in
+    let rows = ref [] in
+    (try while true do
+      let line = String.trim (input_line ic) in
+      if line <> "" && not (String.length line > 0 && line.[0] = '#') then
+        rows := (split_line line) :: !rows
+    done with End_of_file -> ());
+    close_in ic;
+    let rows = List.rev !rows in
+    if sparse then begin
+      (* Sparse triplet: i, j, value — fill a dense grid *)
+      if n_rows <= 0 || n_cols <= 0 then begin
+        Diagnostics.error ctx.diags
+          ~code:"E204"
+          ~loc:Diagnostics.no_loc
+          ~message:(Printf.sprintf "read_csv(format=sparse): cannot determine matrix dimensions for %s; \
+            declare the dimension stratification before the table" path)
+          ();
+        []
+      end else begin
+        let grid = Array.make (n_rows * n_cols) default_val in
+        List.iter (fun row ->
+          match row with
+          | [ri; ci; vi] ->
+            (match int_of_string_opt (String.trim ri),
+                   int_of_string_opt (String.trim ci),
+                   parse_csv_float ctx path (String.trim vi) with
+             | Some r, Some c, Some v when r >= 0 && r < n_rows && c >= 0 && c < n_cols ->
+               grid.(r * n_cols + c) <- v
+             | _ ->
+               Diagnostics.error ctx.diags
+                 ~code:"E204"
+                 ~loc:Diagnostics.no_loc
+                 ~message:(Printf.sprintf "read_csv(format=sparse): bad row in %s (expected i,j,value)" path)
+                 ())
+          | _ ->
+            Diagnostics.error ctx.diags
+              ~code:"E204"
+              ~loc:Diagnostics.no_loc
+              ~message:(Printf.sprintf "read_csv(format=sparse): each row must have 3 columns (i,j,value) in %s" path)
+              ()
+        ) rows;
+        Array.to_list grid
+      end
+    end else begin
+      (* Dense: flatten row-major *)
+      List.concat_map (fun row ->
+        List.filter_map (parse_csv_float ctx path) row
+      ) rows
+    end
+  end
+
+(** Extract a named keyword argument from a kw_arg list: (key, expr) pairs. *)
+let find_kwarg name args =
+  List.find_map (fun (k, e) -> if k = name then Some e else None) args
+
 let collect_declarations ctx decls =
   List.iter (fun d -> match d with
     | DTimeUnit u        -> ctx.time_unit <- u
@@ -66,7 +292,15 @@ let collect_declarations ctx decls =
     | DCompartments cs   -> ctx.comp_decls <- ctx.comp_decls @ cs
     | DParameters ps     -> ctx.param_decls <- ctx.param_decls @ ps
     | DLet lb            -> ctx.let_bindings <- ctx.let_bindings @ [lb]
-    | DStratify sd       -> ctx.stratifies <- ctx.stratifies @ [sd]
+    | DStratify sd       ->
+      (* If using read_values, load the file now so svalues is populated. *)
+      let sd' = match sd.svalues_src with
+        | SValuesLit _    -> sd
+        | SValuesFile path ->
+          let vals = load_values_file ctx path in
+          { sd with svalues = vals }
+      in
+      ctx.stratifies <- ctx.stratifies @ [sd']
     | DTransitions trs   -> ctx.transitions <- ctx.transitions @ trs
     | DInit ies          -> ctx.init_entries <- ctx.init_entries @ ies
     | DSimulate sd       -> ctx.simulate <- Some sd
@@ -182,6 +416,46 @@ let ir_un_op = function
   | Ast.Sqrt  -> Ir.Sqrt | Ast.Abs   -> Ir.Abs  | Ast.Floor -> Ir.Floor
   | Ast.Ceil  -> Ir.Ceil
 
+(* ── Indexed parameter helpers ────────────────────────────────────────────── *)
+
+(** True if [name] is the base name of an indexed parameter declaration. *)
+let is_indexed_param ctx name =
+  List.exists (fun pd ->
+    match pd with
+    | PIndexed p -> p.pname = name
+    | _ -> false
+  ) ctx.param_decls
+
+(** True if [name] matches any fully-expanded indexed param (e.g. "R0_urban"). *)
+let is_expanded_indexed_param_name ctx name =
+  List.exists (fun pd ->
+    match pd with
+    | PIndexed { pname; pdims = [dim]; _ } ->
+      let vals = dim_values ctx dim in
+      List.exists (fun v -> pname ^ "_" ^ v = name) vals
+    | _ -> false
+  ) ctx.param_decls
+
+(** Resolve an index token in index position (inside [...]):
+    1. Check substitution env  → stratum value via env binding
+    2. Check if it is directly a member of any dimension → use as-is
+    3. Otherwise → emit E100 and return the token unchanged *)
+let resolve_index ctx (env : (string * string) list) idx =
+  match List.assoc_opt idx env with
+  | Some concrete -> concrete
+  | None ->
+    let all_vals = List.concat_map (fun sd -> sd.svalues) ctx.stratifies in
+    if List.mem idx all_vals then idx
+    else begin
+      Diagnostics.error ctx.diags
+        ~code:"E100"
+        ~loc:Diagnostics.no_loc
+        ~message:(Printf.sprintf "unknown index value '%s'" idx)
+        ~hint:"use a bound variable from [...] or a literal dimension member"
+        ();
+      idx  (* continue with placeholder *)
+    end
+
 (* ── Expression resolver ─────────────────────────────────────────────────── *)
 
 let diag_loc_of_ast (l : Ast.loc) : Diagnostics.loc =
@@ -252,7 +526,19 @@ let rec resolve_expr ctx (env : (string * string) list) (e : expr) : Ir.expr =
       ) lb.lindices in
       normalize_expr (resolve_expr ctx (inner_env @ env) lb.lbody)
     | _ ->
-    (* 3. Compartment with indices → concatenate to concrete name *)
+    (* 3. Indexed parameter? → resolve index and return Ir.Param of mangled name *)
+    if is_indexed_param ctx base_name then
+      (match items with
+       | [IPosn (EIdent (idx, _))] | [INamed (_, EIdent (idx, _))] ->
+         let concrete = resolve_index ctx env idx in
+         Ir.Param (base_name ^ "_" ^ concrete)
+       | _ ->
+         (* multi-item or non-ident index: fall through to name mangling *)
+         let idx_vals = List.map (index_item_to_str env) items in
+         let concrete = String.concat "_" (base_name :: idx_vals) in
+         resolve_ident_name ctx concrete ~loc:Diagnostics.no_loc)
+    else
+    (* 4. Compartment with indices → concatenate to concrete name *)
     let idx_vals = List.map (index_item_to_str env) items in
     let concrete = String.concat "_" (base_name :: idx_vals) in
     resolve_ident_name ctx concrete ~loc:Diagnostics.no_loc
@@ -299,7 +585,9 @@ and resolve_ident_name ctx name ~loc =
     if List.length expansions = 1 then Ir.Pop (List.hd expansions)
     else Ir.PopSum expansions
   end
-  else if List.exists (fun pd -> pd.pname = name) ctx.param_decls then
+  else if List.exists (fun pd -> match pd with PScalar p -> p.pname = name | _ -> false) ctx.param_decls then
+    Ir.Param name
+  else if is_expanded_indexed_param_name ctx name then
     Ir.Param name
   else begin
     Diagnostics.error ctx.diags
@@ -582,14 +870,48 @@ let desugar_coupling ctx tr =
 
 (* ── Parameter expansion ─────────────────────────────────────────────────── *)
 
+let resolve_float_expr ctx e =
+  let ir = normalize_expr (resolve_expr ctx [] e) in
+  match ir with
+  | Ir.Const f -> f
+  | _ -> 0.0
+
 let expand_parameters ctx =
-  List.map (fun pd ->
-    { Ir.name          = pd.pname;
-      Ir.value         = 0.0;
-      Ir.prior         = None;
-      Ir.transform     = None;
-      Ir.initial_value = None;
-    }
+  List.concat_map (fun pd ->
+    match pd with
+    | PScalar { pname; pdefault; _ } ->
+      let value = match pdefault with
+        | None -> 0.0
+        | Some e -> resolve_float_expr ctx e
+      in
+      [{ Ir.name          = pname;
+         Ir.value         = value;
+         Ir.prior         = None;
+         Ir.transform     = None;
+         Ir.initial_value = None;
+       }]
+    | PIndexed { pname; pdims = [dim]; pdefault; _ } ->
+      let vals = dim_values ctx dim in
+      let default_val = match pdefault with
+        | None -> 0.0
+        | Some e -> resolve_float_expr ctx e
+      in
+      List.map (fun v ->
+        { Ir.name          = pname ^ "_" ^ v;
+          Ir.value         = default_val;
+          Ir.prior         = None;
+          Ir.transform     = None;
+          Ir.initial_value = None;
+        }
+      ) vals
+    | PIndexed { pname; _ } ->
+      (* Multi-dim indexed params not yet supported — emit single scalar *)
+      [{ Ir.name          = pname;
+         Ir.value         = 0.0;
+         Ir.prior         = None;
+         Ir.transform     = None;
+         Ir.initial_value = None;
+       }]
   ) ctx.param_decls
 
 (* ── Compartment expansion ───────────────────────────────────────────────── *)
@@ -608,24 +930,75 @@ let expand_compartments ctx =
 
 (* ── Table expansion ─────────────────────────────────────────────────────── *)
 
-let rec flatten_expr_list ctx = function
-  | EList es     -> List.concat_map (flatten_expr_list ctx) es
+(** Extract a string path from the first positional argument of a function call. *)
+let extract_path_arg ctx func_name args =
+  let path_opt = List.find_map (fun (_, e) ->
+    match e with EIdent (s, _) -> Some s | _ -> None
+  ) args in
+  (match path_opt with
+   | None ->
+     Diagnostics.error ctx.diags
+       ~code:"E200"
+       ~loc:Diagnostics.no_loc
+       ~message:(Printf.sprintf "%s: expected a string path argument" func_name)
+       ();
+   | Some _ -> ());
+  path_opt
+
+let rec flatten_expr_list ctx dims = function
+  | EList es     -> List.concat_map (flatten_expr_list ctx dims) es
   | EConst f     -> [Ir.Const f]
   | EUnit (f, u) ->
     (match u with
      | Days | Weeks | Months | Years       -> [Ir.Const (f *. days_per u)]
      | PerDay | PerWeek | PerMonth | PerYear -> [Ir.Const (f /. days_per u)])
+  | EFuncCall ("read_json", args) ->
+    (match extract_path_arg ctx "read_json" args with
+     | None -> []
+     | Some path ->
+       List.map (fun f -> Ir.Const f) (load_json_floats ctx path))
+  | EFuncCall (("read_csv" | "read_tsv") as fn, args) ->
+    (match extract_path_arg ctx fn args with
+     | None -> []
+     | Some path ->
+       let sparse = match find_kwarg "layout" args with
+         | Some (EIdent ("sparse", _)) -> true
+         | _ -> false
+       in
+       let default_val = match find_kwarg "default" args with
+         | Some (EConst f) -> f
+         | _ -> 0.0
+       in
+       let dim_sizes = List.map (fun d -> List.length (dim_values ctx d)) dims in
+       let n_rows = if List.length dim_sizes >= 1 then List.nth dim_sizes 0 else 0 in
+       let n_cols = if List.length dim_sizes >= 2 then List.nth dim_sizes 1 else 1 in
+       List.map (fun f -> Ir.Const f)
+         (load_csv_floats ctx path ~sparse ~default_val ~n_rows ~n_cols))
   | other        -> [resolve_expr ctx [] other]
+
+(** Determine table source: External if `external("name")`, otherwise Inline. *)
+let table_source_of_expr ctx dims e =
+  match e with
+  | EFuncCall ("external", args) ->
+    (match extract_path_arg ctx "external" args with
+     | None -> Ir.Inline []
+     | Some name -> Ir.External name)
+  | _ ->
+    let vals = flatten_expr_list ctx dims e in
+    Ir.Inline vals
 
 let expand_tables ctx =
   List.filter_map (fun td ->
-    let flat_vals = flatten_expr_list ctx td.tvalue in
-    if flat_vals = [] then None
-    else Some {
-      Ir.name          = td.tname;
-      Ir.values        = flat_vals;
-      Ir.out_of_bounds = Ir.Error;
-    }
+    let dims = List.map (fun de -> match de with
+      | Ast.TDim d | Ast.TDimUnit (d, _) -> d) td.tdims in
+    let source = table_source_of_expr ctx dims td.tvalue in
+    match source with
+    | Ir.Inline [] -> None   (* empty inline = compile error upstream, skip *)
+    | _ -> Some {
+        Ir.name          = td.tname;
+        Ir.source        = source;
+        Ir.out_of_bounds = Ir.Error;
+      }
   ) ctx.table_decls
 
 (* ── Initial conditions ──────────────────────────────────────────────────── *)
@@ -671,12 +1044,6 @@ let expand_init ctx =
     Ir.Parameterized entries
 
 (* ── Simulate / output ───────────────────────────────────────────────────── *)
-
-let resolve_float_expr ctx e =
-  let ir = normalize_expr (resolve_expr ctx [] e) in
-  match ir with
-  | Ir.Const f -> f
-  | _ -> 0.0
 
 let expand_simulate ctx =
   match ctx.simulate with
@@ -889,12 +1256,35 @@ let expand_observations ctx =
     }
   ) ctx.obs_decls
 
+(* ── Shadowing check ──────────────────────────────────────────────────────── *)
+
+(** Emit W103 for any let binding whose name also appears as a stratum value. *)
+let check_shadowing ctx =
+  let all_strat_vals = List.concat_map (fun sd ->
+    List.map (fun v -> (v, sd.sdim)) sd.svalues
+  ) ctx.stratifies in
+  List.iter (fun lb ->
+    match List.assoc_opt lb.lname all_strat_vals with
+    | None -> ()
+    | Some dim ->
+      Diagnostics.warning ctx.diags
+        ~code:"W103"
+        ~loc:Diagnostics.no_loc
+        ~message:(Printf.sprintf
+          "let binding '%s' shadows stratum value '%s' in dimension '%s'. \
+           This is allowed but consider renaming."
+          lb.lname lb.lname dim)
+        ()
+  ) ctx.let_bindings
+
 (* ── Top-level expand ─────────────────────────────────────────────────────── *)
 
-let expand_detail (name : string) (decls : declaration list)
+let expand_detail ?(source_dir = "") (name : string) (decls : declaration list)
     : Ir.model * context * model_summary =
-  let ctx = empty_context () in
+  let ctx = empty_context ~source_dir () in
   collect_declarations ctx decls;
+  (* W103 shadowing check: let bindings vs stratum values *)
+  check_shadowing ctx;
   (* Save original transitions before desugaring *)
   ctx.orig_transitions <- ctx.transitions;
   (* Desugar coupling sugar before expansion *)
@@ -932,6 +1322,6 @@ let expand_detail (name : string) (decls : declaration list)
   } in
   (model, ctx, summary)
 
-let expand (name : string) (decls : declaration list) : Ir.model =
-  let (model, _, _) = expand_detail name decls in
+let expand ?(source_dir = "") (name : string) (decls : declaration list) : Ir.model =
+  let (model, _, _) = expand_detail ~source_dir name decls in
   model

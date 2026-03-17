@@ -1,0 +1,185 @@
+{
+  "name": "sir_two_patch",
+  "version": "0.3",
+  "description": null,
+  "compartments": [
+    { "name": "S_urban", "kind": "integer" },
+    { "name": "S_rural", "kind": "integer" },
+    { "name": "I_urban", "kind": "integer" },
+    { "name": "I_rural", "kind": "integer" },
+    { "name": "R_urban", "kind": "integer" },
+    { "name": "R_rural", "kind": "integer" }
+  ],
+  "transitions": [
+    {
+      "name": "infection_urban",
+      "stoichiometry": [ [ "S_urban", -1 ], [ "I_urban", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "div",
+          "left": {
+            "bin_op": {
+              "op": "mul",
+              "left": {
+                "bin_op": {
+                  "op": "mul",
+                  "left": {
+                    "bin_op": {
+                      "op": "mul",
+                      "left": { "param": "R0_urban" },
+                      "right": { "param": "gamma" }
+                    }
+                  },
+                  "right": { "pop": "S_urban" }
+                }
+              },
+              "right": { "pop": "I_urban" }
+            }
+          },
+          "right": { "param": "N_urban" }
+        }
+      },
+      "event_key": "infection_urban:{firing_index}",
+      "metadata": {
+        "origin_kind": "transmission",
+        "source_compartment": "S_urban",
+        "dest_compartment": "I_urban"
+      }
+    },
+    {
+      "name": "infection_rural",
+      "stoichiometry": [ [ "S_rural", -1 ], [ "I_rural", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "div",
+          "left": {
+            "bin_op": {
+              "op": "mul",
+              "left": {
+                "bin_op": {
+                  "op": "mul",
+                  "left": {
+                    "bin_op": {
+                      "op": "mul",
+                      "left": { "param": "R0_rural" },
+                      "right": { "param": "gamma" }
+                    }
+                  },
+                  "right": { "pop": "S_rural" }
+                }
+              },
+              "right": { "pop": "I_rural" }
+            }
+          },
+          "right": { "param": "N_rural" }
+        }
+      },
+      "event_key": "infection_rural:{firing_index}",
+      "metadata": {
+        "origin_kind": "transmission",
+        "source_compartment": "S_rural",
+        "dest_compartment": "I_rural"
+      }
+    },
+    {
+      "name": "recovery_urban",
+      "stoichiometry": [ [ "I_urban", -1 ], [ "R_urban", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": { "param": "gamma" },
+          "right": { "pop": "I_urban" }
+        }
+      },
+      "event_key": "recovery_urban:{firing_index}",
+      "metadata": {
+        "origin_kind": "intrinsic",
+        "source_compartment": "I_urban",
+        "dest_compartment": "R_urban"
+      }
+    },
+    {
+      "name": "recovery_rural",
+      "stoichiometry": [ [ "I_rural", -1 ], [ "R_rural", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": { "param": "gamma" },
+          "right": { "pop": "I_rural" }
+        }
+      },
+      "event_key": "recovery_rural:{firing_index}",
+      "metadata": {
+        "origin_kind": "intrinsic",
+        "source_compartment": "I_rural",
+        "dest_compartment": "R_rural"
+      }
+    }
+  ],
+  "ode_equations": [],
+  "time_functions": [],
+  "tables": [],
+  "interventions": [],
+  "observations": [],
+  "parameters": [
+    {
+      "name": "gamma",
+      "value": 0.1,
+      "prior": null,
+      "transform": null,
+      "initial_value": null
+    },
+    {
+      "name": "N_urban",
+      "value": 1000.0,
+      "prior": null,
+      "transform": null,
+      "initial_value": null
+    },
+    {
+      "name": "N_rural",
+      "value": 1000.0,
+      "prior": null,
+      "transform": null,
+      "initial_value": null
+    },
+    {
+      "name": "R0_urban",
+      "value": 2.5,
+      "prior": null,
+      "transform": null,
+      "initial_value": null
+    },
+    {
+      "name": "R0_rural",
+      "value": 2.5,
+      "prior": null,
+      "transform": null,
+      "initial_value": null
+    }
+  ],
+  "initial_conditions": {
+    "explicit": {
+      "S_urban": 990.0,
+      "I_urban": 10.0,
+      "R_urban": 0.0,
+      "S_rural": 999.0,
+      "I_rural": 1.0,
+      "R_rural": 0.0
+    }
+  },
+  "data_contract": null,
+  "output": {
+    "times": { "regular": { "start": 0.0, "step": 1.0, "end": 200.0 } },
+    "format": "tsv",
+    "trajectory": true,
+    "observations": true
+  },
+  "simulation": {
+    "t_start": 0.0,
+    "t_end": 200.0,
+    "time_semantics": "continuous",
+    "dt": null,
+    "rng_seed": null
+  }
+}

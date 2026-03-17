@@ -191,12 +191,24 @@ impl CompiledModel {
         }
 
         // Evaluate table value expressions at load time using default params.
+        // External tables (TableSource::External) are left empty here; the CLI
+        // fills them in before calling CompiledModel::new() via --table flags.
         let mut table_values_cache: Vec<Vec<f64>> = Vec::with_capacity(model.tables.len());
         for table in &model.tables {
-            let vals: Result<Vec<f64>, SimError> = table.values.iter()
-                .map(|expr| eval_table_expr(expr, &param_index, &default_params))
-                .collect();
-            table_values_cache.push(vals?);
+            match &table.source {
+                ir::table::TableSource::Inline { values } => {
+                    let vals: Result<Vec<f64>, SimError> = values.iter()
+                        .map(|expr| eval_table_expr(expr, &param_index, &default_params))
+                        .collect();
+                    table_values_cache.push(vals?);
+                }
+                ir::table::TableSource::External { external } => {
+                    // Placeholder — CLI must replace these before simulation.
+                    // If still empty at simulation time, propensity eval will error.
+                    let _ = external;
+                    table_values_cache.push(vec![]);
+                }
+            }
         }
 
         Ok(CompiledModel {

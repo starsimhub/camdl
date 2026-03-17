@@ -58,7 +58,9 @@ type compartment_decl = { cname: string; ckind: compartment_kind }
 
 type param_type = PRate | PProbability | PPositive | PCount | PReal
 
-type param_decl = { pname: string; pkind: param_type }
+type param_decl =
+  | PScalar  of { pname: string; pkind: param_type; pdefault: expr option }
+  | PIndexed of { pname: string; pdims: string list; pkind: param_type; pdefault: expr option }
 
 (** Table dimension entry: bare dim name, or dim + unit *)
 type table_dim_entry =
@@ -92,9 +94,14 @@ type let_binding = {
   lbody    : expr;
 }
 
+type stratify_values_src =
+  | SValuesLit   of string list          (* values = [a, b, c] *)
+  | SValuesFile  of string               (* values = read_values("path") *)
+
 type stratify_decl = {
   sdim    : string;
-  svalues : string list;
+  svalues : string list;       (* populated after file loading; empty if svalues_src = SValuesFile *)
+  svalues_src : stratify_values_src;
   sonly   : string list option;
 }
 

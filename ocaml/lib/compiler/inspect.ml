@@ -180,13 +180,20 @@ let run_summary ppf (model : Ir.model) ctx (sum : Expander.model_summary) =
   Fmt.pf ppf " declared";
   if model.parameters <> [] then (
     let names = List.map (fun (p : Ir.parameter) ->
-      let kind = match List.find_opt (fun pd -> pd.pname = p.name) ctx.param_decls with
-        | Some pd -> (match pd.pkind with
-          | PRate -> "rate"
-          | PProbability -> "probability"
-          | PPositive -> "positive"
-          | PCount -> "count"
-          | PReal -> "real")
+      let pkind_str k = match k with
+        | Ast.PRate -> "rate" | Ast.PProbability -> "probability"
+        | Ast.PPositive -> "positive" | Ast.PCount -> "count" | Ast.PReal -> "real"
+      in
+      let kind = match List.find_opt (fun pd ->
+          match pd with
+          | Ast.PScalar s -> s.pname = p.name
+          | Ast.PIndexed ix ->
+            let prefix = ix.pname ^ "_" in
+            String.length p.name > String.length prefix &&
+            String.sub p.name 0 (String.length prefix) = prefix
+          ) ctx.param_decls with
+        | Some (Ast.PScalar pd)   -> pkind_str pd.pkind
+        | Some (Ast.PIndexed pd) -> pkind_str pd.pkind
         | None -> "?"
       in
       Printf.sprintf "%s: %s" p.name kind

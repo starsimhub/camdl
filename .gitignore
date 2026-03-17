@@ -34,3 +34,12 @@ __pycache__/
 # Generated / output
 ir/expected/
 tests/snapshots/
+
+# Web editor
+web/node_modules/
+web/dist/
+web/compiler-server/node_modules/
+web/src/lib/wasm/pkg/*.wasm
+web/src/lib/wasm/pkg/package.json
+web/src/lib/wasm/pkg/README.md
+web/.env.local

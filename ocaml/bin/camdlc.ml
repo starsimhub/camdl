@@ -97,6 +97,9 @@ let () =
         | [k; v] -> set_kvs := (k, float_of_string v) :: !set_kvs
         | _ -> Printf.eprintf "bad --set %s (want NAME=VALUE)\n" s; exit 1
        ), "NAME=VALUE  override a parameter value");
+      ("--json-errors", Arg.Unit (fun () ->
+        Diagnostics.json_errors_mode := true
+       ), " emit diagnostics as JSON array to stderr instead of ANSI text");
     ] in
     Arg.parse_argv (Array.of_list ("camdlc" :: args))
       spec (fun f -> files := f :: !files) usage;

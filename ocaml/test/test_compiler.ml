@@ -258,14 +258,18 @@ let test_parameterised_table () =
      | None -> Alcotest.fail "B_sex table not found"
      | Some tbl ->
        (* The 2nd entry (index 1) should be Ir.Param "beta_mf" *)
-       let second = List.nth tbl.Ir.values 1 in
+       let values = match tbl.Ir.source with
+         | Ir.Inline vs -> vs
+         | Ir.External _ -> Alcotest.fail "expected Inline table, got External"
+       in
+       let second = List.nth values 1 in
        (match second with
         | Ir.Param "beta_mf" ->
           ()  (* pass *)
         | other ->
           Alcotest.failf "expected Ir.Param \"beta_mf\", got: %s"
             (Serialize.model_to_string
-               { m with Ir.tables = [{tbl with Ir.values = [other]}] })))
+               { m with Ir.tables = [{tbl with Ir.source = Ir.Inline [other]}] })))
 
 (* ── DESIGN-2: Intervention expansion ───────────────────────────────────────
    Compile a model with an intervention. Assert it appears in model.interventions. *)
@@ -399,6 +403,295 @@ let test_time_func_in_rate () =
     if not (expr_contains_time_func "seasonal" infection.Ir.rate) then
       Alcotest.fail "infection rate should contain Ir.TimeFunc \"seasonal\", got Const 0.0"
 
+(* ── read_json / read_values tests ──────────────────────────────────────────
+
+   These tests write temporary JSON files to a temp directory, compile a model
+   that references them via read_json / read_values, and assert the expected IR.
+   The ~filename argument ensures source_dir is set to the temp directory so
+   relative paths in the model source resolve correctly.                      *)
+
+let write_tmp_file dir name content =
+  let path = Filename.concat dir name in
+  let oc = open_out path in
+  output_string oc content;
+  close_out oc;
+  path
+
+let test_read_json_1d () =
+  let dir = Filename.get_temp_dir_name () in
+  let json_path = write_tmp_file dir "test_rates.json" "[0.5, 1.5, 2.5]" in
+  let src = Printf.sprintf {|
+    stratify(by = grp, values = [a, b, c])
+    compartments { S, I }
+    parameters { gamma : rate }
+    tables {
+      rates : grp = read_json("%s")
+    }
+    transitions {
+      recovery[g in grp] : I[g] --> S[g] @ rates[g] * I[g]
+    }
+    simulate { from = 0  to = 10 }
+  |} (Filename.basename json_path) in
+  (* Use the temp dir as the source file directory *)
+  let fake_src_file = Filename.concat dir "model.camdl" in
+  match Compiler.compile ~name:"test_rj1d" ~filename:fake_src_file src with
+  | Error e -> Alcotest.failf "compile failed: %s" e
+  | Ok m ->
+    (match List.find_opt (fun (t : Ir.table) -> t.Ir.name = "rates") m.Ir.tables with
+     | None -> Alcotest.fail "table 'rates' not found"
+     | Some tbl ->
+       let values = match tbl.Ir.source with
+         | Ir.Inline vs -> vs
+         | Ir.External _ -> Alcotest.fail "expected Inline table, got External"
+       in
+       Alcotest.(check int) "three values" 3 (List.length values);
+       let vals = List.map (function
+         | Ir.Const f -> f
+         | _ -> Alcotest.fail "expected Ir.Const"
+       ) values in
+       Alcotest.(check (list (float 1e-9))) "values match JSON" [0.5; 1.5; 2.5] vals)
+
+let test_read_values () =
+  let dir = Filename.get_temp_dir_name () in
+  let _json_path = write_tmp_file dir "test_groups.json" {|["alpha", "beta"]|} in
+  let src = {|
+    compartments { S, I }
+    parameters { beta : rate }
+    stratify(by = grp, values = read_values("test_groups.json"))
+    transitions {
+      infection[g in grp] : S[g] --> I[g] @ beta * S[g] * I[g]
+    }
+    simulate { from = 0  to = 10 }
+  |} in
+  let fake_src_file = Filename.concat dir "model.camdl" in
+  match Compiler.compile ~name:"test_rv" ~filename:fake_src_file src with
+  | Error e -> Alcotest.failf "compile failed: %s" e
+  | Ok m ->
+    (* The expanded compartments should include S_alpha, S_beta, I_alpha, I_beta *)
+    let comp_names = List.map (fun (c : Ir.compartment) -> c.Ir.name) m.Ir.compartments in
+    List.iter (fun expected ->
+      if not (List.mem expected comp_names) then
+        Alcotest.failf "compartment %s not found; got: %s"
+          expected (String.concat ", " comp_names)
+    ) ["S_alpha"; "S_beta"; "I_alpha"; "I_beta"]
+
+let test_read_json_missing_file () =
+  (* Test at expander level to avoid the exit 1 in compiler.ml.
+     We parse the AST manually, then call expand_detail with source_dir set,
+     and inspect ctx.diags for the expected error. *)
+  let dir = Filename.get_temp_dir_name () in
+  let src = {|
+    stratify(by = grp, values = [a, b])
+    compartments { S }
+    tables {
+      rates : grp = read_json("nonexistent_xyz_12345.json")
+    }
+    simulate { from = 0  to = 10 }
+  |} in
+  let lexbuf = Lexing.from_string src in
+  let decls =
+    try Parser.file Lexer.token lexbuf
+    with _ -> Alcotest.fail "parse failed"
+  in
+  let (_model, ctx, _summary) =
+    Expander.expand_detail ~source_dir:dir "test_missing" decls
+  in
+  (* There should be at least one error containing the missing filename *)
+  let errors = ctx.diags.Diagnostics.diags
+    |> List.filter (fun d -> d.Diagnostics.severity = Diagnostics.Error)
+  in
+  Alcotest.(check bool) "at least one error" true (errors <> []);
+  let found_filename = List.exists (fun d ->
+    let msg = d.Diagnostics.message in
+    let contains s sub =
+      let ls = String.length s and lb = String.length sub in
+      if lb > ls then false
+      else begin
+        let found = ref false in
+        for i = 0 to ls - lb do
+          if String.sub s i lb = sub then found := true
+        done;
+        !found
+      end
+    in
+    contains msg "nonexistent_xyz_12345.json"
+  ) errors in
+  Alcotest.(check bool) "error message contains filename" true found_filename
+
+(* ── Indexed parameter tests ─────────────────────────────────────────────────
+   These tests verify that indexed parameter declarations like `R0[patch]` are
+   expanded to scalar IR parameters, resolved correctly in rate expressions, and
+   emit W103 warnings when let bindings shadow stratum values.               ── *)
+
+let test_indexed_param_scalar_expansion () =
+  let src = {|
+    stratify(by = patch, values = [a, b])
+    compartments { S, I }
+    parameters {
+      R0[patch] : positive = 2.5
+      gamma     : rate = 0.1
+    }
+    transitions {
+      recovery[p in patch] : I[p] --> S[p] @ gamma * I[p]
+    }
+    simulate { from = 0  to = 10 }
+  |} in
+  match Compiler.compile ~name:"test_idx_scalar" src with
+  | Error e -> Alcotest.failf "compile failed: %s" e
+  | Ok m ->
+    let param_names = List.map (fun (p : Ir.parameter) -> p.Ir.name) m.Ir.parameters in
+    List.iter (fun expected ->
+      if not (List.mem expected param_names) then
+        Alcotest.failf "expected param '%s' not found; got: %s"
+          expected (String.concat ", " param_names)
+    ) ["R0_a"; "R0_b"; "gamma"];
+    (* Check default value is propagated *)
+    let r0_a = List.find (fun (p : Ir.parameter) -> p.Ir.name = "R0_a") m.Ir.parameters in
+    Alcotest.(check (float 1e-9)) "R0_a default value" 2.5 r0_a.Ir.value;
+    let gamma_p = List.find (fun (p : Ir.parameter) -> p.Ir.name = "gamma") m.Ir.parameters in
+    Alcotest.(check (float 1e-9)) "gamma default value" 0.1 gamma_p.Ir.value
+
+let test_indexed_param_variable_index () =
+  let src = {|
+    stratify(by = patch, values = [a, b])
+    compartments { S, I }
+    parameters {
+      R0[patch] : positive = 2.5
+      gamma     : rate
+    }
+    let beta[p in patch] = R0[p] * gamma
+    transitions {
+      infection[p in patch] : S[p] --> I[p] @ beta[p] * S[p] * I[p]
+      recovery[p in patch]  : I[p] --> S[p] @ gamma * I[p]
+    }
+    simulate { from = 0  to = 10 }
+  |} in
+  match Compiler.compile ~name:"test_idx_var" src with
+  | Error e -> Alcotest.failf "compile failed: %s" e
+  | Ok m ->
+    (* infection_a rate should contain Ir.Param "R0_a", infection_b "R0_b" *)
+    let infection_a = find_transition m "infection_a" in
+    let rec contains_param name = function
+      | Ir.Param n -> n = name
+      | Ir.BinOp b -> contains_param name b.Ir.left || contains_param name b.Ir.right
+      | Ir.UnOp u  -> contains_param name u.Ir.arg
+      | Ir.Cond c  -> contains_param name c.Ir.pred
+                   || contains_param name c.Ir.then_
+                   || contains_param name c.Ir.else_
+      | _ -> false
+    in
+    Alcotest.(check bool) "infection_a rate has R0_a" true
+      (contains_param "R0_a" (tr_rate infection_a));
+    let infection_b = find_transition m "infection_b" in
+    Alcotest.(check bool) "infection_b rate has R0_b" true
+      (contains_param "R0_b" (tr_rate infection_b))
+
+let test_indexed_param_literal_index () =
+  let src = {|
+    stratify(by = patch, values = [kano, lagos])
+    compartments { S, I }
+    parameters {
+      R0[patch] : positive = 3.0
+      gamma     : rate
+    }
+    transitions {
+      infection_kano : S[kano] --> I[kano] @ R0[kano] * gamma * S[kano] * I[kano]
+    }
+    simulate { from = 0  to = 10 }
+  |} in
+  match Compiler.compile ~name:"test_idx_lit" src with
+  | Error e -> Alcotest.failf "compile failed: %s" e
+  | Ok m ->
+    let tr = find_transition m "infection_kano" in
+    let rec contains_param name = function
+      | Ir.Param n -> n = name
+      | Ir.BinOp b -> contains_param name b.Ir.left || contains_param name b.Ir.right
+      | _ -> false
+    in
+    Alcotest.(check bool) "infection_kano rate has R0_kano" true
+      (contains_param "R0_kano" (tr_rate tr))
+
+let test_indexed_param_no_default () =
+  let src = {|
+    stratify(by = patch, values = [x, y])
+    compartments { S, I }
+    parameters {
+      z[patch] : real
+      gamma    : rate
+    }
+    transitions {
+      recovery[p in patch] : I[p] --> S[p] @ gamma * I[p]
+    }
+    simulate { from = 0  to = 10 }
+  |} in
+  match Compiler.compile ~name:"test_idx_nodef" src with
+  | Error e -> Alcotest.failf "compile failed: %s" e
+  | Ok m ->
+    let find_val pname =
+      match List.find_opt (fun (p : Ir.parameter) -> p.Ir.name = pname) m.Ir.parameters with
+      | None -> Alcotest.failf "param %s not found" pname
+      | Some p -> p.Ir.value
+    in
+    Alcotest.(check (float 1e-9)) "z_x default is 0.0" 0.0 (find_val "z_x");
+    Alcotest.(check (float 1e-9)) "z_y default is 0.0" 0.0 (find_val "z_y")
+
+let test_indexed_param_bad_index () =
+  let src = {|
+    stratify(by = patch, values = [urban, rural])
+    compartments { S, I }
+    parameters {
+      R0[patch] : positive = 2.5
+      gamma     : rate
+    }
+    transitions {
+      infection : S[urban] --> I[urban] @ R0[unknown_place] * gamma * S[urban] * I[urban]
+    }
+    simulate { from = 0  to = 10 }
+  |} in
+  let lexbuf = Lexing.from_string src in
+  let decls =
+    try Parser.file Lexer.token lexbuf
+    with _ -> Alcotest.fail "parse failed"
+  in
+  let (_model, ctx, _summary) = Expander.expand_detail "test_bad_idx" decls in
+  let errors = ctx.diags.Diagnostics.diags
+    |> List.filter (fun d -> d.Diagnostics.severity = Diagnostics.Error)
+  in
+  Alcotest.(check bool) "at least one error for bad index" true (errors <> []);
+  let found_e100 = List.exists (fun d ->
+    d.Diagnostics.code = "E100"
+  ) errors in
+  Alcotest.(check bool) "E100 diagnostic emitted" true found_e100
+
+let test_indexed_param_shadow_warning () =
+  (* 'kano' is both a let binding and a stratum value → W103 *)
+  let src = {|
+    stratify(by = patch, values = [kano, lagos])
+    compartments { S, I }
+    parameters {
+      R0[patch] : positive = 2.5
+      gamma     : rate
+    }
+    let kano = 1.0
+    transitions {
+      recovery[p in patch] : I[p] --> S[p] @ gamma * I[p]
+    }
+    simulate { from = 0  to = 10 }
+  |} in
+  let lexbuf = Lexing.from_string src in
+  let decls =
+    try Parser.file Lexer.token lexbuf
+    with _ -> Alcotest.fail "parse failed"
+  in
+  let (_model, ctx, _summary) = Expander.expand_detail "test_shadow" decls in
+  let warnings = ctx.diags.Diagnostics.diags
+    |> List.filter (fun d -> d.Diagnostics.severity = Diagnostics.Warning)
+  in
+  let found_w103 = List.exists (fun d ->
+    d.Diagnostics.code = "W103"
+  ) warnings in
+  Alcotest.(check bool) "W103 warning for shadowing" true found_w103
+
 let () =
   Alcotest.run "compiler" [
     "golden", [
@@ -406,8 +699,10 @@ let () =
       Alcotest.test_case "sir_demography" `Quick (test_golden "sir_demography");
       Alcotest.test_case "seir_age"       `Quick (test_golden "seir_age");
       Alcotest.test_case "sir_five_age"   `Quick (test_golden "sir_five_age");
-      Alcotest.test_case "seir_erlang"    `Quick (test_golden "seir_erlang");
-      Alcotest.test_case "sir_coupling"   `Quick (test_golden "sir_coupling");
+      Alcotest.test_case "seir_erlang"        `Quick (test_golden "seir_erlang");
+      Alcotest.test_case "seir_erlang_staged" `Quick (test_golden "seir_erlang_staged");
+      Alcotest.test_case "sir_coupling"       `Quick (test_golden "sir_coupling");
+      Alcotest.test_case "sir_two_patch"      `Quick (test_golden "sir_two_patch");
     ];
     "table_lookup_flattening", [
       Alcotest.test_case "single index per lookup" `Quick test_table_lookup_single_index;
@@ -430,5 +725,18 @@ let () =
     "time_functions", [
       Alcotest.test_case "sinusoidal compiles to TimeFunc" `Quick test_sinusoidal_time_func;
       Alcotest.test_case "EFuncCall in rate emits Ir.TimeFunc" `Quick test_time_func_in_rate;
+    ];
+    "read_json", [
+      Alcotest.test_case "1D array from JSON file"           `Quick test_read_json_1d;
+      Alcotest.test_case "read_values stratify dimension"    `Quick test_read_values;
+      Alcotest.test_case "missing file handled gracefully"   `Quick test_read_json_missing_file;
+    ];
+    "indexed_params", [
+      Alcotest.test_case "scalar expansion per stratum"      `Quick test_indexed_param_scalar_expansion;
+      Alcotest.test_case "variable index in transition rate" `Quick test_indexed_param_variable_index;
+      Alcotest.test_case "literal index outside loop"        `Quick test_indexed_param_literal_index;
+      Alcotest.test_case "no default → value = 0.0"         `Quick test_indexed_param_no_default;
+      Alcotest.test_case "bad index value → E100"            `Quick test_indexed_param_bad_index;
+      Alcotest.test_case "let shadows stratum → W103"        `Quick test_indexed_param_shadow_warning;
     ];
   ]

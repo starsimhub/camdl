@@ -12,7 +12,7 @@ OCAML_GOLDENS := $(wildcard ocaml/golden/*.camdl)
 
 # ── Build ─────────────────────────────────────────────────────────────────────
 
-.PHONY: build build-ocaml build-rust
+.PHONY: build build-ocaml build-rust build-wasm
 
 build: build-ocaml build-rust
 
@@ -21,6 +21,31 @@ build-ocaml:
 
 build-rust:
 	cd rust && cargo build --release --workspace --bins
+
+# ── WASM (browser simulation) ─────────────────────────────────────────────────
+
+WASM_OUT := web/src/lib/wasm/pkg
+
+build-wasm:
+	cd rust && wasm-pack build crates/wasm \
+	    --target web \
+	    --out-dir $(CURDIR)/$(WASM_OUT) \
+	    --release
+
+# ── Web editor ────────────────────────────────────────────────────────────────
+
+.PHONY: web-install web-dev web-build
+
+web-install:
+	cd web && npm install
+	cd web/compiler-server && npm install
+
+web-dev: build-ocaml build-wasm
+	cd web/compiler-server && npx tsx server.ts &
+	cd web && npm run dev
+
+web-build: build-ocaml build-wasm web-install
+	cd web && npm run build
 
 # ── Install ───────────────────────────────────────────────────────────────────
 
@@ -86,6 +111,26 @@ update-golden: update-ocaml-golden update-ir-golden
 # Usage: make sim MODEL=ir/golden/sir_basic.ir.json ARGS="--set beta=0.3 ..."
 sim: build-rust
 	$(CAMDL_SIM) simulate $(MODEL) $(ARGS)
+
+# ── Tree-sitter / Neovim ──────────────────────────────────────────────────────
+
+TS_DIR      := tree-sitter
+NVIM_PARSER := $(HOME)/.local/share/nvim/lazy/nvim-treesitter/parser/camdl.so
+NVIM_QUERIES := $(HOME)/.config/nvim/after/queries/camdl
+
+.PHONY: install-nvim-ts
+
+# Compile the camdl tree-sitter parser and install it into Neovim.
+# Requires: a C compiler on PATH.
+install-nvim-ts:
+	@echo "Compiling tree-sitter parser..."
+	cc -shared -fPIC -o $(TS_DIR)/camdl.so -I $(TS_DIR)/src $(TS_DIR)/src/parser.c
+	install -m 644 $(TS_DIR)/camdl.so $(NVIM_PARSER)
+	@echo "Installing queries..."
+	@mkdir -p $(NVIM_QUERIES)
+	install -m 644 $(TS_DIR)/queries/highlights.scm $(NVIM_QUERIES)/highlights.scm
+	install -m 644 $(TS_DIR)/queries/locals.scm     $(NVIM_QUERIES)/locals.scm
+	@echo "Done. Restart Neovim and open a .camdl file."
 
 # ── Housekeeping ──────────────────────────────────────────────────────────────
 

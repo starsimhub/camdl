@@ -1,0 +1,30 @@
+# Two-patch SIR: demonstrates indexed parameters N[patch] and R0[patch]
+stratify(by = patch, values = [urban, rural])
+
+compartments { S, I, R }
+
+parameters {
+  gamma    : positive = 0.1
+  N[patch] : positive = 1000.0
+  R0[patch]: positive = 2.5
+}
+
+let beta[p in patch] = R0[p] * gamma
+
+transitions {
+  infection[p in patch] : S[p] --> I[p]
+    @ beta[p] * S[p] * I[p] / N[p]
+  recovery[p in patch]  : I[p] --> R[p]
+    @ gamma * I[p]
+}
+
+init {
+  S[urban] = 990
+  I[urban] = 10
+  R[urban] = 0
+  S[rural] = 999
+  I[rural] = 1
+  R[rural] = 0
+}
+
+simulate { from = 0  to = 200 }
