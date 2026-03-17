@@ -142,35 +142,35 @@
   "parameters": [
     {
       "name": "beta",
-      "value": 0.0,
+      "value": null,
       "prior": null,
       "transform": null,
       "initial_value": null
     },
     {
       "name": "gamma",
-      "value": 0.0,
+      "value": null,
       "prior": null,
       "transform": null,
       "initial_value": null
     },
     {
       "name": "sigma_e1",
-      "value": 0.0,
+      "value": null,
       "prior": null,
       "transform": null,
       "initial_value": null
     },
     {
       "name": "sigma_e2",
-      "value": 0.0,
+      "value": null,
       "prior": null,
       "transform": null,
       "initial_value": null
     },
     {
       "name": "sigma_e3",
-      "value": 0.0,
+      "value": null,
       "prior": null,
       "transform": null,
       "initial_value": null

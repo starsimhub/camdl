@@ -45,7 +45,9 @@ pub enum Transform {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Parameter {
     pub name:          String,
-    pub value:         f64,
+    /// `None` = must be supplied at runtime via --params / --set.
+    /// `Some(v)` = value present (either from hand-crafted IR or applied override).
+    pub value:         Option<f64>,
     pub prior:         Option<PriorDist>,
     pub transform:     Option<Transform>,
     pub initial_value: Option<f64>,

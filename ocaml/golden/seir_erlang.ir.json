@@ -135,21 +135,21 @@
   "parameters": [
     {
       "name": "beta",
-      "value": 0.0,
+      "value": null,
       "prior": null,
       "transform": null,
       "initial_value": null
     },
     {
       "name": "sigma",
-      "value": 0.0,
+      "value": null,
       "prior": null,
       "transform": null,
       "initial_value": null
     },
     {
       "name": "gamma",
-      "value": 0.0,
+      "value": null,
       "prior": null,
       "transform": null,
       "initial_value": null

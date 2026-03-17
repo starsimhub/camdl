@@ -6,6 +6,7 @@ use sim::{
 };
 use ir::table::TableSource;
 use std::collections::HashMap;
+use toml;
 
 /// Load a flat Vec<Expr::Const> from a CSV, TSV, or JSON file.
 /// CSV/TSV: rows of numbers, row-major. JSON: `[n, ...]` or `[[n,...],...]`.
@@ -64,6 +65,7 @@ fn usage() -> ! {
     eprintln!("camdl simulate MODEL.ir.json [OPTIONS]");
     eprintln!();
     eprintln!("Options:");
+    eprintln!("  --params   FILE.toml     load parameter values from TOML (repeatable, later overrides earlier)");
     eprintln!("  --backend  gillespie|tau_leap|chain_binomial  (default: gillespie)");
     eprintln!("  --dt       DT   step size for tau_leap / chain_binomial");
     eprintln!("  --seed     N    RNG seed (default: 1)");
@@ -71,6 +73,43 @@ fn usage() -> ! {
     eprintln!("  --set-vec  PREFIX=FILE   override indexed params from a keyed TSV (name<TAB>value)");
     eprintln!("  --table    NAME=FILE     supply a runtime external() table from CSV/TSV/JSON");
     std::process::exit(1);
+}
+
+/// Load parameter overrides from a TOML file.
+///
+/// Supports two forms:
+///   - Top-level scalar:  `gamma = 0.1`  → parameter "gamma"
+///   - Indexed section:   `[R0]`         → prefix "R0"
+///                        `urban = 2.5`  → parameter "R0_urban"
+fn load_params_toml(path: &str) -> Result<HashMap<String, f64>, String> {
+    let content = std::fs::read_to_string(path)
+        .map_err(|e| format!("{}: {}", path, e))?;
+    let table: toml::Table = content.parse()
+        .map_err(|e| format!("TOML parse error in {}: {}", path, e))?;
+    let mut out = HashMap::new();
+    for (key, val) in &table {
+        match val {
+            toml::Value::Float(f)   => { out.insert(key.clone(), *f); }
+            toml::Value::Integer(i) => { out.insert(key.clone(), *i as f64); }
+            toml::Value::Table(section) => {
+                // Indexed section: [PREFIX] with scalar entries → PREFIX_key
+                for (subkey, subval) in section {
+                    let full = format!("{}_{}", key, subkey);
+                    match subval {
+                        toml::Value::Float(f)   => { out.insert(full, *f); }
+                        toml::Value::Integer(i) => { out.insert(full, *i as f64); }
+                        _ => return Err(format!(
+                            "{}:[{}].{}: expected a number, got {:?}", path, key, subkey, subval
+                        )),
+                    }
+                }
+            }
+            _ => return Err(format!(
+                "{}:{}: expected a number or table section, got {:?}", path, key, val
+            )),
+        }
+    }
+    Ok(out)
 }
 
 /// Load a keyed TSV file (two columns: name<TAB>value) for --set-vec.
@@ -104,12 +143,13 @@ fn main() {
     let args: &[String] = if args[0] == "simulate" { &args[1..] } else { &args };
     if args.is_empty() { usage(); }
 
-    let mut ir_path:   Option<String> = None;
-    let mut backend  = "gillespie".to_string();
-    let mut dt       = 1.0_f64;
-    let mut seed     = 1_u64;
+    let mut ir_path:     Option<String> = None;
+    let mut backend    = "gillespie".to_string();
+    let mut dt         = 1.0_f64;
+    let mut seed       = 1_u64;
     let mut overrides: HashMap<String, f64> = HashMap::new();
     let mut table_files: HashMap<String, String> = HashMap::new();
+    let mut params_files: Vec<String> = Vec::new();
 
     // Collect --set-vec PREFIX=FILE entries for deferred validation after model load
     let mut set_vec_entries: Vec<(String, String)> = Vec::new();
@@ -120,6 +160,7 @@ fn main() {
             "--backend" => { i += 1; backend = args[i].clone(); }
             "--dt"      => { i += 1; dt      = args[i].parse().expect("--dt needs a number"); }
             "--seed"    => { i += 1; seed    = args[i].parse().expect("--seed needs an integer"); }
+            "--params"  => { i += 1; params_files.push(args[i].clone()); }
             "--set"     => {
                 i += 1;
                 let kv = &args[i];
@@ -182,16 +223,29 @@ fn main() {
     let mut model: ir::Model = serde_json::from_str(&src)
         .unwrap_or_else(|e| { eprintln!("IR parse error: {}", e); std::process::exit(1); });
 
-    // Apply --set overrides
-    for p in &mut model.parameters {
-        if let Some(&v) = overrides.get(&p.name) { p.value = v; }
+    // Apply parameters: resolution order (highest priority last, so later writes win):
+    //   1. IR value (already in model, may be None)
+    //   2. --params FILE.toml (in order given, later files override earlier)
+    //   3. --set-vec PREFIX=FILE (keyed TSV)
+    //   4. --set NAME=VALUE (highest priority)
+
+    // Step 2: apply --params TOML files in order
+    for path in &params_files {
+        let toml_overrides = load_params_toml(path).unwrap_or_else(|e| {
+            eprintln!("error: --params {}: {}", path, e);
+            std::process::exit(1);
+        });
+        for p in &mut model.parameters {
+            if let Some(&v) = toml_overrides.get(&p.name) {
+                p.value = Some(v);
+            }
+        }
     }
 
-    // Apply --set-vec PREFIX=FILE overrides (keyed TSV: name<TAB>value)
+    // Step 3: apply --set-vec PREFIX=FILE overrides (keyed TSV: name<TAB>value)
     if !set_vec_entries.is_empty() {
         let known_param_names: std::collections::HashSet<String> =
             model.parameters.iter().map(|p| p.name.clone()).collect();
-        // Load and validate all entries first, then apply
         let mut resolved: Vec<(String, f64)> = Vec::new();
         for (prefix, file) in &set_vec_entries {
             let entries = load_keyed_tsv(file).unwrap_or_else(|e| {
@@ -209,9 +263,14 @@ fn main() {
         }
         for (full_name, val) in resolved {
             for p in &mut model.parameters {
-                if p.name == full_name { p.value = val; }
+                if p.name == full_name { p.value = Some(val); }
             }
         }
+    }
+
+    // Step 4: apply --set scalar overrides (highest priority)
+    for p in &mut model.parameters {
+        if let Some(&v) = overrides.get(&p.name) { p.value = Some(v); }
     }
 
     // Fill external() tables from --table NAME=FILE

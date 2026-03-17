@@ -124,35 +124,35 @@
   "parameters": [
     {
       "name": "gamma",
-      "value": 0.1,
+      "value": null,
       "prior": null,
       "transform": null,
       "initial_value": null
     },
     {
       "name": "N_urban",
-      "value": 1000.0,
+      "value": null,
       "prior": null,
       "transform": null,
       "initial_value": null
     },
     {
       "name": "N_rural",
-      "value": 1000.0,
+      "value": null,
       "prior": null,
       "transform": null,
       "initial_value": null
     },
     {
       "name": "R0_urban",
-      "value": 2.5,
+      "value": null,
       "prior": null,
       "transform": null,
       "initial_value": null
     },
     {
       "name": "R0_rural",
-      "value": 2.5,
+      "value": null,
       "prior": null,
       "transform": null,
       "initial_value": null

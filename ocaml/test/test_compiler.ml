@@ -528,8 +528,8 @@ let test_indexed_param_scalar_expansion () =
     stratify(by = patch, values = [a, b])
     compartments { S, I }
     parameters {
-      R0[patch] : positive = 2.5
-      gamma     : rate = 0.1
+      R0[patch] : positive
+      gamma     : rate
     }
     transitions {
       recovery[p in patch] : I[p] --> S[p] @ gamma * I[p]
@@ -545,18 +545,18 @@ let test_indexed_param_scalar_expansion () =
         Alcotest.failf "expected param '%s' not found; got: %s"
           expected (String.concat ", " param_names)
     ) ["R0_a"; "R0_b"; "gamma"];
-    (* Check default value is propagated *)
+    (* Values are None — must be supplied externally *)
     let r0_a = List.find (fun (p : Ir.parameter) -> p.Ir.name = "R0_a") m.Ir.parameters in
-    Alcotest.(check (float 1e-9)) "R0_a default value" 2.5 r0_a.Ir.value;
+    Alcotest.(check bool) "R0_a value is None" true (r0_a.Ir.value = None);
     let gamma_p = List.find (fun (p : Ir.parameter) -> p.Ir.name = "gamma") m.Ir.parameters in
-    Alcotest.(check (float 1e-9)) "gamma default value" 0.1 gamma_p.Ir.value
+    Alcotest.(check bool) "gamma value is None" true (gamma_p.Ir.value = None)
 
 let test_indexed_param_variable_index () =
   let src = {|
     stratify(by = patch, values = [a, b])
     compartments { S, I }
     parameters {
-      R0[patch] : positive = 2.5
+      R0[patch] : positive
       gamma     : rate
     }
     let beta[p in patch] = R0[p] * gamma
@@ -591,7 +591,7 @@ let test_indexed_param_literal_index () =
     stratify(by = patch, values = [kano, lagos])
     compartments { S, I }
     parameters {
-      R0[patch] : positive = 3.0
+      R0[patch] : positive
       gamma     : rate
     }
     transitions {
@@ -627,20 +627,20 @@ let test_indexed_param_no_default () =
   match Compiler.compile ~name:"test_idx_nodef" src with
   | Error e -> Alcotest.failf "compile failed: %s" e
   | Ok m ->
-    let find_val pname =
+    let find_param pname =
       match List.find_opt (fun (p : Ir.parameter) -> p.Ir.name = pname) m.Ir.parameters with
       | None -> Alcotest.failf "param %s not found" pname
-      | Some p -> p.Ir.value
+      | Some p -> p
     in
-    Alcotest.(check (float 1e-9)) "z_x default is 0.0" 0.0 (find_val "z_x");
-    Alcotest.(check (float 1e-9)) "z_y default is 0.0" 0.0 (find_val "z_y")
+    Alcotest.(check bool) "z_x value is None" true ((find_param "z_x").Ir.value = None);
+    Alcotest.(check bool) "z_y value is None" true ((find_param "z_y").Ir.value = None)
 
 let test_indexed_param_bad_index () =
   let src = {|
     stratify(by = patch, values = [urban, rural])
     compartments { S, I }
     parameters {
-      R0[patch] : positive = 2.5
+      R0[patch] : positive
       gamma     : rate
     }
     transitions {
@@ -669,7 +669,7 @@ let test_indexed_param_shadow_warning () =
     stratify(by = patch, values = [kano, lagos])
     compartments { S, I }
     parameters {
-      R0[patch] : positive = 2.5
+      R0[patch] : positive
       gamma     : rate
     }
     let kano = 1.0

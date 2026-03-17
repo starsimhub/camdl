@@ -4,9 +4,9 @@ stratify(by = patch, values = [urban, rural])
 compartments { S, I, R }
 
 parameters {
-  gamma    : positive = 0.1
-  N[patch] : positive = 1000.0
-  R0[patch]: positive = 2.5
+  gamma    : positive
+  N[patch] : positive
+  R0[patch]: positive
 }
 
 let beta[p in patch] = R0[p] * gamma

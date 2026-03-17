@@ -13,3 +13,4 @@ ir = { path = "../ir" }
 observe = { path = "../observe" }
 serde_json = "1"
 sim = { path = "../sim" }
+toml = { version = "0.8", features = ["parse"] }

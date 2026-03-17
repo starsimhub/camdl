@@ -121,13 +121,9 @@ param_list:
 
 param_decl:
   | name = IDENT COLON pk = param_kind
-      { PScalar { pname = name; pkind = pk; pdefault = None } }
-  | name = IDENT COLON pk = param_kind EQ e = expr
-      { PScalar { pname = name; pkind = pk; pdefault = Some e } }
+      { PScalar { pname = name; pkind = pk } }
   | name = IDENT LBRACKET dim = IDENT RBRACKET COLON pk = param_kind
-      { PIndexed { pname = name; pdims = [dim]; pkind = pk; pdefault = None } }
-  | name = IDENT LBRACKET dim = IDENT RBRACKET COLON pk = param_kind EQ e = expr
-      { PIndexed { pname = name; pdims = [dim]; pkind = pk; pdefault = Some e } }
+      { PIndexed { pname = name; pdims = [dim]; pkind = pk } }
 
 param_kind:
   | RATE        { PRate }

@@ -1,0 +1,5 @@
+beta     = 0.3
+gamma    = 0.1
+sigma_e1 = 0.6   # 3-stage Erlang: each stage rate = k*sigma = 3*0.2
+sigma_e2 = 0.6
+sigma_e3 = 0.6

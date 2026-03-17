@@ -694,10 +694,10 @@
 
     "parameter": {
       "type": "object",
-      "required": ["name", "value"],
+      "required": ["name"],
       "properties": {
         "name": { "type": "string" },
-        "value": { "type": "number" },
+        "value": { "type": ["number", "null"] },
         "prior": { "oneOf": [{ "type": "null" }, { "$ref": "#/definitions/prior_dist" }] },
         "transform": { "oneOf": [{ "type": "null" }, { "type": "string", "enum": ["log", "logit", "identity"] }] },
         "initial_value": { "type": ["number", "null"] }

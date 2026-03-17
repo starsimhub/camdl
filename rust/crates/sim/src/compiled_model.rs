@@ -141,7 +141,10 @@ impl CompiledModel {
         let mut default_params = Vec::with_capacity(model.parameters.len());
         for (i, p) in model.parameters.iter().enumerate() {
             param_index.insert(p.name.clone(), i);
-            default_params.push(p.value);
+            let v = p.value.ok_or_else(|| SimError::Validation(
+                format!("parameter '{}' has no value; supply it via --params or --set", p.name)
+            ))?;
+            default_params.push(v);
         }
 
         let mut time_func_index = HashMap::with_capacity(model.time_functions.len());

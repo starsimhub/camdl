@@ -123,7 +123,7 @@ let () =
            { m with Ir.parameters =
                List.map (fun (p : Ir.parameter) ->
                  match List.assoc_opt p.name overrides with
-                 | Some v -> { p with value = v }
+                 | Some v -> { p with value = Some v }
                  | None   -> p
                ) m.Ir.parameters
            }

@@ -268,7 +268,7 @@ let transform_to_json = function
 let parameter_to_json (p : parameter) : Yojson.Safe.t =
   obj [
     ("name",          str p.name);
-    ("value",         flt p.value);
+    ("value",         match p.value         with None -> null | Some v  -> flt v);
     ("prior",         match p.prior         with None -> null | Some pr -> prior_dist_to_json pr);
     ("transform",     match p.transform     with None -> null | Some tr -> transform_to_json tr);
     ("initial_value", match p.initial_value with None -> null | Some v  -> flt v);

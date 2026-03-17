@@ -879,26 +879,18 @@ let resolve_float_expr ctx e =
 let expand_parameters ctx =
   List.concat_map (fun pd ->
     match pd with
-    | PScalar { pname; pdefault; _ } ->
-      let value = match pdefault with
-        | None -> 0.0
-        | Some e -> resolve_float_expr ctx e
-      in
+    | PScalar { pname; _ } ->
       [{ Ir.name          = pname;
-         Ir.value         = value;
+         Ir.value         = None;
          Ir.prior         = None;
          Ir.transform     = None;
          Ir.initial_value = None;
        }]
-    | PIndexed { pname; pdims = [dim]; pdefault; _ } ->
+    | PIndexed { pname; pdims = [dim]; _ } ->
       let vals = dim_values ctx dim in
-      let default_val = match pdefault with
-        | None -> 0.0
-        | Some e -> resolve_float_expr ctx e
-      in
       List.map (fun v ->
         { Ir.name          = pname ^ "_" ^ v;
-          Ir.value         = default_val;
+          Ir.value         = None;
           Ir.prior         = None;
           Ir.transform     = None;
           Ir.initial_value = None;
@@ -907,7 +899,7 @@ let expand_parameters ctx =
     | PIndexed { pname; _ } ->
       (* Multi-dim indexed params not yet supported — emit single scalar *)
       [{ Ir.name          = pname;
-         Ir.value         = 0.0;
+         Ir.value         = None;
          Ir.prior         = None;
          Ir.transform     = None;
          Ir.initial_value = None;

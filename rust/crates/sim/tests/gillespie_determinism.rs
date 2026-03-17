@@ -32,10 +32,10 @@ fn test_gillespie_same_seed_identical_output() {
     let mut m1 = model.clone();
     for p in &mut m1.parameters {
         match p.name.as_str() {
-            "beta"  => p.value = 0.3,
-            "gamma" => p.value = 0.1,
-            "N0"    => p.value = 1000.0,
-            "I0"    => p.value = 10.0,
+            "beta"  => p.value = Some(0.3),
+            "gamma" => p.value = Some(0.1),
+            "N0"    => p.value = Some(1000.0),
+            "I0"    => p.value = Some(10.0),
             _ => {}
         }
     }
@@ -81,10 +81,10 @@ fn test_gillespie_different_seeds_different_output() {
     let mut m = model;
     for p in &mut m.parameters {
         match p.name.as_str() {
-            "beta"  => p.value = 0.3,
-            "gamma" => p.value = 0.1,
-            "N0"    => p.value = 1000.0,
-            "I0"    => p.value = 10.0,
+            "beta"  => p.value = Some(0.3),
+            "gamma" => p.value = Some(0.1),
+            "N0"    => p.value = Some(1000.0),
+            "I0"    => p.value = Some(10.0),
             _ => {}
         }
     }

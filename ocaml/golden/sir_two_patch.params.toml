@@ -1,0 +1,9 @@
+gamma = 0.1
+
+[N]
+urban = 1000.0
+rural = 1000.0
+
+[R0]
+urban = 2.5
+rural = 1.8
