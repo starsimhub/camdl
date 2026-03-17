@@ -177,6 +177,7 @@ type transform = Log | Logit | Identity
 type parameter = {
   name:          string;
   value:         float option;  (* None = must be supplied at runtime via --params / --set *)
+  bounds:        (float * float) option;  (* optional [lo, hi] constraint for inference/validation *)
   prior:         prior_dist option;
   transform:     transform option;
   initial_value: float option;

@@ -20,7 +20,7 @@ fn int_comp(name: &str) -> Compartment {
 }
 
 fn param(name: &str, value: f64) -> Parameter {
-    Parameter { name: name.into(), value: Some(value), prior: None, transform: None, initial_value: None }
+    Parameter { name: name.into(), value: Some(value), bounds: None, prior: None, transform: None, initial_value: None }
 }
 
 fn minimal_model_with_interventions(

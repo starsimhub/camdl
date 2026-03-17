@@ -48,6 +48,9 @@ pub struct Parameter {
     /// `None` = must be supplied at runtime via --params / --set.
     /// `Some(v)` = value present (either from hand-crafted IR or applied override).
     pub value:         Option<f64>,
+    /// Optional `[lo, hi]` constraint. Used by inference; simulation ignores it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bounds:        Option<(f64, f64)>,
     pub prior:         Option<PriorDist>,
     pub transform:     Option<Transform>,
     pub initial_value: Option<f64>,

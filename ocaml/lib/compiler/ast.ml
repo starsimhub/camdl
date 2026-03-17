@@ -59,8 +59,8 @@ type compartment_decl = { cname: string; ckind: compartment_kind }
 type param_type = PRate | PProbability | PPositive | PCount | PReal
 
 type param_decl =
-  | PScalar  of { pname: string; pkind: param_type }
-  | PIndexed of { pname: string; pdims: string list; pkind: param_type }
+  | PScalar  of { pname: string; pkind: param_type; pbounds: (expr * expr) option }
+  | PIndexed of { pname: string; pdims: string list; pkind: param_type; pbounds: (expr * expr) option }
 
 (** Table dimension entry: bare dim name, or dim + unit *)
 type table_dim_entry =

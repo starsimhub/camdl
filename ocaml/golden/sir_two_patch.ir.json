@@ -125,6 +125,7 @@
     {
       "name": "gamma",
       "value": null,
+      "bounds": null,
       "prior": null,
       "transform": null,
       "initial_value": null
@@ -132,6 +133,7 @@
     {
       "name": "N_urban",
       "value": null,
+      "bounds": null,
       "prior": null,
       "transform": null,
       "initial_value": null
@@ -139,6 +141,7 @@
     {
       "name": "N_rural",
       "value": null,
+      "bounds": null,
       "prior": null,
       "transform": null,
       "initial_value": null
@@ -146,6 +149,7 @@
     {
       "name": "R0_urban",
       "value": null,
+      "bounds": null,
       "prior": null,
       "transform": null,
       "initial_value": null
@@ -153,6 +157,7 @@
     {
       "name": "R0_rural",
       "value": null,
+      "bounds": null,
       "prior": null,
       "transform": null,
       "initial_value": null

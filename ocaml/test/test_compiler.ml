@@ -692,6 +692,59 @@ let test_indexed_param_shadow_warning () =
   ) warnings in
   Alcotest.(check bool) "W103 warning for shadowing" true found_w103
 
+(* ── Parameter bounds tests ───────────────────────────────────────────────── *)
+
+let test_scalar_bounds () =
+  let src = {|
+    compartments { S, I }
+    parameters {
+      R0 : positive in [1.0, 20.0]
+      gamma : rate
+    }
+    transitions {
+      recovery : I --> S @ gamma * I
+    }
+    simulate { from = 0  to = 10 }
+  |} in
+  match Compiler.compile ~name:"test_scalar_bounds" src with
+  | Error e -> Alcotest.failf "compile failed: %s" e
+  | Ok m ->
+    let r0 = List.find (fun (p : Ir.parameter) -> p.Ir.name = "R0") m.Ir.parameters in
+    Alcotest.(check bool) "R0 bounds present" true (r0.Ir.bounds <> None);
+    (match r0.Ir.bounds with
+     | Some (lo, hi) ->
+       Alcotest.(check (float 1e-12)) "R0 lo = 1.0"  1.0  lo;
+       Alcotest.(check (float 1e-12)) "R0 hi = 20.0" 20.0 hi
+     | None -> Alcotest.fail "expected bounds");
+    let gamma_p = List.find (fun (p : Ir.parameter) -> p.Ir.name = "gamma") m.Ir.parameters in
+    Alcotest.(check bool) "gamma bounds is None" true (gamma_p.Ir.bounds = None)
+
+let test_indexed_bounds () =
+  let src = {|
+    stratify(by = patch, values = [urban, rural])
+    compartments { S, I }
+    parameters {
+      R0[patch] : positive in [1.0, 10.0]
+      gamma     : rate
+    }
+    transitions {
+      recovery[p in patch] : I[p] --> S[p] @ gamma * I[p]
+    }
+    simulate { from = 0  to = 10 }
+  |} in
+  match Compiler.compile ~name:"test_indexed_bounds" src with
+  | Error e -> Alcotest.failf "compile failed: %s" e
+  | Ok m ->
+    List.iter (fun pname ->
+      let p = List.find (fun (p : Ir.parameter) -> p.Ir.name = pname) m.Ir.parameters in
+      Alcotest.(check bool) (pname ^ " bounds present") true (p.Ir.bounds <> None);
+      match p.Ir.bounds with
+      | Some (lo, hi) ->
+        Alcotest.(check (float 1e-12)) (pname ^ " lo = 1.0")  1.0  lo;
+        Alcotest.(check (float 1e-12)) (pname ^ " hi = 10.0") 10.0 hi
+      | None -> Alcotest.failf "%s bounds expected" pname
+    ) ["R0_urban"; "R0_rural"]
+
 let () =
   Alcotest.run "compiler" [
     "golden", [
@@ -738,5 +791,9 @@ let () =
       Alcotest.test_case "no default → value = 0.0"         `Quick test_indexed_param_no_default;
       Alcotest.test_case "bad index value → E100"            `Quick test_indexed_param_bad_index;
       Alcotest.test_case "let shadows stratum → W103"        `Quick test_indexed_param_shadow_warning;
+    ];
+    "param_bounds", [
+      Alcotest.test_case "scalar param in [lo, hi]"          `Quick test_scalar_bounds;
+      Alcotest.test_case "indexed param bounds expand to all strata" `Quick test_indexed_bounds;
     ];
   ]

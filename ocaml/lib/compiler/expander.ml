@@ -876,21 +876,33 @@ let resolve_float_expr ctx e =
   | Ir.Const f -> f
   | _ -> 0.0
 
+let resolve_bounds ctx pbounds =
+  match pbounds with
+  | None -> None
+  | Some (lo_e, hi_e) ->
+    let lo = resolve_float_expr ctx lo_e in
+    let hi = resolve_float_expr ctx hi_e in
+    Some (lo, hi)
+
 let expand_parameters ctx =
   List.concat_map (fun pd ->
     match pd with
-    | PScalar { pname; _ } ->
+    | PScalar { pname; pbounds; _ } ->
+      let bounds = resolve_bounds ctx pbounds in
       [{ Ir.name          = pname;
          Ir.value         = None;
+         Ir.bounds        = bounds;
          Ir.prior         = None;
          Ir.transform     = None;
          Ir.initial_value = None;
        }]
-    | PIndexed { pname; pdims = [dim]; _ } ->
+    | PIndexed { pname; pdims = [dim]; pbounds; _ } ->
       let vals = dim_values ctx dim in
+      let bounds = resolve_bounds ctx pbounds in
       List.map (fun v ->
         { Ir.name          = pname ^ "_" ^ v;
           Ir.value         = None;
+          Ir.bounds        = bounds;
           Ir.prior         = None;
           Ir.transform     = None;
           Ir.initial_value = None;
@@ -900,6 +912,7 @@ let expand_parameters ctx =
       (* Multi-dim indexed params not yet supported — emit single scalar *)
       [{ Ir.name          = pname;
          Ir.value         = None;
+         Ir.bounds        = None;
          Ir.prior         = None;
          Ir.transform     = None;
          Ir.initial_value = None;

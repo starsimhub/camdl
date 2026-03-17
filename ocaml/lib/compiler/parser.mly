@@ -121,9 +121,13 @@ param_list:
 
 param_decl:
   | name = IDENT COLON pk = param_kind
-      { PScalar { pname = name; pkind = pk } }
+      { PScalar { pname = name; pkind = pk; pbounds = None } }
+  | name = IDENT COLON pk = param_kind IN LBRACKET lo = expr COMMA hi = expr RBRACKET
+      { PScalar { pname = name; pkind = pk; pbounds = Some (lo, hi) } }
   | name = IDENT LBRACKET dim = IDENT RBRACKET COLON pk = param_kind
-      { PIndexed { pname = name; pdims = [dim]; pkind = pk } }
+      { PIndexed { pname = name; pdims = [dim]; pkind = pk; pbounds = None } }
+  | name = IDENT LBRACKET dim = IDENT RBRACKET COLON pk = param_kind IN LBRACKET lo = expr COMMA hi = expr RBRACKET
+      { PIndexed { pname = name; pdims = [dim]; pkind = pk; pbounds = Some (lo, hi) } }
 
 param_kind:
   | RATE        { PRate }

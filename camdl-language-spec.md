@@ -190,21 +190,26 @@ real        : unconstrained (default if omitted).
 Types enable: validation of supplied values, default inference transforms,
 dimensional checking in rate expressions.
 
-### 4.2 Default Values
+### 4.2 External parameter values
 
-Parameters may have an optional default value specified with `=`:
+Parameter values are **never** specified inside `.camdl` files. The model file
+declares names and types only; concrete values are supplied at runtime:
 
+```bash
+# Single flat TOML file
+camdl-sim simulate model.ir.json --params base.toml
+
+# Layered overrides (later files win)
+camdl-sim simulate model.ir.json --params base.toml --params patch.toml
+
+# Single value override
+camdl-sim simulate model.ir.json --set gamma=0.1
+
+# Per-stratum override (indexed params)
+camdl-sim simulate model.ir.json --set-vec R0=r0_posterior.tsv
 ```
-parameters {
-  gamma    : positive = 0.1     # default 0.1; overridable via --set gamma=0.2
-  rho      : probability = 0.5
-  beta     : rate               # no default; must be supplied externally
-}
-```
 
-Defaults are stored in the IR and used by the simulator unless overridden at
-runtime via `--set NAME=VALUE`. They do not affect inference — inference
-engines always supply their own values.
+The TOML format supports both flat and sectioned forms (see §22).
 
 ### 4.3 Indexed Parameters
 
@@ -213,15 +218,14 @@ parameter per stratum:
 
 ```
 parameters {
-  gamma    : positive = 0.1
-  N[patch] : positive = 1000.0   # expands to N_urban, N_rural, ...
-  R0[patch]: positive = 2.5      # expands to R0_urban, R0_rural, ...
+  gamma    : rate
+  N[patch] : positive   # expands to N_urban, N_rural, ...
+  R0[patch]: positive   # expands to R0_urban, R0_rural, ...
 }
 ```
 
-The index must refer to a declared `stratify` dimension. Each expanded scalar
-parameter carries the same default value. In expressions, indexed parameters
-are accessed with `[index]`:
+The index must refer to a declared `stratify` dimension. In expressions,
+indexed parameters are accessed with `[index]`:
 
 ```
 let beta[p in patch] = R0[p] * gamma   # R0[p] → Param("R0_urban") etc.
@@ -247,8 +251,8 @@ let urban = 1.0   # W103: let binding 'urban' shadows stratum value 'urban'
 parameters:
 
 ```
-N[patch] : positive = 1000.0  →  { name: "N_urban",  value: 1000.0, kind: "positive" }
-                                   { name: "N_rural",  value: 1000.0, kind: "positive" }
+N[patch] : positive  →  { name: "N_urban",  value: null }
+                         { name: "N_rural",  value: null }
 ```
 
 **Runtime override.** Use `--set-vec PREFIX=FILE` to supply per-stratum values
@@ -257,6 +261,34 @@ at runtime (see §22):
 ```bash
 camdl-sim simulate model.ir.json --set-vec R0=/tmp/r0_posterior.tsv
 ```
+
+### 4.4 Parameter Bounds
+
+An optional `in [lo, hi]` clause constrains the parameter's valid range:
+
+```
+parameters {
+  R0       : positive in [1.0, 20.0]    # scalar with bounds
+  rho      : probability in [0.0, 1.0]  # redundant but explicit
+  R0[patch]: positive in [0.5, 15.0]    # all strata get same bounds
+  gamma    : rate                        # unbounded (beyond type constraint)
+}
+```
+
+Bounds are **optional** and apply to all expanded scalar parameters for
+indexed declarations. They are stored in the IR:
+
+```json
+{ "name": "R0", "value": null, "bounds": [1.0, 20.0], ... }
+```
+
+Bounds are used by inference engines to constrain sampling or optimization;
+the forward simulator does not enforce them at runtime. The compiler does not
+validate that supplied values lie within bounds — that is the inference
+engine's responsibility.
+
+Type constraints still apply independently of bounds: a `positive` parameter
+with `in [1.0, 20.0]` is implicitly also constrained to `> 0`.
 
 ---
 

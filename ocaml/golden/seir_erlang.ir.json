@@ -136,6 +136,7 @@
     {
       "name": "beta",
       "value": null,
+      "bounds": null,
       "prior": null,
       "transform": null,
       "initial_value": null
@@ -143,6 +144,7 @@
     {
       "name": "sigma",
       "value": null,
+      "bounds": null,
       "prior": null,
       "transform": null,
       "initial_value": null
@@ -150,6 +152,7 @@
     {
       "name": "gamma",
       "value": null,
+      "bounds": null,
       "prior": null,
       "transform": null,
       "initial_value": null
