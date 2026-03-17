@@ -1,0 +1,26 @@
+label       = "SIR basic"
+description = "3 compartments, 2 transitions"
+
+[descriptions]
+beta  = "transmission rate (day⁻¹) — R0 = β/γ"
+gamma = "recovery rate (day⁻¹) — mean infectious period = 1/γ"
+N0    = "initial population size"
+I0    = "initial number of infectious individuals"
+
+[[params]]
+name  = "default"
+label = "default  (R0 ≈ 3)"
+t_end = 100.0
+beta  = 0.3
+gamma = 0.1
+N0    = 1000.0
+I0    = 10.0
+
+[[params]]
+name  = "high_r0"
+label = "high R0  (R0 = 5)"
+t_end = 70.0
+beta  = 0.5
+gamma = 0.1
+N0    = 1000.0
+I0    = 5.0

@@ -35,11 +35,9 @@ __pycache__/
 ir/expected/
 tests/snapshots/
 
-# Web editor
+# Web
 web/node_modules/
 web/dist/
 web/compiler-server/node_modules/
-web/src/lib/wasm/pkg/*.wasm
-web/src/lib/wasm/pkg/package.json
-web/src/lib/wasm/pkg/README.md
+web/src/lib/wasm/pkg/
 web/.env.local

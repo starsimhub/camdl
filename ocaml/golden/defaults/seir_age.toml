@@ -1,0 +1,26 @@
+label       = "SEIR + age mixing"
+description = "Stratified by age, contact matrix"
+
+# Contact matrix C_age hardcoded in model: [[12,4],[4,8]]
+# Effective R0 ≈ β · ρ(C) / γ where ρ(C) ≈ 14.5
+
+[descriptions]
+beta  = "transmission rate per contact (day⁻¹) — scales all entries of the contact matrix"
+sigma = "progression rate (day⁻¹) — mean latent period = 1/σ"
+gamma = "recovery rate (day⁻¹) — mean infectious period = 1/γ"
+
+[[params]]
+name  = "default"
+label = "default"
+t_end = 200.0
+beta  = 0.05
+sigma = 0.2
+gamma = 0.1
+
+[[params]]
+name  = "child_driven"
+label = "child-driven  (high beta)"
+t_end = 160.0
+beta  = 0.08
+sigma = 0.2
+gamma = 0.1
