@@ -101,7 +101,9 @@ function FitViewOnChange() {
   const { fitView } = useReactFlow();
   const nodes = useStore((s) => s.canvasNodes);
   useEffect(() => {
-    fitView({ padding: 0.3, duration: 200 });
+    if (nodes.length === 0) return;
+    const id = requestAnimationFrame(() => fitView({ padding: 0.3, duration: 200 }));
+    return () => cancelAnimationFrame(id);
   }, [nodes.length, fitView]);
   return null;
 }

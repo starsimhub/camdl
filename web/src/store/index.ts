@@ -7,6 +7,7 @@ import { compile as compileApi } from '../lib/compilerClient';
 import { simulate as wasmSimulate } from '../lib/wasm';
 import { irToCanvas } from '../lib/irToCanvas';
 import { extractSpans } from '../lib/spanExtractor';
+import { EXAMPLES } from '../lib/examples';
 
 export type ActiveTab = 'dsl' | 'agent';
 
@@ -127,6 +128,7 @@ interface CamdlStore {
   rejectDiff: () => void;
 
   // ── File I/O ──────────────────────────────────────────────────────────────────
+  loadExample: (name: string) => void;
   openFile: () => Promise<void>;
   saveFile: () => void;
 
@@ -442,6 +444,26 @@ export const useStore = create<CamdlStore>((set, get) => ({
   rejectDiff: () => set({ pendingDiff: null }),
 
   // File I/O
+  loadExample: (name) => {
+    const ex = EXAMPLES.find((e) => e.name === name);
+    if (!ex) return;
+    get().setModelName(ex.name);
+    get().resetExperiment();
+    const defaults = ex.paramSets[0];
+    if (defaults) {
+      get().setRunConfig({ tEnd: defaults.tEnd ?? undefined });
+      const baselineId = get().scenarios[0]?.id;
+      if (baselineId) {
+        for (const [k, v] of Object.entries(defaults.values)) {
+          get().setScenarioParam(baselineId, k, v);
+        }
+      }
+    } else {
+      get().setRunConfig({ tEnd: undefined });
+    }
+    get().setDslSource(ex.dsl);
+  },
+
   openFile: async () => {
     const input = document.createElement('input');
     input.type = 'file';

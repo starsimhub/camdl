@@ -91,23 +91,25 @@ export default function ResultsPanel() {
             </button>
           ))}
           <div className="flex-1" />
-          {/* PI / Lines toggle */}
-          <div className="flex items-center gap-0.5 bg-surface-2 rounded p-0.5 ml-2">
-            {(['pi', 'traces'] as EnsembleMode[]).map((m) => (
-              <button
-                key={m}
-                onClick={() => setModeOverride(modeOverride === m ? null : m)}
-                title={m === 'pi' ? 'Predictive interval ribbons' : 'Individual trace lines'}
-                className={`px-2 py-0.5 text-xs rounded transition-colors ${
-                  effectiveMode === m
-                    ? 'bg-surface-3 text-gray-100'
-                    : 'text-gray-500 hover:text-gray-300'
-                }`}
-              >
-                {m === 'pi' ? 'PI' : 'Lines'}
-              </button>
-            ))}
-          </div>
+          {/* Band / Lines toggle */}
+          {hasResults && (
+            <div className="flex items-center gap-0.5 bg-surface-2 rounded p-0.5 ml-2">
+              {(['pi', 'traces'] as EnsembleMode[]).map((m) => (
+                <button
+                  key={m}
+                  onClick={() => setModeOverride(modeOverride === m ? null : m)}
+                  title={m === 'pi' ? 'P10–P90 quantile band + median' : 'Individual seed traces + mean'}
+                  className={`px-2 py-0.5 text-xs rounded transition-colors ${
+                    effectiveMode === m
+                      ? 'bg-surface-3 text-gray-100'
+                      : 'text-gray-500 hover:text-gray-300'
+                  }`}
+                >
+                  {m === 'pi' ? 'Band' : 'Lines'}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       )}
 

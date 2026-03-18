@@ -7,32 +7,7 @@ export default function Header() {
   const compileStatus = useStore((s) => s.compileStatus);
   const openFile      = useStore((s) => s.openFile);
   const saveFile      = useStore((s) => s.saveFile);
-  const setDslSource  = useStore((s) => s.setDslSource);
-  const setRunConfig  = useStore((s) => s.setRunConfig);
-  const resetExperiment = useStore((s) => s.resetExperiment);
-  const setScenarioParam = useStore((s) => s.setScenarioParam);
-  const scenarios     = useStore((s) => s.scenarios);
-
-  function loadExample(name: string) {
-    const ex = EXAMPLES.find((e) => e.name === name);
-    if (!ex) return;
-    setModelName(ex.name);
-    resetExperiment();
-    const defaults = ex.paramSets[0];
-    if (defaults) {
-      setRunConfig({ tEnd: defaults.tEnd ?? undefined });
-      // Apply baseline paramSet values as overrides on the baseline scenario
-      const baselineId = scenarios[0]?.id;
-      if (baselineId) {
-        for (const [k, v] of Object.entries(defaults.values)) {
-          setScenarioParam(baselineId, k, v);
-        }
-      }
-    } else {
-      setRunConfig({ tEnd: undefined });
-    }
-    setDslSource(ex.dsl);
-  }
+  const loadExample   = useStore((s) => s.loadExample);
 
   const statusDot =
     compileStatus === 'compiling' ? '⟳' :

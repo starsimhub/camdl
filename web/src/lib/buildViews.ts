@@ -112,7 +112,9 @@ const SCENARIO_DASHES = ['', '6 3', '2 3', '10 4 2 4', '1 4'];
 
 /**
  * Build a multi-variable view (Aggregate, All, By Group, Flows).
- * Shows mean per (scenario × variable). Color = variable, dash = scenario.
+ * Band mode: P10–P90 ribbon + median per variable × scenario.
+ * Lines mode: individual seed traces (faint) + mean per variable × scenario.
+ * Color = variable, dash = scenario.
  */
 function buildMultiVarView(
   id: string,
@@ -121,14 +123,23 @@ function buildMultiVarView(
   active: Scenario[],
   timeGrid: number[],
   variables: { key: string; label: string; color: string; strokeDasharray?: string; getVal: (traj: TrajectoryJson, si: number) => number }[],
+  mode: EnsembleMode,
 ): PlotView {
   const data: ChartPoint[] = timeGrid.map((t, ti) => {
     const pt: ChartPoint = { t };
     for (const [scIdx, sc] of active.entries()) {
       for (const v of variables) {
         const values = sc.runs.map((r) => v.getVal(r.trajectory, ti));
-        pt[`s${scIdx}_${v.key}_mean`] =
-          values.length > 0 ? values.reduce((a, b) => a + b, 0) / values.length : 0;
+        if (mode === 'pi') {
+          const stats = computeStats(values);
+          pt[`s${scIdx}_${v.key}_lo`] = stats.lo;
+          pt[`s${scIdx}_${v.key}_band`] = stats.band;
+          pt[`s${scIdx}_${v.key}_median`] = stats.median;
+        } else {
+          pt[`s${scIdx}_${v.key}_mean`] =
+            values.length > 0 ? values.reduce((a, b) => a + b, 0) / values.length : 0;
+          values.forEach((val, ri) => { pt[`s${scIdx}_${v.key}_r${ri}`] = val; });
+        }
       }
     }
     return pt;
@@ -138,15 +149,36 @@ function buildMultiVarView(
   for (const [scIdx, sc] of active.entries()) {
     const dash = SCENARIO_DASHES[scIdx % SCENARIO_DASHES.length];
     for (const v of variables) {
-      series.push({
-        dataKey: `s${scIdx}_${v.key}_mean`,
-        name: active.length > 1 ? `${v.label} · ${sc.name}` : v.label,
-        color: v.color,
-        kind: 'line',
-        strokeDasharray: dash || v.strokeDasharray || undefined,
-        strokeOpacity: 0.85,
-        strokeWidth: 2,
-      });
+      const seriesDash = dash || v.strokeDasharray || undefined;
+      const legendName = active.length > 1 ? `${v.label} · ${sc.name}` : v.label;
+      if (mode === 'pi') {
+        const sid = `s${scIdx}_${v.key}`;
+        series.push({ dataKey: `${sid}_lo`,     name: '',         color: v.color, kind: 'area_base', stackId: sid, hideLegend: true });
+        series.push({ dataKey: `${sid}_band`,   name: '',         color: v.color, kind: 'area_band', stackId: sid, fillOpacity: 0.15, hideLegend: true });
+        series.push({ dataKey: `${sid}_median`, name: legendName, color: v.color, kind: 'line', strokeDasharray: seriesDash, strokeWidth: 2 });
+      } else {
+        series.push({
+          dataKey: `s${scIdx}_${v.key}_mean`,
+          name: legendName,
+          color: v.color,
+          kind: 'line',
+          strokeDasharray: seriesDash,
+          strokeOpacity: 0.85,
+          strokeWidth: 2,
+        });
+        for (let r = 0; r < active[scIdx].runs.length; r++) {
+          series.push({
+            dataKey: `s${scIdx}_${v.key}_r${r}`,
+            name: '',
+            color: v.color,
+            kind: 'line',
+            strokeDasharray: seriesDash,
+            strokeWidth: 1,
+            strokeOpacity: 0.2,
+            hideLegend: true,
+          });
+        }
+      }
     }
   }
 
@@ -270,7 +302,7 @@ export function buildViews(ir: IrModel, scenarios: Scenario[], mode: EnsembleMod
     }));
     views.push(buildMultiVarView(
       'aggregate', 'Aggregate', 'Strata summed per compartment type',
-      active, timeGrid, vars,
+      active, timeGrid, vars, mode,
     ));
   }
 
@@ -289,14 +321,14 @@ export function buildViews(ir: IrModel, scenarios: Scenario[], mode: EnsembleMod
     });
     views.push(buildMultiVarView(
       'all', 'All', 'All compartments',
-      active, timeGrid, vars,
+      active, timeGrid, vars, mode,
     ));
   }
 
   // ── 3. By group (stratified, ≤ 8 strata) ─────────────────────────────────────
   if (isStratified && allStrata.length <= 8) {
     const dashesGroup = ['', '6 3', '2 3', '10 4 2 4', '1 4'];
-    const vars: Parameters<typeof buildMultiVarView>[5] = [];
+    const vars: Parameters<typeof buildMultiVarView>[6] = [];
     for (const [si, stratum] of allStrata.entries()) {
       const members = parsed.filter((p) => p.stratum === stratum);
       for (const p of members) {
@@ -311,7 +343,7 @@ export function buildViews(ir: IrModel, scenarios: Scenario[], mode: EnsembleMod
     }
     views.push(buildMultiVarView(
       'by_group', 'By group', 'Compartments by stratum, colour = type, dash = stratum',
-      active, timeGrid, vars,
+      active, timeGrid, vars, mode,
     ));
   }
 
@@ -390,6 +422,7 @@ export function buildViews(ir: IrModel, scenarios: Scenario[], mode: EnsembleMod
         description: 'Running total of infection events — final value is epidemic size',
         data: cumData,
         series: cumSeries,
+        supportsEnsembleMode: true,
       });
     }
   }
@@ -406,7 +439,7 @@ export function buildViews(ir: IrModel, scenarios: Scenario[], mode: EnsembleMod
     }));
     views.push(buildMultiVarView(
       'flows', 'Flows', 'All transition event counts per output interval',
-      active, timeGrid, vars,
+      active, timeGrid, vars, mode,
     ));
   }
 

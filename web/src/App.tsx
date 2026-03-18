@@ -7,10 +7,10 @@ import BottomPanel from './components/BottomPanel';
 import { useStore } from './store';
 
 export default function App() {
-  const compile = useStore((s) => s.compile);
+  const loadExample = useStore((s) => s.loadExample);
 
-  // Compile the default model on mount
-  useEffect(() => { compile(); }, [compile]);
+  // Load sir_basic with its baseline preset on mount
+  useEffect(() => { loadExample('sir_basic'); }, [loadExample]);
 
   return (
     <div className="flex flex-col h-screen overflow-hidden bg-surface-0">
