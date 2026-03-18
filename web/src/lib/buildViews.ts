@@ -1,15 +1,25 @@
 import type { IrModel } from '../types/ir';
 import type { TrajectoryJson } from '../types/trajectory';
-import type { Scenario } from '../store';
+import type { Scenario } from '../types/experiment';
 import { compartmentColor } from './irToCanvas';
+
+// ── Public types ──────────────────────────────────────────────────────────────
+
+export type EnsembleMode = 'pi' | 'traces';
+
+export const TRACE_THRESHOLD = 6;
 
 export interface ChartSeries {
   dataKey: string;
   name: string;
   color: string;
+  /** 'line' → recharts Line; 'area_base' / 'area_band' → recharts Area for PI ribbon. */
+  kind: 'line' | 'area_base' | 'area_band';
+  stackId?: string;
   strokeDasharray?: string;
   strokeOpacity?: number;
   strokeWidth?: number;
+  fillOpacity?: number;
   hideLegend?: boolean;
 }
 
@@ -26,7 +36,7 @@ export interface PlotView {
   series: ChartSeries[];
 }
 
-// ── Stratification detection ──────────────────────────────────────────────────
+// ── Internals ─────────────────────────────────────────────────────────────────
 
 interface Parsed {
   full: string;
@@ -47,402 +57,358 @@ function uniqueOrdered<T>(arr: T[]): T[] {
   return [...new Set(arr)];
 }
 
-// ── Data builders ─────────────────────────────────────────────────────────────
+function quantile(sorted: number[], q: number): number {
+  if (sorted.length === 0) return 0;
+  if (sorted.length === 1) return sorted[0];
+  const pos = q * (sorted.length - 1);
+  const lo = Math.floor(pos);
+  const hi = Math.ceil(pos);
+  if (lo === hi) return sorted[lo];
+  return sorted[lo] * (hi - pos) + sorted[hi] * (pos - lo);
+}
 
-function rawValue(traj: TrajectoryJson, snapIdx: number, compIdx: number): number {
-  const snap = traj.snapshots[snapIdx];
-  const nInt = traj.int_compartment_names.length;
-  return compIdx < nInt
-    ? (snap.counts[compIdx] ?? 0)
-    : (snap.values[compIdx - nInt] ?? 0);
+function computeStats(values: number[]): { lo: number; band: number; median: number; mean: number } {
+  if (values.length === 0) return { lo: 0, band: 0, median: 0, mean: 0 };
+  const sorted = [...values].sort((a, b) => a - b);
+  const lo = Math.max(0, quantile(sorted, 0.1));
+  const hi = quantile(sorted, 0.9);
+  return {
+    lo,
+    band: Math.max(0, hi - lo),
+    median: quantile(sorted, 0.5),
+    mean: values.reduce((a, b) => a + b, 0) / values.length,
+  };
 }
 
 function allCompNames(traj: TrajectoryJson): string[] {
   return [...traj.int_compartment_names, ...traj.real_compartment_names];
 }
 
-/** Build chart data including only the specified keys (plus t). */
-function buildData(traj: TrajectoryJson, keys: string[]): ChartPoint[] {
+/** Sum named compartments at a snapshot index. */
+function sumAtIdx(traj: TrajectoryJson, snapIdx: number, compNames: string[]): number {
   const names = allCompNames(traj);
-  const indices = keys.map((k) => names.indexOf(k));
-  return traj.snapshots.map((snap, si) => {
-    const pt: ChartPoint = { t: snap.t };
-    keys.forEach((k, ki) => {
-      if (indices[ki] >= 0) pt[k] = rawValue(traj, si, indices[ki]);
-    });
-    return pt;
-  });
+  const si = Math.min(snapIdx, traj.snapshots.length - 1);
+  const snap = traj.snapshots[si];
+  if (!snap) return 0;
+  const nInt = traj.int_compartment_names.length;
+  return compNames.reduce((sum, name) => {
+    const idx = names.indexOf(name);
+    if (idx < 0) return sum;
+    return sum + (idx < nInt ? (snap.counts[idx] ?? 0) : (snap.values[idx - nInt] ?? 0));
+  }, 0);
 }
 
-/** Build chart data where each key is the SUM of several source compartments. */
-function buildAggData(
-  traj: TrajectoryJson,
-  groups: { key: string; members: string[] }[]
-): ChartPoint[] {
-  const names = allCompNames(traj);
-  return traj.snapshots.map((snap, si) => {
-    const pt: ChartPoint = { t: snap.t };
-    for (const { key, members } of groups) {
-      let sum = 0;
-      for (const m of members) {
-        const idx = names.indexOf(m);
-        if (idx >= 0) sum += rawValue(traj, si, idx);
-      }
-      pt[key] = sum;
-    }
-    return pt;
-  });
+/** Get flow value for a named transition at snapshot index. */
+function flowAtIdx(traj: TrajectoryJson, snapIdx: number, transName: string): number {
+  const si = Math.min(snapIdx, traj.snapshots.length - 1);
+  const snap = traj.snapshots[si];
+  if (!snap) return 0;
+  const idx = traj.transition_names.indexOf(transName);
+  return idx >= 0 ? (snap.flows[idx] ?? 0) : 0;
 }
 
-/** Build flow (incidence) data from transition counts. */
-function buildFlowData(traj: TrajectoryJson): ChartPoint[] {
-  return traj.snapshots.map((snap) => {
-    const pt: ChartPoint = { t: snap.t };
-    traj.transition_names.forEach((name, i) => {
-      pt[name] = snap.flows[i] ?? 0;
-    });
-    return pt;
-  });
-}
+// Dash patterns for multi-variable views — one per scenario
+const SCENARIO_DASHES = ['', '6 3', '2 3', '10 4 2 4', '1 4'];
 
-// Dash patterns for distinguishing strata with the same color
-const DASHES = ['', '6 3', '2 3', '10 4 2 4', '1 4'];
-
-// ── Main export ───────────────────────────────────────────────────────────────
-
-export function buildViews(ir: IrModel, traj: TrajectoryJson): PlotView[] {
-  const names = allCompNames(traj);
-  const parsed = parseNames(names);
-
-  const allStrata = uniqueOrdered(
-    parsed.filter((p) => p.stratum !== null).map((p) => p.stratum!)
-  );
-  const isStratified = allStrata.length > 0;
-
-  // All unique base compartment names (respects model order)
-  const bases = uniqueOrdered(parsed.map((p) => p.base));
-
-  const views: PlotView[] = [];
-
-  // ── 1. Aggregate view (stratified models only, shown first) ──────────────────
-  if (isStratified) {
-    const groups = bases.map((base) => ({
-      key: base,
-      members: parsed.filter((p) => p.base === base).map((p) => p.full),
-    }));
-    const series: ChartSeries[] = bases.map((base) => ({
-      dataKey: base,
-      name: base,
-      color: compartmentColor(base),
-    }));
-    views.push({
-      id: 'aggregate',
-      label: 'Aggregate',
-      description: 'Strata summed per compartment type',
-      data: buildAggData(traj, groups),
-      series,
-    });
-  }
-
-  // ── 2. All compartments ──────────────────────────────────────────────────────
-  {
-    const series: ChartSeries[] = parsed.map((p, i) => {
-      const stratumIdx = p.stratum ? allStrata.indexOf(p.stratum) : 0;
-      return {
-        dataKey: p.full,
-        name: p.full,
-        color: compartmentColor(p.base),
-        strokeDasharray: DASHES[stratumIdx % DASHES.length] || undefined,
-        strokeOpacity: isStratified ? 0.85 : 1,
-      };
-    });
-    views.push({
-      id: 'all',
-      label: 'All',
-      description: 'All compartments',
-      data: buildData(traj, names),
-      series,
-    });
-  }
-
-  // ── 3. By group (stratified only) ────────────────────────────────────────────
-  if (isStratified && allStrata.length <= 8) {
-    // For each stratum, one series per base compartment within it —
-    // colours by compartment type, shown overlaid on one chart
-    const series: ChartSeries[] = [];
-    for (const [si, stratum] of allStrata.entries()) {
-      const members = parsed.filter((p) => p.stratum === stratum);
-      for (const p of members) {
-        series.push({
-          dataKey: p.full,
-          name: `${p.base} [${stratum}]`,
-          color: compartmentColor(p.base),
-          strokeDasharray: DASHES[si % DASHES.length] || undefined,
-          strokeOpacity: 0.9,
-        });
+/**
+ * Build a multi-variable view (Aggregate, All, By Group, Flows).
+ * Shows mean per (scenario × variable). Color = variable, dash = scenario.
+ */
+function buildMultiVarView(
+  id: string,
+  label: string,
+  description: string,
+  active: Scenario[],
+  timeGrid: number[],
+  variables: { key: string; label: string; color: string; strokeDasharray?: string; getVal: (traj: TrajectoryJson, si: number) => number }[],
+): PlotView {
+  const data: ChartPoint[] = timeGrid.map((t, ti) => {
+    const pt: ChartPoint = { t };
+    for (const [scIdx, sc] of active.entries()) {
+      for (const v of variables) {
+        const values = sc.runs.map((r) => v.getVal(r.trajectory, ti));
+        pt[`s${scIdx}_${v.key}_mean`] =
+          values.length > 0 ? values.reduce((a, b) => a + b, 0) / values.length : 0;
       }
     }
-    views.push({
-      id: 'by_group',
-      label: 'By group',
-      description: 'Compartments by stratum, colour = type, dash = stratum',
-      data: buildData(traj, names),
-      series,
-    });
-  }
+    return pt;
+  });
 
-  // ── 4. Prevalence — infectious compartments only ──────────────────────────────
-  const infectiousAll = parsed.filter((p) => /^I/i.test(p.base));
-  if (infectiousAll.length > 0) {
-    const series: ChartSeries[] = [];
-    if (infectiousAll.length > 1 && isStratified) {
-      // Add aggregate I_total line first
-      series.push({ dataKey: '__I_total', name: 'I (total)', color: '#ef4444' });
-    }
-    for (const [si, p] of infectiousAll.entries()) {
+  const series: ChartSeries[] = [];
+  for (const [scIdx, sc] of active.entries()) {
+    const dash = SCENARIO_DASHES[scIdx % SCENARIO_DASHES.length];
+    for (const v of variables) {
       series.push({
-        dataKey: p.full,
-        name: p.stratum ? `I [${p.stratum}]` : 'I',
-        color: compartmentColor(p.base),
-        strokeDasharray: DASHES[si % DASHES.length] || undefined,
-        strokeOpacity: 0.75,
-      });
-    }
-    // Build data with optional __I_total
-    const iGroups = infectiousAll.map((p) => p.full);
-    const base = buildData(traj, iGroups);
-    const data: ChartPoint[] = base.map((pt) => ({
-      ...pt,
-      __I_total: iGroups.reduce((s, k) => s + (pt[k] ?? 0), 0),
-    }));
-    views.push({
-      id: 'prevalence',
-      label: 'Prevalence',
-      description: 'Infectious compartments',
-      data,
-      series,
-    });
-  }
-
-  // ── 5. Incidence — infection transitions, stratified ─────────────────────────
-  const hasFlows = traj.transition_names.length > 0 && traj.snapshots[0]?.flows.length > 0;
-  if (hasFlows) {
-    const infectionTr = traj.transition_names.filter((n) =>
-      /^infection|^force|^incidence|^transmission/i.test(n)
-    );
-    if (infectionTr.length > 0) {
-      const parsedTr = parseNames(infectionTr);
-      const trStrata = uniqueOrdered(
-        parsedTr.filter((p) => p.stratum !== null).map((p) => p.stratum!)
-      );
-      const isStratifiedTr = trStrata.length > 0;
-
-      // Stratum colour palette (distinct from compartment colours)
-      const stratumPalette = ['#f97316', '#06b6d4', '#a78bfa', '#22c55e', '#f59e0b', '#ec4899'];
-
-      const series: ChartSeries[] = [];
-
-      if (isStratifiedTr) {
-        // Aggregate total line first
-        series.push({
-          dataKey: '__incidence_total',
-          name: 'total',
-          color: '#e5e7eb',
-          strokeOpacity: 0.9,
-        });
-        // Per-stratum lines, colour by stratum
-        for (const [si, p] of parsedTr.entries()) {
-          series.push({
-            dataKey: p.full,
-            name: p.stratum ?? p.full,
-            color: stratumPalette[si % stratumPalette.length],
-            strokeDasharray: DASHES[si % DASHES.length] || undefined,
-            strokeOpacity: 0.85,
-          });
-        }
-      } else {
-        series.push({ dataKey: infectionTr[0], name: 'incidence', color: '#f97316' });
-      }
-
-      const flowBase = buildFlowData(traj);
-      const data: ChartPoint[] = flowBase.map((pt) => ({
-        ...pt,
-        __incidence_total: infectionTr.reduce((s, k) => s + (pt[k] ?? 0), 0),
-      }));
-
-      views.push({
-        id: 'incidence',
-        label: 'Incidence',
-        description: 'New infection events per output interval',
-        data,
-        series,
+        dataKey: `s${scIdx}_${v.key}_mean`,
+        name: active.length > 1 ? `${v.label} · ${sc.name}` : v.label,
+        color: v.color,
+        kind: 'line',
+        strokeDasharray: dash || v.strokeDasharray || undefined,
+        strokeOpacity: 0.85,
+        strokeWidth: 2,
       });
     }
   }
 
-  // ── 6. Cumulative incidence ───────────────────────────────────────────────────
-  if (hasFlows) {
-    const infectionTr = traj.transition_names.filter((n) =>
-      /^infection|^force|^incidence|^transmission/i.test(n)
-    );
-    const sourceTr = infectionTr.length > 0 ? infectionTr : [];
-    if (sourceTr.length > 0) {
-      const parsedTr = parseNames(sourceTr);
-      const trStrata = uniqueOrdered(
-        parsedTr.filter((p) => p.stratum !== null).map((p) => p.stratum!)
-      );
-      const isStratifiedTr = trStrata.length > 0;
-      const stratumPalette = ['#f97316', '#06b6d4', '#a78bfa', '#22c55e', '#f59e0b', '#ec4899'];
-
-      // Build cumulative data by running-summing the flows
-      const flowBase = buildFlowData(traj);
-      const cumSums: Record<string, number> = {};
-      const data: ChartPoint[] = flowBase.map((pt) => {
-        const out: ChartPoint = { t: pt.t };
-        for (const name of sourceTr) {
-          cumSums[name] = (cumSums[name] ?? 0) + (pt[name] ?? 0);
-          out[`cum_${name}`] = cumSums[name];
-        }
-        const total = sourceTr.reduce((s, k) => s + (cumSums[k] ?? 0), 0);
-        out['__cum_total'] = total;
-        return out;
-      });
-
-      const series: ChartSeries[] = [];
-      if (isStratifiedTr) {
-        series.push({ dataKey: '__cum_total', name: 'total', color: '#e5e7eb', strokeOpacity: 0.9 });
-        for (const [si, p] of parsedTr.entries()) {
-          series.push({
-            dataKey: `cum_${p.full}`,
-            name: p.stratum ?? p.full,
-            color: stratumPalette[si % stratumPalette.length],
-            strokeDasharray: DASHES[si % DASHES.length] || undefined,
-            strokeOpacity: 0.85,
-          });
-        }
-      } else {
-        series.push({ dataKey: `cum_${sourceTr[0]}`, name: 'cumulative infections', color: '#f97316' });
-      }
-
-      views.push({
-        id: 'cumulative',
-        label: 'Cumulative',
-        description: 'Running total of infection events — final value is epidemic size',
-        data,
-        series,
-      });
-    }
-  }
-
-  // ── 7. All flows ──────────────────────────────────────────────────────────────
-  if (hasFlows && traj.transition_names.length > 0) {
-    const shown = traj.transition_names.slice(0, 14);
-    const palette = ['#f59e0b', '#3b82f6', '#22c55e', '#a78bfa', '#f97316', '#06b6d4', '#ec4899', '#84cc16'];
-    const series: ChartSeries[] = shown.map((name, i) => ({
-      dataKey: name,
-      name,
-      color: palette[i % palette.length],
-      strokeDasharray: i >= palette.length ? DASHES[(Math.floor(i / palette.length)) % DASHES.length] || undefined : undefined,
-      strokeOpacity: 0.8,
-    }));
-    views.push({
-      id: 'flows',
-      label: 'Flows',
-      description: 'All transition event counts per output interval',
-      data: buildFlowData(traj),
-      series,
-    });
-  }
-
-  return views;
-}
-
-// ── Scenario compare view ─────────────────────────────────────────────────────
-
-const SCENARIO_COLORS = ['#2dd4bf', '#f97316', '#a78bfa', '#22c55e', '#f59e0b', '#ec4899', '#3b82f6', '#f43f5e'];
-
-/** Sum of all I-prefixed integer compartments at a given snapshot index. */
-function iTotalAtIdx(traj: TrajectoryJson, snapIdx: number): number {
-  const iIndices = traj.int_compartment_names
-    .map((n, i) => ({ n, i }))
-    .filter(({ n }) => /^I/i.test(n))
-    .map(({ i }) => i);
-  const snap = traj.snapshots[snapIdx];
-  if (iIndices.length === 0) return snap.counts.reduce((a, b) => a + b, 0);
-  return iIndices.reduce((sum, i) => sum + (snap.counts[i] ?? 0), 0);
-}
-
-/** Forward-fill I_total for a trajectory at time t. */
-function iTotalAt(traj: TrajectoryJson, t: number): number {
-  let lastIdx = 0;
-  for (let i = 0; i < traj.snapshots.length; i++) {
-    if (traj.snapshots[i].t <= t + 1e-9) lastIdx = i;
-    else break;
-  }
-  return iTotalAtIdx(traj, lastIdx);
+  return { id, label, description, data, series };
 }
 
 /**
- * Build a "Compare" PlotView overlaying infectious prevalence for all
- * completed scenarios. Bold mean + thin individual replicates.
+ * Build a single-variable view (Prevalence, Incidence, Cumulative).
+ * Shows PI ribbon or traces per scenario. Color = scenario.
  */
-export function buildCompareViews(scenarios: Scenario[]): PlotView[] {
-  const ready = scenarios.filter((s) => s.status === 'ok' && s.trajectories.length > 0);
-  if (ready.length === 0) return [];
-
-  // Merge time grids from all replicates, downsample to ≤ 400 points
-  const rawTimes = [...new Set(
-    ready.flatMap((s) => s.trajectories.flatMap((t) => t.snapshots.map((sn) => sn.t)))
-  )].sort((a, b) => a - b);
-
-  const MAX = 400;
-  const timeGrid = rawTimes.length > MAX
-    ? rawTimes.filter((_, i) => i % Math.ceil(rawTimes.length / MAX) === 0)
-    : rawTimes;
+function buildSingleVarView(
+  id: string,
+  label: string,
+  description: string,
+  active: Scenario[],
+  timeGrid: number[],
+  getVal: (traj: TrajectoryJson, snapIdx: number) => number,
+  mode: EnsembleMode,
+): PlotView {
+  const data: ChartPoint[] = timeGrid.map((t, ti) => {
+    const pt: ChartPoint = { t };
+    for (const [si, sc] of active.entries()) {
+      const values = sc.runs.map((r) => getVal(r.trajectory, ti));
+      if (mode === 'pi') {
+        const stats = computeStats(values);
+        pt[`s${si}_lo`] = stats.lo;
+        pt[`s${si}_band`] = stats.band;
+        pt[`s${si}_median`] = stats.median;
+      } else {
+        pt[`s${si}_mean`] =
+          values.length > 0 ? values.reduce((a, b) => a + b, 0) / values.length : 0;
+        values.forEach((v, ri) => { pt[`s${si}_r${ri}`] = v; });
+      }
+    }
+    return pt;
+  });
 
   const series: ChartSeries[] = [];
-  const dataRows: ChartPoint[] = timeGrid.map((t) => ({ t }));
-
-  for (const [si, sc] of ready.entries()) {
-    const color = SCENARIO_COLORS[si % SCENARIO_COLORS.length];
-    const nRep = sc.trajectories.length;
-
-    // Mean line (bold, shown in legend)
-    const meanKey = `s${si}_mean`;
-    series.push({ dataKey: meanKey, name: sc.name, color, strokeWidth: 2 });
-
-    // Individual replicate lines (faint, hidden from legend)
-    if (nRep > 1) {
-      for (let r = 0; r < nRep; r++) {
+  for (const [si, sc] of active.entries()) {
+    if (mode === 'pi') {
+      const sid = `s${si}`;
+      series.push({
+        dataKey: `s${si}_lo`,
+        name: '',
+        color: sc.color,
+        kind: 'area_base',
+        stackId: sid,
+        hideLegend: true,
+      });
+      series.push({
+        dataKey: `s${si}_band`,
+        name: '',
+        color: sc.color,
+        kind: 'area_band',
+        stackId: sid,
+        fillOpacity: 0.18,
+        hideLegend: true,
+      });
+      series.push({
+        dataKey: `s${si}_median`,
+        name: sc.name,
+        color: sc.color,
+        kind: 'line',
+        strokeWidth: 2,
+      });
+    } else {
+      // Mean line (bold, in legend)
+      series.push({
+        dataKey: `s${si}_mean`,
+        name: sc.name,
+        color: sc.color,
+        kind: 'line',
+        strokeWidth: 2,
+      });
+      // Individual trace lines (faint, not in legend)
+      for (let r = 0; r < sc.runs.length; r++) {
         series.push({
           dataKey: `s${si}_r${r}`,
-          name: `${sc.name} #${r + 1}`,
-          color,
+          name: '',
+          color: sc.color,
+          kind: 'line',
           strokeWidth: 1,
           strokeOpacity: 0.25,
           hideLegend: true,
         });
       }
     }
+  }
 
-    // Fill data rows
-    for (let ti = 0; ti < timeGrid.length; ti++) {
-      const t = timeGrid[ti];
-      const repVals = sc.trajectories.map((traj) => iTotalAt(traj, t));
-      dataRows[ti][meanKey] = repVals.reduce((a, b) => a + b, 0) / repVals.length;
-      if (nRep > 1) {
-        for (let r = 0; r < nRep; r++) {
-          dataRows[ti][`s${si}_r${r}`] = repVals[r];
+  return { id, label, description, data, series };
+}
+
+// ── Main export ───────────────────────────────────────────────────────────────
+
+export function buildViews(ir: IrModel, scenarios: Scenario[], mode: EnsembleMode): PlotView[] {
+  const active = scenarios.filter((s) => s.runs.length > 0);
+  if (active.length === 0) return [];
+
+  // Reference trajectory for compartment names and time grid
+  const refTraj = active[0].runs[0].trajectory;
+  const compNames = allCompNames(refTraj);
+  const parsed = parseNames(compNames);
+  const timeGrid = refTraj.snapshots.map((s) => s.t);
+
+  const allStrata = uniqueOrdered(
+    parsed.filter((p) => p.stratum !== null).map((p) => p.stratum!)
+  );
+  const isStratified = allStrata.length > 0;
+  const bases = uniqueOrdered(parsed.map((p) => p.base));
+
+  const views: PlotView[] = [];
+
+  // ── 1. Aggregate (stratified only) ───────────────────────────────────────────
+  if (isStratified) {
+    const vars = bases.map((base) => ({
+      key: base,
+      label: base,
+      color: compartmentColor(base),
+      getVal: (traj: TrajectoryJson, si: number) =>
+        sumAtIdx(traj, si, parsed.filter((p) => p.base === base).map((p) => p.full)),
+    }));
+    views.push(buildMultiVarView(
+      'aggregate', 'Aggregate', 'Strata summed per compartment type',
+      active, timeGrid, vars,
+    ));
+  }
+
+  // ── 2. All compartments ──────────────────────────────────────────────────────
+  {
+    const dashesAll = ['', '6 3', '2 3', '10 4 2 4', '1 4'];
+    const vars = parsed.map((p, i) => {
+      const stratumIdx = p.stratum ? allStrata.indexOf(p.stratum) : 0;
+      return {
+        key: p.full.replace(/[^a-zA-Z0-9]/g, '_'),
+        label: p.full,
+        color: compartmentColor(p.base),
+        strokeDasharray: dashesAll[stratumIdx % dashesAll.length] || undefined,
+        getVal: (traj: TrajectoryJson, si: number) => sumAtIdx(traj, si, [p.full]),
+      };
+    });
+    views.push(buildMultiVarView(
+      'all', 'All', 'All compartments',
+      active, timeGrid, vars,
+    ));
+  }
+
+  // ── 3. By group (stratified, ≤ 8 strata) ─────────────────────────────────────
+  if (isStratified && allStrata.length <= 8) {
+    const dashesGroup = ['', '6 3', '2 3', '10 4 2 4', '1 4'];
+    const vars: Parameters<typeof buildMultiVarView>[5] = [];
+    for (const [si, stratum] of allStrata.entries()) {
+      const members = parsed.filter((p) => p.stratum === stratum);
+      for (const p of members) {
+        vars.push({
+          key: `${p.full.replace(/[^a-zA-Z0-9]/g, '_')}_grp`,
+          label: `${p.base} [${stratum}]`,
+          color: compartmentColor(p.base),
+          strokeDasharray: dashesGroup[si % dashesGroup.length] || undefined,
+          getVal: (traj: TrajectoryJson, snapIdx: number) => sumAtIdx(traj, snapIdx, [p.full]),
+        });
+      }
+    }
+    views.push(buildMultiVarView(
+      'by_group', 'By group', 'Compartments by stratum, colour = type, dash = stratum',
+      active, timeGrid, vars,
+    ));
+  }
+
+  // ── 4. Prevalence (I-prefixed compartments, aggregated) ──────────────────────
+  const infectiousNames = parsed.filter((p) => /^I/i.test(p.base)).map((p) => p.full);
+  if (infectiousNames.length > 0) {
+    views.push(buildSingleVarView(
+      'prevalence', 'Prevalence', 'Infectious compartments (summed)',
+      active, timeGrid,
+      (traj, si) => sumAtIdx(traj, si, infectiousNames),
+      mode,
+    ));
+  }
+
+  // ── 5. Incidence (infection transitions, summed) ─────────────────────────────
+  const hasFlows =
+    refTraj.transition_names.length > 0 && (refTraj.snapshots[0]?.flows.length ?? 0) > 0;
+
+  if (hasFlows) {
+    const infTrans = refTraj.transition_names.filter((n) =>
+      /^infection|^force|^incidence|^transmission/i.test(n)
+    );
+    if (infTrans.length > 0) {
+      views.push(buildSingleVarView(
+        'incidence', 'Incidence', 'New infection events per output interval',
+        active, timeGrid,
+        (traj, si) => infTrans.reduce((sum, t) => sum + flowAtIdx(traj, si, t), 0),
+        mode,
+      ));
+
+      // ── 6. Cumulative incidence ───────────────────────────────────────────────
+      // We need running sums — build special view
+      const cumData: ChartPoint[] = timeGrid.map((t, ti) => {
+        const pt: ChartPoint = { t };
+        for (const [scIdx, sc] of active.entries()) {
+          const values = sc.runs.map((r) => {
+            // Sum flows up to this snapshot index
+            let cumSum = 0;
+            for (let j = 0; j <= ti; j++) {
+              cumSum += infTrans.reduce((s, tr) => s + flowAtIdx(r.trajectory, j, tr), 0);
+            }
+            return cumSum;
+          });
+          if (mode === 'pi') {
+            const stats = computeStats(values);
+            pt[`s${scIdx}_lo`] = stats.lo;
+            pt[`s${scIdx}_band`] = stats.band;
+            pt[`s${scIdx}_median`] = stats.median;
+          } else {
+            pt[`s${scIdx}_mean`] =
+              values.length > 0 ? values.reduce((a, b) => a + b, 0) / values.length : 0;
+            values.forEach((v, ri) => { pt[`s${scIdx}_r${ri}`] = v; });
+          }
+        }
+        return pt;
+      });
+
+      // Series same structure as buildSingleVarView
+      const cumSeries: ChartSeries[] = [];
+      for (const [si, sc] of active.entries()) {
+        if (mode === 'pi') {
+          const sid = `cs${si}`;
+          cumSeries.push({ dataKey: `s${si}_lo`, name: '', color: sc.color, kind: 'area_base', stackId: sid, hideLegend: true });
+          cumSeries.push({ dataKey: `s${si}_band`, name: '', color: sc.color, kind: 'area_band', stackId: sid, fillOpacity: 0.18, hideLegend: true });
+          cumSeries.push({ dataKey: `s${si}_median`, name: sc.name, color: sc.color, kind: 'line', strokeWidth: 2 });
+        } else {
+          cumSeries.push({ dataKey: `s${si}_mean`, name: sc.name, color: sc.color, kind: 'line', strokeWidth: 2 });
+          for (let r = 0; r < sc.runs.length; r++) {
+            cumSeries.push({ dataKey: `s${si}_r${r}`, name: '', color: sc.color, kind: 'line', strokeWidth: 1, strokeOpacity: 0.25, hideLegend: true });
+          }
         }
       }
+      views.push({
+        id: 'cumulative',
+        label: 'Cumulative',
+        description: 'Running total of infection events — final value is epidemic size',
+        data: cumData,
+        series: cumSeries,
+      });
     }
   }
 
-  return [{
-    id: 'compare',
-    label: 'Compare',
-    description: 'Scenarios overlaid — infectious prevalence (mean + replicates)',
-    data: dataRows,
-    series,
-  }];
+  // ── 7. All flows ──────────────────────────────────────────────────────────────
+  if (hasFlows && refTraj.transition_names.length > 0) {
+    const shown = refTraj.transition_names.slice(0, 14);
+    const palette = ['#f59e0b', '#3b82f6', '#22c55e', '#a78bfa', '#f97316', '#06b6d4', '#ec4899', '#84cc16'];
+    const vars = shown.map((name, i) => ({
+      key: `flow_${name.replace(/[^a-zA-Z0-9]/g, '_')}`,
+      label: name,
+      color: palette[i % palette.length],
+      getVal: (traj: TrajectoryJson, si: number) => flowAtIdx(traj, si, name),
+    }));
+    views.push(buildMultiVarView(
+      'flows', 'Flows', 'All transition event counts per output interval',
+      active, timeGrid, vars,
+    ));
+  }
+
+  return views;
 }

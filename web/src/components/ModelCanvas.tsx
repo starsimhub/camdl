@@ -1,4 +1,4 @@
-import { useCallback, memo } from 'react';
+import { useCallback, useEffect, memo } from 'react';
 import {
   ReactFlow,
   Background,
@@ -6,6 +6,7 @@ import {
   Controls,
   Handle,
   Position,
+  useReactFlow,
   type NodeProps,
   type EdgeProps,
   getBezierPath,
@@ -96,6 +97,15 @@ TransitionEdge.displayName = 'TransitionEdge';
 const nodeTypes = { compartmentNode: CompartmentNode };
 const edgeTypes = { transitionEdge: TransitionEdge };
 
+function FitViewOnChange() {
+  const { fitView } = useReactFlow();
+  const nodes = useStore((s) => s.canvasNodes);
+  useEffect(() => {
+    fitView({ padding: 0.3, duration: 200 });
+  }, [nodes.length, fitView]);
+  return null;
+}
+
 // ── Canvas ────────────────────────────────────────────────────────────────────
 
 export default function ModelCanvas() {
@@ -144,6 +154,7 @@ export default function ModelCanvas() {
           style={{ background: '#161b22', border: '1px solid #30363d' }}
           showInteractive={false}
         />
+        <FitViewOnChange />
       </ReactFlow>
     </div>
   );

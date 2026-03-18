@@ -50,7 +50,8 @@ Rules:
 - Never output modified DSL in your chat message — always use propose_edit
 - If compile fails, read the error, fix the DSL, try again (max 3 attempts)
 - Explain what you changed and why in the explanation field
-- When asked about simulation results, use the trajectory data to give specific numbers`;
+- When asked about simulation results, use the trajectory data to give specific numbers
+- Note: editing the DSL (via propose_edit) clears all experiment results. The user will need to re-run their experiment after accepting any edits.`;
 
 interface Message {
   role: 'user' | 'assistant';

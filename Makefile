@@ -34,17 +34,25 @@ build-wasm:
 
 # ── Web editor ────────────────────────────────────────────────────────────────
 
-.PHONY: web-install web-dev web-build
+.PHONY: web-dev web-build
 
-web-install:
+web/node_modules/.package-lock.json: web/package.json
 	cd web && npm install
+
+web/compiler-server/node_modules/.package-lock.json: web/compiler-server/package.json
 	cd web/compiler-server && npm install
 
-web-dev: build-ocaml build-wasm
-	cd web/compiler-server && npx tsx server.ts &
-	cd web && npm run dev
+# Fast dev loop — does not rebuild OCaml/WASM. Run make build-wasm first if needed.
+web-dev: web/node_modules/.package-lock.json \
+         web/compiler-server/node_modules/.package-lock.json
+	@trap 'kill 0' INT; \
+	 (cd web/compiler-server && npx tsx server.ts) & \
+	 (cd web && npm run dev) & \
+	 wait
 
-web-build: build-ocaml build-wasm web-install
+web-build: build-ocaml build-wasm \
+           web/node_modules/.package-lock.json \
+           web/compiler-server/node_modules/.package-lock.json
 	cd web && npm run build
 
 # ── Install ───────────────────────────────────────────────────────────────────

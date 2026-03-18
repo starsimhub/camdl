@@ -2,35 +2,34 @@ import { useStore } from '../store';
 import { EXAMPLES } from '../lib/examples';
 
 export default function Header() {
-  const modelName       = useStore((s) => s.modelName);
-  const setModelName    = useStore((s) => s.setModelName);
-  const compileStatus   = useStore((s) => s.compileStatus);
-  const simStatus       = useStore((s) => s.simStatus);
-  const openFile        = useStore((s) => s.openFile);
-  const saveFile        = useStore((s) => s.saveFile);
-  const runSimulation   = useStore((s) => s.runSimulation);
-  const ir              = useStore((s) => s.ir);
-  const anyRunning      = useStore((s) =>
-    s.simStatus === 'running' || s.scenarios.some((sc) => sc.status === 'running')
-  );
-  const setDslSource      = useStore((s) => s.setDslSource);
-  const resetOverrides    = useStore((s) => s.resetParamOverrides);
-  const setParamOverride  = useStore((s) => s.setParamOverride);
-  const setSimConfig      = useStore((s) => s.setSimConfig);
-  const resetRun          = useStore((s) => s.resetRun);
+  const modelName     = useStore((s) => s.modelName);
+  const setModelName  = useStore((s) => s.setModelName);
+  const compileStatus = useStore((s) => s.compileStatus);
+  const openFile      = useStore((s) => s.openFile);
+  const saveFile      = useStore((s) => s.saveFile);
+  const setDslSource  = useStore((s) => s.setDslSource);
+  const setRunConfig  = useStore((s) => s.setRunConfig);
+  const resetExperiment = useStore((s) => s.resetExperiment);
+  const setScenarioParam = useStore((s) => s.setScenarioParam);
+  const scenarios     = useStore((s) => s.scenarios);
 
   function loadExample(name: string) {
     const ex = EXAMPLES.find((e) => e.name === name);
     if (!ex) return;
     setModelName(ex.name);
-    resetRun();
-    resetOverrides();
+    resetExperiment();
     const defaults = ex.paramSets[0];
     if (defaults) {
-      for (const [k, v] of Object.entries(defaults.values)) setParamOverride(k, v);
-      setSimConfig({ tEnd: defaults.tEnd ?? undefined });
+      setRunConfig({ tEnd: defaults.tEnd ?? undefined });
+      // Apply baseline paramSet values as overrides on the baseline scenario
+      const baselineId = scenarios[0]?.id;
+      if (baselineId) {
+        for (const [k, v] of Object.entries(defaults.values)) {
+          setScenarioParam(baselineId, k, v);
+        }
+      }
     } else {
-      setSimConfig({ tEnd: undefined });
+      setRunConfig({ tEnd: undefined });
     }
     setDslSource(ex.dsl);
   }
@@ -40,8 +39,8 @@ export default function Header() {
     compileStatus === 'error'     ? '●' :
     compileStatus === 'ok'        ? '●' : '○';
   const statusColor =
-    compileStatus === 'error'     ? 'text-red-400' :
-    compileStatus === 'ok'        ? 'text-accent' : 'text-gray-500';
+    compileStatus === 'error' ? 'text-red-400' :
+    compileStatus === 'ok'    ? 'text-accent' : 'text-gray-500';
 
   return (
     <header className="flex items-center gap-3 px-4 h-11 bg-surface-1 border-b border-surface-border flex-shrink-0">
@@ -91,19 +90,6 @@ export default function Header() {
         className="px-2 py-1 text-xs text-gray-300 border border-surface-border hover:text-white hover:border-gray-500 rounded transition-colors"
       >
         Save
-      </button>
-
-      {/* Run button */}
-      <button
-        onClick={runSimulation}
-        disabled={!ir || anyRunning}
-        className={`px-3 py-1 text-xs rounded font-semibold transition-colors disabled:cursor-not-allowed ${
-          anyRunning
-            ? 'bg-red-500/80 text-white animate-pulse'
-            : 'bg-accent text-surface-0 hover:bg-accent-dim disabled:opacity-40'
-        }`}
-      >
-        {simStatus === 'running' ? '● Running…' : anyRunning ? '● Running…' : '▶ Run'}
       </button>
     </header>
   );
