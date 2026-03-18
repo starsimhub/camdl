@@ -354,9 +354,15 @@ let test_sinusoidal_time_func () =
     Alcotest.(check string) "name is seasonal" "seasonal" tf.Ir.name;
     (match tf.Ir.kind with
      | Ir.Sinusoidal s ->
-       Alcotest.(check (float 1e-9)) "amplitude" 0.3   s.Ir.amplitude;
-       Alcotest.(check (float 1e-9)) "period"    365.0 s.Ir.period;
-       Alcotest.(check (float 1e-9)) "baseline"  1.0   s.Ir.baseline
+       (match s.Ir.amplitude with
+        | Ir.Const v -> Alcotest.(check (float 1e-9)) "amplitude" 0.3 v
+        | _ -> Alcotest.fail "expected Ir.Const for amplitude");
+       (match s.Ir.period with
+        | Ir.Const v -> Alcotest.(check (float 1e-9)) "period" 365.0 v
+        | _ -> Alcotest.fail "expected Ir.Const for period");
+       (match s.Ir.baseline with
+        | Ir.Const v -> Alcotest.(check (float 1e-9)) "baseline" 1.0 v
+        | _ -> Alcotest.fail "expected Ir.Const for baseline")
      | _ -> Alcotest.fail "expected Sinusoidal kind")
 
 let rec expr_contains_time_func name = function
@@ -745,6 +751,133 @@ let test_indexed_bounds () =
       | None -> Alcotest.failf "%s bounds expected" pname
     ) ["R0_urban"; "R0_rural"]
 
+(* ── Issue 2: Bare function name in rate resolves to Ir.TimeFunc ─────────────
+   Using `seasonal` without parens in a rate expression should resolve to
+   Ir.TimeFunc "seasonal", not emit E100. ─────────────────────────────────── *)
+
+let test_bare_func_name_in_rate () =
+  let src = {|
+    compartments { S, I, R }
+    parameters {
+      gamma : rate
+      N0    : count
+      I0    : count
+    }
+    functions {
+      seasonal : sinusoidal {
+        amplitude = 0.3
+        period    = 365.0
+        phase     = 0.0
+        baseline  = 1.0
+      }
+    }
+    let N = S + I + R
+    transitions {
+      infection : S --> I  @ seasonal * S * I / N
+      recovery  : I --> R  @ gamma * I
+    }
+    init {
+      S = N0 - I0
+      I = I0
+    }
+    simulate { from = 0 'days  to = 365 'days }
+  |} in
+  match Compiler.compile ~name:"test_bare_func" src with
+  | Error e -> Alcotest.failf "compile failed: %s" e
+  | Ok m ->
+    let infection = find_transition m "infection" in
+    if not (expr_contains_time_func "seasonal" infection.Ir.rate) then
+      Alcotest.fail "bare 'seasonal' in rate should resolve to Ir.TimeFunc \"seasonal\""
+
+(* ── Issue 3: Unknown EFuncCall emits E100, not silent 0.0 ───────────────────
+   A misspelled function call like `seassonal()` should produce an E100 error. *)
+
+let test_unknown_func_call_e100 () =
+  let src = {|
+    compartments { S, I, R }
+    parameters {
+      gamma : rate
+      N0    : count
+      I0    : count
+    }
+    functions {
+      seasonal : sinusoidal {
+        amplitude = 0.3
+        period    = 365.0
+        phase     = 0.0
+        baseline  = 1.0
+      }
+    }
+    let N = S + I + R
+    transitions {
+      infection : S --> I  @ seassonal() * S * I / N
+      recovery  : I --> R  @ gamma * I
+    }
+    init {
+      S = N0 - I0
+      I = I0
+    }
+    simulate { from = 0 'days  to = 365 'days }
+  |} in
+  let lexbuf = Lexing.from_string src in
+  let decls =
+    try Parser.file Lexer.token lexbuf
+    with _ -> Alcotest.fail "parse failed"
+  in
+  let (_model, ctx, _summary) = Expander.expand_detail "test_unk_func" decls in
+  let errors = ctx.diags.Diagnostics.diags
+    |> List.filter (fun d -> d.Diagnostics.severity = Diagnostics.Error)
+  in
+  let found_e100 = List.exists (fun d -> d.Diagnostics.code = "E100") errors in
+  Alcotest.(check bool) "E100 for unknown function call" true found_e100
+
+(* ── Issue 1: Time function param args preserved ─────────────────────────────
+   Compile a model with a sinusoidal function where amplitude is a parameter.
+   The compiled Sinusoidal.amplitude should be Ir.Param "alpha", not Ir.Const 0.0.*)
+
+let test_time_func_param_arg () =
+  let src = {|
+    compartments { S, I, R }
+    parameters {
+      alpha : positive
+      gamma : rate
+      N0    : count
+      I0    : count
+    }
+    functions {
+      seasonal : sinusoidal {
+        amplitude = alpha
+        period    = 365.0
+        phase     = 0.0
+        baseline  = 1.0
+      }
+    }
+    let N = S + I + R
+    transitions {
+      infection : S --> I  @ seasonal(t) * S * I / N
+      recovery  : I --> R  @ gamma * I
+    }
+    init {
+      S = N0 - I0
+      I = I0
+    }
+    simulate { from = 0 'days  to = 365 'days }
+  |} in
+  match Compiler.compile ~name:"test_tf_param" src with
+  | Error e -> Alcotest.failf "compile failed: %s" e
+  | Ok m ->
+    let tf = List.find (fun (t : Ir.time_function) -> t.Ir.name = "seasonal") m.Ir.time_functions in
+    (match tf.Ir.kind with
+     | Ir.Sinusoidal s ->
+       (match s.Ir.amplitude with
+        | Ir.Param "alpha" -> ()  (* pass *)
+        | Ir.Const 0.0     -> Alcotest.fail "amplitude was silently converted to 0.0 (param not preserved)"
+        | other ->
+          Alcotest.failf "expected Ir.Param \"alpha\", got: %s"
+            (Serialize.model_to_string { m with Ir.time_functions =
+               [{ tf with Ir.kind = Ir.Sinusoidal { s with Ir.amplitude = other } }] }))
+     | _ -> Alcotest.fail "expected Sinusoidal kind")
+
 let () =
   Alcotest.run "compiler" [
     "golden", [
@@ -776,8 +909,11 @@ let () =
       Alcotest.test_case "intervention expansion" `Quick test_intervention_expansion;
     ];
     "time_functions", [
-      Alcotest.test_case "sinusoidal compiles to TimeFunc" `Quick test_sinusoidal_time_func;
-      Alcotest.test_case "EFuncCall in rate emits Ir.TimeFunc" `Quick test_time_func_in_rate;
+      Alcotest.test_case "sinusoidal compiles to TimeFunc"       `Quick test_sinusoidal_time_func;
+      Alcotest.test_case "EFuncCall in rate emits Ir.TimeFunc"   `Quick test_time_func_in_rate;
+      Alcotest.test_case "param arg preserved in time func"      `Quick test_time_func_param_arg;
+      Alcotest.test_case "bare func name resolves to Ir.TimeFunc" `Quick test_bare_func_name_in_rate;
+      Alcotest.test_case "unknown func call emits E100"          `Quick test_unknown_func_call_e100;
     ];
     "read_json", [
       Alcotest.test_case "1D array from JSON file"           `Quick test_read_json_1d;

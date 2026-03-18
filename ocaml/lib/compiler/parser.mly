@@ -1,5 +1,10 @@
 %{
   open Ast
+
+  type scenario_field_kind =
+    | ScLabel  of string
+    | ScTEnd   of expr
+    | ScParams of (string * expr) list
 %}
 
 (* ── Literals & identifiers ────────────────────────────────────────────── *)
@@ -85,6 +90,8 @@ declaration:
       { DStratify sa }
   | LET name = IDENT ibs = index_bindings_opt EQ body = expr
       { DLet { lname = name; lindices = ibs; lbody = body } }
+  | SCENARIOS LBRACE ss = list(scenario_block) RBRACE
+      { DScenarios ss }
 
 (* ── Unit literals ──────────────────────────────────────────────────────── *)
 
@@ -478,3 +485,30 @@ atom_expr:
 kw_expr:
   | k = IDENT EQ v = expr { (k, v) }
   | e = expr               { ("", e) }
+
+(* ── Scenarios block ─────────────────────────────────────────────────────── *)
+
+scenario_block:
+  | name = IDENT LBRACE fields = list(scenario_field) RBRACE
+      { let label  = List.find_map (function ScLabel s -> Some s | _ -> None) fields in
+        let t_end  = List.find_map (function ScTEnd  e -> Some e | _ -> None) fields in
+        let params = List.concat_map (function ScParams ps -> ps | _ -> []) fields in
+        { Ast.scname = name; sclabel = label; sct_end = t_end; scparams = params } }
+
+scenario_field:
+  | SIMULATE LBRACE kvs = list(simulate_kv) RBRACE
+      { let e = match List.find_map (function `To e -> Some e | _ -> None) kvs with
+                | Some e -> e | None -> EConst 0.0 in
+        ScTEnd e }
+  | IDENT EQ LBRACE ps = list(scenario_kv_item) RBRACE
+      { ScParams ps }
+  | k = IDENT EQ v = expr
+      { if k = "label" then
+          (match v with
+           | EIdent (s, _) -> ScLabel s
+           | EConst f -> ScLabel (string_of_float f)
+           | _ -> ScLabel "")
+        else ScParams [(k, v)] }
+
+scenario_kv_item:
+  | k = IDENT EQ v = expr { (k, v) }

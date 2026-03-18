@@ -62,10 +62,10 @@ type ode_equation = {
 
 (* ── Time functions ──────────────────────────────────────────────────────────── *)
 
-type sinusoidal = { amplitude: float; period: float; phase: float; baseline: float }
-type piecewise  = { breakpoints: float list; values: float list }
-type interpolated = { times: float list; values: float list; method_: string }
-type periodic   = { period: float; values: float list }
+type sinusoidal = { amplitude: expr; period: expr; phase: expr; baseline: expr }
+type piecewise  = { breakpoints: expr list; values: expr list }
+type interpolated = { times: expr list; values: expr list; method_: string }
+type periodic   = { period: expr; values: expr list }
 
 type time_func_kind =
   | Sinusoidal  of sinusoidal
@@ -216,6 +216,15 @@ type simulation_config = {
   rng_seed:       int option;
 }
 
+(* ── Presets (named parameter sets for web UI / CLI) ─────────────────────────── *)
+
+type preset = {
+  preset_name   : string;
+  preset_label  : string;
+  preset_params : (string * float) list;
+  preset_t_end  : float option;
+}
+
 (* ── Top-level model ─────────────────────────────────────────────────────────── *)
 
 type model = {
@@ -234,4 +243,5 @@ type model = {
   data_contract:      Yojson.Safe.t option;
   output:             output_config;
   simulation:         simulation_config;
+  presets:            preset list;
 }

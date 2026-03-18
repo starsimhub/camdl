@@ -2,8 +2,23 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use ir::{Model, model::CompartmentKind};
 use ir::expr::{BinOp, Expr, UnOp};
+use ir::time_func::InterpMethod;
 use crate::error::SimError;
 use crate::state::{IntState, RealState};
+
+/// A time function with all Expr fields resolved to concrete f64 values.
+#[derive(Debug, Clone)]
+pub enum CompiledTimeFuncKind {
+    Sinusoidal { amplitude: f64, period: f64, phase: f64, baseline: f64 },
+    Piecewise   { breakpoints: Vec<f64>, values: Vec<f64> },
+    Interpolated { times: Vec<f64>, values: Vec<f64>, method: InterpMethod },
+    Periodic    { period: f64, values: Vec<f64> },
+}
+
+#[derive(Debug, Clone)]
+pub struct CompiledTimeFunc {
+    pub kind: CompiledTimeFuncKind,
+}
 
 /// Evaluate a table value expression using only params (no compartment state).
 /// Table values may only reference constants and parameters.
@@ -105,6 +120,10 @@ pub struct CompiledModel {
     /// Per-table evaluated values (params resolved at load time).
     /// Indexed in the same order as model.tables / table_index.
     pub table_values_cache: Vec<Vec<f64>>,
+
+    /// Per-time-function resolved values (Expr fields evaluated at load time).
+    /// Indexed in the same order as model.time_functions / time_func_index.
+    pub time_func_cache: Vec<CompiledTimeFunc>,
 }
 
 impl CompiledModel {
@@ -142,7 +161,7 @@ impl CompiledModel {
         for (i, p) in model.parameters.iter().enumerate() {
             param_index.insert(p.name.clone(), i);
             let v = p.value.ok_or_else(|| SimError::Validation(
-                format!("parameter '{}' has no value; supply it via --params or --set", p.name)
+                format!("parameter '{}' has no value; supply it via --params or --param", p.name)
             ))?;
             default_params.push(v);
         }
@@ -214,6 +233,50 @@ impl CompiledModel {
             }
         }
 
+        // Evaluate time function Expr fields at load time using default params.
+        let mut time_func_cache: Vec<CompiledTimeFunc> = Vec::with_capacity(model.time_functions.len());
+        for tf in &model.time_functions {
+            use ir::time_func::TimeFuncKind;
+            let kind = match &tf.kind {
+                TimeFuncKind::Sinusoidal(s) => CompiledTimeFuncKind::Sinusoidal {
+                    amplitude: eval_table_expr(&s.amplitude, &param_index, &default_params)?,
+                    period:    eval_table_expr(&s.period,    &param_index, &default_params)?,
+                    phase:     eval_table_expr(&s.phase,     &param_index, &default_params)?,
+                    baseline:  eval_table_expr(&s.baseline,  &param_index, &default_params)?,
+                },
+                TimeFuncKind::Piecewise(p) => {
+                    let bps: Result<Vec<f64>, SimError> = p.breakpoints.iter()
+                        .map(|e| eval_table_expr(e, &param_index, &default_params))
+                        .collect();
+                    let vals: Result<Vec<f64>, SimError> = p.values.iter()
+                        .map(|e| eval_table_expr(e, &param_index, &default_params))
+                        .collect();
+                    CompiledTimeFuncKind::Piecewise { breakpoints: bps?, values: vals? }
+                }
+                TimeFuncKind::Interpolated(i) => {
+                    let times: Result<Vec<f64>, SimError> = i.times.iter()
+                        .map(|e| eval_table_expr(e, &param_index, &default_params))
+                        .collect();
+                    let vals: Result<Vec<f64>, SimError> = i.values.iter()
+                        .map(|e| eval_table_expr(e, &param_index, &default_params))
+                        .collect();
+                    CompiledTimeFuncKind::Interpolated {
+                        times: times?,
+                        values: vals?,
+                        method: i.method.clone(),
+                    }
+                }
+                TimeFuncKind::Periodic(p) => {
+                    let period = eval_table_expr(&p.period, &param_index, &default_params)?;
+                    let vals: Result<Vec<f64>, SimError> = p.values.iter()
+                        .map(|e| eval_table_expr(e, &param_index, &default_params))
+                        .collect();
+                    CompiledTimeFuncKind::Periodic { period, values: vals? }
+                }
+            };
+            time_func_cache.push(CompiledTimeFunc { kind });
+        }
+
         Ok(CompiledModel {
             model: Arc::new(model),
             comp_index,
@@ -230,6 +293,7 @@ impl CompiledModel {
             transition_stoich,
             ode_real_indices,
             table_values_cache,
+            time_func_cache,
         })
     }
 

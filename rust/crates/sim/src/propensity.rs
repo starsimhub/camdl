@@ -1,10 +1,9 @@
 use crate::{
-    compiled_model::CompiledModel,
+    compiled_model::{CompiledModel, CompiledTimeFuncKind},
     error::SimError,
     state::{IntState, RealState},
 };
 use ir::expr::{BinOp, Expr, UnOp};
-use ir::time_func::{TimeFuncKind, Sinusoidal, Piecewise, Interpolated, Periodic};
 
 /// Evaluate a single expression. No allocations in steady state.
 pub fn eval_expr(
@@ -108,7 +107,7 @@ pub fn eval_expr(
             let idx = model.time_func_index.get(w.time_func.name.as_str())
                 .copied()
                 .ok_or_else(|| SimError::UnknownTimeFunction(w.time_func.name.clone()))?;
-            Ok(eval_time_func(&model.model.time_functions[idx].kind, t))
+            Ok(eval_time_func(&model.time_func_cache[idx].kind, t))
         }
 
         Expr::TableLookup(w) => {
@@ -157,13 +156,13 @@ fn table_lookup(table: &ir::table::Table, cached: &[f64], idx: i64) -> Result<f6
     Ok(cached[i as usize])
 }
 
-/// Evaluate a time function kind at time `t`.
-pub fn eval_time_func(kind: &TimeFuncKind, t: f64) -> f64 {
+/// Evaluate a compiled time function kind at time `t`.
+pub fn eval_time_func(kind: &CompiledTimeFuncKind, t: f64) -> f64 {
     match kind {
-        TimeFuncKind::Sinusoidal(Sinusoidal { amplitude, period, phase, baseline }) => {
+        CompiledTimeFuncKind::Sinusoidal { amplitude, period, phase, baseline } => {
             baseline + amplitude * (2.0 * std::f64::consts::PI * (t - phase) / period).sin()
         }
-        TimeFuncKind::Piecewise(Piecewise { breakpoints, values }) => {
+        CompiledTimeFuncKind::Piecewise { breakpoints, values } => {
             // Constant on each interval: values[i] applies for t in [breakpoints[i-1], breakpoints[i])
             // values[0] applies before breakpoints[0]; values[last] applies after breakpoints[last-1]
             if values.is_empty() { return 0.0; }
@@ -175,7 +174,7 @@ pub fn eval_time_func(kind: &TimeFuncKind, t: f64) -> f64 {
             }
             result
         }
-        TimeFuncKind::Interpolated(Interpolated { times, values, .. }) => {
+        CompiledTimeFuncKind::Interpolated { times, values, .. } => {
             // Linear interpolation
             if times.is_empty() || values.is_empty() { return 0.0; }
             if t <= times[0] { return values[0]; }
@@ -188,7 +187,7 @@ pub fn eval_time_func(kind: &TimeFuncKind, t: f64) -> f64 {
             }
             *values.last().unwrap()
         }
-        TimeFuncKind::Periodic(Periodic { period, values }) => {
+        CompiledTimeFuncKind::Periodic { period, values } => {
             if values.is_empty() || *period <= 0.0 { return 0.0; }
             let phase = t.rem_euclid(*period);
             let n = values.len();

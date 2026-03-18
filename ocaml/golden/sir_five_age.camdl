@@ -8,9 +8,9 @@ stratify(by = age, values = [age_0_5, age_5_15, age_15_50, age_50_65, age_65p])
 let N_local[a in age] = S[a] + I[a] + R[a]
 
 parameters {
-  beta  : rate
-  gamma : rate
-  mu    : rate
+  beta  : rate in [0.001, 2.0]
+  gamma : rate in [0.01, 1.0]
+  mu    : rate in [1e-6, 0.01]
 }
 
 tables {
@@ -43,4 +43,25 @@ init {
 simulate {
   from = 0 'days
   to   = 365 'days
+}
+
+scenarios {
+  baseline {
+    label = "default"
+    simulate { to = 500 'days }
+    set = {
+      beta  = 0.4
+      gamma = 0.1
+      mu    = 0.000027
+    }
+  }
+  slow {
+    label = "slow epidemic  (R0 ≈ 2)"
+    simulate { to = 730 'days }
+    set = {
+      beta  = 0.2
+      gamma = 0.1
+      mu    = 0.000027
+    }
+  }
 }

@@ -100,24 +100,24 @@ let time_func_kind_to_json (k : time_func_kind) : Yojson.Safe.t =
   match k with
   | Sinusoidal s ->
     obj [("sinusoidal", obj [
-      ("amplitude", flt s.amplitude); ("period", flt s.period);
-      ("phase",     flt s.phase);     ("baseline", flt s.baseline);
+      ("amplitude", expr_to_json s.amplitude); ("period", expr_to_json s.period);
+      ("phase",     expr_to_json s.phase);     ("baseline", expr_to_json s.baseline);
     ])]
   | Piecewise p ->
     obj [("piecewise", obj [
-      ("breakpoints", arr (List.map flt p.breakpoints));
-      ("values",      arr (List.map flt p.values));
+      ("breakpoints", arr (List.map expr_to_json p.breakpoints));
+      ("values",      arr (List.map expr_to_json p.values));
     ])]
   | Interpolated i ->
     obj [("interpolated", obj [
-      ("times",  arr (List.map flt i.times));
-      ("values", arr (List.map flt i.values));
+      ("times",  arr (List.map expr_to_json i.times));
+      ("values", arr (List.map expr_to_json i.values));
       ("method", str i.method_);
     ])]
   | Periodic p ->
     obj [("periodic", obj [
-      ("period", flt p.period);
-      ("values", arr (List.map flt p.values));
+      ("period", expr_to_json p.period);
+      ("values", arr (List.map expr_to_json p.values));
     ])]
 
 let time_function_to_json (tf : time_function) : Yojson.Safe.t =
@@ -320,6 +320,16 @@ let simulation_config_to_json (s : simulation_config) : Yojson.Safe.t =
     ("rng_seed",       match s.rng_seed with None -> null | Some n -> int n);
   ]
 
+(* ── Presets ─────────────────────────────────────────────────────────────── *)
+
+let preset_to_json (p : preset) : Yojson.Safe.t =
+  obj [
+    ("name",   str p.preset_name);
+    ("label",  str p.preset_label);
+    ("params", obj (List.map (fun (k, v) -> (k, flt v)) p.preset_params));
+    ("t_end",  match p.preset_t_end with None -> null | Some v -> flt v);
+  ]
+
 (* ── Top-level model ─────────────────────────────────────────────────────── *)
 
 let model_to_json (m : model) : Yojson.Safe.t =
@@ -339,6 +349,7 @@ let model_to_json (m : model) : Yojson.Safe.t =
     ("data_contract",      match m.data_contract with None -> null | Some j -> j);
     ("output",             output_config_to_json m.output);
     ("simulation",         simulation_config_to_json m.simulation);
+    ("presets",            arr (List.map preset_to_json m.presets));
   ])
 
 let model_to_string (m : model) : string =

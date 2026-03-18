@@ -22,7 +22,6 @@ export default function ParamEditor() {
   }
 
   const example      = EXAMPLES.find((e) => e.name === modelName);
-  const comments     = example?.paramComments ?? {};
   const hasOverrides = Object.keys(paramOverrides).length > 0;
 
   function applyParamSet(setName: string) {
@@ -76,7 +75,6 @@ export default function ParamEditor() {
           {ir.parameters.map((p) => {
             const val        = paramOverrides[p.name] ?? p.value;
             const isOverridden = paramOverrides[p.name] !== undefined;
-            const comment    = comments[p.name];
 
             return (
               <div
@@ -99,11 +97,6 @@ export default function ParamEditor() {
                     <span className="text-xs text-accent/60 ml-2">edited</span>
                   )}
                 </div>
-
-                {/* Comment / description */}
-                {comment && (
-                  <p className="text-xs text-gray-500 mb-2 leading-snug">{comment}</p>
-                )}
 
                 {/* Value input */}
                 <input

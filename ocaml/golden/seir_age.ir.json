@@ -236,7 +236,7 @@
     {
       "name": "beta",
       "value": null,
-      "bounds": null,
+      "bounds": [ 0.001, 0.5 ],
       "prior": null,
       "transform": null,
       "initial_value": null
@@ -244,7 +244,7 @@
     {
       "name": "sigma",
       "value": null,
-      "bounds": null,
+      "bounds": [ 0.01, 1.0 ],
       "prior": null,
       "transform": null,
       "initial_value": null
@@ -252,7 +252,7 @@
     {
       "name": "gamma",
       "value": null,
-      "bounds": null,
+      "bounds": [ 0.01, 1.0 ],
       "prior": null,
       "transform": null,
       "initial_value": null
@@ -274,5 +274,19 @@
     "time_semantics": "continuous",
     "dt": null,
     "rng_seed": null
-  }
+  },
+  "presets": [
+    {
+      "name": "baseline",
+      "label": "default",
+      "params": { "beta": 0.05, "sigma": 0.2, "gamma": 0.1 },
+      "t_end": 200.0
+    },
+    {
+      "name": "child_driven",
+      "label": "child-driven  (high beta)",
+      "params": { "beta": 0.08, "sigma": 0.2, "gamma": 0.1 },
+      "t_end": 160.0
+    }
+  ]
 }

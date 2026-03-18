@@ -21,8 +21,10 @@ type context = {
   mutable interv_decls    : intervention_decl list;
   mutable output_decl     : output_decl option;
   mutable table_decls     : table_decl list;
+  mutable scenario_decls  : scenario_decl list;
   mutable diags           : Diagnostics.t;  (* collected errors/warnings *)
   mutable source_dir      : string;         (* directory of the source file, for read_json/read_values *)
+  mutable expanded_comp_cache : string list option;
 }
 
 let empty_context ?(source_dir = "") () = {
@@ -41,9 +43,11 @@ let empty_context ?(source_dir = "") () = {
   obs_decls        = [];
   interv_decls     = [];
   output_decl      = None;
-  table_decls      = [];
-  diags            = Diagnostics.create ();
+  table_decls          = [];
+  scenario_decls       = [];
+  diags                = Diagnostics.create ();
   source_dir;
+  expanded_comp_cache  = None;
 }
 
 (* ── Model summary ────────────────────────────────────────────────────────── *)
@@ -311,6 +315,7 @@ let collect_declarations ctx decls =
     | DOutput od         -> ctx.output_decl <- Some od
     | DTables tds        -> ctx.table_decls <- ctx.table_decls @ tds
     | DTimepoints _      -> ()
+    | DScenarios ss      -> ctx.scenario_decls <- ctx.scenario_decls @ ss
   ) decls;
   ctx.orig_transitions <- ctx.transitions
 
@@ -355,6 +360,13 @@ let expand_compartment_name ctx cname =
 
 let all_expanded_compartments ctx =
   List.concat_map (fun cd -> expand_compartment_name ctx cd.cname) ctx.comp_decls
+
+let get_expanded_compartments ctx =
+  match ctx.expanded_comp_cache with
+  | Some c -> c
+  | None ->
+    let c = all_expanded_compartments ctx in
+    ctx.expanded_comp_cache <- Some c; c
 
 (* ── Table helpers ───────────────────────────────────────────────────────── *)
 
@@ -568,7 +580,12 @@ let rec resolve_expr ctx (env : (string * string) list) (e : expr) : Ir.expr =
   | EFuncCall (fname, _args) ->
     if List.exists (fun (fd : func_decl) -> fd.fname = fname) ctx.func_decls
     then Ir.TimeFunc fname
-    else Ir.Const 0.0
+    else begin
+      Diagnostics.error ctx.diags ~code:"E100" ~loc:Diagnostics.no_loc
+        ~message:(Printf.sprintf "undeclared function '%s'" fname)
+        ~hint:"check spelling, or add a declaration in functions { }" ();
+      Ir.Const 0.0
+    end
   | EList _     -> Ir.Const 0.0
 
 and resolve_ident_name ctx name ~loc =
@@ -578,7 +595,7 @@ and resolve_ident_name ctx name ~loc =
     normalize_expr (resolve_expr ctx [] lb.lbody)
   | None ->
   (* 2. Known expanded compartment? *)
-  let expanded = all_expanded_compartments ctx in
+  let expanded = get_expanded_compartments ctx in
   if List.mem name expanded then Ir.Pop name
   else if List.exists (fun cd -> cd.cname = name) ctx.comp_decls then begin
     let expansions = expand_compartment_name ctx name in
@@ -589,6 +606,8 @@ and resolve_ident_name ctx name ~loc =
     Ir.Param name
   else if is_expanded_indexed_param_name ctx name then
     Ir.Param name
+  else if List.exists (fun (fd : func_decl) -> fd.fname = name) ctx.func_decls then
+    Ir.TimeFunc name
   else begin
     Diagnostics.error ctx.diags
       ~code:"E100"
@@ -1093,34 +1112,34 @@ let resolve_comp_name ctx env e =
 
 (* ── Time function expansion ──────────────────────────────────────────────── *)
 
-(** Convert a func_decl's (string * expr) kwargs to a float, using resolve_float_expr.
+(** Resolve a func_decl kwarg to an Ir.expr, preserving Param references.
     Raises if the key is missing. *)
-let get_float_kwarg ctx kwargs key =
+let get_expr_kwarg ctx kwargs key =
   match List.assoc_opt key kwargs with
   | None   -> failwith (Printf.sprintf "time function missing required argument '%s'" key)
-  | Some e -> resolve_float_expr ctx e
+  | Some e -> resolve_expr ctx [] e
 
-let get_float_list_kwarg ctx kwargs key =
+let get_expr_list_kwarg ctx kwargs key =
   match List.assoc_opt key kwargs with
   | None   -> failwith (Printf.sprintf "time function missing required argument '%s'" key)
   | Some e -> match e with
-    | EList es -> List.map (resolve_float_expr ctx) es
-    | _ -> [resolve_float_expr ctx e]
+    | EList es -> List.map (resolve_expr ctx []) es
+    | _ -> [resolve_expr ctx [] e]
 
 let expand_time_functions ctx : Ir.time_function list =
   List.map (fun (fd : func_decl) ->
     let kind = match fd.fkind with
       | "sinusoidal" ->
         Ir.Sinusoidal {
-          amplitude = get_float_kwarg ctx fd.fargs "amplitude";
-          period    = get_float_kwarg ctx fd.fargs "period";
-          phase     = get_float_kwarg ctx fd.fargs "phase";
-          baseline  = get_float_kwarg ctx fd.fargs "baseline";
+          amplitude = get_expr_kwarg ctx fd.fargs "amplitude";
+          period    = get_expr_kwarg ctx fd.fargs "period";
+          phase     = get_expr_kwarg ctx fd.fargs "phase";
+          baseline  = get_expr_kwarg ctx fd.fargs "baseline";
         }
       | "piecewise" ->
         Ir.Piecewise {
-          breakpoints = get_float_list_kwarg ctx fd.fargs "breakpoints";
-          values      = get_float_list_kwarg ctx fd.fargs "values";
+          breakpoints = get_expr_list_kwarg ctx fd.fargs "breakpoints";
+          values      = get_expr_list_kwarg ctx fd.fargs "values";
         }
       | "interpolated" ->
         let method_ = match List.assoc_opt "method" fd.fargs with
@@ -1130,14 +1149,14 @@ let expand_time_functions ctx : Ir.time_function list =
             | _ -> "linear")
         in
         Ir.Interpolated {
-          times   = get_float_list_kwarg ctx fd.fargs "times";
-          values  = get_float_list_kwarg ctx fd.fargs "values";
+          times   = get_expr_list_kwarg ctx fd.fargs "times";
+          values  = get_expr_list_kwarg ctx fd.fargs "values";
           method_;
         }
       | "periodic" ->
         Ir.Periodic {
-          period = get_float_kwarg ctx fd.fargs "period";
-          values = get_float_list_kwarg ctx fd.fargs "values";
+          period = get_expr_kwarg ctx fd.fargs "period";
+          values = get_expr_list_kwarg ctx fd.fargs "values";
         }
       | k -> failwith (Printf.sprintf "unknown time function kind '%s'" k)
     in
@@ -1282,6 +1301,20 @@ let check_shadowing ctx =
         ()
   ) ctx.let_bindings
 
+(* ── Scenarios expansion ─────────────────────────────────────────────────── *)
+
+let expand_scenarios ctx : Ir.preset list =
+  List.map (fun (sd : scenario_decl) ->
+    let label = Option.value ~default:sd.scname sd.sclabel in
+    let t_end = Option.map (resolve_float_expr ctx) sd.sct_end in
+    let params = List.map (fun (k, e) -> (k, resolve_float_expr ctx e)) sd.scparams in
+    { Ir.preset_name   = sd.scname;
+      Ir.preset_label  = label;
+      Ir.preset_params = params;
+      Ir.preset_t_end  = t_end;
+    }
+  ) ctx.scenario_decls
+
 (* ── Top-level expand ─────────────────────────────────────────────────────── *)
 
 let expand_detail ?(source_dir = "") (name : string) (decls : declaration list)
@@ -1312,6 +1345,7 @@ let expand_detail ?(source_dir = "") (name : string) (decls : declaration list)
     Ir.data_contract      = None;
     Ir.output             = expand_output ctx;
     Ir.simulation         = expand_simulate ctx;
+    Ir.presets            = expand_scenarios ctx;
   } in
   let summary = {
     base_compartment_count     = List.length ctx.comp_decls;

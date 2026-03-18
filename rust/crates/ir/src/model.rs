@@ -72,6 +72,17 @@ pub struct SimulationConfig {
     pub rng_seed:       Option<i64>,
 }
 
+// ── Presets ───────────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Preset {
+    pub name:   String,
+    pub label:  String,
+    pub params: std::collections::HashMap<String, f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub t_end:  Option<f64>,
+}
+
 // ── Top-level model ───────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -91,4 +102,6 @@ pub struct Model {
     pub data_contract:      Option<serde_json::Value>,
     pub output:             OutputConfig,
     pub simulation:         SimulationConfig,
+    #[serde(default)]
+    pub presets:            Vec<Preset>,
 }

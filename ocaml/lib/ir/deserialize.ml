@@ -159,26 +159,26 @@ let time_func_kind_of_json j =
     match key with
     | "sinusoidal" ->
       Sinusoidal {
-        amplitude = as_float (member "amplitude" v);
-        period    = as_float (member "period"    v);
-        phase     = as_float (member "phase"     v);
-        baseline  = as_float (member "baseline"  v);
+        amplitude = expr_of_json (member "amplitude" v);
+        period    = expr_of_json (member "period"    v);
+        phase     = expr_of_json (member "phase"     v);
+        baseline  = expr_of_json (member "baseline"  v);
       }
     | "piecewise" ->
       Piecewise {
-        breakpoints = List.map as_float (as_list (member "breakpoints" v));
-        values      = List.map as_float (as_list (member "values"      v));
+        breakpoints = List.map expr_of_json (as_list (member "breakpoints" v));
+        values      = List.map expr_of_json (as_list (member "values"      v));
       }
     | "interpolated" ->
       Interpolated {
-        times   = List.map as_float (as_list (member "times"  v));
-        values  = List.map as_float (as_list (member "values" v));
+        times   = List.map expr_of_json (as_list (member "times"  v));
+        values  = List.map expr_of_json (as_list (member "values" v));
         method_ = as_string (member "method" v);
       }
     | "periodic" ->
       Periodic {
-        period = as_float (member "period" v);
-        values = List.map as_float (as_list (member "values" v));
+        period = expr_of_json (member "period" v);
+        values = List.map expr_of_json (as_list (member "values" v));
       }
     | k -> fail "unknown time_func_kind '%s'" k
   )
@@ -412,6 +412,15 @@ let simulation_config_of_json j =
     rng_seed       = (match member_opt "rng_seed" j with Some `Null | None -> None | Some v -> Some (as_int   v));
   }
 
+(* ── Presets ──────────────────────────────────────────────────────────────── *)
+
+let preset_of_json j =
+  { preset_name   = as_string (member "name"  j);
+    preset_label  = as_string (member "label" j);
+    preset_params = List.map (fun (k, v) -> (k, as_float v)) (as_assoc (member "params" j));
+    preset_t_end  = (match member_opt "t_end" j with Some `Null | None -> None | Some v -> Some (as_float v));
+  }
+
 (* ── Top-level model ─────────────────────────────────────────────────────── *)
 
 let model_of_json (j : Yojson.Safe.t) : model =
@@ -430,6 +439,9 @@ let model_of_json (j : Yojson.Safe.t) : model =
     data_contract      = (match member_opt "data_contract" j with Some `Null | None -> None | Some v -> Some v);
     output             = output_config_of_json     (member "output"     j);
     simulation         = simulation_config_of_json (member "simulation" j);
+    presets            = (match member_opt "presets" j with
+      | Some `Null | None -> []
+      | Some v -> List.map preset_of_json (as_list v));
   }
 
 let model_of_string (s : string) : (model, string) result =

@@ -15,6 +15,18 @@ fn load_model(path: &str) -> ir::Model {
         .unwrap_or_else(|e| panic!("failed to parse {}: {}", path, e))
 }
 
+/// Apply the first (baseline) preset's parameter values to the model.
+/// Models that store values only in presets require this before simulation.
+fn apply_baseline(model: &mut ir::Model) {
+    if let Some(preset) = model.presets.first() {
+        for p in &mut model.parameters {
+            if let Some(&v) = preset.params.get(&p.name) {
+                p.value = Some(v);
+            }
+        }
+    }
+}
+
 fn golden_path(name: &str) -> String {
     // Relative to workspace root: ir/golden/<name>.ir.json
     let manifest = std::env::var("CARGO_MANIFEST_DIR").unwrap();
@@ -36,7 +48,8 @@ fn gillespie_config(model: &ir::Model) -> SimConfig {
 
 #[test]
 fn test_sir_basic_non_negativity() {
-    let model = load_model(&golden_path("sir_basic"));
+    let mut model = load_model(&golden_path("sir_basic"));
+    apply_baseline(&mut model);
     let compiled = CompiledModel::new(model.clone()).unwrap();
     let params = &compiled.default_params.clone();
     let config = gillespie_config(&model);
@@ -56,7 +69,8 @@ fn test_sir_basic_non_negativity() {
 
 #[test]
 fn test_sir_basic_population_conservation() {
-    let model = load_model(&golden_path("sir_basic"));
+    let mut model = load_model(&golden_path("sir_basic"));
+    apply_baseline(&mut model);
     let compiled = CompiledModel::new(model.clone()).unwrap();
     let params = &compiled.default_params.clone();
     let config = gillespie_config(&model);
@@ -108,7 +122,8 @@ fn test_propensity_non_negativity() {
     use sim::propensity::eval_propensities;
     use sim::state::{IntState, RealState};
 
-    let model = load_model(&golden_path("sir_basic"));
+    let mut model = load_model(&golden_path("sir_basic"));
+    apply_baseline(&mut model);
     let compiled = CompiledModel::new(model).unwrap();
     let params = &compiled.default_params.clone();
 
@@ -132,7 +147,8 @@ fn test_propensity_non_negativity() {
 
 #[test]
 fn test_determinism_same_seed() {
-    let model = load_model(&golden_path("sir_basic"));
+    let mut model = load_model(&golden_path("sir_basic"));
+    apply_baseline(&mut model);
     let compiled = CompiledModel::new(model.clone()).unwrap();
     let params = &compiled.default_params.clone();
     let config = gillespie_config(&model);

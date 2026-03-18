@@ -179,6 +179,13 @@ type simulate_decl = { sim_from: expr; sim_to: expr }
 
 type timepoint_decl = { tpname: string; tptime: expr }
 
+type scenario_decl = {
+  scname   : string;
+  sclabel  : string option;
+  sct_end  : expr option;
+  scparams : (string * expr) list;
+}
+
 type declaration =
   | DTimeUnit    of unit_lit
   | DDescription of string
@@ -196,3 +203,4 @@ type declaration =
   | DTimepoints   of timepoint_decl list
   | DStratify     of stratify_decl
   | DLet          of let_binding
+  | DScenarios    of scenario_decl list

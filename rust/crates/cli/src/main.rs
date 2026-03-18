@@ -69,8 +69,8 @@ fn usage() -> ! {
     eprintln!("  --backend  gillespie|tau_leap|chain_binomial  (default: gillespie)");
     eprintln!("  --dt       DT   step size for tau_leap / chain_binomial");
     eprintln!("  --seed     N    RNG seed (default: 1)");
-    eprintln!("  --set      NAME=VALUE    override a parameter value");
-    eprintln!("  --set-vec  PREFIX=FILE   override indexed params from a keyed TSV (name<TAB>value)");
+    eprintln!("  --param    NAME=VALUE    override a parameter value");
+    eprintln!("  --param-vec PREFIX=FILE  override indexed params from a keyed TSV (name<TAB>value)");
     eprintln!("  --table    NAME=FILE     supply a runtime external() table from CSV/TSV/JSON");
     std::process::exit(1);
 }
@@ -151,7 +151,7 @@ fn main() {
     let mut table_files: HashMap<String, String> = HashMap::new();
     let mut params_files: Vec<String> = Vec::new();
 
-    // Collect --set-vec PREFIX=FILE entries for deferred validation after model load
+    // Collect --param-vec PREFIX=FILE entries for deferred validation after model load
     let mut set_vec_entries: Vec<(String, String)> = Vec::new();
 
     let mut i = 0;
@@ -161,21 +161,21 @@ fn main() {
             "--dt"      => { i += 1; dt      = args[i].parse().expect("--dt needs a number"); }
             "--seed"    => { i += 1; seed    = args[i].parse().expect("--seed needs an integer"); }
             "--params"  => { i += 1; params_files.push(args[i].clone()); }
-            "--set"     => {
+            "--param"     => {
                 i += 1;
                 let kv = &args[i];
                 let mut parts = kv.splitn(2, '=');
-                let k = parts.next().expect("--set needs NAME=VALUE").to_string();
+                let k = parts.next().expect("--param needs NAME=VALUE").to_string();
                 let v: f64 = parts.next().and_then(|s| s.parse().ok())
-                    .expect("--set value must be a number");
+                    .expect("--param value must be a number");
                 overrides.insert(k, v);
             }
-            "--set-vec" => {
+            "--param-vec" => {
                 i += 1;
                 let kv = &args[i];
                 let mut parts = kv.splitn(2, '=');
-                let prefix = parts.next().expect("--set-vec needs PREFIX=FILE").to_string();
-                let file   = parts.next().expect("--set-vec needs PREFIX=FILE").to_string();
+                let prefix = parts.next().expect("--param-vec needs PREFIX=FILE").to_string();
+                let file   = parts.next().expect("--param-vec needs PREFIX=FILE").to_string();
                 set_vec_entries.push((prefix, file));
             }
             "--table"   => {
@@ -242,20 +242,20 @@ fn main() {
         }
     }
 
-    // Step 3: apply --set-vec PREFIX=FILE overrides (keyed TSV: name<TAB>value)
+    // Step 3: apply --param-vec PREFIX=FILE overrides (keyed TSV: name<TAB>value)
     if !set_vec_entries.is_empty() {
         let known_param_names: std::collections::HashSet<String> =
             model.parameters.iter().map(|p| p.name.clone()).collect();
         let mut resolved: Vec<(String, f64)> = Vec::new();
         for (prefix, file) in &set_vec_entries {
             let entries = load_keyed_tsv(file).unwrap_or_else(|e| {
-                eprintln!("error: --set-vec {}: {}", prefix, e);
+                eprintln!("error: --param-vec {}: {}", prefix, e);
                 std::process::exit(1);
             });
             for (key, val) in entries {
                 let full_name = format!("{}_{}", prefix, key);
                 if !known_param_names.contains(&full_name) {
-                    eprintln!("error: --set-vec {}: unknown parameter '{}'", prefix, full_name);
+                    eprintln!("error: --param-vec {}: unknown parameter '{}'", prefix, full_name);
                     std::process::exit(1);
                 }
                 resolved.push((full_name, val));
@@ -268,7 +268,7 @@ fn main() {
         }
     }
 
-    // Step 4: apply --set scalar overrides (highest priority)
+    // Step 4: apply --param scalar overrides (highest priority)
     for p in &mut model.parameters {
         if let Some(&v) = overrides.get(&p.name) { p.value = Some(v); }
     }

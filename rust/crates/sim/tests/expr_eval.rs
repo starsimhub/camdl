@@ -49,6 +49,7 @@ fn minimal_model(compartments: Vec<Compartment>, params: Vec<Parameter>) -> Mode
             dt: None,
             rng_seed: Some(42),
         },
+        presets: vec![],
     }
 }
 

@@ -4,9 +4,9 @@ stratify(by = patch, values = [urban, rural])
 compartments { S, I, R }
 
 parameters {
-  gamma    : positive
-  N[patch] : positive
-  R0[patch]: positive
+  gamma    : positive in [0.01, 1.0]
+  N[patch] : positive in [100, 100000]
+  R0[patch]: positive in [0.5, 10.0]
 }
 
 let beta[p in patch] = R0[p] * gamma
@@ -28,3 +28,16 @@ init {
 }
 
 simulate { from = 0  to = 200 }
+
+scenarios {
+  baseline {
+    label = "default"
+    set = {
+      gamma    = 0.1
+      N_urban  = 1000
+      N_rural  = 1000
+      R0_urban = 2.5
+      R0_rural = 1.8
+    }
+  }
+}

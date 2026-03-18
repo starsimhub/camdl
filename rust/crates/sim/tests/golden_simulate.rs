@@ -14,6 +14,16 @@ fn golden_dir() -> PathBuf {
     PathBuf::from(&manifest).join("../../../ir/golden")
 }
 
+fn apply_baseline(model: &mut ir::Model) {
+    if let Some(preset) = model.presets.first() {
+        for p in &mut model.parameters {
+            if let Some(&v) = preset.params.get(&p.name) {
+                p.value = Some(v);
+            }
+        }
+    }
+}
+
 fn load_golden(name: &str) -> ir::Model {
     let path = golden_dir().join(format!("{}.ir.json", name));
     let contents = std::fs::read_to_string(&path)
@@ -64,7 +74,8 @@ fn test_deserialize_all_golden() {
 
 #[test]
 fn test_sir_basic_all_backends() {
-    let model = load_golden("sir_basic");
+    let mut model = load_golden("sir_basic");
+    apply_baseline(&mut model);
     let compiled = CompiledModel::new(model.clone()).unwrap();
     let params = compiled.default_params.clone();
 
@@ -132,7 +143,8 @@ fn test_cholera_siwr_gillespie() {
 
 #[test]
 fn test_config_mismatch_returns_err() {
-    let model = load_golden("sir_basic");
+    let mut model = load_golden("sir_basic");
+    apply_baseline(&mut model);
     let compiled = CompiledModel::new(model).unwrap();
     let params = compiled.default_params.clone();
 
