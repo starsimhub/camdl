@@ -109,17 +109,26 @@ expand → dsl → ir
 - `expand`: base model × stratification spec → flat expanded IR (the core
   compiler logic)
 
-### EKRNG (Event-Keyed RNG)
+### RNG and CRN coupling
 
-Each transition carries an `event_key` template
-(`"{transition_name}:{firing_index}"`). The runtime derives per-event random
-values via a counter-based PRNG (Philox/Threefry) keyed by `(seed, event_key)`
-rather than a stateful stream. This ensures paired scenario simulations (same
-seed, different model) draw comparable random values for the same events — a
-requirement for valid counterfactual comparisons.
+Each transition carries an `event_key` field in the IR (populated by the OCaml
+compiler). `rust/crates/sim/src/ekrng.rs` implements an event-keyed RNG
+(`EkRng`) where each draw is fully determined by `(seed, event_key, counter)` —
+stateless and order-independent.
 
-If `event_key` is null, the runtime falls back to stateful PRNG (backward
-compatibility).
+**Current status: EkRng is implemented but not wired into any simulation
+backend.** All backends (`gillespie.rs`, `tau_leap.rs`, `chain_binomial.rs`)
+use `StatefulRng` (a seeded ChaCha8 stream) exclusively. The `event_key` field
+is populated in generated IR but ignored at runtime.
+
+CRN coupling for paired scenario comparison currently works only by coincidence
+of draw order: same seed → same sequential stream → identical trajectories as
+long as states and propensities match (i.e., only for `enable`/`disable`
+scenarios that don't change propensities before the intervention time). For
+scenarios that modify parameters from t=0 (e.g., `scale = { beta = 1.5 }`),
+there is no CRN guarantee with the current stateful approach.
+
+Wiring `EkRng` into backends is deferred; see issue #X for tracking.
 
 ### Implementation phases
 
