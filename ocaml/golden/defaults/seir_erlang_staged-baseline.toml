@@ -1,0 +1,15 @@
+model_label = "SEIR Erlang staged"
+model_description = "SEIR with per-stage Erlang progression rates"
+label    = "default"
+beta     = 0.3
+gamma    = 0.1
+sigma_e1 = 0.6
+sigma_e2 = 0.6
+sigma_e3 = 0.6
+
+[descriptions]
+beta     = "transmission rate (day⁻¹)"
+gamma    = "recovery rate (day⁻¹)"
+sigma_e1 = "progression rate out of latent stage 1 (day⁻¹)"
+sigma_e2 = "progression rate out of latent stage 2 (day⁻¹)"
+sigma_e3 = "progression rate out of latent stage 3 (day⁻¹)"

@@ -1,0 +1,15 @@
+model_label = "SEIR Erlang"
+model_description = "SEIR with Erlang-distributed latent period"
+label = "default  (latent = 5d)"
+t_end = 180.0
+beta  = 0.3
+sigma = 0.2
+gamma = 0.1
+
+[descriptions]
+beta  = "transmission rate (day⁻¹)"
+gamma = "recovery rate (day⁻¹)"
+sigma = "progression rate out of each E sub-stage (day⁻¹)"
+k     = "number of Erlang stages"
+N0    = "initial population size"
+I0    = "initial infectious count"

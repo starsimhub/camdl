@@ -1,0 +1,16 @@
+model_label = "SIR + demography"
+model_description = "SIR with births and deaths"
+label = "default  (R0 ≈ 2.9)"
+t_end = 365.0
+beta  = 0.3
+gamma = 0.1
+mu    = 0.000027
+N0    = 10000.0
+I0    = 100.0
+
+[descriptions]
+beta  = "transmission rate (day⁻¹)"
+gamma = "recovery rate (day⁻¹)"
+mu    = "birth/death rate (day⁻¹) — mean lifespan = 1/μ"
+N0    = "initial population size"
+I0    = "initial infectious count"
