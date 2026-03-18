@@ -203,10 +203,10 @@ camdl-sim simulate model.ir.json --params base.toml
 camdl-sim simulate model.ir.json --params base.toml --params patch.toml
 
 # Single value override
-camdl-sim simulate model.ir.json --set gamma=0.1
+camdl-sim simulate model.ir.json --param gamma=0.1
 
 # Per-stratum override (indexed params)
-camdl-sim simulate model.ir.json --set-vec R0=r0_posterior.tsv
+camdl-sim simulate model.ir.json --param-vec R0=r0_posterior.tsv
 ```
 
 The TOML format supports both flat and sectioned forms (see §22).
@@ -255,11 +255,11 @@ N[patch] : positive  →  { name: "N_urban",  value: null }
                          { name: "N_rural",  value: null }
 ```
 
-**Runtime override.** Use `--set-vec PREFIX=FILE` to supply per-stratum values
+**Runtime override.** Use `--param-vec PREFIX=FILE` to supply per-stratum values
 at runtime (see §22):
 
 ```bash
-camdl-sim simulate model.ir.json --set-vec R0=/tmp/r0_posterior.tsv
+camdl-sim simulate model.ir.json --param-vec R0=/tmp/r0_posterior.tsv
 ```
 
 ### 4.4 Parameter Bounds
@@ -1731,7 +1731,7 @@ future integration.
 
 ```bash
 # Compile a .camdl file to IR JSON (stdout)
-camdlc FILE.camdl [--set NAME=VALUE ...]
+camdlc FILE.camdl [--param NAME=VALUE ...]
 
 # Validate model structure without producing IR
 camdlc check FILE.camdl
@@ -1748,7 +1748,7 @@ camdlc inspect FILE.camdl [--summary] [--compartments]
 defaults and concrete float values for declared defaults. Output is written to
 stdout as JSON. Redirect with `camdlc model.camdl > model.ir.json`.
 
-The `--set NAME=VALUE` flag overrides a parameter value in the emitted IR
+The `--param NAME=VALUE` flag overrides a parameter value in the emitted IR
 (useful for inspection and debugging; not for inference).
 
 ### 22.2 camdl-sim — Simulator (Rust)
@@ -1765,24 +1765,24 @@ Options:
   --backend  gillespie|tau_leap|chain_binomial  (default: gillespie)
   --dt       DT     step size for tau_leap / chain_binomial
   --seed     N      RNG seed (default: 1)
-  --set      NAME=VALUE    override a scalar parameter value
-  --set-vec  PREFIX=FILE   override indexed params from a keyed TSV
+  --param     NAME=VALUE    override a scalar parameter value
+  --param-vec PREFIX=FILE   override indexed params from a keyed TSV
   --table    NAME=FILE     supply a runtime external() table from CSV/TSV/JSON
 ```
 
-**`--set NAME=VALUE`** overrides a single parameter. Can be repeated:
+**`--param NAME=VALUE`** overrides a single parameter. Can be repeated:
 ```bash
-camdl-sim model.ir.json --set gamma=0.1 --set beta=0.3
+camdl-sim model.ir.json --param gamma=0.1 --param beta=0.3
 ```
 
-**`--set-vec PREFIX=FILE`** loads a two-column keyed TSV (`name<TAB>value`)
+**`--param-vec PREFIX=FILE`** loads a two-column keyed TSV (`name<TAB>value`)
 and applies it as per-stratum parameter overrides. The full parameter name is
 constructed as `PREFIX_name`:
 ```bash
 # r0_values.tsv:
 #   urban   2.1
 #   rural   1.8
-camdl-sim model.ir.json --set-vec R0=r0_values.tsv
+camdl-sim model.ir.json --param-vec R0=r0_values.tsv
 # Sets R0_urban=2.1, R0_rural=1.8
 ```
 Unknown keys (constructed parameter name not in model) cause an immediate
@@ -1805,7 +1805,7 @@ The following commands are **planned** but not yet implemented:
 camdl simulate MODEL --params PARAMS [--seed N] [--seeds N:M]
                      [--scenario NAME]
                      [--backend gillespie|tau_leap|chain_binomial]
-                     [--set PARAM=VAL] [--output-dir DIR]
+                     [--param PARAM=VAL] [--output-dir DIR]
 
 camdl compare   MODEL --params PARAMS [--seeds N:M]
 camdl verify    RUN_DIR

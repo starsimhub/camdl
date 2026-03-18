@@ -112,7 +112,7 @@ fn load_params_toml(path: &str) -> Result<HashMap<String, f64>, String> {
     Ok(out)
 }
 
-/// Load a keyed TSV file (two columns: name<TAB>value) for --set-vec.
+/// Load a keyed TSV file (two columns: name<TAB>value) for --param-vec.
 /// Returns Vec<(key, value)>. Skips blank lines and # comments.
 fn load_keyed_tsv(path: &str) -> Result<Vec<(String, f64)>, String> {
     let content = std::fs::read_to_string(path)
@@ -226,8 +226,8 @@ fn main() {
     // Apply parameters: resolution order (highest priority last, so later writes win):
     //   1. IR value (already in model, may be None)
     //   2. --params FILE.toml (in order given, later files override earlier)
-    //   3. --set-vec PREFIX=FILE (keyed TSV)
-    //   4. --set NAME=VALUE (highest priority)
+    //   3. --param-vec PREFIX=FILE (keyed TSV)
+    //   4. --param NAME=VALUE (highest priority)
 
     // Step 2: apply --params TOML files in order
     for path in &params_files {

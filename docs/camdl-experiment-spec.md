@@ -50,7 +50,7 @@ same directory. Different inputs → different hash → separate directory.
 ├──────────────────────┼──────────────────────┼───────────────────────────┤
 │ Model structure      │ .camdl only          │ never                     │
 │ Parameter names/types│ .camdl only          │ never                     │
-│ Parameter values     │ params.toml only     │ layered .toml, --set, σ   │
+│ Parameter values     │ params.toml only     │ layered .toml, --param, σ │
 │ Scenarios            │ .camdl scenarios { } │ experiment file (wins)    │
 │ Interventions        │ .camdl only          │ scenarios enable/disable  │
 │ Backend choice       │ experiment [config]  │ CLI --backend             │
@@ -86,7 +86,7 @@ params.toml (later files)        (layered patches)
   ↓ overridden by
 scenario patches                 (counterfactual modifications)
   ↓ overridden by
---set CLI flags                  (convenience, non-persistent)
+--param CLI flags                (convenience, non-persistent)
 ```
 
 **For scenarios:**
@@ -125,7 +125,7 @@ camdl simulate model.camdl --params params.toml --scenario with_sia --seed 42
 camdl simulate model.camdl --params params.toml --enable sia_round_1 --seed 42
 
 # Override a parameter
-camdl simulate model.camdl --params params.toml --set beta=0.5 --seed 42
+camdl simulate model.camdl --params params.toml --param beta=0.5 --seed 42
 ```
 
 `--scenario NAME` looks up the scenario in the `.camdl` file's
@@ -462,7 +462,7 @@ R0_sokoto	2.4
 ```
 
 ```bash
-camdl-sim simulate model.ir.json --set-vec R0=r0_init.tsv
+camdl simulate model.camdl --params params.toml --param-vec R0=r0_init.tsv
 ```
 
 Matched by **parameter name** (not position). Errors if a constructed name
@@ -801,7 +801,7 @@ camdl simulate model.camdl --params params.toml --scenario with_sia --seed 42
 camdl simulate model.camdl --params params.toml --enable sia_round_1 --seed 42
 
 # Parameter override
-camdl simulate model.camdl --params params.toml --set beta=0.5 --seed 42
+camdl simulate model.camdl --params params.toml --param beta=0.5 --seed 42
 
 # With content-addressable output
 camdl simulate model.camdl --params params.toml --seed 42 --output-dir output/
