@@ -38,7 +38,7 @@ export default function Header() {
 
       {/* Examples dropdown */}
       <select
-        value=""
+        value={EXAMPLES.find((e) => e.name === modelName) ? modelName : ''}
         onChange={(e) => { if (e.target.value) loadExample(e.target.value); }}
         className="text-xs bg-surface-2 border border-surface-border text-gray-400 hover:text-gray-200 rounded px-2 py-1 focus:outline-none cursor-pointer transition-colors"
         title="Load an example model"

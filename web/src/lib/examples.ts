@@ -6,6 +6,7 @@ import seirErlangDsl        from '../../../ocaml/golden/seir_erlang.camdl?raw';
 import seirErlangStagedDsl  from '../../../ocaml/golden/seir_erlang_staged.camdl?raw';
 import sirFiveAgeDsl        from '../../../ocaml/golden/sir_five_age.camdl?raw';
 import sirCouplingDsl       from '../../../ocaml/golden/sir_coupling.camdl?raw';
+import malariaTwoSpeciesDsl from '../../../ocaml/golden/malaria_two_species.camdl?raw';
 
 // Compiled IR JSON — carries presets and model metadata
 import sirBasicIr          from '../../../ocaml/golden/sir_basic.ir.json';
@@ -15,6 +16,7 @@ import seirErlangIr        from '../../../ocaml/golden/seir_erlang.ir.json';
 import seirErlangStagedIr  from '../../../ocaml/golden/seir_erlang_staged.ir.json';
 import sirFiveAgeIr        from '../../../ocaml/golden/sir_five_age.ir.json';
 import sirCouplingIr       from '../../../ocaml/golden/sir_coupling.ir.json';
+import malariaTwoSpeciesIr from '../../../ocaml/golden/malaria_two_species.ir.json';
 
 export interface ParamSet {
   name: string;
@@ -65,5 +67,6 @@ export const EXAMPLES: Example[] = [
   buildExample('seir_erlang_staged', seirErlangStagedDsl, seirErlangStagedIr as IrModel),
   buildExample('seir_age',           seirAgeDsl,          seirAgeIr as IrModel),
   buildExample('sir_five_age',       sirFiveAgeDsl,       sirFiveAgeIr as IrModel),
-  buildExample('sir_coupling',       sirCouplingDsl,      sirCouplingIr as IrModel),
+  buildExample('sir_coupling',         sirCouplingDsl,         sirCouplingIr as IrModel),
+  buildExample('malaria_two_species',  malariaTwoSpeciesDsl,  malariaTwoSpeciesIr as IrModel),
 ];

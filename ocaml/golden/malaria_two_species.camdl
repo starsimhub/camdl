@@ -1,0 +1,250 @@
+# Two-mosquito-species malaria transmission model
+# Three host populations in swim-lane style:
+#   Top:    An. funestus  — biting cycle (B) + resting/gonotrophic cycle (R)
+#   Middle: Humans        — SEIRS with waning immunity
+#   Bottom: An. arabiensis — biting cycle (A) + resting cycle (r)
+#
+# Dashed transmission arrows in the source diagram (Fig.) are NOT structural
+# flows; they appear here as force-of-infection terms in the rate expressions.
+#
+# Reference structure: Chitnis & Smith / similar two-vector malaria models.
+
+time_unit = 'days
+
+compartments {
+  # An. funestus
+  L_B, S_B, E_B, I_B,    # larval + biting (gonotrophic) cycle
+  S_R, E_R, I_R,          # resting/refractory cycle
+
+  # Humans
+  S_H, E_H, I_H, R_H,
+
+  # An. arabiensis
+  L_A, S_A, E_A, I_A,    # larval + biting cycle
+  S_r, E_r, I_r           # resting cycle
+}
+
+# ── Derived quantities ────────────────────────────────────────────────────────
+
+let N_H = S_H + E_H + I_H + R_H
+
+# Force of infection on humans (mosquito → human); both species combined
+let lambda_H = (beta_BH * (I_B + I_R) + beta_AH * (I_A + I_r)) / N_H
+
+# Force of infection on mosquitoes (human → mosquito)
+let lambda_B = beta_HB * I_H / N_H    # An. funestus (biting + resting phase share same blood-meal risk)
+let lambda_A = beta_HA * I_H / N_H    # An. arabiensis
+
+# ── Parameters ────────────────────────────────────────────────────────────────
+
+parameters {
+  # Human demographics
+  Pi_H  : rate  in [0.01, 2000]   # constant birth inflow (individuals/day)
+  mu_H  : rate  in [1e-5, 0.001]  # background mortality (≈1/life-expectancy)
+  tau   : rate  in [0.0, 0.01]    # malaria-induced mortality (on top of mu_H)
+  eps_H : rate  in [0.01, 0.5]    # progression rate E_H → I_H  (1/EIP_human)
+  gamma : rate  in [0.001, 0.5]   # recovery rate I_H → R_H
+  omega : rate  in [0.0, 0.05]    # waning immunity R_H → S_H
+
+  # Transmission coefficients
+  beta_BH : rate in [0.0, 5.0]    # An. funestus → human (per infectious mosquito per day)
+  beta_AH : rate in [0.0, 5.0]    # An. arabiensis → human
+  beta_HB : rate in [0.0, 2.0]    # human → An. funestus (per bite on I_H, scaled by N_H)
+  beta_HA : rate in [0.0, 2.0]    # human → An. arabiensis
+
+  # Shared larval parameters
+  mu_L  : rate  in [0.001, 0.5]   # larval mortality
+  tau_L : rate  in [0.01, 0.5]    # larval development / maturation rate
+
+  # An. funestus
+  pi_B    : rate in [0.0, 20000]  # larval recruitment (individuals/day)
+  phi_B   : rate in [0.0, 1.0]    # fraction of emerged adults entering resting cycle
+  mu_B    : rate in [0.01, 0.5]   # adult biting-phase mortality
+  mu_R    : rate in [0.01, 0.5]   # adult resting-phase mortality
+  eps_B   : rate in [0.01, 0.5]   # extrinsic incubation rate, biting phase (1/EIP)
+  eps_R   : rate in [0.01, 0.5]   # extrinsic incubation rate, resting phase
+  sigma_B : rate in [0.01, 2.0]   # I_B → I_R  (infectious biting → infectious resting)
+  sigma_R : rate in [0.01, 2.0]   # I_R → I_B  (return to biting)
+
+  # An. arabiensis
+  pi_A    : rate in [0.0, 20000]
+  phi_A   : rate in [0.0, 1.0]
+  mu_A    : rate in [0.01, 0.5]
+  mu_r    : rate in [0.01, 0.5]
+  eps_A   : rate in [0.01, 0.5]
+  eps_r   : rate in [0.01, 0.5]
+  sigma_A : rate in [0.01, 2.0]   # I_A → I_r
+  sigma_r : rate in [0.01, 2.0]   # I_r → I_A
+}
+
+# ── Transitions ───────────────────────────────────────────────────────────────
+
+transitions {
+
+  # ── Humans ──────────────────────────────────────────────────────────────────
+  birth_H       :       --> S_H  @ Pi_H
+  death_S_H     : S_H -->        @ mu_H * S_H
+  death_E_H     : E_H -->        @ mu_H * E_H
+  death_I_H     : I_H -->        @ (mu_H + tau) * I_H
+  death_R_H     : R_H -->        @ mu_H * R_H
+  infection_H   : S_H --> E_H   @ lambda_H * S_H
+  progression_H : E_H --> I_H   @ eps_H * E_H
+  recovery_H    : I_H --> R_H   @ gamma * I_H
+  waning_H      : R_H --> S_H   @ omega * R_H
+
+  # ── An. funestus — larval ───────────────────────────────────────────────────
+  birth_L_B     :       --> L_B  @ pi_B
+  death_L_B     : L_B -->        @ mu_L * L_B
+  emerge_S_B    : L_B --> S_B    @ (1 - phi_B) * tau_L * L_B
+  emerge_S_R    : L_B --> S_R    @ phi_B * tau_L * L_B
+
+  # ── An. funestus — biting cycle ─────────────────────────────────────────────
+  death_S_B     : S_B -->        @ mu_B * S_B
+  infection_B   : S_B --> E_B   @ lambda_B * S_B
+  death_E_B     : E_B -->        @ mu_B * E_B
+  incubation_B  : E_B --> I_B   @ eps_B * E_B
+  death_I_B     : I_B -->        @ mu_B * I_B
+  biting_rest_B : I_B --> I_R   @ sigma_B * I_B
+
+  # ── An. funestus — resting cycle ─────────────────────────────────────────────
+  death_S_R     : S_R -->        @ mu_R * S_R
+  infection_R   : S_R --> E_R   @ lambda_B * S_R
+  death_E_R     : E_R -->        @ mu_R * E_R
+  incubation_R  : E_R --> I_R   @ eps_R * E_R
+  death_I_R     : I_R -->        @ mu_R * I_R
+  rest_biting_B : I_R --> I_B   @ sigma_R * I_R
+
+  # ── An. arabiensis — larval ─────────────────────────────────────────────────
+  birth_L_A     :       --> L_A  @ pi_A
+  death_L_A     : L_A -->        @ mu_L * L_A
+  emerge_S_A    : L_A --> S_A    @ (1 - phi_A) * tau_L * L_A
+  emerge_S_r    : L_A --> S_r    @ phi_A * tau_L * L_A
+
+  # ── An. arabiensis — biting cycle ───────────────────────────────────────────
+  death_S_A     : S_A -->        @ mu_A * S_A
+  infection_A   : S_A --> E_A   @ lambda_A * S_A
+  death_E_A     : E_A -->        @ mu_A * E_A
+  incubation_A  : E_A --> I_A   @ eps_A * E_A
+  death_I_A     : I_A -->        @ mu_A * I_A
+  biting_rest_A : I_A --> I_r   @ sigma_A * I_A
+
+  # ── An. arabiensis — resting cycle ──────────────────────────────────────────
+  death_S_r     : S_r -->        @ mu_r * S_r
+  infection_r   : S_r --> E_r   @ lambda_A * S_r
+  death_E_r     : E_r -->        @ mu_r * E_r
+  incubation_r  : E_r --> I_r   @ eps_r * E_r
+  death_I_r     : I_r -->        @ mu_r * I_r
+  rest_biting_A : I_r --> I_A   @ sigma_r * I_r
+}
+
+# ── Initial conditions ────────────────────────────────────────────────────────
+
+init {
+  # Humans: 10 000 total, 10 infectious
+  S_H = 9990
+  I_H = 10
+
+  # An. funestus: rough endemic steady state
+  L_B = 2000
+  S_B = 800
+  I_B = 20
+  S_R = 300
+  I_R = 8
+
+  # An. arabiensis: similar
+  L_A = 2000
+  S_A = 800
+  I_A = 20
+  S_r = 300
+  I_r = 8
+}
+
+simulate {
+  from = 0 'days
+  to   = 365 'days
+}
+
+scenarios {
+  baseline {
+    label = "baseline  (co-endemic)"
+    simulate { to = 365 'days }
+    set = {
+      # Human demographics
+      Pi_H  = 0.45
+      mu_H  = 0.000045
+      tau   = 0.0001
+      eps_H = 0.083
+      gamma = 0.02
+      omega = 0.005
+
+      # Transmission
+      beta_BH = 0.3
+      beta_AH = 0.2
+      beta_HB = 0.08
+      beta_HA = 0.06
+
+      # Larval (shared)
+      mu_L  = 0.05
+      tau_L = 0.1
+
+      # An. funestus
+      pi_B    = 500.0
+      phi_B   = 0.3
+      mu_B    = 0.05
+      mu_R    = 0.05
+      eps_B   = 0.067
+      eps_R   = 0.067
+      sigma_B = 0.33
+      sigma_R = 0.5
+
+      # An. arabiensis
+      pi_A    = 500.0
+      phi_A   = 0.3
+      mu_A    = 0.06
+      mu_r    = 0.06
+      eps_A   = 0.067
+      eps_r   = 0.067
+      sigma_A = 0.33
+      sigma_r = 0.5
+    }
+  }
+
+  funestus_dominant {
+    label = "An. funestus dominant"
+    simulate { to = 365 'days }
+    set = {
+      Pi_H  = 0.45
+      mu_H  = 0.000045
+      tau   = 0.0001
+      eps_H = 0.083
+      gamma = 0.02
+      omega = 0.005
+
+      beta_BH = 0.5
+      beta_AH = 0.05
+      beta_HB = 0.12
+      beta_HA = 0.02
+
+      mu_L  = 0.05
+      tau_L = 0.1
+
+      pi_B    = 800.0
+      phi_B   = 0.3
+      mu_B    = 0.05
+      mu_R    = 0.05
+      eps_B   = 0.067
+      eps_R   = 0.067
+      sigma_B = 0.33
+      sigma_R = 0.5
+
+      pi_A    = 100.0
+      phi_A   = 0.3
+      mu_A    = 0.06
+      mu_r    = 0.06
+      eps_A   = 0.067
+      eps_r   = 0.067
+      sigma_A = 0.33
+      sigma_r = 0.5
+    }
+  }
+}

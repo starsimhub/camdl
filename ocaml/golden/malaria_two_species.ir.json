@@ -1,0 +1,1185 @@
+{
+  "name": "malaria_two_species",
+  "version": "0.3",
+  "description": null,
+  "compartments": [
+    { "name": "L_B", "kind": "integer" },
+    { "name": "S_B", "kind": "integer" },
+    { "name": "E_B", "kind": "integer" },
+    { "name": "I_B", "kind": "integer" },
+    { "name": "S_R", "kind": "integer" },
+    { "name": "E_R", "kind": "integer" },
+    { "name": "I_R", "kind": "integer" },
+    { "name": "S_H", "kind": "integer" },
+    { "name": "E_H", "kind": "integer" },
+    { "name": "I_H", "kind": "integer" },
+    { "name": "R_H", "kind": "integer" },
+    { "name": "L_A", "kind": "integer" },
+    { "name": "S_A", "kind": "integer" },
+    { "name": "E_A", "kind": "integer" },
+    { "name": "I_A", "kind": "integer" },
+    { "name": "S_r", "kind": "integer" },
+    { "name": "E_r", "kind": "integer" },
+    { "name": "I_r", "kind": "integer" }
+  ],
+  "transitions": [
+    {
+      "name": "birth_H",
+      "stoichiometry": [ [ "S_H", 1 ] ],
+      "rate": { "param": "Pi_H" },
+      "event_key": "birth_H:{firing_index}",
+      "metadata": {
+        "origin_kind": "inflow",
+        "source_compartment": null,
+        "dest_compartment": "S_H"
+      }
+    },
+    {
+      "name": "death_S_H",
+      "stoichiometry": [ [ "S_H", -1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": { "param": "mu_H" },
+          "right": { "pop": "S_H" }
+        }
+      },
+      "event_key": "death_S_H:{firing_index}",
+      "metadata": {
+        "origin_kind": "outflow",
+        "source_compartment": "S_H",
+        "dest_compartment": null
+      }
+    },
+    {
+      "name": "death_E_H",
+      "stoichiometry": [ [ "E_H", -1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": { "param": "mu_H" },
+          "right": { "pop": "E_H" }
+        }
+      },
+      "event_key": "death_E_H:{firing_index}",
+      "metadata": {
+        "origin_kind": "outflow",
+        "source_compartment": "E_H",
+        "dest_compartment": null
+      }
+    },
+    {
+      "name": "death_I_H",
+      "stoichiometry": [ [ "I_H", -1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": {
+            "bin_op": {
+              "op": "add",
+              "left": { "param": "mu_H" },
+              "right": { "param": "tau" }
+            }
+          },
+          "right": { "pop": "I_H" }
+        }
+      },
+      "event_key": "death_I_H:{firing_index}",
+      "metadata": {
+        "origin_kind": "outflow",
+        "source_compartment": "I_H",
+        "dest_compartment": null
+      }
+    },
+    {
+      "name": "death_R_H",
+      "stoichiometry": [ [ "R_H", -1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": { "param": "mu_H" },
+          "right": { "pop": "R_H" }
+        }
+      },
+      "event_key": "death_R_H:{firing_index}",
+      "metadata": {
+        "origin_kind": "outflow",
+        "source_compartment": "R_H",
+        "dest_compartment": null
+      }
+    },
+    {
+      "name": "infection_H",
+      "stoichiometry": [ [ "S_H", -1 ], [ "E_H", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": {
+            "bin_op": {
+              "op": "div",
+              "left": {
+                "bin_op": {
+                  "op": "add",
+                  "left": {
+                    "bin_op": {
+                      "op": "mul",
+                      "left": { "param": "beta_BH" },
+                      "right": { "pop_sum": [ "I_B", "I_R" ] }
+                    }
+                  },
+                  "right": {
+                    "bin_op": {
+                      "op": "mul",
+                      "left": { "param": "beta_AH" },
+                      "right": { "pop_sum": [ "I_A", "I_r" ] }
+                    }
+                  }
+                }
+              },
+              "right": { "pop_sum": [ "S_H", "E_H", "I_H", "R_H" ] }
+            }
+          },
+          "right": { "pop": "S_H" }
+        }
+      },
+      "event_key": "infection_H:{firing_index}",
+      "metadata": {
+        "origin_kind": "transmission",
+        "source_compartment": "S_H",
+        "dest_compartment": "E_H"
+      }
+    },
+    {
+      "name": "progression_H",
+      "stoichiometry": [ [ "E_H", -1 ], [ "I_H", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": { "param": "eps_H" },
+          "right": { "pop": "E_H" }
+        }
+      },
+      "event_key": "progression_H:{firing_index}",
+      "metadata": {
+        "origin_kind": "intrinsic",
+        "source_compartment": "E_H",
+        "dest_compartment": "I_H"
+      }
+    },
+    {
+      "name": "recovery_H",
+      "stoichiometry": [ [ "I_H", -1 ], [ "R_H", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": { "param": "gamma" },
+          "right": { "pop": "I_H" }
+        }
+      },
+      "event_key": "recovery_H:{firing_index}",
+      "metadata": {
+        "origin_kind": "intrinsic",
+        "source_compartment": "I_H",
+        "dest_compartment": "R_H"
+      }
+    },
+    {
+      "name": "waning_H",
+      "stoichiometry": [ [ "R_H", -1 ], [ "S_H", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": { "param": "omega" },
+          "right": { "pop": "R_H" }
+        }
+      },
+      "event_key": "waning_H:{firing_index}",
+      "metadata": {
+        "origin_kind": "intrinsic",
+        "source_compartment": "R_H",
+        "dest_compartment": "S_H"
+      }
+    },
+    {
+      "name": "birth_L_B",
+      "stoichiometry": [ [ "L_B", 1 ] ],
+      "rate": { "param": "pi_B" },
+      "event_key": "birth_L_B:{firing_index}",
+      "metadata": {
+        "origin_kind": "inflow",
+        "source_compartment": null,
+        "dest_compartment": "L_B"
+      }
+    },
+    {
+      "name": "death_L_B",
+      "stoichiometry": [ [ "L_B", -1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": { "param": "mu_L" },
+          "right": { "pop": "L_B" }
+        }
+      },
+      "event_key": "death_L_B:{firing_index}",
+      "metadata": {
+        "origin_kind": "outflow",
+        "source_compartment": "L_B",
+        "dest_compartment": null
+      }
+    },
+    {
+      "name": "emerge_S_B",
+      "stoichiometry": [ [ "L_B", -1 ], [ "S_B", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": {
+            "bin_op": {
+              "op": "mul",
+              "left": {
+                "bin_op": {
+                  "op": "sub",
+                  "left": { "const": 1.0 },
+                  "right": { "param": "phi_B" }
+                }
+              },
+              "right": { "param": "tau_L" }
+            }
+          },
+          "right": { "pop": "L_B" }
+        }
+      },
+      "event_key": "emerge_S_B:{firing_index}",
+      "metadata": {
+        "origin_kind": "intrinsic",
+        "source_compartment": "L_B",
+        "dest_compartment": "S_B"
+      }
+    },
+    {
+      "name": "emerge_S_R",
+      "stoichiometry": [ [ "L_B", -1 ], [ "S_R", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": {
+            "bin_op": {
+              "op": "mul",
+              "left": { "param": "phi_B" },
+              "right": { "param": "tau_L" }
+            }
+          },
+          "right": { "pop": "L_B" }
+        }
+      },
+      "event_key": "emerge_S_R:{firing_index}",
+      "metadata": {
+        "origin_kind": "intrinsic",
+        "source_compartment": "L_B",
+        "dest_compartment": "S_R"
+      }
+    },
+    {
+      "name": "death_S_B",
+      "stoichiometry": [ [ "S_B", -1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": { "param": "mu_B" },
+          "right": { "pop": "S_B" }
+        }
+      },
+      "event_key": "death_S_B:{firing_index}",
+      "metadata": {
+        "origin_kind": "outflow",
+        "source_compartment": "S_B",
+        "dest_compartment": null
+      }
+    },
+    {
+      "name": "infection_B",
+      "stoichiometry": [ [ "S_B", -1 ], [ "E_B", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": {
+            "bin_op": {
+              "op": "div",
+              "left": {
+                "bin_op": {
+                  "op": "mul",
+                  "left": { "param": "beta_HB" },
+                  "right": { "pop": "I_H" }
+                }
+              },
+              "right": { "pop_sum": [ "S_H", "E_H", "I_H", "R_H" ] }
+            }
+          },
+          "right": { "pop": "S_B" }
+        }
+      },
+      "event_key": "infection_B:{firing_index}",
+      "metadata": {
+        "origin_kind": "transmission",
+        "source_compartment": "S_B",
+        "dest_compartment": "E_B"
+      }
+    },
+    {
+      "name": "death_E_B",
+      "stoichiometry": [ [ "E_B", -1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": { "param": "mu_B" },
+          "right": { "pop": "E_B" }
+        }
+      },
+      "event_key": "death_E_B:{firing_index}",
+      "metadata": {
+        "origin_kind": "outflow",
+        "source_compartment": "E_B",
+        "dest_compartment": null
+      }
+    },
+    {
+      "name": "incubation_B",
+      "stoichiometry": [ [ "E_B", -1 ], [ "I_B", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": { "param": "eps_B" },
+          "right": { "pop": "E_B" }
+        }
+      },
+      "event_key": "incubation_B:{firing_index}",
+      "metadata": {
+        "origin_kind": "intrinsic",
+        "source_compartment": "E_B",
+        "dest_compartment": "I_B"
+      }
+    },
+    {
+      "name": "death_I_B",
+      "stoichiometry": [ [ "I_B", -1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": { "param": "mu_B" },
+          "right": { "pop": "I_B" }
+        }
+      },
+      "event_key": "death_I_B:{firing_index}",
+      "metadata": {
+        "origin_kind": "outflow",
+        "source_compartment": "I_B",
+        "dest_compartment": null
+      }
+    },
+    {
+      "name": "biting_rest_B",
+      "stoichiometry": [ [ "I_B", -1 ], [ "I_R", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": { "param": "sigma_B" },
+          "right": { "pop": "I_B" }
+        }
+      },
+      "event_key": "biting_rest_B:{firing_index}",
+      "metadata": {
+        "origin_kind": "intrinsic",
+        "source_compartment": "I_B",
+        "dest_compartment": "I_R"
+      }
+    },
+    {
+      "name": "death_S_R",
+      "stoichiometry": [ [ "S_R", -1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": { "param": "mu_R" },
+          "right": { "pop": "S_R" }
+        }
+      },
+      "event_key": "death_S_R:{firing_index}",
+      "metadata": {
+        "origin_kind": "outflow",
+        "source_compartment": "S_R",
+        "dest_compartment": null
+      }
+    },
+    {
+      "name": "infection_R",
+      "stoichiometry": [ [ "S_R", -1 ], [ "E_R", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": {
+            "bin_op": {
+              "op": "div",
+              "left": {
+                "bin_op": {
+                  "op": "mul",
+                  "left": { "param": "beta_HB" },
+                  "right": { "pop": "I_H" }
+                }
+              },
+              "right": { "pop_sum": [ "S_H", "E_H", "I_H", "R_H" ] }
+            }
+          },
+          "right": { "pop": "S_R" }
+        }
+      },
+      "event_key": "infection_R:{firing_index}",
+      "metadata": {
+        "origin_kind": "transmission",
+        "source_compartment": "S_R",
+        "dest_compartment": "E_R"
+      }
+    },
+    {
+      "name": "death_E_R",
+      "stoichiometry": [ [ "E_R", -1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": { "param": "mu_R" },
+          "right": { "pop": "E_R" }
+        }
+      },
+      "event_key": "death_E_R:{firing_index}",
+      "metadata": {
+        "origin_kind": "outflow",
+        "source_compartment": "E_R",
+        "dest_compartment": null
+      }
+    },
+    {
+      "name": "incubation_R",
+      "stoichiometry": [ [ "E_R", -1 ], [ "I_R", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": { "param": "eps_R" },
+          "right": { "pop": "E_R" }
+        }
+      },
+      "event_key": "incubation_R:{firing_index}",
+      "metadata": {
+        "origin_kind": "intrinsic",
+        "source_compartment": "E_R",
+        "dest_compartment": "I_R"
+      }
+    },
+    {
+      "name": "death_I_R",
+      "stoichiometry": [ [ "I_R", -1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": { "param": "mu_R" },
+          "right": { "pop": "I_R" }
+        }
+      },
+      "event_key": "death_I_R:{firing_index}",
+      "metadata": {
+        "origin_kind": "outflow",
+        "source_compartment": "I_R",
+        "dest_compartment": null
+      }
+    },
+    {
+      "name": "rest_biting_B",
+      "stoichiometry": [ [ "I_R", -1 ], [ "I_B", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": { "param": "sigma_R" },
+          "right": { "pop": "I_R" }
+        }
+      },
+      "event_key": "rest_biting_B:{firing_index}",
+      "metadata": {
+        "origin_kind": "intrinsic",
+        "source_compartment": "I_R",
+        "dest_compartment": "I_B"
+      }
+    },
+    {
+      "name": "birth_L_A",
+      "stoichiometry": [ [ "L_A", 1 ] ],
+      "rate": { "param": "pi_A" },
+      "event_key": "birth_L_A:{firing_index}",
+      "metadata": {
+        "origin_kind": "inflow",
+        "source_compartment": null,
+        "dest_compartment": "L_A"
+      }
+    },
+    {
+      "name": "death_L_A",
+      "stoichiometry": [ [ "L_A", -1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": { "param": "mu_L" },
+          "right": { "pop": "L_A" }
+        }
+      },
+      "event_key": "death_L_A:{firing_index}",
+      "metadata": {
+        "origin_kind": "outflow",
+        "source_compartment": "L_A",
+        "dest_compartment": null
+      }
+    },
+    {
+      "name": "emerge_S_A",
+      "stoichiometry": [ [ "L_A", -1 ], [ "S_A", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": {
+            "bin_op": {
+              "op": "mul",
+              "left": {
+                "bin_op": {
+                  "op": "sub",
+                  "left": { "const": 1.0 },
+                  "right": { "param": "phi_A" }
+                }
+              },
+              "right": { "param": "tau_L" }
+            }
+          },
+          "right": { "pop": "L_A" }
+        }
+      },
+      "event_key": "emerge_S_A:{firing_index}",
+      "metadata": {
+        "origin_kind": "intrinsic",
+        "source_compartment": "L_A",
+        "dest_compartment": "S_A"
+      }
+    },
+    {
+      "name": "emerge_S_r",
+      "stoichiometry": [ [ "L_A", -1 ], [ "S_r", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": {
+            "bin_op": {
+              "op": "mul",
+              "left": { "param": "phi_A" },
+              "right": { "param": "tau_L" }
+            }
+          },
+          "right": { "pop": "L_A" }
+        }
+      },
+      "event_key": "emerge_S_r:{firing_index}",
+      "metadata": {
+        "origin_kind": "intrinsic",
+        "source_compartment": "L_A",
+        "dest_compartment": "S_r"
+      }
+    },
+    {
+      "name": "death_S_A",
+      "stoichiometry": [ [ "S_A", -1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": { "param": "mu_A" },
+          "right": { "pop": "S_A" }
+        }
+      },
+      "event_key": "death_S_A:{firing_index}",
+      "metadata": {
+        "origin_kind": "outflow",
+        "source_compartment": "S_A",
+        "dest_compartment": null
+      }
+    },
+    {
+      "name": "infection_A",
+      "stoichiometry": [ [ "S_A", -1 ], [ "E_A", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": {
+            "bin_op": {
+              "op": "div",
+              "left": {
+                "bin_op": {
+                  "op": "mul",
+                  "left": { "param": "beta_HA" },
+                  "right": { "pop": "I_H" }
+                }
+              },
+              "right": { "pop_sum": [ "S_H", "E_H", "I_H", "R_H" ] }
+            }
+          },
+          "right": { "pop": "S_A" }
+        }
+      },
+      "event_key": "infection_A:{firing_index}",
+      "metadata": {
+        "origin_kind": "transmission",
+        "source_compartment": "S_A",
+        "dest_compartment": "E_A"
+      }
+    },
+    {
+      "name": "death_E_A",
+      "stoichiometry": [ [ "E_A", -1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": { "param": "mu_A" },
+          "right": { "pop": "E_A" }
+        }
+      },
+      "event_key": "death_E_A:{firing_index}",
+      "metadata": {
+        "origin_kind": "outflow",
+        "source_compartment": "E_A",
+        "dest_compartment": null
+      }
+    },
+    {
+      "name": "incubation_A",
+      "stoichiometry": [ [ "E_A", -1 ], [ "I_A", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": { "param": "eps_A" },
+          "right": { "pop": "E_A" }
+        }
+      },
+      "event_key": "incubation_A:{firing_index}",
+      "metadata": {
+        "origin_kind": "intrinsic",
+        "source_compartment": "E_A",
+        "dest_compartment": "I_A"
+      }
+    },
+    {
+      "name": "death_I_A",
+      "stoichiometry": [ [ "I_A", -1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": { "param": "mu_A" },
+          "right": { "pop": "I_A" }
+        }
+      },
+      "event_key": "death_I_A:{firing_index}",
+      "metadata": {
+        "origin_kind": "outflow",
+        "source_compartment": "I_A",
+        "dest_compartment": null
+      }
+    },
+    {
+      "name": "biting_rest_A",
+      "stoichiometry": [ [ "I_A", -1 ], [ "I_r", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": { "param": "sigma_A" },
+          "right": { "pop": "I_A" }
+        }
+      },
+      "event_key": "biting_rest_A:{firing_index}",
+      "metadata": {
+        "origin_kind": "intrinsic",
+        "source_compartment": "I_A",
+        "dest_compartment": "I_r"
+      }
+    },
+    {
+      "name": "death_S_r",
+      "stoichiometry": [ [ "S_r", -1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": { "param": "mu_r" },
+          "right": { "pop": "S_r" }
+        }
+      },
+      "event_key": "death_S_r:{firing_index}",
+      "metadata": {
+        "origin_kind": "outflow",
+        "source_compartment": "S_r",
+        "dest_compartment": null
+      }
+    },
+    {
+      "name": "infection_r",
+      "stoichiometry": [ [ "S_r", -1 ], [ "E_r", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": {
+            "bin_op": {
+              "op": "div",
+              "left": {
+                "bin_op": {
+                  "op": "mul",
+                  "left": { "param": "beta_HA" },
+                  "right": { "pop": "I_H" }
+                }
+              },
+              "right": { "pop_sum": [ "S_H", "E_H", "I_H", "R_H" ] }
+            }
+          },
+          "right": { "pop": "S_r" }
+        }
+      },
+      "event_key": "infection_r:{firing_index}",
+      "metadata": {
+        "origin_kind": "transmission",
+        "source_compartment": "S_r",
+        "dest_compartment": "E_r"
+      }
+    },
+    {
+      "name": "death_E_r",
+      "stoichiometry": [ [ "E_r", -1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": { "param": "mu_r" },
+          "right": { "pop": "E_r" }
+        }
+      },
+      "event_key": "death_E_r:{firing_index}",
+      "metadata": {
+        "origin_kind": "outflow",
+        "source_compartment": "E_r",
+        "dest_compartment": null
+      }
+    },
+    {
+      "name": "incubation_r",
+      "stoichiometry": [ [ "E_r", -1 ], [ "I_r", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": { "param": "eps_r" },
+          "right": { "pop": "E_r" }
+        }
+      },
+      "event_key": "incubation_r:{firing_index}",
+      "metadata": {
+        "origin_kind": "intrinsic",
+        "source_compartment": "E_r",
+        "dest_compartment": "I_r"
+      }
+    },
+    {
+      "name": "death_I_r",
+      "stoichiometry": [ [ "I_r", -1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": { "param": "mu_r" },
+          "right": { "pop": "I_r" }
+        }
+      },
+      "event_key": "death_I_r:{firing_index}",
+      "metadata": {
+        "origin_kind": "outflow",
+        "source_compartment": "I_r",
+        "dest_compartment": null
+      }
+    },
+    {
+      "name": "rest_biting_A",
+      "stoichiometry": [ [ "I_r", -1 ], [ "I_A", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": { "param": "sigma_r" },
+          "right": { "pop": "I_r" }
+        }
+      },
+      "event_key": "rest_biting_A:{firing_index}",
+      "metadata": {
+        "origin_kind": "intrinsic",
+        "source_compartment": "I_r",
+        "dest_compartment": "I_A"
+      }
+    }
+  ],
+  "ode_equations": [],
+  "time_functions": [],
+  "tables": [],
+  "interventions": [],
+  "observations": [],
+  "parameters": [
+    {
+      "name": "Pi_H",
+      "value": null,
+      "bounds": [ 0.01, 2000.0 ],
+      "prior": null,
+      "transform": null,
+      "initial_value": null
+    },
+    {
+      "name": "mu_H",
+      "value": null,
+      "bounds": [ 1e-05, 0.001 ],
+      "prior": null,
+      "transform": null,
+      "initial_value": null
+    },
+    {
+      "name": "tau",
+      "value": null,
+      "bounds": [ 0.0, 0.01 ],
+      "prior": null,
+      "transform": null,
+      "initial_value": null
+    },
+    {
+      "name": "eps_H",
+      "value": null,
+      "bounds": [ 0.01, 0.5 ],
+      "prior": null,
+      "transform": null,
+      "initial_value": null
+    },
+    {
+      "name": "gamma",
+      "value": null,
+      "bounds": [ 0.001, 0.5 ],
+      "prior": null,
+      "transform": null,
+      "initial_value": null
+    },
+    {
+      "name": "omega",
+      "value": null,
+      "bounds": [ 0.0, 0.05 ],
+      "prior": null,
+      "transform": null,
+      "initial_value": null
+    },
+    {
+      "name": "beta_BH",
+      "value": null,
+      "bounds": [ 0.0, 5.0 ],
+      "prior": null,
+      "transform": null,
+      "initial_value": null
+    },
+    {
+      "name": "beta_AH",
+      "value": null,
+      "bounds": [ 0.0, 5.0 ],
+      "prior": null,
+      "transform": null,
+      "initial_value": null
+    },
+    {
+      "name": "beta_HB",
+      "value": null,
+      "bounds": [ 0.0, 2.0 ],
+      "prior": null,
+      "transform": null,
+      "initial_value": null
+    },
+    {
+      "name": "beta_HA",
+      "value": null,
+      "bounds": [ 0.0, 2.0 ],
+      "prior": null,
+      "transform": null,
+      "initial_value": null
+    },
+    {
+      "name": "mu_L",
+      "value": null,
+      "bounds": [ 0.001, 0.5 ],
+      "prior": null,
+      "transform": null,
+      "initial_value": null
+    },
+    {
+      "name": "tau_L",
+      "value": null,
+      "bounds": [ 0.01, 0.5 ],
+      "prior": null,
+      "transform": null,
+      "initial_value": null
+    },
+    {
+      "name": "pi_B",
+      "value": null,
+      "bounds": [ 0.0, 20000.0 ],
+      "prior": null,
+      "transform": null,
+      "initial_value": null
+    },
+    {
+      "name": "phi_B",
+      "value": null,
+      "bounds": [ 0.0, 1.0 ],
+      "prior": null,
+      "transform": null,
+      "initial_value": null
+    },
+    {
+      "name": "mu_B",
+      "value": null,
+      "bounds": [ 0.01, 0.5 ],
+      "prior": null,
+      "transform": null,
+      "initial_value": null
+    },
+    {
+      "name": "mu_R",
+      "value": null,
+      "bounds": [ 0.01, 0.5 ],
+      "prior": null,
+      "transform": null,
+      "initial_value": null
+    },
+    {
+      "name": "eps_B",
+      "value": null,
+      "bounds": [ 0.01, 0.5 ],
+      "prior": null,
+      "transform": null,
+      "initial_value": null
+    },
+    {
+      "name": "eps_R",
+      "value": null,
+      "bounds": [ 0.01, 0.5 ],
+      "prior": null,
+      "transform": null,
+      "initial_value": null
+    },
+    {
+      "name": "sigma_B",
+      "value": null,
+      "bounds": [ 0.01, 2.0 ],
+      "prior": null,
+      "transform": null,
+      "initial_value": null
+    },
+    {
+      "name": "sigma_R",
+      "value": null,
+      "bounds": [ 0.01, 2.0 ],
+      "prior": null,
+      "transform": null,
+      "initial_value": null
+    },
+    {
+      "name": "pi_A",
+      "value": null,
+      "bounds": [ 0.0, 20000.0 ],
+      "prior": null,
+      "transform": null,
+      "initial_value": null
+    },
+    {
+      "name": "phi_A",
+      "value": null,
+      "bounds": [ 0.0, 1.0 ],
+      "prior": null,
+      "transform": null,
+      "initial_value": null
+    },
+    {
+      "name": "mu_A",
+      "value": null,
+      "bounds": [ 0.01, 0.5 ],
+      "prior": null,
+      "transform": null,
+      "initial_value": null
+    },
+    {
+      "name": "mu_r",
+      "value": null,
+      "bounds": [ 0.01, 0.5 ],
+      "prior": null,
+      "transform": null,
+      "initial_value": null
+    },
+    {
+      "name": "eps_A",
+      "value": null,
+      "bounds": [ 0.01, 0.5 ],
+      "prior": null,
+      "transform": null,
+      "initial_value": null
+    },
+    {
+      "name": "eps_r",
+      "value": null,
+      "bounds": [ 0.01, 0.5 ],
+      "prior": null,
+      "transform": null,
+      "initial_value": null
+    },
+    {
+      "name": "sigma_A",
+      "value": null,
+      "bounds": [ 0.01, 2.0 ],
+      "prior": null,
+      "transform": null,
+      "initial_value": null
+    },
+    {
+      "name": "sigma_r",
+      "value": null,
+      "bounds": [ 0.01, 2.0 ],
+      "prior": null,
+      "transform": null,
+      "initial_value": null
+    }
+  ],
+  "initial_conditions": {
+    "explicit": {
+      "S_H": 9990.0,
+      "I_H": 10.0,
+      "L_B": 2000.0,
+      "S_B": 800.0,
+      "I_B": 20.0,
+      "S_R": 300.0,
+      "I_R": 8.0,
+      "L_A": 2000.0,
+      "S_A": 800.0,
+      "I_A": 20.0,
+      "S_r": 300.0,
+      "I_r": 8.0
+    }
+  },
+  "data_contract": null,
+  "output": {
+    "times": { "regular": { "start": 0.0, "step": 1.0, "end": 365.0 } },
+    "format": "tsv",
+    "trajectory": true,
+    "observations": true
+  },
+  "simulation": {
+    "t_start": 0.0,
+    "t_end": 365.0,
+    "time_semantics": "continuous",
+    "dt": null,
+    "rng_seed": null
+  },
+  "presets": [
+    {
+      "name": "baseline",
+      "label": "baseline  (co-endemic)",
+      "params": {
+        "Pi_H": 0.45,
+        "mu_H": 4.5e-05,
+        "tau": 0.0001,
+        "eps_H": 0.083,
+        "gamma": 0.02,
+        "omega": 0.005,
+        "beta_BH": 0.3,
+        "beta_AH": 0.2,
+        "beta_HB": 0.08,
+        "beta_HA": 0.06,
+        "mu_L": 0.05,
+        "tau_L": 0.1,
+        "pi_B": 500.0,
+        "phi_B": 0.3,
+        "mu_B": 0.05,
+        "mu_R": 0.05,
+        "eps_B": 0.067,
+        "eps_R": 0.067,
+        "sigma_B": 0.33,
+        "sigma_R": 0.5,
+        "pi_A": 500.0,
+        "phi_A": 0.3,
+        "mu_A": 0.06,
+        "mu_r": 0.06,
+        "eps_A": 0.067,
+        "eps_r": 0.067,
+        "sigma_A": 0.33,
+        "sigma_r": 0.5
+      },
+      "t_end": 365.0
+    },
+    {
+      "name": "funestus_dominant",
+      "label": "An. funestus dominant",
+      "params": {
+        "Pi_H": 0.45,
+        "mu_H": 4.5e-05,
+        "tau": 0.0001,
+        "eps_H": 0.083,
+        "gamma": 0.02,
+        "omega": 0.005,
+        "beta_BH": 0.5,
+        "beta_AH": 0.05,
+        "beta_HB": 0.12,
+        "beta_HA": 0.02,
+        "mu_L": 0.05,
+        "tau_L": 0.1,
+        "pi_B": 800.0,
+        "phi_B": 0.3,
+        "mu_B": 0.05,
+        "mu_R": 0.05,
+        "eps_B": 0.067,
+        "eps_R": 0.067,
+        "sigma_B": 0.33,
+        "sigma_R": 0.5,
+        "pi_A": 100.0,
+        "phi_A": 0.3,
+        "mu_A": 0.06,
+        "mu_r": 0.06,
+        "eps_A": 0.067,
+        "eps_r": 0.067,
+        "sigma_A": 0.33,
+        "sigma_r": 0.5
+      },
+      "t_end": 365.0
+    }
+  ],
+  "model_structure": {
+    "dimensions": [],
+    "compartment_dims": {
+      "L_B": [],
+      "S_B": [],
+      "E_B": [],
+      "I_B": [],
+      "S_R": [],
+      "E_R": [],
+      "I_R": [],
+      "S_H": [],
+      "E_H": [],
+      "I_H": [],
+      "R_H": [],
+      "L_A": [],
+      "S_A": [],
+      "E_A": [],
+      "I_A": [],
+      "S_r": [],
+      "E_r": [],
+      "I_r": []
+    },
+    "base_compartments": [
+      "L_B", "S_B", "E_B", "I_B", "S_R", "E_R", "I_R", "S_H", "E_H", "I_H",
+      "R_H", "L_A", "S_A", "E_A", "I_A", "S_r", "E_r", "I_r"
+    ],
+    "transmission_transitions": [
+      "infection_H", "infection_B", "infection_R", "infection_A",
+      "infection_r"
+    ],
+    "infectious_compartments": [ "S_H", "S_B", "S_R", "S_A", "S_r" ]
+  }
+}
