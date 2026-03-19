@@ -5,12 +5,14 @@ import { useTheme } from '../lib/theme';
 const THEME_LABELS: Record<string, string> = { dark: '🌙', light: '☀', auto: '⬤' };
 
 export default function Header() {
-  const modelName     = useStore((s) => s.modelName);
-  const setModelName  = useStore((s) => s.setModelName);
-  const compileStatus = useStore((s) => s.compileStatus);
-  const openFile      = useStore((s) => s.openFile);
-  const saveFile      = useStore((s) => s.saveFile);
-  const loadExample   = useStore((s) => s.loadExample);
+  const modelName        = useStore((s) => s.modelName);
+  const setModelName     = useStore((s) => s.setModelName);
+  const compileStatus    = useStore((s) => s.compileStatus);
+  const experimentStatus = useStore((s) => s.experimentStatus);
+  const runExperiment    = useStore((s) => s.runExperiment);
+  const openFile         = useStore((s) => s.openFile);
+  const saveFile         = useStore((s) => s.saveFile);
+  const loadExample      = useStore((s) => s.loadExample);
   const { theme, cycle } = useTheme();
 
   const statusDot =
@@ -54,6 +56,20 @@ export default function Header() {
           </option>
         ))}
       </select>
+
+      {/* Run All */}
+      <button
+        onClick={() => { runExperiment(); }}
+        disabled={experimentStatus === 'running' || compileStatus !== 'ok'}
+        title="Run all scenarios"
+        className={`px-2.5 py-1 text-xs rounded font-semibold transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+          experimentStatus === 'running'
+            ? 'bg-accent/15 text-accent border border-accent/30'
+            : 'bg-accent text-white hover:bg-accent-dim'
+        }`}
+      >
+        {experimentStatus === 'running' ? '● Running…' : '▶ Run All'}
+      </button>
 
       <div className="flex-1" />
 
