@@ -62,8 +62,16 @@ export interface ModelStructure {
   infectious_compartments: string[];
 }
 
+export interface IrPreset {
+  name: string;
+  label: string;
+  params: Record<string, number>;
+  t_end?: number | null;
+}
+
 export interface IrModel {
   name: string;
+  presets?: IrPreset[];
   version: string;
   description: string | null;
   compartments: Compartment[];

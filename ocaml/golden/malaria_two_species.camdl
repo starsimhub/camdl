@@ -161,13 +161,13 @@ init {
 
 simulate {
   from = 0 'days
-  to   = 365 'days
+  to   = 280 'days
 }
 
 scenarios {
   baseline {
     label = "baseline  (co-endemic)"
-    simulate { to = 365 'days }
+    simulate { to = 280 'days }
     set = {
       # Human demographics
       Pi_H  = 0.45
@@ -211,7 +211,7 @@ scenarios {
 
   funestus_dominant {
     label = "An. funestus dominant"
-    simulate { to = 365 'days }
+    simulate { to = 280 'days }
     set = {
       Pi_H  = 0.45
       mu_H  = 0.000045

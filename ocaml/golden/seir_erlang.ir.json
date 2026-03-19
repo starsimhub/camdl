@@ -161,14 +161,14 @@
   "initial_conditions": { "explicit": { "S": 990.0, "E_e1": 5.0, "I": 5.0 } },
   "data_contract": null,
   "output": {
-    "times": { "regular": { "start": 0.0, "step": 1.0, "end": 365.0 } },
+    "times": { "regular": { "start": 0.0, "step": 1.0, "end": 160.0 } },
     "format": "tsv",
     "trajectory": true,
     "observations": true
   },
   "simulation": {
     "t_start": 0.0,
-    "t_end": 365.0,
+    "t_end": 160.0,
     "time_semantics": "continuous",
     "dt": null,
     "rng_seed": null
@@ -178,13 +178,13 @@
       "name": "baseline",
       "label": "default  (latent ≈ 5d)",
       "params": { "beta": 0.3, "sigma": 0.2, "gamma": 0.1 },
-      "t_end": 180.0
+      "t_end": 160.0
     },
     {
       "name": "slow_progression",
       "label": "slow progression  (latent ≈ 10d)",
       "params": { "beta": 0.3, "sigma": 0.1, "gamma": 0.1 },
-      "t_end": 250.0
+      "t_end": 160.0
     }
   ],
   "model_structure": {

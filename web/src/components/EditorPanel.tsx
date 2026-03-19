@@ -5,18 +5,18 @@ import AgentPanel from './AgentPanel';
 export default function EditorPanel() {
   const activeTab = useStore((s) => s.activeTab);
   const setActiveTab = useStore((s) => s.setActiveTab);
-  const agentStatus = useStore((s) => s.agentStatus);
+  const agentPhase = useStore((s) => s.agentPhase);
 
   return (
     <div className="flex flex-col h-full">
       {/* Tab bar */}
-      <div className="flex items-center gap-1 px-3 py-1 bg-surface-1 border-b border-surface-border flex-shrink-0">
+      <div className="flex items-center gap-1 px-3 py-1 bg-gray-50 border-b border-gray-200 flex-shrink-0 dark:bg-surface-1 dark:border-surface-border">
         <button
           onClick={() => setActiveTab('dsl')}
           className={`px-3 py-1 text-xs rounded transition-colors ${
             activeTab === 'dsl'
               ? 'text-accent bg-accent/10 font-semibold'
-              : 'text-gray-400 hover:text-gray-200'
+              : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
           }`}
         >
           DSL
@@ -26,11 +26,11 @@ export default function EditorPanel() {
           className={`px-3 py-1 text-xs rounded transition-colors ${
             activeTab === 'agent'
               ? 'text-accent bg-accent/10 font-semibold'
-              : 'text-gray-400 hover:text-gray-200'
+              : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
           }`}
         >
           Agent
-          {agentStatus === 'streaming' && (
+          {agentPhase !== 'idle' && (
             <span className="ml-1 text-accent animate-pulse">•</span>
           )}
         </button>

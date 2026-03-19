@@ -42,13 +42,13 @@ init {
 
 simulate {
   from = 0 'days
-  to   = 365 'days
+  to   = 80 'days
 }
 
 scenarios {
   baseline {
     label = "default"
-    simulate { to = 500 'days }
+    simulate { to = 80 'days }
     set = {
       beta  = 0.4
       gamma = 0.1
@@ -57,7 +57,7 @@ scenarios {
   }
   slow {
     label = "slow epidemic  (R0 ≈ 2)"
-    simulate { to = 730 'days }
+    simulate { to = 80 'days }
     set = {
       beta  = 0.2
       gamma = 0.1

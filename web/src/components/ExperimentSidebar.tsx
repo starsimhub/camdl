@@ -39,10 +39,10 @@ export default function ExperimentSidebar() {
   }, [menuOpen]);
 
   return (
-    <div className="flex flex-col h-full overflow-hidden bg-surface-1 border-r border-surface-border">
+    <div className="flex flex-col h-full overflow-hidden bg-gray-50 border-r border-gray-200 dark:bg-surface-1 dark:border-surface-border">
 
       {/* ── Scenarios header ──────────────────────────────────────────────────── */}
-      <div className="px-3 pt-3 pb-2 border-b border-surface-border flex-shrink-0">
+      <div className="px-3 pt-3 pb-2 border-b border-gray-200 flex-shrink-0 dark:border-surface-border">
         <div className="flex items-center justify-between mb-2">
           <span className="text-xs text-gray-500 font-medium uppercase tracking-wider">Scenarios</span>
 
@@ -51,36 +51,36 @@ export default function ExperimentSidebar() {
             <button
               disabled={!ir}
               onClick={() => setMenuOpen((o) => !o)}
-              className="flex items-center gap-1 px-2 py-0.5 text-xs text-gray-400 hover:text-gray-200 border border-surface-border rounded transition-colors disabled:opacity-40"
+              className="flex items-center gap-1 px-2 py-0.5 text-xs text-gray-600 hover:text-gray-900 border border-gray-200 rounded transition-colors disabled:opacity-40 dark:text-gray-400 dark:hover:text-gray-200 dark:border-surface-border"
             >
-              + Add <span className="text-gray-600">▾</span>
+              + Add <span className="text-gray-400 dark:text-gray-600">▾</span>
             </button>
             {menuOpen && (
-              <div className="absolute right-0 top-full mt-1 z-50 min-w-[140px] bg-surface-2 border border-surface-border rounded shadow-lg py-0.5">
+              <div className="absolute right-0 top-full mt-1 z-50 min-w-[140px] bg-white border border-gray-200 rounded shadow-lg py-0.5 dark:bg-surface-2 dark:border-surface-border">
                 {examplePresets.length > 0 && (
                   <>
-                    <div className="px-2.5 py-1 text-xs text-gray-600 uppercase tracking-wider">Presets</div>
+                    <div className="px-2.5 py-1 text-xs text-gray-400 uppercase tracking-wider dark:text-gray-600">Presets</div>
                     {examplePresets.map((p) => (
                       <button
                         key={p.name}
                         onClick={() => { addPresetScenario(p.name); setMenuOpen(false); }}
-                        className="w-full text-left px-2.5 py-1 text-xs text-gray-300 hover:bg-surface-3 hover:text-gray-100 transition-colors"
+                        className="w-full text-left px-2.5 py-1 text-xs text-gray-700 hover:bg-gray-100 hover:text-gray-900 transition-colors dark:text-gray-300 dark:hover:bg-surface-3 dark:hover:text-gray-100"
                       >
                         {p.label}
                       </button>
                     ))}
-                    <div className="my-0.5 border-t border-surface-border" />
+                    <div className="my-0.5 border-t border-gray-200 dark:border-surface-border" />
                   </>
                 )}
                 <button
                   onClick={() => { addScenario(true); setMenuOpen(false); }}
-                  className="w-full text-left px-2.5 py-1 text-xs text-gray-300 hover:bg-surface-3 hover:text-gray-100 transition-colors"
+                  className="w-full text-left px-2.5 py-1 text-xs text-gray-700 hover:bg-gray-100 hover:text-gray-900 transition-colors dark:text-gray-300 dark:hover:bg-surface-3 dark:hover:text-gray-100"
                 >
                   From baseline
                 </button>
                 <button
                   onClick={() => { addScenario(false); setMenuOpen(false); }}
-                  className="w-full text-left px-2.5 py-1 text-xs text-gray-300 hover:bg-surface-3 hover:text-gray-100 transition-colors"
+                  className="w-full text-left px-2.5 py-1 text-xs text-gray-700 hover:bg-gray-100 hover:text-gray-900 transition-colors dark:text-gray-300 dark:hover:bg-surface-3 dark:hover:text-gray-100"
                 >
                   Clone last
                 </button>
@@ -97,19 +97,19 @@ export default function ExperimentSidebar() {
               onClick={() => setSelectedId(sc.id)}
               className={`flex items-center gap-1.5 px-2 py-1 rounded text-xs transition-colors ${
                 sc.id === selected?.id
-                  ? 'ring-1 ring-offset-0 bg-surface-3 text-gray-100'
-                  : 'bg-surface-2 text-gray-400 hover:text-gray-200'
+                  ? 'ring-1 ring-offset-0 bg-gray-200 text-gray-900 dark:bg-surface-3 dark:text-gray-100'
+                  : 'bg-gray-100 text-gray-600 hover:text-gray-900 dark:bg-surface-2 dark:text-gray-400 dark:hover:text-gray-200'
               }`}
               style={{ borderLeft: `3px solid ${sc.color}` }}
             >
               {sc.status === 'running' && <span className="animate-pulse text-accent">●</span>}
               {sc.status === 'ok' && sc.runs.length > 0 && <span style={{ color: sc.color }}>●</span>}
               {sc.status === 'error' && <span className="text-red-400">●</span>}
-              {sc.status === 'idle' && <span className="text-gray-600">○</span>}
+              {sc.status === 'idle' && <span className="text-gray-400 dark:text-gray-600">○</span>}
               <span>{idx === 0 ? 'Baseline' : sc.name}</span>
               {idx > 0 && (
                 <span
-                  className="text-gray-600 hover:text-red-400 ml-0.5 leading-none"
+                  className="text-gray-400 hover:text-red-400 ml-0.5 leading-none dark:text-gray-600"
                   onClick={(e) => {
                     e.stopPropagation();
                     removeScenario(sc.id);
@@ -132,7 +132,7 @@ export default function ExperimentSidebar() {
             <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: selected.color }} />
             {!isBaseline && editingName === selected.id ? (
               <input
-                className="flex-1 text-xs bg-surface-2 border border-accent rounded px-1.5 py-0.5 text-gray-100 focus:outline-none"
+                className="flex-1 text-xs bg-white border border-accent rounded px-1.5 py-0.5 text-gray-900 focus:outline-none dark:bg-surface-2 dark:text-gray-100"
                 autoFocus
                 value={selected.name}
                 onChange={(e) => renameScenario(selected.id, e.target.value)}
@@ -141,14 +141,14 @@ export default function ExperimentSidebar() {
               />
             ) : (
               <span
-                className={`text-xs text-gray-300 ${!isBaseline ? 'cursor-pointer hover:text-gray-100' : ''}`}
+                className={`text-xs text-gray-700 dark:text-gray-300 ${!isBaseline ? 'cursor-pointer hover:text-gray-900 dark:hover:text-gray-100' : ''}`}
                 onClick={() => { if (!isBaseline) setEditingName(selected.id); }}
               >
                 {isBaseline ? 'Baseline' : selected.name}
               </span>
             )}
             {selected.seedsCompleted > 0 && (
-              <span className="text-xs text-gray-600 ml-auto">
+              <span className="text-xs text-gray-400 ml-auto dark:text-gray-600">
                 {selected.seedsCompleted}/{runConfig.nSeeds}
               </span>
             )}
@@ -156,7 +156,7 @@ export default function ExperimentSidebar() {
 
           {/* Progress bar */}
           {selected.seedsCompleted > 0 && (
-            <div className="w-full h-0.5 bg-surface-2 rounded mb-2">
+            <div className="w-full h-0.5 bg-gray-200 rounded mb-2 dark:bg-surface-2">
               <div
                 className="h-full rounded transition-all"
                 style={{
@@ -171,7 +171,7 @@ export default function ExperimentSidebar() {
           {irParams.length > 0 && (
             <>
               {!isBaseline && Object.keys(selected.paramOverrides).length === 0 && (
-                <div className="text-xs text-gray-600 italic mb-1">
+                <div className="text-xs text-gray-500 italic mb-1 dark:text-gray-600">
                   No overrides — runs with baseline values.
                 </div>
               )}
@@ -206,24 +206,24 @@ export default function ExperimentSidebar() {
                         }}
                         className={`w-20 text-xs rounded px-1.5 py-0.5 focus:outline-none focus:ring-1 focus:ring-accent ${
                           overridden
-                            ? 'bg-surface-2 border border-accent text-gray-100'
+                            ? 'bg-white border border-accent text-gray-900 dark:bg-surface-2 dark:text-gray-100'
                             : noValue
-                            ? 'bg-surface-2 border border-yellow-600/50 text-gray-400 placeholder-yellow-700'
-                            : 'bg-surface-2 border border-surface-border text-gray-400'
+                            ? 'bg-white border border-yellow-400/50 text-gray-600 placeholder-yellow-600 dark:bg-surface-2 dark:border-yellow-600/50 dark:text-gray-400 dark:placeholder-yellow-700'
+                            : 'bg-white border border-gray-200 text-gray-600 dark:bg-surface-2 dark:border-surface-border dark:text-gray-400'
                         }`}
                         step="any"
                       />
                       {overridden && (
                         <button
                           onClick={() => clearScenarioParam(selected.id, p.name)}
-                          className="text-xs text-gray-600 hover:text-red-400 transition-colors leading-none"
+                          className="text-xs text-gray-400 hover:text-red-400 transition-colors leading-none dark:text-gray-600"
                           title={isBaseline ? 'Clear value' : 'Reset to baseline'}
                         >
                           ×
                         </button>
                       )}
                       {!overridden && !isBaseline && !noValue && (
-                        <span className="text-xs text-gray-700">baseline</span>
+                        <span className="text-xs text-gray-400 dark:text-gray-700">baseline</span>
                       )}
                     </div>
                   );

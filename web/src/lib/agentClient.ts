@@ -3,8 +3,14 @@
 import { useStore } from '../store';
 import { compile as compileApi } from './compilerClient';
 import { simulate as wasmSimulate } from './wasm';
+import { buildAgentContext } from './agentContext';
 
 const SYSTEM_PROMPT = `You are an expert in stochastic compartmental epidemic modelling using the camdl DSL.
+
+Formatting rules:
+- Use plain prose and standard markdown (bold, bullets, code blocks). No ASCII art, no box-drawing characters, no emoji.
+- Keep responses concise. Lead with the answer, not preamble.
+- Use code blocks (triple backtick) for any DSL or code snippets.
 
 The camdl language is a minimal spec DSL for compartmental models. Key syntax:
 
@@ -39,6 +45,15 @@ The camdl language is a minimal spec DSL for compartmental models. Key syntax:
     from = 0 'days
     to   = 120 'days
   }
+
+Each user message includes two context blocks appended after the question:
+1. "Current model DSL" — the full camdl source (parameter kinds like :rate, :count are here)
+2. "App state" — JSON with: compiled model summary (compartments, parameters with current values,
+   simulation config, dimensions), all scenarios (name, param overrides vs baseline, run status,
+   mean final compartment counts if simulation has run), and run configuration.
+
+Use this context to give specific, data-grounded answers. If the user asks about results, use
+final_state_mean. If they ask about parameter units, read the DSL kind annotations.
 
 You have three tools:
 1. compile(dsl) — compile DSL to IR JSON, returns IR or error with line numbers
@@ -143,24 +158,27 @@ async function executeTool(name: string, input: Record<string, unknown>): Promis
 
 export async function sendMessage(userText: string) {
   const store = useStore.getState();
-  store.addUserMessage(userText);
-  store.setAgentStatus('streaming');
 
-  const assistantMsgId = crypto.randomUUID();
-  store.startAssistantMessage(assistantMsgId);
+  // Build history from current state BEFORE mutating it, then append enriched user message.
+  // (store is a snapshot — accessing store.messages after addUserMessage gives stale data)
+  const { dslSource, ir, compileStatus, scenarios, runConfig, experimentStatus } = store;
+  const ctx = buildAgentContext(ir, compileStatus, scenarios, runConfig, experimentStatus);
 
-  // Build conversation history from store messages (simplified — last 20)
   const history: Message[] = store.messages
-    .slice(-20)
+    .slice(-19)
     .filter((m) => m.role === 'user' || m.role === 'assistant')
     .map((m) => ({ role: m.role, content: m.content }));
 
-  // Inject current DSL as context
-  const currentDsl = store.dslSource;
-  history[history.length - 1] = {
+  history.push({
     role: 'user',
-    content: `${userText}\n\n---\nCurrent model DSL:\n\`\`\`camdl\n${currentDsl}\n\`\`\``,
-  };
+    content: `${userText}\n\n---\nCurrent model DSL:\n\`\`\`camdl\n${dslSource}\n\`\`\`\n\nApp state:\n\`\`\`json\n${JSON.stringify(ctx, null, 2)}\n\`\`\``,
+  });
+
+  store.addUserMessage(userText);
+  store.setAgentPhase('waiting');
+
+  const assistantMsgId = crypto.randomUUID();
+  store.startAssistantMessage(assistantMsgId);
 
   const messages: Message[] = [...history];
 
@@ -226,6 +244,7 @@ export async function sendMessage(userText: string) {
           if (t === 'content_block_delta') {
             const delta = event.delta as { type: string; text?: string; partial_json?: string };
             if (delta.type === 'text_delta' && delta.text) {
+              store.setAgentPhase('streaming');
               store.appendAssistantChunk(assistantMsgId, delta.text);
             }
             if (delta.type === 'input_json_delta' && delta.partial_json) {
@@ -244,6 +263,7 @@ export async function sendMessage(userText: string) {
       if (stopReason !== 'tool_use' || toolUses.length === 0) break;
 
       // Execute tool calls
+      store.setAgentPhase('tool_calling');
       const toolResults = [];
       for (const tu of toolUses) {
         let input: Record<string, unknown> = {};
@@ -255,6 +275,7 @@ export async function sendMessage(userText: string) {
 
         toolResults.push({ type: 'tool_result', tool_use_id: tu.id, content: result });
       }
+      store.setAgentPhase('waiting');
 
       // Continue conversation with tool results
       messages.push({
@@ -271,6 +292,6 @@ export async function sendMessage(userText: string) {
   } catch (e) {
     store.appendAssistantChunk(assistantMsgId, `\n\n[Error: ${e}]`);
   } finally {
-    store.setAgentStatus('idle');
+    store.setAgentPhase('idle');
   }
 }

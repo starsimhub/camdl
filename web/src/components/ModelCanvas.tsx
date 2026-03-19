@@ -37,8 +37,8 @@ const CompartmentNode = memo(({ data, id, selected }: NodeProps) => {
           width: 110,
           height: 70,
           borderRadius: 12,
-          border: `2px solid ${selected ? '#2dd4bf' : d.color}`,
-          background: selected ? `${d.color}22` : '#161b22',
+          border: `2px solid ${selected ? 'rgb(var(--accent-rgb))' : d.color}`,
+          background: selected ? `${d.color}22` : 'var(--canvas-node-bg)',
           display: 'flex',
           flexDirection: 'column',
           alignItems: 'center',
@@ -52,7 +52,7 @@ const CompartmentNode = memo(({ data, id, selected }: NodeProps) => {
           {d.label}
         </span>
         {d.subLabel && (
-          <span style={{ color: '#6b7280', fontSize: 10, fontFamily: 'JetBrains Mono, monospace', lineHeight: 1 }}>
+          <span style={{ color: 'var(--canvas-text-muted)', fontSize: 10, fontFamily: 'JetBrains Mono, monospace', lineHeight: 1 }}>
             {d.subLabel}
           </span>
         )}
@@ -72,8 +72,8 @@ const StubNode = memo(({ }: NodeProps) => (
     <Handle type="target" id="top"  position={Position.Top}    style={{ opacity: 0, width: 0, height: 0 }} />
     <div style={{
       width: 10, height: 10, borderRadius: '50%',
-      background: '#0d1117',
-      border: '1.5px solid #4b5563',
+      background: 'var(--canvas-stub-bg)',
+      border: '1.5px solid var(--canvas-stub-border)',
     }} />
     <Handle type="source" id="right"  position={Position.Right}  style={{ opacity: 0, width: 0, height: 0 }} />
     <Handle type="source" id="bottom" position={Position.Bottom} style={{ opacity: 0, width: 0, height: 0 }} />
@@ -90,9 +90,9 @@ const SwimLaneNode = memo(({ data }: NodeProps) => {
       style={{
         width: d.width,
         height: d.height,
-        border: '1px solid #21262d',
+        border: '1px solid var(--canvas-lane-border)',
         borderRadius: 8,
-        background: '#0d1117',
+        background: 'var(--canvas-lane-bg)',
         display: 'flex',
         alignItems: 'stretch',
         pointerEvents: 'none',
@@ -102,7 +102,7 @@ const SwimLaneNode = memo(({ data }: NodeProps) => {
         style={{
           width: LANE_HEADER_W - 1,
           flexShrink: 0,
-          borderRight: '1px solid #21262d',
+          borderRight: '1px solid var(--canvas-lane-border)',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
@@ -110,7 +110,7 @@ const SwimLaneNode = memo(({ data }: NodeProps) => {
         }}
       >
         <span style={{
-          color: '#4b5563',
+          color: 'var(--canvas-text-muted)',
           fontSize: 10,
           fontFamily: 'JetBrains Mono, monospace',
           fontWeight: 600,
@@ -137,11 +137,11 @@ const TransitionEdge = memo(({
   const isTransmission = d.originKind === 'transmission';
   const isBack = d.isBack ?? false;
   const isCrossLane = d.isCrossLane ?? false;
-  const edgeColor = selected ? '#2dd4bf'
+  const edgeColor = selected ? 'rgb(var(--accent-rgb))'
     : isTransmission ? '#ef4444'
     : isCrossLane ? '#f59e0b'
     : isBack ? '#a78bfa'
-    : '#6b7280';
+    : 'var(--canvas-edge-default)';
 
   return (
     <>
@@ -165,11 +165,11 @@ const TransitionEdge = memo(({
             textAlign: 'center',
           }}
         >
-          <div style={{ color: isCrossLane ? '#f59e0b' : '#e5e7eb', fontSize: 11, fontWeight: 600, fontFamily: 'JetBrains Mono, monospace', background: '#161b22', padding: '1px 5px', borderRadius: 4 }}>
+          <div style={{ color: isCrossLane ? '#f59e0b' : 'var(--text-hi)', fontSize: 11, fontWeight: 600, fontFamily: 'JetBrains Mono, monospace', background: 'var(--canvas-label-bg)', padding: '1px 5px', borderRadius: 4 }}>
             {d.label}
           </div>
           {d.rate && (
-            <div style={{ color: '#6b7280', fontSize: 10, fontFamily: 'JetBrains Mono, monospace', marginTop: 1 }}>
+            <div style={{ color: 'var(--canvas-text-muted)', fontSize: 10, fontFamily: 'JetBrains Mono, monospace', marginTop: 1 }}>
               {d.rate}
             </div>
           )}
@@ -226,10 +226,10 @@ export default function ModelCanvas() {
   }));
 
   return (
-    <div className="relative w-full h-full bg-surface-0">
+    <div className="relative w-full h-full bg-gray-50 dark:bg-surface-0">
       {nodes.length === 0 && (
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-          <p className="text-gray-600 text-sm">
+          <p className="text-gray-500 text-sm dark:text-gray-600">
             {compileStatus === 'error' ? 'Fix DSL errors to see canvas' : 'Canvas will appear after first compile'}
           </p>
         </div>
@@ -237,11 +237,13 @@ export default function ModelCanvas() {
 
       {/* Mode selector — only shown when model has dimensions */}
       {dims.length > 0 && nodes.length > 0 && (
-        <div className="absolute top-2 right-2 z-10 flex items-center gap-0.5 bg-surface-1 rounded p-0.5 border border-surface-border">
+        <div className="absolute top-2 right-2 z-10 flex items-center gap-0.5 bg-white border border-gray-200 rounded p-0.5 dark:bg-surface-1 dark:border-surface-border">
           <button
             onClick={() => setExpandDim(null)}
             className={`px-2 py-0.5 text-xs rounded transition-colors ${
-              !expandDim ? 'bg-surface-3 text-gray-100' : 'text-gray-500 hover:text-gray-300'
+              !expandDim
+                ? 'bg-gray-200 text-gray-900 dark:bg-surface-3 dark:text-gray-100'
+                : 'text-gray-500 hover:text-gray-700 dark:text-gray-500 dark:hover:text-gray-300'
             }`}
           >
             Base
@@ -251,7 +253,9 @@ export default function ModelCanvas() {
               key={d.name}
               onClick={() => setExpandDim(expandDim === d.name ? null : d.name)}
               className={`px-2 py-0.5 text-xs rounded transition-colors ${
-                expandDim === d.name ? 'bg-surface-3 text-gray-100' : 'text-gray-500 hover:text-gray-300'
+                expandDim === d.name
+                  ? 'bg-gray-200 text-gray-900 dark:bg-surface-3 dark:text-gray-100'
+                  : 'text-gray-500 hover:text-gray-700 dark:text-gray-500 dark:hover:text-gray-300'
               }`}
             >
               By {d.name}
@@ -277,10 +281,10 @@ export default function ModelCanvas() {
           variant={BackgroundVariant.Dots}
           gap={20}
           size={1}
-          color="#1c2128"
+          color="var(--canvas-lane-border)"
         />
         <Controls
-          style={{ background: '#161b22', border: '1px solid #30363d' }}
+          style={{ background: 'var(--canvas-controls-bg)', border: '1px solid var(--canvas-controls-border)' }}
           showInteractive={false}
         />
         <FitViewOnChange layoutKey={layoutKey} />

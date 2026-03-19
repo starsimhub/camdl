@@ -34,7 +34,7 @@ build-wasm:
 
 # ── Web editor ────────────────────────────────────────────────────────────────
 
-.PHONY: web-dev web-build
+.PHONY: dev web-dev web server web-build
 
 web/node_modules/.package-lock.json: web/package.json
 	cd web && npm install
@@ -42,13 +42,21 @@ web/node_modules/.package-lock.json: web/package.json
 web/compiler-server/node_modules/.package-lock.json: web/compiler-server/package.json
 	cd web/compiler-server && npm install
 
-# Fast dev loop — does not rebuild OCaml/WASM. Run make build-wasm first if needed.
-web-dev: web/node_modules/.package-lock.json \
-         web/compiler-server/node_modules/.package-lock.json
-	@trap 'kill 0' INT; \
-	 (cd web/compiler-server && npx tsx server.ts) & \
-	 (cd web && npm run dev) & \
-	 wait
+# Primary dev entry point — mprocs gives a clean TUI with one pane per process.
+# Env vars (ANTHROPIC_API_KEY etc.) are inherited from the shell via direnv.
+dev: web/node_modules/.package-lock.json \
+     web/compiler-server/node_modules/.package-lock.json
+	mprocs
+
+# Fallback: run individual processes in separate terminals
+web: web/node_modules/.package-lock.json
+	cd web && npm run dev
+
+server: web/compiler-server/node_modules/.package-lock.json
+	cd web/compiler-server && npx tsx server.ts
+
+# Alias for muscle memory
+web-dev: dev
 
 web-build: build-ocaml build-wasm \
            web/node_modules/.package-lock.json \

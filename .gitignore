@@ -35,6 +35,10 @@ __pycache__/
 ir/expected/
 tests/snapshots/
 
+# Secrets / local env
+.envrc
+mprocs.log
+
 # Web
 web/node_modules/
 web/dist/

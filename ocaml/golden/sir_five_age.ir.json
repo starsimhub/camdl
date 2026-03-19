@@ -1244,14 +1244,14 @@
   },
   "data_contract": null,
   "output": {
-    "times": { "regular": { "start": 0.0, "step": 1.0, "end": 365.0 } },
+    "times": { "regular": { "start": 0.0, "step": 1.0, "end": 80.0 } },
     "format": "tsv",
     "trajectory": true,
     "observations": true
   },
   "simulation": {
     "t_start": 0.0,
-    "t_end": 365.0,
+    "t_end": 80.0,
     "time_semantics": "continuous",
     "dt": null,
     "rng_seed": null
@@ -1261,13 +1261,13 @@
       "name": "baseline",
       "label": "default",
       "params": { "beta": 0.4, "gamma": 0.1, "mu": 2.7e-05 },
-      "t_end": 500.0
+      "t_end": 80.0
     },
     {
       "name": "slow",
       "label": "slow epidemic  (R0 ≈ 2)",
       "params": { "beta": 0.2, "gamma": 0.1, "mu": 2.7e-05 },
-      "t_end": 730.0
+      "t_end": 80.0
     }
   ],
   "model_structure": {

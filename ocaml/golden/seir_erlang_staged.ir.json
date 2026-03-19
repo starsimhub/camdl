@@ -184,14 +184,14 @@
   "initial_conditions": { "explicit": { "S": 990.0, "E_e1": 5.0, "I": 5.0 } },
   "data_contract": null,
   "output": {
-    "times": { "regular": { "start": 0.0, "step": 1.0, "end": 365.0 } },
+    "times": { "regular": { "start": 0.0, "step": 1.0, "end": 100.0 } },
     "format": "tsv",
     "trajectory": true,
     "observations": true
   },
   "simulation": {
     "t_start": 0.0,
-    "t_end": 365.0,
+    "t_end": 100.0,
     "time_semantics": "continuous",
     "dt": null,
     "rng_seed": null
@@ -207,7 +207,7 @@
         "sigma_e2": 0.6,
         "sigma_e3": 0.6
       },
-      "t_end": null
+      "t_end": 100.0
     }
   ],
   "model_structure": {

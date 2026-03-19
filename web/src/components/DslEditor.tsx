@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 import MonacoEditor, { useMonaco } from '@monaco-editor/react';
 import type * as Monaco from 'monaco-editor';
 import { useStore } from '../store';
+import { useIsDark } from '../lib/theme';
 
 const KEYWORDS = [
   'time_unit', 'compartments', 'parameters', 'tables', 'functions',
@@ -57,6 +58,30 @@ function registerCamdl(monaco: typeof Monaco) {
       'editorGutter.background':        '#0f1117',
     },
   });
+
+  monaco.editor.defineTheme('camdl-light', {
+    base: 'vs',
+    inherit: true,
+    rules: [
+      { token: 'comment',    foreground: '94a3b8', fontStyle: 'italic' },
+      { token: 'keyword',    foreground: '0d9488', fontStyle: 'bold' },
+      { token: 'type',       foreground: '7c3aed' },
+      { token: 'operator',   foreground: 'db2777' },
+      { token: 'number',     foreground: 'd97706' },
+      { token: 'string',     foreground: '16a34a' },
+      { token: 'identifier', foreground: '1e293b' },
+      { token: 'delimiter',  foreground: '64748b' },
+    ],
+    colors: {
+      'editor.background':              '#ffffff',
+      'editor.foreground':              '#1e293b',
+      'editorLineNumber.foreground':    '#94a3b8',
+      'editor.lineHighlightBackground': '#f1f5f9',
+      'editorCursor.foreground':        '#0d9488',
+      'editor.selectionBackground':     '#e0f2fe',
+      'editorGutter.background':        '#ffffff',
+    },
+  });
 }
 
 export default function DslEditor() {
@@ -64,6 +89,7 @@ export default function DslEditor() {
   const setDslSource   = useStore((s) => s.setDslSource);
   const diagnostics    = useStore((s) => s.diagnostics);
   const highlightedSpan = useStore((s) => s.highlightedSpan);
+  const isDark = useIsDark();
 
   const editorRef = useRef<Monaco.editor.IStandaloneCodeEditor | null>(null);
   const monaco    = useMonaco();
@@ -88,6 +114,12 @@ export default function DslEditor() {
     monaco.editor.setModelMarkers(model, 'camdl', markers);
   }, [diagnostics, monaco]);
 
+  // Switch Monaco theme when light/dark changes
+  useEffect(() => {
+    if (!monaco) return;
+    monaco.editor.setTheme(isDark ? 'camdl-dark' : 'camdl-light');
+  }, [isDark, monaco]);
+
   // Scroll to + select highlighted span when canvas node is clicked
   useEffect(() => {
     if (!editorRef.current || !highlightedSpan) return;
@@ -106,7 +138,7 @@ export default function DslEditor() {
     <MonacoEditor
       height="100%"
       language="camdl"
-      theme="camdl-dark"
+      theme={isDark ? 'camdl-dark' : 'camdl-light'}
       value={dslSource}
       beforeMount={registerCamdl}
       onChange={(v) => { if (v !== undefined) setDslSource(v); }}

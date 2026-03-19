@@ -10,15 +10,15 @@ export default {
       },
       colors: {
         surface: {
-          0: '#0f1117',
-          1: '#161b22',
-          2: '#1c2128',
-          3: '#22272e',
-          border: '#30363d',
+          0: 'var(--surface-0)',
+          1: 'var(--surface-1)',
+          2: 'var(--surface-2)',
+          3: 'var(--surface-3)',
+          border: 'var(--border)',
         },
         accent: {
-          DEFAULT: '#2dd4bf',
-          dim: '#1a9e8e',
+          DEFAULT: 'rgb(var(--accent-rgb) / <alpha-value>)',
+          dim: 'rgb(var(--accent-dim-rgb) / <alpha-value>)',
         },
       },
     },

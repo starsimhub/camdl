@@ -90,6 +90,56 @@ function flowAtIdx(traj: TrajectoryJson, snapIdx: number, transName: string): nu
   return idx >= 0 ? (snap.flows[idx] ?? 0) : 0;
 }
 
+/**
+ * Find the last "active" index in a view's data array by computing rolling
+ * variance of all numeric signals, normalised so each contributes equally.
+ * Returns the index where dynamics have effectively ended + 10% tail buffer,
+ * or undefined if the data is trivially flat.
+ */
+export function findDynamicEndIndex(data: ChartPoint[]): number | undefined {
+  const n = data.length;
+  if (n < 2) return undefined;
+
+  // All numeric keys except the time axis
+  const keys = Object.keys(data[0]).filter((k) => k !== 't');
+  if (!keys.length) return undefined;
+
+  // Build per-signal time series
+  const sigMat: number[][] = keys.map((k) => data.map((row) => (row[k] as number | undefined) ?? 0));
+
+  // Normalise each signal by its range so all signals contribute equally
+  const normalised = sigMat.map((sig) => {
+    const min = Math.min(...sig);
+    const max = Math.max(...sig);
+    const range = max - min || 1;
+    return sig.map((v) => (v - min) / range);
+  });
+
+  // Rolling variance of each normalised signal, summed across all signals
+  const W = Math.max(5, Math.floor(n * 0.05));
+  const activity = new Array(n).fill(0);
+  for (let i = W; i < n; i++) {
+    let total = 0;
+    for (const sig of normalised) {
+      const window = sig.slice(i - W, i + 1);
+      const mean = window.reduce((a, b) => a + b, 0) / window.length;
+      total += window.reduce((a, v) => a + (v - mean) ** 2, 0) / window.length;
+    }
+    activity[i] = total;
+  }
+
+  const maxActivity = Math.max(...activity);
+  if (maxActivity === 0) return undefined;
+  const threshold = maxActivity * 0.01;
+
+  let lastActive = W;
+  for (let i = n - 1; i >= W; i--) {
+    if (activity[i] >= threshold) { lastActive = i; break; }
+  }
+
+  return Math.min(n - 1, Math.floor(lastActive * 1.1));
+}
+
 // Dash patterns for multi-variable views — one per scenario / stratum
 const SCENARIO_DASHES = ['', '6 3', '2 3', '10 4 2 4', '1 4'];
 
@@ -330,7 +380,7 @@ export function buildViews(ir: IrModel, scenarios: Scenario[], mode: EnsembleMod
         };
       });
       views.push(buildMultiVarView(
-        'aggregate', 'Aggregate', 'Strata summed per compartment type',
+        'aggregate', 'Compartments', 'Base compartments, strata summed',
         active, timeGrid, vars, mode,
       ));
     }

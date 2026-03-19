@@ -33,13 +33,13 @@ init {
 
 simulate {
   from = 0 'days
-  to   = 365 'days
+  to   = 160 'days
 }
 
 scenarios {
   baseline {
     label = "default  (latent ≈ 5d)"
-    simulate { to = 180 'days }
+    simulate { to = 160 'days }
     set = {
       beta  = 0.3
       sigma = 0.2
@@ -48,7 +48,7 @@ scenarios {
   }
   slow_progression {
     label = "slow progression  (latent ≈ 10d)"
-    simulate { to = 250 'days }
+    simulate { to = 160 'days }
     set = {
       beta  = 0.3
       sigma = 0.1

@@ -26,12 +26,12 @@ transitions {
 
 init { S[young] = N0 - I0  S[old] = N0  I[young] = I0 }
 
-simulate { from = 0 'days  to = 100 'days }
+simulate { from = 0 'days  to = 50 'days }
 
 scenarios {
   baseline {
     label = "default"
-    simulate { to = 80 'days }
+    simulate { to = 50 'days }
     set = {
       beta  = 0.05
       gamma = 0.1
@@ -41,7 +41,7 @@ scenarios {
   }
   high_coupling {
     label = "high coupling  (strong cross-mixing)"
-    simulate { to = 60 'days }
+    simulate { to = 50 'days }
     set = {
       beta  = 0.09
       gamma = 0.1

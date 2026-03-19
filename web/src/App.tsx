@@ -13,7 +13,7 @@ export default function App() {
   useEffect(() => { loadExample('sir_five_age'); }, [loadExample]);
 
   return (
-    <div className="flex flex-col h-screen overflow-hidden bg-surface-0">
+    <div className="flex flex-col h-screen overflow-hidden bg-gray-50 dark:bg-surface-0">
       <Header />
 
       {/* Main area: canvas + editor */}
@@ -24,14 +24,14 @@ export default function App() {
             <Panel defaultSize={50} minSize={20}>
               <ModelCanvas />
             </Panel>
-            <PanelResizeHandle className="w-1 bg-surface-border hover:bg-accent/40 transition-colors cursor-col-resize" />
+            <PanelResizeHandle className="w-1 bg-gray-200 hover:bg-accent/40 transition-colors cursor-col-resize dark:bg-surface-border" />
             <Panel defaultSize={50} minSize={25}>
               <EditorPanel />
             </Panel>
           </PanelGroup>
         </Panel>
 
-        <PanelResizeHandle className="h-1 bg-surface-border hover:bg-accent/40 transition-colors cursor-row-resize" />
+        <PanelResizeHandle className="h-1 bg-gray-200 hover:bg-accent/40 transition-colors cursor-row-resize dark:bg-surface-border" />
 
         {/* Bottom: experiment */}
         <Panel defaultSize={50} minSize={20}>

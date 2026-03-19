@@ -57,6 +57,20 @@ function makeBaseline(): Scenario {
   };
 }
 
+/** Build a scenario list from IR presets (pure). */
+function scenariosFromPresets(presets: IrModel['presets']): Scenario[] {
+  if (!presets || presets.length === 0) return [makeBaseline()];
+  return presets.map((p, i) => ({
+    id: crypto.randomUUID(),
+    name: i === 0 ? 'Baseline' : p.label,
+    color: SCENARIO_COLORS[i % SCENARIO_COLORS.length],
+    paramOverrides: { ...p.params },
+    runs: [],
+    seedsCompleted: 0,
+    status: 'idle' as const,
+  }));
+}
+
 /** Apply param overrides + runConfig.tEnd to an IR model (pure). */
 function patchIr(ir: IrModel, paramOverrides: Record<string, number>, runConfig: RunConfig): IrModel {
   return {
@@ -117,13 +131,14 @@ interface CamdlStore {
 
   // ── Agent ─────────────────────────────────────────────────────────────────────
   messages: AgentMessage[];
-  agentStatus: 'idle' | 'streaming';
+  /** idle → waiting → streaming ↔ tool_calling → idle */
+  agentPhase: 'idle' | 'waiting' | 'streaming' | 'tool_calling';
   pendingDiff: ProposedEdit | null;
   addUserMessage: (text: string) => void;
   appendAssistantChunk: (id: string, chunk: string) => void;
   startAssistantMessage: (id: string) => void;
   addToolCall: (msgId: string, name: string, status: 'running' | 'done' | 'error', summary: string) => void;
-  setAgentStatus: (s: 'idle' | 'streaming') => void;
+  setAgentPhase: (p: 'idle' | 'waiting' | 'streaming' | 'tool_calling') => void;
   setPendingDiff: (d: ProposedEdit | null) => void;
   acceptDiff: () => void;
   rejectDiff: () => void;
@@ -201,19 +216,31 @@ export const useStore = create<CamdlStore>((set, get) => ({
         const newHash = JSON.stringify(result.ir);
         const prevHash = get().irHash;
 
-        // Clear scenario runs if IR changed (not just whitespace/comments)
         const irChanged = newHash !== prevHash;
+
         if (irChanged) {
-          set((s) => ({
-            scenarios: s.scenarios.map((sc) => ({
-              ...sc,
-              runs: [],
-              seedsCompleted: 0,
-              status: 'idle' as const,
-              error: undefined,
-            })),
-            experimentStatus: 'idle',
-          }));
+          const prevPresetKey = JSON.stringify((get().ir?.presets ?? []).map(p => p.name));
+          const newPresetKey  = JSON.stringify((result.ir.presets ?? []).map(p => p.name));
+          const presetsChanged = prevPresetKey !== newPresetKey;
+
+          if (presetsChanged) {
+            // Presets changed (agent edited scenarios block, or new model loaded) — rebuild scenarios.
+            const newScenarios = scenariosFromPresets(result.ir.presets);
+            const tEnd = result.ir.presets?.[0]?.t_end ?? undefined;
+            set((s) => ({
+              scenarios: newScenarios,
+              experimentStatus: 'idle',
+              runConfig: tEnd != null ? { ...s.runConfig, tEnd } : s.runConfig,
+            }));
+          } else {
+            // IR changed but presets didn't — just clear runs.
+            set((s) => ({
+              scenarios: s.scenarios.map((sc) => ({
+                ...sc, runs: [], seedsCompleted: 0, status: 'idle' as const, error: undefined,
+              })),
+              experimentStatus: 'idle',
+            }));
+          }
         }
 
         set({
@@ -413,7 +440,7 @@ export const useStore = create<CamdlStore>((set, get) => ({
 
   // Agent
   messages: [],
-  agentStatus: 'idle',
+  agentPhase: 'idle',
   pendingDiff: null,
 
   addUserMessage: (text) => {
@@ -450,7 +477,7 @@ export const useStore = create<CamdlStore>((set, get) => ({
     }));
   },
 
-  setAgentStatus: (s) => set({ agentStatus: s }),
+  setAgentPhase: (p) => set({ agentPhase: p }),
   setPendingDiff: (d) => set({ pendingDiff: d }),
 
   acceptDiff: () => {
@@ -466,39 +493,8 @@ export const useStore = create<CamdlStore>((set, get) => ({
   loadExample: (name) => {
     const ex = EXAMPLES.find((e) => e.name === name);
     if (!ex) return;
-    get().setModelName(ex.name);
-
-    // Reset to a single fresh baseline, then populate one scenario per preset
-    set({ experimentStatus: 'idle', scenarios: [makeBaseline()] });
-
-    const presets = ex.paramSets;
-    if (presets.length === 0) {
-      get().setRunConfig({ tEnd: undefined });
-    } else {
-      get().setRunConfig({ tEnd: presets[0].tEnd ?? undefined });
-      // First preset → baseline
-      const baselineId = get().scenarios[0]!.id;
-      get().renameScenario(baselineId, presets[0].label);
-      for (const [k, v] of Object.entries(presets[0].values)) {
-        get().setScenarioParam(baselineId, k, v);
-      }
-      // Remaining presets → additional scenarios
-      for (const preset of presets.slice(1)) {
-        get().addScenario();
-        const newId = get().scenarios[get().scenarios.length - 1]!.id;
-        get().renameScenario(newId, preset.label);
-        // Replace the copied overrides with this preset's values
-        set((s) => ({
-          scenarios: s.scenarios.map((sc) =>
-            sc.id === newId ? { ...sc, paramOverrides: { ...preset.values } } : sc
-          ),
-        }));
-        if (preset.tEnd != null) {
-          // tEnd per scenario isn't supported; global runConfig.tEnd is used for all
-        }
-      }
-    }
-
+    // Reset irHash so compile always sees presets as "changed" and rebuilds scenarios.
+    set({ modelName: ex.name, irHash: null, scenarios: [makeBaseline()], experimentStatus: 'idle' });
     get().setDslSource(ex.dsl);
   },
 

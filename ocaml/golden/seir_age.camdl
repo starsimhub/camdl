@@ -33,13 +33,13 @@ init {
 
 simulate {
   from = 0 'days
-  to   = 365 'days
+  to   = 100 'days
 }
 
 scenarios {
   baseline {
     label = "default"
-    simulate { to = 200 'days }
+    simulate { to = 100 'days }
     set = {
       beta  = 0.05
       sigma = 0.2
@@ -48,7 +48,7 @@ scenarios {
   }
   child_driven {
     label = "child-driven  (high beta)"
-    simulate { to = 160 'days }
+    simulate { to = 100 'days }
     set = {
       beta  = 0.08
       sigma = 0.2

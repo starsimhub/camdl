@@ -1,10 +1,27 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import {
   ComposedChart, Line, Area, XAxis, YAxis, Tooltip,
   ResponsiveContainer, Legend, CartesianGrid, Brush,
 } from 'recharts';
 import { useStore } from '../store';
-import { buildViews, TRACE_THRESHOLD, type EnsembleMode } from '../lib/buildViews';
+import { buildViews, findDynamicEndIndex, TRACE_THRESHOLD, type EnsembleMode } from '../lib/buildViews';
+
+// ── Brush handle ──────────────────────────────────────────────────────────────
+
+function BrushHandle(props: Record<string, unknown>) {
+  const x = props.x as number ?? 0;
+  const y = props.y as number ?? 0;
+  const width = props.width as number ?? 8;
+  const height = props.height as number ?? 18;
+  const cx = x + width / 2;
+  return (
+    <g>
+      <rect x={x - 1} y={y} width={width + 2} height={height} fill="rgb(var(--accent-rgb))" rx={2} opacity={0.9} />
+      <line x1={cx - 2} y1={y + 4} x2={cx - 2} y2={y + height - 4} stroke="white" strokeWidth={1} strokeOpacity={0.5} />
+      <line x1={cx + 2} y1={y + 4} x2={cx + 2} y2={y + height - 4} stroke="white" strokeWidth={1} strokeOpacity={0.5} />
+    </g>
+  );
+}
 
 // ── Smart legend ───────────────────────────────────────────────────────────────
 
@@ -24,9 +41,9 @@ function SmartLegend({ payload, groupMap }: { payload?: LegendEntry[]; groupMap?
     return (
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 12px', padding: '6px 8px 0', fontSize: 11, fontFamily: 'JetBrains Mono, monospace' }}>
         {visible.map((e) => (
-          <span key={typeof e.dataKey === 'string' ? e.dataKey : e.value} style={{ display: 'flex', alignItems: 'center', gap: 5, color: '#9ca3af' }}>
-            <span style={{ display: 'inline-block', width: 16, height: 2, background: e.color ?? '#6b7280', borderRadius: 1 }} />
-            <span style={{ color: '#d1d5db' }}>{e.value}</span>
+          <span key={typeof e.dataKey === 'string' ? e.dataKey : e.value} style={{ display: 'flex', alignItems: 'center', gap: 5, color: 'var(--text-md)' }}>
+            <span style={{ display: 'inline-block', width: 16, height: 2, background: e.color ?? 'var(--text-lo)', borderRadius: 1 }} />
+            <span style={{ color: 'var(--text-hi)' }}>{e.value}</span>
           </span>
         ))}
       </div>
@@ -52,23 +69,23 @@ function SmartLegend({ payload, groupMap }: { payload?: LegendEntry[]; groupMap?
     <div style={{ padding: '6px 8px 0', fontSize: 11, fontFamily: 'JetBrains Mono, monospace', display: 'flex', flexWrap: 'wrap', gap: '2px 10px' }}>
       {[...groups.entries()].map(([k, entries]) => {
         const isOpen = expanded.has(k);
-        const swatch = entries[0].color ?? '#6b7280';
+        const swatch = entries[0].color ?? 'var(--text-lo)';
         return (
           <div key={k} style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
             <button
               onClick={() => toggle(k)}
-              style={{ display: 'flex', alignItems: 'center', gap: 5, background: 'none', border: 'none', cursor: 'pointer', padding: '1px 0', color: '#9ca3af' }}
+              style={{ display: 'flex', alignItems: 'center', gap: 5, background: 'none', border: 'none', cursor: 'pointer', padding: '1px 0', color: 'var(--text-md)' }}
             >
               <span style={{ display: 'inline-block', width: 16, height: 2, background: swatch, borderRadius: 1 }} />
-              <span style={{ color: '#d1d5db' }}>{k}</span>
-              <span style={{ color: '#6b7280', fontSize: 10 }}>({entries.length}) {isOpen ? '▾' : '▸'}</span>
+              <span style={{ color: 'var(--text-hi)' }}>{k}</span>
+              <span style={{ color: 'var(--text-lo)', fontSize: 10 }}>({entries.length}) {isOpen ? '▾' : '▸'}</span>
             </button>
             {isOpen && (
               <div style={{ paddingLeft: 21, display: 'flex', flexDirection: 'column', gap: 1 }}>
                 {entries.map((e) => (
-                  <span key={typeof e.dataKey === 'string' ? e.dataKey : e.value} style={{ color: '#9ca3af', display: 'flex', alignItems: 'center', gap: 4 }}>
-                    <span style={{ display: 'inline-block', width: 10, height: 1.5, background: e.color ?? '#6b7280', borderRadius: 1 }} />
-                    <span style={{ color: '#6b7280' }}>{e.value.slice(k.length).trim()}</span>
+                  <span key={typeof e.dataKey === 'string' ? e.dataKey : e.value} style={{ color: 'var(--text-md)', display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <span style={{ display: 'inline-block', width: 10, height: 1.5, background: e.color ?? 'var(--text-lo)', borderRadius: 1 }} />
+                    <span style={{ color: 'var(--text-lo)' }}>{e.value.slice(k.length).trim()}</span>
                   </span>
                 ))}
               </div>
@@ -108,15 +125,15 @@ function CustomTooltip({ active, payload, label, tooltipKeySet }: {
 
   return (
     <div style={{
-      background: '#1c2128', border: '1px solid #30363d', borderRadius: 6,
+      background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 6,
       padding: '8px 10px', fontSize: 11, fontFamily: 'JetBrains Mono, monospace',
       maxWidth: 240,
     }}>
-      <div style={{ color: '#9ca3af', marginBottom: 5 }}>t = {fmtTime(label ?? 0)}</div>
+      <div style={{ color: 'var(--text-md)', marginBottom: 5 }}>t = {fmtTime(label ?? 0)}</div>
       {shown.map((p) => (
         <div key={p.dataKey} style={{ display: 'flex', justifyContent: 'space-between', gap: 16, lineHeight: 1.6 }}>
           <span style={{ color: p.color }}>{p.name}</span>
-          <span style={{ color: '#e5e7eb' }}>{fmtCount(p.value)}</span>
+          <span style={{ color: 'var(--text-hi)' }}>{fmtCount(p.value)}</span>
         </div>
       ))}
     </div>
@@ -158,6 +175,26 @@ export default function ResultsPanel() {
     [activeView]
   );
 
+  // Per-view brush end index. Auto-computed from each view's own data on new
+  // runs; user drag overrides per-view. Reset all when run count changes.
+  const [brushEnds, setBrushEnds] = useState<Record<string, number | undefined>>({});
+  const prevRunCount = useRef(0);
+
+  // Compute dynamic end for each view whenever views change
+  const dynamicEnds = useMemo(() => {
+    const result: Record<string, number | undefined> = {};
+    for (const v of views) result[v.id] = findDynamicEndIndex(v.data);
+    return result;
+  }, [views]);
+
+  useEffect(() => {
+    const totalRuns = scenarios.reduce((sum, s) => sum + s.runs.length, 0);
+    if (totalRuns > 0 && totalRuns !== prevRunCount.current) {
+      prevRunCount.current = totalRuns;
+      setBrushEnds(dynamicEnds);
+    }
+  }, [scenarios, dynamicEnds]);
+
   const isRunning = experimentStatus === 'running';
   const hasResults = views.length > 0;
 
@@ -165,7 +202,7 @@ export default function ResultsPanel() {
     <div className="flex flex-col h-full">
       {/* Top bar: view tabs + mode toggle */}
       {hasResults && (
-        <div className="flex items-center gap-1 px-3 py-1 bg-surface-0 border-b border-surface-border flex-shrink-0 overflow-x-auto">
+        <div className="flex items-center gap-1 px-3 py-1 bg-white border-b border-gray-200 flex-shrink-0 overflow-x-auto dark:bg-surface-0 dark:border-surface-border">
           {views.map((v) => (
             <button
               key={v.id}
@@ -173,8 +210,8 @@ export default function ResultsPanel() {
               title={v.description}
               className={`px-2.5 py-0.5 text-xs rounded transition-colors ${
                 v.id === (activeView?.id)
-                  ? 'bg-surface-3 text-gray-100'
-                  : 'text-gray-500 hover:text-gray-300'
+                  ? 'bg-gray-200 text-gray-900 dark:bg-surface-3 dark:text-gray-100'
+                  : 'text-gray-500 hover:text-gray-700 dark:text-gray-500 dark:hover:text-gray-300'
               }`}
             >
               {v.label}
@@ -183,7 +220,7 @@ export default function ResultsPanel() {
           <div className="flex-1" />
           {/* Band / Lines toggle */}
           {hasResults && (
-            <div className="flex items-center gap-0.5 bg-surface-2 rounded p-0.5 ml-2">
+            <div className="flex items-center gap-0.5 bg-gray-100 rounded p-0.5 ml-2 dark:bg-surface-2">
               {(['pi', 'traces'] as EnsembleMode[]).map((m) => (
                 <button
                   key={m}
@@ -191,8 +228,8 @@ export default function ResultsPanel() {
                   title={m === 'pi' ? 'P10–P90 quantile band + median' : 'Individual seed traces + mean'}
                   className={`px-2 py-0.5 text-xs rounded transition-colors ${
                     effectiveMode === m
-                      ? 'bg-surface-3 text-gray-100'
-                      : 'text-gray-500 hover:text-gray-300'
+                      ? 'bg-gray-200 text-gray-900 dark:bg-surface-3 dark:text-gray-100'
+                      : 'text-gray-500 hover:text-gray-700 dark:text-gray-500 dark:hover:text-gray-300'
                   }`}
                 >
                   {m === 'pi' ? 'Band' : 'Lines'}
@@ -207,8 +244,8 @@ export default function ResultsPanel() {
       <div className="flex-1 min-h-0 px-2 py-3">
         {!hasResults && !isRunning && (
           <div className="flex flex-col items-center justify-center h-full gap-2">
-            <span className="text-gray-600 text-sm">Click ▶ Run All to simulate</span>
-            <span className="text-gray-700 text-xs">Load an example from the header if parameters have no defaults</span>
+            <span className="text-gray-500 text-sm dark:text-gray-600">Click ▶ Run All to simulate</span>
+            <span className="text-gray-400 text-xs dark:text-gray-700">Load an example from the header if parameters have no defaults</span>
           </div>
         )}
         {!hasResults && isRunning && (
@@ -222,18 +259,18 @@ export default function ResultsPanel() {
               data={activeView.data}
               margin={{ top: 4, right: 16, bottom: 4, left: 8 }}
             >
-              <CartesianGrid strokeDasharray="3 3" stroke="#1c2128" vertical={false} />
+              <CartesianGrid strokeDasharray="3 3" stroke="var(--surface-2)" vertical={false} />
               <XAxis
                 dataKey="t"
                 tickFormatter={fmtTime}
-                tick={{ fontSize: 10, fill: '#6b7280', fontFamily: 'JetBrains Mono, monospace' }}
-                axisLine={{ stroke: '#30363d' }}
+                tick={{ fontSize: 10, fill: 'var(--text-lo)', fontFamily: 'JetBrains Mono, monospace' }}
+                axisLine={{ stroke: 'var(--border)' }}
                 tickLine={false}
-                label={{ value: 'time', position: 'insideBottomRight', offset: -4, fontSize: 10, fill: '#4b5563' }}
+                label={{ value: 'time', position: 'insideBottomRight', offset: -4, fontSize: 10, fill: 'var(--text-lo)' }}
               />
               <YAxis
                 tickFormatter={fmtCount}
-                tick={{ fontSize: 10, fill: '#6b7280', fontFamily: 'JetBrains Mono, monospace' }}
+                tick={{ fontSize: 10, fill: 'var(--text-lo)', fontFamily: 'JetBrains Mono, monospace' }}
                 axisLine={false}
                 tickLine={false}
                 width={44}
@@ -293,10 +330,18 @@ export default function ResultsPanel() {
               <Brush
                 dataKey="t"
                 height={18}
-                stroke="#30363d"
-                fill="#161b22"
-                travellerWidth={6}
+                stroke="var(--border)"
+                fill="var(--surface-1)"
+                travellerWidth={8}
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                traveller={BrushHandle as any}
                 tickFormatter={fmtTime}
+                startIndex={0}
+                endIndex={activeView ? brushEnds[activeView.id] : undefined}
+                onChange={(range: { startIndex?: number; endIndex?: number }) => {
+                  if (!activeView || range.endIndex === undefined) return;
+                  setBrushEnds((prev) => ({ ...prev, [activeView.id]: range.endIndex }));
+                }}
               />
             </ComposedChart>
           </ResponsiveContainer>
