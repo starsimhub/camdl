@@ -125,12 +125,16 @@
       "name": "baseline",
       "label": "default  (R0 ≈ 3)",
       "params": { "beta": 0.3, "gamma": 0.1, "N0": 1000.0, "I0": 10.0 },
+      "enable": [],
+      "disable": [],
       "t_end": 80.0
     },
     {
       "name": "high_r0",
       "label": "high R0  (R0 = 5)",
       "params": { "beta": 0.5, "gamma": 0.1, "N0": 1000.0, "I0": 5.0 },
+      "enable": [],
+      "disable": [],
       "t_end": 80.0
     }
   ],
@@ -139,6 +143,6 @@
     "compartment_dims": { "S": [], "I": [], "R": [] },
     "base_compartments": [ "S", "I", "R" ],
     "transmission_transitions": [ "infection" ],
-    "infectious_compartments": [ "S" ]
+    "infectious_compartments": [ "I" ]
   }
 }

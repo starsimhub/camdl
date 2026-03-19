@@ -207,6 +207,8 @@
         "N0": 10000.0,
         "I0": 100.0
       },
+      "enable": [],
+      "disable": [],
       "t_end": 100.0
     },
     {
@@ -219,6 +221,8 @@
         "N0": 10000.0,
         "I0": 10.0
       },
+      "enable": [],
+      "disable": [],
       "t_end": 3650.0
     }
   ],
@@ -227,6 +231,6 @@
     "compartment_dims": { "S": [], "I": [], "R": [] },
     "base_compartments": [ "S", "I", "R" ],
     "transmission_transitions": [ "infection" ],
-    "infectious_compartments": [ "S" ]
+    "infectious_compartments": [ "I" ]
   }
 }

@@ -1307,11 +1307,22 @@ let expand_scenarios ctx : Ir.preset list =
   List.map (fun (sd : scenario_decl) ->
     let label = Option.value ~default:sd.scname sd.sclabel in
     let t_end = Option.map (resolve_float_expr ctx) sd.sct_end in
-    let params = List.map (fun (k, e) -> (k, resolve_float_expr ctx e)) sd.scparams in
-    { Ir.preset_name   = sd.scname;
-      Ir.preset_label  = label;
-      Ir.preset_params = params;
-      Ir.preset_t_end  = t_end;
+    (* Extract enable/disable lists; the rest are set-style param overrides. *)
+    let extract_names = function
+      | EList items -> List.filter_map (function EIdent (n, _) -> Some n | _ -> None) items
+      | _ -> []
+    in
+    let enable  = List.concat_map (fun (k, e) -> if k = "enable"  then extract_names e else []) sd.scparams in
+    let disable = List.concat_map (fun (k, e) -> if k = "disable" then extract_names e else []) sd.scparams in
+    let params  = List.filter_map (fun (k, e) ->
+      if k = "enable" || k = "disable" then None
+      else Some (k, resolve_float_expr ctx e)) sd.scparams in
+    { Ir.preset_name    = sd.scname;
+      Ir.preset_label   = label;
+      Ir.preset_params  = params;
+      Ir.preset_enable  = enable;
+      Ir.preset_disable = disable;
+      Ir.preset_t_end   = t_end;
     }
   ) ctx.scenario_decls
 
@@ -1345,6 +1356,24 @@ let build_model_structure ctx expanded_trs =
   let compartment_dims = List.map (fun cd ->
     (cd.cname, comp_dims ctx cd.cname)
   ) ctx.comp_decls in
+  (* Collect Pop/PopSum names from the numerator of a rate expression.
+     Descends through Mul and Cond but does NOT enter the right-hand side of Div,
+     so compartments that appear only in a denominator (e.g. N = S+I+R) are excluded.
+     For beta * S * I / N this yields {S, I}, not {S, I, R}. *)
+  let rec collect_numerator_pops acc = function
+    | Ir.Pop n -> n :: acc
+    | Ir.PopSum ns -> ns @ acc
+    | Ir.BinOp { op = Ir.Mul; left; right }
+    | Ir.BinOp { op = Ir.Add; left; right } ->
+      collect_numerator_pops (collect_numerator_pops acc left) right
+    | Ir.BinOp { op = Ir.Div; left; _ } ->
+      collect_numerator_pops acc left
+    | Ir.Cond c ->
+      collect_numerator_pops
+        (collect_numerator_pops (collect_numerator_pops acc c.pred) c.then_)
+        c.else_
+    | _ -> acc
+  in
   let seen_tr  = Hashtbl.create 4 in
   let seen_inf = Hashtbl.create 4 in
   let transmission_transitions = ref [] in
@@ -1357,14 +1386,16 @@ let build_model_structure ctx expanded_trs =
          Hashtbl.add seen_tr b ();
          transmission_transitions := b :: !transmission_transitions
        | _ -> ());
-      (match source_compartment with
-       | Some src ->
-         (match find_base_compname ctx src with
-          | Some b when not (Hashtbl.mem seen_inf b) ->
-            Hashtbl.add seen_inf b ();
-            infectious_compartments := b :: !infectious_compartments
-          | _ -> ())
-       | None -> ())
+      (* Infectious compartments = pops referenced in rate that are NOT the source. *)
+      let src_base = Option.bind source_compartment (find_base_compname ctx) in
+      let rate_pops = collect_numerator_pops [] t.rate in
+      List.iter (fun pop_name ->
+        match find_base_compname ctx pop_name with
+        | Some b when Some b <> src_base && not (Hashtbl.mem seen_inf b) ->
+          Hashtbl.add seen_inf b ();
+          infectious_compartments := b :: !infectious_compartments
+        | _ -> ()
+      ) rate_pops
     | _ -> ()
   ) expanded_trs;
   { Ir.dimensions;

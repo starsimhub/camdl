@@ -1,0 +1,56 @@
+time_unit = 'days
+
+compartments { S, E, I, R, V }
+
+let N = S + E + I + R + V
+
+parameters {
+  beta           : rate
+  sigma          : rate
+  gamma          : rate
+  omega          : rate          # waning immunity rate (V → S, R → S)
+  reversion_rate : rate          # OPV reversion rate (V → E)
+  alpha          : probability   # seasonal amplitude
+  phi_season     : real          # seasonal phase (days from t=0 to peak)
+  vacc_frac      : probability   # SIA coverage fraction
+  N0             : count
+  I0             : count
+}
+
+functions {
+  seasonal : sinusoidal {
+    amplitude = alpha
+    period    = 365.25
+    phase     = phi_season
+    baseline  = 1.0
+  }
+}
+
+transitions {
+  infection   : S --> E  @ beta * seasonal(t) * S * I / N
+  progression : E --> I  @ sigma * E
+  recovery    : I --> R  @ gamma * I
+  waning      : R --> S  @ omega * R
+  vacc_waning : V --> S  @ omega * V
+  reversion   : V --> E  @ reversion_rate * V
+}
+
+interventions {
+  sia_round_1 : transfer(fraction = vacc_frac, from = S, to = V) at [180, 545, 910]
+}
+
+init {
+  S = N0 - I0
+  I = I0
+}
+
+simulate {
+  from = 0 'days
+  to   = 3 'years
+}
+
+scenarios {
+  with_sia {
+    enable = [sia_round_1]
+  }
+}

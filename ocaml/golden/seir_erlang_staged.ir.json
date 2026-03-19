@@ -207,6 +207,8 @@
         "sigma_e2": 0.6,
         "sigma_e3": 0.6
       },
+      "enable": [],
+      "disable": [],
       "t_end": 100.0
     }
   ],
@@ -222,6 +224,6 @@
     },
     "base_compartments": [ "S", "E", "I", "R" ],
     "transmission_transitions": [ "infection" ],
-    "infectious_compartments": [ "S" ]
+    "infectious_compartments": [ "I" ]
   }
 }

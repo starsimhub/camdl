@@ -153,10 +153,12 @@ type simulation_config = {
 }
 
 type preset = {
-  preset_name   : string;
-  preset_label  : string;
-  preset_params : (string * float) list;
-  preset_t_end  : float option;
+  preset_name    : string;
+  preset_label   : string;
+  preset_params  : (string * float) list;
+  preset_enable  : string list;
+  preset_disable : string list;
+  preset_t_end   : float option;
 }
 
 type dimension = {

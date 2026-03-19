@@ -44,7 +44,8 @@ web/compiler-server/node_modules/.package-lock.json: web/compiler-server/package
 
 # Primary dev entry point — mprocs gives a clean TUI with one pane per process.
 # Env vars (ANTHROPIC_API_KEY etc.) are inherited from the shell via direnv.
-dev: web/node_modules/.package-lock.json \
+dev: build-wasm \
+     web/node_modules/.package-lock.json \
      web/compiler-server/node_modules/.package-lock.json
 	mprocs
 

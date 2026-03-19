@@ -324,10 +324,12 @@ let simulation_config_to_json (s : simulation_config) : Yojson.Safe.t =
 
 let preset_to_json (p : preset) : Yojson.Safe.t =
   obj [
-    ("name",   str p.preset_name);
-    ("label",  str p.preset_label);
-    ("params", obj (List.map (fun (k, v) -> (k, flt v)) p.preset_params));
-    ("t_end",  match p.preset_t_end with None -> null | Some v -> flt v);
+    ("name",    str p.preset_name);
+    ("label",   str p.preset_label);
+    ("params",  obj (List.map (fun (k, v) -> (k, flt v)) p.preset_params));
+    ("enable",  arr (List.map str p.preset_enable));
+    ("disable", arr (List.map str p.preset_disable));
+    ("t_end",   match p.preset_t_end with None -> null | Some v -> flt v);
   ]
 
 (* ── Model structure ─────────────────────────────────────────────────────── *)

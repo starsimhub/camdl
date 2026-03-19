@@ -1261,12 +1261,16 @@
       "name": "baseline",
       "label": "default",
       "params": { "beta": 0.4, "gamma": 0.1, "mu": 2.7e-05 },
+      "enable": [],
+      "disable": [],
       "t_end": 80.0
     },
     {
       "name": "slow",
       "label": "slow epidemic  (R0 ≈ 2)",
       "params": { "beta": 0.2, "gamma": 0.1, "mu": 2.7e-05 },
+      "enable": [],
+      "disable": [],
       "t_end": 80.0
     }
   ],
@@ -1282,6 +1286,6 @@
     "compartment_dims": { "S": [ "age" ], "I": [ "age" ], "R": [ "age" ] },
     "base_compartments": [ "S", "I", "R" ],
     "transmission_transitions": [ "infection" ],
-    "infectious_compartments": [ "S" ]
+    "infectious_compartments": [ "I" ]
   }
 }

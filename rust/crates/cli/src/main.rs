@@ -69,6 +69,9 @@ fn usage() -> ! {
     eprintln!("  --backend  gillespie|tau_leap|chain_binomial  (default: gillespie)");
     eprintln!("  --dt       DT   step size for tau_leap / chain_binomial");
     eprintln!("  --seed     N    RNG seed (default: 1)");
+    eprintln!("  --scenario NAME          select a named scenario from the model file");
+    eprintln!("  --enable   NAME          enable a named intervention (ad-hoc; mutually exclusive with --scenario)");
+    eprintln!("  --disable  NAME          disable a named intervention (ad-hoc; mutually exclusive with --scenario)");
     eprintln!("  --param    NAME=VALUE    override a parameter value");
     eprintln!("  --param-vec PREFIX=FILE  override indexed params from a keyed TSV (name<TAB>value)");
     eprintln!("  --table    NAME=FILE     supply a runtime external() table from CSV/TSV/JSON");
@@ -150,6 +153,9 @@ fn main() {
     let mut overrides: HashMap<String, f64> = HashMap::new();
     let mut table_files: HashMap<String, String> = HashMap::new();
     let mut params_files: Vec<String> = Vec::new();
+    let mut scenario_name: Option<String> = None;
+    let mut adhoc_enable: Vec<String> = Vec::new();
+    let mut adhoc_disable: Vec<String> = Vec::new();
 
     // Collect --param-vec PREFIX=FILE entries for deferred validation after model load
     let mut set_vec_entries: Vec<(String, String)> = Vec::new();
@@ -157,10 +163,13 @@ fn main() {
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
-            "--backend" => { i += 1; backend = args[i].clone(); }
-            "--dt"      => { i += 1; dt      = args[i].parse().expect("--dt needs a number"); }
-            "--seed"    => { i += 1; seed    = args[i].parse().expect("--seed needs an integer"); }
-            "--params"  => { i += 1; params_files.push(args[i].clone()); }
+            "--backend"  => { i += 1; backend = args[i].clone(); }
+            "--dt"       => { i += 1; dt      = args[i].parse().expect("--dt needs a number"); }
+            "--seed"     => { i += 1; seed    = args[i].parse().expect("--seed needs an integer"); }
+            "--params"   => { i += 1; params_files.push(args[i].clone()); }
+            "--scenario" => { i += 1; scenario_name = Some(args[i].clone()); }
+            "--enable"   => { i += 1; adhoc_enable.push(args[i].clone()); }
+            "--disable"  => { i += 1; adhoc_disable.push(args[i].clone()); }
             "--param"     => {
                 i += 1;
                 let kv = &args[i];
@@ -194,6 +203,15 @@ fn main() {
 
     let ir_path = ir_path.unwrap_or_else(|| { eprintln!("missing IR file argument"); usage(); });
 
+    // Validate mutually exclusive σ flags
+    if scenario_name.is_some() && (!adhoc_enable.is_empty() || !adhoc_disable.is_empty()) {
+        eprintln!("error: --scenario and --enable/--disable are mutually exclusive.");
+        eprintln!("  --scenario selects a named scenario from the model file.");
+        eprintln!("  --enable/--disable compose an ad-hoc scenario.");
+        eprintln!("  To combine both, define a composed scenario in the model file.");
+        std::process::exit(1);
+    }
+
     // If given a .camdl source file, compile it via camdlc (outputs JSON to stdout)
     let (ir_path, _tmpfile) = if ir_path.ends_with(".camdl") {
         let tmp = std::env::temp_dir().join(format!("camdl_{}.ir.json", std::process::id()));
@@ -222,6 +240,46 @@ fn main() {
         .unwrap_or_else(|e| { eprintln!("cannot read {}: {}", ir_path, e); std::process::exit(1); });
     let mut model: ir::Model = serde_json::from_str(&src)
         .unwrap_or_else(|e| { eprintln!("IR parse error: {}", e); std::process::exit(1); });
+
+    // Apply scenario patch (σ layer): resolve which interventions are active and
+    // apply set-style param overrides. Interventions are DISABLED by default
+    // (baseline identity patch = no interventions). Scenarios explicitly enable them.
+    {
+        let (active_enable, active_disable, scenario_params): (Vec<String>, Vec<String>, Vec<(String, f64)>) =
+            if let Some(ref name) = scenario_name {
+                // Named scenario: look up in presets manifest
+                let preset = model.presets.iter().find(|p| p.name == *name)
+                    .unwrap_or_else(|| {
+                        eprintln!("error: scenario '{}' not found in model. Available: {}",
+                            name,
+                            model.presets.iter().map(|p| p.name.as_str()).collect::<Vec<_>>().join(", "));
+                        std::process::exit(1);
+                    });
+                (preset.enable.clone(), preset.disable.clone(),
+                 preset.params.iter().map(|(k, &v)| (k.clone(), v)).collect())
+            } else {
+                // Ad-hoc flags
+                (adhoc_enable.clone(), adhoc_disable.clone(), vec![])
+            };
+
+        // Filter interventions: baseline = none; enable list = keep only those;
+        // disable list = keep all except those.
+        if !active_enable.is_empty() {
+            model.interventions.retain(|iv| active_enable.contains(&iv.name));
+        } else if !active_disable.is_empty() {
+            model.interventions.retain(|iv| !active_disable.contains(&iv.name));
+        } else {
+            // Baseline identity patch: no interventions fire
+            model.interventions.clear();
+        }
+
+        // Apply scenario set-style param overrides (lower priority than --param)
+        for (k, v) in scenario_params {
+            for p in &mut model.parameters {
+                if p.name == k { p.value = Some(v); }
+            }
+        }
+    }
 
     // Apply parameters: resolution order (highest priority last, so later writes win):
     //   1. IR value (already in model, may be None)

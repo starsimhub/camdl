@@ -178,12 +178,16 @@
       "name": "baseline",
       "label": "default  (latent ≈ 5d)",
       "params": { "beta": 0.3, "sigma": 0.2, "gamma": 0.1 },
+      "enable": [],
+      "disable": [],
       "t_end": 160.0
     },
     {
       "name": "slow_progression",
       "label": "slow progression  (latent ≈ 10d)",
       "params": { "beta": 0.3, "sigma": 0.1, "gamma": 0.1 },
+      "enable": [],
+      "disable": [],
       "t_end": 160.0
     }
   ],
@@ -199,6 +203,6 @@
     },
     "base_compartments": [ "S", "E", "I", "R" ],
     "transmission_transitions": [ "infection" ],
-    "infectious_compartments": [ "S" ]
+    "infectious_compartments": [ "I" ]
   }
 }

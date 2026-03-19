@@ -198,6 +198,8 @@
         "R0_urban": 2.5,
         "R0_rural": 1.8
       },
+      "enable": [],
+      "disable": [],
       "t_end": null
     }
   ],
@@ -210,6 +212,6 @@
     },
     "base_compartments": [ "S", "I", "R" ],
     "transmission_transitions": [ "infection" ],
-    "infectious_compartments": [ "S" ]
+    "infectious_compartments": [ "I" ]
   }
 }

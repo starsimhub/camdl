@@ -415,10 +415,12 @@ let simulation_config_of_json j =
 (* ── Presets ──────────────────────────────────────────────────────────────── *)
 
 let preset_of_json j =
-  { preset_name   = as_string (member "name"  j);
-    preset_label  = as_string (member "label" j);
-    preset_params = List.map (fun (k, v) -> (k, as_float v)) (as_assoc (member "params" j));
-    preset_t_end  = (match member_opt "t_end" j with Some `Null | None -> None | Some v -> Some (as_float v));
+  { preset_name    = as_string (member "name"  j);
+    preset_label   = as_string (member "label" j);
+    preset_params  = List.map (fun (k, v) -> (k, as_float v)) (as_assoc (member "params" j));
+    preset_enable  = (match member_opt "enable"  j with Some (`List xs) -> List.map as_string xs | _ -> []);
+    preset_disable = (match member_opt "disable" j with Some (`List xs) -> List.map as_string xs | _ -> []);
+    preset_t_end   = (match member_opt "t_end" j with Some `Null | None -> None | Some v -> Some (as_float v));
   }
 
 (* ── Model structure ─────────────────────────────────────────────────────── *)
