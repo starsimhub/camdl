@@ -105,6 +105,7 @@ interface CamdlStore {
   // ── Scenarios ─────────────────────────────────────────────────────────────────
   scenarios: Scenario[];
   addScenario: (fromBaseline?: boolean) => void;
+  addPresetScenario: (presetName: string) => void;
   removeScenario: (id: string) => void;
   renameScenario: (id: string, name: string) => void;
   setScenarioParam: (id: string, paramName: string, value: number) => void;
@@ -360,6 +361,24 @@ export const useStore = create<CamdlStore>((set, get) => ({
     });
   },
 
+  addPresetScenario: (presetName) => {
+    const { modelName, scenarios } = get();
+    const ex = EXAMPLES.find((e) => e.name === modelName);
+    const preset = ex?.paramSets.find((p) => p.name === presetName);
+    if (!preset) return;
+    const n = scenarios.length;
+    const scenario: Scenario = {
+      id: crypto.randomUUID(),
+      name: preset.label,
+      color: SCENARIO_COLORS[n % SCENARIO_COLORS.length],
+      paramOverrides: { ...preset.values },
+      runs: [],
+      seedsCompleted: 0,
+      status: 'idle',
+    };
+    set((s) => ({ scenarios: [...s.scenarios, scenario] }));
+  },
+
   removeScenario: (id) =>
     set((s) => ({
       scenarios: s.scenarios.filter((sc) => sc.id !== id),
@@ -448,19 +467,38 @@ export const useStore = create<CamdlStore>((set, get) => ({
     const ex = EXAMPLES.find((e) => e.name === name);
     if (!ex) return;
     get().setModelName(ex.name);
-    get().resetExperiment();
-    const defaults = ex.paramSets[0];
-    if (defaults) {
-      get().setRunConfig({ tEnd: defaults.tEnd ?? undefined });
-      const baselineId = get().scenarios[0]?.id;
-      if (baselineId) {
-        for (const [k, v] of Object.entries(defaults.values)) {
-          get().setScenarioParam(baselineId, k, v);
+
+    // Reset to a single fresh baseline, then populate one scenario per preset
+    set({ experimentStatus: 'idle', scenarios: [makeBaseline()] });
+
+    const presets = ex.paramSets;
+    if (presets.length === 0) {
+      get().setRunConfig({ tEnd: undefined });
+    } else {
+      get().setRunConfig({ tEnd: presets[0].tEnd ?? undefined });
+      // First preset → baseline
+      const baselineId = get().scenarios[0]!.id;
+      get().renameScenario(baselineId, presets[0].label);
+      for (const [k, v] of Object.entries(presets[0].values)) {
+        get().setScenarioParam(baselineId, k, v);
+      }
+      // Remaining presets → additional scenarios
+      for (const preset of presets.slice(1)) {
+        get().addScenario();
+        const newId = get().scenarios[get().scenarios.length - 1]!.id;
+        get().renameScenario(newId, preset.label);
+        // Replace the copied overrides with this preset's values
+        set((s) => ({
+          scenarios: s.scenarios.map((sc) =>
+            sc.id === newId ? { ...sc, paramOverrides: { ...preset.values } } : sc
+          ),
+        }));
+        if (preset.tEnd != null) {
+          // tEnd per scenario isn't supported; global runConfig.tEnd is used for all
         }
       }
-    } else {
-      get().setRunConfig({ tEnd: undefined });
     }
+
     get().setDslSource(ex.dsl);
   },
 

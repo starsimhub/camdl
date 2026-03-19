@@ -1,11 +1,14 @@
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { useStore } from '../store';
+import { EXAMPLES } from '../lib/examples';
 
 export default function ExperimentSidebar() {
   const ir = useStore((s) => s.ir);
   const scenarios = useStore((s) => s.scenarios);
   const runConfig = useStore((s) => s.runConfig);
+  const modelName = useStore((s) => s.modelName);
   const addScenario = useStore((s) => s.addScenario);
+  const addPresetScenario = useStore((s) => s.addPresetScenario);
   const removeScenario = useStore((s) => s.removeScenario);
   const renameScenario = useStore((s) => s.renameScenario);
   const setScenarioParam = useStore((s) => s.setScenarioParam);
@@ -13,19 +16,81 @@ export default function ExperimentSidebar() {
 
   const [selectedId, setSelectedId] = useState<string>(() => scenarios[0]?.id ?? '');
   const [editingName, setEditingName] = useState<string | null>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
 
   const selected = scenarios.find((s) => s.id === selectedId) ?? scenarios[0];
   const isBaseline = selected?.id === scenarios[0]?.id;
 
+  const examplePresets = EXAMPLES.find((e) => e.name === modelName)?.paramSets ?? [];
+
   const irParams = ir?.parameters ?? [];
+
+  // Close menu on outside click
+  useEffect(() => {
+    if (!menuOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [menuOpen]);
 
   return (
     <div className="flex flex-col h-full overflow-hidden bg-surface-1 border-r border-surface-border">
 
-      {/* ── Scenarios ─────────────────────────────────────────────────────────── */}
+      {/* ── Scenarios header ──────────────────────────────────────────────────── */}
       <div className="px-3 pt-3 pb-2 border-b border-surface-border flex-shrink-0">
-        <div className="text-xs text-gray-500 font-medium mb-2 uppercase tracking-wider">Scenarios</div>
-        <div className="flex flex-wrap gap-1.5 mb-2">
+        <div className="flex items-center justify-between mb-2">
+          <span className="text-xs text-gray-500 font-medium uppercase tracking-wider">Scenarios</span>
+
+          {/* Add scenario dropdown */}
+          <div className="relative" ref={menuRef}>
+            <button
+              disabled={!ir}
+              onClick={() => setMenuOpen((o) => !o)}
+              className="flex items-center gap-1 px-2 py-0.5 text-xs text-gray-400 hover:text-gray-200 border border-surface-border rounded transition-colors disabled:opacity-40"
+            >
+              + Add <span className="text-gray-600">▾</span>
+            </button>
+            {menuOpen && (
+              <div className="absolute right-0 top-full mt-1 z-50 min-w-[140px] bg-surface-2 border border-surface-border rounded shadow-lg py-0.5">
+                {examplePresets.length > 0 && (
+                  <>
+                    <div className="px-2.5 py-1 text-xs text-gray-600 uppercase tracking-wider">Presets</div>
+                    {examplePresets.map((p) => (
+                      <button
+                        key={p.name}
+                        onClick={() => { addPresetScenario(p.name); setMenuOpen(false); }}
+                        className="w-full text-left px-2.5 py-1 text-xs text-gray-300 hover:bg-surface-3 hover:text-gray-100 transition-colors"
+                      >
+                        {p.label}
+                      </button>
+                    ))}
+                    <div className="my-0.5 border-t border-surface-border" />
+                  </>
+                )}
+                <button
+                  onClick={() => { addScenario(true); setMenuOpen(false); }}
+                  className="w-full text-left px-2.5 py-1 text-xs text-gray-300 hover:bg-surface-3 hover:text-gray-100 transition-colors"
+                >
+                  From baseline
+                </button>
+                <button
+                  onClick={() => { addScenario(false); setMenuOpen(false); }}
+                  className="w-full text-left px-2.5 py-1 text-xs text-gray-300 hover:bg-surface-3 hover:text-gray-100 transition-colors"
+                >
+                  Clone last
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Scenario chips */}
+        <div className="flex flex-wrap gap-1.5">
           {scenarios.map((sc, idx) => (
             <button
               key={sc.id}
@@ -56,23 +121,6 @@ export default function ExperimentSidebar() {
               )}
             </button>
           ))}
-        </div>
-
-        <div className="flex gap-1.5">
-          <button
-            onClick={() => addScenario(false)}
-            disabled={!ir}
-            className="px-2 py-0.5 text-xs text-gray-400 hover:text-gray-200 border border-surface-border rounded transition-colors disabled:opacity-40"
-          >
-            + Clone last
-          </button>
-          <button
-            onClick={() => addScenario(true)}
-            disabled={!ir}
-            className="px-2 py-0.5 text-xs text-gray-400 hover:text-gray-200 border border-surface-border rounded transition-colors disabled:opacity-40"
-          >
-            + From baseline
-          </button>
         </div>
       </div>
 
