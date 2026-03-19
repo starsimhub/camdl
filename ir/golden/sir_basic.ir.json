@@ -133,5 +133,12 @@
       "params": { "beta": 0.5, "gamma": 0.1, "N0": 1000.0, "I0": 5.0 },
       "t_end": 70.0
     }
-  ]
+  ],
+  "model_structure": {
+    "dimensions": [],
+    "compartment_dims": { "S": [], "I": [], "R": [] },
+    "base_compartments": [ "S", "I", "R" ],
+    "transmission_transitions": [ "infection" ],
+    "infectious_compartments": [ "S" ]
+  }
 }

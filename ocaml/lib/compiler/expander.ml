@@ -1317,6 +1317,63 @@ let expand_scenarios ctx : Ir.preset list =
 
 (* ── Top-level expand ─────────────────────────────────────────────────────── *)
 
+(* ── Model structure ─────────────────────────────────────────────────────── *)
+
+(** Recover the pre-expansion base name of an expanded transition name by
+    prefix-matching against the known set from ctx. Relies on the compiler
+    invariant that expanded names are {base}_{stratum_parts} with '_'. *)
+let find_base_trname ctx ename =
+  List.find_opt (fun td ->
+    let b = td.trname and bl = String.length td.trname and el = String.length ename in
+    ename = b || (el > bl && String.sub ename 0 bl = b && ename.[bl] = '_')
+  ) ctx.transitions
+  |> Option.map (fun td -> td.trname)
+
+(** Same invariant: compartment expanded names are {base}_{dim_values}. *)
+let find_base_compname ctx expanded_name =
+  List.find_opt (fun cd ->
+    let b = cd.cname and bl = String.length cd.cname and el = String.length expanded_name in
+    expanded_name = b || (el > bl && String.sub expanded_name 0 bl = b && expanded_name.[bl] = '_')
+  ) ctx.comp_decls
+  |> Option.map (fun cd -> cd.cname)
+
+let build_model_structure ctx expanded_trs =
+  let dimensions = List.map (fun sd ->
+    { Ir.dim_name = sd.sdim; Ir.dim_values = sd.svalues }
+  ) ctx.stratifies in
+  let base_compartments = List.map (fun cd -> cd.cname) ctx.comp_decls in
+  let compartment_dims = List.map (fun cd ->
+    (cd.cname, comp_dims ctx cd.cname)
+  ) ctx.comp_decls in
+  let seen_tr  = Hashtbl.create 4 in
+  let seen_inf = Hashtbl.create 4 in
+  let transmission_transitions = ref [] in
+  let infectious_compartments  = ref [] in
+  List.iter (fun (t : Ir.transition) ->
+    match t.metadata with
+    | Some { Ir.origin_kind = Some "transmission"; Ir.source_compartment; _ } ->
+      (match find_base_trname ctx t.name with
+       | Some b when not (Hashtbl.mem seen_tr b) ->
+         Hashtbl.add seen_tr b ();
+         transmission_transitions := b :: !transmission_transitions
+       | _ -> ());
+      (match source_compartment with
+       | Some src ->
+         (match find_base_compname ctx src with
+          | Some b when not (Hashtbl.mem seen_inf b) ->
+            Hashtbl.add seen_inf b ();
+            infectious_compartments := b :: !infectious_compartments
+          | _ -> ())
+       | None -> ())
+    | _ -> ()
+  ) expanded_trs;
+  { Ir.dimensions;
+    Ir.compartment_dims;
+    Ir.base_compartments;
+    Ir.transmission_transitions = List.rev !transmission_transitions;
+    Ir.infectious_compartments  = List.rev !infectious_compartments;
+  }
+
 let expand_detail ?(source_dir = "") (name : string) (decls : declaration list)
     : Ir.model * context * model_summary =
   let ctx = empty_context ~source_dir () in
@@ -1329,6 +1386,7 @@ let expand_detail ?(source_dir = "") (name : string) (decls : declaration list)
   ctx.transitions <- List.map (desugar_coupling ctx) ctx.transitions;
   let expanded_comps = expand_compartments ctx in
   let (expanded_trs, filtered_n) = expand_transitions_counted ctx in
+  let ms = build_model_structure ctx expanded_trs in
   let model = {
     Ir.name               = name;
     Ir.version            = "0.3";
@@ -1346,6 +1404,7 @@ let expand_detail ?(source_dir = "") (name : string) (decls : declaration list)
     Ir.output             = expand_output ctx;
     Ir.simulation         = expand_simulate ctx;
     Ir.presets            = expand_scenarios ctx;
+    Ir.model_structure    = Some ms;
   } in
   let summary = {
     base_compartment_count     = List.length ctx.comp_decls;

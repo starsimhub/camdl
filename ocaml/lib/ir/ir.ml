@@ -225,6 +225,21 @@ type preset = {
   preset_t_end  : float option;
 }
 
+(* ── Model structure ─────────────────────────────────────────────────────────── *)
+
+type dimension = {
+  dim_name  : string;
+  dim_values: string list;
+}
+
+type model_structure = {
+  dimensions              : dimension list;
+  compartment_dims        : (string * string list) list; (* base → [dim_name, ...] *)
+  base_compartments       : string list;
+  transmission_transitions: string list;
+  infectious_compartments : string list; (* base names of source_compartment in transmission transitions *)
+}
+
 (* ── Top-level model ─────────────────────────────────────────────────────────── *)
 
 type model = {
@@ -244,4 +259,5 @@ type model = {
   output:             output_config;
   simulation:         simulation_config;
   presets:            preset list;
+  model_structure:    model_structure option;
 }

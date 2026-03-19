@@ -47,9 +47,9 @@ const CompartmentNode = memo(({ data, id, selected }: NodeProps) => {
         <span style={{ color: d.color, fontWeight: 700, fontSize: 18, fontFamily: 'JetBrains Mono, monospace' }}>
           {d.label}
         </span>
-        <span style={{ color: '#4b5563', fontSize: 10, marginTop: 2 }}>
+        {/* <span style={{ color: '#4b5563', fontSize: 10, marginTop: 2 }}>
           {d.kind === 'real' ? 'ℝ' : 'ℤ'}
-        </span>
+        </span> */}
       </div>
       <Handle type="source" position={Position.Right} style={handleStyle} />
     </>

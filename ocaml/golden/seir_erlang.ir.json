@@ -186,5 +186,19 @@
       "params": { "beta": 0.3, "sigma": 0.1, "gamma": 0.1 },
       "t_end": 250.0
     }
-  ]
+  ],
+  "model_structure": {
+    "dimensions": [
+      { "name": "latent_stage", "values": [ "e1", "e2", "e3" ] }
+    ],
+    "compartment_dims": {
+      "S": [],
+      "E": [ "latent_stage" ],
+      "I": [],
+      "R": []
+    },
+    "base_compartments": [ "S", "E", "I", "R" ],
+    "transmission_transitions": [ "infection" ],
+    "infectious_compartments": [ "S" ]
+  }
 }

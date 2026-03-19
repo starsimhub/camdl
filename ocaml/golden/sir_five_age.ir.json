@@ -1269,5 +1269,19 @@
       "params": { "beta": 0.2, "gamma": 0.1, "mu": 2.7e-05 },
       "t_end": 730.0
     }
-  ]
+  ],
+  "model_structure": {
+    "dimensions": [
+      {
+        "name": "age",
+        "values": [
+          "age_0_5", "age_5_15", "age_15_50", "age_50_65", "age_65p"
+        ]
+      }
+    ],
+    "compartment_dims": { "S": [ "age" ], "I": [ "age" ], "R": [ "age" ] },
+    "base_compartments": [ "S", "I", "R" ],
+    "transmission_transitions": [ "infection" ],
+    "infectious_compartments": [ "S" ]
+  }
 }

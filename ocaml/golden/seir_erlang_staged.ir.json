@@ -209,5 +209,19 @@
       },
       "t_end": null
     }
-  ]
+  ],
+  "model_structure": {
+    "dimensions": [
+      { "name": "latent_stage", "values": [ "e1", "e2", "e3" ] }
+    ],
+    "compartment_dims": {
+      "S": [],
+      "E": [ "latent_stage" ],
+      "I": [],
+      "R": []
+    },
+    "base_compartments": [ "S", "E", "I", "R" ],
+    "transmission_transitions": [ "infection" ],
+    "infectious_compartments": [ "S" ]
+  }
 }

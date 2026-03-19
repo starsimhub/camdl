@@ -200,5 +200,16 @@
       },
       "t_end": null
     }
-  ]
+  ],
+  "model_structure": {
+    "dimensions": [ { "name": "patch", "values": [ "urban", "rural" ] } ],
+    "compartment_dims": {
+      "S": [ "patch" ],
+      "I": [ "patch" ],
+      "R": [ "patch" ]
+    },
+    "base_compartments": [ "S", "I", "R" ],
+    "transmission_transitions": [ "infection" ],
+    "infectious_compartments": [ "S" ]
+  }
 }

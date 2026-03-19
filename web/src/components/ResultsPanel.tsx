@@ -6,6 +6,80 @@ import {
 import { useStore } from '../store';
 import { buildViews, TRACE_THRESHOLD, type EnsembleMode } from '../lib/buildViews';
 
+// ── Smart legend ───────────────────────────────────────────────────────────────
+
+const LEGEND_GROUP_THRESHOLD = 8;
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+interface LegendEntry { value: string; color?: string; type?: string; dataKey?: string | number | ((obj: any) => any) }
+
+function SmartLegend({ payload, groupMap }: { payload?: LegendEntry[]; groupMap?: Record<string, string> }) {
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+
+  const visible = (payload ?? []).filter((p) => p.value && p.type !== 'none');
+  if (!visible.length) return null;
+
+  // Flat view for small legends
+  if (visible.length <= LEGEND_GROUP_THRESHOLD) {
+    return (
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 12px', padding: '6px 8px 0', fontSize: 11, fontFamily: 'JetBrains Mono, monospace' }}>
+        {visible.map((e) => (
+          <span key={typeof e.dataKey === 'string' ? e.dataKey : e.value} style={{ display: 'flex', alignItems: 'center', gap: 5, color: '#9ca3af' }}>
+            <span style={{ display: 'inline-block', width: 16, height: 2, background: e.color ?? '#6b7280', borderRadius: 1 }} />
+            <span style={{ color: '#d1d5db' }}>{e.value}</span>
+          </span>
+        ))}
+      </div>
+    );
+  }
+
+  // Grouped view: bucket by explicit group metadata, falling back to the full label
+  const groups = new Map<string, LegendEntry[]>();
+  for (const e of visible) {
+    const dk = typeof e.dataKey === 'string' ? e.dataKey : undefined;
+    const k = (dk && groupMap?.[dk]) ?? e.value;
+    if (!groups.has(k)) groups.set(k, []);
+    groups.get(k)!.push(e);
+  }
+
+  const toggle = (k: string) => setExpanded((prev) => {
+    const next = new Set(prev);
+    next.has(k) ? next.delete(k) : next.add(k);
+    return next;
+  });
+
+  return (
+    <div style={{ padding: '6px 8px 0', fontSize: 11, fontFamily: 'JetBrains Mono, monospace', display: 'flex', flexWrap: 'wrap', gap: '2px 10px' }}>
+      {[...groups.entries()].map(([k, entries]) => {
+        const isOpen = expanded.has(k);
+        const swatch = entries[0].color ?? '#6b7280';
+        return (
+          <div key={k} style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+            <button
+              onClick={() => toggle(k)}
+              style={{ display: 'flex', alignItems: 'center', gap: 5, background: 'none', border: 'none', cursor: 'pointer', padding: '1px 0', color: '#9ca3af' }}
+            >
+              <span style={{ display: 'inline-block', width: 16, height: 2, background: swatch, borderRadius: 1 }} />
+              <span style={{ color: '#d1d5db' }}>{k}</span>
+              <span style={{ color: '#6b7280', fontSize: 10 }}>({entries.length}) {isOpen ? '▾' : '▸'}</span>
+            </button>
+            {isOpen && (
+              <div style={{ paddingLeft: 21, display: 'flex', flexDirection: 'column', gap: 1 }}>
+                {entries.map((e) => (
+                  <span key={typeof e.dataKey === 'string' ? e.dataKey : e.value} style={{ color: '#9ca3af', display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <span style={{ display: 'inline-block', width: 10, height: 1.5, background: e.color ?? '#6b7280', borderRadius: 1 }} />
+                    <span style={{ color: '#6b7280' }}>{e.value.slice(k.length).trim()}</span>
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 // ── Formatting ────────────────────────────────────────────────────────────────
 
 function fmtCount(v: number): string {
@@ -20,15 +94,18 @@ function fmtTime(v: number): string {
 
 // ── Custom tooltip ────────────────────────────────────────────────────────────
 
-function CustomTooltip({ active, payload, label }: {
+function CustomTooltip({ active, payload, label, tooltipKeySet }: {
   active?: boolean;
-  payload?: { name: string; value: number; color: string; dataKey: string }[];
+  payload?: { name: string; value: number; color: string; dataKey: string; type?: string }[];
   label?: number;
+  tooltipKeySet?: Set<string>;
 }) {
   if (!active || !payload?.length) return null;
-  // Only show named (legend) series in tooltip
-  const shown = payload.filter((p) => p.name);
+  const shown = tooltipKeySet
+    ? payload.filter((p) => typeof p.dataKey === 'string' && tooltipKeySet.has(p.dataKey))
+    : payload.filter((p) => p.name && p.type !== 'none');
   if (!shown.length) return null;
+
   return (
     <div style={{
       background: '#1c2128', border: '1px solid #30363d', borderRadius: 6,
@@ -67,6 +144,19 @@ export default function ResultsPanel() {
 
   const [activeViewId, setActiveViewId] = useState<string | null>(null);
   const activeView = views.find((v) => v.id === activeViewId) ?? views[0] ?? null;
+
+  const groupMap = useMemo(() => {
+    const m: Record<string, string> = {};
+    for (const s of activeView?.series ?? []) {
+      if (s.group) m[s.dataKey] = s.group;
+    }
+    return m;
+  }, [activeView]);
+
+  const tooltipKeySet = useMemo(() =>
+    new Set((activeView?.series ?? []).filter(s => s.name && !s.hideLegend).map(s => s.dataKey)),
+    [activeView]
+  );
 
   const isRunning = experimentStatus === 'running';
   const hasResults = views.length > 0;
@@ -148,17 +238,15 @@ export default function ResultsPanel() {
                 tickLine={false}
                 width={44}
               />
-              <Tooltip content={<CustomTooltip />} />
-              <Legend
-                wrapperStyle={{ fontSize: 11, fontFamily: 'JetBrains Mono, monospace', paddingTop: 6, lineHeight: '1.8' }}
-                iconType="plainline"
-                iconSize={16}
-              />
+              {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+              <Tooltip content={(props: any) => <CustomTooltip {...props} tooltipKeySet={tooltipKeySet} />} />
+              <Legend content={(props) => <SmartLegend {...props} groupMap={groupMap} />} />
               {activeView.series.map((s) => {
                 if (s.kind === 'area_base') {
                   return (
                     <Area
                       key={s.dataKey}
+                      name=""
                       type="monotone"
                       dataKey={s.dataKey}
                       stackId={s.stackId}
@@ -173,6 +261,7 @@ export default function ResultsPanel() {
                   return (
                     <Area
                       key={s.dataKey}
+                      name=""
                       type="monotone"
                       dataKey={s.dataKey}
                       stackId={s.stackId}
@@ -189,7 +278,7 @@ export default function ResultsPanel() {
                     key={s.dataKey}
                     type="monotone"
                     dataKey={s.dataKey}
-                    name={s.name || undefined}
+                    name={s.name}
                     stroke={s.color}
                     strokeWidth={s.strokeWidth ?? 2}
                     strokeDasharray={s.strokeDasharray}

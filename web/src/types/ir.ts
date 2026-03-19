@@ -49,6 +49,19 @@ export interface OutputConfig {
   observations: boolean;
 }
 
+export interface Dimension {
+  name: string;
+  values: string[];
+}
+
+export interface ModelStructure {
+  dimensions: Dimension[];
+  compartment_dims: Record<string, string[]>;  // base → [dim_name, ...]
+  base_compartments: string[];
+  transmission_transitions: string[];
+  infectious_compartments: string[];
+}
+
 export interface IrModel {
   name: string;
   version: string;
@@ -65,6 +78,7 @@ export interface IrModel {
   data_contract: unknown | null;
   output: OutputConfig;
   simulation: SimulationConfig;
+  model_structure?: ModelStructure;
 }
 
 export interface Diagnostic {

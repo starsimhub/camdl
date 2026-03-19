@@ -221,5 +221,12 @@
       },
       "t_end": 3650.0
     }
-  ]
+  ],
+  "model_structure": {
+    "dimensions": [],
+    "compartment_dims": { "S": [], "I": [], "R": [] },
+    "base_compartments": [ "S", "I", "R" ],
+    "transmission_transitions": [ "infection" ],
+    "infectious_compartments": [ "S" ]
+  }
 }

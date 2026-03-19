@@ -1,4 +1,4 @@
-import type { IrModel } from '../types/ir';
+import type { IrModel, ModelStructure } from '../types/ir';
 import type { TrajectoryJson } from '../types/trajectory';
 import type { Scenario } from '../types/experiment';
 import { compartmentColor } from './irToCanvas';
@@ -21,6 +21,8 @@ export interface ChartSeries {
   strokeWidth?: number;
   fillOpacity?: number;
   hideLegend?: boolean;
+  /** Compartment base or variable family — used by SmartLegend for collapsible grouping. */
+  group?: string;
 }
 
 export interface ChartPoint {
@@ -37,25 +39,6 @@ export interface PlotView {
 }
 
 // ── Internals ─────────────────────────────────────────────────────────────────
-
-interface Parsed {
-  full: string;
-  base: string;
-  stratum: string | null;
-}
-
-function parseNames(names: string[]): Parsed[] {
-  return names.map((full) => {
-    const idx = full.indexOf('_');
-    return idx > 0
-      ? { full, base: full.slice(0, idx), stratum: full.slice(idx + 1) }
-      : { full, base: full, stratum: null };
-  });
-}
-
-function uniqueOrdered<T>(arr: T[]): T[] {
-  return [...new Set(arr)];
-}
 
 function quantile(sorted: number[], q: number): number {
   if (sorted.length === 0) return 0;
@@ -107,11 +90,11 @@ function flowAtIdx(traj: TrajectoryJson, snapIdx: number, transName: string): nu
   return idx >= 0 ? (snap.flows[idx] ?? 0) : 0;
 }
 
-// Dash patterns for multi-variable views — one per scenario
+// Dash patterns for multi-variable views — one per scenario / stratum
 const SCENARIO_DASHES = ['', '6 3', '2 3', '10 4 2 4', '1 4'];
 
 /**
- * Build a multi-variable view (Aggregate, All, By Group, Flows).
+ * Build a multi-variable view (Aggregate, All, By Dim, Flows).
  * Band mode: P10–P90 ribbon + median per variable × scenario.
  * Lines mode: individual seed traces (faint) + mean per variable × scenario.
  * Color = variable, dash = scenario.
@@ -122,7 +105,7 @@ function buildMultiVarView(
   description: string,
   active: Scenario[],
   timeGrid: number[],
-  variables: { key: string; label: string; color: string; strokeDasharray?: string; getVal: (traj: TrajectoryJson, si: number) => number }[],
+  variables: { key: string; label: string; color: string; group?: string; strokeDasharray?: string; getVal: (traj: TrajectoryJson, si: number) => number }[],
   mode: EnsembleMode,
 ): PlotView {
   const data: ChartPoint[] = timeGrid.map((t, ti) => {
@@ -155,7 +138,7 @@ function buildMultiVarView(
         const sid = `s${scIdx}_${v.key}`;
         series.push({ dataKey: `${sid}_lo`,     name: '',         color: v.color, kind: 'area_base', stackId: sid, hideLegend: true });
         series.push({ dataKey: `${sid}_band`,   name: '',         color: v.color, kind: 'area_band', stackId: sid, fillOpacity: 0.15, hideLegend: true });
-        series.push({ dataKey: `${sid}_median`, name: legendName, color: v.color, kind: 'line', strokeDasharray: seriesDash, strokeWidth: 2 });
+        series.push({ dataKey: `${sid}_median`, name: legendName, color: v.color, kind: 'line', strokeDasharray: seriesDash, strokeWidth: 2, group: v.group });
       } else {
         series.push({
           dataKey: `s${scIdx}_${v.key}_mean`,
@@ -165,6 +148,7 @@ function buildMultiVarView(
           strokeDasharray: seriesDash,
           strokeOpacity: 0.85,
           strokeWidth: 2,
+          group: v.group,
         });
         for (let r = 0; r < active[scIdx].runs.length; r++) {
           series.push({
@@ -245,7 +229,6 @@ function buildSingleVarView(
         strokeWidth: 2,
       });
     } else {
-      // Mean line (bold, in legend)
       series.push({
         dataKey: `s${si}_mean`,
         name: sc.name,
@@ -253,7 +236,6 @@ function buildSingleVarView(
         kind: 'line',
         strokeWidth: 2,
       });
-      // Individual trace lines (faint, not in legend)
       for (let r = 0; r < sc.runs.length; r++) {
         series.push({
           dataKey: `s${si}_r${r}`,
@@ -271,172 +253,226 @@ function buildSingleVarView(
   return { id, label, description, data, series };
 }
 
+// ── Structural helpers ────────────────────────────────────────────────────────
+
+type DimValues = Record<string, string>;
+
+function cartesianProductDims(dims: Array<{ name: string; values: string[] }>): DimValues[] {
+  if (dims.length === 0) return [{}];
+  const [first, ...rest] = dims;
+  const restCombos = cartesianProductDims(rest);
+  return first.values.flatMap(v => restCombos.map(combo => ({ [first.name]: v, ...combo })));
+}
+
+/** Map expanded compartment name → dim value assignments for that stratum. */
+function buildCompartmentIndex(ms: ModelStructure): Map<string, DimValues> {
+  const index = new Map<string, DimValues>();
+  for (const base of ms.base_compartments) {
+    const dimNames = ms.compartment_dims[base] ?? [];
+    const dims = dimNames.map(dn => ms.dimensions.find(d => d.name === dn)!).filter(Boolean);
+    for (const combo of cartesianProductDims(dims)) {
+      const suffix = dimNames.map(dn => combo[dn]).join('_');
+      index.set(suffix ? `${base}_${suffix}` : base, combo);
+    }
+  }
+  return index;
+}
+
 // ── Main export ───────────────────────────────────────────────────────────────
 
 export function buildViews(ir: IrModel, scenarios: Scenario[], mode: EnsembleMode): PlotView[] {
   const active = scenarios.filter((s) => s.runs.length > 0);
   if (active.length === 0) return [];
 
-  // Reference trajectory for compartment names and time grid
   const refTraj = active[0].runs[0].trajectory;
-  const compNames = allCompNames(refTraj);
-  const parsed = parseNames(compNames);
   const timeGrid = refTraj.snapshots.map((s) => s.t);
 
-  const allStrata = uniqueOrdered(
-    parsed.filter((p) => p.stratum !== null).map((p) => p.stratum!)
-  );
-  const isStratified = allStrata.length > 0;
-  const bases = uniqueOrdered(parsed.map((p) => p.base));
+  const hasFlows =
+    refTraj.transition_names.length > 0 && (refTraj.snapshots[0]?.flows.length ?? 0) > 0;
 
   const views: PlotView[] = [];
 
-  // ── 1. Aggregate (stratified only) ───────────────────────────────────────────
-  if (isStratified) {
-    const vars = bases.map((base) => ({
-      key: base,
-      label: base,
-      color: compartmentColor(base),
-      getVal: (traj: TrajectoryJson, si: number) =>
-        sumAtIdx(traj, si, parsed.filter((p) => p.base === base).map((p) => p.full)),
-    }));
-    views.push(buildMultiVarView(
-      'aggregate', 'Aggregate', 'Strata summed per compartment type',
-      active, timeGrid, vars, mode,
-    ));
-  }
+  const ms = ir.model_structure;
 
-  // ── 2. All compartments ──────────────────────────────────────────────────────
-  {
-    const dashesAll = ['', '6 3', '2 3', '10 4 2 4', '1 4'];
-    const vars = parsed.map((p, i) => {
-      const stratumIdx = p.stratum ? allStrata.indexOf(p.stratum) : 0;
+  if (!ms) {
+    // ── Fallback: no model_structure — flat single view ───────────────────────
+    const compNames = [...refTraj.int_compartment_names, ...refTraj.real_compartment_names];
+    const vars = compNames.map((name) => {
+      const uIdx = name.indexOf('_');
+      const base = uIdx > 0 ? name.slice(0, uIdx) : name;
       return {
-        key: p.full.replace(/[^a-zA-Z0-9]/g, '_'),
-        label: p.full,
-        color: compartmentColor(p.base),
-        strokeDasharray: dashesAll[stratumIdx % dashesAll.length] || undefined,
-        getVal: (traj: TrajectoryJson, si: number) => sumAtIdx(traj, si, [p.full]),
+        key: name.replace(/[^a-zA-Z0-9]/g, '_'),
+        label: name,
+        color: compartmentColor(base),
+        group: base,
+        getVal: (traj: TrajectoryJson, si: number) => sumAtIdx(traj, si, [name]),
       };
     });
     views.push(buildMultiVarView(
       'all', 'All', 'All compartments',
       active, timeGrid, vars, mode,
     ));
-  }
+  } else {
+    const compIndex = buildCompartmentIndex(ms);
 
-  // ── 3. By group (stratified, ≤ 8 strata) ─────────────────────────────────────
-  if (isStratified && allStrata.length <= 8) {
-    const dashesGroup = ['', '6 3', '2 3', '10 4 2 4', '1 4'];
-    const vars: Parameters<typeof buildMultiVarView>[6] = [];
-    for (const [si, stratum] of allStrata.entries()) {
-      const members = parsed.filter((p) => p.stratum === stratum);
-      for (const p of members) {
-        vars.push({
-          key: `${p.full.replace(/[^a-zA-Z0-9]/g, '_')}_grp`,
-          label: `${p.base} [${stratum}]`,
-          color: compartmentColor(p.base),
-          strokeDasharray: dashesGroup[si % dashesGroup.length] || undefined,
-          getVal: (traj: TrajectoryJson, snapIdx: number) => sumAtIdx(traj, snapIdx, [p.full]),
+    // ── 1. Aggregate ─────────────────────────────────────────────────────────
+    {
+      const vars = ms.base_compartments.map((base) => {
+        const members = [...compIndex.entries()]
+          .filter(([name]) => name === base || name.startsWith(base + '_'))
+          .map(([name]) => name);
+        return {
+          key: base,
+          label: base,
+          color: compartmentColor(base),
+          group: base,
+          getVal: (traj: TrajectoryJson, si: number) => sumAtIdx(traj, si, members),
+        };
+      });
+      views.push(buildMultiVarView(
+        'aggregate', 'Aggregate', 'Strata summed per compartment type',
+        active, timeGrid, vars, mode,
+      ));
+    }
+
+    // ── 2. By dimension ──────────────────────────────────────────────────────
+    for (const dim of ms.dimensions) {
+      const vars: Parameters<typeof buildMultiVarView>[5] = [];
+      for (const base of ms.base_compartments) {
+        const hasDim = (ms.compartment_dims[base] ?? []).includes(dim.name);
+        if (!hasDim) {
+          // Compartment doesn't vary on this dim — include aggregated
+          const members = [...compIndex.entries()]
+            .filter(([name]) => name === base || name.startsWith(base + '_'))
+            .map(([name]) => name);
+          vars.push({
+            key: base,
+            label: base,
+            color: compartmentColor(base),
+            group: base,
+            getVal: (traj: TrajectoryJson, si: number) => sumAtIdx(traj, si, members),
+          });
+        } else {
+          for (const [dimValIdx, dimVal] of dim.values.entries()) {
+            const members = [...compIndex.entries()]
+              .filter(([name, dimMap]) => {
+                if (name !== base && !name.startsWith(base + '_')) return false;
+                return dimMap[dim.name] === dimVal;
+              })
+              .map(([name]) => name);
+            vars.push({
+              key: `${base}_${dimVal}`.replace(/[^a-zA-Z0-9]/g, '_'),
+              label: `${base} [${dimVal}]`,
+              color: compartmentColor(base),
+              group: base,
+              strokeDasharray: SCENARIO_DASHES[dimValIdx % SCENARIO_DASHES.length] || undefined,
+              getVal: (traj: TrajectoryJson, si: number) => sumAtIdx(traj, si, members),
+            });
+          }
+        }
+      }
+      views.push(buildMultiVarView(
+        `by_${dim.name}`, `By ${dim.name}`,
+        `Compartments by ${dim.name}, colour = type, dash = stratum`,
+        active, timeGrid, vars, mode,
+      ));
+    }
+
+    // ── 3. Prevalence ────────────────────────────────────────────────────────
+    if (ms.infectious_compartments.length > 0) {
+      const infectiousNames = ms.infectious_compartments.flatMap((base) =>
+        [...compIndex.entries()]
+          .filter(([name]) => name === base || name.startsWith(base + '_'))
+          .map(([name]) => name)
+      );
+      if (infectiousNames.length > 0) {
+        views.push(buildSingleVarView(
+          'prevalence', 'Prevalence', 'Infectious compartments (summed)',
+          active, timeGrid,
+          (traj, si) => sumAtIdx(traj, si, infectiousNames),
+          mode,
+        ));
+      }
+    }
+
+    // ── 4 & 5. Incidence + Cumulative ────────────────────────────────────────
+    if (hasFlows && ms.transmission_transitions.length > 0) {
+      const infTrans = refTraj.transition_names.filter((n) =>
+        ms.transmission_transitions.some((base) => n === base || n.startsWith(base + '_'))
+      );
+      if (infTrans.length > 0) {
+        views.push(buildSingleVarView(
+          'incidence', 'Incidence', 'New infection events per output interval',
+          active, timeGrid,
+          (traj, si) => infTrans.reduce((sum, t) => sum + flowAtIdx(traj, si, t), 0),
+          mode,
+        ));
+
+        // Cumulative
+        const cumData: ChartPoint[] = timeGrid.map((t, ti) => {
+          const pt: ChartPoint = { t };
+          for (const [scIdx, sc] of active.entries()) {
+            const values = sc.runs.map((r) => {
+              let cumSum = 0;
+              for (let j = 0; j <= ti; j++) {
+                cumSum += infTrans.reduce((s, tr) => s + flowAtIdx(r.trajectory, j, tr), 0);
+              }
+              return cumSum;
+            });
+            if (mode === 'pi') {
+              const stats = computeStats(values);
+              pt[`s${scIdx}_lo`] = stats.lo;
+              pt[`s${scIdx}_band`] = stats.band;
+              pt[`s${scIdx}_median`] = stats.median;
+            } else {
+              pt[`s${scIdx}_mean`] =
+                values.length > 0 ? values.reduce((a, b) => a + b, 0) / values.length : 0;
+              values.forEach((v, ri) => { pt[`s${scIdx}_r${ri}`] = v; });
+            }
+          }
+          return pt;
+        });
+
+        const cumSeries: ChartSeries[] = [];
+        for (const [si, sc] of active.entries()) {
+          if (mode === 'pi') {
+            const sid = `cs${si}`;
+            cumSeries.push({ dataKey: `s${si}_lo`, name: '', color: sc.color, kind: 'area_base', stackId: sid, hideLegend: true });
+            cumSeries.push({ dataKey: `s${si}_band`, name: '', color: sc.color, kind: 'area_band', stackId: sid, fillOpacity: 0.18, hideLegend: true });
+            cumSeries.push({ dataKey: `s${si}_median`, name: sc.name, color: sc.color, kind: 'line', strokeWidth: 2 });
+          } else {
+            cumSeries.push({ dataKey: `s${si}_mean`, name: sc.name, color: sc.color, kind: 'line', strokeWidth: 2 });
+            for (let r = 0; r < sc.runs.length; r++) {
+              cumSeries.push({ dataKey: `s${si}_r${r}`, name: '', color: sc.color, kind: 'line', strokeWidth: 1, strokeOpacity: 0.25, hideLegend: true });
+            }
+          }
+        }
+        views.push({
+          id: 'cumulative',
+          label: 'Cumulative',
+          description: 'Running total of infection events — final value is epidemic size',
+          data: cumData,
+          series: cumSeries,
         });
       }
     }
-    views.push(buildMultiVarView(
-      'by_group', 'By group', 'Compartments by stratum, colour = type, dash = stratum',
-      active, timeGrid, vars, mode,
-    ));
   }
 
-  // ── 4. Prevalence (I-prefixed compartments, aggregated) ──────────────────────
-  const infectiousNames = parsed.filter((p) => /^I/i.test(p.base)).map((p) => p.full);
-  if (infectiousNames.length > 0) {
-    views.push(buildSingleVarView(
-      'prevalence', 'Prevalence', 'Infectious compartments (summed)',
-      active, timeGrid,
-      (traj, si) => sumAtIdx(traj, si, infectiousNames),
-      mode,
-    ));
-  }
-
-  // ── 5. Incidence (infection transitions, summed) ─────────────────────────────
-  const hasFlows =
-    refTraj.transition_names.length > 0 && (refTraj.snapshots[0]?.flows.length ?? 0) > 0;
-
-  if (hasFlows) {
-    const infTrans = refTraj.transition_names.filter((n) =>
-      /^infection|^force|^incidence|^transmission/i.test(n)
-    );
-    if (infTrans.length > 0) {
-      views.push(buildSingleVarView(
-        'incidence', 'Incidence', 'New infection events per output interval',
-        active, timeGrid,
-        (traj, si) => infTrans.reduce((sum, t) => sum + flowAtIdx(traj, si, t), 0),
-        mode,
-      ));
-
-      // ── 6. Cumulative incidence ───────────────────────────────────────────────
-      // We need running sums — build special view
-      const cumData: ChartPoint[] = timeGrid.map((t, ti) => {
-        const pt: ChartPoint = { t };
-        for (const [scIdx, sc] of active.entries()) {
-          const values = sc.runs.map((r) => {
-            // Sum flows up to this snapshot index
-            let cumSum = 0;
-            for (let j = 0; j <= ti; j++) {
-              cumSum += infTrans.reduce((s, tr) => s + flowAtIdx(r.trajectory, j, tr), 0);
-            }
-            return cumSum;
-          });
-          if (mode === 'pi') {
-            const stats = computeStats(values);
-            pt[`s${scIdx}_lo`] = stats.lo;
-            pt[`s${scIdx}_band`] = stats.band;
-            pt[`s${scIdx}_median`] = stats.median;
-          } else {
-            pt[`s${scIdx}_mean`] =
-              values.length > 0 ? values.reduce((a, b) => a + b, 0) / values.length : 0;
-            values.forEach((v, ri) => { pt[`s${scIdx}_r${ri}`] = v; });
-          }
-        }
-        return pt;
-      });
-
-      // Series same structure as buildSingleVarView
-      const cumSeries: ChartSeries[] = [];
-      for (const [si, sc] of active.entries()) {
-        if (mode === 'pi') {
-          const sid = `cs${si}`;
-          cumSeries.push({ dataKey: `s${si}_lo`, name: '', color: sc.color, kind: 'area_base', stackId: sid, hideLegend: true });
-          cumSeries.push({ dataKey: `s${si}_band`, name: '', color: sc.color, kind: 'area_band', stackId: sid, fillOpacity: 0.18, hideLegend: true });
-          cumSeries.push({ dataKey: `s${si}_median`, name: sc.name, color: sc.color, kind: 'line', strokeWidth: 2 });
-        } else {
-          cumSeries.push({ dataKey: `s${si}_mean`, name: sc.name, color: sc.color, kind: 'line', strokeWidth: 2 });
-          for (let r = 0; r < sc.runs.length; r++) {
-            cumSeries.push({ dataKey: `s${si}_r${r}`, name: '', color: sc.color, kind: 'line', strokeWidth: 1, strokeOpacity: 0.25, hideLegend: true });
-          }
-        }
-      }
-      views.push({
-        id: 'cumulative',
-        label: 'Cumulative',
-        description: 'Running total of infection events — final value is epidemic size',
-        data: cumData,
-        series: cumSeries,
-        supportsEnsembleMode: true,
-      });
-    }
-  }
-
-  // ── 7. All flows ──────────────────────────────────────────────────────────────
+  // ── Flows (always shown if available) ────────────────────────────────────────
   if (hasFlows && refTraj.transition_names.length > 0) {
     const shown = refTraj.transition_names.slice(0, 14);
     const palette = ['#f59e0b', '#3b82f6', '#22c55e', '#a78bfa', '#f97316', '#06b6d4', '#ec4899', '#84cc16'];
-    const vars = shown.map((name, i) => ({
-      key: `flow_${name.replace(/[^a-zA-Z0-9]/g, '_')}`,
-      label: name,
-      color: palette[i % palette.length],
-      getVal: (traj: TrajectoryJson, si: number) => flowAtIdx(traj, si, name),
-    }));
+    const vars = shown.map((name, i) => {
+      const uIdx = name.indexOf('_');
+      const transitionBase = uIdx > 0 ? name.slice(0, uIdx) : name;
+      return {
+        key: `flow_${name.replace(/[^a-zA-Z0-9]/g, '_')}`,
+        label: name,
+        color: palette[i % palette.length],
+        group: transitionBase,
+        getVal: (traj: TrajectoryJson, si: number) => flowAtIdx(traj, si, name),
+      };
+    });
     views.push(buildMultiVarView(
       'flows', 'Flows', 'All transition event counts per output interval',
       active, timeGrid, vars, mode,

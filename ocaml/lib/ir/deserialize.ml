@@ -421,6 +421,22 @@ let preset_of_json j =
     preset_t_end  = (match member_opt "t_end" j with Some `Null | None -> None | Some v -> Some (as_float v));
   }
 
+(* ── Model structure ─────────────────────────────────────────────────────── *)
+
+let dimension_of_json j = {
+  dim_name   = j |> member "name"   |> as_string;
+  dim_values = j |> member "values" |> as_list |> List.map as_string;
+}
+
+let model_structure_of_json j = {
+  dimensions = j |> member "dimensions" |> as_list |> List.map dimension_of_json;
+  compartment_dims = j |> member "compartment_dims" |> as_assoc
+    |> List.map (fun (k, v) -> (k, v |> as_list |> List.map as_string));
+  base_compartments = j |> member "base_compartments" |> as_list |> List.map as_string;
+  transmission_transitions = j |> member "transmission_transitions" |> as_list |> List.map as_string;
+  infectious_compartments  = j |> member "infectious_compartments"  |> as_list |> List.map as_string;
+}
+
 (* ── Top-level model ─────────────────────────────────────────────────────── *)
 
 let model_of_json (j : Yojson.Safe.t) : model =
@@ -442,6 +458,9 @@ let model_of_json (j : Yojson.Safe.t) : model =
     presets            = (match member_opt "presets" j with
       | Some `Null | None -> []
       | Some v -> List.map preset_of_json (as_list v));
+    model_structure    = (match member_opt "model_structure" j with
+      | None -> None
+      | Some v -> opt_null model_structure_of_json v);
   }
 
 let model_of_string (s : string) : (model, string) result =

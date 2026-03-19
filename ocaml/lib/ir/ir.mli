@@ -159,6 +159,19 @@ type preset = {
   preset_t_end  : float option;
 }
 
+type dimension = {
+  dim_name  : string;
+  dim_values: string list;
+}
+
+type model_structure = {
+  dimensions              : dimension list;
+  compartment_dims        : (string * string list) list;
+  base_compartments       : string list;
+  transmission_transitions: string list;
+  infectious_compartments : string list;
+}
+
 type model = {
   name:               string;
   version:            string;
@@ -176,4 +189,5 @@ type model = {
   output:             output_config;
   simulation:         simulation_config;
   presets:            preset list;
+  model_structure:    model_structure option;
 }

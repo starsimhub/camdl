@@ -83,6 +83,23 @@ pub struct Preset {
     pub t_end:  Option<f64>,
 }
 
+// ── Model structure ───────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Dimension {
+    pub name:   String,
+    pub values: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ModelStructure {
+    pub dimensions:               Vec<Dimension>,
+    pub compartment_dims:         HashMap<String, Vec<String>>,
+    pub base_compartments:        Vec<String>,
+    pub transmission_transitions: Vec<String>,
+    pub infectious_compartments:  Vec<String>,
+}
+
 // ── Top-level model ───────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -104,4 +121,6 @@ pub struct Model {
     pub simulation:         SimulationConfig,
     #[serde(default)]
     pub presets:            Vec<Preset>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_structure:    Option<ModelStructure>,
 }

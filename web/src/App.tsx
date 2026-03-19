@@ -9,8 +9,8 @@ import { useStore } from './store';
 export default function App() {
   const loadExample = useStore((s) => s.loadExample);
 
-  // Load sir_basic with its baseline preset on mount
-  useEffect(() => { loadExample('sir_basic'); }, [loadExample]);
+  // Load sir_five_age with its baseline preset on mount
+  useEffect(() => { loadExample('sir_five_age'); }, [loadExample]);
 
   return (
     <div className="flex flex-col h-screen overflow-hidden bg-surface-0">

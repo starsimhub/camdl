@@ -330,6 +330,20 @@ let preset_to_json (p : preset) : Yojson.Safe.t =
     ("t_end",  match p.preset_t_end with None -> null | Some v -> flt v);
   ]
 
+(* ── Model structure ─────────────────────────────────────────────────────── *)
+
+let dimension_to_json (d : dimension) : Yojson.Safe.t =
+  obj [("name", str d.dim_name); ("values", arr (List.map str d.dim_values))]
+
+let model_structure_to_json (ms : model_structure) : Yojson.Safe.t =
+  obj [
+    ("dimensions",               arr (List.map dimension_to_json ms.dimensions));
+    ("compartment_dims",         obj (List.map (fun (k, vs) -> (k, arr (List.map str vs))) ms.compartment_dims));
+    ("base_compartments",        arr (List.map str ms.base_compartments));
+    ("transmission_transitions", arr (List.map str ms.transmission_transitions));
+    ("infectious_compartments",  arr (List.map str ms.infectious_compartments));
+  ]
+
 (* ── Top-level model ─────────────────────────────────────────────────────── *)
 
 let model_to_json (m : model) : Yojson.Safe.t =
@@ -350,6 +364,7 @@ let model_to_json (m : model) : Yojson.Safe.t =
     ("output",             output_config_to_json m.output);
     ("simulation",         simulation_config_to_json m.simulation);
     ("presets",            arr (List.map preset_to_json m.presets));
+    ("model_structure",    match m.model_structure with None -> null | Some ms -> model_structure_to_json ms);
   ])
 
 let model_to_string (m : model) : string =
