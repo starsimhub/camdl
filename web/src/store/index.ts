@@ -57,14 +57,18 @@ function makeBaseline(): Scenario {
   };
 }
 
-/** Build a scenario list from IR scenarios/presets (pure). */
+/** Build a scenario list from IR scenarios/presets (pure).
+ *  Non-baseline scenarios inherit the baseline's params, then apply their own
+ *  overrides on top — so a scenario with only enable/disable and no set={} gets
+ *  sensible starting values in the parameter panel. */
 function scenariosFromPresets(presets: IrModel['scenarios'] | IrModel['presets']): Scenario[] {
   if (!presets || presets.length === 0) return [makeBaseline()];
+  const baseParams = presets[0]?.params ?? {};
   return presets.map((p, i) => ({
     id: crypto.randomUUID(),
     name: i === 0 ? 'Baseline' : p.label,
     color: SCENARIO_COLORS[i % SCENARIO_COLORS.length],
-    paramOverrides: { ...p.params },
+    paramOverrides: { ...baseParams, ...p.params },
     runs: [],
     seedsCompleted: 0,
     status: 'idle' as const,

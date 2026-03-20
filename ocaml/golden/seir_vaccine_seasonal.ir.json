@@ -272,8 +272,27 @@
   },
   "scenarios": [
     {
+      "name": "baseline",
+      "label": "no SIA (baseline)",
+      "params": {
+        "beta": 0.3,
+        "sigma": 0.2,
+        "gamma": 0.1,
+        "omega": 0.003,
+        "reversion_rate": 1e-06,
+        "alpha": 0.15,
+        "phi_season": 90.0,
+        "vacc_frac": 0.8,
+        "N0": 1000000.0,
+        "I0": 10.0
+      },
+      "enable": [],
+      "disable": [],
+      "t_end": null
+    },
+    {
       "name": "with_sia",
-      "label": "with_sia",
+      "label": "with SIA rounds",
       "params": {},
       "enable": [ "sia_round_1" ],
       "disable": [],

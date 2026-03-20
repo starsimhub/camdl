@@ -198,7 +198,15 @@
     {
       "name": "baseline",
       "label": "no SIA (baseline)",
-      "params": {},
+      "params": {
+        "beta": 0.3,
+        "sigma": 0.2,
+        "gamma": 0.1,
+        "omega": 0.003,
+        "vacc_frac": 0.8,
+        "N0": 100000.0,
+        "I0": 10.0
+      },
       "enable": [],
       "disable": [],
       "t_end": null
