@@ -457,9 +457,11 @@ let model_of_json (j : Yojson.Safe.t) : model =
     data_contract      = (match member_opt "data_contract" j with Some `Null | None -> None | Some v -> Some v);
     output             = output_config_of_json     (member "output"     j);
     simulation         = simulation_config_of_json (member "simulation" j);
-    presets            = (match member_opt "presets" j with
-      | Some `Null | None -> []
-      | Some v -> List.map preset_of_json (as_list v));
+    presets            = (match member_opt "scenarios" j with
+      | Some (`List v) -> List.map preset_of_json v
+      | _ -> match member_opt "presets" j with  (* backward compat *)
+        | Some (`List v) -> List.map preset_of_json v
+        | _ -> []);
     model_structure    = (match member_opt "model_structure" j with
       | None -> None
       | Some v -> opt_null model_structure_of_json v);

@@ -57,8 +57,8 @@ function makeBaseline(): Scenario {
   };
 }
 
-/** Build a scenario list from IR presets (pure). */
-function scenariosFromPresets(presets: IrModel['presets']): Scenario[] {
+/** Build a scenario list from IR scenarios/presets (pure). */
+function scenariosFromPresets(presets: IrModel['scenarios'] | IrModel['presets']): Scenario[] {
   if (!presets || presets.length === 0) return [makeBaseline()];
   return presets.map((p, i) => ({
     id: crypto.randomUUID(),
@@ -219,14 +219,15 @@ export const useStore = create<CamdlStore>((set, get) => ({
         const irChanged = newHash !== prevHash;
 
         if (irChanged) {
-          const prevPresetKey = JSON.stringify((get().ir?.presets ?? []).map(p => p.name));
-          const newPresetKey  = JSON.stringify((result.ir.presets ?? []).map(p => p.name));
+          const irScenarios = (ir: IrModel) => ir.scenarios ?? ir.presets ?? [];
+          const prevPresetKey = JSON.stringify(irScenarios(get().ir ?? {} as IrModel).map(p => p.name));
+          const newPresetKey  = JSON.stringify(irScenarios(result.ir).map(p => p.name));
           const presetsChanged = prevPresetKey !== newPresetKey;
 
           if (presetsChanged) {
-            // Presets changed (agent edited scenarios block, or new model loaded) — rebuild scenarios.
-            const newScenarios = scenariosFromPresets(result.ir.presets);
-            const tEnd = result.ir.presets?.[0]?.t_end ?? undefined;
+            // Scenarios changed (agent edited scenarios block, or new model loaded) — rebuild scenarios.
+            const newScenarios = scenariosFromPresets(irScenarios(result.ir));
+            const tEnd = irScenarios(result.ir)[0]?.t_end ?? undefined;
             set((s) => ({
               scenarios: newScenarios,
               experimentStatus: 'idle',

@@ -194,7 +194,7 @@
     "dt": null,
     "rng_seed": null
   },
-  "presets": [
+  "scenarios": [
     {
       "name": "baseline",
       "label": "no SIA (baseline)",

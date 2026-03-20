@@ -365,7 +365,7 @@ let model_to_json (m : model) : Yojson.Safe.t =
     ("data_contract",      match m.data_contract with None -> null | Some j -> j);
     ("output",             output_config_to_json m.output);
     ("simulation",         simulation_config_to_json m.simulation);
-    ("presets",            arr (List.map preset_to_json m.presets));
+    ("scenarios",          arr (List.map preset_to_json m.presets));
     ("model_structure",    match m.model_structure with None -> null | Some ms -> model_structure_to_json ms);
   ])
 

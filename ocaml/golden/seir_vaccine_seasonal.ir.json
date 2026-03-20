@@ -270,7 +270,7 @@
     "dt": null,
     "rng_seed": null
   },
-  "presets": [
+  "scenarios": [
     {
       "name": "with_sia",
       "label": "with_sia",

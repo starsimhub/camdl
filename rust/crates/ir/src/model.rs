@@ -123,7 +123,7 @@ pub struct Model {
     pub data_contract:      Option<serde_json::Value>,
     pub output:             OutputConfig,
     pub simulation:         SimulationConfig,
-    #[serde(default)]
+    #[serde(default, rename = "scenarios", alias = "presets")]
     pub presets:            Vec<Preset>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model_structure:    Option<ModelStructure>,

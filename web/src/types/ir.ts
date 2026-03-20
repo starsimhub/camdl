@@ -71,6 +71,8 @@ export interface IrPreset {
 
 export interface IrModel {
   name: string;
+  scenarios?: IrPreset[];
+  /** @deprecated use scenarios */
   presets?: IrPreset[];
   version: string;
   description: string | null;
