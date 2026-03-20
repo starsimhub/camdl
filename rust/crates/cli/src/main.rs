@@ -2,6 +2,7 @@ mod util;
 mod hashing;
 mod experiment;
 mod serve;
+mod summarize;
 
 use sim::{
     CompiledModel, GillespieSim, TauLeapSim, ChainBinomialSim,
@@ -37,10 +38,11 @@ fn main() {
     match all_args[0].as_str() {
         "experiment" => {
             match all_args.get(1).map(|s| s.as_str()) {
-                Some("run")    => experiment::cmd_experiment_run(&all_args[2..]),
-                Some("status") => experiment::cmd_experiment_status(&all_args[2..]),
+                Some("run")       => experiment::cmd_experiment_run(&all_args[2..]),
+                Some("status")    => experiment::cmd_experiment_status(&all_args[2..]),
+                Some("summarize") => summarize::cmd_experiment_summarize(&all_args[2..]),
                 _ => {
-                    eprintln!("usage: camdl experiment <run|status> ...");
+                    eprintln!("usage: camdl experiment <run|status|summarize> ...");
                     std::process::exit(1);
                 }
             }
