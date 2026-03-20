@@ -105,7 +105,7 @@ run_experiment_test tests/fixtures/exp_sir_five_age.toml          40
 run_experiment_test tests/fixtures/exp_sir_patches_5.toml         40
 run_experiment_test tests/fixtures/exp_seir_vaccine.toml          30
 run_experiment_test tests/fixtures/exp_seir_vaccine_seasonal.toml 30
-run_experiment_test tests/fixtures/exp_polio_spatial_5.toml       30
+run_experiment_test tests/fixtures/exp_polio_spatial_5.toml       45
 
 echo ""
 echo "Results: $PASS passed, $FAIL failed"

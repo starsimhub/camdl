@@ -921,6 +921,22 @@ let test_spatial_5_importation_count () =
     ) m.transitions in
     Alcotest.(check bool) "no self-loop importation" false has_self
 
+(* ── Issue 5: preset_enable roundtrip ────────────────────────────────────────
+   Compile seir_vaccine.camdl and verify the with_sia preset has
+   preset_enable = ["sia_round_1"]. ─────────────────────────────────────── *)
+
+let test_preset_enable_seir_vaccine () =
+  let src = read_file (Filename.concat golden_dir "seir_vaccine.camdl") in
+  match Compiler.compile ~name:"seir_vaccine" src with
+  | Error e -> Alcotest.failf "compile failed: %s" e
+  | Ok m ->
+    let with_sia = match List.find_opt (fun (p : Ir.preset) -> p.Ir.preset_name = "with_sia") m.Ir.presets with
+      | Some p -> p
+      | None   -> Alcotest.fail "with_sia preset not found"
+    in
+    Alcotest.(check (list string)) "with_sia preset_enable"
+      ["sia_round_1"] with_sia.Ir.preset_enable
+
 let () =
   Alcotest.run "compiler" [
     "golden", [
@@ -982,5 +998,8 @@ let () =
     "polio_models", [
       Alcotest.test_case "age-targeted SIA targets S_under5 → V_under5" `Quick test_polio_age_sia_targets_under5;
       Alcotest.test_case "spatial where p!=q gives 20 importation transitions" `Quick test_spatial_5_importation_count;
+    ];
+    "scenario_presets", [
+      Alcotest.test_case "with_sia preset_enable = [\"sia_round_1\"]" `Quick test_preset_enable_seir_vaccine;
     ];
   ]

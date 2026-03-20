@@ -12,9 +12,8 @@ dt      = 1.0
 n = 15
 
 [[scenario]]
-name   = "no_sia"
-params = { vacc_frac = 0.0 }
+name = "no_sia"
 
 [[scenario]]
 name   = "with_sia"
-params = { vacc_frac = 0.8 }
+enable = ["sia_round_1"]

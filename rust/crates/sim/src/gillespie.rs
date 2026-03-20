@@ -177,7 +177,7 @@ fn run_gillespie(
             t = boundary;
 
             // Apply intervention if at intervention boundary
-            let at_iv = next_iv_t.map_or(false, |iv_t| (iv_t - t).abs() < 1e-10);
+            let at_iv = next_iv_t.is_some_and(|iv_t| (iv_t - t).abs() < 1e-10);
             if at_iv {
                 apply_interventions_at(t, model, &mut int_s, &mut real_s, params, 1e-10)?;
                 while iv_idx < iv_times.len() && iv_times[iv_idx] <= t + 1e-10 {
@@ -258,7 +258,7 @@ fn run_gillespie(
 
         // --- Sparse propensity update ---
         event_count += 1;
-        if event_count % FULL_RECOMPUTE_INTERVAL == 0 {
+        if event_count.is_multiple_of(FULL_RECOMPUTE_INTERVAL) {
             // Periodic full recompute prevents floating-point drift in lambda_total
             eval_propensities(model, &int_s, &real_s, params, t, &mut propensities)?;
             lambda_total = propensities.iter().sum();

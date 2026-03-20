@@ -113,7 +113,7 @@ fn run_chain_binomial(
         t += dt;
 
         // Interventions
-        if iv_times.get(iv_idx).copied().map_or(false, |iv| (iv - t).abs() < cfg.dt * 0.5) {
+        if iv_times.get(iv_idx).copied().is_some_and(|iv| (iv - t).abs() < cfg.dt * 0.5) {
             apply_interventions_at(t, model, &mut int_s, &mut real_s, params, cfg.dt * 0.5)?;
             while iv_idx < iv_times.len() && iv_times[iv_idx] <= t + cfg.dt * 0.5 { iv_idx += 1; }
         }

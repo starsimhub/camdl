@@ -12,7 +12,6 @@ use ir::{
     },
     model::{Compartment, CompartmentKind, InitialConditions, OutputConfig, OutputSchedule, SimulationConfig},
     Model,
-    transition::Transition,
     parameter::Parameter,
 };
 use sim::{

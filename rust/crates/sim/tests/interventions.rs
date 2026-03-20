@@ -6,7 +6,6 @@ use ir::{
     intervention::{Action, FractionTransfer, Intervention, InterventionSchedule},
     model::{Compartment, CompartmentKind, InitialConditions, OutputConfig, OutputSchedule, SimulationConfig},
     Model,
-    transition::Transition,
     parameter::Parameter,
 };
 use sim::{
@@ -17,10 +16,6 @@ use sim::{
 
 fn int_comp(name: &str) -> Compartment {
     Compartment { name: name.into(), kind: CompartmentKind::Integer }
-}
-
-fn param(name: &str, value: f64) -> Parameter {
-    Parameter { name: name.into(), value: Some(value), bounds: None, prior: None, transform: None, initial_value: None }
 }
 
 fn minimal_model_with_interventions(

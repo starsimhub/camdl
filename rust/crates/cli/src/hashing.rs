@@ -3,10 +3,32 @@ use std::collections::HashMap;
 
 const TOOL_VERSION: &str = env!("CARGO_PKG_VERSION");
 
-/// SHA-256 of the raw IR JSON bytes, hex-encoded.
+/// Structural hash of the IR: only fields that affect simulation semantics.
+/// Ignores t_end, output config, labels, and other non-structural fields.
+/// serde_json's Map is backed by BTreeMap (sorted keys), so serialization is deterministic.
 pub fn model_hash(ir_json: &str) -> String {
+    let v: serde_json::Value = serde_json::from_str(ir_json)
+        .expect("model_hash: invalid JSON");
+    let obj = v.as_object().expect("model_hash: expected object");
+
     let mut h = Sha256::new();
-    h.update(ir_json.as_bytes());
+    let structural_keys = [
+        "compartments", "transitions", "parameters", "tables",
+        "time_functions", "interventions", "observations",
+        "ode_equations", "initial_conditions",
+    ];
+    for key in &structural_keys {
+        if let Some(val) = obj.get(*key) {
+            h.update(key.as_bytes());
+            h.update(b"\x00");
+            h.update(serde_json::to_string(val).unwrap().as_bytes());
+            h.update(b"\x00");
+        }
+    }
+    if let Some(val) = obj.get("version") {
+        h.update(b"version\x00");
+        h.update(serde_json::to_string(val).unwrap().as_bytes());
+    }
     hex::encode(h.finalize())
 }
 

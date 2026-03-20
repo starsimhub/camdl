@@ -4,7 +4,7 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 use rayon::prelude::*;
 
-use crate::util::{run_simulation, write_traj_tsv, load_params_toml, SimRun};
+use crate::util::{run_simulation, write_traj_tsv, load_params_toml, resolve_ir_path, SimRun};
 use crate::hashing::{model_hash, config_hash, input_hash, canonical_params};
 
 // ─── TOML schema ─────────────────────────────────────────────────────────────
@@ -72,6 +72,10 @@ struct ScenarioEntry {
     name: String,
     #[serde(default)]
     params: HashMap<String, f64>,
+    #[serde(default)]
+    enable: Vec<String>,
+    #[serde(default)]
+    disable: Vec<String>,
 }
 
 // ─── Manifest / run metadata ─────────────────────────────────────────────────
@@ -162,30 +166,10 @@ pub fn cmd_experiment_run(args: &[String]) {
     let model_path = exp.config.model.clone();
 
     // Read IR JSON for hashing
-    let (ir_path_resolved, _tmpfile) = if model_path.ends_with(".camdl") {
-        let tmp = std::env::temp_dir()
-            .join(format!("camdl_exp_{}.ir.json", std::process::id()));
-        let camdlc = std::env::var("CAMDLC").unwrap_or_else(|_| "camdlc".to_string());
-        let out = std::process::Command::new(&camdlc)
-            .arg(&model_path)
-            .output()
-            .unwrap_or_else(|e| {
-                eprintln!("error: could not run camdlc: {}", e);
-                std::process::exit(1);
-            });
-        if !out.status.success() {
-            let msg = String::from_utf8_lossy(&out.stderr);
-            eprintln!("error: camdlc failed: {}", msg);
-            std::process::exit(1);
-        }
-        std::fs::write(&tmp, &out.stdout).unwrap_or_else(|e| {
-            eprintln!("error writing temp IR: {}", e);
-            std::process::exit(1);
-        });
-        (tmp.to_string_lossy().into_owned(), Some(tmp))
-    } else {
-        (model_path.clone(), None)
-    };
+    let (ir_path_resolved, _tmpfile) = resolve_ir_path(&model_path).unwrap_or_else(|e| {
+        eprintln!("error: {}", e);
+        std::process::exit(1);
+    });
 
     let ir_json = std::fs::read_to_string(&ir_path_resolved).unwrap_or_else(|e| {
         eprintln!("error: cannot read {}: {}", ir_path_resolved, e);
@@ -213,7 +197,7 @@ pub fn cmd_experiment_run(args: &[String]) {
 
     // If no [[scenario]] entries, run a single implicit "baseline"
     let scenarios: Vec<ScenarioEntry> = if exp.scenario.is_empty() {
-        vec![ScenarioEntry { name: "baseline".to_string(), params: HashMap::new() }]
+        vec![ScenarioEntry { name: "baseline".to_string(), params: HashMap::new(), enable: Vec::new(), disable: Vec::new() }]
     } else {
         exp.scenario
     };
@@ -278,8 +262,8 @@ pub fn cmd_experiment_run(args: &[String]) {
                 params_files: params_file_opt.as_ref().map(|p| vec![p.clone()]).unwrap_or_default(),
                 overrides: overrides_map,
                 scenario_name: None, // We handle scenario param overrides above
-                adhoc_enable: Vec::new(),
-                adhoc_disable: Vec::new(),
+                adhoc_enable: sc.enable.clone(),
+                adhoc_disable: sc.disable.clone(),
                 backend: backend.clone(),
                 dt,
                 seed: *seed,
@@ -431,7 +415,7 @@ pub fn cmd_experiment_status(args: &[String]) {
                 let params_str = canonical_params(&base_params);
                 let cfg_hash = config_hash(&mhash, &params_str, &backend);
                 let scenarios: Vec<ScenarioEntry> = if exp.scenario.is_empty() {
-                    vec![ScenarioEntry { name: "baseline".to_string(), params: HashMap::new() }]
+                    vec![ScenarioEntry { name: "baseline".to_string(), params: HashMap::new(), enable: Vec::new(), disable: Vec::new() }]
                 } else {
                     exp.scenario
                 };

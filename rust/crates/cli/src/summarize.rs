@@ -16,6 +16,7 @@ use serde::Deserialize;
 #[derive(Debug, Deserialize)]
 struct Manifest {
     scenarios: Vec<String>,
+    #[allow(dead_code)]
     output_dir: String,
     runs: Vec<RunEntry>,
 }

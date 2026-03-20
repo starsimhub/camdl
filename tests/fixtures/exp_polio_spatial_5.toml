@@ -18,3 +18,7 @@ params = { kappa = 0.0 }
 [[scenario]]
 name   = "coupled"
 params = { kappa = 0.05 }
+
+[[scenario]]
+name   = "with_sia"
+enable = ["sia_north", "sia_south", "sia_east", "sia_west", "sia_center"]

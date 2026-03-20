@@ -130,9 +130,9 @@ fn eval_table_expr(
                 UnOp::Ceil  => a.ceil(),
             })
         }
-        _ => Err(SimError::Validation(format!(
-            "unsupported expression type in table values (only Const and Param are valid)"
-        ))),
+        _ => Err(SimError::Validation(
+            "unsupported expression type in table values (only Const and Param are valid)".to_string()
+        )),
     }
 }
 

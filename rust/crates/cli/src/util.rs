@@ -7,6 +7,29 @@ use sim::{
     Trajectory,
 };
 
+// ─── IR path resolver ────────────────────────────────────────────────────────
+
+/// If path ends with `.camdl`, compile it via camdlc and write to a temp file.
+/// Returns (resolved_path, Some(tmpfile)) or (path, None) for plain .ir.json.
+pub fn resolve_ir_path(path: &str) -> Result<(String, Option<std::path::PathBuf>), String> {
+    if !path.ends_with(".camdl") {
+        return Ok((path.to_string(), None));
+    }
+    let tmp = std::env::temp_dir()
+        .join(format!("camdl_{}.ir.json", std::process::id()));
+    let camdlc = std::env::var("CAMDLC").unwrap_or_else(|_| "camdlc".to_string());
+    let out = std::process::Command::new(&camdlc)
+        .arg(path)
+        .output()
+        .map_err(|e| format!("could not run camdlc: {}", e))?;
+    if !out.status.success() {
+        return Err(format!("camdlc failed: {}", String::from_utf8_lossy(&out.stderr)));
+    }
+    std::fs::write(&tmp, &out.stdout)
+        .map_err(|e| format!("error writing temp IR: {}", e))?;
+    Ok((tmp.to_string_lossy().into_owned(), Some(tmp)))
+}
+
 // ─── Loader helpers ──────────────────────────────────────────────────────────
 
 /// Load a flat Vec<Expr::Const> from a CSV, TSV, or JSON file.
@@ -152,24 +175,7 @@ impl Default for SimRun {
 /// Run a simulation and return the full trajectory.
 pub fn run_simulation(run: &SimRun) -> Result<(Trajectory, ir::Model), String> {
     // Load IR source (handles .camdl compilation via camdlc)
-    let (ir_path_resolved, _tmpfile) = if run.ir_path.ends_with(".camdl") {
-        let tmp = std::env::temp_dir()
-            .join(format!("camdl_{}.ir.json", std::process::id()));
-        let camdlc = std::env::var("CAMDLC").unwrap_or_else(|_| "camdlc".to_string());
-        let out = std::process::Command::new(&camdlc)
-            .arg(&run.ir_path)
-            .output()
-            .map_err(|e| format!("could not run camdlc: {}", e))?;
-        if !out.status.success() {
-            let msg = String::from_utf8_lossy(&out.stderr).to_string();
-            return Err(format!("camdlc failed: {}", msg));
-        }
-        std::fs::write(&tmp, &out.stdout)
-            .map_err(|e| format!("error writing temp IR: {}", e))?;
-        (tmp.to_string_lossy().into_owned(), Some(tmp))
-    } else {
-        (run.ir_path.clone(), None)
-    };
+    let (ir_path_resolved, _tmpfile) = resolve_ir_path(&run.ir_path)?;
 
     let src = std::fs::read_to_string(&ir_path_resolved)
         .map_err(|e| format!("cannot read {}: {}", ir_path_resolved, e))?;
