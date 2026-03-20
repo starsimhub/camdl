@@ -1,3 +1,7 @@
+mod util;
+mod hashing;
+mod experiment;
+
 use sim::{
     CompiledModel, GillespieSim, TauLeapSim, ChainBinomialSim,
     config::{GillespieConfig, TauLeapConfig, ChainBinomialConfig, SimConfig},
@@ -6,60 +10,6 @@ use sim::{
 };
 use ir::table::TableSource;
 use std::collections::HashMap;
-use toml;
-
-/// Load a flat Vec<Expr::Const> from a CSV, TSV, or JSON file.
-/// CSV/TSV: rows of numbers, row-major. JSON: `[n, ...]` or `[[n,...],...]`.
-fn load_table_file(path: &str) -> Result<Vec<ir::expr::Expr>, String> {
-    use ir::expr::Expr;
-    let content = std::fs::read_to_string(path)
-        .map_err(|e| format!("{}: {}", path, e))?;
-    let ext = std::path::Path::new(path)
-        .extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
-
-    if ext == "json" {
-        let v: serde_json::Value = serde_json::from_str(&content)
-            .map_err(|e| format!("JSON parse error in {}: {}", path, e))?;
-        let mut out = Vec::new();
-        match &v {
-            serde_json::Value::Array(rows) => {
-                for row in rows {
-                    match row {
-                        serde_json::Value::Array(cols) => {
-                            for cell in cols {
-                                let f = cell.as_f64().ok_or_else(||
-                                    format!("expected number in {}", path))?;
-                                out.push(Expr::const_(f));
-                            }
-                        }
-                        _ => {
-                            let f = row.as_f64().ok_or_else(||
-                                format!("expected number in {}", path))?;
-                            out.push(Expr::const_(f));
-                        }
-                    }
-                }
-            }
-            _ => return Err(format!("expected JSON array in {}", path)),
-        }
-        Ok(out)
-    } else {
-        // CSV or TSV
-        let sep = if ext == "tsv" { '\t' } else { ',' };
-        let mut out = Vec::new();
-        for line in content.lines() {
-            let line = line.trim();
-            if line.is_empty() || line.starts_with('#') { continue; }
-            for cell in line.split(sep) {
-                let cell = cell.trim();
-                let f: f64 = cell.parse()
-                    .map_err(|_| format!("expected number, got '{}' in {}", cell, path))?;
-                out.push(Expr::const_(f));
-            }
-        }
-        Ok(out)
-    }
-}
 
 fn usage() -> ! {
     eprintln!("camdl simulate MODEL.ir.json [OPTIONS]");
@@ -78,74 +28,36 @@ fn usage() -> ! {
     std::process::exit(1);
 }
 
-/// Load parameter overrides from a TOML file.
-///
-/// Supports two forms:
-///   - Top-level scalar:  `gamma = 0.1`  → parameter "gamma"
-///   - Indexed section:   `[R0]`         → prefix "R0"
-///                        `urban = 2.5`  → parameter "R0_urban"
-fn load_params_toml(path: &str) -> Result<HashMap<String, f64>, String> {
-    let content = std::fs::read_to_string(path)
-        .map_err(|e| format!("{}: {}", path, e))?;
-    let table: toml::Table = content.parse()
-        .map_err(|e| format!("TOML parse error in {}: {}", path, e))?;
-    let mut out = HashMap::new();
-    for (key, val) in &table {
-        match val {
-            toml::Value::Float(f)   => { out.insert(key.clone(), *f); }
-            toml::Value::Integer(i) => { out.insert(key.clone(), *i as f64); }
-            toml::Value::Table(section) => {
-                // Indexed section: [PREFIX] with scalar entries → PREFIX_key
-                for (subkey, subval) in section {
-                    let full = format!("{}_{}", key, subkey);
-                    match subval {
-                        toml::Value::Float(f)   => { out.insert(full, *f); }
-                        toml::Value::Integer(i) => { out.insert(full, *i as f64); }
-                        _ => return Err(format!(
-                            "{}:[{}].{}: expected a number, got {:?}", path, key, subkey, subval
-                        )),
-                    }
+fn main() {
+    let all_args: Vec<String> = std::env::args().skip(1).collect();
+    if all_args.is_empty() { usage(); }
+
+    // Dispatch on first argument
+    match all_args[0].as_str() {
+        "experiment" => {
+            match all_args.get(1).map(|s| s.as_str()) {
+                Some("run")    => experiment::cmd_experiment_run(&all_args[2..]),
+                Some("status") => experiment::cmd_experiment_status(&all_args[2..]),
+                _ => {
+                    eprintln!("usage: camdl experiment <run|status> ...");
+                    std::process::exit(1);
                 }
             }
-            _ => return Err(format!(
-                "{}:{}: expected a number or table section, got {:?}", path, key, val
-            )),
+        }
+        _ => {
+            // Accept "camdl simulate FILE ..." or bare "camdl FILE ..."
+            let args: &[String] = if all_args[0] == "simulate" || all_args[0] == "sim" {
+                &all_args[1..]
+            } else {
+                &all_args
+            };
+            if args.is_empty() { usage(); }
+            run_simulate(args);
         }
     }
-    Ok(out)
 }
 
-/// Load a keyed TSV file (two columns: name<TAB>value) for --param-vec.
-/// Returns Vec<(key, value)>. Skips blank lines and # comments.
-fn load_keyed_tsv(path: &str) -> Result<Vec<(String, f64)>, String> {
-    let content = std::fs::read_to_string(path)
-        .map_err(|e| format!("{}: {}", path, e))?;
-    let mut out = Vec::new();
-    for (lineno, line) in content.lines().enumerate() {
-        let line = line.trim();
-        if line.is_empty() || line.starts_with('#') { continue; }
-        let mut parts = line.splitn(2, '\t');
-        let key = parts.next()
-            .ok_or_else(|| format!("{}:{}: expected key<TAB>value", path, lineno + 1))?
-            .trim().to_string();
-        let val_str = parts.next()
-            .ok_or_else(|| format!("{}:{}: missing value column", path, lineno + 1))?
-            .trim();
-        let val: f64 = val_str.parse()
-            .map_err(|_| format!("{}:{}: expected number, got '{}'", path, lineno + 1, val_str))?;
-        out.push((key, val));
-    }
-    Ok(out)
-}
-
-fn main() {
-    let args: Vec<String> = std::env::args().skip(1).collect();
-    if args.is_empty() { usage(); }
-
-    // Accept "camdl simulate FILE ..." or bare "camdl FILE ..."
-    let args: &[String] = if args[0] == "simulate" { &args[1..] } else { &args };
-    if args.is_empty() { usage(); }
-
+fn run_simulate(args: &[String]) {
     let mut ir_path:     Option<String> = None;
     let mut backend    = "gillespie".to_string();
     let mut dt         = 1.0_f64;
@@ -289,7 +201,7 @@ fn main() {
 
     // Step 2: apply --params TOML files in order
     for path in &params_files {
-        let toml_overrides = load_params_toml(path).unwrap_or_else(|e| {
+        let toml_overrides = util::load_params_toml(path).unwrap_or_else(|e| {
             eprintln!("error: --params {}: {}", path, e);
             std::process::exit(1);
         });
@@ -306,7 +218,7 @@ fn main() {
             model.parameters.iter().map(|p| p.name.clone()).collect();
         let mut resolved: Vec<(String, f64)> = Vec::new();
         for (prefix, file) in &set_vec_entries {
-            let entries = load_keyed_tsv(file).unwrap_or_else(|e| {
+            let entries = util::load_keyed_tsv(file).unwrap_or_else(|e| {
                 eprintln!("error: --param-vec {}: {}", prefix, e);
                 std::process::exit(1);
             });
@@ -342,7 +254,7 @@ fn main() {
                     std::process::exit(1);
                 }
                 Some(path) => {
-                    let values = load_table_file(path).unwrap_or_else(|e| {
+                    let values = util::load_table_file(path).unwrap_or_else(|e| {
                         eprintln!("error loading table '{}' from {}: {}", logical_name, path, e);
                         std::process::exit(1);
                     });
