@@ -1,6 +1,8 @@
+import { useState } from 'react';
 import { useStore } from '../store';
 import { EXAMPLES } from '../lib/examples';
 import { useTheme } from '../lib/theme';
+import ConnectModal from './ConnectModal';
 
 const THEME_LABELS: Record<string, string> = { dark: '🌙', light: '☀', auto: '⬤' };
 
@@ -13,7 +15,20 @@ export default function Header() {
   const openFile         = useStore((s) => s.openFile);
   const saveFile         = useStore((s) => s.saveFile);
   const loadExample      = useStore((s) => s.loadExample);
+  const connectRemote    = useStore((s) => s.connectRemote);
+  const connectStatus    = useStore((s) => s.connectStatus);
+  const connectError     = useStore((s) => s.connectError);
   const { theme, cycle } = useTheme();
+
+  const [showConnect, setShowConnect] = useState(false);
+
+  const handleConnect = async (url: string) => {
+    await connectRemote(url);
+    // Close modal only on success (connectStatus updated reactively)
+    if (useStore.getState().connectStatus === 'idle') {
+      setShowConnect(false);
+    }
+  };
 
   const statusDot =
     compileStatus === 'compiling' ? '⟳' :
@@ -71,6 +86,15 @@ export default function Header() {
         {experimentStatus === 'running' ? '● Running…' : '▶ Run All'}
       </button>
 
+      {/* Connect to camdl serve */}
+      <button
+        onClick={() => setShowConnect(true)}
+        title="Load results from a running camdl serve instance"
+        className="px-2.5 py-1 text-xs rounded font-medium border border-gray-200 text-gray-600 hover:text-gray-900 hover:border-gray-400 transition-colors dark:border-surface-border dark:text-gray-400 dark:hover:text-gray-200 dark:hover:border-gray-500"
+      >
+        ⇣ Connect
+      </button>
+
       <div className="flex-1" />
 
       {/* Theme toggle */}
@@ -95,6 +119,15 @@ export default function Header() {
       >
         Save
       </button>
+
+      {showConnect && (
+        <ConnectModal
+          onConnect={handleConnect}
+          onClose={() => setShowConnect(false)}
+          status={connectStatus}
+          error={connectError ?? undefined}
+        />
+      )}
     </header>
   );
 }

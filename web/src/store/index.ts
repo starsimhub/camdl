@@ -8,6 +8,7 @@ import { simulate as wasmSimulate } from '../lib/wasm';
 import { irToCanvas } from '../lib/irToCanvas';
 import { extractSpans } from '../lib/spanExtractor';
 import { EXAMPLES } from '../lib/examples';
+import { loadRemoteExperiment } from '../lib/remoteDataSource';
 
 export type ActiveTab = 'dsl' | 'agent';
 
@@ -146,6 +147,11 @@ interface CamdlStore {
   setPendingDiff: (d: ProposedEdit | null) => void;
   acceptDiff: () => void;
   rejectDiff: () => void;
+
+  // ── Remote data source ────────────────────────────────────────────────────────
+  connectStatus: 'idle' | 'loading' | 'error';
+  connectError: string | null;
+  connectRemote: (url: string) => Promise<void>;
 
   // ── File I/O ──────────────────────────────────────────────────────────────────
   loadExample: (name: string) => void;
@@ -544,4 +550,34 @@ export const useStore = create<CamdlStore>((set, get) => ({
         paramOverrides: {},
       })),
     })),
+
+  // ── Remote connect ────────────────────────────────────────────────────────────
+
+  connectStatus: 'idle',
+  connectError: null,
+
+  connectRemote: async (url: string) => {
+    set({ connectStatus: 'loading', connectError: null });
+    try {
+      const { ir, scenarios } = await loadRemoteExperiment(url);
+      const { nodes, edges } = irToCanvas(ir);
+      set({
+        ir,
+        irHash: url,  // use URL as irHash proxy to prevent scenario rebuild on re-render
+        scenarios,
+        canvasNodes: nodes,
+        canvasEdges: edges,
+        compileStatus: 'ok',
+        modelName: (ir as { name?: string }).name ?? 'remote',
+        connectStatus: 'idle',
+        connectError: null,
+        experimentStatus: 'ok',
+      });
+    } catch (e) {
+      set({
+        connectStatus: 'error',
+        connectError: e instanceof Error ? e.message : String(e),
+      });
+    }
+  },
 }));

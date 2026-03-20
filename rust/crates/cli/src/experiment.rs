@@ -85,6 +85,15 @@ struct RunMeta {
     model_hash: String,
 }
 
+/// Minimal descriptor for one completed run, included in manifest.json.
+/// The web app uses input_hash to construct the URL: /runs/{input_hash}/traj.tsv
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct RunEntry {
+    scenario: String,
+    seed: u64,
+    input_hash: String,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 struct Manifest {
     model: String,
@@ -93,6 +102,8 @@ struct Manifest {
     total_runs: usize,
     completed: usize,
     output_dir: String,
+    /// All completed runs, in scenario×seed order. Used by web app to load trajectories.
+    runs: Vec<RunEntry>,
 }
 
 // ─── cmd_experiment_run ──────────────────────────────────────────────────────
@@ -223,6 +234,12 @@ pub fn cmd_experiment_run(args: &[String]) {
         std::process::exit(1);
     });
 
+    // Copy model IR to output dir so the web app can load it via camdl serve.
+    let model_ir_dest = format!("{}/model.ir.json", output_dir);
+    std::fs::write(&model_ir_dest, &ir_json).unwrap_or_else(|e| {
+        eprintln!("warning: could not write model.ir.json: {}", e);
+    });
+
     let counter = Arc::new(AtomicUsize::new(0));
     let scenario_names: Vec<String> = scenarios.iter().map(|s| s.name.clone()).collect();
 
@@ -236,8 +253,9 @@ pub fn cmd_experiment_run(args: &[String]) {
         });
 
     let params_file_opt = exp.config.params.clone();
-    let errors: Vec<String> = pool.install(|| {
-        work_items.par_iter().filter_map(|(sc, seed)| {
+    // Each work item produces Ok(RunEntry) on success or Err(message) on failure.
+    let results: Vec<Result<RunEntry, String>> = pool.install(|| {
+        work_items.par_iter().map(|(sc, seed)| {
             let ihash = input_hash(&cfg_hash, &sc.name, *seed);
             let run_dir = format!("{}/{}", runs_dir, ihash);
             let traj_path = format!("{}/traj.tsv", run_dir);
@@ -246,7 +264,7 @@ pub fn cmd_experiment_run(args: &[String]) {
             if !force && std::path::Path::new(&traj_path).exists() {
                 let n = counter.fetch_add(1, Ordering::Relaxed) + 1;
                 eprintln!("[{}/{}] scenario={} seed={} (skipped — already exists)", n, total, sc.name, seed);
-                return None;
+                return Ok(RunEntry { scenario: sc.name.clone(), seed: *seed, input_hash: ihash });
             }
 
             // Build SimRun
@@ -273,17 +291,17 @@ pub fn cmd_experiment_run(args: &[String]) {
                 Err(e) => {
                     let n = counter.fetch_add(1, Ordering::Relaxed) + 1;
                     eprintln!("[{}/{}] scenario={} seed={} ERROR: {}", n, total, sc.name, seed, e);
-                    return Some(format!("scenario={} seed={}: {}", sc.name, seed, e));
+                    Err(format!("scenario={} seed={}: {}", sc.name, seed, e))
                 }
                 Ok((traj, model)) => {
                     // Create run dir
                     if let Err(e) = std::fs::create_dir_all(&run_dir) {
-                        return Some(format!("cannot create {}: {}", run_dir, e));
+                        return Err(format!("cannot create {}: {}", run_dir, e));
                     }
 
                     // Write traj.tsv
                     if let Err(e) = write_traj_tsv(&traj_path, &model, &traj) {
-                        return Some(format!("cannot write {}: {}", traj_path, e));
+                        return Err(format!("cannot write {}: {}", traj_path, e));
                     }
 
                     // Write run.json metadata
@@ -298,16 +316,25 @@ pub fn cmd_experiment_run(args: &[String]) {
                         .unwrap_or_else(|_| "{}".to_string());
                     let meta_path = format!("{}/run.json", run_dir);
                     if let Err(e) = std::fs::write(&meta_path, meta_json) {
-                        return Some(format!("cannot write {}: {}", meta_path, e));
+                        return Err(format!("cannot write {}: {}", meta_path, e));
                     }
 
                     let n = counter.fetch_add(1, Ordering::Relaxed) + 1;
                     eprintln!("[{}/{}] scenario={} seed={}", n, total, sc.name, seed);
-                    None
+                    Ok(RunEntry { scenario: sc.name.clone(), seed: *seed, input_hash: ihash })
                 }
             }
         }).collect()
     });
+
+    let mut errors: Vec<String> = Vec::new();
+    let mut completed_runs: Vec<RunEntry> = Vec::new();
+    for result in results {
+        match result {
+            Ok(entry) => completed_runs.push(entry),
+            Err(e)    => errors.push(e),
+        }
+    }
 
     if !errors.is_empty() {
         eprintln!("Errors encountered:");
@@ -316,10 +343,9 @@ pub fn cmd_experiment_run(args: &[String]) {
         }
     }
 
-    // Count completed runs
-    let completed = count_completed_runs(&runs_dir, &cfg_hash, &scenario_names, &seeds);
+    let completed = completed_runs.len();
 
-    // Write manifest.json
+    // Write manifest.json — includes completed run entries so the web app can load trajectories.
     let manifest = Manifest {
         model: model_path.clone(),
         scenarios: scenario_names,
@@ -327,6 +353,7 @@ pub fn cmd_experiment_run(args: &[String]) {
         total_runs: total,
         completed,
         output_dir: output_dir.clone(),
+        runs: completed_runs,
     };
     let manifest_json = serde_json::to_string_pretty(&manifest)
         .unwrap_or_else(|_| "{}".to_string());
