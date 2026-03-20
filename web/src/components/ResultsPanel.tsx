@@ -5,6 +5,8 @@ import {
 } from 'recharts';
 import { useStore } from '../store';
 import { buildViews, findDynamicEndIndex, TRACE_THRESHOLD, type EnsembleMode } from '../lib/buildViews';
+import MapPanel from './MapPanel';
+import { detectPatches } from '../lib/patchStats';
 
 // ── Brush handle ──────────────────────────────────────────────────────────────
 
@@ -160,7 +162,15 @@ export default function ResultsPanel() {
   );
 
   const [activeViewId, setActiveViewId] = useState<string | null>(null);
-  const activeView = views.find((v) => v.id === activeViewId) ?? views[0] ?? null;
+  const [showMap, setShowMap] = useState(false);
+  const activeView = showMap ? null : (views.find((v) => v.id === activeViewId) ?? views[0] ?? null);
+
+  // Detect whether the loaded model has patch stratification
+  const firstTraj = scenarios.flatMap((s) => s.runs).find(Boolean)?.trajectory;
+  const hasPatchModel = useMemo(
+    () => (firstTraj ? detectPatches(firstTraj) !== null : false),
+    [firstTraj],
+  );
 
   const groupMap = useMemo(() => {
     const m: Record<string, string> = {};
@@ -206,10 +216,10 @@ export default function ResultsPanel() {
           {views.map((v) => (
             <button
               key={v.id}
-              onClick={() => setActiveViewId(v.id)}
+              onClick={() => { setActiveViewId(v.id); setShowMap(false); }}
               title={v.description}
               className={`px-2.5 py-0.5 text-xs rounded transition-colors ${
-                v.id === (activeView?.id)
+                !showMap && v.id === (activeView?.id ?? views[0]?.id)
                   ? 'bg-gray-200 text-gray-900 dark:bg-surface-3 dark:text-gray-100'
                   : 'text-gray-500 hover:text-gray-700 dark:text-gray-500 dark:hover:text-gray-300'
               }`}
@@ -217,6 +227,19 @@ export default function ResultsPanel() {
               {v.label}
             </button>
           ))}
+          {hasPatchModel && (
+            <button
+              onClick={() => setShowMap(true)}
+              title="Geographic choropleth by patch"
+              className={`px-2.5 py-0.5 text-xs rounded transition-colors ${
+                showMap
+                  ? 'bg-gray-200 text-gray-900 dark:bg-surface-3 dark:text-gray-100'
+                  : 'text-gray-500 hover:text-gray-700 dark:text-gray-500 dark:hover:text-gray-300'
+              }`}
+            >
+              Map
+            </button>
+          )}
           <div className="flex-1" />
           {/* Band / Lines toggle */}
           {hasResults && (
@@ -240,8 +263,11 @@ export default function ResultsPanel() {
         </div>
       )}
 
+      {/* Map panel */}
+      {showMap && <div className="flex-1 min-h-0"><MapPanel /></div>}
+
       {/* Chart area */}
-      <div className="flex-1 min-h-0 px-2 py-3">
+      {!showMap && <div className="flex-1 min-h-0 px-2 py-3">
         {!hasResults && !isRunning && (
           <div className="flex flex-col items-center justify-center h-full gap-2">
             <span className="text-gray-500 text-sm dark:text-gray-600">Click ▶ Run All to simulate</span>
@@ -346,7 +372,7 @@ export default function ResultsPanel() {
             </ComposedChart>
           </ResponsiveContainer>
         )}
-      </div>
+      </div>}
     </div>
   );
 }
