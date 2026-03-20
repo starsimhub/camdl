@@ -1,0 +1,59 @@
+# Five-patch SIR: simple spatial model using numeric patch indices (p0..p4).
+# Each patch has its own population and R0 — no coupling.
+# Demonstrates the Map panel in the web editor (compartments use _p{N} suffix).
+
+time_unit = 'days
+
+compartments { S, I, R }
+
+stratify(by = patch, values = [p0, p1, p2, p3, p4])
+
+let N[p in patch] = S[p] + I[p] + R[p]
+
+parameters {
+  gamma       : rate     in [0.01, 1.0]
+  N0[patch]   : count    in [100,  1000000]
+  R0[patch]   : positive in [0.5,  10.0]
+  I0          : count    in [1,    1000]
+}
+
+let beta[p in patch] = R0[p] * gamma
+
+transitions {
+  infection[p in patch] : S[p] --> I[p]  @ beta[p] * S[p] * I[p] / N[p]
+  recovery[p in patch]  : I[p] --> R[p]  @ gamma * I[p]
+}
+
+init {
+  S[p0] = N0_p0 - I0
+  I[p0] = I0
+  S[p1] = N0_p1
+  S[p2] = N0_p2
+  S[p3] = N0_p3
+  S[p4] = N0_p4
+}
+
+simulate {
+  from = 0 'days
+  to   = 365 'days
+}
+
+scenarios {
+  baseline {
+    label = "5-patch baseline"
+    set = {
+      gamma   = 0.1
+      N0_p0   = 50000
+      N0_p1   = 80000
+      N0_p2   = 30000
+      N0_p3   = 120000
+      N0_p4   = 20000
+      R0_p0   = 2.5
+      R0_p1   = 1.8
+      R0_p2   = 3.2
+      R0_p3   = 1.5
+      R0_p4   = 2.9
+      I0      = 5
+    }
+  }
+}

@@ -11,6 +11,7 @@ import seirVaccineDsl           from '../../../ocaml/golden/seir_vaccine.camdl?r
 import seirVaccineSeasonalDsl   from '../../../ocaml/golden/seir_vaccine_seasonal.camdl?raw';
 import polioAgeDsl              from '../../../ocaml/golden/polio_age.camdl?raw';
 import polioSpatial5Dsl         from '../../../ocaml/golden/polio_spatial_5.camdl?raw';
+import sirPatches5Dsl           from '../../../ocaml/golden/sir_patches_5.camdl?raw';
 
 // Compiled IR JSON — carries presets and model metadata
 import sirBasicIr              from '../../../ocaml/golden/sir_basic.ir.json';
@@ -25,6 +26,7 @@ import seirVaccineIr           from '../../../ocaml/golden/seir_vaccine.ir.json'
 import seirVaccineSeasonalIr   from '../../../ocaml/golden/seir_vaccine_seasonal.ir.json';
 import polioAgeIr              from '../../../ocaml/golden/polio_age.ir.json';
 import polioSpatial5Ir         from '../../../ocaml/golden/polio_spatial_5.ir.json';
+import sirPatches5Ir           from '../../../ocaml/golden/sir_patches_5.ir.json';
 
 export interface ParamSet {
   name: string;
@@ -83,4 +85,5 @@ export const EXAMPLES: Example[] = [
   buildExample('seir_vaccine_seasonal', seirVaccineSeasonalDsl,  seirVaccineSeasonalIr as IrModel),
   buildExample('polio_age',             polioAgeDsl,             polioAgeIr as IrModel),
   buildExample('polio_spatial_5',       polioSpatial5Dsl,        polioSpatial5Ir as IrModel),
+  buildExample('sir_patches_5',         sirPatches5Dsl,          sirPatches5Ir as IrModel),
 ];

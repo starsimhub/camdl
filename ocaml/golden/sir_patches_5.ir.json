@@ -1,0 +1,453 @@
+{
+  "name": "sir_patches_5",
+  "version": "0.3",
+  "description": null,
+  "compartments": [
+    { "name": "S_p0", "kind": "integer" },
+    { "name": "S_p1", "kind": "integer" },
+    { "name": "S_p2", "kind": "integer" },
+    { "name": "S_p3", "kind": "integer" },
+    { "name": "S_p4", "kind": "integer" },
+    { "name": "I_p0", "kind": "integer" },
+    { "name": "I_p1", "kind": "integer" },
+    { "name": "I_p2", "kind": "integer" },
+    { "name": "I_p3", "kind": "integer" },
+    { "name": "I_p4", "kind": "integer" },
+    { "name": "R_p0", "kind": "integer" },
+    { "name": "R_p1", "kind": "integer" },
+    { "name": "R_p2", "kind": "integer" },
+    { "name": "R_p3", "kind": "integer" },
+    { "name": "R_p4", "kind": "integer" }
+  ],
+  "transitions": [
+    {
+      "name": "infection_p0",
+      "stoichiometry": [ [ "S_p0", -1 ], [ "I_p0", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "div",
+          "left": {
+            "bin_op": {
+              "op": "mul",
+              "left": {
+                "bin_op": {
+                  "op": "mul",
+                  "left": {
+                    "bin_op": {
+                      "op": "mul",
+                      "left": { "param": "R0_p0" },
+                      "right": { "param": "gamma" }
+                    }
+                  },
+                  "right": { "pop": "S_p0" }
+                }
+              },
+              "right": { "pop": "I_p0" }
+            }
+          },
+          "right": { "pop_sum": [ "S_p0", "I_p0", "R_p0" ] }
+        }
+      },
+      "event_key": "infection_p0:{firing_index}",
+      "metadata": {
+        "origin_kind": "transmission",
+        "source_compartment": "S_p0",
+        "dest_compartment": "I_p0"
+      }
+    },
+    {
+      "name": "infection_p1",
+      "stoichiometry": [ [ "S_p1", -1 ], [ "I_p1", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "div",
+          "left": {
+            "bin_op": {
+              "op": "mul",
+              "left": {
+                "bin_op": {
+                  "op": "mul",
+                  "left": {
+                    "bin_op": {
+                      "op": "mul",
+                      "left": { "param": "R0_p1" },
+                      "right": { "param": "gamma" }
+                    }
+                  },
+                  "right": { "pop": "S_p1" }
+                }
+              },
+              "right": { "pop": "I_p1" }
+            }
+          },
+          "right": { "pop_sum": [ "S_p1", "I_p1", "R_p1" ] }
+        }
+      },
+      "event_key": "infection_p1:{firing_index}",
+      "metadata": {
+        "origin_kind": "transmission",
+        "source_compartment": "S_p1",
+        "dest_compartment": "I_p1"
+      }
+    },
+    {
+      "name": "infection_p2",
+      "stoichiometry": [ [ "S_p2", -1 ], [ "I_p2", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "div",
+          "left": {
+            "bin_op": {
+              "op": "mul",
+              "left": {
+                "bin_op": {
+                  "op": "mul",
+                  "left": {
+                    "bin_op": {
+                      "op": "mul",
+                      "left": { "param": "R0_p2" },
+                      "right": { "param": "gamma" }
+                    }
+                  },
+                  "right": { "pop": "S_p2" }
+                }
+              },
+              "right": { "pop": "I_p2" }
+            }
+          },
+          "right": { "pop_sum": [ "S_p2", "I_p2", "R_p2" ] }
+        }
+      },
+      "event_key": "infection_p2:{firing_index}",
+      "metadata": {
+        "origin_kind": "transmission",
+        "source_compartment": "S_p2",
+        "dest_compartment": "I_p2"
+      }
+    },
+    {
+      "name": "infection_p3",
+      "stoichiometry": [ [ "S_p3", -1 ], [ "I_p3", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "div",
+          "left": {
+            "bin_op": {
+              "op": "mul",
+              "left": {
+                "bin_op": {
+                  "op": "mul",
+                  "left": {
+                    "bin_op": {
+                      "op": "mul",
+                      "left": { "param": "R0_p3" },
+                      "right": { "param": "gamma" }
+                    }
+                  },
+                  "right": { "pop": "S_p3" }
+                }
+              },
+              "right": { "pop": "I_p3" }
+            }
+          },
+          "right": { "pop_sum": [ "S_p3", "I_p3", "R_p3" ] }
+        }
+      },
+      "event_key": "infection_p3:{firing_index}",
+      "metadata": {
+        "origin_kind": "transmission",
+        "source_compartment": "S_p3",
+        "dest_compartment": "I_p3"
+      }
+    },
+    {
+      "name": "infection_p4",
+      "stoichiometry": [ [ "S_p4", -1 ], [ "I_p4", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "div",
+          "left": {
+            "bin_op": {
+              "op": "mul",
+              "left": {
+                "bin_op": {
+                  "op": "mul",
+                  "left": {
+                    "bin_op": {
+                      "op": "mul",
+                      "left": { "param": "R0_p4" },
+                      "right": { "param": "gamma" }
+                    }
+                  },
+                  "right": { "pop": "S_p4" }
+                }
+              },
+              "right": { "pop": "I_p4" }
+            }
+          },
+          "right": { "pop_sum": [ "S_p4", "I_p4", "R_p4" ] }
+        }
+      },
+      "event_key": "infection_p4:{firing_index}",
+      "metadata": {
+        "origin_kind": "transmission",
+        "source_compartment": "S_p4",
+        "dest_compartment": "I_p4"
+      }
+    },
+    {
+      "name": "recovery_p0",
+      "stoichiometry": [ [ "I_p0", -1 ], [ "R_p0", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": { "param": "gamma" },
+          "right": { "pop": "I_p0" }
+        }
+      },
+      "event_key": "recovery_p0:{firing_index}",
+      "metadata": {
+        "origin_kind": "intrinsic",
+        "source_compartment": "I_p0",
+        "dest_compartment": "R_p0"
+      }
+    },
+    {
+      "name": "recovery_p1",
+      "stoichiometry": [ [ "I_p1", -1 ], [ "R_p1", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": { "param": "gamma" },
+          "right": { "pop": "I_p1" }
+        }
+      },
+      "event_key": "recovery_p1:{firing_index}",
+      "metadata": {
+        "origin_kind": "intrinsic",
+        "source_compartment": "I_p1",
+        "dest_compartment": "R_p1"
+      }
+    },
+    {
+      "name": "recovery_p2",
+      "stoichiometry": [ [ "I_p2", -1 ], [ "R_p2", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": { "param": "gamma" },
+          "right": { "pop": "I_p2" }
+        }
+      },
+      "event_key": "recovery_p2:{firing_index}",
+      "metadata": {
+        "origin_kind": "intrinsic",
+        "source_compartment": "I_p2",
+        "dest_compartment": "R_p2"
+      }
+    },
+    {
+      "name": "recovery_p3",
+      "stoichiometry": [ [ "I_p3", -1 ], [ "R_p3", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": { "param": "gamma" },
+          "right": { "pop": "I_p3" }
+        }
+      },
+      "event_key": "recovery_p3:{firing_index}",
+      "metadata": {
+        "origin_kind": "intrinsic",
+        "source_compartment": "I_p3",
+        "dest_compartment": "R_p3"
+      }
+    },
+    {
+      "name": "recovery_p4",
+      "stoichiometry": [ [ "I_p4", -1 ], [ "R_p4", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": { "param": "gamma" },
+          "right": { "pop": "I_p4" }
+        }
+      },
+      "event_key": "recovery_p4:{firing_index}",
+      "metadata": {
+        "origin_kind": "intrinsic",
+        "source_compartment": "I_p4",
+        "dest_compartment": "R_p4"
+      }
+    }
+  ],
+  "ode_equations": [],
+  "time_functions": [],
+  "tables": [],
+  "interventions": [],
+  "observations": [],
+  "parameters": [
+    {
+      "name": "gamma",
+      "value": null,
+      "bounds": [ 0.01, 1.0 ],
+      "prior": null,
+      "transform": null,
+      "initial_value": null
+    },
+    {
+      "name": "N0_p0",
+      "value": null,
+      "bounds": [ 100.0, 1000000.0 ],
+      "prior": null,
+      "transform": null,
+      "initial_value": null
+    },
+    {
+      "name": "N0_p1",
+      "value": null,
+      "bounds": [ 100.0, 1000000.0 ],
+      "prior": null,
+      "transform": null,
+      "initial_value": null
+    },
+    {
+      "name": "N0_p2",
+      "value": null,
+      "bounds": [ 100.0, 1000000.0 ],
+      "prior": null,
+      "transform": null,
+      "initial_value": null
+    },
+    {
+      "name": "N0_p3",
+      "value": null,
+      "bounds": [ 100.0, 1000000.0 ],
+      "prior": null,
+      "transform": null,
+      "initial_value": null
+    },
+    {
+      "name": "N0_p4",
+      "value": null,
+      "bounds": [ 100.0, 1000000.0 ],
+      "prior": null,
+      "transform": null,
+      "initial_value": null
+    },
+    {
+      "name": "R0_p0",
+      "value": null,
+      "bounds": [ 0.5, 10.0 ],
+      "prior": null,
+      "transform": null,
+      "initial_value": null
+    },
+    {
+      "name": "R0_p1",
+      "value": null,
+      "bounds": [ 0.5, 10.0 ],
+      "prior": null,
+      "transform": null,
+      "initial_value": null
+    },
+    {
+      "name": "R0_p2",
+      "value": null,
+      "bounds": [ 0.5, 10.0 ],
+      "prior": null,
+      "transform": null,
+      "initial_value": null
+    },
+    {
+      "name": "R0_p3",
+      "value": null,
+      "bounds": [ 0.5, 10.0 ],
+      "prior": null,
+      "transform": null,
+      "initial_value": null
+    },
+    {
+      "name": "R0_p4",
+      "value": null,
+      "bounds": [ 0.5, 10.0 ],
+      "prior": null,
+      "transform": null,
+      "initial_value": null
+    },
+    {
+      "name": "I0",
+      "value": null,
+      "bounds": [ 1.0, 1000.0 ],
+      "prior": null,
+      "transform": null,
+      "initial_value": null
+    }
+  ],
+  "initial_conditions": {
+    "parameterized": {
+      "S_p0": {
+        "bin_op": {
+          "op": "sub",
+          "left": { "param": "N0_p0" },
+          "right": { "param": "I0" }
+        }
+      },
+      "I_p0": { "param": "I0" },
+      "S_p1": { "param": "N0_p1" },
+      "S_p2": { "param": "N0_p2" },
+      "S_p3": { "param": "N0_p3" },
+      "S_p4": { "param": "N0_p4" }
+    }
+  },
+  "data_contract": null,
+  "output": {
+    "times": { "regular": { "start": 0.0, "step": 1.0, "end": 365.0 } },
+    "format": "tsv",
+    "trajectory": true,
+    "observations": true
+  },
+  "simulation": {
+    "t_start": 0.0,
+    "t_end": 365.0,
+    "time_semantics": "continuous",
+    "dt": null,
+    "rng_seed": null
+  },
+  "scenarios": [
+    {
+      "name": "baseline",
+      "label": "5-patch baseline",
+      "params": {
+        "gamma": 0.1,
+        "N0_p0": 50000.0,
+        "N0_p1": 80000.0,
+        "N0_p2": 30000.0,
+        "N0_p3": 120000.0,
+        "N0_p4": 20000.0,
+        "R0_p0": 2.5,
+        "R0_p1": 1.8,
+        "R0_p2": 3.2,
+        "R0_p3": 1.5,
+        "R0_p4": 2.9,
+        "I0": 5.0
+      },
+      "enable": [],
+      "disable": [],
+      "t_end": null
+    }
+  ],
+  "model_structure": {
+    "dimensions": [
+      { "name": "patch", "values": [ "p0", "p1", "p2", "p3", "p4" ] }
+    ],
+    "compartment_dims": {
+      "S": [ "patch" ],
+      "I": [ "patch" ],
+      "R": [ "patch" ]
+    },
+    "base_compartments": [ "S", "I", "R" ],
+    "transmission_transitions": [ "infection" ],
+    "infectious_compartments": [ "I" ]
+  }
+}
