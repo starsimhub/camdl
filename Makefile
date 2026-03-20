@@ -83,9 +83,9 @@ uninstall:
 
 # ── Test ──────────────────────────────────────────────────────────────────────
 
-.PHONY: test test-ocaml test-rust
+.PHONY: test test-ocaml test-rust test-integration
 
-test: test-ocaml test-rust
+test: test-ocaml test-rust test-integration
 
 test-ocaml:
 	cd ocaml && dune runtest
@@ -93,9 +93,12 @@ test-ocaml:
 test-rust:
 	cd rust && cargo test --workspace
 
+test-integration: build
+	CAMDLC="$(CAMDLC)" CAMDL="$(CAMDL_SIM)" bash tests/test_ocaml_to_rust.sh
+
 # ── Golden file management ────────────────────────────────────────────────────
 
-.PHONY: update-golden update-ocaml-golden update-ir-golden
+.PHONY: update-golden update-ocaml-golden
 
 # Recompile all DSL fixtures → ocaml/golden/*.ir.json
 update-ocaml-golden: build-ocaml
@@ -106,20 +109,7 @@ update-ocaml-golden: build-ocaml
 		$(CAMDLC) "$$src" > "$$out"; \
 	done
 
-# Copy the shared ir/golden/ files from the compiled OCaml goldens
-# (only the models that exist in both directories)
-update-ir-golden: update-ocaml-golden
-	@echo "Updating ir/golden from ocaml/golden..."
-	@for f in seir_age sir_basic sir_demography; do \
-		src="ocaml/golden/$$f.ir.json"; \
-		dst="ir/golden/$$f.ir.json"; \
-		if [ -f "$$src" ]; then \
-			echo "  $$src → $$dst"; \
-			cp "$$src" "$$dst"; \
-		fi; \
-	done
-
-update-golden: update-ocaml-golden update-ir-golden
+update-golden: update-ocaml-golden
 
 # ── Quick simulation helpers ──────────────────────────────────────────────────
 

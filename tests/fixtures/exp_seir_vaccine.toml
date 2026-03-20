@@ -1,0 +1,20 @@
+# Polio-like endemic in 100k population over a 3-year horizon.
+# Compares no vaccination vs 80% SIA coverage using chain-binomial (dt=1d).
+# Exercises the params file integration path.
+
+[config]
+model   = "ocaml/golden/seir_vaccine.camdl"
+params  = "ocaml/golden/seir_vaccine.params.toml"
+backend = "chain_binomial"
+dt      = 1.0
+
+[config.seeds]
+n = 15
+
+[[scenario]]
+name   = "no_sia"
+params = { vacc_frac = 0.0 }
+
+[[scenario]]
+name   = "with_sia"
+params = { vacc_frac = 0.8 }

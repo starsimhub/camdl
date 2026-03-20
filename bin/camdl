@@ -20,7 +20,7 @@ CAMDLC=${CAMDLC:-camdlc}
 CAMDL_SIM=${CAMDL_SIM:-camdl-sim}
 
 if [ $# -eq 0 ]; then
-  echo "usage: camdl <compile|check|inspect|simulate>" >&2
+  echo "usage: camdl <compile|check|inspect|simulate|experiment|serve>" >&2
   exit 1
 fi
 
@@ -32,7 +32,7 @@ case "$1" in
   check|inspect)
     exec "$CAMDLC" "$@"
     ;;
-  simulate)
+  simulate|experiment|serve)
     exec "$CAMDL_SIM" "$@"
     ;;
   --help|-h|help)
@@ -40,10 +40,12 @@ case "$1" in
 camdl — stochastic compartmental model toolchain
 
 Subcommands:
-  compile   Compile a .camdl model to IR JSON (output on stdout)
-  check     Parse and validate a .camdl model (no output)
-  inspect   Inspect compiled IR (compartments, transitions, parameters, ...)
-  simulate  Run a forward simulation (accepts .camdl or .ir.json)
+  compile     Compile a .camdl model to IR JSON (output on stdout)
+  check       Parse and validate a .camdl model (no output)
+  inspect     Inspect compiled IR (compartments, transitions, parameters, ...)
+  simulate    Run a forward simulation (accepts .camdl or .ir.json)
+  experiment  Run or summarize a multi-scenario experiment (TOML manifest)
+  serve       Serve experiment output dirs over HTTP for the web editor
 
 Examples:
   camdl compile sir.camdl > sir.ir.json
@@ -54,7 +56,7 @@ EOF
     exit 0
     ;;
   *)
-    echo "camdl: unknown subcommand '$1'. Use compile, check, inspect, or simulate." >&2
+    echo "camdl: unknown subcommand '$1'. Use compile, check, inspect, simulate, experiment, or serve." >&2
     exit 1
     ;;
 esac
