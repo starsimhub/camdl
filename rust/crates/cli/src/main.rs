@@ -1,6 +1,7 @@
 mod util;
 mod hashing;
 mod experiment;
+mod serve;
 
 use sim::{
     CompiledModel, GillespieSim, TauLeapSim, ChainBinomialSim,
@@ -43,6 +44,9 @@ fn main() {
                     std::process::exit(1);
                 }
             }
+        }
+        "serve" => {
+            serve::cmd_serve(&all_args[1..]);
         }
         _ => {
             // Accept "camdl simulate FILE ..." or bare "camdl FILE ..."
