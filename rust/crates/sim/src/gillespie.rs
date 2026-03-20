@@ -6,11 +6,14 @@ use crate::{
     intervention::{all_intervention_times, apply_interventions_at},
     ode_integrator::rk4_step,
     output::output_times as get_output_times,
-    propensity::eval_propensities,
+    propensity::{eval_expr, eval_propensities},
     simulate::Simulate,
     state::{FlowVec, IntState, RealState, Snapshot, Trajectory},
     transition_diagnostics::TransitionDiagnostics,
 };
+
+/// Full recompute every N events to prevent floating-point drift in lambda_total.
+const FULL_RECOMPUTE_INTERVAL: usize = 10_000;
 
 pub struct GillespieSim;
 
@@ -31,6 +34,28 @@ impl Simulate for GillespieSim {
         };
         run_gillespie(model, params, seed, cfg)
     }
+}
+
+/// Evaluate a single transition's propensity, clamping negative values to 0.0.
+/// Used for incremental sparse updates where transient negatives can arise from drift.
+#[inline]
+fn eval_one(
+    tr_idx: usize,
+    model: &CompiledModel,
+    int_s: &IntState,
+    real_s: &RealState,
+    params: &[f64],
+    t: f64,
+) -> Result<f64, SimError> {
+    let p = eval_expr(
+        &model.model.transitions[tr_idx].rate,
+        model,
+        int_s,
+        real_s,
+        params,
+        t,
+    )?;
+    Ok(p.max(0.0))
 }
 
 fn run_gillespie(
@@ -85,17 +110,24 @@ fn run_gillespie(
         output_idx += 1;
     }
 
+    // Initial full propensity evaluation — maintained incrementally from here on.
+    eval_propensities(model, &int_s, &real_s, params, t, &mut propensities)?;
+    let mut lambda_total: f64 = propensities.iter().sum();
+    let mut event_count: usize = 0;
+
     loop {
         if t >= cfg.t_end { break; }
 
-        // Evaluate propensities
-        eval_propensities(model, &int_s, &real_s, params, t, &mut propensities)?;
-        let lambda_total: f64 = propensities.iter().sum();
+        // If lambda_total looks zero (from incremental drift or genuine absorbing state),
+        // do a full recompute to verify before treating as absorbing.
+        if lambda_total <= 0.0 {
+            eval_propensities(model, &int_s, &real_s, params, t, &mut propensities)?;
+            lambda_total = propensities.iter().sum();
+        }
 
         if lambda_total <= 0.0 {
             // Absorbing state — advance to next output/intervention or end
             let next_special = next_time(cfg.t_end, output_idx, &output_times, iv_idx, &iv_times);
-            // Flush outputs up to end
             flush_outputs(
                 t, next_special, &mut output_idx, &output_times,
                 &int_s, &real_s, &mut current_flows, &mut traj, n_transitions,
@@ -108,6 +140,9 @@ fn run_gillespie(
                     while iv_idx < iv_times.len() && iv_times[iv_idx] <= t + 1e-10 {
                         iv_idx += 1;
                     }
+                    // Full recompute after intervention
+                    eval_propensities(model, &int_s, &real_s, params, t, &mut propensities)?;
+                    lambda_total = propensities.iter().sum();
                     // Propensities might become non-zero again after intervention
                     continue;
                 }
@@ -142,11 +177,24 @@ fn run_gillespie(
             t = boundary;
 
             // Apply intervention if at intervention boundary
-            if next_iv_t.map_or(false, |iv_t| (iv_t - t).abs() < 1e-10) {
+            let at_iv = next_iv_t.map_or(false, |iv_t| (iv_t - t).abs() < 1e-10);
+            if at_iv {
                 apply_interventions_at(t, model, &mut int_s, &mut real_s, params, 1e-10)?;
                 while iv_idx < iv_times.len() && iv_times[iv_idx] <= t + 1e-10 {
                     iv_idx += 1;
                 }
+                // Full recompute after intervention (integer state changed)
+                eval_propensities(model, &int_s, &real_s, params, t, &mut propensities)?;
+                lambda_total = propensities.iter().sum();
+            } else {
+                // Time advanced but no state change: re-evaluate time-dependent transitions
+                for &tr_idx in &model.time_dep_transitions {
+                    let old = propensities[tr_idx];
+                    let new_p = eval_one(tr_idx, model, &int_s, &real_s, params, t)?;
+                    propensities[tr_idx] = new_p;
+                    lambda_total += new_p - old;
+                }
+                lambda_total = lambda_total.max(0.0);
             }
 
             // Record output if at output boundary
@@ -207,6 +255,46 @@ fn run_gillespie(
             int_s.counts.iter().all(|&v| v >= 0),
             "non-negativity violated at t={}", t
         );
+
+        // --- Sparse propensity update ---
+        event_count += 1;
+        if event_count % FULL_RECOMPUTE_INTERVAL == 0 {
+            // Periodic full recompute prevents floating-point drift in lambda_total
+            eval_propensities(model, &int_s, &real_s, params, t, &mut propensities)?;
+            lambda_total = propensities.iter().sum();
+        } else {
+            // Incremental update: only recompute transitions whose dependencies changed.
+            // `updated` tracks which transitions we've already recomputed this step to
+            // avoid evaluating the same transition twice when multiple stoich entries
+            // share a dependent transition (e.g., N[p] = S[p] + E[p] + ...).
+            let mut updated: Vec<usize> = Vec::with_capacity(16);
+
+            // Compartment-dependent transitions
+            for &(local, _) in &model.transition_stoich[fired_idx] {
+                for &tr_idx in &model.comp_to_transitions[local] {
+                    if !updated.contains(&tr_idx) {
+                        let old = propensities[tr_idx];
+                        let new_p = eval_one(tr_idx, model, &int_s, &real_s, params, t)?;
+                        propensities[tr_idx] = new_p;
+                        lambda_total += new_p - old;
+                        updated.push(tr_idx);
+                    }
+                }
+            }
+
+            // Time-dependent transitions at new t (skip if already updated above)
+            for &tr_idx in &model.time_dep_transitions {
+                if !updated.contains(&tr_idx) {
+                    let old = propensities[tr_idx];
+                    let new_p = eval_one(tr_idx, model, &int_s, &real_s, params, t)?;
+                    propensities[tr_idx] = new_p;
+                    lambda_total += new_p - old;
+                }
+            }
+
+            // Prevent negative drift accumulation
+            lambda_total = lambda_total.max(0.0);
+        }
 
         // Record output at any output times we've passed
         while output_idx < output_times.len() && output_times[output_idx] <= t + 1e-12 {

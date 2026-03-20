@@ -20,6 +20,70 @@ pub struct CompiledTimeFunc {
     pub kind: CompiledTimeFuncKind,
 }
 
+/// Recursively collect integer compartment local indices referenced in an expression.
+fn collect_int_comp_deps(
+    expr: &Expr,
+    comp_index: &HashMap<String, usize>,
+    global_to_int: &[Option<usize>],
+    deps: &mut std::collections::HashSet<usize>,
+) {
+    match expr {
+        Expr::Pop(p) => {
+            if let Some(&global) = comp_index.get(p.pop.as_str()) {
+                if let Some(local) = global_to_int[global] {
+                    deps.insert(local);
+                }
+            }
+        }
+        Expr::PopSum(ps) => {
+            for name in &ps.pop_sum {
+                if let Some(&global) = comp_index.get(name.as_str()) {
+                    if let Some(local) = global_to_int[global] {
+                        deps.insert(local);
+                    }
+                }
+            }
+        }
+        Expr::BinOp(w) => {
+            collect_int_comp_deps(&w.bin_op.left, comp_index, global_to_int, deps);
+            collect_int_comp_deps(&w.bin_op.right, comp_index, global_to_int, deps);
+        }
+        Expr::UnOp(w) => {
+            collect_int_comp_deps(&w.un_op.arg, comp_index, global_to_int, deps);
+        }
+        Expr::Cond(w) => {
+            collect_int_comp_deps(&w.cond.pred, comp_index, global_to_int, deps);
+            collect_int_comp_deps(&w.cond.then, comp_index, global_to_int, deps);
+            collect_int_comp_deps(&w.cond.else_, comp_index, global_to_int, deps);
+        }
+        Expr::TableLookup(w) => {
+            for idx_expr in &w.table_lookup.indices {
+                collect_int_comp_deps(idx_expr, comp_index, global_to_int, deps);
+            }
+        }
+        // Const, Param, Time, TimeFunc: no compartment dependencies
+        _ => {}
+    }
+}
+
+/// Returns true if the expression contains any time function reference.
+fn expr_has_time_func(expr: &Expr) -> bool {
+    match expr {
+        Expr::TimeFunc(_) => true,
+        Expr::BinOp(w) => {
+            expr_has_time_func(&w.bin_op.left) || expr_has_time_func(&w.bin_op.right)
+        }
+        Expr::UnOp(w) => expr_has_time_func(&w.un_op.arg),
+        Expr::Cond(w) => {
+            expr_has_time_func(&w.cond.pred)
+                || expr_has_time_func(&w.cond.then)
+                || expr_has_time_func(&w.cond.else_)
+        }
+        Expr::TableLookup(w) => w.table_lookup.indices.iter().any(expr_has_time_func),
+        _ => false,
+    }
+}
+
 /// Evaluate a table value expression using only params (no compartment state).
 /// Table values may only reference constants and parameters.
 fn eval_table_expr(
@@ -124,6 +188,15 @@ pub struct CompiledModel {
     /// Per-time-function resolved values (Expr fields evaluated at load time).
     /// Indexed in the same order as model.time_functions / time_func_index.
     pub time_func_cache: Vec<CompiledTimeFunc>,
+
+    /// For each integer compartment (local index), the list of transition indices
+    /// whose rate expression references that compartment.
+    /// Used for sparse incremental propensity updates after stoichiometry changes.
+    pub comp_to_transitions: Vec<Vec<usize>>,
+
+    /// Indices of transitions whose rate expression contains a time function.
+    /// These must be re-evaluated whenever simulation time advances.
+    pub time_dep_transitions: Vec<usize>,
 }
 
 impl CompiledModel {
@@ -197,6 +270,23 @@ impl CompiledModel {
                 }
             }
             transition_stoich.push(stoich);
+        }
+
+        // Build dependency graph for sparse propensity updates.
+        // comp_to_transitions[local_int_idx] = [transition indices that reference it]
+        // time_dep_transitions = [transition indices with TimeFunc in rate expression]
+        let n_int_comps = int_local_to_global.len();
+        let mut comp_to_transitions: Vec<Vec<usize>> = vec![vec![]; n_int_comps];
+        let mut time_dep_transitions: Vec<usize> = Vec::new();
+        for (tr_idx, tr) in model.transitions.iter().enumerate() {
+            let mut deps = std::collections::HashSet::new();
+            collect_int_comp_deps(&tr.rate, &comp_index, &global_to_int, &mut deps);
+            for local_idx in deps {
+                comp_to_transitions[local_idx].push(tr_idx);
+            }
+            if expr_has_time_func(&tr.rate) {
+                time_dep_transitions.push(tr_idx);
+            }
         }
 
         // Pre-compute ODE equation → real local index
@@ -294,6 +384,8 @@ impl CompiledModel {
             ode_real_indices,
             table_values_cache,
             time_func_cache,
+            comp_to_transitions,
+            time_dep_transitions,
         })
     }
 
