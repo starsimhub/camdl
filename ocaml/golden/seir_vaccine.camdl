@@ -1,0 +1,50 @@
+# Layer 1: SEIR+V with SIA intervention
+# Baseline polio model: vaccination compartment + supplemental immunisation activity.
+# Builds toward age-structured and spatial extensions (Layers 3–4).
+
+time_unit = 'days
+
+compartments { S, E, I, R, V }
+
+let N = S + E + I + R + V
+
+parameters {
+  beta      : rate        in [0.001, 0.5]
+  sigma     : rate        in [0.01,  1.0]
+  gamma     : rate        in [0.01,  1.0]
+  omega     : rate        in [0.0001, 0.1]   # waning immunity: V → S
+  vacc_frac : probability in [0.0,   1.0]
+  N0        : count       in [100, 1000000]
+  I0        : count       in [1,   1000]
+}
+
+transitions {
+  infection   : S --> E  @ beta * S * I / N
+  progression : E --> I  @ sigma * E
+  recovery    : I --> R  @ gamma * I
+  waning      : V --> S  @ omega * V
+}
+
+interventions {
+  sia_round_1 : transfer(fraction = vacc_frac, from = S, to = V) at [180, 545, 910]
+}
+
+init {
+  S = N0 - I0
+  I = I0
+}
+
+simulate {
+  from = 0 'days
+  to   = 3 'years
+}
+
+scenarios {
+  baseline {
+    label = "no SIA (baseline)"
+  }
+  with_sia {
+    label = "with SIA rounds"
+    enable = [sia_round_1]
+  }
+}

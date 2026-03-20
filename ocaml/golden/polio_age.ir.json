@@ -1,0 +1,419 @@
+{
+  "name": "polio_age",
+  "version": "0.3",
+  "description": null,
+  "compartments": [
+    { "name": "S_under5", "kind": "integer" },
+    { "name": "S_over5", "kind": "integer" },
+    { "name": "E_under5", "kind": "integer" },
+    { "name": "E_over5", "kind": "integer" },
+    { "name": "I_under5", "kind": "integer" },
+    { "name": "I_over5", "kind": "integer" },
+    { "name": "R_under5", "kind": "integer" },
+    { "name": "R_over5", "kind": "integer" },
+    { "name": "V_under5", "kind": "integer" },
+    { "name": "V_over5", "kind": "integer" }
+  ],
+  "transitions": [
+    {
+      "name": "infection_under5",
+      "stoichiometry": [ [ "S_under5", -1 ], [ "E_under5", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": {
+            "bin_op": {
+              "op": "mul",
+              "left": { "param": "beta" },
+              "right": { "pop": "S_under5" }
+            }
+          },
+          "right": {
+            "bin_op": {
+              "op": "add",
+              "left": {
+                "bin_op": {
+                  "op": "div",
+                  "left": {
+                    "bin_op": {
+                      "op": "mul",
+                      "left": {
+                        "table_lookup": {
+                          "table": "C_age",
+                          "indices": [ { "const": 0.0 } ]
+                        }
+                      },
+                      "right": { "pop": "I_under5" }
+                    }
+                  },
+                  "right": {
+                    "pop_sum": [
+                      "S_under5", "E_under5", "I_under5", "R_under5",
+                      "V_under5"
+                    ]
+                  }
+                }
+              },
+              "right": {
+                "bin_op": {
+                  "op": "div",
+                  "left": {
+                    "bin_op": {
+                      "op": "mul",
+                      "left": {
+                        "table_lookup": {
+                          "table": "C_age",
+                          "indices": [ { "const": 1.0 } ]
+                        }
+                      },
+                      "right": { "pop": "I_over5" }
+                    }
+                  },
+                  "right": {
+                    "pop_sum": [
+                      "S_over5", "E_over5", "I_over5", "R_over5", "V_over5"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "event_key": "infection_under5:{firing_index}",
+      "metadata": {
+        "origin_kind": "transmission",
+        "source_compartment": "S_under5",
+        "dest_compartment": "E_under5"
+      }
+    },
+    {
+      "name": "infection_over5",
+      "stoichiometry": [ [ "S_over5", -1 ], [ "E_over5", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": {
+            "bin_op": {
+              "op": "mul",
+              "left": { "param": "beta" },
+              "right": { "pop": "S_over5" }
+            }
+          },
+          "right": {
+            "bin_op": {
+              "op": "add",
+              "left": {
+                "bin_op": {
+                  "op": "div",
+                  "left": {
+                    "bin_op": {
+                      "op": "mul",
+                      "left": {
+                        "table_lookup": {
+                          "table": "C_age",
+                          "indices": [ { "const": 2.0 } ]
+                        }
+                      },
+                      "right": { "pop": "I_under5" }
+                    }
+                  },
+                  "right": {
+                    "pop_sum": [
+                      "S_under5", "E_under5", "I_under5", "R_under5",
+                      "V_under5"
+                    ]
+                  }
+                }
+              },
+              "right": {
+                "bin_op": {
+                  "op": "div",
+                  "left": {
+                    "bin_op": {
+                      "op": "mul",
+                      "left": {
+                        "table_lookup": {
+                          "table": "C_age",
+                          "indices": [ { "const": 3.0 } ]
+                        }
+                      },
+                      "right": { "pop": "I_over5" }
+                    }
+                  },
+                  "right": {
+                    "pop_sum": [
+                      "S_over5", "E_over5", "I_over5", "R_over5", "V_over5"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "event_key": "infection_over5:{firing_index}",
+      "metadata": {
+        "origin_kind": "transmission",
+        "source_compartment": "S_over5",
+        "dest_compartment": "E_over5"
+      }
+    },
+    {
+      "name": "progression_under5",
+      "stoichiometry": [ [ "E_under5", -1 ], [ "I_under5", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": { "param": "sigma" },
+          "right": { "pop": "E_under5" }
+        }
+      },
+      "event_key": "progression_under5:{firing_index}",
+      "metadata": {
+        "origin_kind": "intrinsic",
+        "source_compartment": "E_under5",
+        "dest_compartment": "I_under5"
+      }
+    },
+    {
+      "name": "progression_over5",
+      "stoichiometry": [ [ "E_over5", -1 ], [ "I_over5", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": { "param": "sigma" },
+          "right": { "pop": "E_over5" }
+        }
+      },
+      "event_key": "progression_over5:{firing_index}",
+      "metadata": {
+        "origin_kind": "intrinsic",
+        "source_compartment": "E_over5",
+        "dest_compartment": "I_over5"
+      }
+    },
+    {
+      "name": "recovery_under5",
+      "stoichiometry": [ [ "I_under5", -1 ], [ "R_under5", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": { "param": "gamma" },
+          "right": { "pop": "I_under5" }
+        }
+      },
+      "event_key": "recovery_under5:{firing_index}",
+      "metadata": {
+        "origin_kind": "intrinsic",
+        "source_compartment": "I_under5",
+        "dest_compartment": "R_under5"
+      }
+    },
+    {
+      "name": "recovery_over5",
+      "stoichiometry": [ [ "I_over5", -1 ], [ "R_over5", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": { "param": "gamma" },
+          "right": { "pop": "I_over5" }
+        }
+      },
+      "event_key": "recovery_over5:{firing_index}",
+      "metadata": {
+        "origin_kind": "intrinsic",
+        "source_compartment": "I_over5",
+        "dest_compartment": "R_over5"
+      }
+    },
+    {
+      "name": "waning_under5",
+      "stoichiometry": [ [ "V_under5", -1 ], [ "S_under5", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": { "param": "omega" },
+          "right": { "pop": "V_under5" }
+        }
+      },
+      "event_key": "waning_under5:{firing_index}",
+      "metadata": {
+        "origin_kind": "intrinsic",
+        "source_compartment": "V_under5",
+        "dest_compartment": "S_under5"
+      }
+    },
+    {
+      "name": "waning_over5",
+      "stoichiometry": [ [ "V_over5", -1 ], [ "S_over5", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": { "param": "omega" },
+          "right": { "pop": "V_over5" }
+        }
+      },
+      "event_key": "waning_over5:{firing_index}",
+      "metadata": {
+        "origin_kind": "intrinsic",
+        "source_compartment": "V_over5",
+        "dest_compartment": "S_over5"
+      }
+    }
+  ],
+  "ode_equations": [],
+  "time_functions": [],
+  "tables": [
+    {
+      "name": "C_age",
+      "values": [
+        { "const": 8.0 },
+        { "const": 3.0 },
+        { "const": 3.0 },
+        { "const": 6.0 }
+      ],
+      "out_of_bounds": "error"
+    }
+  ],
+  "interventions": [
+    {
+      "name": "sia_round_1",
+      "schedule": { "at_times": [ 180.0, 545.0, 910.0 ] },
+      "actions": [
+        {
+          "fraction_transfer": {
+            "src": "S_under5",
+            "dst": "V_under5",
+            "fraction": { "param": "vacc_frac" }
+          }
+        }
+      ]
+    }
+  ],
+  "observations": [],
+  "parameters": [
+    {
+      "name": "beta",
+      "value": null,
+      "bounds": [ 0.001, 0.5 ],
+      "prior": null,
+      "transform": null,
+      "initial_value": null
+    },
+    {
+      "name": "sigma",
+      "value": null,
+      "bounds": [ 0.01, 1.0 ],
+      "prior": null,
+      "transform": null,
+      "initial_value": null
+    },
+    {
+      "name": "gamma",
+      "value": null,
+      "bounds": [ 0.01, 1.0 ],
+      "prior": null,
+      "transform": null,
+      "initial_value": null
+    },
+    {
+      "name": "omega",
+      "value": null,
+      "bounds": [ 0.0001, 0.1 ],
+      "prior": null,
+      "transform": null,
+      "initial_value": null
+    },
+    {
+      "name": "vacc_frac",
+      "value": null,
+      "bounds": [ 0.0, 1.0 ],
+      "prior": null,
+      "transform": null,
+      "initial_value": null
+    },
+    {
+      "name": "N0_under5",
+      "value": null,
+      "bounds": [ 100.0, 1000000.0 ],
+      "prior": null,
+      "transform": null,
+      "initial_value": null
+    },
+    {
+      "name": "N0_over5",
+      "value": null,
+      "bounds": [ 100.0, 1000000.0 ],
+      "prior": null,
+      "transform": null,
+      "initial_value": null
+    },
+    {
+      "name": "I0",
+      "value": null,
+      "bounds": [ 1.0, 1000.0 ],
+      "prior": null,
+      "transform": null,
+      "initial_value": null
+    }
+  ],
+  "initial_conditions": {
+    "parameterized": {
+      "S_under5": {
+        "bin_op": {
+          "op": "sub",
+          "left": { "param": "N0_under5" },
+          "right": { "param": "I0" }
+        }
+      },
+      "S_over5": { "param": "N0_over5" },
+      "I_under5": { "param": "I0" }
+    }
+  },
+  "data_contract": null,
+  "output": {
+    "times": { "regular": { "start": 0.0, "step": 1.0, "end": 1095.75 } },
+    "format": "tsv",
+    "trajectory": true,
+    "observations": true
+  },
+  "simulation": {
+    "t_start": 0.0,
+    "t_end": 1095.75,
+    "time_semantics": "continuous",
+    "dt": null,
+    "rng_seed": null
+  },
+  "presets": [
+    {
+      "name": "baseline",
+      "label": "no SIA (baseline)",
+      "params": {},
+      "enable": [],
+      "disable": [],
+      "t_end": null
+    },
+    {
+      "name": "with_sia",
+      "label": "with SIA targeting under-5",
+      "params": {},
+      "enable": [ "sia_round_1" ],
+      "disable": [],
+      "t_end": null
+    }
+  ],
+  "model_structure": {
+    "dimensions": [ { "name": "age", "values": [ "under5", "over5" ] } ],
+    "compartment_dims": {
+      "S": [ "age" ],
+      "E": [ "age" ],
+      "I": [ "age" ],
+      "R": [ "age" ],
+      "V": [ "age" ]
+    },
+    "base_compartments": [ "S", "E", "I", "R", "V" ],
+    "transmission_transitions": [ "infection" ],
+    "infectious_compartments": [ "I" ]
+  }
+}

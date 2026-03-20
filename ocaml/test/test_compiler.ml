@@ -878,6 +878,49 @@ let test_time_func_param_arg () =
                [{ tf with Ir.kind = Ir.Sinusoidal { s with Ir.amplitude = other } }] }))
      | _ -> Alcotest.fail "expected Sinusoidal kind")
 
+(* ── Layer 3: age-targeted SIA ────────────────────────────────────────────── *)
+
+let test_polio_age_sia_targets_under5 () =
+  let src = read_file (Filename.concat golden_dir "polio_age.camdl") in
+  match Compiler.compile ~name:"polio_age" src with
+  | Error e -> Alcotest.failf "compile failed: %s" e
+  | Ok m ->
+    (* There should be exactly one intervention named sia_round_1 *)
+    let iv = match List.find_opt (fun (iv : Ir.intervention) -> iv.name = "sia_round_1") m.interventions with
+      | Some iv -> iv
+      | None -> Alcotest.fail "sia_round_1 intervention not found"
+    in
+    (* Its only action should transfer S_under5 → V_under5 (not S_over5) *)
+    (match iv.actions with
+     | [ Ir.FractionTransfer { src; dst; _ } ] ->
+       Alcotest.(check string) "src is S_under5" "S_under5" src;
+       Alcotest.(check string) "dst is V_under5" "V_under5" dst
+     | _ -> Alcotest.fail "expected exactly one FractionTransfer action")
+
+(* ── Layer 4: where p!=q guard filters diagonal importation ─────────────── *)
+
+let test_spatial_5_importation_count () =
+  let src = read_file (Filename.concat golden_dir "polio_spatial_5.camdl") in
+  match Compiler.compile ~name:"polio_spatial_5" src with
+  | Error e -> Alcotest.failf "compile failed: %s" e
+  | Ok m ->
+    (* 5 patches × 5 transitions (local) = 25 compartments *)
+    Alcotest.(check int) "25 compartments" 25 (List.length m.compartments);
+    (* importation[p,q where p!=q]: 5×5 - 5 = 20 transitions *)
+    let imports = List.filter (fun (t : Ir.transition) ->
+      let n = t.name in
+      String.length n > 12 &&
+      String.sub n 0 12 = "importation_"
+    ) m.transitions in
+    Alcotest.(check int) "20 importation transitions (where p!=q)" 20 (List.length imports);
+    (* No self-loop: importation_north_north must not exist *)
+    let has_self = List.exists (fun (t : Ir.transition) ->
+      t.name = "importation_north_north" ||
+      t.name = "importation_south_south" ||
+      t.name = "importation_center_center"
+    ) m.transitions in
+    Alcotest.(check bool) "no self-loop importation" false has_self
+
 let () =
   Alcotest.run "compiler" [
     "golden", [
@@ -889,6 +932,10 @@ let () =
       Alcotest.test_case "seir_erlang_staged" `Quick (test_golden "seir_erlang_staged");
       Alcotest.test_case "sir_coupling"       `Quick (test_golden "sir_coupling");
       Alcotest.test_case "sir_two_patch"      `Quick (test_golden "sir_two_patch");
+      Alcotest.test_case "seir_vaccine"            `Quick (test_golden "seir_vaccine");
+      Alcotest.test_case "seir_vaccine_seasonal"   `Quick (test_golden "seir_vaccine_seasonal");
+      Alcotest.test_case "polio_age"               `Quick (test_golden "polio_age");
+      Alcotest.test_case "polio_spatial_5"         `Quick (test_golden "polio_spatial_5");
     ];
     "table_lookup_flattening", [
       Alcotest.test_case "single index per lookup" `Quick test_table_lookup_single_index;
@@ -931,5 +978,9 @@ let () =
     "param_bounds", [
       Alcotest.test_case "scalar param in [lo, hi]"          `Quick test_scalar_bounds;
       Alcotest.test_case "indexed param bounds expand to all strata" `Quick test_indexed_bounds;
+    ];
+    "polio_models", [
+      Alcotest.test_case "age-targeted SIA targets S_under5 → V_under5" `Quick test_polio_age_sia_targets_under5;
+      Alcotest.test_case "spatial where p!=q gives 20 importation transitions" `Quick test_spatial_5_importation_count;
     ];
   ]

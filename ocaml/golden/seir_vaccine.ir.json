@@ -1,0 +1,222 @@
+{
+  "name": "seir_vaccine",
+  "version": "0.3",
+  "description": null,
+  "compartments": [
+    { "name": "S", "kind": "integer" },
+    { "name": "E", "kind": "integer" },
+    { "name": "I", "kind": "integer" },
+    { "name": "R", "kind": "integer" },
+    { "name": "V", "kind": "integer" }
+  ],
+  "transitions": [
+    {
+      "name": "infection",
+      "stoichiometry": [ [ "S", -1 ], [ "E", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "div",
+          "left": {
+            "bin_op": {
+              "op": "mul",
+              "left": {
+                "bin_op": {
+                  "op": "mul",
+                  "left": { "param": "beta" },
+                  "right": { "pop": "S" }
+                }
+              },
+              "right": { "pop": "I" }
+            }
+          },
+          "right": { "pop_sum": [ "S", "E", "I", "R", "V" ] }
+        }
+      },
+      "event_key": "infection:{firing_index}",
+      "metadata": {
+        "origin_kind": "transmission",
+        "source_compartment": "S",
+        "dest_compartment": "E"
+      }
+    },
+    {
+      "name": "progression",
+      "stoichiometry": [ [ "E", -1 ], [ "I", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": { "param": "sigma" },
+          "right": { "pop": "E" }
+        }
+      },
+      "event_key": "progression:{firing_index}",
+      "metadata": {
+        "origin_kind": "intrinsic",
+        "source_compartment": "E",
+        "dest_compartment": "I"
+      }
+    },
+    {
+      "name": "recovery",
+      "stoichiometry": [ [ "I", -1 ], [ "R", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": { "param": "gamma" },
+          "right": { "pop": "I" }
+        }
+      },
+      "event_key": "recovery:{firing_index}",
+      "metadata": {
+        "origin_kind": "intrinsic",
+        "source_compartment": "I",
+        "dest_compartment": "R"
+      }
+    },
+    {
+      "name": "waning",
+      "stoichiometry": [ [ "V", -1 ], [ "S", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": { "param": "omega" },
+          "right": { "pop": "V" }
+        }
+      },
+      "event_key": "waning:{firing_index}",
+      "metadata": {
+        "origin_kind": "intrinsic",
+        "source_compartment": "V",
+        "dest_compartment": "S"
+      }
+    }
+  ],
+  "ode_equations": [],
+  "time_functions": [],
+  "tables": [],
+  "interventions": [
+    {
+      "name": "sia_round_1",
+      "schedule": { "at_times": [ 180.0, 545.0, 910.0 ] },
+      "actions": [
+        {
+          "fraction_transfer": {
+            "src": "S",
+            "dst": "V",
+            "fraction": { "param": "vacc_frac" }
+          }
+        }
+      ]
+    }
+  ],
+  "observations": [],
+  "parameters": [
+    {
+      "name": "beta",
+      "value": null,
+      "bounds": [ 0.001, 0.5 ],
+      "prior": null,
+      "transform": null,
+      "initial_value": null
+    },
+    {
+      "name": "sigma",
+      "value": null,
+      "bounds": [ 0.01, 1.0 ],
+      "prior": null,
+      "transform": null,
+      "initial_value": null
+    },
+    {
+      "name": "gamma",
+      "value": null,
+      "bounds": [ 0.01, 1.0 ],
+      "prior": null,
+      "transform": null,
+      "initial_value": null
+    },
+    {
+      "name": "omega",
+      "value": null,
+      "bounds": [ 0.0001, 0.1 ],
+      "prior": null,
+      "transform": null,
+      "initial_value": null
+    },
+    {
+      "name": "vacc_frac",
+      "value": null,
+      "bounds": [ 0.0, 1.0 ],
+      "prior": null,
+      "transform": null,
+      "initial_value": null
+    },
+    {
+      "name": "N0",
+      "value": null,
+      "bounds": [ 100.0, 1000000.0 ],
+      "prior": null,
+      "transform": null,
+      "initial_value": null
+    },
+    {
+      "name": "I0",
+      "value": null,
+      "bounds": [ 1.0, 1000.0 ],
+      "prior": null,
+      "transform": null,
+      "initial_value": null
+    }
+  ],
+  "initial_conditions": {
+    "parameterized": {
+      "S": {
+        "bin_op": {
+          "op": "sub",
+          "left": { "param": "N0" },
+          "right": { "param": "I0" }
+        }
+      },
+      "I": { "param": "I0" }
+    }
+  },
+  "data_contract": null,
+  "output": {
+    "times": { "regular": { "start": 0.0, "step": 1.0, "end": 1095.75 } },
+    "format": "tsv",
+    "trajectory": true,
+    "observations": true
+  },
+  "simulation": {
+    "t_start": 0.0,
+    "t_end": 1095.75,
+    "time_semantics": "continuous",
+    "dt": null,
+    "rng_seed": null
+  },
+  "presets": [
+    {
+      "name": "baseline",
+      "label": "no SIA (baseline)",
+      "params": {},
+      "enable": [],
+      "disable": [],
+      "t_end": null
+    },
+    {
+      "name": "with_sia",
+      "label": "with SIA rounds",
+      "params": {},
+      "enable": [ "sia_round_1" ],
+      "disable": [],
+      "t_end": null
+    }
+  ],
+  "model_structure": {
+    "dimensions": [],
+    "compartment_dims": { "S": [], "E": [], "I": [], "R": [], "V": [] },
+    "base_compartments": [ "S", "E", "I", "R", "V" ],
+    "transmission_transitions": [ "infection" ],
+    "infectious_compartments": [ "I" ]
+  }
+}

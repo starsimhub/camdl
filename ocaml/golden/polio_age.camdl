@@ -1,0 +1,63 @@
+# Layer 3: Age-structured SEIR+V with SIA targeting under-5s
+# Adds 2-group age stratification and age-specific contact matrix to Layer 1.
+# SIA targets only the under-5 age group (highest polio risk).
+
+time_unit = 'days
+
+compartments { S, E, I, R, V }
+
+stratify(by = age, values = [under5, over5])
+
+let N[a in age] = S[a] + E[a] + I[a] + R[a] + V[a]
+
+parameters {
+  beta      : rate        in [0.001, 0.5]
+  sigma     : rate        in [0.01,  1.0]
+  gamma     : rate        in [0.01,  1.0]
+  omega     : rate        in [0.0001, 0.1]   # waning immunity: V → S
+  vacc_frac : probability in [0.0,   1.0]
+  N0[age]   : count       in [100, 1000000]
+  I0        : count       in [1,   1000]
+}
+
+tables {
+  # Age-specific contact rates (under5 × under5, under5 × over5, etc.)
+  # Under-5s have higher within-group contacts; over-5s dominate cross-group.
+  C_age : age × age = [[8.0, 3.0],
+                        [3.0, 6.0]]
+}
+
+transitions {
+  infection[a in age] : S[a] --> E[a]
+    @ beta * S[a] * sum(b in age, C_age[a, b] * I[b] / N[b])
+
+  progression[a in age] : E[a] --> I[a]  @ sigma * E[a]
+  recovery[a in age]    : I[a] --> R[a]  @ gamma * I[a]
+  waning[a in age]      : V[a] --> S[a]  @ omega * V[a]
+}
+
+interventions {
+  # SIA targets susceptible under-5s only (age-targeted campaign)
+  sia_round_1 : transfer(fraction = vacc_frac, from = S[under5], to = V[under5]) at [180, 545, 910]
+}
+
+init {
+  S[under5] = N0_under5 - I0
+  S[over5]  = N0_over5
+  I[under5] = I0
+}
+
+simulate {
+  from = 0 'days
+  to   = 3 'years
+}
+
+scenarios {
+  baseline {
+    label = "no SIA (baseline)"
+  }
+  with_sia {
+    label = "with SIA targeting under-5"
+    enable = [sia_round_1]
+  }
+}

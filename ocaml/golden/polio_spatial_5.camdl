@@ -1,0 +1,83 @@
+# Layer 4: 5-patch spatial SEIR+V with gravity coupling
+# Adds spatial stratification over 5 patches to Layer 1.
+# Gravity coupling: local transmission + importation from other patches (where p != q).
+# Development sandbox for 774-LGA Nigeria model (same structure, 150x smaller).
+
+time_unit = 'days
+
+compartments { S, E, I, R, V }
+
+stratify(by = patch, values = [north, south, east, west, center])
+
+let N[p in patch] = S[p] + E[p] + I[p] + R[p] + V[p]
+
+parameters {
+  sigma     : rate        in [0.01,  1.0]
+  gamma     : rate        in [0.01,  1.0]
+  omega     : rate        in [0.0001, 0.1]  # waning immunity: V → S
+  kappa     : rate        in [0.0,   0.5]   # importation coupling strength
+  vacc_frac : probability in [0.0,   1.0]
+  R0[patch] : positive    in [0.5,   10.0]
+  N0[patch] : count       in [100,   1000000]
+  I0        : count       in [1,     1000]
+}
+
+let beta[p in patch] = R0[p] * gamma
+
+tables {
+  # Gravity coupling weights (off-diagonal only; used in importation transitions).
+  # Row p, col q = relative coupling strength from patch q into patch p.
+  # Values reflect geographic proximity (center connects to all; edges connect to neighbors).
+  W_patch : patch × patch = [[0.00, 0.10, 0.05, 0.05, 0.15],
+                              [0.10, 0.00, 0.10, 0.05, 0.10],
+                              [0.05, 0.10, 0.00, 0.10, 0.10],
+                              [0.05, 0.05, 0.10, 0.00, 0.15],
+                              [0.15, 0.10, 0.10, 0.15, 0.00]]
+}
+
+transitions {
+  # Local transmission within each patch
+  infection[p in patch] : S[p] --> E[p]
+    @ beta[p] * S[p] * I[p] / N[p]
+
+  # Cross-patch importation: infectious in q drive infection in p (where p != q)
+  importation[p in patch, q in patch] : S[p] --> E[p]
+    @ kappa * W_patch[p, q] * S[p] * I[q] / N[q] where p != q
+
+  progression[p in patch] : E[p] --> I[p]  @ sigma * E[p]
+  recovery[p in patch]    : I[p] --> R[p]  @ gamma * I[p]
+  waning[p in patch]      : V[p] --> S[p]  @ omega * V[p]
+}
+
+interventions {
+  # SIA targeting all patches simultaneously
+  sia_north  : transfer(fraction = vacc_frac, from = S[north],  to = V[north])  at [180, 545, 910]
+  sia_south  : transfer(fraction = vacc_frac, from = S[south],  to = V[south])  at [190, 555, 920]
+  sia_east   : transfer(fraction = vacc_frac, from = S[east],   to = V[east])   at [200, 565, 930]
+  sia_west   : transfer(fraction = vacc_frac, from = S[west],   to = V[west])   at [200, 565, 930]
+  sia_center : transfer(fraction = vacc_frac, from = S[center], to = V[center]) at [185, 550, 915]
+}
+
+init {
+  S[north]  = N0_north  - I0
+  S[south]  = N0_south
+  S[east]   = N0_east
+  S[west]   = N0_west
+  S[center] = N0_center
+  I[north]  = I0
+}
+
+simulate {
+  from = 0 'days
+  to   = 3 'years
+}
+
+scenarios {
+  baseline {
+    label = "no SIA (baseline)"
+  }
+  with_sia {
+    label = "with SIA all patches"
+    enable = [sia_north, sia_south, sia_east, sia_west, sia_center]
+  }
+}
