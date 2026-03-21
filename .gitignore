@@ -39,6 +39,10 @@ tests/snapshots/
 .envrc
 mprocs.log
 
+# examples/polio_nigeria — raw PIM source data (not open-source; lives in adjacent repos)
+examples/polio_nigeria/data/raw/
+examples/polio_nigeria/data/*.csv.bak
+
 # Web
 web/node_modules/
 web/dist/

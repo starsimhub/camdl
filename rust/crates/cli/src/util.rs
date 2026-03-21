@@ -296,7 +296,7 @@ pub fn run_simulation(run: &SimRun) -> Result<(Trajectory, ir::Model), String> {
 }
 
 /// Write a trajectory to a TSV file (same format as `camdl simulate` stdout).
-pub fn write_traj_tsv(path: &str, model: &ir::Model, traj: &Trajectory) -> Result<(), String> {
+pub fn write_traj_tsv(path: &str, model: &ir::Model, traj: &Trajectory, emit_flows: bool) -> Result<(), String> {
     use std::io::Write;
     use std::fs::File;
 
@@ -316,7 +316,9 @@ pub fn write_traj_tsv(path: &str, model: &ir::Model, traj: &Trajectory) -> Resul
     write!(f, "t").map_err(|e| e.to_string())?;
     for n in &int_names  { write!(f, "\t{}", n).map_err(|e| e.to_string())?; }
     for n in &real_names { write!(f, "\t{}", n).map_err(|e| e.to_string())?; }
-    for n in &tr_names   { write!(f, "\tflow_{}", n).map_err(|e| e.to_string())?; }
+    if emit_flows {
+        for n in &tr_names { write!(f, "\tflow_{}", n).map_err(|e| e.to_string())?; }
+    }
     writeln!(f).map_err(|e| e.to_string())?;
 
     // Rows
@@ -324,7 +326,9 @@ pub fn write_traj_tsv(path: &str, model: &ir::Model, traj: &Trajectory) -> Resul
         write!(f, "{}", snap.t).map_err(|e| e.to_string())?;
         for &c in &snap.int_state.counts  { write!(f, "\t{}", c).map_err(|e| e.to_string())?; }
         for &v in &snap.real_state.values { write!(f, "\t{:.4}", v).map_err(|e| e.to_string())?; }
-        for &fl in &snap.flows.counts     { write!(f, "\t{}", fl).map_err(|e| e.to_string())?; }
+        if emit_flows {
+            for &fl in &snap.flows.counts { write!(f, "\t{}", fl).map_err(|e| e.to_string())?; }
+        }
         writeln!(f).map_err(|e| e.to_string())?;
     }
     Ok(())

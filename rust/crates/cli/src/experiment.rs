@@ -21,6 +21,8 @@ struct ConfigSection {
     model: String,
     #[serde(default)]
     params: Option<String>,
+    #[serde(default)]
+    geo: Option<String>,
     #[serde(default = "default_backend")]
     backend: String,
     #[serde(default = "default_dt")]
@@ -106,6 +108,9 @@ struct Manifest {
     total_runs: usize,
     completed: usize,
     output_dir: String,
+    /// Relative URL to the GeoJSON boundary file, if provided via config.geo.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    geo: Option<String>,
     /// All completed runs, in scenario×seed order. Used by web app to load trajectories.
     runs: Vec<RunEntry>,
 }
@@ -224,6 +229,21 @@ pub fn cmd_experiment_run(args: &[String]) {
         eprintln!("warning: could not write model.ir.json: {}", e);
     });
 
+    // Copy GeoJSON boundary file if specified (→ <output-dir>/geo/boundaries.geojson).
+    let geo_url: Option<String> = if let Some(ref geo_src) = exp.config.geo {
+        let geo_dir = format!("{}/geo", output_dir);
+        let geo_dest = format!("{}/boundaries.geojson", geo_dir);
+        match std::fs::create_dir_all(&geo_dir).and_then(|_| std::fs::copy(geo_src, &geo_dest)) {
+            Ok(_) => Some("geo/boundaries.geojson".to_string()),
+            Err(e) => {
+                eprintln!("warning: could not copy geo file '{}': {}", geo_src, e);
+                None
+            }
+        }
+    } else {
+        None
+    };
+
     let counter = Arc::new(AtomicUsize::new(0));
     let scenario_names: Vec<String> = scenarios.iter().map(|s| s.name.clone()).collect();
 
@@ -284,7 +304,7 @@ pub fn cmd_experiment_run(args: &[String]) {
                     }
 
                     // Write traj.tsv
-                    if let Err(e) = write_traj_tsv(&traj_path, &model, &traj) {
+                    if let Err(e) = write_traj_tsv(&traj_path, &model, &traj, false) {
                         return Err(format!("cannot write {}: {}", traj_path, e));
                     }
 
@@ -337,6 +357,7 @@ pub fn cmd_experiment_run(args: &[String]) {
         total_runs: total,
         completed,
         output_dir: output_dir.clone(),
+        geo: geo_url,
         runs: completed_runs,
     };
     let manifest_json = serde_json::to_string_pretty(&manifest)
