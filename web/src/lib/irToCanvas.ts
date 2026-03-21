@@ -80,9 +80,9 @@ interface BaseTransition {
  * Strip stratum suffixes from a transition name.
  * Finds the earliest `_${dimValue}` occurrence and returns everything before it.
  * Example: "infection_age_0_5" with dim value "age_0_5" → "infection"
+ * allDimValues must be pre-computed by the caller to avoid rebuilding per call.
  */
-function inferBaseTransName(trName: string, ms: ModelStructure): string {
-  const allDimValues = ms.dimensions.flatMap(d => d.values);
+function inferBaseTransName(trName: string, allDimValues: string[]): string {
   let earliest = trName.length;
   for (const dv of allDimValues) {
     const idx = trName.indexOf('_' + dv);
@@ -106,8 +106,16 @@ function buildBaseTransitions(ir: IrModel, ms: ModelStructure): BaseTransition[]
     }
   }
 
+  // Pre-compute once — avoids rebuilding a 238-element array per transition
+  const allDimValues = ms.dimensions.flatMap(d => d.values);
+
   const seen = new Set<string>();
   const result: BaseTransition[] = [];
+
+  // Early-exit: once we've seen 500+ consecutive duplicate base transitions, all
+  // unique base transitions have already been found (they appear in the first
+  // stratum of each transition group).
+  let dupStreak = 0;
 
   for (const tr of ir.transitions) {
     const meta = tr.metadata;
@@ -121,13 +129,16 @@ function buildBaseTransitions(ir: IrModel, ms: ModelStructure): BaseTransition[]
     // Skip intra-base transitions (Erlang stages, aging within same base, etc.)
     if (fromBase !== null && fromBase === toBase) continue;
 
-    const name = inferBaseTransName(tr.name, ms);
+    const name = inferBaseTransName(tr.name, allDimValues);
     const key = `${fromBase ?? '*'}→${toBase ?? '*'}:${name}`;
 
-    if (!seen.has(key)) {
-      seen.add(key);
-      result.push({ key, name, from: fromBase, to: toBase, originKind });
+    if (seen.has(key)) {
+      if (++dupStreak > 500) break;
+      continue;
     }
+    dupStreak = 0;
+    seen.add(key);
+    result.push({ key, name, from: fromBase, to: toBase, originKind });
   }
 
   return result;
@@ -308,8 +319,10 @@ function buildCrossLaneTransitions(
     }
   }
 
+  const allDimValues = ms.dimensions.flatMap(d => d.values);
   const seen = new Set<string>();
   const result: Array<{ name: string; base: string; fromDimVal: string; toDimVal: string; originKind: string }> = [];
+  let dupStreak = 0;
 
   for (const tr of ir.transitions) {
     const meta = tr.metadata;
@@ -326,12 +339,15 @@ function buildCrossLaneTransitions(
     if (!fromDimVal || !toDimVal || fromDimVal === toDimVal) continue;
 
     const originKind = meta?.origin_kind ?? 'intrinsic';
-    const name = inferBaseTransName(tr.name, ms);
+    const name = inferBaseTransName(tr.name, allDimValues);
     const key = `${fromBase}:${fromDimVal}→${toDimVal}:${name}`;
-    if (!seen.has(key)) {
-      seen.add(key);
-      result.push({ name, base: fromBase, fromDimVal, toDimVal, originKind });
+    if (seen.has(key)) {
+      if (++dupStreak > 500) break;
+      continue;
     }
+    dupStreak = 0;
+    seen.add(key);
+    result.push({ name, base: fromBase, fromDimVal, toDimVal, originKind });
   }
 
   return result;

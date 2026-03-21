@@ -271,13 +271,14 @@ function ColorLegend({ minV, maxV }: { minV: number; maxV: number }) {
 
 export default function MapPanel() {
   const scenarios = useStore((s) => s.scenarios);
+  const ir = useStore((s) => s.ir);
 
   const [scenarioIdx, setScenarioIdx] = useState(0);
   const sc = scenarios[Math.min(scenarioIdx, scenarios.length - 1)];
   const firstTraj = sc?.runs[0]?.trajectory;
   const patchInfo = useMemo(
-    () => (firstTraj ? detectPatches(firstTraj) : null),
-    [firstTraj],
+    () => (firstTraj ? detectPatches(firstTraj, ir) : null),
+    [firstTraj, ir],
   );
 
   const [compType, setCompType] = useState(() => patchInfo?.compTypes[0] ?? 'I');
@@ -289,14 +290,16 @@ export default function MapPanel() {
   const [snapIdx, setSnapIdx] = useState(0);
   const effectiveSnap = Math.min(snapIdx, maxSnap);
 
+  const remoteGeo = useStore((s) => s.remoteGeo);
   const [geoJson, setGeoJson] = useState<FeatureCollection | null>(null);
+  const effectiveGeo = geoJson ?? remoteGeo;
   const [selectedPatch, setSelectedPatch] = useState<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Compute median values for all patches at current time
   const values = useMemo(() => {
     if (!sc || !patchInfo) return [];
-    return allPatchMedians(sc, patchInfo.indices, effectiveCompType, effectiveSnap);
+    return allPatchMedians(sc, patchInfo.indices, effectiveCompType, effectiveSnap, patchInfo.names);
   }, [sc, patchInfo, effectiveCompType, effectiveSnap]);
 
   const minV = useMemo(() => Math.min(0, ...values), [values]);
@@ -304,9 +307,9 @@ export default function MapPanel() {
 
   // Per-patch time series for chart
   const chartData = useMemo(() => {
-    if (selectedPatch === null || !sc) return [];
-    return patchTimeSeries(sc, effectiveCompType, selectedPatch);
-  }, [selectedPatch, sc, effectiveCompType]);
+    if (selectedPatch === null || !sc || !patchInfo) return [];
+    return patchTimeSeries(sc, effectiveCompType, selectedPatch, patchInfo.names);
+  }, [selectedPatch, sc, effectiveCompType, patchInfo]);
 
   const handleLoadGeoJson = () => fileInputRef.current?.click();
 
@@ -329,9 +332,8 @@ export default function MapPanel() {
       <div className="flex flex-col items-center justify-center h-full gap-2 text-gray-500 text-sm">
         <span className="dark:text-gray-600">Map view requires a patch-stratified model</span>
         <span className="text-xs text-gray-400 dark:text-gray-700">
-          Compartments must use the <code className="font-mono">_p{'{N}'}</code> suffix (e.g.{' '}
-          <code className="font-mono">I_p0</code>,{' '}
-          <code className="font-mono">S_a2_p5</code>)
+          Add a <code className="font-mono">patch</code> dimension or use the{' '}
+          <code className="font-mono">_p{'{N}'}</code> suffix convention
         </span>
       </div>
     );
@@ -381,7 +383,11 @@ export default function MapPanel() {
           onClick={handleLoadGeoJson}
           className="text-xs px-2 py-0.5 border border-gray-200 dark:border-surface-border rounded text-gray-600 dark:text-gray-400 hover:border-gray-400 transition-colors"
         >
-          {geoJson ? `GeoJSON loaded (${geoJson.features.length} features)` : 'Load GeoJSON…'}
+          {geoJson
+            ? `GeoJSON loaded (${geoJson.features.length} features)`
+            : remoteGeo
+              ? `GeoJSON from server (${remoteGeo.features.length} features)`
+              : 'Load GeoJSON…'}
         </button>
         <input
           ref={fileInputRef}
@@ -409,9 +415,9 @@ export default function MapPanel() {
 
       {/* ── Main display ────────────────────────────────────────────────────── */}
       <div className="flex-1 min-h-0 relative">
-        {geoJson ? (
+        {effectiveGeo ? (
           <GeoMap
-            geoJson={geoJson}
+            geoJson={effectiveGeo}
             patchIndices={patchInfo.indices}
             values={values}
             minV={minV}

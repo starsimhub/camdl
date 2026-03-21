@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import type { Node, Edge } from '@xyflow/react';
+import type { FeatureCollection } from 'geojson';
 import type { IrModel, Diagnostic } from '../types/ir';
 import type { RunConfig, Scenario } from '../types/experiment';
 import type { Span, SpanMap } from '../lib/spanExtractor';
@@ -152,6 +153,7 @@ interface CamdlStore {
   connectStatus: 'idle' | 'loading' | 'error';
   connectError: string | null;
   connectRemote: (url: string) => Promise<void>;
+  remoteGeo: FeatureCollection | null;
 
   // ── File I/O ──────────────────────────────────────────────────────────────────
   loadExample: (name: string) => void;
@@ -555,11 +557,12 @@ export const useStore = create<CamdlStore>((set, get) => ({
 
   connectStatus: 'idle',
   connectError: null,
+  remoteGeo: null,
 
   connectRemote: async (url: string) => {
     set({ connectStatus: 'loading', connectError: null });
     try {
-      const { ir, scenarios } = await loadRemoteExperiment(url);
+      const { ir, scenarios, geo } = await loadRemoteExperiment(url);
       const { nodes, edges } = irToCanvas(ir);
       set({
         ir,
@@ -572,6 +575,7 @@ export const useStore = create<CamdlStore>((set, get) => ({
         connectStatus: 'idle',
         connectError: null,
         experimentStatus: 'ok',
+        remoteGeo: geo ?? null,
       });
     } catch (e) {
       set({

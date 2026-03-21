@@ -1,3 +1,4 @@
+import type { FeatureCollection } from 'geojson';
 import type { IrModel } from '../types/ir';
 import type { Scenario, ScenarioRun } from '../types/experiment';
 import type { TrajectoryJson, TrajectorySnapshot } from '../types/trajectory';
@@ -21,12 +22,14 @@ interface RemoteManifest {
   total_runs: number;
   completed: number;
   output_dir: string;
+  geo?: string;
   runs: RemoteRunEntry[];
 }
 
 export interface RemoteExperiment {
   ir: IrModel;
   scenarios: Scenario[];
+  geo?: FeatureCollection;
 }
 
 /** Parse a TSV trajectory into TrajectoryJson using the IR for column mapping. */
@@ -41,12 +44,15 @@ function parseTsvTrajectory(tsv: string, ir: IrModel): TrajectoryJson {
   const realNames = ir.compartments
     .filter((c) => c.kind === 'real')
     .map((c) => c.name);
-  const trNames = ir.transitions.map((t) => t.name);
+  // Only build flowIdxs if the TSV actually has flow columns — checking up front avoids
+  // 57k× headers.indexOf() calls and a 57k-element flows array per snapshot.
+  const hasFlowCols = headers.some((h) => h.startsWith('flow_'));
+  const trNames = hasFlowCols ? ir.transitions.map((t) => t.name) : [];
+  const flowIdxs = hasFlowCols ? trNames.map((n) => headers.indexOf('flow_' + n)) : [];
 
   const tIdx = 0;
   const intIdxs = intNames.map((n) => headers.indexOf(n));
   const realIdxs = realNames.map((n) => headers.indexOf(n));
-  const flowIdxs = trNames.map((n) => headers.indexOf('flow_' + n));
 
   const snapshots: TrajectorySnapshot[] = lines
     .slice(1)
@@ -57,7 +63,7 @@ function parseTsvTrajectory(tsv: string, ir: IrModel): TrajectoryJson {
         t: cols[tIdx] ?? 0,
         counts: intIdxs.map((i) => (i >= 0 ? (cols[i] ?? 0) : 0)),
         values: realIdxs.map((i) => (i >= 0 ? (cols[i] ?? 0) : 0)),
-        flows: flowIdxs.map((i) => (i >= 0 ? (cols[i] ?? 0) : 0)),
+        flows: hasFlowCols ? flowIdxs.map((i) => (i >= 0 ? (cols[i] ?? 0) : 0)) : [],
       };
     });
 
@@ -120,7 +126,20 @@ export async function loadRemoteExperiment(baseUrl: string): Promise<RemoteExper
     })
   );
 
-  // 4. Group by scenario name → build Scenario[]
+  // 4. Fetch GeoJSON boundary file if advertised in manifest (non-fatal if missing)
+  let geo: FeatureCollection | undefined;
+  if (manifest.geo) {
+    try {
+      const geoRes = await fetch(`${url}/${manifest.geo}`);
+      if (geoRes.ok) {
+        geo = await geoRes.json() as FeatureCollection;
+      }
+    } catch {
+      // geo is optional — continue without it
+    }
+  }
+
+  // 5. Group by scenario name → build Scenario[]
   const grouped = new Map<string, ScenarioRun[]>();
   for (const { run, trajectory } of loadedRuns) {
     if (!grouped.has(run.scenario)) grouped.set(run.scenario, []);
@@ -137,5 +156,5 @@ export async function loadRemoteExperiment(baseUrl: string): Promise<RemoteExper
     status: 'ok' as const,
   }));
 
-  return { ir, scenarios };
+  return { ir, scenarios, geo };
 }

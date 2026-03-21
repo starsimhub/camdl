@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import MonacoEditor, { useMonaco } from '@monaco-editor/react';
-import type * as Monaco from 'monaco-editor';
+import type { Monaco } from '@monaco-editor/react';
 import { useStore } from '../store';
 import { useIsDark } from '../lib/theme';
 
@@ -14,8 +14,8 @@ const KEYWORDS = [
   'coupling', 'every', 'at', 'format', 'description', 'tag', 'null', 'transfer',
 ];
 
-function registerCamdl(monaco: typeof Monaco) {
-  if (monaco.languages.getLanguages().some((l) => l.id === 'camdl')) return;
+function registerCamdl(monaco: Monaco) {
+  if (monaco.languages.getLanguages().some((l: { id: string }) => l.id === 'camdl')) return;
 
   monaco.languages.register({ id: 'camdl' });
   monaco.languages.setMonarchTokensProvider('camdl', {
@@ -91,7 +91,7 @@ export default function DslEditor() {
   const highlightedSpan = useStore((s) => s.highlightedSpan);
   const isDark = useIsDark();
 
-  const editorRef = useRef<Monaco.editor.IStandaloneCodeEditor | null>(null);
+  const editorRef = useRef<Monaco['editor']['IStandaloneCodeEditor'] | null>(null);
   const monaco    = useMonaco();
 
   // Push error markers when diagnostics change
@@ -100,7 +100,7 @@ export default function DslEditor() {
     const model = editorRef.current.getModel();
     if (!model) return;
 
-    const markers: Monaco.editor.IMarkerData[] = diagnostics.map((d) => ({
+    const markers: Monaco['editor']['IMarkerData'][] = diagnostics.map((d) => ({
       severity: d.severity === 'error'
         ? monaco.MarkerSeverity.Error
         : monaco.MarkerSeverity.Warning,
@@ -145,7 +145,7 @@ export default function DslEditor() {
       onMount={(editor) => {
         editorRef.current = editor;
         // Stop key events from bubbling to React Flow (which captures Space for panning)
-        editor.getDomNode()?.addEventListener('keydown', (e) => e.stopPropagation());
+        editor.getDomNode()?.addEventListener('keydown', (e: KeyboardEvent) => e.stopPropagation());
       }}
       options={{
         fontSize: 13,

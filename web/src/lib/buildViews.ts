@@ -63,22 +63,49 @@ function computeStats(values: number[]): { lo: number; band: number; median: num
   };
 }
 
-function allCompNames(traj: TrajectoryJson): string[] {
-  return [...traj.int_compartment_names, ...traj.real_compartment_names];
+/**
+ * Build a fast getter for summing named compartments from a trajectory.
+ * Pre-resolves name→index once; returned function is O(k) where k = compNames.length.
+ */
+function makeSumGetter(
+  traj: TrajectoryJson,
+  compNames: string[],
+): (snapIdx: number) => number {
+  const nInt = traj.int_compartment_names.length;
+  const nameMap = new Map<string, number>();
+  traj.int_compartment_names.forEach((n, i) => nameMap.set(n, i));
+  traj.real_compartment_names.forEach((n, i) => nameMap.set(n, nInt + i));
+  const resolved: { isInt: boolean; idx: number }[] = [];
+  for (const name of compNames) {
+    const flatIdx = nameMap.get(name);
+    if (flatIdx !== undefined) {
+      resolved.push({ isInt: flatIdx < nInt, idx: flatIdx < nInt ? flatIdx : flatIdx - nInt });
+    }
+  }
+  const snapshots = traj.snapshots;
+  const len = snapshots.length;
+  return (snapIdx: number) => {
+    const snap = snapshots[Math.min(snapIdx, len - 1)];
+    if (!snap) return 0;
+    let sum = 0;
+    for (const { isInt, idx } of resolved) {
+      sum += isInt ? (snap.counts[idx] ?? 0) : (snap.values[idx] ?? 0);
+    }
+    return sum;
+  };
 }
 
-/** Sum named compartments at a snapshot index. */
-function sumAtIdx(traj: TrajectoryJson, snapIdx: number, compNames: string[]): number {
-  const names = allCompNames(traj);
-  const si = Math.min(snapIdx, traj.snapshots.length - 1);
-  const snap = traj.snapshots[si];
-  if (!snap) return 0;
-  const nInt = traj.int_compartment_names.length;
-  return compNames.reduce((sum, name) => {
-    const idx = names.indexOf(name);
-    if (idx < 0) return sum;
-    return sum + (idx < nInt ? (snap.counts[idx] ?? 0) : (snap.values[idx - nInt] ?? 0));
-  }, 0);
+/**
+ * Returns a (traj, snapIdx) → number function that pre-resolves indices on first
+ * call per trajectory, then reuses them. Drop-in replacement for the old sumAtIdx.
+ */
+function makeCachedSumGetter(members: string[]): (traj: TrajectoryJson, si: number) => number {
+  const cache = new WeakMap<TrajectoryJson, (si: number) => number>();
+  return (traj, si) => {
+    let g = cache.get(traj);
+    if (!g) { g = makeSumGetter(traj, members); cache.set(traj, g); }
+    return g(si);
+  };
 }
 
 /** Get flow value for a named transition at snapshot index. */
@@ -355,7 +382,7 @@ export function buildViews(ir: IrModel, scenarios: Scenario[], mode: EnsembleMod
         label: name,
         color: compartmentColor(base),
         group: base,
-        getVal: (traj: TrajectoryJson, si: number) => sumAtIdx(traj, si, [name]),
+        getVal: makeCachedSumGetter([name]),
       };
     });
     views.push(buildMultiVarView(
@@ -376,7 +403,7 @@ export function buildViews(ir: IrModel, scenarios: Scenario[], mode: EnsembleMod
           label: base,
           color: compartmentColor(base),
           group: base,
-          getVal: (traj: TrajectoryJson, si: number) => sumAtIdx(traj, si, members),
+          getVal: makeCachedSumGetter(members),
         };
       });
       views.push(buildMultiVarView(
@@ -386,7 +413,10 @@ export function buildViews(ir: IrModel, scenarios: Scenario[], mode: EnsembleMod
     }
 
     // ── 2. By dimension ──────────────────────────────────────────────────────
-    for (const dim of ms.dimensions) {
+    // Skip dimensions with too many values — charts with >20 strata are unreadable
+    // and the O(strata²) computation would freeze the UI (e.g. 238-patch models).
+    const MAX_DIM_VIEW_VALUES = 20;
+    for (const dim of ms.dimensions.filter((d) => d.values.length <= MAX_DIM_VIEW_VALUES)) {
       const vars: Parameters<typeof buildMultiVarView>[5] = [];
       for (const base of ms.base_compartments) {
         const hasDim = (ms.compartment_dims[base] ?? []).includes(dim.name);
@@ -400,7 +430,7 @@ export function buildViews(ir: IrModel, scenarios: Scenario[], mode: EnsembleMod
             label: base,
             color: compartmentColor(base),
             group: base,
-            getVal: (traj: TrajectoryJson, si: number) => sumAtIdx(traj, si, members),
+            getVal: makeCachedSumGetter(members),
           });
         } else {
           for (const [dimValIdx, dimVal] of dim.values.entries()) {
@@ -416,7 +446,7 @@ export function buildViews(ir: IrModel, scenarios: Scenario[], mode: EnsembleMod
               color: compartmentColor(base),
               group: base,
               strokeDasharray: SCENARIO_DASHES[dimValIdx % SCENARIO_DASHES.length] || undefined,
-              getVal: (traj: TrajectoryJson, si: number) => sumAtIdx(traj, si, members),
+              getVal: makeCachedSumGetter(members),
             });
           }
         }
@@ -439,7 +469,7 @@ export function buildViews(ir: IrModel, scenarios: Scenario[], mode: EnsembleMod
         views.push(buildSingleVarView(
           'prevalence', 'Prevalence', 'Infectious compartments (summed)',
           active, timeGrid,
-          (traj, si) => sumAtIdx(traj, si, infectiousNames),
+          makeCachedSumGetter(infectiousNames),
           mode,
         ));
       }

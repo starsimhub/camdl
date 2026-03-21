@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useRef } from 'react';
+import { useState, useMemo, useEffect, useRef, Component, type ReactNode, type ErrorInfo } from 'react';
 import {
   ComposedChart, Line, Area, XAxis, YAxis, Tooltip,
   ResponsiveContainer, Legend, CartesianGrid, Brush,
@@ -7,6 +7,33 @@ import { useStore } from '../store';
 import { buildViews, findDynamicEndIndex, TRACE_THRESHOLD, type EnsembleMode } from '../lib/buildViews';
 import MapPanel from './MapPanel';
 import { detectPatches } from '../lib/patchStats';
+
+// ── Map error boundary ─────────────────────────────────────────────────────────
+
+class MapErrorBoundary extends Component<{ children: ReactNode }, { error: string | null }> {
+  state = { error: null };
+  static getDerivedStateFromError(e: Error) { return { error: e.message }; }
+  componentDidCatch(e: Error, info: ErrorInfo) {
+    console.error('[MapPanel crash]', e, info.componentStack);
+  }
+  render() {
+    if (this.state.error) {
+      return (
+        <div className="flex flex-col items-center justify-center h-full gap-2 text-sm">
+          <span className="text-red-500">Map failed to render</span>
+          <span className="text-xs text-gray-400 font-mono max-w-md text-center">{this.state.error}</span>
+          <button
+            onClick={() => this.setState({ error: null })}
+            className="text-xs px-2 py-0.5 border border-gray-300 rounded hover:border-gray-500"
+          >
+            Retry
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 // ── Brush handle ──────────────────────────────────────────────────────────────
 
@@ -168,8 +195,8 @@ export default function ResultsPanel() {
   // Detect whether the loaded model has patch stratification
   const firstTraj = scenarios.flatMap((s) => s.runs).find(Boolean)?.trajectory;
   const hasPatchModel = useMemo(
-    () => (firstTraj ? detectPatches(firstTraj) !== null : false),
-    [firstTraj],
+    () => (firstTraj ? detectPatches(firstTraj, ir) !== null : false),
+    [firstTraj, ir],
   );
 
   const groupMap = useMemo(() => {
@@ -264,7 +291,7 @@ export default function ResultsPanel() {
       )}
 
       {/* Map panel */}
-      {showMap && <div className="flex-1 min-h-0"><MapPanel /></div>}
+      {showMap && <div className="flex-1 min-h-0"><MapErrorBoundary><MapPanel /></MapErrorBoundary></div>}
 
       {/* Chart area */}
       {!showMap && <div className="flex-1 min-h-0 px-2 py-3">
