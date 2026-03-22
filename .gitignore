@@ -34,6 +34,9 @@ __pycache__/
 # Generated / output
 ir/expected/
 tests/snapshots/
+output/
+diagnostics.tsv
+**/diagnostics.tsv
 
 # Secrets / local env
 .envrc
