@@ -12,7 +12,8 @@ const SCENARIO_COLORS = [
 interface RemoteRunEntry {
   scenario: string;
   seed: number;
-  input_hash: string;
+  /** Path relative to runs/: {sim_hash_8}/{scenario_slug}-{scen_hash_8}/seed_{seed} */
+  run_path: string;
 }
 
 interface RemoteManifest {
@@ -116,9 +117,9 @@ export async function loadRemoteExperiment(baseUrl: string): Promise<RemoteExper
   // 3. Fetch all trajectories in parallel
   const loadedRuns = await Promise.all(
     manifest.runs.map(async (run) => {
-      const tsvRes = await fetch(`${url}/runs/${run.input_hash}/traj.tsv`);
+      const tsvRes = await fetch(`${url}/runs/${run.run_path}/traj.tsv`);
       if (!tsvRes.ok) {
-        throw new Error(`Could not fetch trajectory for run ${run.input_hash} (${tsvRes.status})`);
+        throw new Error(`Could not fetch trajectory for run ${run.run_path} (${tsvRes.status})`);
       }
       const tsv = await tsvRes.text();
       const trajectory = parseTsvTrajectory(tsv, ir);

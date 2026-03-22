@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use rayon::prelude::*;
 
 use crate::util::{run_simulation, write_traj_tsv, load_params_toml, resolve_ir_path, SimRun};
-use crate::hashing::{model_hash, config_hash, input_hash, canonical_params};
+use crate::hashing::{model_hash, sim_hash, scen_hash, canonical_params, slug};
 
 // ─── TOML schema ─────────────────────────────────────────────────────────────
 
@@ -82,22 +82,27 @@ struct ScenarioEntry {
 
 // ─── Manifest / run metadata ─────────────────────────────────────────────────
 
+/// Full audit record written to each run's run.json.
 #[derive(Debug, Serialize, Deserialize)]
 struct RunMeta {
     scenario: String,
     seed: u64,
-    input_hash: String,
-    config_hash: String,
+    /// Full sim_hash (model + base_params + backend + dt + tool_version).
+    sim_hash: String,
+    /// Full scen_hash (scenario enable/disable/params delta).
+    scen_hash: String,
+    /// Full model_hash (IR structure only).
     model_hash: String,
 }
 
 /// Minimal descriptor for one completed run, included in manifest.json.
-/// The web app uses input_hash to construct the URL: /runs/{input_hash}/traj.tsv
+/// The web app uses run_path to construct the URL: /runs/{run_path}/traj.tsv
+/// run_path is relative to the runs/ directory: {sim_hash_8}/{scenario_slug}-{scen_hash_8}/seed_{seed}
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct RunEntry {
     scenario: String,
     seed: u64,
-    input_hash: String,
+    run_path: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -111,7 +116,8 @@ struct Manifest {
     /// Relative URL to the GeoJSON boundary file, if provided via config.geo.
     #[serde(skip_serializing_if = "Option::is_none")]
     geo: Option<String>,
-    /// All completed runs, in scenario×seed order. Used by web app to load trajectories.
+    /// All completed runs. run_path is relative to runs/ and used by the web app
+    /// to fetch trajectories: GET /runs/{run_path}/traj.tsv
     runs: Vec<RunEntry>,
 }
 
@@ -182,7 +188,7 @@ pub fn cmd_experiment_run(args: &[String]) {
     });
     let mhash = model_hash(&ir_json);
 
-    // Build params map for hashing (only from params file, not per-scenario overrides)
+    // Build base params map for hashing (per-scenario overrides are captured in scen_hash)
     let base_params: HashMap<String, f64> = if let Some(ref pf) = exp.config.params {
         load_params_toml(pf).unwrap_or_else(|e| {
             eprintln!("error: cannot load params {}: {}", pf, e);
@@ -192,7 +198,7 @@ pub fn cmd_experiment_run(args: &[String]) {
         HashMap::new()
     };
     let params_str = canonical_params(&base_params);
-    let cfg_hash = config_hash(&mhash, &params_str, &backend);
+    let shash = sim_hash(&mhash, &params_str, &backend, dt);
 
     // Resolve seeds and scenarios
     let seeds = exp.config.seeds.resolve().unwrap_or_else(|e| {
@@ -257,18 +263,23 @@ pub fn cmd_experiment_run(args: &[String]) {
         });
 
     let params_file_opt = exp.config.params.clone();
+    let sim_hash_8 = &shash[..8];
+
     // Each work item produces Ok(RunEntry) on success or Err(message) on failure.
     let results: Vec<Result<RunEntry, String>> = pool.install(|| {
         work_items.par_iter().map(|(sc, seed)| {
-            let ihash = input_hash(&cfg_hash, &sc.name, *seed);
-            let run_dir = format!("{}/{}", runs_dir, ihash);
+            let sc_hash = scen_hash(&sc.enable, &sc.disable, &sc.params);
+            let sc_slug = slug(&sc.name);
+            // run_path is relative to runs/: {sim_hash_8}/{scenario_slug}-{scen_hash_8}/seed_{seed}
+            let run_path = format!("{}/{}-{}/seed_{}", sim_hash_8, sc_slug, &sc_hash[..8], seed);
+            let run_dir = format!("{}/{}", runs_dir, run_path);
             let traj_path = format!("{}/traj.tsv", run_dir);
 
             // Skip if output exists and not --force
             if !force && std::path::Path::new(&traj_path).exists() {
                 let n = counter.fetch_add(1, Ordering::Relaxed) + 1;
                 eprintln!("[{}/{}] scenario={} seed={} (skipped — already exists)", n, total, sc.name, seed);
-                return Ok(RunEntry { scenario: sc.name.clone(), seed: *seed, input_hash: ihash });
+                return Ok(RunEntry { scenario: sc.name.clone(), seed: *seed, run_path });
             }
 
             // Build SimRun
@@ -308,12 +319,12 @@ pub fn cmd_experiment_run(args: &[String]) {
                         return Err(format!("cannot write {}: {}", traj_path, e));
                     }
 
-                    // Write run.json metadata
+                    // Write run.json metadata (full hashes for audit trail)
                     let meta = RunMeta {
                         scenario: sc.name.clone(),
                         seed: *seed,
-                        input_hash: ihash.clone(),
-                        config_hash: cfg_hash.clone(),
+                        sim_hash: shash.clone(),
+                        scen_hash: sc_hash.clone(),
                         model_hash: mhash.clone(),
                     };
                     let meta_json = serde_json::to_string_pretty(&meta)
@@ -325,7 +336,7 @@ pub fn cmd_experiment_run(args: &[String]) {
 
                     let n = counter.fetch_add(1, Ordering::Relaxed) + 1;
                     eprintln!("[{}/{}] scenario={} seed={}", n, total, sc.name, seed);
-                    Ok(RunEntry { scenario: sc.name.clone(), seed: *seed, input_hash: ihash })
+                    Ok(RunEntry { scenario: sc.name.clone(), seed: *seed, run_path })
                 }
             }
         }).collect()
@@ -424,27 +435,27 @@ pub fn cmd_experiment_status(args: &[String]) {
             // Recount from filesystem to show live status
             let backend = exp.config.backend.clone();
             let model_path = exp.config.model.clone();
+            let dt = exp.config.dt;
             let base_params: HashMap<String, f64> = if let Some(ref pf) = exp.config.params {
                 load_params_toml(pf).unwrap_or_default()
             } else {
                 HashMap::new()
             };
 
-            // Try to compute config hash for live count
+            // Try to compute sim hash for live count
             if let Ok(ir_json) = std::fs::read_to_string(&model_path) {
                 let mhash = model_hash(&ir_json);
                 let params_str = canonical_params(&base_params);
-                let cfg_hash = config_hash(&mhash, &params_str, &backend);
+                let shash = sim_hash(&mhash, &params_str, &backend, dt);
                 let scenarios: Vec<ScenarioEntry> = if exp.scenario.is_empty() {
                     vec![ScenarioEntry { name: "baseline".to_string(), params: HashMap::new(), enable: Vec::new(), disable: Vec::new() }]
                 } else {
                     exp.scenario
                 };
-                let scenario_names: Vec<String> = scenarios.iter().map(|s| s.name.clone()).collect();
                 let seeds = exp.config.seeds.resolve().unwrap_or_default();
                 let runs_dir = format!("{}/runs", output_dir);
-                let live_completed = count_completed_runs(&runs_dir, &cfg_hash, &scenario_names, &seeds);
-                let total = scenario_names.len() * seeds.len();
+                let live_completed = count_completed_runs(&runs_dir, &shash, &scenarios, &seeds);
+                let total = scenarios.len() * seeds.len();
                 println!("  Live count: {}/{} traj.tsv files present", live_completed, total);
             }
             return;
@@ -461,15 +472,18 @@ pub fn cmd_experiment_status(args: &[String]) {
 
 fn count_completed_runs(
     runs_dir: &str,
-    cfg_hash: &str,
-    scenario_names: &[String],
+    shash: &str,
+    scenarios: &[ScenarioEntry],
     seeds: &[u64],
 ) -> usize {
+    let sim_hash_8 = &shash[..8];
     let mut completed = 0;
-    for sc_name in scenario_names {
+    for sc in scenarios {
+        let sc_hash = scen_hash(&sc.enable, &sc.disable, &sc.params);
+        let sc_slug = slug(&sc.name);
         for &seed in seeds {
-            let ihash = input_hash(cfg_hash, sc_name, seed);
-            let traj_path = format!("{}/{}/traj.tsv", runs_dir, ihash);
+            let traj_path = format!("{}/{}/{}-{}/seed_{}/traj.tsv",
+                runs_dir, sim_hash_8, sc_slug, &sc_hash[..8], seed);
             if std::path::Path::new(&traj_path).exists() {
                 completed += 1;
             }

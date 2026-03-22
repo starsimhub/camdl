@@ -32,8 +32,10 @@ pub fn model_hash(ir_json: &str) -> String {
     hex::encode(h.finalize())
 }
 
-/// Hash of model_hash + canonical params string + backend + tool version.
-pub fn config_hash(model_hash: &str, params_canonical: &str, backend: &str) -> String {
+/// Hash of the shared simulation configuration: model + base params + backend + dt + tool version.
+/// dt is always included even for backends that ignore it (gillespie) — keeps the logic
+/// unconditional and avoids stale cache hits if someone switches backend while keeping dt.
+pub fn sim_hash(model_hash: &str, params_canonical: &str, backend: &str, dt: f64) -> String {
     let mut h = Sha256::new();
     h.update(model_hash.as_bytes());
     h.update(b"\x00");
@@ -41,18 +43,42 @@ pub fn config_hash(model_hash: &str, params_canonical: &str, backend: &str) -> S
     h.update(b"\x00");
     h.update(backend.as_bytes());
     h.update(b"\x00");
+    h.update(dt.to_bits().to_le_bytes());
+    h.update(b"\x00");
     h.update(TOOL_VERSION.as_bytes());
     hex::encode(h.finalize())
 }
 
-/// Hash of config_hash + scenario name + seed. This is the cache key for one run.
-pub fn input_hash(config_hash: &str, scenario: &str, seed: u64) -> String {
+/// Hash of a scenario's per-scenario delta: enable/disable lists and param overrides.
+/// Does NOT include the scenario name — the name appears in the directory slug for navigation,
+/// but two identically-specified scenarios (same enables/disables/params, different names)
+/// correctly share a cache entry.
+///
+/// TODO(compose): when `compose = ["A", "B"]` is implemented (spec v0.4 §8.3),
+/// this function must recursively incorporate each composed scenario's definition hash,
+/// not just hash the compose list by name. Hashing names would break cache correctness
+/// if a composed scenario's params change without the parent scenario changing.
+pub fn scen_hash(enable: &[String], disable: &[String], params: &HashMap<String, f64>) -> String {
     let mut h = Sha256::new();
-    h.update(config_hash.as_bytes());
-    h.update(b"\x00");
-    h.update(scenario.as_bytes());
-    h.update(b"\x00");
-    h.update(seed.to_le_bytes());
+
+    // Sort enables/disables so order in TOML doesn't matter
+    let mut enables = enable.to_vec();
+    enables.sort();
+    let mut disables = disable.to_vec();
+    disables.sort();
+
+    h.update(b"enable\x00");
+    for e in &enables {
+        h.update(e.as_bytes());
+        h.update(b"\x00");
+    }
+    h.update(b"disable\x00");
+    for d in &disables {
+        h.update(d.as_bytes());
+        h.update(b"\x00");
+    }
+    h.update(b"params\x00");
+    h.update(canonical_params(params).as_bytes());
     hex::encode(h.finalize())
 }
 
@@ -64,4 +90,12 @@ pub fn canonical_params(params: &HashMap<String, f64>) -> String {
         .map(|(k, v)| format!("{}={}", k, v))
         .collect::<Vec<_>>()
         .join(";")
+}
+
+/// Convert a scenario name to a filesystem-safe slug: lowercase, non-[a-z0-9_] → '_'.
+pub fn slug(name: &str) -> String {
+    name.to_lowercase()
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() || c == '_' { c } else { '_' })
+        .collect()
 }
