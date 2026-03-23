@@ -252,9 +252,12 @@ let action_of_json j =
   | _ -> fail "action must be a single-key object"
 
 let intervention_of_json j =
-  { name     = as_string (member "name" j);
-    schedule = intervention_schedule_of_json (member "schedule" j);
-    actions  = List.map action_of_json (as_list (member "actions" j));
+  { name      = as_string (member "name" j);
+    base_name = (match member_opt "base_name" j with
+                 | Some (`String s) -> Some s
+                 | _ -> None);
+    schedule  = intervention_schedule_of_json (member "schedule" j);
+    actions   = List.map action_of_json (as_list (member "actions" j));
   }
 
 (* ── Observation model ───────────────────────────────────────────────────── *)
@@ -420,6 +423,10 @@ let preset_of_json j =
     preset_params  = List.map (fun (k, v) -> (k, as_float v)) (as_assoc (member "params" j));
     preset_enable  = (match member_opt "enable"  j with Some (`List xs) -> List.map as_string xs | _ -> []);
     preset_disable = (match member_opt "disable" j with Some (`List xs) -> List.map as_string xs | _ -> []);
+    preset_scale   = (match member_opt "scale"   j with
+                      | Some (`Assoc kvs) -> List.map (fun (k, v) -> (k, as_float v)) kvs
+                      | _ -> []);
+    preset_compose = (match member_opt "compose" j with Some (`List xs) -> List.map as_string xs | _ -> []);
     preset_t_end   = (match member_opt "t_end" j with Some `Null | None -> None | Some v -> Some (as_float v));
   }
 
@@ -459,9 +466,7 @@ let model_of_json (j : Yojson.Safe.t) : model =
     simulation         = simulation_config_of_json (member "simulation" j);
     presets            = (match member_opt "scenarios" j with
       | Some (`List v) -> List.map preset_of_json v
-      | _ -> match member_opt "presets" j with  (* backward compat *)
-        | Some (`List v) -> List.map preset_of_json v
-        | _ -> []);
+      | _ -> []);
     model_structure    = (match member_opt "model_structure" j with
       | None -> None
       | Some v -> opt_null model_structure_of_json v);

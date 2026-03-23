@@ -611,106 +611,101 @@ Summary computation requires the model's `output { summary { } }` block
 
 ```
 {output_dir}/
-  model-{model_hash}/
-    config-{config_hash}/
-      experiment.toml              # frozen copy (only if experiment file used)
-      params.toml                  # frozen merged baseline parameters
-      runs/
-        baseline/
-          seed-1/
-            trajectories.parquet
-            flows.parquet
-            diagnostics.tsv
-            run.json
-          seed-2/
-            ...
-        with_sia/
-          seed-1/
-            ...
-      analysis/
-        summaries/
-          baseline.tsv
-          with_sia.tsv
-        ensembles/
-          baseline.parquet
-          with_sia.parquet
-        comparisons/
-          baseline-vs-with_sia.tsv
+  manifest.json
+  model.ir.json
+  geo/boundaries.geojson          (if geo= specified)
+  runs/
+    {sim_hash_8}/                 # model + base params + backend + dt
+      {scenario_slug}-{scen_hash_8}/   # scenario overrides
+        seed_{seed}/              # individual run
+          traj.tsv
+          run.json
 ```
 
-### 8.2 Structural Separation
-
-Two reserved top-level directories under each config hash:
-
-- **`runs/`** — scenario directories with seed subdirectories
-- **`analysis/`** — post-processing outputs
-
-Scenario names live inside `runs/`. Even if a user names a scenario
-`analysis`, it appears as `runs/analysis/seed-42/` — no collision.
-
-Scenario names are identifiers (`[a-zA-Z_][a-zA-Z0-9_]*`). Seed
-directories use `seed-N` format (hyphen delimiter).
-
-### 8.3 Hash Computation
-
-**Model hash** — structural identity of the `.camdl` file:
+Example with two scenarios:
 
 ```
-model_hash = sha256(structural_content)[:12]
+runs/3a7f2c1d/baseline-00000000/seed_1/
+runs/3a7f2c1d/with_sia-f9e2b047/seed_1/
 ```
 
-Structural content: compartments, stratify, parameters (names and types),
-tables (structure + inline values), let bindings, functions, transitions,
-observations, ode, interventions (full specification), init, time_unit.
-
-Excluded: simulate, output, scenarios, data file paths.
-
-**Config hash** — full analysis identity:
+After tweaking `with_sia` only — baseline cache is untouched:
 
 ```
-config_hash = sha256(
-    model_hash
-    + sorted(merged param key=value pairs)
-    + sorted(data file content hashes)
+runs/3a7f2c1d/with_sia-d4e2a391/seed_1/   ← new
+runs/3a7f2c1d/baseline-00000000/seed_1/   ← reused
+```
+
+After changing base params — nothing reused:
+
+```
+runs/cc8b1a90/baseline-00000000/seed_1/
+runs/cc8b1a90/with_sia-f9e2b047/seed_1/
+```
+
+Scenario slug: scenario name lowercased, non-`[a-z0-9_]` replaced with `_`.
+Seed directory: `seed_{N}` with verbatim u64, no zero-padding.
+
+### 8.2 Hash Computation
+
+**Sim hash** — full simulation identity (model + base params + backend + dt):
+
+```
+sim_hash = sha256(
+    model_ir_json_bytes
+    + canonical_sorted(base_param key=value pairs)
     + backend
-    + dt (if applicable)
+    + dt
     + camdl_version
-)[:12]
+)   # full 64-char hex; first 8 used in dir name
 ```
 
-**Input hash** — uniquely identifies one cell of the experiment grid:
+`model_ir_json_bytes` is the compiled IR — it captures all structural
+content: compartments, parameters, transitions, interventions, init, etc.
+
+**Scenario hash** — scenario delta identity:
 
 ```
-input_hash = sha256(
-    config_hash
-    + scenario_definition_hash
-    + seed
-)[:12]
+scen_hash = sha256(
+    sorted(enable list)
+    + sorted(disable list)
+    + canonical_sorted(scenario param overrides)
+)   # full 64-char hex; first 8 used in dir name
 ```
 
-The **scenario definition hash** captures the full resolved definition of
-the scenario patch: enable/disable lists, set/scale values, and for
-composed scenarios, the definitions of all constituent scenarios
-recursively. If a scenario definition changes (e.g., adding a second
-intervention to `with_sia`), the input hash changes and old cached results
-are invalidated — but only for that scenario. Other scenarios' caches are
-unaffected.
+A scenario with no overrides, enables, or disables always hashes to the
+same value (`sha256("") = ...`), producing `00000000` in the directory name.
 
-For the baseline scenario (identity patch), the scenario definition hash
-is a fixed constant (e.g., `sha256("")`).
+`scen_hash` covers only the *delta* — the scenario's own enable/disable
+lists and param overrides. Base params are already in `sim_hash`. Renaming
+a scenario without changing its definition preserves `scen_hash` and
+reuses cached runs.
 
-### 8.4 Frozen Inputs
+### 8.3 Cache Reuse Matrix
 
+| What changed | sim_hash | scen_hash | Reuse |
+|---|---|---|---|
+| IR / model | changes | — | none |
+| base params | changes | — | none |
+| backend or dt | changes | — | none |
+| scenario A's enable/disable/params | unchanged | A changes, B same | B's runs reused |
+| add more seeds | unchanged | unchanged | all existing reused |
+| rename a scenario | unchanged | unchanged | reused (same sim) |
+
+### 8.4 Manifest
+
+`manifest.json` at the output root lists every completed run:
+
+```json
+{
+  "runs": [
+    { "scenario": "baseline", "seed": 1, "run_path": "3a7f2c1d/baseline-00000000/seed_1" },
+    { "scenario": "with_sia", "seed": 1, "run_path": "3a7f2c1d/with_sia-f9e2b047/seed_1" }
+  ]
+}
 ```
-config-{hash}/
-  experiment.toml    # frozen copy (only when experiment file is used)
-  params.toml        # frozen merged baseline (always)
-```
 
-The frozen `experiment.toml` records original file paths for traceability.
-The frozen `params.toml` is the resolved merged values — the authoritative
-record for reproduction. When `camdl simulate --output-dir` is used without
-an experiment file, only `params.toml` is frozen.
+The web app constructs trajectory URLs as `GET /runs/{run_path}/traj.tsv`.
 
 ---
 
@@ -720,25 +715,22 @@ Each run produces a `run.json`:
 
 ```json
 {
-  "model_hash": "a3f8b2c1d4e5",
-  "config_hash": "7c9a1b2e3f4d",
-  "input_hash": "e4f5a6b7c8d9",
+  "sim_hash": "3a7f2c1d...",
+  "scen_hash": "f9e2b047...",
   "scenario": "with_sia",
-  "scenario_definition_hash": "c3d4e5f6a7b8",
   "seed": 42,
-  "backend": "gillespie",
-  "camdl_version": "0.3.0",
-  "model_file": "models/seir_nigeria.camdl",
-  "params_files": ["params/base.toml", "params/fitted_2024.toml"],
+  "backend": "tau_leap",
+  "dt": 1.0,
+  "camdl_version": "0.1.0",
+  "model_file": "model.camdl",
+  "params_file": "params.toml",
   "wall_time_seconds": 1.23,
-  "timestamp": "2024-11-15T14:30:00Z",
-  "transitions_fired": 1482301,
-  "zero_firing_transitions": 0
+  "timestamp": "2026-03-23T14:30:00Z"
 }
 ```
 
-Cache key: if `run.json` exists with matching `input_hash`, the run is
-skipped.
+Cache key: if the run directory (`runs/{sim_hash_8}/{slug}-{scen_hash_8}/seed_{N}/`)
+already exists, the run is skipped. Pass `--force` to re-run.
 
 ---
 
@@ -878,26 +870,23 @@ camdl experiment check EXPERIMENT.toml     # detect stale results
 
 ### 12.1 Cache Hit
 
-A run is a cache hit when `runs/{scenario}/seed-{N}/run.json` exists and
-its `input_hash` matches the computed
-`sha256(config_hash + scenario_definition_hash + seed)[:12]`.
+A run is a cache hit when
+`runs/{sim_hash_8}/{scenario_slug}-{scen_hash_8}/seed_{N}/` already exists.
+The directory path encodes all inputs: changing the model, base params,
+backend, dt, or camdl version changes `sim_hash_8`; changing a scenario's
+enable/disable lists or param overrides changes `scen_hash_8`.
 
-Changing the model structure, any parameter value, the backend, the camdl
-version, or a scenario definition invalidates the relevant cache entries.
-Scenario definition changes only invalidate runs for that scenario (and
-any composed scenarios that include it).
+Scenario changes only invalidate runs for that scenario — other scenarios'
+directories are unaffected.
 
 ### 12.2 Provenance Guarantees
 
-1. **Self-contained.** Frozen files describe the analysis completely.
-2. **Tamper-evident.** `input_hash` is a function of all inputs including
-   the scenario definition.
-3. **Version-stamped.** Different camdl versions → different directories.
+1. **Self-contained.** `manifest.json` + `model.ir.json` describe the analysis completely.
+2. **Content-addressed.** `sim_hash` and `scen_hash` in `run.json` audit all inputs.
+3. **Version-stamped.** Different camdl versions → different `sim_hash` → different directories.
 4. **Deterministic.** Same inputs → byte-identical output (single platform).
 
-**Not guaranteed:** data file immutability (content hashes detect changes
-but frozen copies don't include large external data); cross-machine
-floating-point reproducibility.
+**Not guaranteed:** cross-machine floating-point reproducibility.
 
 ---
 

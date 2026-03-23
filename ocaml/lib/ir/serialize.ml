@@ -177,11 +177,12 @@ let action_to_json (a : action) : Yojson.Safe.t =
     ])]
 
 let intervention_to_json (iv : intervention) : Yojson.Safe.t =
-  obj [
-    ("name",     str iv.name);
-    ("schedule", intervention_schedule_to_json iv.schedule);
-    ("actions",  arr (List.map action_to_json iv.actions));
-  ]
+  obj (
+    [("name", str iv.name)]
+    @ (match iv.base_name with None -> [] | Some s -> [("base_name", str s)])
+    @ [ ("schedule", intervention_schedule_to_json iv.schedule);
+        ("actions",  arr (List.map action_to_json iv.actions)); ]
+  )
 
 (* ── Observation model ───────────────────────────────────────────────────── *)
 
@@ -323,14 +324,18 @@ let simulation_config_to_json (s : simulation_config) : Yojson.Safe.t =
 (* ── Presets ─────────────────────────────────────────────────────────────── *)
 
 let preset_to_json (p : preset) : Yojson.Safe.t =
-  obj [
-    ("name",    str p.preset_name);
-    ("label",   str p.preset_label);
-    ("params",  obj (List.map (fun (k, v) -> (k, flt v)) p.preset_params));
-    ("enable",  arr (List.map str p.preset_enable));
-    ("disable", arr (List.map str p.preset_disable));
-    ("t_end",   match p.preset_t_end with None -> null | Some v -> flt v);
-  ]
+  obj (
+    [ ("name",    str p.preset_name);
+      ("label",   str p.preset_label);
+      ("params",  obj (List.map (fun (k, v) -> (k, flt v)) p.preset_params));
+      ("enable",  arr (List.map str p.preset_enable));
+      ("disable", arr (List.map str p.preset_disable));
+      ("t_end",   match p.preset_t_end with None -> null | Some v -> flt v); ]
+    @ (if p.preset_scale = [] then []
+       else [("scale", obj (List.map (fun (k, v) -> (k, flt v)) p.preset_scale))])
+    @ (if p.preset_compose = [] then []
+       else [("compose", arr (List.map str p.preset_compose))])
+  )
 
 (* ── Model structure ─────────────────────────────────────────────────────── *)
 

@@ -151,3 +151,12 @@ state; do not resume with remaining exponential time.
 5. `make update-golden && make update-expected` — regenerate all golden files
 6. Commit schema + both language changes + updated golden files in one atomic
    commit
+
+## Design Principles
+
+### Backwards compatibility is a non-goal
+
+This is unreleased software. Do not add backwards-compatibility shims,
+`alias` attributes, fallback deserialization paths, or deprecated field
+names. When a field is renamed, rename it everywhere atomically. When a
+format changes, update all golden files. Clean design beats legacy support.

@@ -106,9 +106,10 @@ type stratify_decl = {
 }
 
 type init_entry = {
-  icomp    : string;
-  iindices : index_item list;
-  ivalue   : expr;
+  icomp     : string;
+  iindices  : index_item list;       (* positional: S[child] *)
+  ibindings : index_binding list;    (* loop: [p in patch] *)
+  ivalue    : expr;
 }
 
 type obs_schedule =
@@ -146,6 +147,7 @@ type schedule_decl =
 
 type intervention_decl = {
   ivname    : string;
+  ivindices : index_binding list;   (* [] for non-indexed interventions *)
   ivaction  : action_decl;
   ivschedule: schedule_decl;
 }
@@ -179,11 +181,18 @@ type simulate_decl = { sim_from: expr; sim_to: expr }
 
 type timepoint_decl = { tpname: string; tptime: expr }
 
+type scenario_field =
+  | ScLabel   of string
+  | ScEnable  of string list
+  | ScDisable of string list
+  | ScSet     of (string * expr) list
+  | ScScale   of (string * expr) list
+  | ScCompose of string list
+  | ScTEnd    of expr
+
 type scenario_decl = {
   scname   : string;
-  sclabel  : string option;
-  sct_end  : expr option;
-  scparams : (string * expr) list;
+  scfields : scenario_field list;
 }
 
 type declaration =

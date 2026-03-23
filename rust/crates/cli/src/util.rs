@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use ir::table::TableSource;
+use ir::intervention::Intervention;
 use sim::{
     CompiledModel, GillespieSim, TauLeapSim, ChainBinomialSim,
     config::{GillespieConfig, TauLeapConfig, ChainBinomialConfig, SimConfig},
@@ -137,6 +138,53 @@ pub fn load_keyed_tsv(path: &str) -> Result<Vec<(String, f64)>, String> {
     Ok(out)
 }
 
+// ─── Enable/disable resolution ───────────────────────────────────────────────
+
+/// Resolve a list of enable/disable names, expanding family names via base_name.
+///
+/// Resolution rule:
+/// 1. Exact match: name == iv.name → enable that one
+/// 2. Family match: name == iv.base_name → enable all members of that family
+/// 3. No match: error with available names and families
+pub fn resolve_enable_list(
+    names: &[String],
+    interventions: &[Intervention],
+) -> Result<Vec<String>, String> {
+    let mut resolved: Vec<String> = Vec::new();
+    for name in names {
+        // 1. Exact match
+        if interventions.iter().any(|iv| iv.name == *name) {
+            resolved.push(name.clone());
+            continue;
+        }
+        // 2. Family match
+        let family: Vec<String> = interventions.iter()
+            .filter(|iv| iv.base_name.as_deref() == Some(name.as_str()))
+            .map(|iv| iv.name.clone())
+            .collect();
+        if !family.is_empty() {
+            resolved.extend(family);
+            continue;
+        }
+        // 3. No match
+        let mut families: Vec<&str> = interventions.iter()
+            .filter_map(|iv| iv.base_name.as_deref())
+            .collect::<std::collections::HashSet<_>>()
+            .into_iter().collect();
+        families.sort();
+        return Err(format!(
+            "'{}' does not match any intervention or family.\n  \
+             Families: {}\n  Names (first 10): {}",
+            name,
+            if families.is_empty() { "(none)".to_string() }
+            else { families.join(", ") },
+            interventions.iter().take(10)
+                .map(|iv| iv.name.as_str()).collect::<Vec<_>>().join(", ")
+        ));
+    }
+    Ok(resolved)
+}
+
 // ─── SimRun / SimOutput ───────────────────────────────────────────────────────
 
 /// All inputs needed to run one simulation.
@@ -184,7 +232,8 @@ pub fn run_simulation(run: &SimRun) -> Result<(Trajectory, ir::Model), String> {
 
     // Apply scenario patch
     {
-        let (active_enable, active_disable, scenario_params): (Vec<String>, Vec<String>, Vec<(String, f64)>) =
+        let (raw_enable, raw_disable, scenario_params, scenario_scale, scenario_compose):
+            (Vec<String>, Vec<String>, Vec<(String, f64)>, Vec<(String, f64)>, Vec<String>) =
             if let Some(ref name) = run.scenario_name {
                 let preset = model.presets.iter().find(|p| p.name == *name)
                     .ok_or_else(|| {
@@ -194,12 +243,42 @@ pub fn run_simulation(run: &SimRun) -> Result<(Trajectory, ir::Model), String> {
                             name,
                             if available.is_empty() { "(none)".to_string() }
                             else { available.join(", ") })
-                    })?;
-                (preset.enable.clone(), preset.disable.clone(),
-                 preset.params.iter().map(|(k, &v)| (k.clone(), v)).collect())
+                    })?.clone();
+                // Compose: apply sub-scenarios left-to-right (flat only — no nested compose)
+                let mut composed_enable: Vec<String> = Vec::new();
+                let mut composed_disable: Vec<String> = Vec::new();
+                let mut composed_params: Vec<(String, f64)> = Vec::new();
+                let mut composed_scale: Vec<(String, f64)> = Vec::new();
+                if !preset.compose.is_empty() {
+                    for sc_name in &preset.compose {
+                        let sub = model.presets.iter().find(|p| p.name == *sc_name)
+                            .ok_or_else(|| format!(
+                                "compose: scenario '{}' not found in model", sc_name))?;
+                        if !sub.compose.is_empty() {
+                            return Err(format!(
+                                "nested compose is not supported. Scenario '{}' referenced \
+                                 in compose = [...] itself uses compose.",
+                                sc_name));
+                        }
+                        composed_enable.extend(sub.enable.clone());
+                        composed_disable.extend(sub.disable.clone());
+                        composed_params.extend(sub.params.iter().map(|(k, &v)| (k.clone(), v)));
+                        composed_scale.extend(sub.scale.iter().map(|(k, &v)| (k.clone(), v)));
+                    }
+                }
+                // Own enable/disable/params override composed ones
+                composed_enable.extend(preset.enable.clone());
+                composed_disable.extend(preset.disable.clone());
+                composed_params.extend(preset.params.iter().map(|(k, &v)| (k.clone(), v)));
+                composed_scale.extend(preset.scale.iter().map(|(k, &v)| (k.clone(), v)));
+                (composed_enable, composed_disable, composed_params, composed_scale, preset.compose.clone())
             } else {
-                (run.adhoc_enable.clone(), run.adhoc_disable.clone(), vec![])
+                (run.adhoc_enable.clone(), run.adhoc_disable.clone(), vec![], vec![], vec![])
             };
+
+        // Resolve family names → concrete intervention names
+        let active_enable  = resolve_enable_list(&raw_enable,  &model.interventions)?;
+        let active_disable = resolve_enable_list(&raw_disable, &model.interventions)?;
 
         if !active_enable.is_empty() {
             model.interventions.retain(|iv| active_enable.contains(&iv.name));
@@ -214,6 +293,19 @@ pub fn run_simulation(run: &SimRun) -> Result<(Trajectory, ir::Model), String> {
                 if p.name == k { p.value = Some(v); }
             }
         }
+
+        // Apply scale: multiply existing param values
+        for (k, factor) in &scenario_scale {
+            for p in &mut model.parameters {
+                if p.name == *k {
+                    if let Some(v) = p.value {
+                        p.value = Some(v * factor);
+                    }
+                }
+            }
+        }
+
+        let _ = scenario_compose; // compose is consumed above; suppress unused warning
     }
 
     // Apply --params TOML files

@@ -1047,21 +1047,47 @@ let eval_const e =
   in eval e
 
 let expand_init ctx =
-  let entries = List.filter_map (fun ie ->
-    let concrete_name =
-      if ie.iindices = [] then ie.icomp
-      else
-        let idx_vals = List.map (function
-          | IPosn (EIdent (s, _)) -> s
-          | IPosn (EConst f)      -> string_of_float f
-          | INamed (_, EIdent (s, _)) -> s
-          | _                     -> "?"
-        ) ie.iindices in
-        String.concat "_" (ie.icomp :: idx_vals)
-    in
-    let resolved = normalize_expr (resolve_expr ctx [] ie.ivalue) in
-    Some (concrete_name, resolved)
-  ) ctx.init_entries in
+  (* Hashtbl + queue to implement override-by-source-order: later entries win,
+     but insertion order is preserved for deterministic output. *)
+  let tbl   : (string, Ir.expr) Hashtbl.t = Hashtbl.create 64 in
+  let order : string Queue.t = Queue.create () in
+  let add_entry name value =
+    if not (Hashtbl.mem tbl name) then Queue.add name order;
+    Hashtbl.replace tbl name value
+  in
+  List.iter (fun ie ->
+    if ie.ibindings = [] then begin
+      (* Positional or bare form *)
+      let concrete_name =
+        if ie.iindices = [] then ie.icomp
+        else
+          let idx_vals = List.map (function
+            | IPosn (EIdent (s, _))     -> s
+            | IPosn (EConst f)          -> string_of_float f
+            | INamed (_, EIdent (s, _)) -> s
+            | _                         -> "?"
+          ) ie.iindices in
+          String.concat "_" (ie.icomp :: idx_vals)
+      in
+      let resolved = normalize_expr (resolve_expr ctx [] ie.ivalue) in
+      add_entry concrete_name resolved
+    end else begin
+      (* Loop binding form *)
+      let combos = cartesian_product ie.ibindings ctx in
+      List.iter (fun env ->
+        let parts = name_parts_from_bindings ie.ibindings env in
+        let concrete_name =
+          if parts = [] then ie.icomp
+          else ie.icomp ^ "_" ^ String.concat "_" parts
+        in
+        let resolved = normalize_expr (resolve_expr ctx env ie.ivalue) in
+        add_entry concrete_name resolved
+      ) combos
+    end
+  ) ctx.init_entries;
+  let entries = Queue.fold (fun acc name ->
+    acc @ [(name, Hashtbl.find tbl name)]
+  ) [] order in
   if List.for_all (fun (_, e) -> is_all_const e) entries then
     Ir.Explicit (List.map (fun (k, e) -> (k, eval_const e)) entries)
   else
@@ -1164,41 +1190,50 @@ let expand_time_functions ctx : Ir.time_function list =
   ) ctx.func_decls
 
 let expand_interventions ctx =
-  List.map (fun iv ->
-    let schedule = match iv.ivschedule with
-      | SAtTimes exprs ->
-        Ir.AtTimes (List.map (resolve_float_expr ctx) exprs)
-      | SRecurring (every, from_, until) ->
-        let period = resolve_float_expr ctx every in
-        let start  = resolve_float_expr ctx from_  in
-        let end_   = resolve_float_expr ctx until in
-        Ir.Recurring { Ir.start; Ir.period; Ir.end_ }
-    in
-    let actions = match iv.ivaction with
-      | ATransfer kwargs ->
-        let src = match List.assoc_opt "from" kwargs with
-          | Some e -> resolve_comp_name ctx [] e
-          | None   -> "?"
-        in
-        let dst = match List.assoc_opt "to" kwargs with
-          | Some e -> resolve_comp_name ctx [] e
-          | None   -> "?"
-        in
-        (match List.assoc_opt "fraction" kwargs with
-        | Some fe ->
-          [Ir.FractionTransfer { Ir.src; Ir.dst; Ir.fraction = resolve_expr ctx [] fe }]
-        | None ->
-          match List.assoc_opt "count" kwargs with
-          | Some ce ->
-            [Ir.AbsoluteTransfer { Ir.src; Ir.dst; Ir.count = resolve_expr ctx [] ce }]
-          | None -> [])
-      | ASet (comp, idxs, expr) ->
-        let idx_vals = List.map (index_item_to_str []) idxs in
-        let concrete = if idx_vals = [] then comp
-          else String.concat "_" (comp :: idx_vals) in
-        [Ir.Set { Ir.compartment = concrete; Ir.value = resolve_expr ctx [] expr }]
-    in
-    { Ir.name = iv.ivname; Ir.schedule; Ir.actions }
+  List.concat_map (fun iv ->
+    let base_name = if iv.ivindices = [] then None else Some iv.ivname in
+    let combos = cartesian_product iv.ivindices ctx in
+    List.map (fun env ->
+      let parts = name_parts_from_bindings iv.ivindices env in
+      let iv_name =
+        if parts = [] then iv.ivname
+        else iv.ivname ^ "_" ^ String.concat "_" parts
+      in
+      let schedule = match iv.ivschedule with
+        | SAtTimes exprs ->
+          Ir.AtTimes (List.map (resolve_float_expr ctx) exprs)
+        | SRecurring (every, from_, until) ->
+          let period = resolve_float_expr ctx every in
+          let start  = resolve_float_expr ctx from_  in
+          let end_   = resolve_float_expr ctx until in
+          Ir.Recurring { Ir.start; Ir.period; Ir.end_ }
+      in
+      let actions = match iv.ivaction with
+        | ATransfer kwargs ->
+          let src = match List.assoc_opt "from" kwargs with
+            | Some e -> resolve_comp_name ctx env e
+            | None   -> "?"
+          in
+          let dst = match List.assoc_opt "to" kwargs with
+            | Some e -> resolve_comp_name ctx env e
+            | None   -> "?"
+          in
+          (match List.assoc_opt "fraction" kwargs with
+          | Some fe ->
+            [Ir.FractionTransfer { Ir.src; Ir.dst; Ir.fraction = resolve_expr ctx env fe }]
+          | None ->
+            match List.assoc_opt "count" kwargs with
+            | Some ce ->
+              [Ir.AbsoluteTransfer { Ir.src; Ir.dst; Ir.count = resolve_expr ctx env ce }]
+            | None -> [])
+        | ASet (comp, idxs, expr) ->
+          let idx_vals = List.map (index_item_to_str env) idxs in
+          let concrete = if idx_vals = [] then comp
+            else String.concat "_" (comp :: idx_vals) in
+          [Ir.Set { Ir.compartment = concrete; Ir.value = resolve_expr ctx env expr }]
+      in
+      { Ir.name = iv_name; Ir.base_name; Ir.schedule; Ir.actions }
+    ) combos
   ) ctx.interv_decls
 
 (* ── Observation model expansion ─────────────────────────────────────────── *)
@@ -1305,24 +1340,30 @@ let check_shadowing ctx =
 
 let expand_scenarios ctx : Ir.preset list =
   List.map (fun (sd : scenario_decl) ->
-    let label = Option.value ~default:sd.scname sd.sclabel in
-    let t_end = Option.map (resolve_float_expr ctx) sd.sct_end in
-    (* Extract enable/disable lists; the rest are set-style param overrides. *)
-    let extract_names = function
-      | EList items -> List.filter_map (function EIdent (n, _) -> Some n | _ -> None) items
-      | _ -> []
-    in
-    let enable  = List.concat_map (fun (k, e) -> if k = "enable"  then extract_names e else []) sd.scparams in
-    let disable = List.concat_map (fun (k, e) -> if k = "disable" then extract_names e else []) sd.scparams in
-    let params  = List.filter_map (fun (k, e) ->
-      if k = "enable" || k = "disable" then None
-      else Some (k, resolve_float_expr ctx e)) sd.scparams in
+    let label        = ref sd.scname in
+    let enable       = ref [] in
+    let disable      = ref [] in
+    let set_params   = ref [] in
+    let scale_params = ref [] in
+    let compose      = ref [] in
+    let t_end        = ref None in
+    List.iter (function
+      | ScLabel s    -> label := s
+      | ScEnable es  -> enable := !enable @ es
+      | ScDisable ds -> disable := !disable @ ds
+      | ScSet ps     -> set_params := !set_params @ ps
+      | ScScale ps   -> scale_params := !scale_params @ ps
+      | ScCompose cs -> compose := !compose @ cs
+      | ScTEnd e     -> t_end := Some (resolve_float_expr ctx e)
+    ) sd.scfields;
     { Ir.preset_name    = sd.scname;
-      Ir.preset_label   = label;
-      Ir.preset_params  = params;
-      Ir.preset_enable  = enable;
-      Ir.preset_disable = disable;
-      Ir.preset_t_end   = t_end;
+      Ir.preset_label   = !label;
+      Ir.preset_params  = List.map (fun (k, e) -> (k, resolve_float_expr ctx e)) !set_params;
+      Ir.preset_enable  = !enable;
+      Ir.preset_disable = !disable;
+      Ir.preset_scale   = List.map (fun (k, e) -> (k, resolve_float_expr ctx e)) !scale_params;
+      Ir.preset_compose = !compose;
+      Ir.preset_t_end   = !t_end;
     }
   ) ctx.scenario_decls
 

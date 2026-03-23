@@ -1,10 +1,9 @@
 %{
   open Ast
 
-  type scenario_field_kind =
-    | ScLabel  of string
-    | ScTEnd   of expr
-    | ScParams of (string * expr) list
+  let extract_ident_list = function
+    | EList items -> List.filter_map (function EIdent (n, _) -> Some n | _ -> None) items
+    | _ -> []
 %}
 
 (* ── Literals & identifiers ────────────────────────────────────────────── *)
@@ -304,16 +303,16 @@ intervention_list:
   | ivs = list(intervention_decl) { ivs }
 
 intervention_decl:
-  | name = IDENT COLON LBRACE iv_kvs = list(iv_kv) RBRACE
+  | name = IDENT ibs = index_bindings_opt COLON LBRACE iv_kvs = list(iv_kv) RBRACE
       { let action = ref (ATransfer []) in
         let sched  = ref (SAtTimes []) in
         List.iter (function
           | `Action a -> action := a
           | `Schedule s -> sched := s
         ) iv_kvs;
-        { ivname = name; ivaction = !action; ivschedule = !sched } }
-  | name = IDENT COLON TRANSFER LPAREN kwargs = separated_list(COMMA, transfer_kwarg) RPAREN AT_KW LBRACKET ts = separated_list(COMMA, expr) RBRACKET
-      { { ivname = name; ivaction = ATransfer kwargs; ivschedule = SAtTimes ts } }
+        { ivname = name; ivindices = ibs; ivaction = !action; ivschedule = !sched } }
+  | name = IDENT ibs = index_bindings_opt COLON TRANSFER LPAREN kwargs = separated_list(COMMA, transfer_kwarg) RPAREN AT_KW LBRACKET ts = separated_list(COMMA, expr) RBRACKET
+      { { ivname = name; ivindices = ibs; ivaction = ATransfer kwargs; ivschedule = SAtTimes ts } }
 
 transfer_kwarg:
   | k = IDENT EQ e = expr { (k, e) }
@@ -399,8 +398,10 @@ init_list:
   | ies = list(init_entry) { ies }
 
 init_entry:
+  | comp = IDENT LBRACKET ibs = separated_nonempty_list(COMMA, index_binding) RBRACKET EQ v = expr
+      { { icomp = comp; iindices = []; ibindings = ibs; ivalue = v } }
   | comp = IDENT idxs = index_items_opt EQ v = expr
-      { { icomp = comp; iindices = idxs; ivalue = v } }
+      { { icomp = comp; iindices = idxs; ibindings = []; ivalue = v } }
 
 (* ── Timepoints block ────────────────────────────────────────────────────── *)
 
@@ -490,25 +491,31 @@ kw_expr:
 
 scenario_block:
   | name = IDENT LBRACE fields = list(scenario_field) RBRACE
-      { let label  = List.find_map (function ScLabel s -> Some s | _ -> None) fields in
-        let t_end  = List.find_map (function ScTEnd  e -> Some e | _ -> None) fields in
-        let params = List.concat_map (function ScParams ps -> ps | _ -> []) fields in
-        { Ast.scname = name; sclabel = label; sct_end = t_end; scparams = params } }
+      { { Ast.scname = name; scfields = fields } }
 
 scenario_field:
   | SIMULATE LBRACE kvs = list(simulate_kv) RBRACE
       { let e = match List.find_map (function `To e -> Some e | _ -> None) kvs with
                 | Some e -> e | None -> EConst 0.0 in
-        ScTEnd e }
-  | IDENT EQ LBRACE ps = list(scenario_kv_item) RBRACE
-      { ScParams ps }
+        Ast.ScTEnd e }
+  | k = IDENT EQ LBRACE ps = list(scenario_kv_item) RBRACE
+      { match k with
+        | "set"   -> Ast.ScSet   ps
+        | "scale" -> Ast.ScScale ps
+        | _       -> Ast.ScSet   [(k, EConst 0.0)] }
   | k = IDENT EQ v = expr
-      { if k = "label" then
-          (match v with
-           | EIdent (s, _) -> ScLabel s
-           | EConst f -> ScLabel (string_of_float f)
-           | _ -> ScLabel "")
-        else ScParams [(k, v)] }
+      { match k with
+        | "label"   ->
+          let s = match v with
+            | EIdent (s, _) -> s
+            | EConst f -> string_of_float f
+            | EFuncCall (s, []) -> s
+            | _ -> "" in
+          Ast.ScLabel s
+        | "enable"  -> Ast.ScEnable  (extract_ident_list v)
+        | "disable" -> Ast.ScDisable (extract_ident_list v)
+        | "compose" -> Ast.ScCompose (extract_ident_list v)
+        | _         -> Ast.ScSet [(k, v)] }
 
 scenario_kv_item:
   | k = IDENT EQ v = expr { (k, v) }

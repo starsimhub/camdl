@@ -70,7 +70,12 @@ type action =
   | FractionTransfer of fraction_transfer
   | AbsoluteTransfer of absolute_transfer
   | Set              of set_action
-type intervention = { name: string; schedule: intervention_schedule; actions: action list }
+type intervention = {
+  name:      string;
+  base_name: string option;
+  schedule:  intervention_schedule;
+  actions:   action list;
+}
 
 type projection =
   | CumulativeFlow of string
@@ -158,6 +163,8 @@ type preset = {
   preset_params  : (string * float) list;
   preset_enable  : string list;
   preset_disable : string list;
+  preset_scale   : (string * float) list;
+  preset_compose : string list;
   preset_t_end   : float option;
 }
 

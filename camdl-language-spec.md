@@ -1207,7 +1207,29 @@ from  = DURATION             start of recurring
 until = DURATION             end of recurring
 ```
 
-### 14.3 Activation
+### 14.3 Indexed Interventions
+
+An intervention can be declared with an **index binder**, creating a **family**
+of interventions — one per stratum — in a single line:
+
+```
+interventions {
+  # Declares sia_jigawa_miga, sia_borno_damboa, ... (one per patch)
+  sia[p in patch] : transfer(fraction = vacc_eff * sia_cov, from = S[p], to = V[p])
+    at [180, 545]
+}
+```
+
+Syntax: `NAME[INDEX_VAR in DIMENSION] : ACTION at [...]`
+
+The expanded members share a **`base_name`** (the unindexed name, `"sia"` above).
+In scenario `enable`/`disable` lists, passing `"sia"` resolves to all members
+whose `base_name` is `"sia"` — no need to enumerate them individually (see §18).
+
+Individual members can still be addressed by their expanded name
+(`"sia_borno_damboa"`) when fine-grained control is needed.
+
+### 14.4 Activation
 
 Interventions are off by default. Enable via scenarios or CLI:
 
@@ -1411,23 +1433,23 @@ time_when(pred)            first time predicate becomes true
 
 ## 18. Scenarios
 
-> **Not yet implemented (v0.2).** The `scenarios { }` block token is
-> recognized by the lexer but has no grammar rules or expander support.
-> Scenario management is planned for v0.2.
-
-Patch-based modifications to the baseline (Buffalo 2026). Baseline is the
-identity patch — the model as defined, no modifications.
+Patch-based modifications to the baseline. Baseline is the identity patch —
+the model as defined, no modifications.
 
 ```
 scenarios {
+  baseline {
+    label = "no SIA (baseline)"
+  }
+
   with_sia {
-    enable = [sia_round_1]
+    label  = "with SIA — all patches"
+    enable = [sia]
   }
 
   high_coverage {
-    enable = [sia_round_1]
-    set    = { vacc_rate = if vacc_rate * 1.2 > 1.0 then 1.0
-                           else vacc_rate * 1.2 }
+    enable = [sia]
+    set    = { sia_cov = 0.95 }
   }
 
   more_transmissible {
@@ -1443,12 +1465,20 @@ scenarios {
 ### 18.1 Patch Operations
 
 ```
+label   = STRING                   human-readable name for the scenario
 enable  = [INTERVENTION, ...]      turn on interventions
 disable = [INTERVENTION, ...]      turn off interventions
-set     = { PARAM = EXPR, ... }    override values (explicit expressions)
+set     = { PARAM = EXPR, ... }    override parameter values
 scale   = { PARAM = FACTOR, ... }  multiply (compiler checks domain validity)
 compose = [SCENARIO, ...]          apply patches in sequence
 ```
+
+**Family-based enable resolution.** `enable` entries are matched against
+intervention `base_name` as well as exact names. If `"sia"` is the
+`base_name` of an indexed family `sia[p in patch]`, writing `enable = [sia]`
+activates all 238 members at once. Individual members can still be addressed
+by their expanded name (e.g., `"sia_borno_damboa"`) when fine-grained control
+is needed.
 
 The compiler warns on non-commutative compositions (overlapping write sets).
 `scale` on a `probability` parameter that would exceed [0,1] is a **compile
@@ -1540,53 +1570,70 @@ Seed is always external (CLI `--seed`), never in the model file.
 
 ## 20. Content-Addressable Output
 
-Outputs are stored in a content-addressable hierarchy:
+Outputs are stored in a two-level content-addressable hierarchy inside an
+`output_dir` you choose:
 
 ```
-{output_root}/
-  {model_hash}/                    # structural model identity
-    {config_hash}/                 # model + data + parameter values
-      baseline/                    # scenario (human-readable)
-        {seed}/                    # individual run
-          metadata.json
-          trajectories.parquet
-          flows.parquet
-          summary.tsv
-          synthetic.tsv
-      with_sia/
-        {seed}/
-          ...
-      ensemble_summary.tsv         # all seeds stacked
-    comparisons/
-      baseline_vs_with_sia/
-        treatment_effects.tsv
+{output_dir}/
+  manifest.json
+  model.ir.json
+  geo/boundaries.geojson          (if geo= specified in experiment)
+  runs/
+    {sim_hash_8}/                 # model + base params + backend + dt
+      {scenario_slug}-{scen_hash_8}/   # scenario overrides
+        seed_{seed}/              # individual run
+          traj.tsv
+          run.json
+```
+
+Example with two scenarios after a base-param change:
+
+```
+runs/3a7f2c1d/baseline-00000000/seed_1/
+runs/3a7f2c1d/with_sia-f9e2b047/seed_1/
+# after tweaking with_sia only — baseline reused:
+runs/3a7f2c1d/with_sia-d4e2a391/seed_1/
+runs/3a7f2c1d/baseline-00000000/seed_1/   ← untouched, cached
+# after changing base params — nothing reused:
+runs/cc8b1a90/baseline-00000000/seed_1/
 ```
 
 ### 20.1 Hash Computation
 
 ```
-model_hash = sha256(structural content of .camdl file)[:12]
+model_hash = sha256(IR JSON bytes)                         # full 64-char hex
 
-config_hash = sha256(model_hash + sorted params + data file hashes
-                     + backend + runtime version)[:12]
+sim_hash   = sha256(model_hash + canonical_base_params
+                    + backend + dt + tool_version)         # 64-char hex
+                                                           # first 8 used in dir name
 
-scenario_dir = scenario name (human-readable, not hashed)
-run_dir      = seed (integer)
+scen_hash  = sha256(sorted(enable) + sorted(disable)
+                    + canonical_scen_params)               # 64-char hex
+                                                           # first 8 used in dir name
+
+scenario_slug = scenario name lowercased,
+                non-[a-z0-9_] replaced with _
+seed_dir      = seed_{N}   (verbatim u64, no zero-padding)
 ```
 
-**Structural content** included in `model_hash`:
+A scenario with no overrides, enables, or disables always produces
+`scen_hash = sha256("")` → `00000000` prefix, visually identifying it as the
+unmodified baseline.
+
+`scen_hash` covers only the *delta* (scenario overrides, enable, disable).
+Base params and model structure are captured in `sim_hash`. Renaming a scenario
+without changing its definition preserves the hash, so cached runs are reused.
+
+**Structural content** included in `model_hash` (via IR JSON):
 
 ```
 compartments         # state variable declarations
 stratify             # index dimension declarations
 parameters           # names and types only (not values)
-tables               # dimension annotations + inline values (not external file paths)
+tables               # dimension annotations + inline values
 let                  # all let bindings
-functions            # function definitions
 transitions          # all transition declarations
-observations         # observation model structure
-ode                  # ODE equations
-interventions        # intervention definitions
+interventions        # intervention definitions (including base_name)
 init                 # initial condition expressions
 time_unit            # canonical time unit
 ```
@@ -1595,36 +1642,40 @@ time_unit            # canonical time unit
 
 ```
 simulate             # time range is analysis-specific
-output               # format is presentation-specific
 scenarios            # counterfactual modifications, not structural
-data (file paths)    # external file paths change across machines;
-                     #   data CONTENT is covered by config_hash
+data (file paths)    # external file paths change across machines
 ```
 
-Inline table values (e.g., `C_age = [[12.0, 4.0], ...]`) ARE included in the
-model hash — they are part of the model definition. External table file paths
-are not — the config hash covers data file content hashes separately.
+### 20.2 Cache Reuse Matrix
 
-### 20.2 Metadata
+| What changed | sim_hash | scen_hash | Reuse |
+|---|---|---|---|
+| IR / model | changes | — | none |
+| base params | changes | — | none |
+| backend or dt | changes | — | none |
+| scenario A's enable/disable/params | unchanged | A changes, B same | B's runs reused |
+| add more seeds | unchanged | unchanged | all existing reused |
+| rename a scenario | unchanged | unchanged | reused (same sim) |
+
+### 20.3 Manifest
+
+`manifest.json` at the output root lists every completed run:
 
 ```json
 {
-  "model_hash": "a3f8b2c1d4e5",
-  "config_hash": "7c9a1b2e3f4d",
-  "model_file": "models/seir_nigeria.camdl",
-  "parameters": { "beta": 0.3, "gamma": 0.1 },
-  "data_files": { "data/cases.csv": "sha256:..." },
-  "scenario": "with_sia",
-  "seed": 42,
-  "backend": "gillespie",
-  "camdl_version": "0.1.0",
-  "wall_time_seconds": 1.23
+  "runs": [
+    { "scenario": "baseline", "seed": 1, "run_path": "3a7f2c1d/baseline-00000000/seed_1" },
+    { "scenario": "with_sia", "seed": 1, "run_path": "3a7f2c1d/with_sia-f9e2b047/seed_1" }
+  ]
 }
 ```
 
-### 20.3 Caching
+The web app constructs trajectory URLs as `GET /runs/{run_path}/traj.tsv`.
 
-Same inputs → same hash → skip simulation. `--force` to re-run.
+### 20.4 Caching
+
+Same inputs → same hashes → run directory already exists → skip simulation.
+Pass `--force` to re-run and overwrite existing results.
 
 ---
 

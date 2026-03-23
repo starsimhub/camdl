@@ -62,6 +62,7 @@ fn minimal_model_with_interventions(
 fn test_fraction_transfer_uses_floor_not_round() {
     let intervention = Intervention {
         name: "test_iv".into(),
+        base_name: None,
         schedule: InterventionSchedule::AtTimes(vec![30.0]),
         actions: vec![
             Action::FractionTransfer(FractionTransfer {
@@ -93,6 +94,7 @@ fn test_fraction_transfer_uses_floor_not_round() {
 fn test_fraction_transfer_floor_larger() {
     let intervention = Intervention {
         name: "test_iv".into(),
+        base_name: None,
         schedule: InterventionSchedule::AtTimes(vec![30.0]),
         actions: vec![
             Action::FractionTransfer(FractionTransfer {

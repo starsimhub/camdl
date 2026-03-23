@@ -78,11 +78,15 @@ pub struct SimulationConfig {
 pub struct Preset {
     pub name:   String,
     pub label:  String,
-    pub params: std::collections::HashMap<String, f64>,
+    pub params: HashMap<String, f64>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub enable:  Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub disable: Vec<String>,
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub scale:   HashMap<String, f64>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub compose: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub t_end:  Option<f64>,
 }
@@ -123,7 +127,7 @@ pub struct Model {
     pub data_contract:      Option<serde_json::Value>,
     pub output:             OutputConfig,
     pub simulation:         SimulationConfig,
-    #[serde(default, rename = "scenarios", alias = "presets")]
+    #[serde(default, rename = "scenarios")]
     pub presets:            Vec<Preset>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model_structure:    Option<ModelStructure>,

@@ -53,6 +53,8 @@ pub enum Action {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Intervention {
     pub name:     String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_name: Option<String>,
     pub schedule: InterventionSchedule,
     pub actions:  Vec<Action>,
 }
