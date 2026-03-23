@@ -99,3 +99,126 @@ pub fn slug(name: &str) -> String {
         .map(|c| if c.is_ascii_alphanumeric() || c == '_' { c } else { '_' })
         .collect()
 }
+
+// ─── Tests ────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── sim_hash ─────────────────────────────────────────────────────────────
+
+    #[test]
+    fn sim_hash_stable() {
+        assert_eq!(sim_hash("m", "p=1", "gillespie", 1.0), sim_hash("m", "p=1", "gillespie", 1.0));
+    }
+
+    #[test]
+    fn sim_hash_dt_invalidates() {
+        assert_ne!(sim_hash("m", "", "tau_leap", 1.0), sim_hash("m", "", "tau_leap", 0.5));
+    }
+
+    #[test]
+    fn sim_hash_backend_invalidates() {
+        assert_ne!(sim_hash("m", "", "gillespie", 1.0), sim_hash("m", "", "tau_leap", 1.0));
+    }
+
+    #[test]
+    fn sim_hash_model_invalidates() {
+        assert_ne!(sim_hash("model_a", "", "gillespie", 1.0), sim_hash("model_b", "", "gillespie", 1.0));
+    }
+
+    #[test]
+    fn sim_hash_params_invalidates() {
+        assert_ne!(sim_hash("m", "r0=2", "gillespie", 1.0), sim_hash("m", "r0=3", "gillespie", 1.0));
+    }
+
+    // ── scen_hash ────────────────────────────────────────────────────────────
+
+    #[test]
+    fn scen_hash_stable() {
+        let p: HashMap<String, f64> = HashMap::new();
+        assert_eq!(scen_hash(&["sia".to_string()], &[], &p), scen_hash(&["sia".to_string()], &[], &p));
+    }
+
+    #[test]
+    fn scen_hash_enable_order_invariant() {
+        let p: HashMap<String, f64> = HashMap::new();
+        let ab = scen_hash(&["a".to_string(), "b".to_string()], &[], &p);
+        let ba = scen_hash(&["b".to_string(), "a".to_string()], &[], &p);
+        assert_eq!(ab, ba);
+    }
+
+    #[test]
+    fn scen_hash_disable_order_invariant() {
+        let p: HashMap<String, f64> = HashMap::new();
+        let ab = scen_hash(&[], &["a".to_string(), "b".to_string()], &p);
+        let ba = scen_hash(&[], &["b".to_string(), "a".to_string()], &p);
+        assert_eq!(ab, ba);
+    }
+
+    #[test]
+    fn scen_hash_enable_change_invalidates() {
+        let p: HashMap<String, f64> = HashMap::new();
+        assert_ne!(scen_hash(&["sia_r1".to_string()], &[], &p),
+                   scen_hash(&["sia_r2".to_string()], &[], &p));
+    }
+
+    #[test]
+    fn scen_hash_params_change_invalidates() {
+        let mut p1: HashMap<String, f64> = HashMap::new(); p1.insert("vacc_frac".into(), 0.7);
+        let mut p2: HashMap<String, f64> = HashMap::new(); p2.insert("vacc_frac".into(), 0.9);
+        assert_ne!(scen_hash(&[], &[], &p1), scen_hash(&[], &[], &p2));
+    }
+
+    #[test]
+    fn scen_hash_name_independent() {
+        // Same enables/params, different name → same hash (name is navigation only)
+        let p: HashMap<String, f64> = HashMap::new();
+        // scen_hash doesn't take a name argument, so this is enforced by the API
+        let h1 = scen_hash(&["sia".to_string()], &[], &p);
+        let h2 = scen_hash(&["sia".to_string()], &[], &p);
+        assert_eq!(h1, h2);
+    }
+
+    #[test]
+    fn scen_hash_returns_64_hex_chars() {
+        let p: HashMap<String, f64> = HashMap::new();
+        assert_eq!(scen_hash(&[], &[], &p).len(), 64);
+    }
+
+    // ── slug ─────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn slug_alphanumeric_passthrough() {
+        assert_eq!(slug("baseline"), "baseline");
+        assert_eq!(slug("with_sia"), "with_sia");
+    }
+
+    #[test]
+    fn slug_lowercases() {
+        assert_eq!(slug("WithSIA"), "withsia");
+    }
+
+    #[test]
+    fn slug_replaces_spaces_and_specials() {
+        assert_eq!(slug("with sia!"), "with_sia_");
+        assert_eq!(slug("r0=3.0"), "r0_3_0");
+    }
+
+    // ── canonical_params ─────────────────────────────────────────────────────
+
+    #[test]
+    fn canonical_params_sorted_keys() {
+        let mut p: HashMap<String, f64> = HashMap::new();
+        p.insert("z".into(), 1.0);
+        p.insert("a".into(), 2.0);
+        // Regardless of insertion order, output is sorted
+        assert_eq!(canonical_params(&p), "a=2;z=1");
+    }
+
+    #[test]
+    fn canonical_params_empty() {
+        assert_eq!(canonical_params(&HashMap::new()), "");
+    }
+}
