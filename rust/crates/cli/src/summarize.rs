@@ -25,7 +25,7 @@ struct Manifest {
 struct RunEntry {
     scenario: String,
     seed: u64,
-    input_hash: String,
+    run_path: String,
 }
 
 fn usage() -> ! {
@@ -162,7 +162,7 @@ pub fn cmd_experiment_summarize(args: &[String]) {
 
         // Determine summary columns from the first trajectory
         let first_run = runs[0];
-        let first_traj_path = format!("{}/runs/{}/traj.tsv", output_dir, first_run.input_hash);
+        let first_traj_path = format!("{}/runs/{}/traj.tsv", output_dir, first_run.run_path);
         let (headers, first_rows) = match parse_tsv(&first_traj_path) {
             Ok(r) => r,
             Err(e) => {
@@ -182,7 +182,7 @@ pub fn cmd_experiment_summarize(args: &[String]) {
         let mut seed_rows: Vec<(u64, HashMap<String, f64>)> = Vec::new();
 
         for run in &runs {
-            let traj_path = format!("{}/runs/{}/traj.tsv", output_dir, run.input_hash);
+            let traj_path = format!("{}/runs/{}/traj.tsv", output_dir, run.run_path);
             match parse_tsv(&traj_path) {
                 Err(e) => {
                     eprintln!("warning: {}", e);

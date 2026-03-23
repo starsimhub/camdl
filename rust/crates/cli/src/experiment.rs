@@ -291,7 +291,7 @@ pub fn cmd_experiment_run(args: &[String]) {
 
             // Build per-scenario overrides map from the original scenario list
             let sc = scenarios.iter().find(|s| s.name == plan.scenario).unwrap();
-            let mut overrides_map: HashMap<String, f64> = sc.params.clone();
+            let overrides_map: HashMap<String, f64> = sc.params.clone();
 
             let sim_run = SimRun {
                 ir_path: ir_path_resolved.clone(),
