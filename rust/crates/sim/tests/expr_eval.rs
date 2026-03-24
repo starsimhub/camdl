@@ -16,7 +16,7 @@ use ir::{
 };
 use sim::{
     compiled_model::CompiledModel,
-    propensity::eval_expr,
+    propensity::{eval_expr, EvalCtx},
     state::{IntState, RealState},
 };
 
@@ -67,7 +67,8 @@ fn test_const() {
     let int_s = IntState::new(1);
     let real_s = RealState::new(0);
     let expr = Expr::Const(ConstExpr { value: 3.14 });
-    let result = eval_expr(&expr, &model, &int_s, &real_s, &[], 0.0).unwrap();
+    let ctx = EvalCtx { model: &model, int_s: &int_s, real_s: &real_s, params: &[], t: 0.0 };
+    let result = eval_expr(&expr, &ctx).unwrap();
     assert!((result - 3.14).abs() < 1e-12);
 }
 
@@ -81,7 +82,8 @@ fn test_param() {
     let real_s = RealState::new(0);
     let params = vec![0.5f64];
     let expr = Expr::Param(ParamExpr { param: "beta".into() });
-    let result = eval_expr(&expr, &model, &int_s, &real_s, &params, 0.0).unwrap();
+    let ctx = EvalCtx { model: &model, int_s: &int_s, real_s: &real_s, params: &params, t: 0.0 };
+    let result = eval_expr(&expr, &ctx).unwrap();
     assert!((result - 0.5).abs() < 1e-12);
 }
 
@@ -95,7 +97,8 @@ fn test_pop_integer() {
     int_s.counts[0] = 42; // I is first
     let real_s = RealState::new(0);
     let expr = Expr::Pop(PopExpr { pop: "I".into() });
-    let result = eval_expr(&expr, &model, &int_s, &real_s, &[], 0.0).unwrap();
+    let ctx = EvalCtx { model: &model, int_s: &int_s, real_s: &real_s, params: &[], t: 0.0 };
+    let result = eval_expr(&expr, &ctx).unwrap();
     assert!((result - 42.0).abs() < 1e-12);
 }
 
@@ -108,7 +111,8 @@ fn test_pop_sum() {
     let int_s = IntState::from_vec(vec![100, 20, 30]);
     let real_s = RealState::new(0);
     let expr = Expr::PopSum(PopSumExpr { pop_sum: vec!["S".into(), "I".into(), "R".into()] });
-    let result = eval_expr(&expr, &model, &int_s, &real_s, &[], 0.0).unwrap();
+    let ctx = EvalCtx { model: &model, int_s: &int_s, real_s: &real_s, params: &[], t: 0.0 };
+    let result = eval_expr(&expr, &ctx).unwrap();
     assert!((result - 150.0).abs() < 1e-12);
 }
 
@@ -118,7 +122,8 @@ fn test_time() {
     let int_s = IntState::new(1);
     let real_s = RealState::new(0);
     let expr = Expr::Time(TimeExpr { time: () });
-    let result = eval_expr(&expr, &model, &int_s, &real_s, &[], 7.5).unwrap();
+    let ctx = EvalCtx { model: &model, int_s: &int_s, real_s: &real_s, params: &[], t: 7.5 };
+    let result = eval_expr(&expr, &ctx).unwrap();
     assert!((result - 7.5).abs() < 1e-12);
 }
 
@@ -134,7 +139,8 @@ fn test_binop_add() {
             right: Box::new(Expr::Const(ConstExpr { value: 4.0 })),
         },
     });
-    let result = eval_expr(&expr, &model, &int_s, &real_s, &[], 0.0).unwrap();
+    let ctx = EvalCtx { model: &model, int_s: &int_s, real_s: &real_s, params: &[], t: 0.0 };
+    let result = eval_expr(&expr, &ctx).unwrap();
     assert!((result - 7.0).abs() < 1e-12);
 }
 
@@ -150,7 +156,8 @@ fn test_binop_mul() {
             right: Box::new(Expr::Const(ConstExpr { value: 7.0 })),
         },
     });
-    let result = eval_expr(&expr, &model, &int_s, &real_s, &[], 0.0).unwrap();
+    let ctx = EvalCtx { model: &model, int_s: &int_s, real_s: &real_s, params: &[], t: 0.0 };
+    let result = eval_expr(&expr, &ctx).unwrap();
     assert!((result - 42.0).abs() < 1e-12);
 }
 
@@ -166,7 +173,8 @@ fn test_binop_div() {
             right: Box::new(Expr::Const(ConstExpr { value: 3.0 })),
         },
     });
-    let result = eval_expr(&expr, &model, &int_s, &real_s, &[], 0.0).unwrap();
+    let ctx = EvalCtx { model: &model, int_s: &int_s, real_s: &real_s, params: &[], t: 0.0 };
+    let result = eval_expr(&expr, &ctx).unwrap();
     assert!((result - 10.0 / 3.0).abs() < 1e-10);
 }
 
@@ -183,7 +191,8 @@ fn test_div_by_zero_returns_zero() {
             right: Box::new(Expr::Const(ConstExpr { value: 0.0 })),
         },
     });
-    let result = eval_expr(&expr, &model, &int_s, &real_s, &[], 0.0).unwrap();
+    let ctx = EvalCtx { model: &model, int_s: &int_s, real_s: &real_s, params: &[], t: 0.0 };
+    let result = eval_expr(&expr, &ctx).unwrap();
     assert_eq!(result, 0.0);
 }
 
@@ -198,7 +207,8 @@ fn test_unop_exp() {
             arg: Box::new(Expr::Const(ConstExpr { value: 1.0 })),
         },
     });
-    let result = eval_expr(&expr, &model, &int_s, &real_s, &[], 0.0).unwrap();
+    let ctx = EvalCtx { model: &model, int_s: &int_s, real_s: &real_s, params: &[], t: 0.0 };
+    let result = eval_expr(&expr, &ctx).unwrap();
     assert!((result - std::f64::consts::E).abs() < 1e-10);
 }
 
@@ -215,7 +225,8 @@ fn test_cond_pred_positive() {
             else_: Box::new(Expr::Const(ConstExpr { value: 0.0 })),
         },
     });
-    let result = eval_expr(&expr, &model, &int_s, &real_s, &[], 0.0).unwrap();
+    let ctx = EvalCtx { model: &model, int_s: &int_s, real_s: &real_s, params: &[], t: 0.0 };
+    let result = eval_expr(&expr, &ctx).unwrap();
     assert_eq!(result, 5.0);
 }
 
@@ -232,7 +243,8 @@ fn test_cond_pred_zero() {
             else_: Box::new(Expr::Const(ConstExpr { value: 0.0 })),
         },
     });
-    let result = eval_expr(&expr, &model, &int_s, &real_s, &[], 0.0).unwrap();
+    let ctx = EvalCtx { model: &model, int_s: &int_s, real_s: &real_s, params: &[], t: 0.0 };
+    let result = eval_expr(&expr, &ctx).unwrap();
     assert_eq!(result, 0.0);
 }
 
@@ -249,7 +261,8 @@ fn test_cond_pred_negative() {
             else_: Box::new(Expr::Const(ConstExpr { value: 99.0 })),
         },
     });
-    let result = eval_expr(&expr, &model, &int_s, &real_s, &[], 0.0).unwrap();
+    let ctx = EvalCtx { model: &model, int_s: &int_s, real_s: &real_s, params: &[], t: 0.0 };
+    let result = eval_expr(&expr, &ctx).unwrap();
     assert_eq!(result, 99.0);
 }
 
@@ -265,7 +278,8 @@ fn test_binop_gt_true() {
             right: Box::new(Expr::Const(ConstExpr { value: 3.0 })),
         },
     });
-    let result = eval_expr(&expr, &model, &int_s, &real_s, &[], 0.0).unwrap();
+    let ctx = EvalCtx { model: &model, int_s: &int_s, real_s: &real_s, params: &[], t: 0.0 };
+    let result = eval_expr(&expr, &ctx).unwrap();
     assert_eq!(result, 1.0);
 }
 
@@ -281,7 +295,8 @@ fn test_binop_gt_false() {
             right: Box::new(Expr::Const(ConstExpr { value: 5.0 })),
         },
     });
-    let result = eval_expr(&expr, &model, &int_s, &real_s, &[], 0.0).unwrap();
+    let ctx = EvalCtx { model: &model, int_s: &int_s, real_s: &real_s, params: &[], t: 0.0 };
+    let result = eval_expr(&expr, &ctx).unwrap();
     assert_eq!(result, 0.0);
 }
 
@@ -297,7 +312,8 @@ fn test_binop_eq_true() {
             right: Box::new(Expr::Const(ConstExpr { value: 4.0 })),
         },
     });
-    let result = eval_expr(&expr, &model, &int_s, &real_s, &[], 0.0).unwrap();
+    let ctx = EvalCtx { model: &model, int_s: &int_s, real_s: &real_s, params: &[], t: 0.0 };
+    let result = eval_expr(&expr, &ctx).unwrap();
     assert_eq!(result, 1.0);
 }
 
@@ -314,6 +330,7 @@ fn test_binop_le() {
             right: Box::new(Expr::Const(ConstExpr { value: 3.0 })),
         },
     });
-    let result = eval_expr(&expr, &model, &int_s, &real_s, &[], 0.0).unwrap();
+    let ctx = EvalCtx { model: &model, int_s: &int_s, real_s: &real_s, params: &[], t: 0.0 };
+    let result = eval_expr(&expr, &ctx).unwrap();
     assert_eq!(result, 1.0);
 }

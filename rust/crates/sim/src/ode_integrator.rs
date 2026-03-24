@@ -1,7 +1,7 @@
 use crate::{
     compiled_model::CompiledModel,
     error::SimError,
-    propensity::eval_expr,
+    propensity::{eval_expr, EvalCtx},
     state::{IntState, RealState},
 };
 
@@ -56,9 +56,10 @@ fn eval_ode_derivs(
     params: &[f64],
     t: f64,
 ) -> Result<Vec<f64>, SimError> {
+    let ctx = EvalCtx { model, int_s, real_s, params, t };
     let mut derivs = vec![0.0; model.ode_real_indices.len()];
     for (i, eq) in model.model.ode_equations.iter().enumerate() {
-        derivs[i] = eval_expr(&eq.derivative, model, int_s, real_s, params, t)?;
+        derivs[i] = eval_expr(&eq.derivative, &ctx)?;
     }
     Ok(derivs)
 }

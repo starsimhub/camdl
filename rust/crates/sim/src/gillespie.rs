@@ -6,7 +6,7 @@ use crate::{
     intervention::{all_intervention_times, apply_interventions_at},
     ode_integrator::rk4_step,
     output::output_times as get_output_times,
-    propensity::{eval_expr, eval_propensities},
+    propensity::{eval_expr, eval_propensities, EvalCtx},
     simulate::Simulate,
     state::{FlowVec, IntState, RealState, Snapshot, Trajectory},
     transition_diagnostics::TransitionDiagnostics,
@@ -39,22 +39,8 @@ impl Simulate for GillespieSim {
 /// Evaluate a single transition's propensity, clamping negative values to 0.0.
 /// Used for incremental sparse updates where transient negatives can arise from drift.
 #[inline]
-fn eval_one(
-    tr_idx: usize,
-    model: &CompiledModel,
-    int_s: &IntState,
-    real_s: &RealState,
-    params: &[f64],
-    t: f64,
-) -> Result<f64, SimError> {
-    let p = eval_expr(
-        &model.model.transitions[tr_idx].rate,
-        model,
-        int_s,
-        real_s,
-        params,
-        t,
-    )?;
+fn eval_one(tr_idx: usize, ctx: &EvalCtx<'_>) -> Result<f64, SimError> {
+    let p = eval_expr(&ctx.model.model.transitions[tr_idx].rate, ctx)?;
     Ok(p.max(0.0))
 }
 
@@ -188,9 +174,10 @@ fn run_gillespie(
                 lambda_total = propensities.iter().sum();
             } else {
                 // Time advanced but no state change: re-evaluate time-dependent transitions
+                let ctx = EvalCtx { model, int_s: &int_s, real_s: &real_s, params, t };
                 for &tr_idx in &model.time_dep_transitions {
                     let old = propensities[tr_idx];
-                    let new_p = eval_one(tr_idx, model, &int_s, &real_s, params, t)?;
+                    let new_p = eval_one(tr_idx, &ctx)?;
                     propensities[tr_idx] = new_p;
                     lambda_total += new_p - old;
                 }
@@ -268,13 +255,14 @@ fn run_gillespie(
             // avoid evaluating the same transition twice when multiple stoich entries
             // share a dependent transition (e.g., N[p] = S[p] + E[p] + ...).
             let mut updated: Vec<usize> = Vec::with_capacity(16);
+            let ctx = EvalCtx { model, int_s: &int_s, real_s: &real_s, params, t };
 
             // Compartment-dependent transitions
             for &(local, _) in &model.transition_stoich[fired_idx] {
                 for &tr_idx in &model.comp_to_transitions[local] {
                     if !updated.contains(&tr_idx) {
                         let old = propensities[tr_idx];
-                        let new_p = eval_one(tr_idx, model, &int_s, &real_s, params, t)?;
+                        let new_p = eval_one(tr_idx, &ctx)?;
                         propensities[tr_idx] = new_p;
                         lambda_total += new_p - old;
                         updated.push(tr_idx);
@@ -286,7 +274,7 @@ fn run_gillespie(
             for &tr_idx in &model.time_dep_transitions {
                 if !updated.contains(&tr_idx) {
                     let old = propensities[tr_idx];
-                    let new_p = eval_one(tr_idx, model, &int_s, &real_s, params, t)?;
+                    let new_p = eval_one(tr_idx, &ctx)?;
                     propensities[tr_idx] = new_p;
                     lambda_total += new_p - old;
                 }

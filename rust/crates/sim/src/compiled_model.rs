@@ -395,7 +395,7 @@ impl CompiledModel {
         params: &[f64],
     ) -> Result<(IntState, RealState), SimError> {
         use ir::model::InitialConditions;
-        use crate::propensity::eval_expr;
+        use crate::propensity::{eval_expr, EvalCtx};
 
         let n_int = self.int_local_to_global.len();
         let n_real = self.real_local_to_global.len();
@@ -420,11 +420,12 @@ impl CompiledModel {
                 }
             }
             InitialConditions::Parameterized(map) => {
+                let ctx = EvalCtx { model: self, int_s: &zero_int, real_s: &zero_real, params, t: 0.0 };
                 for (name, expr) in map {
                     let global = self.comp_index.get(name.as_str())
                         .copied()
                         .ok_or_else(|| SimError::UnknownCompartment(name.clone()))?;
-                    let v = eval_expr(expr, self, &zero_int, &zero_real, params, 0.0)?;
+                    let v = eval_expr(expr, &ctx)?;
                     if let Some(local) = self.global_to_int[global] {
                         int_counts[local] = v.round() as i64;
                     } else if let Some(local) = self.global_to_real[global] {

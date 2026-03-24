@@ -5,33 +5,37 @@ use crate::{
 };
 use ir::expr::{BinOp, Expr, UnOp};
 
+/// Evaluation context: bundles all read-only simulation state for a single time step.
+/// Passed by reference to `eval_expr` and all callers, eliminating the repeated
+/// `(model, int_s, real_s, params, t)` parameter list.
+pub struct EvalCtx<'a> {
+    pub model:  &'a CompiledModel,
+    pub int_s:  &'a IntState,
+    pub real_s: &'a RealState,
+    pub params: &'a [f64],
+    pub t:      f64,
+}
+
 /// Evaluate a single expression. No allocations in steady state.
-pub fn eval_expr(
-    expr: &Expr,
-    model: &CompiledModel,
-    int_s: &IntState,
-    real_s: &RealState,
-    params: &[f64],
-    t: f64,
-) -> Result<f64, SimError> {
+pub fn eval_expr(expr: &Expr, ctx: &EvalCtx<'_>) -> Result<f64, SimError> {
     match expr {
         Expr::Const(c) => Ok(c.value),
 
         Expr::Param(p) => {
-            let idx = model.param_index.get(p.param.as_str())
+            let idx = ctx.model.param_index.get(p.param.as_str())
                 .copied()
                 .ok_or_else(|| SimError::UnknownParameter(p.param.clone()))?;
-            Ok(params[idx])
+            Ok(ctx.params[idx])
         }
 
         Expr::Pop(p) => {
-            let global = model.comp_index.get(p.pop.as_str())
+            let global = ctx.model.comp_index.get(p.pop.as_str())
                 .copied()
                 .ok_or_else(|| SimError::UnknownCompartment(p.pop.clone()))?;
-            if let Some(local) = model.global_to_int[global] {
-                Ok(int_s.counts[local] as f64)
-            } else if let Some(local) = model.global_to_real[global] {
-                Ok(real_s.values[local])
+            if let Some(local) = ctx.model.global_to_int[global] {
+                Ok(ctx.int_s.counts[local] as f64)
+            } else if let Some(local) = ctx.model.global_to_real[global] {
+                Ok(ctx.real_s.values[local])
             } else {
                 Err(SimError::UnknownCompartment(p.pop.clone()))
             }
@@ -40,30 +44,30 @@ pub fn eval_expr(
         Expr::PopSum(ps) => {
             let mut sum = 0.0;
             for name in &ps.pop_sum {
-                let global = model.comp_index.get(name.as_str())
+                let global = ctx.model.comp_index.get(name.as_str())
                     .copied()
                     .ok_or_else(|| SimError::UnknownCompartment(name.clone()))?;
-                if let Some(local) = model.global_to_int[global] {
-                    sum += int_s.counts[local] as f64;
-                } else if let Some(local) = model.global_to_real[global] {
-                    sum += real_s.values[local];
+                if let Some(local) = ctx.model.global_to_int[global] {
+                    sum += ctx.int_s.counts[local] as f64;
+                } else if let Some(local) = ctx.model.global_to_real[global] {
+                    sum += ctx.real_s.values[local];
                 }
             }
             Ok(sum)
         }
 
-        Expr::Time(_) => Ok(t),
+        Expr::Time(_) => Ok(ctx.t),
 
         Expr::BinOp(w) => {
-            let a = eval_expr(&w.bin_op.left, model, int_s, real_s, params, t)?;
-            let b = eval_expr(&w.bin_op.right, model, int_s, real_s, params, t)?;
+            let a = eval_expr(&w.bin_op.left, ctx)?;
+            let b = eval_expr(&w.bin_op.right, ctx)?;
             Ok(match w.bin_op.op {
                 BinOp::Add => a + b,
                 BinOp::Sub => a - b,
                 BinOp::Mul => a * b,
                 BinOp::Div => {
                     if b == 0.0 {
-                        log::debug!("eval_expr: Div by zero suppressed at t={t}, returning 0.0");
+                        log::debug!("eval_expr: Div by zero suppressed at t={}, returning 0.0", ctx.t);
                         0.0
                     } else {
                         a / b
@@ -82,7 +86,7 @@ pub fn eval_expr(
         }
 
         Expr::UnOp(w) => {
-            let a = eval_expr(&w.un_op.arg, model, int_s, real_s, params, t)?;
+            let a = eval_expr(&w.un_op.arg, ctx)?;
             Ok(match w.un_op.op {
                 UnOp::Neg   => -a,
                 UnOp::Exp   => a.exp(),
@@ -95,35 +99,35 @@ pub fn eval_expr(
         }
 
         Expr::Cond(w) => {
-            let pred = eval_expr(&w.cond.pred, model, int_s, real_s, params, t)?;
+            let pred = eval_expr(&w.cond.pred, ctx)?;
             if pred > 0.0 {
-                eval_expr(&w.cond.then, model, int_s, real_s, params, t)
+                eval_expr(&w.cond.then, ctx)
             } else {
-                eval_expr(&w.cond.else_, model, int_s, real_s, params, t)
+                eval_expr(&w.cond.else_, ctx)
             }
         }
 
         Expr::TimeFunc(w) => {
-            let idx = model.time_func_index.get(w.time_func.name.as_str())
+            let idx = ctx.model.time_func_index.get(w.time_func.name.as_str())
                 .copied()
                 .ok_or_else(|| SimError::UnknownTimeFunction(w.time_func.name.clone()))?;
-            Ok(eval_time_func(&model.time_func_cache[idx].kind, t))
+            Ok(eval_time_func(&ctx.model.time_func_cache[idx].kind, ctx.t))
         }
 
         Expr::TableLookup(w) => {
-            let idx = model.table_index.get(w.table_lookup.table.as_str())
+            let idx = ctx.model.table_index.get(w.table_lookup.table.as_str())
                 .copied()
                 .ok_or_else(|| SimError::UnknownTable(w.table_lookup.table.clone()))?;
-            let table = &model.model.tables[idx];
-            let cached = &model.table_values_cache[idx];
-            // Only single-index lookups supported
+            let table = &ctx.model.model.tables[idx];
+            let cached = &ctx.model.table_values_cache[idx];
+            // Only single-index lookups supported (OCaml compiler pre-flattens multi-dim)
             if w.table_lookup.indices.len() != 1 {
                 return Err(SimError::TableLookup(format!(
                     "table '{}' requires exactly 1 index, got {}",
                     w.table_lookup.table, w.table_lookup.indices.len()
                 )));
             }
-            let raw = eval_expr(&w.table_lookup.indices[0], model, int_s, real_s, params, t)?;
+            let raw = eval_expr(&w.table_lookup.indices[0], ctx)?;
             let table_idx = raw.floor() as i64;
             table_lookup(table, cached, table_idx)
         }
@@ -208,9 +212,10 @@ pub fn eval_propensities(
     t: f64,
     out: &mut Vec<f64>,
 ) -> Result<(), SimError> {
+    let ctx = EvalCtx { model, int_s, real_s, params, t };
     out.clear();
     for tr in model.model.transitions.iter() {
-        let p = eval_expr(&tr.rate, model, int_s, real_s, params, t)?;
+        let p = eval_expr(&tr.rate, &ctx)?;
         if p < 0.0 {
             return Err(SimError::NegativePropensity {
                 transition: tr.name.clone(),
