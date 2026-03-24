@@ -24,13 +24,23 @@ pub struct ChainBinomialConfig {
     pub dt: f64,
 }
 
-/// Dispatch enum — lets cross-backend test loops iterate over all three backends.
+/// Config for the deterministic ODE (RK4) backend.
+/// Seed is accepted at the call site but ignored — runs are deterministic.
+#[derive(Debug, Clone)]
+pub struct OdeConfig {
+    pub t_start: f64,
+    pub t_end: f64,
+    pub dt: f64,
+}
+
+/// Dispatch enum — lets cross-backend test loops iterate over all backends.
 /// Use the type system: `dt` only exists in the variants that need it.
 #[derive(Debug, Clone)]
 pub enum SimConfig {
     Gillespie(GillespieConfig),
     TauLeap(TauLeapConfig),
     ChainBinomial(ChainBinomialConfig),
+    Ode(OdeConfig),
 }
 
 impl SimConfig {
@@ -39,6 +49,7 @@ impl SimConfig {
             SimConfig::Gillespie(c) => c.t_start,
             SimConfig::TauLeap(c) => c.t_start,
             SimConfig::ChainBinomial(c) => c.t_start,
+            SimConfig::Ode(c) => c.t_start,
         }
     }
 
@@ -47,6 +58,7 @@ impl SimConfig {
             SimConfig::Gillespie(c) => c.t_end,
             SimConfig::TauLeap(c) => c.t_end,
             SimConfig::ChainBinomial(c) => c.t_end,
+            SimConfig::Ode(c) => c.t_end,
         }
     }
 
@@ -55,6 +67,7 @@ impl SimConfig {
             SimConfig::Gillespie(_) => "Gillespie",
             SimConfig::TauLeap(_) => "TauLeap",
             SimConfig::ChainBinomial(_) => "ChainBinomial",
+            SimConfig::Ode(_) => "Ode",
         }
     }
 }

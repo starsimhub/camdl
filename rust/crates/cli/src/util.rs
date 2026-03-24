@@ -2,8 +2,8 @@ use std::collections::HashMap;
 use ir::table::TableSource;
 use ir::intervention::Intervention;
 use sim::{
-    CompiledModel, GillespieSim, TauLeapSim, ChainBinomialSim,
-    config::{GillespieConfig, TauLeapConfig, ChainBinomialConfig, SimConfig},
+    CompiledModel, GillespieSim, TauLeapSim, ChainBinomialSim, OdeSim,
+    config::{GillespieConfig, TauLeapConfig, ChainBinomialConfig, OdeConfig, SimConfig},
     simulate::Simulate,
     Trajectory,
 };
@@ -376,7 +376,7 @@ pub fn run_simulation(run: &SimRun) -> Result<(Trajectory, ir::Model), String> {
         "gillespie"      => SimConfig::Gillespie(GillespieConfig { t_start, t_end, output_dt: None }),
         "tau_leap"       => SimConfig::TauLeap(TauLeapConfig { t_start, t_end, dt: run.dt }),
         "chain_binomial" => SimConfig::ChainBinomial(ChainBinomialConfig { t_start, t_end, dt: run.dt }),
-        "ode" => return Err("ODE backend not yet implemented".to_string()),
+        "ode"            => SimConfig::Ode(OdeConfig { t_start, t_end, dt: run.dt }),
         s => return Err(format!("unknown backend: {}", s)),
     };
 
@@ -384,6 +384,7 @@ pub fn run_simulation(run: &SimRun) -> Result<(Trajectory, ir::Model), String> {
         "gillespie"      => GillespieSim.run(&compiled, &params, run.seed, &config),
         "tau_leap"       => TauLeapSim.run(&compiled, &params, run.seed, &config),
         "chain_binomial" => ChainBinomialSim.run(&compiled, &params, run.seed, &config),
+        "ode"            => OdeSim.run(&compiled, &params, run.seed, &config),
         _ => unreachable!(),
     }.map_err(|e| format!("simulation error: {:?}", e))?;
 

@@ -71,6 +71,10 @@ impl FlowVec {
         FlowVec { counts: vec![0; n] }
     }
 
+    pub fn from_vec(counts: Vec<u64>) -> Self {
+        FlowVec { counts }
+    }
+
     pub fn reset(&mut self) {
         for v in &mut self.counts {
             *v = 0;
