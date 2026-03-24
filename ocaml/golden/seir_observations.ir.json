@@ -1,0 +1,227 @@
+{
+  "name": "seir_observations",
+  "version": "0.3",
+  "description": null,
+  "compartments": [
+    { "name": "S", "kind": "integer" },
+    { "name": "E", "kind": "integer" },
+    { "name": "I", "kind": "integer" },
+    { "name": "R", "kind": "integer" }
+  ],
+  "transitions": [
+    {
+      "name": "infection",
+      "stoichiometry": [ [ "S", -1 ], [ "E", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "div",
+          "left": {
+            "bin_op": {
+              "op": "mul",
+              "left": {
+                "bin_op": {
+                  "op": "mul",
+                  "left": { "param": "beta" },
+                  "right": { "pop": "S" }
+                }
+              },
+              "right": { "pop": "I" }
+            }
+          },
+          "right": { "pop_sum": [ "S", "E", "I", "R" ] }
+        }
+      },
+      "event_key": "infection:{firing_index}",
+      "metadata": {
+        "origin_kind": "transmission",
+        "source_compartment": "S",
+        "dest_compartment": "E"
+      }
+    },
+    {
+      "name": "progression",
+      "stoichiometry": [ [ "E", -1 ], [ "I", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": { "param": "sigma" },
+          "right": { "pop": "E" }
+        }
+      },
+      "event_key": "progression:{firing_index}",
+      "metadata": {
+        "origin_kind": "intrinsic",
+        "source_compartment": "E",
+        "dest_compartment": "I"
+      }
+    },
+    {
+      "name": "recovery",
+      "stoichiometry": [ [ "I", -1 ], [ "R", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": { "param": "gamma" },
+          "right": { "pop": "I" }
+        }
+      },
+      "event_key": "recovery:{firing_index}",
+      "metadata": {
+        "origin_kind": "intrinsic",
+        "source_compartment": "I",
+        "dest_compartment": "R"
+      }
+    }
+  ],
+  "ode_equations": [],
+  "time_functions": [],
+  "tables": [],
+  "interventions": [],
+  "observations": [
+    {
+      "name": "weekly_cases",
+      "data_stream": "weekly_cases",
+      "schedule": { "regular": { "start": 0.0, "step": 7.0, "end": 365.25 } },
+      "projection": { "cumulative_flow": "infection" },
+      "likelihood": {
+        "neg_binomial": {
+          "mean": {
+            "bin_op": {
+              "op": "mul",
+              "left": { "param": "rho" },
+              "right": { "projected": null }
+            }
+          },
+          "dispersion": { "param": "k" }
+        }
+      }
+    },
+    {
+      "name": "detection",
+      "data_stream": "detection",
+      "schedule": {
+        "regular": { "start": 0.0, "step": 14.0, "end": 365.25 }
+      },
+      "projection": { "current_pop": "I" },
+      "likelihood": { "bernoulli": { "p": { "param": "p_detect" } } }
+    }
+  ],
+  "parameters": [
+    {
+      "name": "beta",
+      "value": null,
+      "bounds": [ 0.001, 0.5 ],
+      "prior": null,
+      "transform": null,
+      "initial_value": null
+    },
+    {
+      "name": "sigma",
+      "value": null,
+      "bounds": [ 0.01, 1.0 ],
+      "prior": null,
+      "transform": null,
+      "initial_value": null
+    },
+    {
+      "name": "gamma",
+      "value": null,
+      "bounds": [ 0.01, 1.0 ],
+      "prior": null,
+      "transform": null,
+      "initial_value": null
+    },
+    {
+      "name": "rho",
+      "value": null,
+      "bounds": [ 0.0, 1.0 ],
+      "prior": null,
+      "transform": null,
+      "initial_value": null
+    },
+    {
+      "name": "k",
+      "value": null,
+      "bounds": [ 0.1, 100.0 ],
+      "prior": null,
+      "transform": null,
+      "initial_value": null
+    },
+    {
+      "name": "p_detect",
+      "value": null,
+      "bounds": [ 0.0, 1.0 ],
+      "prior": null,
+      "transform": null,
+      "initial_value": null
+    },
+    {
+      "name": "N0",
+      "value": null,
+      "bounds": [ 1000.0, 1000000.0 ],
+      "prior": null,
+      "transform": null,
+      "initial_value": null
+    },
+    {
+      "name": "I0",
+      "value": null,
+      "bounds": [ 1.0, 10000.0 ],
+      "prior": null,
+      "transform": null,
+      "initial_value": null
+    }
+  ],
+  "initial_conditions": {
+    "parameterized": {
+      "S": {
+        "bin_op": {
+          "op": "sub",
+          "left": { "param": "N0" },
+          "right": { "param": "I0" }
+        }
+      },
+      "I": { "param": "I0" }
+    }
+  },
+  "data_contract": null,
+  "output": {
+    "times": { "regular": { "start": 0.0, "step": 1.0, "end": 365.25 } },
+    "format": "tsv",
+    "trajectory": true,
+    "observations": true
+  },
+  "simulation": {
+    "t_start": 0.0,
+    "t_end": 365.25,
+    "time_semantics": "continuous",
+    "dt": null,
+    "rng_seed": null
+  },
+  "scenarios": [
+    {
+      "name": "baseline",
+      "label": "baseline",
+      "params": {
+        "beta": 0.3,
+        "sigma": 0.2,
+        "gamma": 0.1,
+        "rho": 0.5,
+        "k": 5.0,
+        "p_detect": 0.8,
+        "N0": 100000.0,
+        "I0": 10.0
+      },
+      "enable": [],
+      "disable": [],
+      "t_end": null
+    }
+  ],
+  "model_structure": {
+    "dimensions": [],
+    "compartment_dims": { "S": [], "E": [], "I": [], "R": [] },
+    "base_compartments": [ "S", "E", "I", "R" ],
+    "transmission_transitions": [ "infection" ],
+    "infectious_compartments": [ "I" ]
+  }
+}

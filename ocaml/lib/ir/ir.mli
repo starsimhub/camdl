@@ -87,12 +87,14 @@ type neg_binomial_likelihood  = { mean: expr; dispersion: expr }
 type normal_likelihood        = { mean: expr; sd: expr }
 type binomial_likelihood      = { n: expr; p: expr }
 type beta_binomial_likelihood = { n: expr; alpha: expr; beta: expr }
+type bernoulli_likelihood     = { p: expr }
 type likelihood =
   | Poisson      of poisson_likelihood
   | NegBinomial  of neg_binomial_likelihood
   | Normal       of normal_likelihood
   | Binomial     of binomial_likelihood
   | BetaBinomial of beta_binomial_likelihood
+  | Bernoulli    of bernoulli_likelihood
 type regular_obs_schedule = { start: float; step: float; end_: float }
 type observation_schedule =
   | ObsAtTimes of float list

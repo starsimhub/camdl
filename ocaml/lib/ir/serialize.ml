@@ -218,6 +218,8 @@ let likelihood_to_json (l : likelihood) : Yojson.Safe.t =
       ("alpha", expr_to_json bb.alpha);
       ("beta",  expr_to_json bb.beta);
     ])]
+  | Bernoulli b ->
+    obj [("bernoulli", obj [("p", expr_to_json b.p)])]
 
 let obs_schedule_to_json (s : observation_schedule) : Yojson.Safe.t =
   match s with

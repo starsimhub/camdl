@@ -301,6 +301,8 @@ let likelihood_of_json j =
         alpha = expr_of_json (member "alpha" v);
         beta  = expr_of_json (member "beta"  v);
       }
+    | "bernoulli" ->
+      Bernoulli { p = expr_of_json (member "p" v) }
     | k -> fail "unknown likelihood '%s'" k
   )
   | _ -> fail "likelihood must be a single-key object"

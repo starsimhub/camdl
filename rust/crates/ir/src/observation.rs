@@ -45,6 +45,11 @@ pub struct BetaBinomialLikelihood {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BernoulliLikelihood {
+    pub p: Expr,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Likelihood {
     Poisson(PoissonLikelihood),
@@ -52,6 +57,7 @@ pub enum Likelihood {
     Normal(NormalLikelihood),
     Binomial(BinomialLikelihood),
     BetaBinomial(BetaBinomialLikelihood),
+    Bernoulli(BernoulliLikelihood),
 }
 
 // ── Observation schedule ──────────────────────────────────────────────────────

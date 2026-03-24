@@ -608,6 +608,9 @@ and resolve_ident_name ctx name ~loc =
     Ir.Param name
   else if List.exists (fun (fd : func_decl) -> fd.fname = name) ctx.func_decls then
     Ir.TimeFunc name
+  else if name = "projected" then
+    (* Special keyword in likelihood expressions: refers to the observation projection output. *)
+    Ir.Projected
   else begin
     Diagnostics.error ctx.diags
       ~code:"E100"
@@ -1201,7 +1204,13 @@ let expand_interventions ctx =
       in
       let schedule = match iv.ivschedule with
         | SAtTimes exprs ->
-          Ir.AtTimes (List.map (resolve_float_expr ctx) exprs)
+          (* Pass env so index variables (e.g. p in sia[p in patch]) are
+             substituted before evaluation. Table lookups like sia_day[p, 0]
+             resolve to concrete float constants at expansion time. *)
+          Ir.AtTimes (List.map (fun e ->
+            let ir = normalize_expr (resolve_expr ctx env e) in
+            match ir with Ir.Const f -> f | _ -> 0.0
+          ) exprs)
         | SRecurring (every, from_, until) ->
           let period = resolve_float_expr ctx every in
           let start  = resolve_float_expr ctx from_  in
@@ -1266,6 +1275,20 @@ let expand_observations ctx =
         let concrete = if idx_vals = [] then name
           else String.concat "_" (name :: idx_vals) in
         Ir.CurrentPop concrete
+      | ProjDerived (EFuncCall ("incidence", args)) ->
+        (* incidence(transition) or incidence(transition[idx]) syntax *)
+        (match List.assoc_opt "" args with
+         | Some (EIdent (n, _))    -> Ir.CumulativeFlow n
+         | Some (EIndex (n, idxs)) ->
+           Ir.CumulativeFlow (String.concat "_" (n :: List.map (index_item_to_str []) idxs))
+         | _ -> Ir.CumulativeFlow "?")
+      | ProjDerived (EFuncCall ("prevalence", args)) ->
+        (* prevalence(compartment) or prevalence(compartment[idx]) syntax *)
+        (match List.assoc_opt "" args with
+         | Some (EIdent (n, _))    -> Ir.CurrentPop n
+         | Some (EIndex (n, idxs)) ->
+           Ir.CurrentPop (String.concat "_" (n :: List.map (index_item_to_str []) idxs))
+         | _ -> Ir.CurrentPop "?")
       | ProjDerived (EIdent (name, _)) ->
         (* bare compartment/transition name → cumulative flow *)
         Ir.CumulativeFlow name
@@ -1305,6 +1328,8 @@ let expand_observations ctx =
           Ir.alpha = resolve_kw kwargs "alpha";
           Ir.beta  = resolve_kw kwargs "beta";
         }
+      | LikBernoulli kwargs ->
+        Ir.Bernoulli { Ir.p = resolve_kw kwargs "p" }
     in
     let data_stream = Option.value ~default:od.oname od.odata_stream in
     { Ir.name        = od.oname;

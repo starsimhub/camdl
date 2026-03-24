@@ -250,5 +250,8 @@ fn check_likelihood_exprs(
             check_expr(&l.alpha, ctx, true, errors);
             check_expr(&l.beta,  ctx, true, errors);
         }
+        Likelihood::Bernoulli(l) => {
+            check_expr(&l.p, ctx, true, errors);
+        }
     }
 }

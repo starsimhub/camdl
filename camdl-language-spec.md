@@ -1090,25 +1090,23 @@ at compile time. The IR remains self-contained.
 
 ```
 observations {
-  weekly_cases {
+  weekly_cases : {
     projected  = incidence(infection)
     every      = 7 'days
-    likelihood = neg_binomial(
-      mean       = rho * projected,
-      dispersion = k
-    )
+    likelihood : neg_binomial { mean = rho * projected  r = k }
   }
 
-  sero_prevalence {
-    projected = prevalence(R) / N
-    times     = serosurvey.time
-    likelihood = binomial(
-      n = serosurvey.tested,
-      p = projected
-    )
+  detection : {
+    projected  = prevalence(I)
+    every      = 14 'days
+    likelihood : bernoulli { p = p_detect }
   }
 }
 ```
+
+Syntax notes: the observation name is followed by ` : {` (colon required).
+`likelihood` uses ` : KIND { ... }` (colon, not `=`). Keyword arguments inside
+`{ }` are whitespace-separated — no commas.
 
 ### 13.1 Projections
 
@@ -1125,24 +1123,28 @@ compartments may have multiple dimensions. `incidence(infection[patch = p])`
 sums over age for a specific patch — without named indexing, positional
 `infection[p]` would incorrectly index the first dimension (age).
 
+Inside a likelihood expression, the keyword `projected` refers to the
+evaluated projection value for that observation.
+
 ### 13.2 Likelihood Families
 
 ```
-neg_binomial(mean = EXPR, dispersion = EXPR)
-poisson(rate = EXPR)
-normal(mean = EXPR, sd = EXPR)
-binomial(n = EXPR, p = EXPR)
-beta_binomial(n = EXPR, alpha = EXPR, beta = EXPR)
+neg_binomial { mean = EXPR  r = EXPR }         overdispersed counts
+poisson      { rate = EXPR }                   Poisson counts
+normal       { mean = EXPR  sd = EXPR }        continuous
+binomial     { n = EXPR  p = EXPR }            bounded counts
+beta_binomial{ n = EXPR  alpha = EXPR  beta = EXPR }
+bernoulli    { p = EXPR }                      binary outcome
 ```
 
 ### 13.3 Indexed Observations
 
 ```
 observations {
-  cases_by_patch[p in patch] {
+  cases_by_patch[p in patch] : {
     projected  = incidence(infection[patch = p])
     every      = 7 'days
-    likelihood = neg_binomial(mean = rho * projected, dispersion = k)
+    likelihood : neg_binomial { mean = rho * projected  r = k }
   }
 }
 ```
@@ -1151,9 +1153,17 @@ Generates one observation stream per patch.
 
 ### 13.4 Sampling vs Scoring
 
-In forward simulation (v0.1): runtime evaluates projection, **samples** from
+> **v0.1 status**: the `observations {}` block is compiled and included in the
+> IR. In the current Rust backend, the projection and likelihood are not yet
+> evaluated at runtime and no observations output file is written. This is
+> scheduled for v0.2 (inference support). The syntax is final.
+
+In forward simulation (v0.2+): runtime evaluates projection, **samples** from
 likelihood → synthetic data. In inference (v0.2+): runtime **scores** observed
 data against likelihood → log p(y|θ).
+
+Monthly incidence can be obtained natively by setting `every = 30 'days` (or
+`every = 1 'months` once time-unit arithmetic is implemented).
 
 ---
 
@@ -1214,20 +1224,40 @@ of interventions — one per stratum — in a single line:
 
 ```
 interventions {
-  # Declares sia_jigawa_miga, sia_borno_damboa, ... (one per patch)
-  sia[p in patch] : transfer(fraction = vacc_eff * sia_cov, from = S[p], to = V[p])
-    at [180, 545]
+  # Declares sia_north, sia_south, sia_east (one per patch)
+  sia[p in patch] : transfer(fraction = vacc_eff * sia_cov, from = S[p], to = V[p]) {
+    at = [180 'days, 545 'days]
+  }
 }
 ```
 
-Syntax: `NAME[INDEX_VAR in DIMENSION] : ACTION at [...]`
+Syntax: `NAME[INDEX_VAR in DIMENSION] : ACTION { schedule }`
 
 The expanded members share a **`base_name`** (the unindexed name, `"sia"` above).
 In scenario `enable`/`disable` lists, passing `"sia"` resolves to all members
 whose `base_name` is `"sia"` — no need to enumerate them individually (see §18).
 
 Individual members can still be addressed by their expanded name
-(`"sia_borno_damboa"`) when fine-grained control is needed.
+(`"sia_north"`) when fine-grained control is needed.
+
+**Per-patch timing from a table.** When SIA rounds happen on different dates
+per patch, store the schedule in a table and reference it in the `at` list:
+
+```
+tables {
+  sia_day : patch × round = read_csv("data/sia_schedule.csv")
+}
+
+interventions {
+  sia[p in patch] : transfer(fraction = vacc_eff * sia_cov, from = S[p], to = V[p]) {
+    at = [sia_day[p, 0] 'days, sia_day[p, 1] 'days]
+  }
+}
+```
+
+The index variable `p` is in scope inside the schedule block, so `sia_day[p, 0]`
+resolves to the correct row at compile time — each expanded intervention gets
+its own concrete timestamp.
 
 ### 14.4 Activation
 
@@ -1335,21 +1365,33 @@ Unlisted stratum combinations default to 0. For a 774-patch model, only the
 patches mentioned in init are nonzero — the rest start empty. This is common for
 initialization from a single-patch seeding event.
 
-### 16.3 Init from Tables (v0.2)
+### 16.3 Init from Tables
 
-For large spatial models where per-stratum init from inline values is
-impractical:
+For large spatial models where per-stratum populations come from a CSV, declare
+a table (§6) and reference it directly in init expressions:
 
 ```
+tables {
+  N0 : patch = read_csv("data/population.csv")
+}
+
+parameters {
+  I0 : count in [1, 1000]
+}
+
 init {
-  S = distribute(N0, weights = pop_table)
-  # Distributes N0 across all strata of S proportionally to pop_table values
+  S[p in patch] = N0[p] - I0
+  I[p in patch] = I0
 }
 ```
 
-The `distribute(total, weights = table)` function is future sugar (v0.2) that
-allocates a total across strata proportionally to a table. For v0.1, use
-explicit per-stratum values or initialize from a table in external tooling.
+The index binder `[p in patch]` generates one init entry per patch. `N0[p]`
+performs a table lookup at compile time — each expanded entry gets its own
+concrete value. Parameter references (e.g. `I0`) remain as IR-level
+expressions evaluated at runtime.
+
+This is fully supported in v0.1. The `distribute(total, weights = table)`
+aggregate helper for proportional allocation is future sugar (v0.2).
 
 ---
 

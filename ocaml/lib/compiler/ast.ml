@@ -127,6 +127,7 @@ type likelihood_kind =
   | LikNormal       of (string * expr) list
   | LikBinomial     of (string * expr) list
   | LikBetaBinomial of (string * expr) list
+  | LikBernoulli    of (string * expr) list
 
 type obs_decl = {
   oname       : string;

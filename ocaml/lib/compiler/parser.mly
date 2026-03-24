@@ -292,6 +292,7 @@ obs_kv:
         | "normal"        -> LikNormal       lik_args
         | "binomial"      -> LikBinomial     lik_args
         | "beta_binomial" -> LikBetaBinomial lik_args
+        | "bernoulli"     -> LikBernoulli    lik_args
         | s -> failwith ("unknown likelihood: " ^ s)) }
 
 obs_projection:
