@@ -280,11 +280,14 @@ pub fn run_simulation(run: &SimRun) -> Result<(Trajectory, ir::Model), String> {
         let active_enable  = resolve_enable_list(&raw_enable,  &model.interventions)?;
         let active_disable = resolve_enable_list(&raw_disable, &model.interventions)?;
 
-        if !active_enable.is_empty() {
-            model.interventions.retain(|iv| active_enable.contains(&iv.name));
-        } else if !active_disable.is_empty() {
-            model.interventions.retain(|iv| !active_disable.contains(&iv.name));
+        if !active_enable.is_empty() || !active_disable.is_empty() {
+            model.interventions.retain(|iv| {
+                let kept_by_enable  = active_enable.is_empty() || active_enable.contains(&iv.name);
+                let kept_by_disable = !active_disable.contains(&iv.name);
+                kept_by_enable && kept_by_disable
+            });
         } else {
+            // Baseline identity patch: no interventions fire
             model.interventions.clear();
         }
 

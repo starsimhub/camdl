@@ -4,13 +4,7 @@ mod experiment;
 mod serve;
 mod summarize;
 
-use sim::{
-    CompiledModel, GillespieSim, TauLeapSim, ChainBinomialSim,
-    config::{GillespieConfig, TauLeapConfig, ChainBinomialConfig, SimConfig},
-    simulate::Simulate,
-    write_diagnostics_tsv, warn_zero_firings,
-};
-use ir::table::TableSource;
+use sim::{write_diagnostics_tsv, warn_zero_firings};
 use std::collections::HashMap;
 
 fn usage() -> ! {
@@ -130,153 +124,24 @@ fn run_simulate(args: &[String]) {
         std::process::exit(1);
     }
 
-    // If given a .camdl source file, compile it via camdlc (outputs JSON to stdout)
-    let (ir_path, _tmpfile) = util::resolve_ir_path(&ir_path).unwrap_or_else(|e| {
-        eprintln!("error: {}", e);
-        eprintln!("Make sure camdlc is on your PATH (run 'dune build' in the ocaml/ directory).");
-        std::process::exit(1);
-    });
-
-    // Load and parse IR
-    let src = std::fs::read_to_string(&ir_path)
-        .unwrap_or_else(|e| { eprintln!("cannot read {}: {}", ir_path, e); std::process::exit(1); });
-    let mut model: ir::Model = serde_json::from_str(&src)
-        .unwrap_or_else(|e| { eprintln!("IR parse error: {}", e); std::process::exit(1); });
-
-    // Apply scenario patch (σ layer): resolve which interventions are active and
-    // apply set-style param overrides. Interventions are DISABLED by default
-    // (baseline identity patch = no interventions). Scenarios explicitly enable them.
-    {
-        let (active_enable, active_disable, scenario_params): (Vec<String>, Vec<String>, Vec<(String, f64)>) =
-            if let Some(ref name) = scenario_name {
-                // Named scenario: look up in presets manifest
-                let preset = model.presets.iter().find(|p| p.name == *name)
-                    .unwrap_or_else(|| {
-                        eprintln!("error: scenario '{}' not found in model. Available: {}",
-                            name,
-                            model.presets.iter().map(|p| p.name.as_str()).collect::<Vec<_>>().join(", "));
-                        std::process::exit(1);
-                    });
-                (preset.enable.clone(), preset.disable.clone(),
-                 preset.params.iter().map(|(k, &v)| (k.clone(), v)).collect())
-            } else {
-                // Ad-hoc flags
-                (adhoc_enable.clone(), adhoc_disable.clone(), vec![])
-            };
-
-        // Filter interventions: baseline = none; enable list = keep only those;
-        // disable list = keep all except those.
-        if !active_enable.is_empty() {
-            model.interventions.retain(|iv| active_enable.contains(&iv.name));
-        } else if !active_disable.is_empty() {
-            model.interventions.retain(|iv| !active_disable.contains(&iv.name));
-        } else {
-            // Baseline identity patch: no interventions fire
-            model.interventions.clear();
-        }
-
-        // Apply scenario set-style param overrides (lower priority than --param)
-        for (k, v) in scenario_params {
-            for p in &mut model.parameters {
-                if p.name == k { p.value = Some(v); }
-            }
-        }
-    }
-
-    // Apply parameters: resolution order (highest priority last, so later writes win):
-    //   1. IR value (already in model, may be None)
-    //   2. --params FILE.toml (in order given, later files override earlier)
-    //   3. --param-vec PREFIX=FILE (keyed TSV)
-    //   4. --param NAME=VALUE (highest priority)
-
-    // Step 2: apply --params TOML files in order
-    for path in &params_files {
-        let toml_overrides = util::load_params_toml(path).unwrap_or_else(|e| {
-            eprintln!("error: --params {}: {}", path, e);
-            std::process::exit(1);
-        });
-        for p in &mut model.parameters {
-            if let Some(&v) = toml_overrides.get(&p.name) {
-                p.value = Some(v);
-            }
-        }
-    }
-
-    // Step 3: apply --param-vec PREFIX=FILE overrides (keyed TSV: name<TAB>value)
-    if !set_vec_entries.is_empty() {
-        let known_param_names: std::collections::HashSet<String> =
-            model.parameters.iter().map(|p| p.name.clone()).collect();
-        let mut resolved: Vec<(String, f64)> = Vec::new();
-        for (prefix, file) in &set_vec_entries {
-            let entries = util::load_keyed_tsv(file).unwrap_or_else(|e| {
-                eprintln!("error: --param-vec {}: {}", prefix, e);
-                std::process::exit(1);
-            });
-            for (key, val) in entries {
-                let full_name = format!("{}_{}", prefix, key);
-                if !known_param_names.contains(&full_name) {
-                    eprintln!("error: --param-vec {}: unknown parameter '{}'", prefix, full_name);
-                    std::process::exit(1);
-                }
-                resolved.push((full_name, val));
-            }
-        }
-        for (full_name, val) in resolved {
-            for p in &mut model.parameters {
-                if p.name == full_name { p.value = Some(val); }
-            }
-        }
-    }
-
-    // Step 4: apply --param scalar overrides (highest priority)
-    for p in &mut model.parameters {
-        if let Some(&v) = overrides.get(&p.name) { p.value = Some(v); }
-    }
-
-    // Fill external() tables from --table NAME=FILE
-    for table in &mut model.tables {
-        if let TableSource::External { external: ref name } = table.source {
-            let logical_name = name.clone();
-            match table_files.get(&logical_name) {
-                None => {
-                    eprintln!("error: table '{}' is declared as external() but --table {}=<file> was not provided",
-                        logical_name, logical_name);
-                    std::process::exit(1);
-                }
-                Some(path) => {
-                    let values = util::load_table_file(path).unwrap_or_else(|e| {
-                        eprintln!("error loading table '{}' from {}: {}", logical_name, path, e);
-                        std::process::exit(1);
-                    });
-                    table.source = TableSource::Inline { values };
-                }
-            }
-        }
-    }
-
-    let compiled = CompiledModel::new(model.clone())
-        .unwrap_or_else(|e| { eprintln!("model compile error: {:?}", e); std::process::exit(1); });
-    let params  = compiled.default_params.clone();
-    let t_start = model.simulation.t_start;
-    let t_end   = model.simulation.t_end;
-
-    let config = match backend.as_str() {
-        "gillespie"      => SimConfig::Gillespie(GillespieConfig { t_start, t_end, output_dt: None }),
-        "tau_leap"       => SimConfig::TauLeap(TauLeapConfig { t_start, t_end, dt }),
-        "chain_binomial" => SimConfig::ChainBinomial(ChainBinomialConfig { t_start, t_end, dt }),
-        "ode" => {
-            eprintln!("error: ODE backend not yet implemented. Use --backend gillespie (default), tau_leap, or chain_binomial.");
-            std::process::exit(1);
-        }
-        s => { eprintln!("unknown backend: {}", s); usage(); }
+    let sim_run = util::SimRun {
+        ir_path: ir_path.clone(),
+        params_files,
+        overrides,
+        set_vec_entries,
+        table_files,
+        scenario_name,
+        adhoc_enable,
+        adhoc_disable,
+        backend,
+        dt,
+        seed,
     };
 
-    let traj = match backend.as_str() {
-        "gillespie"      => GillespieSim.run(&compiled, &params, seed, &config),
-        "tau_leap"       => TauLeapSim.run(&compiled, &params, seed, &config),
-        "chain_binomial" => ChainBinomialSim.run(&compiled, &params, seed, &config),
-        _ => unreachable!(),
-    }.unwrap_or_else(|e| { eprintln!("simulation error: {:?}", e); std::process::exit(1); });
+    let (traj, model) = util::run_simulation(&sim_run).unwrap_or_else(|e| {
+        eprintln!("error: {}", e);
+        std::process::exit(1);
+    });
 
     // Write diagnostics.tsv unconditionally
     if !traj.transition_diagnostics.is_empty() {

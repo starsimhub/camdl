@@ -507,10 +507,10 @@ scenario_field:
       { match k with
         | "label"   ->
           let s = match v with
-            | EIdent (s, _) -> s
-            | EConst f -> string_of_float f
-            | EFuncCall (s, []) -> s
-            | _ -> "" in
+            | EIdent (s, _)    -> s   (* quoted string or bare identifier *)
+            | EFuncCall (s, []) -> s  (* zero-arg call used as name *)
+            | EConst f         -> string_of_float f
+            | _ -> failwith "scenario label must be a quoted string or identifier" in
           Ast.ScLabel s
         | "enable"  -> Ast.ScEnable  (extract_ident_list v)
         | "disable" -> Ast.ScDisable (extract_ident_list v)

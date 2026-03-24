@@ -22,10 +22,12 @@ fn apply_scenario_patch(
     enable: &[String],
     disable: &[String],
 ) {
-    if !enable.is_empty() {
-        model.interventions.retain(|iv| enable.contains(&iv.name));
-    } else if !disable.is_empty() {
-        model.interventions.retain(|iv| !disable.contains(&iv.name));
+    if !enable.is_empty() || !disable.is_empty() {
+        model.interventions.retain(|iv| {
+            let kept_by_enable  = enable.is_empty() || enable.contains(&iv.name);
+            let kept_by_disable = !disable.contains(&iv.name);
+            kept_by_enable && kept_by_disable
+        });
     } else {
         model.interventions.clear();
     }
@@ -82,4 +84,34 @@ fn test_disable_removes_named_intervention() {
         model.interventions.iter().all(|iv| iv.name != "sia_round_1"),
         "disable should remove sia_round_1 from interventions"
     );
+}
+
+#[test]
+fn test_enable_and_disable_compose() {
+    // polio_spatial_5 has: sia_north, sia_south, sia_east, sia_west, sia_center
+    let mut model = load_model("polio_spatial_5.ir.json");
+    assert_eq!(model.interventions.len(), 5);
+
+    // enable=[north, south, east], disable=[east] → should keep north and south only
+    let enable  = vec!["sia_north".to_string(), "sia_south".to_string(), "sia_east".to_string()];
+    let disable = vec!["sia_east".to_string()];
+    apply_scenario_patch(&mut model, &enable, &disable);
+
+    let names: Vec<&str> = model.interventions.iter().map(|iv| iv.name.as_str()).collect();
+    assert!(names.contains(&"sia_north"),  "sia_north should be retained");
+    assert!(names.contains(&"sia_south"),  "sia_south should be retained");
+    assert!(!names.contains(&"sia_east"),  "sia_east should be excluded by disable");
+    assert!(!names.contains(&"sia_west"),  "sia_west should be excluded (not enabled)");
+    assert!(!names.contains(&"sia_center"),"sia_center should be excluded (not enabled)");
+    assert_eq!(names.len(), 2);
+}
+
+#[test]
+fn test_disable_only_keeps_all_except_disabled() {
+    // enable=[], disable=[sia_north] → keep all 4 others
+    let mut model = load_model("polio_spatial_5.ir.json");
+    let disable = vec!["sia_north".to_string()];
+    apply_scenario_patch(&mut model, &[], &disable);
+    assert_eq!(model.interventions.len(), 4);
+    assert!(model.interventions.iter().all(|iv| iv.name != "sia_north"));
 }
