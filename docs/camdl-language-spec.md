@@ -173,9 +173,9 @@ parameters {
 }
 ```
 
-Parameters are **declared** here. Default values may optionally be specified
-in the model file. Concrete values for inference are supplied externally via
-CLI flags or inference engines.
+Parameters are **declared** here. Default values may optionally be specified in
+the model file. Concrete values for inference are supplied externally via CLI
+flags or inference engines.
 
 ### 4.1 Parameter Types
 
@@ -224,8 +224,8 @@ parameters {
 }
 ```
 
-The index must refer to a declared `stratify` dimension. In expressions,
-indexed parameters are accessed with `[index]`:
+The index must refer to a declared `stratify` dimension. In expressions, indexed
+parameters are accessed with `[index]`:
 
 ```
 let beta[p in patch] = R0[p] * gamma   # R0[p] → Param("R0_urban") etc.
@@ -233,11 +233,13 @@ let beta[p in patch] = R0[p] * gamma   # R0[p] → Param("R0_urban") etc.
 
 **Index namespace rule.** Inside `[...]` on a parameter reference, the compiler
 checks only:
+
 1. The current substitution environment (bound index variables like `p`)
 2. The literal dimension values (e.g., `R0[urban]` → `Param("R0_urban")`)
 
-Let bindings and other parameters are never checked in index position. `R0[urban]`
-always means the stratum value `urban`, even if a let binding named `urban` exists.
+Let bindings and other parameters are never checked in index position.
+`R0[urban]` always means the stratum value `urban`, even if a let binding named
+`urban` exists.
 
 **Shadowing warning W103.** The compiler emits W103 when a let binding name
 matches a stratum value in any dimension:
@@ -275,17 +277,17 @@ parameters {
 }
 ```
 
-Bounds are **optional** and apply to all expanded scalar parameters for
-indexed declarations. They are stored in the IR:
+Bounds are **optional** and apply to all expanded scalar parameters for indexed
+declarations. They are stored in the IR:
 
 ```json
 { "name": "R0", "value": null, "bounds": [1.0, 20.0], ... }
 ```
 
-Bounds are used by inference engines to constrain sampling or optimization;
-the forward simulator does not enforce them at runtime. The compiler does not
-validate that supplied values lie within bounds — that is the inference
-engine's responsibility.
+Bounds are used by inference engines to constrain sampling or optimization; the
+forward simulator does not enforce them at runtime. The compiler does not
+validate that supplied values lie within bounds — that is the inference engine's
+responsibility.
 
 Type constraints still apply independently of bounds: a `positive` parameter
 with `in [1.0, 20.0]` is implicitly also constrained to `> 0`.
@@ -1050,9 +1052,9 @@ compartments, ODE evolution for real compartments between events.
 
 ## 12. Data
 
-> **Not yet implemented (v0.2).** The `data { }` block is not yet supported
-> by the parser or expander. External data loading and observation targets
-> backed by data files are planned for v0.2.
+> **Not yet implemented (v0.2).** The `data { }` block is not yet supported by
+> the parser or expander. External data loading and observation targets backed
+> by data files are planned for v0.2.
 
 External data for features (always loaded) and observation targets.
 
@@ -1104,8 +1106,8 @@ observations {
 }
 ```
 
-Syntax notes: the observation name is followed by ` : {` (colon required).
-`likelihood` uses ` : KIND { ... }` (colon, not `=`). Keyword arguments inside
+Syntax notes: the observation name is followed by `: {` (colon required).
+`likelihood` uses `: KIND { ... }` (colon, not `=`). Keyword arguments inside
 `{ }` are whitespace-separated — no commas.
 
 ### 13.1 Projections
@@ -1123,8 +1125,8 @@ compartments may have multiple dimensions. `incidence(infection[patch = p])`
 sums over age for a specific patch — without named indexing, positional
 `infection[p]` would incorrectly index the first dimension (age).
 
-Inside a likelihood expression, the keyword `projected` refers to the
-evaluated projection value for that observation.
+Inside a likelihood expression, the keyword `projected` refers to the evaluated
+projection value for that observation.
 
 ### 13.2 Likelihood Families
 
@@ -1233,15 +1235,16 @@ interventions {
 
 Syntax: `NAME[INDEX_VAR in DIMENSION] : ACTION { schedule }`
 
-The expanded members share a **`base_name`** (the unindexed name, `"sia"` above).
-In scenario `enable`/`disable` lists, passing `"sia"` resolves to all members
-whose `base_name` is `"sia"` — no need to enumerate them individually (see §18).
+The expanded members share a **`base_name`** (the unindexed name, `"sia"`
+above). In scenario `enable`/`disable` lists, passing `"sia"` resolves to all
+members whose `base_name` is `"sia"` — no need to enumerate them individually
+(see §18).
 
-Individual members can still be addressed by their expanded name
-(`"sia_north"`) when fine-grained control is needed.
+Individual members can still be addressed by their expanded name (`"sia_north"`)
+when fine-grained control is needed.
 
-**Per-patch timing from a table.** When SIA rounds happen on different dates
-per patch, store the schedule in a table and reference it in the `at` list:
+**Per-patch timing from a table.** When SIA rounds happen on different dates per
+patch, store the schedule in a table and reference it in the `at` list:
 
 ```
 tables {
@@ -1273,9 +1276,9 @@ camdl simulate model.camdl --enable sia_round_1 --seed 42
 
 > **Partially implemented.** The `timepoints { }` block is parsed but the
 > declared timepoint values are currently discarded by the expander and not
-> available in expressions. Full timepoint support is planned for v0.2.
-> The built-in reserved identifiers `t_start` and `t_end` are always
-> available regardless.
+> available in expressions. Full timepoint support is planned for v0.2. The
+> built-in reserved identifiers `t_start` and `t_end` are always available
+> regardless.
 
 ```
 timepoints {
@@ -1387,8 +1390,8 @@ init {
 
 The index binder `[p in patch]` generates one init entry per patch. `N0[p]`
 performs a table lookup at compile time — each expanded entry gets its own
-concrete value. Parameter references (e.g. `I0`) remain as IR-level
-expressions evaluated at runtime.
+concrete value. Parameter references (e.g. `I0`) remain as IR-level expressions
+evaluated at runtime.
 
 This is fully supported in v0.1. The `distribute(total, weights = table)`
 aggregate helper for proportional allocation is future sugar (v0.2).
@@ -1475,8 +1478,8 @@ time_when(pred)            first time predicate becomes true
 
 ## 18. Scenarios
 
-Patch-based modifications to the baseline. Baseline is the identity patch —
-the model as defined, no modifications.
+Patch-based modifications to the baseline. Baseline is the identity patch — the
+model as defined, no modifications.
 
 ```
 scenarios {
@@ -1516,11 +1519,10 @@ compose = [SCENARIO, ...]          apply patches in sequence
 ```
 
 **Family-based enable resolution.** `enable` entries are matched against
-intervention `base_name` as well as exact names. If `"sia"` is the
-`base_name` of an indexed family `sia[p in patch]`, writing `enable = [sia]`
-activates all 238 members at once. Individual members can still be addressed
-by their expanded name (e.g., `"sia_borno_damboa"`) when fine-grained control
-is needed.
+intervention `base_name` as well as exact names. If `"sia"` is the `base_name`
+of an indexed family `sia[p in patch]`, writing `enable = [sia]` activates all
+238 members at once. Individual members can still be addressed by their expanded
+name (e.g., `"sia_borno_damboa"`) when fine-grained control is needed.
 
 The compiler warns on non-commutative compositions (overlapping write sets).
 `scale` on a `probability` parameter that would exceed [0,1] is a **compile
@@ -1662,8 +1664,8 @@ A scenario with no overrides, enables, or disables always produces
 `scen_hash = sha256("")` → `00000000` prefix, visually identifying it as the
 unmodified baseline.
 
-`scen_hash` covers only the *delta* (scenario overrides, enable, disable).
-Base params and model structure are captured in `sim_hash`. Renaming a scenario
+`scen_hash` covers only the _delta_ (scenario overrides, enable, disable). Base
+params and model structure are captured in `sim_hash`. Renaming a scenario
 without changing its definition preserves the hash, so cached runs are reused.
 
 **Structural content** included in `model_hash` (via IR JSON):
@@ -1690,14 +1692,14 @@ data (file paths)    # external file paths change across machines
 
 ### 20.2 Cache Reuse Matrix
 
-| What changed | sim_hash | scen_hash | Reuse |
-|---|---|---|---|
-| IR / model | changes | — | none |
-| base params | changes | — | none |
-| backend or dt | changes | — | none |
-| scenario A's enable/disable/params | unchanged | A changes, B same | B's runs reused |
-| add more seeds | unchanged | unchanged | all existing reused |
-| rename a scenario | unchanged | unchanged | reused (same sim) |
+| What changed                       | sim_hash  | scen_hash         | Reuse               |
+| ---------------------------------- | --------- | ----------------- | ------------------- |
+| IR / model                         | changes   | —                 | none                |
+| base params                        | changes   | —                 | none                |
+| backend or dt                      | changes   | —                 | none                |
+| scenario A's enable/disable/params | unchanged | A changes, B same | B's runs reused     |
+| add more seeds                     | unchanged | unchanged         | all existing reused |
+| rename a scenario                  | unchanged | unchanged         | reused (same sim)   |
 
 ### 20.3 Manifest
 
@@ -1706,8 +1708,16 @@ data (file paths)    # external file paths change across machines
 ```json
 {
   "runs": [
-    { "scenario": "baseline", "seed": 1, "run_path": "3a7f2c1d/baseline-00000000/seed_1" },
-    { "scenario": "with_sia", "seed": 1, "run_path": "3a7f2c1d/with_sia-f9e2b047/seed_1" }
+    {
+      "scenario": "baseline",
+      "seed": 1,
+      "run_path": "3a7f2c1d/baseline-00000000/seed_1"
+    },
+    {
+      "scenario": "with_sia",
+      "seed": 1,
+      "run_path": "3a7f2c1d/with_sia-f9e2b047/seed_1"
+    }
   ]
 }
 ```
@@ -1716,8 +1726,8 @@ The web app constructs trajectory URLs as `GET /runs/{run_path}/traj.tsv`.
 
 ### 20.4 Caching
 
-Same inputs → same hashes → run directory already exists → skip simulation.
-Pass `--force` to re-run and overwrite existing results.
+Same inputs → same hashes → run directory already exists → skip simulation. Pass
+`--force` to re-run and overwrite existing results.
 
 ---
 
@@ -1817,8 +1827,8 @@ structural skeleton; the parameter grammar fills in the rest.
 ## 22. CLI
 
 The toolchain has two binaries: **`camdlc`** (OCaml compiler) and
-**`camdl-sim`** (Rust simulator). The planned unified `camdl` binary is a
-future integration.
+**`camdl-sim`** (Rust simulator). The planned unified `camdl` binary is a future
+integration.
 
 ### 22.1 camdlc — Compiler (OCaml)
 
@@ -1864,6 +1874,7 @@ Options:
 ```
 
 **`--param NAME=VALUE`** overrides a single parameter. Can be repeated:
+
 ```bash
 camdl-sim model.ir.json --param gamma=0.1 --param beta=0.3
 ```
@@ -1871,6 +1882,7 @@ camdl-sim model.ir.json --param gamma=0.1 --param beta=0.3
 **`--param-vec PREFIX=FILE`** loads a two-column keyed TSV (`name<TAB>value`)
 and applies it as per-stratum parameter overrides. The full parameter name is
 constructed as `PREFIX_name`:
+
 ```bash
 # r0_values.tsv:
 #   urban   2.1
@@ -1878,16 +1890,17 @@ constructed as `PREFIX_name`:
 camdl-sim model.ir.json --param-vec R0=r0_values.tsv
 # Sets R0_urban=2.1, R0_rural=1.8
 ```
-Unknown keys (constructed parameter name not in model) cause an immediate
-error with a clear message.
+
+Unknown keys (constructed parameter name not in model) cause an immediate error
+with a clear message.
 
 **`--table NAME=FILE`** supplies a runtime external table. Models that declare
 `external("NAME")` tables require this flag; simulation fails if any external
 table is not provided.
 
-Output is a TSV to stdout with columns: `t`, one column per integer
-compartment, one column per real compartment, and `flow_<name>` per
-transition. A `diagnostics.tsv` is written unconditionally alongside.
+Output is a TSV to stdout with columns: `t`, one column per integer compartment,
+one column per real compartment, and `flow_<name>` per transition. A
+`diagnostics.tsv` is written unconditionally alongside.
 
 ### 22.3 Planned CLI (v0.2+)
 
@@ -2747,16 +2760,16 @@ at compile time, not simulation time.
 Diagnostics carry a numeric code for programmatic consumption (e.g.,
 `--json-errors` mode):
 
-| Code | Kind    | Description |
-|------|---------|-------------|
-| E100 | Error   | Unknown index value in `[...]` — not a bound variable and not a member of any dimension |
-| E200 | Error   | Undeclared compartment or parameter referenced in expression |
-| E201 | Error   | Duplicate declaration (two parameters named `beta`, etc.) |
-| E202 | Error   | Wrong number of indices for compartment |
-| E203 | Error   | Index belongs to wrong dimension (e.g., `C_age[i, s]` where `s : sex`) |
+| Code | Kind    | Description                                                                                     |
+| ---- | ------- | ----------------------------------------------------------------------------------------------- |
+| E100 | Error   | Unknown index value in `[...]` — not a bound variable and not a member of any dimension         |
+| E200 | Error   | Undeclared compartment or parameter referenced in expression                                    |
+| E201 | Error   | Duplicate declaration (two parameters named `beta`, etc.)                                       |
+| E202 | Error   | Wrong number of indices for compartment                                                         |
+| E203 | Error   | Index belongs to wrong dimension (e.g., `C_age[i, s]` where `s : sex`)                          |
 | E204 | Error   | Partial-stratification stoichiometry: destination compartment dimensions incompletely specified |
-| W002 | Warning | Zero-firing transition (emitted at simulation time by `camdl-sim`) |
-| W103 | Warning | Let binding name shadows a stratum value in some dimension |
+| W002 | Warning | Zero-firing transition (emitted at simulation time by `camdl-sim`)                              |
+| W103 | Warning | Let binding name shadows a stratum value in some dimension                                      |
 
 Diagnostics can be emitted as structured JSON by passing `--json-errors` to
 `camdlc`:

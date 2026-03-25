@@ -359,6 +359,7 @@ let model_to_json (m : model) : Yojson.Safe.t =
   obj ([
     ("name",               str m.name);
     ("version",            str m.version);
+    ("time_unit",          str m.time_unit);
     ("description",        match m.description with None -> null | Some s -> str s);
     ("compartments",       arr (List.map compartment_to_json m.compartments));
     ("transitions",        arr (List.map transition_to_json m.transitions));

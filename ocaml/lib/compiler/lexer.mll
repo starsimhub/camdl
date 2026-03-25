@@ -3,6 +3,54 @@
 
   exception LexError of string
 
+  (* Strip underscore separators from a numeric literal before parsing.
+     Allows Rust-style 1_000_000 and 1_000.0. *)
+  let strip_us s = String.concat "" (String.split_on_char '_' s)
+
+  (* Pending lex-phase warnings: drained by compiler.ml into ctx.diags after parsing. *)
+  let pending_warnings
+    : (Lexing.position * Lexing.position * string) list ref = ref []
+
+  (* Warn if digit groups after the first underscore separator are not all the
+     same width — e.g. 10_00_000 (groups 2,2,3) is almost certainly a typo.
+     Single trailing groups (1_000) are always fine. *)
+  let check_int_grouping lexbuf (raw : string) =
+    (* Only inspect the integer part — ignore anything after '.' or 'e'/'E'. *)
+    let int_part =
+      let stop =
+        let dot = try String.index raw '.'  with Not_found -> max_int in
+        let e1  = try String.index raw 'e'  with Not_found -> max_int in
+        let e2  = try String.index raw 'E'  with Not_found -> max_int in
+        min dot (min e1 e2)
+      in
+      if stop = max_int then raw else String.sub raw 0 stop
+    in
+    if String.contains int_part '_' then begin
+      let groups = String.split_on_char '_' int_part in
+      match groups with
+      | [] | [_] -> ()
+      | _ :: rest ->
+        let sizes = List.map String.length rest in
+        let inconsistent = match sizes with
+          | [] | [_] -> false
+          | hd :: tl -> List.exists (fun s -> s <> hd) tl
+        in
+        if inconsistent then begin
+          let all_sizes = List.map String.length groups in
+          let sizes_str =
+            String.concat ", " (List.map string_of_int all_sizes)
+          in
+          let sp = Lexing.lexeme_start_p lexbuf in
+          let ep = Lexing.lexeme_end_p lexbuf in
+          pending_warnings := (sp, ep,
+            Printf.sprintf
+              "inconsistent digit grouping in '%s' (group widths: %s) — \
+               possible typo; consistent examples: 1_000_000 or 10_000_000"
+              raw sizes_str
+          ) :: !pending_warnings
+        end
+    end
+
   let kw_table = [
     "time_unit",     TIME_UNIT;
     "compartments",  COMPARTMENTS;
@@ -57,10 +105,12 @@
     | None     -> IDENT s
 }
 
-let digit  = ['0'-'9']
-let alpha  = ['a'-'z' 'A'-'Z' '_']
-let alnum  = ['a'-'z' 'A'-'Z' '0'-'9' '_']
-let ws     = [' ' '\t' '\r']
+let digit   = ['0'-'9']
+let alpha   = ['a'-'z' 'A'-'Z' '_']
+let alnum   = ['a'-'z' 'A'-'Z' '0'-'9' '_']
+let ws      = [' ' '\t' '\r']
+(* int_lit allows underscore separators between digit groups: 1_000_000 *)
+let int_lit = digit+ ('_'+ digit+)*
 
 rule token = parse
   | ws+               { token lexbuf }
@@ -77,15 +127,21 @@ rule token = parse
   | "'per_month" { UNIT_IDENT "per_month" }
   | "'per_year"  { UNIT_IDENT "per_year" }
 
-  (* Numbers *)
-  | digit+ '.' digit* (['e' 'E'] ['+' '-']? digit+)?
-      { FLOAT (float_of_string (Lexing.lexeme lexbuf)) }
-  | '.' digit+ (['e' 'E'] ['+' '-']? digit+)?
-      { FLOAT (float_of_string (Lexing.lexeme lexbuf)) }
-  | digit+ (['e' 'E'] ['+' '-']? digit+)
-      { FLOAT (float_of_string (Lexing.lexeme lexbuf)) }
-  | digit+
-      { INT (int_of_string (Lexing.lexeme lexbuf)) }
+  (* Numbers — underscore separators allowed between digit groups (1_000_000) *)
+  | int_lit '.' digit* (['e' 'E'] ['+' '-']? int_lit)?
+      { let raw = Lexing.lexeme lexbuf in
+        check_int_grouping lexbuf raw;
+        FLOAT (float_of_string (strip_us raw)) }
+  | '.' digit+ (['e' 'E'] ['+' '-']? int_lit)?
+      { FLOAT (float_of_string (strip_us (Lexing.lexeme lexbuf))) }
+  | int_lit (['e' 'E'] ['+' '-']? int_lit)
+      { let raw = Lexing.lexeme lexbuf in
+        check_int_grouping lexbuf raw;
+        FLOAT (float_of_string (strip_us raw)) }
+  | int_lit
+      { let raw = Lexing.lexeme lexbuf in
+        check_int_grouping lexbuf raw;
+        INT (int_of_string (strip_us raw)) }
 
   (* String literals *)
   | '"'

@@ -1,31 +1,62 @@
 {
   "name": "sir_demography",
   "version": "0.3",
+  "time_unit": "days",
   "description": null,
   "compartments": [
-    { "name": "S", "kind": "integer" },
-    { "name": "I", "kind": "integer" },
-    { "name": "R", "kind": "integer" }
+    {
+      "name": "S",
+      "kind": "integer"
+    },
+    {
+      "name": "I",
+      "kind": "integer"
+    },
+    {
+      "name": "R",
+      "kind": "integer"
+    }
   ],
   "transitions": [
     {
       "name": "infection",
-      "stoichiometry": [ [ "S", -1 ], [ "I", 1 ] ],
+      "stoichiometry": [
+        [
+          "S",
+          -1
+        ],
+        [
+          "I",
+          1
+        ]
+      ],
       "rate": {
         "bin_op": {
           "op": "mul",
           "left": {
             "bin_op": {
               "op": "mul",
-              "left": { "param": "beta" },
-              "right": { "pop": "S" }
+              "left": {
+                "param": "beta"
+              },
+              "right": {
+                "pop": "S"
+              }
             }
           },
           "right": {
             "bin_op": {
               "op": "div",
-              "left": { "pop": "I" },
-              "right": { "pop_sum": [ "S", "I", "R" ] }
+              "left": {
+                "pop": "I"
+              },
+              "right": {
+                "pop_sum": [
+                  "S",
+                  "I",
+                  "R"
+                ]
+              }
             }
           }
         }
@@ -39,12 +70,25 @@
     },
     {
       "name": "recovery",
-      "stoichiometry": [ [ "I", -1 ], [ "R", 1 ] ],
+      "stoichiometry": [
+        [
+          "I",
+          -1
+        ],
+        [
+          "R",
+          1
+        ]
+      ],
       "rate": {
         "bin_op": {
           "op": "mul",
-          "left": { "param": "gamma" },
-          "right": { "pop": "I" }
+          "left": {
+            "param": "gamma"
+          },
+          "right": {
+            "pop": "I"
+          }
         }
       },
       "event_key": "recovery:{firing_index}",
@@ -56,12 +100,25 @@
     },
     {
       "name": "birth",
-      "stoichiometry": [ [ "S", 1 ] ],
+      "stoichiometry": [
+        [
+          "S",
+          1
+        ]
+      ],
       "rate": {
         "bin_op": {
           "op": "mul",
-          "left": { "param": "mu" },
-          "right": { "pop_sum": [ "S", "I", "R" ] }
+          "left": {
+            "param": "mu"
+          },
+          "right": {
+            "pop_sum": [
+              "S",
+              "I",
+              "R"
+            ]
+          }
         }
       },
       "event_key": "birth:{firing_index}",
@@ -73,12 +130,21 @@
     },
     {
       "name": "death_S",
-      "stoichiometry": [ [ "S", -1 ] ],
+      "stoichiometry": [
+        [
+          "S",
+          -1
+        ]
+      ],
       "rate": {
         "bin_op": {
           "op": "mul",
-          "left": { "param": "mu" },
-          "right": { "pop": "S" }
+          "left": {
+            "param": "mu"
+          },
+          "right": {
+            "pop": "S"
+          }
         }
       },
       "event_key": "death_S:{firing_index}",
@@ -90,12 +156,21 @@
     },
     {
       "name": "death_I",
-      "stoichiometry": [ [ "I", -1 ] ],
+      "stoichiometry": [
+        [
+          "I",
+          -1
+        ]
+      ],
       "rate": {
         "bin_op": {
           "op": "mul",
-          "left": { "param": "mu" },
-          "right": { "pop": "I" }
+          "left": {
+            "param": "mu"
+          },
+          "right": {
+            "pop": "I"
+          }
         }
       },
       "event_key": "death_I:{firing_index}",
@@ -107,12 +182,21 @@
     },
     {
       "name": "death_R",
-      "stoichiometry": [ [ "R", -1 ] ],
+      "stoichiometry": [
+        [
+          "R",
+          -1
+        ]
+      ],
       "rate": {
         "bin_op": {
           "op": "mul",
-          "left": { "param": "mu" },
-          "right": { "pop": "R" }
+          "left": {
+            "param": "mu"
+          },
+          "right": {
+            "pop": "R"
+          }
         }
       },
       "event_key": "death_R:{firing_index}",
@@ -132,7 +216,10 @@
     {
       "name": "beta",
       "value": null,
-      "bounds": [ 0.001, 2.0 ],
+      "bounds": [
+        0.001,
+        2.0
+      ],
       "prior": null,
       "transform": null,
       "initial_value": null
@@ -140,7 +227,10 @@
     {
       "name": "gamma",
       "value": null,
-      "bounds": [ 0.001, 1.0 ],
+      "bounds": [
+        0.001,
+        1.0
+      ],
       "prior": null,
       "transform": null,
       "initial_value": null
@@ -148,7 +238,10 @@
     {
       "name": "mu",
       "value": null,
-      "bounds": [ 1e-06, 0.01 ],
+      "bounds": [
+        1e-06,
+        0.01
+      ],
       "prior": null,
       "transform": null,
       "initial_value": null
@@ -156,7 +249,10 @@
     {
       "name": "N0",
       "value": null,
-      "bounds": [ 100.0, 1000000.0 ],
+      "bounds": [
+        100.0,
+        1000000.0
+      ],
       "prior": null,
       "transform": null,
       "initial_value": null
@@ -164,7 +260,10 @@
     {
       "name": "I0",
       "value": null,
-      "bounds": [ 1.0, 10000.0 ],
+      "bounds": [
+        1.0,
+        10000.0
+      ],
       "prior": null,
       "transform": null,
       "initial_value": null
@@ -175,16 +274,28 @@
       "S": {
         "bin_op": {
           "op": "sub",
-          "left": { "param": "N0" },
-          "right": { "param": "I0" }
+          "left": {
+            "param": "N0"
+          },
+          "right": {
+            "param": "I0"
+          }
         }
       },
-      "I": { "param": "I0" }
+      "I": {
+        "param": "I0"
+      }
     }
   },
   "data_contract": null,
   "output": {
-    "times": { "regular": { "start": 0.0, "step": 1.0, "end": 365.0 } },
+    "times": {
+      "regular": {
+        "start": 0.0,
+        "step": 1.0,
+        "end": 365.0
+      }
+    },
     "format": "tsv",
     "trajectory": true,
     "observations": true
@@ -199,7 +310,7 @@
   "scenarios": [
     {
       "name": "baseline",
-      "label": "default  (R0 ≈ 2.9)",
+      "label": "default  (R0 \u2248 2.9)",
       "params": {
         "beta": 0.3,
         "gamma": 0.1,
@@ -228,9 +339,21 @@
   ],
   "model_structure": {
     "dimensions": [],
-    "compartment_dims": { "S": [], "I": [], "R": [] },
-    "base_compartments": [ "S", "I", "R" ],
-    "transmission_transitions": [ "infection" ],
-    "infectious_compartments": [ "I" ]
+    "compartment_dims": {
+      "S": [],
+      "I": [],
+      "R": []
+    },
+    "base_compartments": [
+      "S",
+      "I",
+      "R"
+    ],
+    "transmission_transitions": [
+      "infection"
+    ],
+    "infectious_compartments": [
+      "I"
+    ]
   }
 }

@@ -1,6 +1,7 @@
 {
   "name": "sir_patches_5",
   "version": "0.3",
+  "time_unit": "days",
   "description": null,
   "compartments": [
     { "name": "S_p0", "kind": "integer" },

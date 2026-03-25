@@ -252,6 +252,7 @@ type model_structure = {
 type model = {
   name:               string;
   version:            string;
+  time_unit:          string;           (* declared time unit, e.g. "days" *)
   description:        string option;
   compartments:       compartment list;
   transitions:        transition list;

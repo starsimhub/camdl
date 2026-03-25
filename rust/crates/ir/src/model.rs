@@ -11,6 +11,8 @@ use crate::{
     transition::Transition,
 };
 
+fn default_time_unit() -> String { "days".to_string() }
+
 // ── Compartment ───────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -114,6 +116,8 @@ pub struct ModelStructure {
 pub struct Model {
     pub name:               String,
     pub version:            String,
+    #[serde(default = "default_time_unit")]
+    pub time_unit:          String,
     pub description:        Option<String>,
     pub compartments:       Vec<Compartment>,
     pub transitions:        Vec<Transition>,

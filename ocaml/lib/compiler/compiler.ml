@@ -40,9 +40,24 @@ let compile_detail_result ?(name = "model") ?(filename = "<input>") (src : strin
       else Filename.dirname filename
     in
     let (model, ctx, summary) = Expander.expand_detail ~source_dir name decls in
-    (* Surface any diagnostics collected during expansion *)
+    (* Drain any lex-phase warnings (e.g. inconsistent digit grouping) collected
+       before the expander's ctx.diags was available. *)
+    List.iter (fun (sp, ep, msg) ->
+      Diagnostics.warning ctx.diags
+        ~code:"W100"
+        ~loc:(Diagnostics.loc_of_positions ~file:filename sp ep)
+        ~message:msg
+        ()
+    ) (List.rev !Lexer.pending_warnings);
+    Lexer.pending_warnings := [];
+    (* Errors: render all diagnostics and exit.
+       No errors: render any warnings (no-op if none) and continue. *)
     if Diagnostics.has_errors ctx.diags then
-      Diagnostics.report_and_exit ctx.diags source;
+      Diagnostics.report_and_exit ctx.diags source
+    else begin
+      Fmt.set_style_renderer Fmt.stderr `Ansi_tty;
+      Diagnostics.render_all ctx.diags source Fmt.stderr
+    end;
     Ok { model; ctx; summary; source }
   with
   | Failure msg -> Error msg

@@ -453,6 +453,7 @@ let model_structure_of_json j = {
 let model_of_json (j : Yojson.Safe.t) : model =
   { name               = as_string (member "name"               j);
     version            = as_string (member "version"            j);
+    time_unit          = (match member_opt "time_unit" j with Some (`String s) -> s | _ -> "days");
     description        = (match member_opt "description" j with Some `Null | None -> None | Some s -> Some (as_string s));
     compartments       = List.map compartment_of_json      (as_list (member "compartments"   j));
     transitions        = List.map transition_of_json       (as_list (member "transitions"    j));

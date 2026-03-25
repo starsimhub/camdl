@@ -1,6 +1,7 @@
 {
   "name": "cholera_siwr",
   "version": "0.3",
+  "time_unit": "days",
   "description": "SIWR cholera model: integer S/I/R + real-valued water reservoir W. PDMP coupling.",
   "compartments": [
     {

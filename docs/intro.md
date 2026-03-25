@@ -1,76 +1,101 @@
-# Introduction to the camdl DSL
+# camdl by Example
 
-`camdl` is a domain-specific language for stochastic compartmental epidemic
-models. This document introduces the DSL by working through three models of
-increasing complexity, showing the standard mathematical formulation alongside
-the corresponding DSL code.
+## What camdl is
 
-The key idea: you write down the _transitions_ between compartments and the
-_rates_ at which they fire. The compiler expands stratified shorthand into a
-flat IR; the simulator turns the rate expressions into stochastic or
-deterministic dynamics.
+camdl (Compartmental Model Description Language) describes stochastic
+compartmental models. A `.camdl` file says what the compartments are, how
+individuals move between them, and how fast. It compiles to a flat JSON
+intermediate representation that a Rust backend simulates.
+
+**Three design commitments:**
+
+1. **Structure lives in the model, values live outside.** A `.camdl` file
+   defines compartments, transitions, and parameter _names_. Parameter _values_
+   come from external TOML files or CLI flags — never hardcoded. The same model
+   file serves forward simulation, calibration, and scenario comparison.
+
+2. **Everything expands.** Stratification, indexed parameters, indexed
+   interventions — all expand to flat, concrete IR at compile time. The runtime
+   sees no index variables, no dimension metadata, no sugar. If the model has
+   238 patches × 5 compartments, the IR has 1,190 compartment entries with
+   explicit names like `S_kano_dala`.
+
+3. **Write the math.** The index notation `[a in age]` reads like mathematical
+   subscripts. Transitions read as "from → to at rate." Tables are lookup
+   arrays. The goal is that a modeler can read a `.camdl` file and know what it
+   does without learning a programming language.
 
 ---
 
-## 1. SIR — the simplest epidemic model
+## A single transition
 
-### Mathematics
+The simplest possible model: susceptible individuals become infected.
 
-The SIR model partitions a closed population into susceptibles (S), infecteds
-(I), and recovered/immune (R).
-
-**Parameters**
-
-| Symbol | Meaning                                                               |
-| ------ | --------------------------------------------------------------------- |
-| β      | transmission rate (contacts × probability per infected per unit time) |
-| γ      | recovery rate (1/γ = mean infectious period)                          |
-| N      | total population S + I + R                                            |
-
-**Stochastic formulation**
-
-The model is a continuous-time Markov chain (CTMC). Two competing Poisson
-processes fire at rates that depend on the current state:
-
-| Event     | Rate        | Effect       |
-| --------- | ----------- | ------------ |
-| infection | β · S · I/N | S→S-1, I→I+1 |
-| recovery  | γ · I       | I→I-1, R→R+1 |
-
-This is what `camdl` models at its core. Compartments are integer head-counts;
-events move individuals one at a time.
-
-**Deterministic limit (ODEs)**
-
-At large N, the mean-field limit of the CTMC converges to the familiar ODEs:
-
-```
-dS/dt = −β S I / N
-dI/dt = +β S I / N − γ I
-dR/dt = +γ I
-```
-
-The basic reproduction number is R₀ = β/γ. An epidemic grows when R₀ · S/N > 1.
-The ODE backend (`--backend ode`) integrates these equations directly.
-
-### DSL
-
-```
+```camdl
 time_unit = 'days
 
-compartments { S, I, R }
-
-let N = S + I + R
+compartments { S, I }
 
 parameters {
-  beta  : rate  in [0.001, 2.0]
-  gamma : rate  in [0.001, 1.0]
-  N0    : count in [100, 100000]
-  I0    : count in [1, 1000]
+  lambda : rate
+  N0     : count
 }
 
 transitions {
-  infection : S --> I  @ beta * S * (I / N)
+  infection : S --> I  @ lambda * S
+}
+
+init { S = N0 }
+
+simulate {
+  from = 0 'days
+  to   = 30 'days
+}
+```
+
+The `@` introduces the **propensity** — the total expected events per unit time
+across the whole population. If there are 900 susceptibles and lambda =
+0.01/day, the propensity is 9 events/day.
+
+Run it:
+
+```bash
+camdl simulate model.camdl --params params.toml --seed 42
+```
+
+Where `params.toml`:
+
+```toml
+lambda = 0.01
+N0 = 1000
+```
+
+Or override directly:
+
+```bash
+camdl simulate model.camdl --param lambda=0.01 --param N0=1000 --seed 42
+```
+
+---
+
+## SIR: propensity = per-capita rate × population at risk
+
+Recovery adds a second transition:
+
+```camdl
+compartments { S, I, R }
+
+parameters {
+  beta  : rate
+  gamma : rate
+  N0    : count
+  I0    : count
+}
+
+let N = S + I + R
+
+transitions {
+  infection : S --> I  @ beta * S * I / N
   recovery  : I --> R  @ gamma * I
 }
 
@@ -78,265 +103,418 @@ init {
   S = N0 - I0
   I = I0
 }
+```
 
-simulate {
-  from = 0 'days
-  to   = 80 'days
+Read each transition as: "from [source] to [destination] at total rate
+[propensity]."
+
+| Transition | Per-capita rate | × Who's at risk | = Propensity  |
+| ---------- | --------------- | --------------- | ------------- |
+| infection  | β × I / N       | S               | β × S × I / N |
+| recovery   | γ               | I               | γ × I         |
+
+The per-capita rate is the hazard each individual faces. The propensity is that
+hazard times the number of individuals at risk. camdl always wants the
+propensity — you write the multiplication explicitly. The compiler never
+silently multiplies by a population count.
+
+**`beta` is a rate. `beta * S * I / N` is a propensity.** This distinction
+matters: rates have units of 1/time, propensities have units of events/time.
+Every `@` expression is a propensity.
+
+---
+
+## How names resolve: parameters, let bindings, tables
+
+Three ways to name things in camdl. They have different lifetimes and different
+roles:
+
+### Parameters: external knobs
+
+```camdl
+parameters {
+  beta  : rate
+  gamma : rate
+}
+```
+
+Values supplied at runtime via `--params file.toml` or `--param beta=0.3`.
+Parameters are the model's degrees of freedom — what you sweep, fit, or hold
+fixed across analyses.
+
+### Let bindings: compile-time inlining
+
+```camdl
+let N = S + I + R
+let foi = beta * I / N
+```
+
+Let bindings are **inlined at compile time.** Everywhere the compiler sees `N`
+in a rate expression, it substitutes the expression `S + I + R` directly. The IR
+contains no reference to `N` — just `PopSum(["S", "I", "R"])` in the expression
+tree. Let bindings don't exist at runtime.
+
+This means they're not "variables" in the programming sense — they're named
+expression fragments. The substituted expression evaluates fresh at every use
+(every Gillespie event, every timestep), using the current compartment values.
+So `N` always reflects the current total population, even though it's "just" a
+textual substitution.
+
+### Tables: fixed data arrays
+
+```camdl
+tables {
+  C_age    : age × age  = [[12.0, 4.0], [4.0, 8.0]]
+  pop      : patch      = read_csv("data/lga_pop.csv")
+  adj      : patch × patch = read_csv("data/lga_adj.csv", format = sparse, default = 0.0)
+  coverage : patch      = read_csv("data/lga_coverage.csv")
+}
+```
+
+Tables hold fixed data that doesn't change during simulation: contact matrices,
+population sizes, spatial adjacency weights, vaccination coverage estimates,
+distance matrices, historical immunization records. Anything that's
+observational or structural input to the model — not a quantity you'd infer.
+
+**Table dimensions are stratification dimensions.** The `age × age` in
+`C_age : age × age` refers to the `age` dimension declared by
+`stratify(by = age, values = [child, adult])`. The compiler uses the
+stratification values to compute table sizes and resolve indexed lookups like
+`C_age[a, b]` into linear indices. This means you can't currently have a table
+dimension that isn't also a stratification dimension — a limitation that matters
+for things like `schedule : patch × round` where `round` shouldn't stratify
+compartments. (This is a known gap.)
+
+**Table lookups are resolved at compile time.** `C_age[child, adult]` becomes
+`TableLookup("C_age", Const(1))` in the IR — the index is a pre-computed
+integer. At runtime, it's a single array access.
+
+**The rule:** If it changes during simulation, use `let`. If it's supplied
+externally and might be inferred or swept, it's a `parameter`. If it's fixed
+input data — spatial structure, contact patterns, demographic data, coverage
+estimates, historical records — it's a `table`.
+
+---
+
+## Dimensions: `[i in dim]`
+
+Stratification adds dimensions to compartments. The index notation is designed
+to mirror mathematical subscripts:
+
+| Math notation           | camdl                                  | Meaning                                                         |
+| ----------------------- | -------------------------------------- | --------------------------------------------------------------- |
+| S_a ∀a ∈ {child, adult} | `S[a in age]`                          | for each age group                                              |
+| S_child                 | `S[child]`                             | one specific stratum                                            |
+| Σ_a S_a                 | `S`                                    | bare name = whole compartment (unindexed) = sum over all strata |
+| N_a = S_a + I_a + R_a   | `let N[a in age] = S[a] + I[a] + R[a]` | per-stratum derived quantity                                    |
+
+Declare a dimension:
+
+```camdl
+stratify(by = age, values = [child, adult])
+```
+
+This expands every compartment: `S` becomes `S_child` and `S_adult` in the IR.
+Transitions, let bindings, interventions, and init all use the same `[i in dim]`
+syntax to iterate over dimension values.
+
+Add age structure to the SIR:
+
+```camdl
+compartments { S, I, R }
+stratify(by = age, values = [child, adult])
+
+let N[a in age] = S[a] + I[a] + R[a]
+
+tables {
+  C : age × age = [[12.0, 4.0],
+                    [4.0,  8.0]]
 }
 
-scenarios {
-  baseline {
-    set = { beta = 0.3  gamma = 0.1  N0 = 1000  I0 = 10 }
+transitions {
+  infection[a in age] : S[a] --> I[a]
+    @ beta * S[a] * sum(b in age, C[a, b] * I[b] / N[b])
+
+  recovery[a in age] : I[a] --> R[a]
+    @ gamma * I[a]
+}
+```
+
+The compiler expands to 4 transitions: `infection_child`, `infection_adult`,
+`recovery_child`, `recovery_adult`. Each has a fully resolved rate expression
+with concrete compartment names and numeric table indices.
+
+---
+
+## Multiple dimensions compose
+
+Stack `stratify` declarations for a Cartesian product:
+
+```camdl
+stratify(by = age, values = [child, adult])
+stratify(by = patch, values = [north, south])
+```
+
+This gives `S_child_north`, `S_child_south`, `S_adult_north`, `S_adult_south`.
+Transitions bind one or both:
+
+```camdl
+# Within each patch, age-structured transmission
+infection[a in age, p in patch] : S[a, p] --> I[a, p]
+  @ beta * S[a, p] * sum(b in age, C[a, b] * I[b, p] / N[b, p])
+
+# Between patches, same age group
+importation[a in age, p in patch, q in patch] : S[a, p] --> I[a, p]
+  @ kappa * adj[p, q] * S[a, p] * I[a, q] / N[a, q]
+  where p != q
+```
+
+The `where p != q` guard filters self-loops at compile time — patches don't
+import from themselves.
+
+---
+
+## Interventions: scheduled discrete events
+
+Transitions run continuously. Interventions fire at specific times and move
+individuals instantaneously.
+
+```camdl
+interventions {
+  sia : transfer(fraction = 0.8, from = S, to = V) {
+    at = [180 'days, 545 'days]
   }
 }
 ```
 
-**DSL primitives**
+At day 180 and 545, 80% of S moves to V.
 
-**Compartments and aliases**
+Interventions support `[i in dim]`, table lookups in expressions, and the full
+composability of transitions:
 
-| DSL | Math | Notes |
-|-----|------|-------|
-| `compartments { S, I, R }` | $S, I, R \in \mathbb{Z}_{\geq 0}$ | integer head-counts; stochastic events change them by ±1 |
-| `let N = S + I + R` | $N \triangleq S + I + R$ | alias, not a state variable; inlined everywhere by the compiler |
-
-**Parameters**
-
-| DSL | Math | Notes |
-|-----|------|-------|
-| `beta : rate in [0.001, 2.0]` | $\beta \in [0.001,\ 2.0]$ | units: 1/time\_unit (by convention; not enforced) |
-| `N0 : count in [100, 100000]` | $N_0 \in [100,\ 10^5]$ | bounds used by the inference engine (v0.2) |
-
-**Transitions**
-
-Each line declares one stochastic event: the `-->` sets stoichiometry, `@` introduces the propensity.
-
-| DSL | Math |
-|-----|------|
-| `infection : S --> I @ beta * S * (I / N)` | rate $\lambda = \beta S I / N$; fires → $S \mathrel{-}= 1,\; I \mathrel{+}= 1$ |
-| `recovery  : I --> R @ gamma * I`          | rate $\lambda = \gamma I$; fires → $I \mathrel{-}= 1,\; R \mathrel{+}= 1$ |
-
-The simulator draws discrete events from these rates. The ODE backend (`--backend ode`) instead integrates the mean-field limit $dX_i/dt = \sum_j \nu_{ij} \lambda_j$ — derived automatically from the same stoichiometry. You never write $dS/dt$ explicitly.
-
-**Initial conditions**
-
-| DSL | Math |
-|-----|------|
-| `S = N0 - I0` | $S(0) = N_0 - I_0$ |
-| `I = I0`      | $I(0) = I_0$ |
-| _(R unlisted)_ | $R(0) = 0$ |
-
----
-
-## 2. SIR with demography
-
-### Mathematics
-
-Extending the SIR with births and deaths turns it into an open system capable of
-endemic equilibrium. Births enter S at rate μN; all compartments suffer
-background mortality at rate μ.
-
-**ODEs**
-
-```
-dS/dt = μN − β S I/N − μ S
-dI/dt = +β S I/N − γ I − μ I
-dR/dt = +γ I − μ R
-```
-
-At endemic equilibrium: dI/dt = 0 → S* = (γ + μ)/β · N ≈ N/R₀.
-
-**Stochastic events**
-
-| Event     | Rate    | Effect   |
-| --------- | ------- | -------- |
-| infection | β S I/N | S−1, I+1 |
-| recovery  | γ I     | I−1, R+1 |
-| birth     | μ N     | S+1      |
-| death_S   | μ S     | S−1      |
-| death_I   | μ I     | I−1      |
-| death_R   | μ R     | R−1      |
-
-### DSL
-
-```
-time_unit = 'days
-
-compartments { S, I, R }
-
-let N = S + I + R
-
+```camdl
 parameters {
-  beta  : rate  in [0.001, 2.0]
-  gamma : rate  in [0.001, 1.0]
-  mu    : rate  in [1e-6, 0.01]
-  N0    : count in [100, 1000000]
-  I0    : count in [1, 10000]
-}
-
-transitions {
-  infection : S --> I  @ beta * S * (I / N)
-  recovery  : I --> R  @ gamma * I
-  birth     :     --> S  @ mu * N
-  death_S   : S -->    @ mu * S
-  death_I   : I -->    @ mu * I
-  death_R   : R -->    @ mu * R
-}
-
-init {
-  S = N0 - I0
-  I = I0
-}
-
-simulate {
-  from = 0 'days
-  to   = 365 'days
-}
-```
-
-**Boundary transitions** — source or target can be empty, modelling flux across the system boundary:
-
-| DSL | Math |
-|-----|------|
-| `birth : --> S @ mu * N` | source = ∅; rate $\mu N$; fires → $S \mathrel{+}= 1$ |
-| `death_S : S --> @ mu * S` | target = ∅; rate $\mu S$; fires → $S \mathrel{-}= 1$, individual removed |
-
-The same pattern covers immigration, exportation, and any open-system flux.
-
----
-
-## 3. SEIR with age structure and contact matrix
-
-### Mathematics
-
-Age structure is the canonical reason to add stratification. Different age
-groups mix at different rates, captured by a contact matrix C where C[a,b] is
-the per-capita contact rate of age group `a` with group `b`.
-
-**Parameters**
-
-| Symbol | Meaning                                                        |
-| ------ | -------------------------------------------------------------- |
-| β      | per-contact transmission probability                           |
-| σ      | rate of progression from E to I (1/σ = mean incubation period) |
-| γ      | recovery rate                                                  |
-| C[a,b] | contact matrix (contacts per day, age a with group b)          |
-
-**ODEs** (for each age group a ∈ {child, adult})
-
-```
-dS_a/dt = −β · S_a · Σ_b C[a,b] · I_b / N_b
-dE_a/dt = +β · S_a · Σ_b C[a,b] · I_b / N_b − σ · E_a
-dI_a/dt = +σ · E_a − γ · I_a
-dR_a/dt = +γ · I_a
-```
-
-The force of infection on age group a is λ_a = β · Σ_b C[a,b] · I_b / N_b,
-summing contacts with each group b weighted by their prevalence.
-
-### DSL
-
-```
-time_unit = 'days
-
-compartments { S, E, I, R }
-
-stratify(by = age, values = [child, adult])
-
-let N_local[a in age] = S[a] + E[a] + I[a] + R[a]
-
-parameters {
-  beta  : rate in [0.001, 0.5]
-  sigma : rate in [0.01, 1.0]
-  gamma : rate in [0.01, 1.0]
+  vacc_eff : probability   # vaccine effectiveness (tunable)
 }
 
 tables {
-  C_age : age × age = [[12.0, 4.0], [4.0, 8.0]]
+  coverage : patch = read_csv("data/lga_coverage.csv")  # per-LGA field data (fixed)
+}
+
+interventions {
+  sia[p in patch] : transfer(
+    fraction = vacc_eff * coverage[p],
+    from = S[p], to = V[p]
+  ) { at = [180 'days, 545 'days] }
+}
+```
+
+One declaration, 238 expanded interventions — each with its own coverage from
+observational data. `vacc_eff` (tunable) × `coverage[p]` (data) separates what
+you infer from what you measured.
+
+**With age stratification, target a specific group:**
+
+```camdl
+# SIA vaccinates under-5 only
+sia[p in patch] : transfer(
+  fraction = vacc_eff * coverage[p],
+  from = S[under5, p], to = V[under5, p]
+) { at = [180 'days, 545 'days] }
+```
+
+Bound `p` iterates patches. Concrete `under5` is fixed. Adults are untouched.
+
+---
+
+## Scenarios: counterfactual comparisons
+
+Interventions are **disabled by default** — the baseline is natural transmission
+only. Scenarios select which interventions fire and optionally modify
+parameters.
+
+```camdl
+scenarios {
+  baseline {
+    label = "no vaccination"
+  }
+  with_sia {
+    enable = [sia]
+  }
+  high_transmission {
+    scale = { beta = 1.5 }
+  }
+  combined {
+    compose = [with_sia, high_transmission]
+  }
+}
+```
+
+`enable = [sia]` resolves the family name `sia` to all 238 expanded
+interventions. This is name resolution, not string matching — the compiler tags
+each expanded intervention with its family name.
+
+| Keyword                      | Effect                                           |
+| ---------------------------- | ------------------------------------------------ |
+| `enable = [names]`           | Activate interventions (families or individuals) |
+| `disable = [names]`          | Deactivate interventions                         |
+| `set = { param = value }`    | Override parameter values                        |
+| `scale = { param = factor }` | Multiply parameter values                        |
+| `compose = [A, B]`           | Apply A then B in sequence                       |
+
+Select a scenario at the CLI:
+
+```bash
+camdl simulate model.camdl --params p.toml --scenario with_sia --seed 42
+```
+
+Or run all scenarios across many seeds:
+
+```bash
+camdl experiment run experiment.toml --parallel 8
+```
+
+---
+
+## Init: starting conditions
+
+The `init` block sets compartment values at t=0. Supports `[i in dim]` with
+override-by-source-order:
+
+```camdl
+init {
+  S[p in patch] = N0[p]                         # bulk-set all patches
+  S[borno_damboa] = N0_borno_damboa - I0        # override seed patch
+  I[borno_damboa] = I0
+}
+```
+
+Later entries overwrite earlier ones for the same compartment. Pattern: bulk-set
+everything, then patch the exceptions.
+
+---
+
+## Observations: connecting simulation to data
+
+```camdl
+observations {
+  weekly_cases {
+    projected  = incidence(infection)
+    every      = 7 'days
+    likelihood = neg_binomial(mean = rho * projected, r = k)
+  }
+}
+```
+
+`incidence(infection)` counts infection events since the last observation time.
+The `neg_binomial` likelihood defines how simulated counts relate to observed
+data — used for scoring during inference and for generating synthetic
+observations during forward simulation.
+
+---
+
+## Putting it together
+
+A 238-patch Nigerian polio model in ~55 lines:
+
+```camdl
+time_unit = 'days
+
+compartments { S, E, I, R, V }
+stratify(by = patch, values = read_values("data/lga_names.txt"))
+
+let N[p in patch] = S[p] + E[p] + I[p] + R[p] + V[p]
+
+parameters {
+  sigma    : rate        in [0.001, 1.0]
+  gamma    : rate        in [0.001, 1.0]
+  omega    : rate        in [0.0001, 0.1]
+  kappa    : rate        in [0.0, 0.5]
+  vacc_eff : probability in [0.0, 1.0]
+  I0       : count       in [1, 10000]
+  R0[patch] : positive   in [0.5, 15.0]
+  N0[patch] : count      in [100, 10000000]
+}
+
+let beta[p in patch] = R0[p] * gamma
+
+tables {
+  adj      : patch × patch = read_csv("data/lga_adj.csv", format = sparse, default = 0.0)
+  coverage : patch         = read_csv("data/lga_coverage.csv")
 }
 
 transitions {
-  infection[a in age] : S[a] --> E[a]
-    @ beta * S[a] * sum(b in age, C_age[a, b] * I[b] / N_local[b])
+  infection[p in patch] : S[p] --> E[p]
+    @ beta[p] * S[p] * I[p] / N[p]
 
-  progression[a in age] : E[a] --> I[a]  @ sigma * E[a]
-  recovery[a in age]    : I[a] --> R[a]  @ gamma * I[a]
+  importation[p in patch, q in patch] : S[p] --> E[p]
+    @ kappa * adj[p, q] * S[p] * I[q] / N[q]
+    where p != q
+
+  progression[p in patch] : E[p] --> I[p]  @ sigma * E[p]
+  recovery[p in patch]    : I[p] --> R[p]  @ gamma * I[p]
+  waning[p in patch]      : V[p] --> S[p]  @ omega * V[p]
+}
+
+interventions {
+  sia[p in patch] : transfer(
+    fraction = vacc_eff * coverage[p],
+    from = S[p], to = V[p]
+  ) { at = [180 'days, 545 'days] }
 }
 
 init {
-  S[child] = 4990
-  S[adult] = 5000
-  I[child] = 10
+  S[p in patch] = N0[p]
+  I[borno_damboa] = I0
 }
 
 simulate {
   from = 0 'days
-  to   = 100 'days
+  to   = 730 'days
+}
+
+scenarios {
+  baseline { label = "no SIA" }
+  with_sia {
+    label = "with SIA"
+    enable = [sia]
+  }
 }
 ```
 
-**DSL primitives introduced here**
+---
 
-**Stratification**
+## Quick reference
 
-| DSL | Math | Notes |
-|-----|------|-------|
-| `stratify(by = age, values = [child, adult])` | index set $\mathcal{A} = \{\text{child},\text{adult}\}$ | all compartments and transitions gain dimension $\mathcal{A}$ |
-| `S[a]` | $S_a$ | value of compartment S for stratum $a$ |
-
-After expansion the IR contains `S_child`, `S_adult`, `E_child`, … — 8 compartments total.
-
-**Indexed let-binding**
-
-| DSL | Math |
-|-----|------|
-| `let N_local[a in age] = S[a] + E[a] + I[a] + R[a]` | $N_a \triangleq S_a + E_a + I_a + R_a \quad \forall\, a \in \mathcal{A}$ |
-
-**Tables**
-
-| DSL | Math |
-|-----|------|
-| `C_age : age × age = [[12.0, 4.0], [4.0, 8.0]]` | $C \in \mathbb{R}^{2 \times 2}$, $C_{ab}$ = contacts/day between group $a$ and $b$ |
-| `C_age[a, b]` in an expression | $C_{ab}$ |
-| `read_csv("file.csv")` instead of inline data | same type, values loaded at compile time |
-
-**Indexed transition and compile-time sum**
-
-The force-of-infection line maps directly to the mathematical summation:
-
-$$\lambda_a = \beta \cdot S_a \cdot \sum_{b \in \mathcal{A}} C_{ab} \cdot \frac{I_b}{N_b}$$
-
-| DSL | Math |
-|-----|------|
-| `infection[a in age] : S[a] --> E[a] @ ...` | ∀ $a \in \mathcal{A}$: rate $\lambda_a$; fires → $S_a \mathrel{-}= 1,\; E_a \mathrel{+}= 1$ |
-| `sum(b in age, C_age[a, b] * I[b] / N_local[b])` | $\displaystyle\sum_{b \in \mathcal{A}} C_{ab} \cdot I_b / N_b$ — unrolled at compile time, no runtime loop |
-
-The `[a in age]` binder produces one concrete transition per stratum (`infection_child`, `infection_adult`), each with $a$ substituted. After substitution, `infection_child` evaluates to:
-
-$$\beta \cdot S_\text{child} \cdot \bigl(12.0 \cdot I_\text{child}/N_\text{child} + 4.0 \cdot I_\text{adult}/N_\text{adult}\bigr)$$
-
-which is exactly the first row of the force-of-infection sum.
-
-**Per-stratum initial conditions**
-
-| DSL | Math |
-|-----|------|
-| `S[child] = 4990` | $S_\text{child}(0) = 4990$ |
-| _(stratum unlisted)_ | value defaults to 0 |
+| Concern            | Syntax                               | Notes                                        |
+| ------------------ | ------------------------------------ | -------------------------------------------- |
+| Compartments       | `compartments { S, I, R }`           | what exists                                  |
+| Dimensions         | `stratify(by = age, values = [...])` | Cartesian product                            |
+| Derived quantities | `let N = S + I + R`                  | inlined at compile time                      |
+| Parameters         | `parameters { beta : rate }`         | external, supplied at runtime                |
+| Tables             | `tables { C : age × age = [...] }`   | fixed data, dims must be stratification dims |
+| Continuous flow    | `src --> dst @ propensity`           | Gillespie / tau-leap events                  |
+| Scheduled events   | `transfer(...) at [times]`           | interventions, discrete                      |
+| Observations       | `incidence(...)`, likelihood         | inference + synthetic data                   |
+| Initial state      | `init { S = expr }`                  | override-by-source-order                     |
+| Scenarios          | `enable`, `set`, `scale`, `compose`  | counterfactual selection                     |
+| Time range         | `simulate { from, to }`              | defaults, overridable                        |
 
 ---
 
-## Comparing the three models
+## Known limitations
 
-| Feature                   | SIR basic | SIR demography | SEIR age  |
-| ------------------------- | --------- | -------------- | --------- |
-| Compartments              | 3         | 3              | 4 × 2 = 8 |
-| Transitions               | 2         | 6              | 3 × 2 = 6 |
-| Open system (birth/death) | no        | yes            | no        |
-| Stratification            | no        | no             | yes (age) |
-| Contact matrix            | no        | no             | yes       |
-| Parameters                | 4         | 5              | 3 + table |
+**Table dimensions must be stratification dimensions.** You can't declare
+`schedule : patch × round` unless `round` is a stratification dimension — but
+stratifying compartments by round makes no sense. This limits data-driven
+per-patch scheduling. Workaround: use table columns as explicit indices (e.g.,
+`sia_day[p, 0]`, `sia_day[p, 1]`). A future extension may support table-only
+dimensions.
 
-The DSL syntax scales: a 774-patch spatial model with age structure uses the
-same `stratify`, `tables`, and indexed-transition syntax — the compiler handles
-the explosion in compartment and transition count.
+**Observation block not yet exercised in golden tests.** The syntax compiles but
+end-to-end inference (scoring, particle filter) is not yet implemented.
+Observations currently generate synthetic data during forward simulation.
+
+**String literals in scenarios are fragile.** `label = "multi word"` may not
+parse correctly for all token patterns. Labels are cosmetic and don't affect
+simulation.

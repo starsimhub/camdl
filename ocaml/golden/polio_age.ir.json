@@ -1,6 +1,7 @@
 {
   "name": "polio_age",
   "version": "0.3",
+  "time_unit": "days",
   "description": null,
   "compartments": [
     { "name": "S_under5", "kind": "integer" },

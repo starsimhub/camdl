@@ -1,6 +1,7 @@
 {
   "name": "sir_placebo_ekrng",
   "version": "0.3",
+  "time_unit": "days",
   "description": "SIR + inert placebo transition for EKRNG order-independence test",
   "compartments": [
     {

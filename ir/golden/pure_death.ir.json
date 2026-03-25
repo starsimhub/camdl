@@ -1,6 +1,7 @@
 {
   "name": "pure_death",
   "version": "0.3",
+  "time_unit": "days",
   "description": "Single-compartment pure death process: N \u2192 \u2205 at rate mu*N. Analytic: N(t) = N0*exp(-mu*t).",
   "compartments": [
     {

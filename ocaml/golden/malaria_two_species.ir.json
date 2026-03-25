@@ -1,6 +1,7 @@
 {
   "name": "malaria_two_species",
   "version": "0.3",
+  "time_unit": "days",
   "description": null,
   "compartments": [
     { "name": "L_B", "kind": "integer" },

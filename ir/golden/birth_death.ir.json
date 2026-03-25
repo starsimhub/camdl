@@ -1,6 +1,7 @@
 {
   "name": "birth_death",
   "version": "0.3",
+  "time_unit": "days",
   "description": "Linear birth-death process: \u2205 \u2192 X at lambda*X, X \u2192 \u2205 at mu*X. Poisson steady state when lambda < mu.",
   "compartments": [
     {

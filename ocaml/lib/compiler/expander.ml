@@ -319,13 +319,36 @@ let collect_declarations ctx decls =
   ) decls;
   ctx.orig_transitions <- ctx.transitions
 
-(* ── Unit conversion to days ─────────────────────────────────────────────── *)
+(* ── Unit conversion ─────────────────────────────────────────────────────── *)
 
+(* Number of days represented by each unit literal. Used as the universal
+   intermediate: to convert between any two units, go via days. *)
 let days_per = function
   | Days     -> 1.0    | PerDay   -> 1.0
   | Weeks    -> 7.0    | PerWeek  -> 7.0
   | Months   -> 30.4375| PerMonth -> 30.4375  (* 365.25 / 12 *)
   | Years    -> 365.25 | PerYear  -> 365.25
+
+(* Convert a unit literal expression to a float in the model's declared
+   time_unit.  The computation goes through days as the universal intermediate:
+     duration:  f 'u  = (f × days_per(u)) / days_per(time_unit)
+     rate:      f 'pu = (f / days_per(u)) × days_per(time_unit)
+
+   With time_unit = 'days (the common case) days_per(Days) = 1.0, so the
+   division/multiplication is a no-op and the result is identical to the
+   old hardcoded behaviour.  With time_unit = 'weeks, 80 'days → 80/7 ≈ 11.4
+   and 0.3 'per_day → 0.3 × 7 = 2.1. *)
+let unit_lit_to_string = function
+  | Days -> "days" | Weeks -> "weeks" | Months -> "months" | Years -> "years"
+  | PerDay -> "per_day" | PerWeek -> "per_week" | PerMonth -> "per_month" | PerYear -> "per_year"
+
+let unit_to_model_time ctx f u =
+  let tu = days_per ctx.time_unit in
+  match u with
+  | Days | Weeks | Months | Years ->
+    f *. days_per u /. tu
+  | PerDay | PerWeek | PerMonth | PerYear ->
+    f /. days_per u *. tu
 
 (* ── Stratification helpers ──────────────────────────────────────────────── *)
 
@@ -484,11 +507,7 @@ let index_item_to_str env item =
 let rec resolve_expr ctx (env : (string * string) list) (e : expr) : Ir.expr =
   match e with
   | EConst f     -> Ir.Const f
-  | EUnit (f, u) -> Ir.Const (
-      match u with
-      | Days | Weeks | Months | Years       -> f *. days_per u
-      | PerDay | PerWeek | PerMonth | PerYear -> f /. days_per u
-    )
+  | EUnit (f, u) -> Ir.Const (unit_to_model_time ctx f u)
   | EIdent (name, l) -> (
     let loc = diag_loc_of_ast l in
     match List.assoc_opt name env with
@@ -975,10 +994,7 @@ let extract_path_arg ctx func_name args =
 let rec flatten_expr_list ctx dims = function
   | EList es     -> List.concat_map (flatten_expr_list ctx dims) es
   | EConst f     -> [Ir.Const f]
-  | EUnit (f, u) ->
-    (match u with
-     | Days | Weeks | Months | Years       -> [Ir.Const (f *. days_per u)]
-     | PerDay | PerWeek | PerMonth | PerYear -> [Ir.Const (f /. days_per u)])
+  | EUnit (f, u) -> [Ir.Const (unit_to_model_time ctx f u)]
   | EFuncCall ("read_json", args) ->
     (match extract_path_arg ctx "read_json" args with
      | None -> []
@@ -1487,6 +1503,7 @@ let expand_detail ?(source_dir = "") (name : string) (decls : declaration list)
   let model = {
     Ir.name               = name;
     Ir.version            = "0.3";
+    Ir.time_unit          = unit_lit_to_string ctx.time_unit;
     Ir.description        = ctx.description;
     Ir.compartments       = expanded_comps;
     Ir.transitions        = expanded_trs;

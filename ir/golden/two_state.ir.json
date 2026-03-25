@@ -1,6 +1,7 @@
 {
   "name": "two_state",
   "version": "0.3",
+  "time_unit": "days",
   "description": "Reversible two-state Markov chain A \u2194 B. Analytic equilibrium: A/(A+B) = beta_r/(alpha+beta_r).",
   "compartments": [
     {

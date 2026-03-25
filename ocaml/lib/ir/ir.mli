@@ -186,6 +186,7 @@ type model_structure = {
 type model = {
   name:               string;
   version:            string;
+  time_unit:          string;
   description:        string option;
   compartments:       compartment list;
   transitions:        transition list;

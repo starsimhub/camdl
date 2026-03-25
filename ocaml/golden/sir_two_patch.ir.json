@@ -1,6 +1,7 @@
 {
   "name": "sir_two_patch",
   "version": "0.3",
+  "time_unit": "days",
   "description": null,
   "compartments": [
     { "name": "S_urban", "kind": "integer" },

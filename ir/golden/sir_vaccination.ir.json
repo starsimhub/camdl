@@ -1,6 +1,7 @@
 {
   "name": "sir_vaccination",
   "version": "0.3",
+  "time_unit": "days",
   "description": "SIR with a scheduled supplementary immunisation activity (SIA) at day 100",
   "compartments": [
     {
