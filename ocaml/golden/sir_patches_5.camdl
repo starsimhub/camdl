@@ -6,7 +6,7 @@ time_unit = 'days
 
 compartments { S, I, R }
 
-stratify(by = patch, values = [p0, p1, p2, p3, p4])
+stratify(by = patch, levels = [p0, p1, p2, p3, p4])
 
 let N[p in patch] = S[p] + I[p] + R[p]
 

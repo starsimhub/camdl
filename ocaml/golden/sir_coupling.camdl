@@ -1,7 +1,7 @@
 time_unit = 'days
 
 compartments { S, I, R }
-stratify(by=age, values=[young, old])
+stratify(by=age, levels=[young, old])
 
 tables {
   C_age : age × age = [[10.0, 3.0], [3.0, 7.0]]

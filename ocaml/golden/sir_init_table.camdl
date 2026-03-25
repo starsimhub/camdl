@@ -1,15 +1,15 @@
 # SIR with table-indexed initial conditions
 # Verifies that table lookups work in init blocks: S[p] = N0[p] - I0
-# where N0 is a read_csv table keyed by patch.
+# where N0 is a read_long table keyed by patch.
 
 time_unit = 'days
 
 compartments { S, I, R }
 
-stratify(by = patch, values = [north, south, east])
+stratify(by = patch, levels = [north, south, east])
 
 tables {
-  N0 : patch = read_csv("data/sir_init_n0.csv")
+  N0 : patch = read_long("data/sir_init_n0.tsv")
 }
 
 parameters {

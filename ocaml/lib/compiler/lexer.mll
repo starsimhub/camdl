@@ -75,7 +75,8 @@
     "consecutive",   CONSECUTIVE;
     "in",            IN;
     "by",            BY;
-    "values",        VALUES;
+    "levels",        LEVELS;
+    "defines",       DEFINES;
     "only",          ONLY;
     "real",          REAL;
     "integer",       INTEGER;

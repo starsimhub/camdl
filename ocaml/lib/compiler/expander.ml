@@ -23,8 +23,10 @@ type context = {
   mutable table_decls     : table_decl list;
   mutable scenario_decls  : scenario_decl list;
   mutable diags           : Diagnostics.t;  (* collected errors/warnings *)
-  mutable source_dir      : string;         (* directory of the source file, for read_json/read_values *)
+  mutable source_dir      : string;         (* directory of the source file *)
   mutable expanded_comp_cache : string list option;
+  mutable defines_dims    : (string * string list) list;
+  (* dim name → ordered unique levels derived from defines() tables in pass 1 *)
 }
 
 let empty_context ?(source_dir = "") () = {
@@ -48,6 +50,7 @@ let empty_context ?(source_dir = "") () = {
   diags                = Diagnostics.create ();
   source_dir;
   expanded_comp_cache  = None;
+  defines_dims         = [];
 }
 
 (* ── Model summary ────────────────────────────────────────────────────────── *)
@@ -65,7 +68,7 @@ type model_summary = {
   interv_count              : int;
 }
 
-(* ── JSON data loading helpers ───────────────────────────────────────────── *)
+(* ── Data loading helpers ─────────────────────────────────────────────────── *)
 
 (** Resolve a path relative to source_dir.  Absolute paths pass through. *)
 let resolve_data_path ctx path =
@@ -73,8 +76,23 @@ let resolve_data_path ctx path =
     Filename.concat ctx.source_dir path
   else path
 
-(** Read and parse a JSON file, emitting a diagnostic and returning None on failure. *)
-let load_json_file ctx path =
+(** Split a line by a separator character, returning a list of fields. *)
+let split_by sep line =
+  let parts = ref [] in
+  let buf   = Buffer.create 16 in
+  String.iter (fun c ->
+    if c = sep then (parts := Buffer.contents buf :: !parts; Buffer.clear buf)
+    else Buffer.add_char buf c
+  ) line;
+  parts := Buffer.contents buf :: !parts;
+  List.rev !parts
+
+(** Load a `read_long(path, ...)` file → list of n_values float arrays (row-major).
+    The file must have a header row.
+    dims is the list of table_dim_entry (TDim/TDimUnit/TDefines) for index columns.
+    n_values is the number of value columns (= List.length tnames).
+    default_val = Some f → sparse (missing cells get f); None → dense (all cells required). *)
+let load_long_floats ctx path ~dims ~n_values ~default_val =
   let abs_path = resolve_data_path ctx path in
   if not (Sys.file_exists abs_path) then begin
     Diagnostics.error ctx.diags
@@ -83,211 +101,160 @@ let load_json_file ctx path =
       ~message:(Printf.sprintf "data file not found: %s" path)
       ~hint:"check the path is relative to the .camdl source file"
       ();
-    None
+    List.init n_values (fun _ -> [||])
   end else begin
-    try Some (Yojson.Basic.from_file abs_path)
-    with Yojson.Json_error msg ->
-      Diagnostics.error ctx.diags
-        ~code:"E201"
-        ~loc:Diagnostics.no_loc
-        ~message:(Printf.sprintf "invalid JSON in %s: %s" path msg)
-        ();
-      None
-  end
-
-(** Load a `read_values(path)` file → list of strings.
-    Accepts:
-    - JSON array of strings: ["a", "b", ...]
-    - Plain text, one name per line (any extension other than .json) *)
-let load_values_file ctx path =
-  let abs_path = resolve_data_path ctx path in
-  if not (Sys.file_exists abs_path) then begin
-    Diagnostics.error ctx.diags
-      ~code:"E200"
-      ~loc:Diagnostics.no_loc
-      ~message:(Printf.sprintf "data file not found: %s" path)
-      ~hint:"check the path is relative to the .camdl source file"
-      ();
-    []
-  end else
-  (* Plain text: one name per line *)
-  let ext = String.lowercase_ascii (Filename.extension path) in
-  if ext <> ".json" then begin
-    let ic = open_in abs_path in
-    let lines = ref [] in
-    (try while true do
-      let line = String.trim (input_line ic) in
-      if line <> "" then lines := line :: !lines
-    done with End_of_file -> ());
-    close_in ic;
-    List.rev !lines
-  end else
-  (* JSON array *)
-  match load_json_file ctx path with
-  | None -> []
-  | Some json ->
-    (match json with
-     | `List items ->
-       List.filter_map (fun item ->
-         match item with
-         | `String s -> Some s
-         | _ ->
-           Diagnostics.error ctx.diags
-             ~code:"E202"
-             ~loc:Diagnostics.no_loc
-             ~message:(Printf.sprintf "read_values: expected array of strings in %s" path)
-             ();
-           None
-       ) items
-     | _ ->
-       Diagnostics.error ctx.diags
-         ~code:"E202"
-         ~loc:Diagnostics.no_loc
-         ~message:(Printf.sprintf "read_values: expected a JSON array of strings in %s" path)
-         ();
-       [])
-
-(** Load a `read_json(path)` JSON file → flat list of floats (1D or 2D, row-major). *)
-let load_json_floats ctx path =
-  match load_json_file ctx path with
-  | None -> []
-  | Some json ->
-    let extract_float item =
-      match item with
-      | `Float f -> Some f
-      | `Int n   -> Some (float_of_int n)
+    let ext = String.lowercase_ascii (Filename.extension path) in
+    let sep = match ext with
+      | ".csv" -> ','
+      | ".tsv" -> '\t'
       | _ ->
         Diagnostics.error ctx.diags
-          ~code:"E203"
+          ~code:"E205"
           ~loc:Diagnostics.no_loc
-          ~message:(Printf.sprintf "read_json: expected number in %s" path)
+          ~message:(Printf.sprintf "unrecognized extension '%s' in %s; use .csv or .tsv" ext path)
           ();
-        None
+        '\t'
     in
-    (match json with
-     | `List items ->
-       (match items with
-        | [] -> []
-        | first :: _ ->
-          (match first with
-           | `List _ ->
-             (* 2D: array of arrays, flatten row-major *)
-             List.concat_map (fun row ->
-               match row with
-               | `List cols -> List.filter_map extract_float cols
-               | _ ->
-                 Diagnostics.error ctx.diags
-                   ~code:"E203"
-                   ~loc:Diagnostics.no_loc
-                   ~message:(Printf.sprintf "read_json: expected array of arrays in %s" path)
-                   ();
-                 []
-             ) items
-           | _ ->
-             (* 1D: array of numbers *)
-             List.filter_map extract_float items))
-     | _ ->
-       Diagnostics.error ctx.diags
-         ~code:"E203"
-         ~loc:Diagnostics.no_loc
-         ~message:(Printf.sprintf "read_json: expected a JSON array in %s" path)
-         ();
-       [])
-
-(** Parse a single cell from a CSV/TSV row into a float, or return None. *)
-let parse_csv_float ctx path s =
-  let s = String.trim s in
-  match float_of_string_opt s with
-  | Some f -> Some f
-  | None ->
-    Diagnostics.error ctx.diags
-      ~code:"E204"
-      ~loc:Diagnostics.no_loc
-      ~message:(Printf.sprintf "read_csv: expected a number, got '%s' in %s" s path)
-      ();
-    None
-
-(** Load a `read_csv(path)` or `read_tsv(path)` file → flat list of floats (row-major).
-    Dense format: rows of comma- or tab-separated values, no header.
-    Sparse format (format=sparse): rows of "i,j,value" triplets (0-based), rest defaults to default_val. *)
-let load_csv_floats ctx path ~sparse ~default_val ~n_rows ~n_cols =
-  let abs_path = resolve_data_path ctx path in
-  if not (Sys.file_exists abs_path) then begin
-    Diagnostics.error ctx.diags
-      ~code:"E200"
-      ~loc:Diagnostics.no_loc
-      ~message:(Printf.sprintf "data file not found: %s" path)
-      ~hint:"check the path is relative to the .camdl source file"
-      ();
-    []
-  end else begin
-    let ext  = String.lowercase_ascii (Filename.extension path) in
-    let sep  = if ext = ".tsv" then '\t' else ',' in
-    let split_line line =
-      let parts = ref [] in
-      let buf   = Buffer.create 16 in
-      String.iter (fun c ->
-        if c = sep then (parts := Buffer.contents buf :: !parts; Buffer.clear buf)
-        else Buffer.add_char buf c
-      ) line;
-      parts := Buffer.contents buf :: !parts;
-      List.rev !parts
+    let n_dims = List.length dims in
+    (* Compute dimension sizes and level lists *)
+    let dim_info = List.map (fun de ->
+      let dname = match de with
+        | TDim d | TDimUnit (d, _) | TDefines d -> d
+      in
+      let levels =
+        (* check defines_dims first, then stratifies *)
+        match List.assoc_opt dname ctx.defines_dims with
+        | Some vs -> vs
+        | None ->
+          (match List.find_opt (fun s -> s.sdim = dname) ctx.stratifies with
+           | Some s -> s.svalues
+           | None -> [])
+      in
+      (dname, levels)
+    ) dims in
+    let dim_sizes = List.map (fun (_, lvs) -> List.length lvs) dim_info in
+    let total = List.fold_left ( * ) 1 dim_sizes in
+    (* Allocate arrays; use nan as sentinel for dense-check *)
+    let sentinel = match default_val with
+      | Some f -> f
+      | None   -> Float.nan
     in
+    let arrays = Array.init n_values (fun _ -> Array.make total sentinel) in
+    (* Keep track of which cells were set, for duplicate detection *)
+    let set_flags = Array.make total false in
     let ic = open_in abs_path in
-    let rows = ref [] in
-    (try while true do
-      let line = String.trim (input_line ic) in
-      if line <> "" && not (String.length line > 0 && line.[0] = '#') then
-        rows := (split_line line) :: !rows
-    done with End_of_file -> ());
-    close_in ic;
-    let rows = List.rev !rows in
-    if sparse then begin
-      (* Sparse triplet: i, j, value — fill a dense grid *)
-      if n_rows <= 0 || n_cols <= 0 then begin
-        Diagnostics.error ctx.diags
-          ~code:"E204"
-          ~loc:Diagnostics.no_loc
-          ~message:(Printf.sprintf "read_csv(format=sparse): cannot determine matrix dimensions for %s; \
-            declare the dimension stratification before the table" path)
-          ();
-        []
-      end else begin
-        let grid = Array.make (n_rows * n_cols) default_val in
-        List.iter (fun row ->
-          match row with
-          | [ri; ci; vi] ->
-            (match int_of_string_opt (String.trim ri),
-                   int_of_string_opt (String.trim ci),
-                   parse_csv_float ctx path (String.trim vi) with
-             | Some r, Some c, Some v when r >= 0 && r < n_rows && c >= 0 && c < n_cols ->
-               grid.(r * n_cols + c) <- v
-             | _ ->
-               Diagnostics.error ctx.diags
-                 ~code:"E204"
-                 ~loc:Diagnostics.no_loc
-                 ~message:(Printf.sprintf "read_csv(format=sparse): bad row in %s (expected i,j,value)" path)
-                 ())
-          | _ ->
+    (try
+      (* Read header row *)
+      let _header = input_line ic in
+      let row_num = ref 1 in
+      (try while true do
+        let raw_line = input_line ic in
+        incr row_num;
+        let line = String.trim raw_line in
+        if line = "" || (String.length line > 0 && line.[0] = '#') then ()
+        else begin
+          let cols = split_by sep line in
+          let ncols = List.length cols in
+          let expected = n_dims + n_values in
+          if ncols <> expected then begin
             Diagnostics.error ctx.diags
-              ~code:"E204"
+              ~code:"E206"
               ~loc:Diagnostics.no_loc
-              ~message:(Printf.sprintf "read_csv(format=sparse): each row must have 3 columns (i,j,value) in %s" path)
+              ~message:(Printf.sprintf "%s row %d: expected %d columns (%d dim + %d value), got %d"
+                path !row_num expected n_dims n_values ncols)
               ()
-        ) rows;
-        Array.to_list grid
-      end
-    end else begin
-      (* Dense: flatten row-major *)
-      List.concat_map (fun row ->
-        List.filter_map (parse_csv_float ctx path) row
-      ) rows
-    end
+          end else begin
+            (* Compute flat index from dim columns *)
+            let flat_idx = ref 0 in
+            let stride = ref 1 in
+            (* strides: dim 0 has stride = product of all later dim sizes *)
+            let strides = Array.make n_dims 1 in
+            let n = n_dims in
+            for i = n - 2 downto 0 do
+              strides.(i) <- strides.(i + 1) * (List.nth dim_sizes (i + 1))
+            done;
+            let ok = ref true in
+            List.iteri (fun i de ->
+              let dname, levels = List.nth dim_info i in
+              let cell = String.trim (List.nth cols i) in
+              (match List.find_index (fun v -> v = cell) levels with
+               | Some idx ->
+                 flat_idx := !flat_idx + idx * strides.(i);
+                 ignore stride
+               | None ->
+                 Diagnostics.error ctx.diags
+                   ~code:"E207"
+                   ~loc:Diagnostics.no_loc
+                   ~message:(Printf.sprintf "'%s' in column %d of %s is not a valid '%s' level"
+                     cell (i + 1) path dname)
+                   ();
+                 ok := false);
+              ignore de
+            ) dims;
+            if !ok then begin
+              let idx = !flat_idx in
+              if set_flags.(idx) then begin
+                Diagnostics.error ctx.diags
+                  ~code:"E208"
+                  ~loc:Diagnostics.no_loc
+                  ~message:(Printf.sprintf "%s row %d: duplicate key" path !row_num)
+                  ()
+              end else begin
+                set_flags.(idx) <- true;
+                for j = 0 to n_values - 1 do
+                  let cell = String.trim (List.nth cols (n_dims + j)) in
+                  match float_of_string_opt cell with
+                  | Some f -> arrays.(j).(idx) <- f
+                  | None ->
+                    Diagnostics.error ctx.diags
+                      ~code:"E209"
+                      ~loc:Diagnostics.no_loc
+                      ~message:(Printf.sprintf "%s row %d column %d: expected a number, got '%s'"
+                        path !row_num (n_dims + j + 1) cell)
+                      ()
+                done
+              end
+            end
+          end
+        end
+      done with End_of_file -> ())
+    with End_of_file ->
+      Diagnostics.error ctx.diags
+        ~code:"E210"
+        ~loc:Diagnostics.no_loc
+        ~message:(Printf.sprintf "%s: file is empty (no header row)" path)
+        ());
+    close_in ic;
+    (* Dense check: if no default_val, all cells must have been set *)
+    if default_val = None then begin
+      for idx = 0 to total - 1 do
+        if not set_flags.(idx) then begin
+          (* Find which dim combination this idx corresponds to *)
+          let coords = ref [] in
+          let rem = ref idx in
+          let n = n_dims in
+          let strides = Array.make n 1 in
+          for i = n - 2 downto 0 do
+            strides.(i) <- strides.(i + 1) * (List.nth dim_sizes (i + 1))
+          done;
+          for i = 0 to n - 1 do
+            let q = !rem / strides.(i) in
+            rem := !rem mod strides.(i);
+            let (dname, levels) = List.nth dim_info i in
+            let level = if q < List.length levels then List.nth levels q else "?" in
+            coords := (dname ^ "=" ^ level) :: !coords
+          done;
+          let coord_str = String.concat ", " (List.rev !coords) in
+          Diagnostics.error ctx.diags
+            ~code:"E211"
+            ~loc:Diagnostics.no_loc
+            ~message:(Printf.sprintf "missing entry for (%s) in %s" coord_str path)
+            ()
+        end
+      done
+    end;
+    Array.to_list arrays
   end
-
-(** Extract a named keyword argument from a kw_arg list: (key, expr) pairs. *)
-let find_kwarg name args =
-  List.find_map (fun (k, e) -> if k = name then Some e else None) args
 
 let collect_declarations ctx decls =
   List.iter (fun d -> match d with
@@ -297,14 +264,7 @@ let collect_declarations ctx decls =
     | DParameters ps     -> ctx.param_decls <- ctx.param_decls @ ps
     | DLet lb            -> ctx.let_bindings <- ctx.let_bindings @ [lb]
     | DStratify sd       ->
-      (* If using read_values, load the file now so svalues is populated. *)
-      let sd' = match sd.svalues_src with
-        | SValuesLit _    -> sd
-        | SValuesFile path ->
-          let vals = load_values_file ctx path in
-          { sd with svalues = vals }
-      in
-      ctx.stratifies <- ctx.stratifies @ [sd']
+      ctx.stratifies <- ctx.stratifies @ [sd]
     | DTransitions trs   -> ctx.transitions <- ctx.transitions @ trs
     | DInit ies          -> ctx.init_entries <- ctx.init_entries @ ies
     | DSimulate sd       -> ctx.simulate <- Some sd
@@ -318,6 +278,116 @@ let collect_declarations ctx decls =
     | DScenarios ss      -> ctx.scenario_decls <- ctx.scenario_decls @ ss
   ) decls;
   ctx.orig_transitions <- ctx.transitions
+
+(* ── Defines-dims pass ───────────────────────────────────────────────────── *)
+
+(** Pass 1: scan table_decls for TDefines entries, load level names from files,
+    register in ctx.defines_dims, and fill in svalues for SValuesPending stratify decls. *)
+let derive_defines_dims ctx =
+  (* collect_defines_from_file: open the file, skip header, collect unique values
+     in the dim column at position col_pos, preserving first-occurrence order. *)
+  let collect_levels_from_file path col_pos =
+    let abs_path = resolve_data_path ctx path in
+    if not (Sys.file_exists abs_path) then begin
+      Diagnostics.error ctx.diags
+        ~code:"E200"
+        ~loc:Diagnostics.no_loc
+        ~message:(Printf.sprintf "data file not found: %s" path)
+        ~hint:"check the path is relative to the .camdl source file"
+        ();
+      []
+    end else begin
+      let ext = String.lowercase_ascii (Filename.extension path) in
+      let sep = match ext with
+        | ".csv" -> ','
+        | ".tsv" -> '\t'
+        | _ ->
+          Diagnostics.error ctx.diags
+            ~code:"E205"
+            ~loc:Diagnostics.no_loc
+            ~message:(Printf.sprintf "unrecognized extension '%s' in %s; use .csv or .tsv" ext path)
+            ();
+          '\t'
+      in
+      let ic = open_in abs_path in
+      let seen = Hashtbl.create 8 in
+      let order = ref [] in
+      (try
+        let _hdr = input_line ic in
+        (try while true do
+          let raw = input_line ic in
+          let line = String.trim raw in
+          if line <> "" && not (String.length line > 0 && line.[0] = '#') then begin
+            let cols = split_by sep line in
+            match List.nth_opt cols col_pos with
+            | None -> ()
+            | Some cell ->
+              let v = String.trim cell in
+              if v <> "" && not (Hashtbl.mem seen v) then begin
+                Hashtbl.add seen v ();
+                order := v :: !order
+              end
+          end
+        done with End_of_file -> ())
+      with End_of_file -> ());
+      close_in ic;
+      List.rev !order
+    end
+  in
+  List.iteri (fun _ti td ->
+    List.iteri (fun col_pos de ->
+      match de with
+      | TDefines dname ->
+        (* Error if already defined *)
+        if List.mem_assoc dname ctx.defines_dims then begin
+          Diagnostics.error ctx.diags
+            ~code:"E212"
+            ~loc:Diagnostics.no_loc
+            ~message:(Printf.sprintf "dimension '%s' is already defined by another defines() table" dname)
+            ()
+        end else if List.exists (fun sd ->
+            sd.sdim = dname && sd.svalues_src <> SValuesPending
+          ) ctx.stratifies then begin
+          Diagnostics.error ctx.diags
+            ~code:"E213"
+            ~loc:Diagnostics.no_loc
+            ~message:(Printf.sprintf "dimension '%s' already has levels from a stratify declaration" dname)
+            ()
+        end else begin
+          let path = match td.tvalue with
+            | EFuncCall ("read_long", args) ->
+              (match List.find_map (fun (_, e) ->
+                match e with EIdent (s, _) -> Some s | _ -> None) args with
+               | Some p -> p
+               | None -> "")
+            | _ -> ""
+          in
+          if path = "" then ()
+          else begin
+            let levels = collect_levels_from_file path col_pos in
+            ctx.defines_dims <- ctx.defines_dims @ [(dname, levels)]
+          end
+        end
+      | TDim _ | TDimUnit _ -> ()
+    ) td.tdims
+  ) ctx.table_decls;
+  (* Fill in svalues for SValuesPending stratify decls *)
+  ctx.stratifies <- List.map (fun sd ->
+    match sd.svalues_src with
+    | SValuesPending ->
+      (match List.assoc_opt sd.sdim ctx.defines_dims with
+       | Some levels -> { sd with svalues = levels }
+       | None ->
+         Diagnostics.error ctx.diags
+           ~code:"E214"
+           ~loc:Diagnostics.no_loc
+           ~message:(Printf.sprintf
+             "stratify(by = '%s') has no levels: add levels = [...] or a defines(%s) table"
+             sd.sdim sd.sdim)
+           ();
+         sd)
+    | SValuesLit _ -> sd
+  ) ctx.stratifies
 
 (* ── Unit conversion ─────────────────────────────────────────────────────── *)
 
@@ -355,7 +425,11 @@ let unit_to_model_time ctx f u =
 let dim_values ctx dim =
   match List.find_opt (fun s -> s.sdim = dim) ctx.stratifies with
   | Some s -> s.svalues
-  | None   -> []
+  | None   ->
+    (* fall back to defines_dims (populated by derive_defines_dims pass) *)
+    (match List.assoc_opt dim ctx.defines_dims with
+     | Some vs -> vs
+     | None    -> [])
 
 let strat_applies_to _ctx cname sd =
   match sd.sonly with
@@ -393,9 +467,12 @@ let get_expanded_compartments ctx =
 
 (* ── Table helpers ───────────────────────────────────────────────────────── *)
 
+let dim_name_of_entry = function
+  | TDim d | TDimUnit (d, _) | TDefines d -> d
+
 let table_dims ctx tname =
-  match List.find_opt (fun td -> td.tname = tname) ctx.table_decls with
-  | Some td -> List.map (function TDim d -> d | TDimUnit (d, _) -> d) td.tdims
+  match List.find_opt (fun td -> List.mem tname td.tnames) ctx.table_decls with
+  | Some td -> List.map dim_name_of_entry td.tdims
   | None    -> []
 
 let dim_value_index ctx dim_name value_name =
@@ -479,7 +556,8 @@ let resolve_index ctx (env : (string * string) list) idx =
   match List.assoc_opt idx env with
   | Some concrete -> concrete
   | None ->
-    let all_vals = List.concat_map (fun sd -> sd.svalues) ctx.stratifies in
+    let all_vals = List.concat_map (fun sd -> sd.svalues) ctx.stratifies
+      @ List.concat_map snd ctx.defines_dims in
     if List.mem idx all_vals then idx
     else begin
       Diagnostics.error ctx.diags
@@ -991,57 +1069,59 @@ let extract_path_arg ctx func_name args =
    | Some _ -> ());
   path_opt
 
-let rec flatten_expr_list ctx dims = function
-  | EList es     -> List.concat_map (flatten_expr_list ctx dims) es
+let rec flatten_expr_list ctx (dim_entries : table_dim_entry list) = function
+  | EList es     -> List.concat_map (flatten_expr_list ctx dim_entries) es
   | EConst f     -> [Ir.Const f]
   | EUnit (f, u) -> [Ir.Const (unit_to_model_time ctx f u)]
-  | EFuncCall ("read_json", args) ->
-    (match extract_path_arg ctx "read_json" args with
-     | None -> []
-     | Some path ->
-       List.map (fun f -> Ir.Const f) (load_json_floats ctx path))
-  | EFuncCall (("read_csv" | "read_tsv") as fn, args) ->
-    (match extract_path_arg ctx fn args with
-     | None -> []
-     | Some path ->
-       let sparse = match find_kwarg "layout" args with
-         | Some (EIdent ("sparse", _)) -> true
-         | _ -> false
-       in
-       let default_val = match find_kwarg "default" args with
-         | Some (EConst f) -> f
-         | _ -> 0.0
-       in
-       let dim_sizes = List.map (fun d -> List.length (dim_values ctx d)) dims in
-       let n_rows = if List.length dim_sizes >= 1 then List.nth dim_sizes 0 else 0 in
-       let n_cols = if List.length dim_sizes >= 2 then List.nth dim_sizes 1 else 1 in
-       List.map (fun f -> Ir.Const f)
-         (load_csv_floats ctx path ~sparse ~default_val ~n_rows ~n_cols))
   | other        -> [resolve_expr ctx [] other]
 
 (** Determine table source: External if `external("name")`, otherwise Inline. *)
-let table_source_of_expr ctx dims e =
+let table_source_of_expr ctx (dim_entries : table_dim_entry list) e =
   match e with
   | EFuncCall ("external", args) ->
     (match extract_path_arg ctx "external" args with
      | None -> Ir.Inline []
      | Some name -> Ir.External name)
   | _ ->
-    let vals = flatten_expr_list ctx dims e in
+    let vals = flatten_expr_list ctx dim_entries e in
     Ir.Inline vals
 
 let expand_tables ctx =
-  List.filter_map (fun td ->
-    let dims = List.map (fun de -> match de with
-      | Ast.TDim d | Ast.TDimUnit (d, _) -> d) td.tdims in
-    let source = table_source_of_expr ctx dims td.tvalue in
-    match source with
-    | Ir.Inline [] -> None   (* empty inline = compile error upstream, skip *)
-    | _ -> Some {
-        Ir.name          = td.tname;
-        Ir.source        = source;
-        Ir.out_of_bounds = Ir.Error;
-      }
+  List.concat_map (fun td ->
+    let dim_entries = td.tdims in
+    match td.tvalue with
+    | EFuncCall ("read_long", args) ->
+      (* Multi-value loader: produces one Ir.table per name in td.tnames *)
+      (match extract_path_arg ctx "read_long" args with
+       | None -> []
+       | Some path ->
+         let default_val = match List.find_map (fun (k, e) ->
+             if k = "default" then Some e else None) args with
+           | Some (EConst f) -> Some f
+           | _ -> None
+         in
+         let n_values = List.length td.tnames in
+         let arrays = load_long_floats ctx path
+           ~dims:dim_entries ~n_values ~default_val in
+         List.mapi (fun col_idx name ->
+           let arr = List.nth arrays col_idx in
+           let vals = Array.to_list (Array.map (fun f -> Ir.Const f) arr) in
+           { Ir.name          = name;
+             Ir.source        = Ir.Inline vals;
+             Ir.out_of_bounds = Ir.Error;
+           }
+         ) td.tnames)
+    | _ ->
+      (* Single-value path: external() or inline literal *)
+      let name = match td.tnames with [n] -> n | _ ->
+        Diagnostics.error ctx.diags ~code:"E215" ~loc:Diagnostics.no_loc
+          ~message:"multi-name table declaration requires read_long(...)" ();
+        List.hd td.tnames
+      in
+      let source = table_source_of_expr ctx dim_entries td.tvalue in
+      (match source with
+       | Ir.Inline [] -> []   (* empty inline = compile error upstream, skip *)
+       | _ -> [{ Ir.name; Ir.source; Ir.out_of_bounds = Ir.Error }])
   ) ctx.table_decls
 
 (* ── Initial conditions ──────────────────────────────────────────────────── *)
@@ -1491,6 +1571,8 @@ let expand_detail ?(source_dir = "") (name : string) (decls : declaration list)
     : Ir.model * context * model_summary =
   let ctx = empty_context ~source_dir () in
   collect_declarations ctx decls;
+  (* Pass 1: derive dimension levels from defines() tables *)
+  derive_defines_dims ctx;
   (* W103 shadowing check: let bindings vs stratum values *)
   check_shadowing ctx;
   (* Save original transitions before desugaring *)

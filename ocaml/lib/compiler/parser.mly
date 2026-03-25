@@ -32,7 +32,7 @@
 %token TIME_UNIT COMPARTMENTS PARAMETERS TABLES FUNCTIONS
 %token TRANSITIONS OBSERVATIONS INTERVENTIONS ODE OUTPUT SIMULATE
 %token INIT TIMEPOINTS SCENARIOS STRATIFY LET FROM TO WHERE SUM
-%token CONSECUTIVE IN BY VALUES ONLY REAL INTEGER RATE PROBABILITY POSITIVE COUNT
+%token CONSECUTIVE IN BY LEVELS DEFINES ONLY REAL INTEGER RATE PROBABILITY POSITIVE COUNT
 %token AND OR NOT IF THEN ELSE COUPLING EVERY AT_KW FORMAT DESCRIPTION TAG NULL TRANSFER
 
 %token EOF
@@ -148,10 +148,10 @@ table_list:
   | ts = list(table_decl) { ts }
 
 table_decl:
-  | name = IDENT COLON dims = table_dims_nonempty EQ v = expr
-      { { tname = name; tdims = dims; tvalue = v } }
+  | names = separated_nonempty_list(COMMA, IDENT) COLON dims = table_dims_nonempty EQ v = expr
+      { { tnames = names; tdims = dims; tvalue = v } }
   | name = IDENT EQ v = expr
-      { { tname = name; tdims = []; tvalue = v } }
+      { { tnames = [name]; tdims = []; tvalue = v } }
 
 table_dims_nonempty:
   | ds = separated_nonempty_list(CROSS, table_dim_entry) { ds }
@@ -159,6 +159,7 @@ table_dims_nonempty:
 table_dim_entry:
   | name = IDENT { TDim name }
   | name = IDENT u = unit_lit { TDimUnit (name, u) }
+  | DEFINES LPAREN name = IDENT RPAREN { TDefines name }
 
 (* ── Function block ─────────────────────────────────────────────────────── *)
 
@@ -417,23 +418,22 @@ timepoint_decl:
 stratify_args:
   | kvs = separated_list(COMMA, stratify_kv)
       { let dim       = ref "" in
-        let vals_src  = ref (Ast.SValuesLit []) in
+        let vals_src  = ref Ast.SValuesPending in
         let only      = ref None in
         List.iter (function
           | `By d          -> dim  := d
-          | `Values src    -> vals_src := src
+          | `Levels src    -> vals_src := src
           | `Only cs       -> only := Some cs
         ) kvs;
         let svalues = match !vals_src with
           | Ast.SValuesLit vs -> vs
-          | Ast.SValuesFile _ -> []  (* populated later by expander *)
+          | Ast.SValuesPending -> []  (* populated later by derive_defines_dims *)
         in
         { sdim = !dim; svalues; svalues_src = !vals_src; sonly = !only } }
 
 stratify_kv:
   | BY EQ d = IDENT { `By d }
-  | VALUES EQ LBRACKET vs = separated_list(COMMA, IDENT) RBRACKET { `Values (Ast.SValuesLit vs) }
-  | VALUES EQ _name = IDENT LPAREN path = STRING RPAREN { `Values (Ast.SValuesFile path) }
+  | LEVELS EQ LBRACKET vs = separated_list(COMMA, IDENT) RBRACKET { `Levels (Ast.SValuesLit vs) }
   | ONLY EQ LBRACKET cs = separated_list(COMMA, IDENT) RBRACKET { `Only cs }
 
 (* ── Expression grammar ──────────────────────────────────────────────────── *)

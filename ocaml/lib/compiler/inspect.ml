@@ -213,8 +213,8 @@ let run_summary ppf (model : Ir.model) ctx (sum : Expander.model_summary) =
     Fmt.pf ppf " (";
     List.iteri (fun i td ->
       if i > 0 then Fmt.pf ppf ", ";
-      Term_style.table Fmt.string ppf td.tname;
-      let dim_names = List.map (function TDim d -> d | TDimUnit (d,_) -> d) td.tdims in
+      Term_style.table Fmt.string ppf (String.concat ", " td.tnames);
+      let dim_names = List.map (function TDim d -> d | TDimUnit (d,_) -> d | TDefines d -> d) td.tdims in
       if dim_names <> [] then (
         Term_style.dim_style Fmt.string ppf ": ";
         Term_style.dim_style Fmt.string ppf (String.concat " \xc3\x97 " dim_names)

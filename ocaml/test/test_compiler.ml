@@ -227,7 +227,7 @@ let test_output_step_default () =
 let test_parameterised_table () =
   let src = {|
     compartments { S, I, R }
-    stratify(by = sex, values = [m, f])
+    stratify(by = sex, levels = [m, f])
     parameters {
       beta_mf : rate
       beta_fm : rate
@@ -409,10 +409,10 @@ let test_time_func_in_rate () =
     if not (expr_contains_time_func "seasonal" infection.Ir.rate) then
       Alcotest.fail "infection rate should contain Ir.TimeFunc \"seasonal\", got Const 0.0"
 
-(* ── read_json / read_values tests ──────────────────────────────────────────
+(* ── read_long tests ─────────────────────────────────────────────────────────
 
-   These tests write temporary JSON files to a temp directory, compile a model
-   that references them via read_json / read_values, and assert the expected IR.
+   These tests write temporary TSV files to a temp directory, compile a model
+   that references them via read_long, and assert the expected IR.
    The ~filename argument ensures source_dir is set to the temp directory so
    relative paths in the model source resolve correctly.                      *)
 
@@ -423,24 +423,24 @@ let write_tmp_file dir name content =
   close_out oc;
   path
 
-let test_read_json_1d () =
+let test_read_long_1d () =
   let dir = Filename.get_temp_dir_name () in
-  let json_path = write_tmp_file dir "test_rates.json" "[0.5, 1.5, 2.5]" in
-  let src = Printf.sprintf {|
-    stratify(by = grp, values = [a, b, c])
+  let _tsv_path = write_tmp_file dir "test_rates.tsv" "grp\trate\na\t0.5\nb\t1.5\nc\t2.5\n" in
+  let src = {|
+    stratify(by = grp, levels = [a, b, c])
     compartments { S, I }
     parameters { gamma : rate }
     tables {
-      rates : grp = read_json("%s")
+      rates : grp = read_long("test_rates.tsv")
     }
     transitions {
       recovery[g in grp] : I[g] --> S[g] @ rates[g] * I[g]
     }
     simulate { from = 0  to = 10 }
-  |} (Filename.basename json_path) in
+  |} in
   (* Use the temp dir as the source file directory *)
   let fake_src_file = Filename.concat dir "model.camdl" in
-  match Compiler.compile ~name:"test_rj1d" ~filename:fake_src_file src with
+  match Compiler.compile ~name:"test_rl1d" ~filename:fake_src_file src with
   | Error e -> Alcotest.failf "compile failed: %s" e
   | Ok m ->
     (match List.find_opt (fun (t : Ir.table) -> t.Ir.name = "rates") m.Ir.tables with
@@ -455,22 +455,26 @@ let test_read_json_1d () =
          | Ir.Const f -> f
          | _ -> Alcotest.fail "expected Ir.Const"
        ) values in
-       Alcotest.(check (list (float 1e-9))) "values match JSON" [0.5; 1.5; 2.5] vals)
+       Alcotest.(check (list (float 1e-9))) "values match TSV" [0.5; 1.5; 2.5] vals)
 
-let test_read_values () =
+let test_read_long_defines () =
+  (* Test that defines(dim) derives levels from the data file *)
   let dir = Filename.get_temp_dir_name () in
-  let _json_path = write_tmp_file dir "test_groups.json" {|["alpha", "beta"]|} in
+  let _tsv_path = write_tmp_file dir "test_pop.tsv" "grp\tpop\nalpha\t1000.0\nbeta\t2000.0\n" in
   let src = {|
     compartments { S, I }
     parameters { beta : rate }
-    stratify(by = grp, values = read_values("test_groups.json"))
+    stratify(by = grp)
+    tables {
+      pop : defines(grp) = read_long("test_pop.tsv")
+    }
     transitions {
       infection[g in grp] : S[g] --> I[g] @ beta * S[g] * I[g]
     }
     simulate { from = 0  to = 10 }
   |} in
   let fake_src_file = Filename.concat dir "model.camdl" in
-  match Compiler.compile ~name:"test_rv" ~filename:fake_src_file src with
+  match Compiler.compile ~name:"test_rl_defines" ~filename:fake_src_file src with
   | Error e -> Alcotest.failf "compile failed: %s" e
   | Ok m ->
     (* The expanded compartments should include S_alpha, S_beta, I_alpha, I_beta *)
@@ -481,16 +485,16 @@ let test_read_values () =
           expected (String.concat ", " comp_names)
     ) ["S_alpha"; "S_beta"; "I_alpha"; "I_beta"]
 
-let test_read_json_missing_file () =
+let test_read_long_missing_file () =
   (* Test at expander level to avoid the exit 1 in compiler.ml.
      We parse the AST manually, then call expand_detail with source_dir set,
      and inspect ctx.diags for the expected error. *)
   let dir = Filename.get_temp_dir_name () in
   let src = {|
-    stratify(by = grp, values = [a, b])
+    stratify(by = grp, levels = [a, b])
     compartments { S }
     tables {
-      rates : grp = read_json("nonexistent_xyz_12345.json")
+      rates : grp = read_long("nonexistent_xyz_12345.tsv")
     }
     simulate { from = 0  to = 10 }
   |} in
@@ -520,7 +524,7 @@ let test_read_json_missing_file () =
         !found
       end
     in
-    contains msg "nonexistent_xyz_12345.json"
+    contains msg "nonexistent_xyz_12345.tsv"
   ) errors in
   Alcotest.(check bool) "error message contains filename" true found_filename
 
@@ -531,7 +535,7 @@ let test_read_json_missing_file () =
 
 let test_indexed_param_scalar_expansion () =
   let src = {|
-    stratify(by = patch, values = [a, b])
+    stratify(by = patch, levels = [a, b])
     compartments { S, I }
     parameters {
       R0[patch] : positive
@@ -559,7 +563,7 @@ let test_indexed_param_scalar_expansion () =
 
 let test_indexed_param_variable_index () =
   let src = {|
-    stratify(by = patch, values = [a, b])
+    stratify(by = patch, levels = [a, b])
     compartments { S, I }
     parameters {
       R0[patch] : positive
@@ -594,7 +598,7 @@ let test_indexed_param_variable_index () =
 
 let test_indexed_param_literal_index () =
   let src = {|
-    stratify(by = patch, values = [kano, lagos])
+    stratify(by = patch, levels = [kano, lagos])
     compartments { S, I }
     parameters {
       R0[patch] : positive
@@ -619,7 +623,7 @@ let test_indexed_param_literal_index () =
 
 let test_indexed_param_no_default () =
   let src = {|
-    stratify(by = patch, values = [x, y])
+    stratify(by = patch, levels = [x, y])
     compartments { S, I }
     parameters {
       z[patch] : real
@@ -643,7 +647,7 @@ let test_indexed_param_no_default () =
 
 let test_indexed_param_bad_index () =
   let src = {|
-    stratify(by = patch, values = [urban, rural])
+    stratify(by = patch, levels = [urban, rural])
     compartments { S, I }
     parameters {
       R0[patch] : positive
@@ -672,7 +676,7 @@ let test_indexed_param_bad_index () =
 let test_indexed_param_shadow_warning () =
   (* 'kano' is both a let binding and a stratum value → W103 *)
   let src = {|
-    stratify(by = patch, values = [kano, lagos])
+    stratify(by = patch, levels = [kano, lagos])
     compartments { S, I }
     parameters {
       R0[patch] : positive
@@ -727,7 +731,7 @@ let test_scalar_bounds () =
 
 let test_indexed_bounds () =
   let src = {|
-    stratify(by = patch, values = [urban, rural])
+    stratify(by = patch, levels = [urban, rural])
     compartments { S, I }
     parameters {
       R0[patch] : positive in [1.0, 10.0]
@@ -978,10 +982,10 @@ let () =
       Alcotest.test_case "bare func name resolves to Ir.TimeFunc" `Quick test_bare_func_name_in_rate;
       Alcotest.test_case "unknown func call emits E100"          `Quick test_unknown_func_call_e100;
     ];
-    "read_json", [
-      Alcotest.test_case "1D array from JSON file"           `Quick test_read_json_1d;
-      Alcotest.test_case "read_values stratify dimension"    `Quick test_read_values;
-      Alcotest.test_case "missing file handled gracefully"   `Quick test_read_json_missing_file;
+    "read_long", [
+      Alcotest.test_case "1D array from TSV file"            `Quick test_read_long_1d;
+      Alcotest.test_case "defines() stratify dimension"      `Quick test_read_long_defines;
+      Alcotest.test_case "missing file handled gracefully"   `Quick test_read_long_missing_file;
     ];
     "indexed_params", [
       Alcotest.test_case "scalar expansion per stratum"      `Quick test_indexed_param_scalar_expansion;

@@ -1,0 +1,37 @@
+time_unit = 'days
+
+compartments { S, E, I, R }
+
+stratify(by = patch)
+
+parameters {
+  beta  : rate  in [0.001, 1.0]
+  sigma : rate  in [0.001, 1.0]
+  gamma : rate  in [0.001, 1.0]
+  I0    : count in [1, 1000]
+}
+
+let N[p in patch] = S[p] + E[p] + I[p] + R[p]
+
+tables {
+  pop : defines(patch) = read_long("data/seir_defines_pop.tsv")
+}
+
+transitions {
+  infection[p in patch]   : S[p] --> E[p]  @ beta * S[p] * I[p] / N[p]
+  progression[p in patch] : E[p] --> I[p]  @ sigma * E[p]
+  recovery[p in patch]    : I[p] --> R[p]  @ gamma * I[p]
+}
+
+init {
+  S[p in patch] = pop[p] - I0
+  I[p in patch] = I0
+}
+
+simulate { from = 0 'days  to = 90 'days }
+
+scenarios {
+  baseline {
+    set = { beta = 0.3  sigma = 0.2  gamma = 0.1  I0 = 5 }
+  }
+}

@@ -297,16 +297,16 @@ with `in [1.0, 20.0]` is implicitly also constrained to `> 0`.
 ## 5. Index Dimensions and Stratification
 
 ```
-stratify(by = age, values = [child, adult])
-stratify(by = sex, values = [female, male])
-stratify(by = patch, values = read_values("data/lga_names.txt"))
+stratify(by = age, levels = [child, adult])
+stratify(by = sex, levels = [female, male])
+stratify(by = patch)                          # levels derived from data (see §6.3)
 ```
 
 Each `stratify` declaration adds a dimension to **all** compartments by default.
 Partial stratification restricts to specific compartments:
 
 ```
-stratify(by = immunity, values = [natural, vaccine], only = [R])
+stratify(by = immunity, levels = [natural, vaccine], only = [R])
 ```
 
 After this, S/E/I have dimensions `[age, sex]` but R has `[age, sex, immunity]`.
@@ -406,10 +406,12 @@ tables {
   fertility  : age 'per_day       = [0.0, 0.02]
   age_dur    : age 'years         = [5, 60]
 
-  # External data
-  kernel     : patch × patch      = read_csv("data/spatial_kernel.csv")
-  distances  : patch × patch      = read_csv("data/lga_dist.csv",
-                                      format = sparse, default = 0.0)
+  # File-based data (long format)
+  kernel     : patch × patch      = read_long("data/spatial_kernel.tsv")
+  distances  : patch × patch      = read_long("data/lga_dist.tsv", default = 0.0)
+
+  # Data-derived dimension + table
+  pop        : defines(patch)     = read_long("data/lga_pop.tsv")
 }
 ```
 
@@ -427,28 +429,111 @@ values. The compiler normalizes to the model time unit and checks dimensional
 consistency when table values appear in expressions.
 
 Multi-dimensional: `: age × sex × risk` for 3D tables. Inline via nested
-brackets. For large tables, use `read_csv`.
+brackets. For large tables, use `read_long`.
 
-### 6.2 Sparse Tables
+### 6.2 Loading from Files: `read_long`
+
+All file-based tables use **long format** (one row per observation, index columns
+then value column):
 
 ```
-distances : patch × patch = read_csv("data/lga_dist.csv",
-                              format = sparse, default = 0.0)
+# data/lga_pop.tsv
+patch           pop
+kano_dala       485000
+borno_maiduguri 345000
+borno_gwoza      78000
 ```
 
-Sparse format CSV has columns: `row_index, col_index, value`. The `default`
-value is used for entries not present in the file. For distance matrices,
-`default = 0.0` means missing pairs have zero distance (no connection). For
-migration, `default = 0.0` means no movement between unlisted pairs. The
-compiler generates transitions only for nonzero entries.
+```
+tables {
+  pop : patch = read_long("data/lga_pop.tsv")
+}
+```
 
-### 6.3 External Table Loading
+The type signature declares how many index columns there are (one per dimension
+listed). The remaining column(s) are value(s). Column names in the file are
+for human readability — the compiler uses **positional mapping** from the type
+signature.
+
+**Extension determines separator:** `.tsv` → tab, `.csv` → comma, anything else
+→ compile error. The first row is always a required header.
+
+**Sparse tables** use `default = value` to fill index combinations missing from
+the file:
+
+```
+tables {
+  distances : patch × patch = read_long("data/lga_dist.tsv", default = 0.0)
+}
+```
+
+```
+# data/lga_dist.tsv — only nonzero pairs listed
+src             dst             distance
+kano_dala       borno_maiduguri 245.3
+kano_dala       kano_fagge      18.1
+borno_maiduguri kano_dala       245.3
+```
+
+Index values are the actual level names (not integer positions). The compiler
+validates each value against the known dimension levels and errors on typos.
+Without `default`, every index combination must have a row (dense check).
+
+### 6.3 Data-Derived Dimension Levels: `defines()`
+
+For large models (hundreds of patches), listing levels inline is impractical.
+`defines(dim)` derives dimension membership from the first column of a data file:
+
+```
+stratify(by = patch)                    # no inline levels — derived from data
+
+tables {
+  pop : defines(patch) = read_long("data/lga_pop.tsv")
+}
+```
+
+The `defines(patch)` position reads the `patch` column, collects unique values
+in first-occurrence order, and those become the levels of the `patch` dimension.
+All other tables referencing `patch` validate against these derived levels.
+
+**Rules:**
+- Each dimension is defined exactly once. Two `defines(patch)` → compile error.
+- `defines()` and inline `levels = [...]` are mutually exclusive for the same dim.
+- A `stratify(by = X)` with no `levels` clause **must** be fulfilled by a
+  `defines(X)` table. If none is found → compile error.
+- Bare dimension names in type signatures (`pop : patch = ...`) validate against
+  the known levels; typos → error with Levenshtein suggestion.
+
+### 6.4 Multi-Value Columns
+
+When a file has more columns than `n_dims + 1`, list multiple table names on the
+left of `:`:
+
+```
+tables {
+  pop, init_sus : defines(patch) = read_long("data/demographics.tsv")
+}
+```
+
+```
+# data/demographics.tsv
+patch           pop     init_sus
+kano_dala       485000  0.88
+borno_maiduguri 345000  0.91
+borno_gwoza      78000  0.79
+```
+
+Creates two tables with the same index: `pop[kano_dala] = 485000`,
+`init_sus[kano_dala] = 0.88`. Value columns map positionally to the names on
+the left. Name count must match non-index column count.
+
+### 6.5 External Table Loading
 
 External tables are loaded at compile time and inlined into the IR. The IR is
 self-contained — no file references at runtime. For very large tables (>1M
 entries), binary IR format (msgpack) is recommended over JSON.
 
-### 6.4 Parameterized Table Entries
+### 6.6 Parameterized Table Entries
 
 Inline table values can be parameter names or arithmetic expressions, not just
 numeric literals:
@@ -727,7 +812,7 @@ times:
 
 ```
 # Erlang-3 latent period: E passes through 3 sub-stages
-stratify(by = erlang_E, values = [e1, e2, e3], only = [E])
+stratify(by = erlang_E, levels = [e1, e2, e3], only = [E])
 
 progression[(s, s_next) in consecutive(erlang_E)]
   : E[s] --> E[s_next]
@@ -983,8 +1068,8 @@ you're infected with / recovered from), not on S.
 ```
 compartments { S, E, I, R }
 
-stratify(by = age, values = [child, adult])
-stratify(by = strain, values = [wt, delta], only = [E, I, R])
+stratify(by = age, levels = [child, adult])
+stratify(by = strain, levels = [wt, delta], only = [E, I, R])
 
 tables {
   C_age    : age × age       = [[12.0, 4.0], [4.0, 8.0]]
@@ -1248,7 +1333,7 @@ patch, store the schedule in a table and reference it in the `at` list:
 
 ```
 tables {
-  sia_day : patch × round = read_csv("data/sia_schedule.csv")
+  sia_day : patch × round = read_long("data/sia_schedule.tsv")
 }
 
 interventions {
@@ -1375,7 +1460,7 @@ a table (§6) and reference it directly in init expressions:
 
 ```
 tables {
-  N0 : patch = read_csv("data/population.csv")
+  N0 : patch = read_long("data/population.tsv")
 }
 
 parameters {
@@ -2014,7 +2099,7 @@ time_unit = 'days
 
 compartments { S, E, I, R }
 
-stratify(by = age, values = [child, adult])
+stratify(by = age, levels = [child, adult])
 
 let N_local[a in age] = S[a] + E[a] + I[a] + R[a]
 
@@ -2045,7 +2130,7 @@ time_unit = 'days
 compartments { S, E, I, R }
 let N = S + E + I + R
 
-stratify(by = age, values = [child, adult])
+stratify(by = age, levels = [child, adult])
 
 parameters {
   beta   : rate
@@ -2079,7 +2164,7 @@ time_unit = 'days
 
 compartments { S, I, R }
 
-stratify(by = sex, values = [female, male])
+stratify(by = sex, levels = [female, male])
 
 let N_local[s in sex] = S[s] + I[s] + R[s]
 
@@ -2158,7 +2243,7 @@ time_unit = 'days
 
 compartments { S, I, R }
 
-stratify(by = age, values = [age_0_5, age_5_15, age_15_50, age_50_65, age_65p])
+stratify(by = age, levels = [age_0_5, age_5_15, age_15_50, age_50_65, age_65p])
 
 parameters {
   beta  : rate
@@ -2167,7 +2252,7 @@ parameters {
 }
 
 tables {
-  C_age   : age × age 'per_day = read_csv("data/polymod_5x5.csv")
+  C_age   : age × age 'per_day = read_long("data/polymod_5x5.tsv")
   age_dur : age 'years          = [5, 10, 35, 15, 20]
   mu_age  : age 'per_day        = [0.00008, 0.00002, 0.00003, 0.0001, 0.0005]
 }
@@ -2212,7 +2297,7 @@ time_unit = 'days
 compartments { S, E, I, R }
 
 # E passes through 3 sub-stages for Erlang-distributed latent period
-stratify(by = latent_stage, values = [e1, e2, e3], only = [E])
+stratify(by = latent_stage, levels = [e1, e2, e3], only = [E])
 
 parameters {
   beta  : rate
@@ -2253,8 +2338,8 @@ let N = S + E + I + R + V
 
 ## ── Index dimensions ───────────────────────────────────
 
-stratify(by = age, values = [child, adult])
-stratify(by = patch, values = read_values("data/lga_names.txt"))
+stratify(by = age, levels = [child, adult])
+stratify(by = patch)                          # levels derived from pop table below
 
 ## ── Parameters ─────────────────────────────────────────
 
@@ -2268,7 +2353,6 @@ parameters {
   phi_season : real           # seasonal phase (days from t=0 to peak)
   rho        : probability
   k          : positive
-  N0         : count
   I0         : count
   vacc_frac  : probability
   import_rate : rate
@@ -2281,9 +2365,8 @@ tables {
   mu_age    : age 'per_day       = [0.0000685, 0.0000411]
   fertility : age 'per_day       = [0.0, 0.02]
   age_dur   : age 'years         = [5, 60]
-  pop       : patch              = read_csv("data/lga_pop.csv")
-  distance  : patch × patch      = read_csv("data/lga_dist.csv",
-                                     format = sparse, default = 0.0)
+  pop       : defines(patch)     = read_long("data/lga_pop.tsv")
+  distance  : patch × patch      = read_long("data/lga_dist.tsv", default = 0.0)
 }
 
 ## ── Computed quantities ────────────────────────────────
@@ -2808,7 +2891,7 @@ infection[a in age] : S[a] --> E[a]
 ### 27.3 Partial Stratification Stoichiometry
 
 ```
-stratify(by = immunity, values = [natural, vaccine], only = [R])
+stratify(by = immunity, levels = [natural, vaccine], only = [R])
 
 recovery[a in age] : I[a] --> R[a]  @ gamma * I[a]
 # ERROR at line 55: R has dimensions [age, immunity] but destination
@@ -2828,7 +2911,7 @@ recovery[a in age, r in habitat] : I[a, r] --> R[a, r]  @ gamma * I[a, r]
 ### 27.5 Compartment Doesn't Have Dimension
 
 ```
-stratify(by = immunity, values = [natural, vaccine], only = [R])
+stratify(by = immunity, levels = [natural, vaccine], only = [R])
 
 waning[a in age] : I[a, natural] --> S[a]  @ wane * I[a, natural]
 # ERROR at line 55: I does not have dimension 'immunity'.
@@ -2929,7 +3012,8 @@ compartments { NAME, ... }           integer-valued populations
 compartments { NAME : real }         continuous-valued state
 
 # Dimensions
-stratify(by = DIM, values = [...])   add index dimension
+stratify(by = DIM, levels = [...])   add index dimension (inline levels)
+stratify(by = DIM)                   add index dimension (levels from defines())
 stratify(..., only = [COMP, ...])    partial stratification
 
 # Indexing

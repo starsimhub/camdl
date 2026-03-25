@@ -62,16 +62,17 @@ type param_decl =
   | PScalar  of { pname: string; pkind: param_type; pbounds: (expr * expr) option }
   | PIndexed of { pname: string; pdims: string list; pkind: param_type; pbounds: (expr * expr) option }
 
-(** Table dimension entry: bare dim name, or dim + unit *)
+(** Table dimension entry: bare dim name, dim + unit, or defines(dim) *)
 type table_dim_entry =
   | TDim     of string
   | TDimUnit of string * unit_lit
+  | TDefines of string            (* defines(dim) — derives levels from this column *)
 
-(** Table value: inline literal (EFuncCall for read_csv) or nested EBinOp/EIndex tree *)
+(** Table value: inline literal or EFuncCall for read_long/external *)
 type table_decl = {
-  tname  : string;
+  tnames : string list;           (* one or more names for multi-value columns *)
   tdims  : table_dim_entry list;
-  tvalue : expr;   (* EFuncCall("read_csv",...) or list literal encoded as nested expr *)
+  tvalue : expr;
 }
 
 (** A stoichiometry reference: compartment name + optional indices *)
@@ -95,12 +96,12 @@ type let_binding = {
 }
 
 type stratify_values_src =
-  | SValuesLit   of string list          (* values = [a, b, c] *)
-  | SValuesFile  of string               (* values = read_values("path") *)
+  | SValuesLit     of string list          (* levels = [a, b, c] *)
+  | SValuesPending                         (* no levels clause — must be fulfilled by defines() *)
 
 type stratify_decl = {
   sdim    : string;
-  svalues : string list;       (* populated after file loading; empty if svalues_src = SValuesFile *)
+  svalues : string list;       (* populated after parsing or after derive_defines_dims *)
   svalues_src : stratify_values_src;
   sonly   : string list option;
 }

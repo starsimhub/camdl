@@ -34,6 +34,9 @@ pub fn resolve_ir_path(path: &str) -> Result<(String, Option<std::path::PathBuf>
 // ─── Loader helpers ──────────────────────────────────────────────────────────
 
 /// Load a flat Vec<Expr::Const> from a CSV, TSV, or JSON file.
+// --table loads flat row-major float arrays (not long format).
+// Long format (read_long) is resolved at compile time by the OCaml frontend.
+// External tables supplied at runtime must match the flat order used at compile time.
 pub fn load_table_file(path: &str) -> Result<Vec<ir::expr::Expr>, String> {
     use ir::expr::Expr;
     let content = std::fs::read_to_string(path)
