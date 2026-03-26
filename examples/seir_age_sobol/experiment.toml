@@ -1,0 +1,93 @@
+# Outbreak triage: which uncertainty to resolve first?
+#
+# A novel respiratory pathogen is detected in a town of ~10,000 residents.
+# Before recommending targeted interventions, we want to know:
+#
+#   Given uncertainty in beta (transmission), sigma (latent period), and
+#   gamma (recovery), which parameter most drives peak infections by age?
+#   And which study — seroprevalence (narrows beta) or household shedding
+#   (narrows gamma) — would most reduce model output uncertainty?
+#
+# Three belief-state designs:
+#   current       — no studies done; wide log-uniform uncertainty on all 3
+#   narrow_beta   — seroprevalence study done; beta constrained to [0.2, 0.4]
+#   narrow_gamma  — household study done; gamma constrained to [0.1, 0.3]
+#
+# Run count: 3 designs × 256 × (2×3+2) = 3 × 2,048 = 6,144 parameter
+# points × 3 seeds = 18,432 total runs.
+#
+# Run from repo root:
+#   camdl-sim experiment run examples/seir_age_sobol/experiment.toml --parallel 8
+#   camdl-sim experiment analyze examples/seir_age_sobol/experiment.toml
+
+[config]
+model      = "ocaml/golden/seir_age.ir.json"
+params     = "examples/seir_age_sobol/params.toml"
+backend    = "gillespie"
+seeds      = { n = 3 }
+parallel   = 8
+output_dir = "examples/seir_age_sobol/output"
+
+[config.simulate]
+from = 0.0
+to   = 365.0
+
+# ── Design A: current knowledge — wide log-uniform uncertainty ──────────────
+
+[design.current]
+method = "sobol"
+n      = 256
+
+[design.current.parameters.beta]
+range     = { min = 0.05, max = 0.5 }
+transform = "log"
+
+[design.current.parameters.sigma]
+range     = { min = 0.1, max = 1.0 }
+transform = "log"
+
+[design.current.parameters.gamma]
+range     = { min = 0.05, max = 0.5 }
+transform = "log"
+
+# ── Design B: seroprevalence study done — beta narrowed ─────────────────────
+
+[design.narrow_beta]
+method = "sobol"
+n      = 256
+
+[design.narrow_beta.parameters.beta]
+range     = { min = 0.2, max = 0.4 }
+transform = "log"
+
+[design.narrow_beta.parameters.sigma]
+range     = { min = 0.1, max = 1.0 }
+transform = "log"
+
+[design.narrow_beta.parameters.gamma]
+range     = { min = 0.05, max = 0.5 }
+transform = "log"
+
+# ── Design C: household shedding study done — gamma narrowed ─────────────────
+
+[design.narrow_gamma]
+method = "sobol"
+n      = 256
+
+[design.narrow_gamma.parameters.beta]
+range     = { min = 0.05, max = 0.5 }
+transform = "log"
+
+[design.narrow_gamma.parameters.sigma]
+range     = { min = 0.1, max = 1.0 }
+transform = "log"
+
+[design.narrow_gamma.parameters.gamma]
+range     = { min = 0.1, max = 0.3 }
+transform = "log"
+
+# ── Analysis ─────────────────────────────────────────────────────────────────
+
+[analyze]
+outputs    = ["peak_I_child", "peak_I_adult"]
+confidence = 0.95

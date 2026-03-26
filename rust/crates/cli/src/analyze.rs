@@ -200,8 +200,16 @@ pub fn cmd_experiment_analyze(args: &[String]) {
         });
 
         write_sobol_indices_tsv(&format!("{}/sobol_indices.tsv", sens_dir), &design_results);
+
+        // Build (col_name, y_vec) pairs for the analyzed columns, looking up
+        // indices in the full output_names list so col_idx is correct.
+        let conv_ys: Vec<(String, Vec<f64>)> = analyze_cols.iter().filter_map(|col_name| {
+            let col_idx = output_names.iter().position(|n| n == col_name)?;
+            let y: Vec<f64> = averaged.iter().map(|row| row[col_idx]).collect();
+            Some((col_name.clone(), y))
+        }).collect();
         write_convergence_tsv(&format!("{}/convergence.tsv", sens_dir),
-                              &averaged, n, k, &param_names, &analyze_cols, design_name);
+                              &conv_ys, n, k, &param_names, design_name);
         write_assumptions_txt(&format!("{}/assumptions.txt", sens_dir),
                               &design_results, design_name, &param_names, n, k,
                               bootstrap_n, effective_confidence);
@@ -652,11 +660,10 @@ fn write_sobol_indices_json(path: &str, results: &[SobolResult]) {
 
 fn write_convergence_tsv(
     path: &str,
-    averaged: &[Vec<f64>],
+    ys: &[(String, Vec<f64>)],   // (output_name, full_y_vec) for each analyzed column
     n: usize,
     k: usize,
     param_names: &[String],
-    output_names: &[String],
     design_name: &str,
 ) {
     let mut tsv = String::from("design\toutput\tparameter\tn_samples\tS1\tST\n");
@@ -665,8 +672,7 @@ fn write_convergence_tsv(
     let checkpoints = [n / 8, n / 4, n / 2, n];
     for &cp in &checkpoints {
         if cp == 0 { continue; }
-        for (col_idx, col_name) in output_names.iter().enumerate() {
-            let y_sub: Vec<f64> = averaged.iter().map(|r| r[col_idx]).collect();
+        for (col_name, y_sub) in ys {
             let total = cp * (2 + k);
             if total > y_sub.len() { continue; }
             let y_slice = &y_sub[..total];

@@ -1,0 +1,30 @@
+Sensitivity analysis assumptions:
+
+Methodology:
+  Sobol first-order and total-order indices (Saltelli et al. 2010)
+  Bootstrap confidence intervals (1000 resamples, 95% level)
+
+Sampling:
+  Quasi-random (Halton sequence) over specified parameter ranges
+  Output variance decomposition is CONDITIONAL on these bounds
+  Different bounds (designs) produce different indices
+
+Design "current":
+  Base sample size: n = 256
+  Parameters: k = 3
+  Total points: n(2k+2) = 1280
+
+Results summary:
+  current | peak_I_child | beta: S1=-0.083 ST=0.979
+  current | peak_I_child | gamma: S1=0.021 ST=0.948
+  current | peak_I_child | sigma: S1=0.530 ST=0.909
+  current | peak_I_adult | beta: S1=-0.065 ST=0.985
+  current | peak_I_adult | gamma: S1=0.033 ST=0.950
+  current | peak_I_adult | sigma: S1=0.514 ST=0.907
+
+Cross-design VOI interpretation:
+  Comparing sensitivity indices across designs estimates the VALUE of
+  narrowing parameter uncertainty. This is a sensitivity landscape
+  comparison, NOT a Bayesian posterior. The magnitude depends on the
+  assumed ranges. For prior-weighted analysis, use parameter_points.tsv
+  and outputs.tsv with importance weights.

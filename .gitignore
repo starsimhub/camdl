@@ -46,6 +46,13 @@ mprocs.log
 examples/polio_nigeria/data/raw/
 examples/polio_nigeria/data/*.csv.bak
 
+# examples/seir_age_sobol — commit analysis TSVs + figures, but not sim run files
+!examples/seir_age_sobol/output/
+!examples/seir_age_sobol/output/**
+examples/seir_age_sobol/output/designs/*/runs/
+examples/seir_age_sobol/output/manifest.json
+examples/seir_age_sobol/output/model.ir.json
+
 # Web
 web/node_modules/
 web/dist/
