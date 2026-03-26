@@ -3,6 +3,13 @@
 **Version:** 0.5-draft
 **Date:** 2026-03-25
 
+> **Scope note:** This spec provides infrastructure for parameter exploration
+> and sensitivity analysis. The `[design.*]` system characterizes how model
+> sensitivity varies across belief states. Decision-theoretic value of
+> information (EVSI) — combining these outputs with a decision problem, prior
+> distribution, and utility function — is specified separately in the VOI
+> Specification, which consumes this spec's outputs.
+
 ---
 
 ## 1. Design Principles
@@ -444,15 +451,15 @@ across a parameter space.
 
 ---
 
-## 7. Experimental Design and Value of Information
+## 7. Experimental Design and Sensitivity Analysis
 
 ### 7.1 Overview
 
 `[design.*]` blocks define named **belief states** — parameter ranges
 representing "what we currently know." Each design generates a space-filling
 sample of the parameter space. Comparing sensitivity indices across designs
-quantifies the **value of information**: how much does narrowing uncertainty
-in specific parameters reduce decision-relevant output variance?
+characterizes how model sensitivity varies across belief states: which
+parameters drive output uncertainty shifts as knowledge narrows?
 
 ### 7.2 Named Designs
 
@@ -544,21 +551,20 @@ Runs per design = N(2k+2) × |scenarios| × |seeds|
 Total runs = sum over all designs
 ```
 
-### 7.6 The VOI Interpretation
+### 7.6 Cross-Design Comparison
 
 Each named design encodes a belief state. Sensitivity indices under each design
 answer: "given these beliefs, which parameters drive output uncertainty?"
 
-Cross-design comparison quantifies value of information:
+Cross-design comparison shows how the sensitivity landscape shifts:
 
 - **Design A (current):** vacc_eff explains 62% of peak_I variance
 - **Design B (better coverage):** vacc_eff drops to 15%, R0 rises to 55%
-- **Difference A → B:** learning coverage reduces peak_I variance by ~47%.
-  This estimates the value of a coverage survey.
 - **Design C (better transmission):** R0 drops to 8%, vacc_eff still 58%
-- **Difference A → C:** learning R0 reduces variance by ~15%.
 
-A coverage survey is worth ~3x more than a transmission study for peak_I.
+These are properties of the model's response surface in each parameter region,
+not decision-theoretic quantities. For formal value of information analysis
+(EVSI), see the VOI Specification.
 
 **Important caveats:** This is a sensitivity landscape comparison, not a
 Bayesian posterior calculation. The "variance explained" is conditional on
@@ -1059,12 +1065,12 @@ Design "better_coverage":
   R0 ∈ [1.0, 5.0] (uniform)
   kappa ∈ [0.001, 0.1] (log-uniform)
 
-Cross-design VOI interpretation:
-  Variance reduction from "current" → "better_coverage" ≈ 47%
-  for output "peak_I". This estimates the value of reducing
-  coverage uncertainty. It is a sensitivity landscape comparison,
-  NOT a Bayesian posterior. For prior-weighted analysis, use
-  parameter_points.tsv and outputs.tsv with importance weights.
+Cross-design comparison:
+  ST shift from "current" → "better_coverage" shows which parameters
+  become more or less influential as coverage knowledge narrows.
+  These are sensitivity landscape properties, NOT decision-theoretic
+  quantities. For formal value of information analysis (EVSI), see
+  the VOI Specification (voi.toml).
 ```
 
 The assumptions file is non-negotiable — it is always generated and states
@@ -1193,10 +1199,12 @@ emergence_events = "test.cum_reversion"
 Expected result: `P(emergence_events > threshold)` vs `vacc_eff` produces a
 non-monotonic curve peaking at intermediate coverage.
 
-### 16.2 VOI Extension
+### 16.2 Sensitivity Characterization
 
 "Is the dangerous middle's location more sensitive to coverage uncertainty or
-R0 uncertainty?"
+R0 uncertainty?" — characterize how the model's sensitivity landscape shifts
+as each uncertainty is resolved. For formal value of information analysis
+(EVSI) using these outputs, see the VOI Specification.
 
 ```toml
 [experiment]
@@ -1297,7 +1305,7 @@ directories are unaffected.
 | **Scenario σ**       | `scenarios { }` (merged with experiment)             |
 | **Sweep**            | Deterministic M-layer grid                           |
 | **Design**           | Named belief state → space-filling sample            |
-| **VOI**              | Cross-design sensitivity comparison                  |
+| **VOI**              | See VOI Specification (voi.toml)                     |
 | **Baseline σ₀**      | Identity patch                                       |
 | **σ₂ ∘ σ₁**          | `compose = ["A", "B"]`                               |
 | **View V**           | `view.toml` (v0.2+)                                  |
@@ -1337,7 +1345,7 @@ bootstrap CIs. Auto-generated `assumptions.txt`.
 ### v0.2-python
 
 `camdl-analysis` Python package. Sobol figures from Rust TSV outputs.
-Morris screening. Cross-design VOI waterfall. Sweep result figures.
+Morris screening. Cross-design sensitivity comparison. Sweep result figures.
 
 ### v0.2-inference
 
