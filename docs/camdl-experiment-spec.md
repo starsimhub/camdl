@@ -1,10 +1,7 @@
 # camdl Experiment & Output System Specification
 
-**Version:** 0.4-draft **Date:** 2026-03-17
-
-This document specifies the experiment file format, content-addressable output
-structure, run management, and provenance guarantees for camdl. It implements
-the parameter grammar (Buffalo 2026) at the systems level.
+**Version:** 0.5-draft
+**Date:** 2026-03-25
 
 ---
 
@@ -13,9 +10,9 @@ the parameter grammar (Buffalo 2026) at the systems level.
 **One file per concern, no overlap.**
 
 ```
-.camdl         → what the model IS (structure + scenarios + default C)
-params.toml    → what the values ARE (point m ∈ M)
-experiment.toml → how the BATCH analysis RUNS (runtime C, seed grid, comparisons)
+.camdl           → what the model IS (structure, scenarios, default C)
+params.toml      → what the values ARE (point m ∈ M)
+experiment.toml  → how the analysis RUNS (sweep/design, seeds, comparisons)
 ```
 
 Each file owns its domain exclusively. The experiment file cannot set parameter
@@ -23,19 +20,17 @@ values — that's what params.toml is for. The params file cannot set the backen
 — that's what the experiment file is for. The .camdl file cannot set concrete
 parameter values — that's what external files are for.
 
-**The model file is self-contained for single runs.** A `.camdl` file defines
-structure, interventions, scenarios, simulation config, and output config. With
-a `params.toml` and a seed, it's everything needed for a run — no experiment
-file required. The experiment file adds batch infrastructure (seed grids,
-parallelism, comparisons, content-addressable output) on top.
+**The model file is self-contained for single runs.** A `.camdl` file with a
+`params.toml` and a seed is everything needed for one run — no experiment file
+required. The experiment file adds batch infrastructure on top.
 
 **Mirrored structure for overrides.** When the experiment file overrides a
 `.camdl` block, it uses the same field names in the same hierarchy. If you know
 the `.camdl` syntax, you know the experiment file syntax.
 
 **Reproducibility is structural, not aspirational.** Every output file is
-content-addressed by the inputs that produced it. Same inputs → same hash → same
-directory. Different inputs → different hash → separate directory.
+content-addressed by the inputs that produced it. Same inputs → same hash →
+same directory. Different inputs → different hash → separate directory.
 
 **M and σ are distinct layers.** Parameter values (M) and scenario patches (σ)
 are different operations on different objects. The CLI makes this visible:
@@ -49,66 +44,61 @@ share flags.
 ### 2.1 What Goes Where
 
 ```
-┌──────────────────────┬──────────────────────┬───────────────────────────┐
-│       Concern        │     Lives in         │     Can override?         │
-├──────────────────────┼──────────────────────┼───────────────────────────┤
-│ Model structure      │ .camdl only          │ never                     │
-│ Parameter names/types│ .camdl only          │ never                     │
-│ Parameter values (M) │ params.toml only     │ layered .toml, --param, σ │
-│ Scenarios (σ)        │ .camdl scenarios { } │ experiment merges on top  │
-│ Interventions        │ .camdl only          │ scenarios enable/disable  │
-│ Backend choice       │ experiment [config]  │ CLI --backend             │
-│ Time range           │ .camdl default       │ experiment [config], CLI  │
-│ Output schedule      │ .camdl default       │ experiment [config]       │
-│ Seeds                │ experiment [config]  │ CLI --seed                │
-│ Comparisons          │ experiment only      │ never                     │
-└──────────────────────┴──────────────────────┴───────────────────────────┘
+┌──────────────────────┬───────────────────────┬───────────────────────────┐
+│       Concern        │     Lives in          │     Can override?         │
+├──────────────────────┼───────────────────────┼───────────────────────────┤
+│ Model structure      │ .camdl only           │ never                     │
+│ Parameter names/types│ .camdl only           │ never                     │
+│ Parameter values (M) │ params.toml only      │ layered .toml, --param, σ │
+│ Scenarios (σ)        │ .camdl scenarios { }  │ experiment merges on top  │
+│ Interventions        │ .camdl only           │ scenarios enable/disable  │
+│ Backend choice       │ experiment [config]   │ CLI --backend             │
+│ Time range           │ .camdl default        │ experiment [config], CLI  │
+│ Output schedule      │ .camdl default        │ experiment [config]       │
+│ Seeds                │ experiment [config]   │ CLI --seed                │
+│ Sweep / Design       │ experiment only       │ never                     │
+│ Comparisons          │ experiment only       │ never                     │
+└──────────────────────┴───────────────────────┴───────────────────────────┘
 ```
 
 No row has entries in both "params.toml" and "experiment [config]" — they own
-completely disjoint domains. Scenarios are defined in the `.camdl` file and are
-available for both single-run exploration and batch experiments.
+completely disjoint domains.
 
 ### 2.2 Precedence Chains
 
 **For C (configuration):**
 
 ```
-.camdl simulate/output blocks    (structural defaults)
+.camdl simulate/output blocks     (structural defaults)
   ↓ overridden by
-experiment.toml [config]         (analysis-specific)
+experiment.toml [config]          (analysis-specific)
   ↓ overridden by
-CLI flags                        (convenience, non-persistent)
+CLI flags                         (convenience, non-persistent)
 ```
 
 **For M (parameters):**
 
 ```
-params.toml (first file)         (base values)
+params.toml (first file)          (base values)
   ↓ overridden by
-params.toml (later files)        (layered patches)
+params.toml (later files)         (layered patches)
   ↓ overridden by
-scenario patches (set/scale)     (counterfactual modifications to M)
+sweep / design point overrides    (automated M-layer variation)
   ↓ overridden by
---param CLI flags                (convenience, non-persistent)
+scenario patches (set/scale)      (counterfactual modifications to M)
+  ↓ overridden by
+--param CLI flags                 (convenience, non-persistent)
 ```
 
 **For scenarios:**
 
 ```
-.camdl scenarios { }             (model-level definitions)
+.camdl scenarios { }              (model-level definitions)
   ↓ merged with
-experiment.toml [scenarios]      (experiment adds/overrides by name)
+experiment.toml [[scenario]]     (experiment adds/overrides by name)
 ```
 
-Experiment file scenarios are **merged** into `.camdl` scenarios. On name
-conflict, the experiment file definition wins (with a note). All non-conflicting
-`.camdl` scenarios survive:
-
-```
-note: scenario 'with_sia' in experiment.toml overrides 'with_sia'
-  from model.camdl. Using experiment file definition.
-```
+On name conflict, the experiment file definition wins (with a note).
 
 ---
 
@@ -120,16 +110,16 @@ for running a model. No experiment file is needed for exploration.
 ### 3.1 Basic Run
 
 ```bash
-# Run baseline (no scenario), output to stdout
+# Baseline (no scenario), output to stdout
 camdl simulate model.camdl --params params.toml --seed 42
 
-# Run a named scenario defined in the .camdl file
+# Named scenario from .camdl
 camdl simulate model.camdl --params params.toml --scenario with_sia --seed 42
 
-# Enable a specific intervention (ad-hoc, no named scenario)
+# Ad-hoc intervention toggle (no named scenario)
 camdl simulate model.camdl --params params.toml --enable sia_round_1 --seed 42
 
-# Override a parameter (M layer — works with or without scenarios)
+# Parameter override (M layer — always valid, with or without scenarios)
 camdl simulate model.camdl --params params.toml --param beta=0.5 --seed 42
 
 # Scenario + parameter override (σ layer + M layer — both valid)
@@ -170,36 +160,7 @@ chain: `params.toml → scenario set/scale → --param`.
 --param-vec PREFIX=FILE    # override indexed params from keyed TSV
 ```
 
-### 3.4 With Content-Addressable Output
-
-```bash
-camdl simulate model.camdl --params params.toml --seed 42 --output-dir output/
-```
-
-When `--output-dir` is provided, the content-addressable directory structure is
-created. Since there is no experiment file, no `experiment.toml` is frozen —
-only the merged `params.toml` and per-run `run.json`:
-
-```
-output/
-  model-{hash}/
-    config-{hash}/
-      params.toml              # frozen merged baseline parameters
-      runs/
-        baseline/
-          seed-42/
-            trajectories.parquet
-            flows.parquet
-            diagnostics.tsv
-            run.json
-```
-
-The `run.json` contains full provenance. This is sufficient to reproduce the
-run. If a scenario is used, the scenario directory reflects it:
-
-```
-runs/with_sia/seed-42/...
-```
+Without `--output-dir`, output goes to stdout as TSV.
 
 ---
 
@@ -207,7 +168,8 @@ runs/with_sia/seed-42/...
 
 ### 4.1 Format
 
-TOML. Used only for batch analysis (multiple scenarios × seeds, comparisons).
+TOML. Used only for batch analysis (multiple scenarios × seeds, parameter
+sweeps, experimental designs, and comparisons).
 
 ### 4.2 Full Example
 
@@ -217,25 +179,21 @@ TOML. Used only for batch analysis (multiple scenarios × seeds, comparisons).
 [experiment]
 name = "Nigeria SIA evaluation 2024"
 model = "models/seir_nigeria.camdl"
-params = ["params/base.toml", "params/fitted_2024.toml"] # layered; later wins
-
-# ── Runtime configuration ──────────────────────────────
+params = ["params/base.toml", "params/fitted_2024.toml"]
 
 [config]
-backend = "gillespie" # gillespie | tau_leap | chain_binomial
-dt = 1.0 # only for tau_leap / chain_binomial
-seeds = { from = 1, to = 1000 }
-parallel = 8 # concurrent runs
-output_dir = "output" # root of content-addressable tree
+backend = "gillespie"
+dt = 1.0
+seeds = { n = 1000 }
+parallel = 16
+output_dir = "output"
 
-# Override .camdl simulate block (same field names)
 [config.simulate]
-from = 0.0 # in model time_unit
-to = 730.0 # in model time_unit
+from = 0.0
+to = 730.0
 
-# Override .camdl output block (same structure)
 [config.output.trajectories]
-every = 7.0 # in model time_unit
+every = 7.0
 format = "parquet"
 
 [config.output.flows]
@@ -245,31 +203,29 @@ format = "parquet"
 [config.output.summary]
 format = "tsv"
 
-# ── Scenarios (merged with .camdl scenarios — overrides on conflict) ──
+# ── Parameter sweep (M layer) ──────────────────────────
+[sweep]
+vacc_eff = { linspace = { min = 0.1, max = 0.9, n = 9 } }
 
-[scenarios.high_coverage]
-enable = ["sia_round_1"]
-set = { vacc_frac = 0.95 }
+# ── Scenarios (σ layer) ────────────────────────────────
+[[scenario]]
+name = "baseline"
 
-[scenarios.more_transmissible]
-scale = { beta = 1.5 }
-
-[scenarios.combined]
-compose = ["with_sia", "more_transmissible"]
+[[scenario]]
+name = "with_sia"
+enable = ["sia"]
 
 # ── Comparisons ────────────────────────────────────────
-
 [compare]
 pairs = [
   ["baseline", "with_sia"],
-  ["baseline", "high_coverage"],
-  ["baseline", "delayed_sia"],
 ]
 
 [compare.derived]
 cases_averted = "reference.total_cases - test.total_cases"
 relative_reduction = "cases_averted / reference.total_cases"
-peak_reduction = "1 - test.peak_I / reference.peak_I"
+
+# Total runs: 9 sweep × 2 scenarios × 1000 seeds = 18,000
 ```
 
 ### 4.3 [experiment] Fields
@@ -294,15 +250,15 @@ error: unknown config key 'beta' in [config].
   For parameter values, use params.toml or a scenario patch.
 ```
 
-**Top-level config keys** (runtime-only, no `.camdl` equivalent):
+**Top-level config keys:**
 
-| Field        | Type   | Default       | Description                                                            |
-| ------------ | ------ | ------------- | ---------------------------------------------------------------------- |
-| `backend`    | string | `"gillespie"` | `gillespie`, `tau_leap`, `chain_binomial`                              |
-| `dt`         | float  | `1.0`         | Step size for discrete-time backends                                   |
-| `seeds`      | table  | required      | `{ from = N, to = M }` or `{ list = [...] }` or `{ n = N, start = M }` |
-| `parallel`   | int    | `1`           | Concurrent runs                                                        |
-| `output_dir` | path   | `"output/"`   | Root of content-addressable tree                                       |
+| Field        | Type   | Default       | Description                                                             |
+| ------------ | ------ | ------------- | ----------------------------------------------------------------------- |
+| `backend`    | string | `"gillespie"` | `gillespie`, `tau_leap`, `chain_binomial`                               |
+| `dt`         | float  | `1.0`         | Step size for discrete-time backends                                    |
+| `seeds`      | table  | required      | `{ n = N }` or `{ from, to }` or `{ list = [...] }` or `{ n, start }` |
+| `parallel`   | int    | `1`           | Concurrent runs                                                         |
+| `output_dir` | path   | `"output/"`   | Root of content-addressable tree                                        |
 
 **[config.simulate]** — mirrors `.camdl` `simulate { }`:
 
@@ -311,37 +267,28 @@ error: unknown config key 'beta' in [config].
 | `from` | float | Simulation start time (in model time_unit) |
 | `to`   | float | Simulation end time (in model time_unit)   |
 
-**[config.output.trajectories]** — mirrors `.camdl`
-`output { trajectories { } }`:
+**[config.output.trajectories]** and **[config.output.flows]**:
 
 | Field    | Type   | Description                          |
 | -------- | ------ | ------------------------------------ |
 | `every`  | float  | Output interval (in model time_unit) |
 | `format` | string | `"parquet"` or `"tsv"`               |
 
-**[config.output.flows]** — mirrors `.camdl` `output { flows { } }`:
-
-| Field    | Type   | Description                          |
-| -------- | ------ | ------------------------------------ |
-| `every`  | float  | Output interval (in model time_unit) |
-| `format` | string | `"parquet"` or `"tsv"`               |
-
-**[config.output.summary]** — mirrors `.camdl` `output { summary { } }`:
+**[config.output.summary]**:
 
 | Field    | Type   | Description |
 | -------- | ------ | ----------- |
 | `format` | string | `"tsv"`     |
 
 All `[config]` time values are bare floats in the model's declared `time_unit`.
-The DSL converts `2 'years → 730.5` at compile time; the experiment file uses
-the converted value directly.
 
 ### 4.5 Seeds
 
 ```toml
-seeds = { from = 1, to = 1000 } # range: 1, 2, ..., 1000
-seeds = { list = [42, 137, 256] } # explicit list
-seeds = { n = 500, start = 1 } # count from start: 1, 2, ..., 500
+seeds = { n = 1000 }                # 1, 2, ..., 1000
+seeds = { from = 1, to = 1000 }     # range: 1..1000
+seeds = { list = [42, 137, 256] }   # explicit list
+seeds = { n = 500, start = 1 }      # count from start: 1, 2, ..., 500
 ```
 
 ---
@@ -350,38 +297,29 @@ seeds = { n = 500, start = 1 } # count from start: 1, 2, ..., 500
 
 ### 5.1 Where Scenarios Live
 
-Scenarios are defined in the `.camdl` file's `scenarios { }` block (language
-spec §18). This makes the model file self-contained — a reader sees the model
-structure AND the counterfactual questions in one place.
+Scenarios are defined in the `.camdl` file's `scenarios { }` block. This makes
+the model file self-contained — structure and counterfactual questions in one
+place.
 
 ```
 # In the .camdl file
 scenarios {
   with_sia {
-    enable = [sia_round_1]
+    enable = [sia]
   }
   high_coverage {
-    enable = [sia_round_1]
-    set = { vacc_frac = min(vacc_frac * 1.2, 1.0) }
+    enable = [sia]
+    set = { vacc_eff = 0.95 }
   }
 }
 ```
 
-The `.camdl` `scenarios { }` block has the full DSL expression parser, so `set`
-values can be arbitrary expressions (including parameter references,
-conditionals, and function calls). This is the expressive path for complex
-scenario patches.
-
-For single runs, scenarios are selected via CLI:
-
-```bash
-camdl simulate model.camdl --params p.toml --scenario with_sia --seed 42
-```
+For single runs, select via CLI: `--scenario with_sia`.
 
 ### 5.2 Experiment File Scenarios (Merge-With-Override)
 
 The experiment file can define additional scenarios. These are **merged** with
-`.camdl` scenarios — not replaced:
+`.camdl` scenarios:
 
 - Experiment file scenarios are added to the `.camdl` scenario set
 - On name conflict, the experiment file definition wins
@@ -403,133 +341,375 @@ note: scenario 'high_coverage' in experiment.toml overrides 'high_coverage'
 
 ### 5.3 Scenario Operations
 
-Each scenario is a named patch σ: M × C → M × C. The baseline scenario (identity
-patch) is always available implicitly.
-
 | Key       | Type         | Description                                          |
 | --------- | ------------ | ---------------------------------------------------- |
 | `enable`  | list[string] | Enable named interventions from `.camdl`             |
 | `disable` | list[string] | Disable named interventions (from an all-on default) |
-| `set`     | table        | Override parameter values with numeric literals      |
+| `set`     | table        | Override parameter values (numeric literals)         |
+| `scale`   | table        | Multiply parameter values by factor                  |
+| `compose` | list[string] | Apply scenarios in sequence                          |
 
-`enable`/`disable` reference interventions in the `.camdl` file's
-`interventions { }` block. Interventions must exist in the model.
+Interventions are **disabled by default**. Scenarios explicitly enable them.
 
-**Intervention default state:** interventions are **disabled by default** (the
-baseline identity patch fires no interventions). Scenarios explicitly enable
-them with `enable = [...]`.
+### 5.4 Scenario × Sweep/Design Interaction
 
-**`set` in `.camdl` `scenarios { }`:** values are scalar expressions resolved at
-compile time (parameter references are allowed). **`set` in experiment TOML
-`[scenarios]`:** numeric literals only (TOML limitation).
+Sweeps (§6) and designs (§7) are orthogonal to scenarios. Their cross product
+defines the full run grid:
 
-> **Not yet implemented:** `scale` (multiplicative factor) and `compose`
-> (scenario composition) are planned for a future release. Define composed
-> scenarios directly in the `.camdl` file's `scenarios { }` block for now.
+```
+Total runs = |parameter points| × |scenarios| × |seeds|
+```
 
-### 5.4 Scenario Manifest in the IR
+Each (parameter_point, scenario) combination is a synthetic effective scenario.
+Parameter point overrides apply first (M layer), then scenario patches apply on
+top (σ layer).
 
-The compiler serializes scenario definitions into a top-level `"scenarios"`
-field of the IR JSON. The simulation engine ignores this field — the IR
-represents the fully resolved baseline model. The CLI reads the manifest for
-`--scenario` dispatch:
+### 5.5 Scenario Manifest in the IR
 
-1. `camdlc compile model.camdl` emits the IR (baseline) plus the scenario
-   manifest
-2. The Rust CLI reads the manifest when `--scenario NAME` is passed
-3. The CLI applies the patch (filter interventions, override params) to the
-   `Model` struct before constructing `CompiledModel`
+The compiler serializes scenario definitions into the IR JSON `"scenarios"` field.
+The simulation engine ignores this field. The CLI reads it for `--scenario` dispatch:
+
+1. Compile `.camdl` → IR (baseline) + scenario manifest
+2. CLI reads manifest when `--scenario NAME` is passed
+3. CLI applies the patch (filter interventions, override params) to the `Model`
+   struct before constructing `CompiledModel`
 4. `CompiledModel::new()` sees a model with the right interventions and param
    values — it doesn't know about scenarios
 
 ---
 
-## 6. Parameter Files
+## 6. Parameter Sweep
 
-### 6.1 Baseline Parameters (params.toml)
+`[sweep]` defines a deterministic parameter grid. Each parameter gets a set of
+values; the Cartesian product of all swept parameters defines the grid.
 
-A point m ∈ M. One key-value pair per declared parameter:
-
-```toml
-beta = 0.3
-gamma = 0.1
-sigma = 0.2
-rho = 0.4
-k = 5.0
-N0 = 1000000
-I0 = 10
-```
-
-Every parameter declared in the `.camdl` file must have a value here (or a
-default in the declaration). The CLI validates at load time and reports missing
-parameters with their declared types.
-
-### 6.2 Layered Parameters
+### 6.1 Sweep Value Specifications
 
 ```toml
-[experiment]
-params = ["params/base.toml", "params/fitted_2024.toml"]
+[sweep]
+# Explicit list
+vacc_eff = [0.1, 0.3, 0.5, 0.7, 0.9]
+
+# Evenly spaced
+vacc_eff = { linspace = { min = 0.1, max = 0.9, n = 9 } }
+
+# Log-spaced (useful for rates, R0)
+kappa = { logspace = { min = 0.001, max = 0.1, n = 5 } }
+
+# Range with step
+R0 = { range = { min = 1.0, max = 5.0, step = 0.5 } }
 ```
 
-Later files override earlier ones. `fitted_2024.toml` might contain only
-`beta = 0.35` and `rho = 0.42`, overriding those from `base.toml`.
+| Generator  | Parameters              | Description               |
+| ---------- | ----------------------- | ------------------------- |
+| (bare list)| —                       | Explicit values           |
+| `linspace` | `min`, `max`, `n`       | n evenly-spaced points    |
+| `logspace` | `min`, `max`, `n`       | n log-spaced points       |
+| `range`    | `min`, `max`, `step`    | Step from min toward max  |
 
-### 6.3 Indexed Parameter Overrides
+All generator args are keyword — no positional ambiguity.
 
-For spatial models (`R0[patch]` expanding to 774 scalar parameters):
+### 6.2 Factorial Sweeps
 
-```tsv
-R0_kano	2.1
-R0_lagos	1.8
-R0_sokoto	2.4
-```
-
-```bash
-camdl simulate model.camdl --params p.toml --param-vec R0=r0_init.tsv
-```
-
-Matched by **parameter name** (not position). Errors if a constructed name
-doesn't match, or if a matching parameter has no entry.
-
-### 6.4 Priors and Views (v0.2+)
+Multiple swept parameters produce a Cartesian product:
 
 ```toml
-# priors.toml
-[beta]
-prior = "log_normal"
-mu = 0.0
-sigma = 1.0
-transform = "log"
+[sweep]
+vacc_eff = { linspace = { min = 0.1, max = 0.9, n = 9 } }
+kappa    = { logspace = { min = 0.001, max = 0.1, n = 5 } }
+# 9 × 5 = 45 parameter points × scenarios × seeds
 ```
 
-```toml
-# view.toml — V from the parameter grammar
-[view]
-free = ["beta", "gamma", "rho", "I0"]
-```
+### 6.3 Sweep Points Are M-Layer Overrides
+
+Each sweep point is equivalent to `--param vacc_eff=0.3` added to every run at
+that grid coordinate. Sweep values apply **before** scenario patches in the M
+precedence chain. Sweep parameter values fold into `scen_hash` (§8.2).
+
+### 6.4 `[sweep]` and `[design.*]` Are Mutually Exclusive
+
+A single experiment file uses either `[sweep]` (deterministic grid) or
+`[design.*]` (space-filling designs) — not both. They answer different
+questions: sweeps test specific values, designs characterize sensitivity
+across a parameter space.
 
 ---
 
-## 7. Comparisons
+## 7. Experimental Design and Value of Information
 
-### 7.1 Pair Specification
+### 7.1 Overview
+
+`[design.*]` blocks define named **belief states** — parameter ranges
+representing "what we currently know." Each design generates a space-filling
+sample of the parameter space. Comparing sensitivity indices across designs
+quantifies the **value of information**: how much does narrowing uncertainty
+in specific parameters reduce decision-relevant output variance?
+
+### 7.2 Named Designs
+
+Each design is a named section with its own method, sample size, and parameter
+ranges:
+
+```toml
+# Design A: current knowledge — wide uncertainty
+[design.current]
+method = "sobol"
+n = 1024
+
+[design.current.parameters.vacc_eff]
+range = { min = 0.1, max = 0.9 }
+
+[design.current.parameters.R0]
+range = { min = 1.0, max = 5.0 }
+
+[design.current.parameters.kappa]
+range = { min = 0.001, max = 0.1 }
+transform = "log"
+
+# Design B: "what if we had better coverage data?"
+[design.better_coverage]
+method = "sobol"
+n = 1024
+
+[design.better_coverage.parameters.vacc_eff]
+range = { min = 0.6, max = 0.8 }
+
+[design.better_coverage.parameters.R0]
+range = { min = 1.0, max = 5.0 }
+
+[design.better_coverage.parameters.kappa]
+range = { min = 0.001, max = 0.1 }
+transform = "log"
+```
+
+### 7.3 Design Methods
+
+| Method    | Runs for k params | Description                          |
+| --------- | ----------------- | ------------------------------------ |
+| `sobol`   | N(2k + 2)         | Saltelli's scheme for Sobol indices  |
+| `lhs`     | N                 | Latin Hypercube Sampling             |
+| `random`  | N                 | Uniform random                       |
+
+`sobol` generates structured parameter combinations via Saltelli's quasi-random
+sampling scheme, enabling variance decomposition into first-order and
+total-order indices per parameter. For n=1024 and k=3 parameters: 1024 × 8 =
+8,192 parameter points.
+
+### 7.4 Parameter Specification
+
+```toml
+[design.NAME.parameters.PARAM]
+range = { min = 0.1, max = 0.9 }    # required
+transform = "log"                    # optional: "log" | "logit"
+```
+
+`range` defines the sampling bounds. `transform` changes the sampling
+space: `"log"` samples uniformly in log space (appropriate for rates and R0);
+`"logit"` samples uniformly in logit space (appropriate for probabilities
+bounded away from 0 and 1).
+
+Parameters not mentioned in a design are held at their base values from
+params.toml.
+
+### 7.5 Design × Scenario Interaction
+
+Each design crosses with every scenario:
+
+```
+Runs per design = N(2k+2) × |scenarios| × |seeds|
+Total runs = sum over all designs
+```
+
+### 7.6 The VOI Interpretation
+
+Each named design encodes a belief state. Sensitivity indices under each design
+answer: "given these beliefs, which parameters drive output uncertainty?"
+
+Cross-design comparison quantifies value of information:
+
+- **Design A (current):** vacc_eff explains 62% of peak_I variance
+- **Design B (better coverage):** vacc_eff drops to 15%, R0 rises to 55%
+- **Difference A → B:** learning coverage reduces peak_I variance by ~47%.
+  This estimates the value of a coverage survey.
+- **Design C (better transmission):** R0 drops to 8%, vacc_eff still 58%
+- **Difference A → C:** learning R0 reduces variance by ~15%. A transmission
+  study is worth ~3x less than a coverage survey.
+
+**Important caveats:** This is a sensitivity landscape comparison, not a
+Bayesian posterior calculation. The "variance explained" is conditional on
+uniform sampling over the specified ranges. Different ranges produce different
+indices. The `assumptions.txt` file (§13.4) makes all assumptions explicit.
+
+### 7.7 Output Structure for Designs
+
+```
+{output_dir}/
+  designs/
+    current/
+      parameter_points.tsv      # N(2k+2) × k matrix, always written
+      runs/
+        {sim_hash}/...
+    better_coverage/
+      parameter_points.tsv
+      runs/
+        {sim_hash}/...
+```
+
+`parameter_points.tsv` is always written regardless of whether
+`camdl experiment analyze` is run — it's available for external reanalysis.
+
+---
+
+## 8. Content-Addressable Output Structure
+
+### 8.1 Directory Layout
+
+```
+{output_dir}/
+  manifest.json
+  model.ir.json
+  runs/
+    {sim_hash_8}/
+      {scenario_slug}-{scen_hash_8}/
+        seed_{seed}/
+          traj.tsv
+          run.json
+```
+
+Example with two scenarios and a sweep point:
+
+```
+runs/3a7f2c1d/baseline-00000000/seed_1/
+runs/3a7f2c1d/with_sia-f9e2b047/seed_1/
+runs/3a7f2c1d/with_sia_vacc_eff_0.5-a3c1e890/seed_1/
+```
+
+After tweaking `with_sia` only — baseline cache is untouched:
+
+```
+runs/3a7f2c1d/with_sia-d4e2a391/seed_1/   ← new hash
+runs/3a7f2c1d/baseline-00000000/seed_1/   ← reused
+```
+
+After changing base params — nothing reused:
+
+```
+runs/cc8b1a90/baseline-00000000/seed_1/
+runs/cc8b1a90/with_sia-f9e2b047/seed_1/
+```
+
+Scenario slug: scenario name lowercased, non-`[a-z0-9_]` replaced with `_`.
+Seed directory: `seed_{N}` with verbatim u64, no zero-padding.
+
+### 8.2 Hash Computation
+
+**Sim hash** — model + base params + backend + dt:
+
+```
+sim_hash = sha256(
+    model_ir_json_bytes
+    + canonical_sorted(base_param key=value pairs)
+    + backend + dt + camdl_version
+)   # full 64-char hex; first 8 used in dir name
+```
+
+`model_ir_json_bytes` is the compiled IR — it captures all structural content:
+compartments, parameters, transitions, interventions, init, etc.
+
+**Scenario hash** — scenario delta (sweep/design point values are included):
+
+```
+scen_hash = sha256(
+    sorted(enable list)
+    + sorted(disable list)
+    + canonical_sorted(scenario param overrides)
+    + canonical_sorted(sweep/design point overrides)
+)   # full 64-char hex; first 8 used in dir name
+```
+
+`scen_hash` covers only the _delta_. Base params are already in `sim_hash`.
+Renaming a scenario without changing its definition preserves `scen_hash` and
+reuses cached runs. A scenario with no overrides, enables, or disables always
+hashes to the same value, producing `00000000` in the directory name.
+
+### 8.3 Cache Reuse Matrix
+
+| What changed                       | sim_hash  | scen_hash         | Reuse               |
+| ---------------------------------- | --------- | ----------------- | ------------------- |
+| Model / base params                | changes   | —                 | none                |
+| Backend or dt                      | changes   | —                 | none                |
+| Scenario A's overrides             | unchanged | A changes, B same | B's runs reused     |
+| Sweep point values                 | unchanged | affected only     | other points reused |
+| Add more seeds                     | unchanged | unchanged         | all existing reused |
+| Rename a scenario                  | unchanged | unchanged         | reused              |
+
+### 8.4 Manifest
+
+`manifest.json` at the output root lists every completed run:
+
+```json
+{
+  "experiment_name": "Nigeria SIA evaluation 2024",
+  "runs": [
+    {
+      "scenario": "with_sia",
+      "sweep_point": { "vacc_eff": 0.3 },
+      "seed": 1,
+      "run_path": "3a7f2c1d/with_sia-f9e2b047/seed_1"
+    }
+  ]
+}
+```
+
+The web app constructs trajectory URLs as `GET /runs/{run_path}/traj.tsv`.
+
+---
+
+## 9. Run-Level Metadata
+
+Each run produces a `run.json`:
+
+```json
+{
+  "sim_hash": "3a7f2c1d...",
+  "scen_hash": "f9e2b047...",
+  "scenario": "with_sia",
+  "sweep_point": { "vacc_eff": 0.3 },
+  "design": null,
+  "design_point_index": null,
+  "seed": 42,
+  "backend": "gillespie",
+  "dt": 1.0,
+  "camdl_version": "0.1.0",
+  "wall_time_seconds": 1.23,
+  "timestamp": "2026-03-25T14:30:00Z"
+}
+```
+
+Cache key: if the run directory exists, the run is skipped. `--force` to re-run.
+
+---
+
+## 10. Comparisons
+
+### 10.1 Pair Specification
 
 ```toml
 [compare]
 pairs = [
   ["baseline", "with_sia"],
   ["baseline", "high_coverage"],
-  ["with_sia", "high_coverage"], # non-baseline reference is valid
+  ["with_sia", "high_coverage"],   # non-baseline reference is valid
 ]
 ```
 
 Each pair is `[reference, test]`. The keyword `baseline` refers to the identity
 patch.
 
-### 7.2 CRN Coupling
+### 10.2 CRN Coupling
 
-Paired scenarios are simulated with the same seed. The coupling guarantee
-depends on the scenario type:
+Paired scenarios share the same seed. The coupling guarantee depends on the
+scenario type:
 
 **Propensity-preserving scenarios** (`enable`/`disable` only, no `set`/`scale`):
 Trajectories are **byte-identical** until the first enabled intervention fires.
@@ -540,15 +720,9 @@ intervention captures the exact causal effect.
 **Parameter-modifying scenarios** (`set`/`scale`): Trajectories are **correlated
 but never identical**. Different parameter values produce different propensities
 from t=0, so RNG draws map to different events. CRN still reduces variance
-compared to independent seeds (the correlation comes from shared RNG state), but
-there is no identical prefix. The variance reduction depends on how much the
-parameter change affects propensities.
+compared to independent seeds.
 
-Both types produce valid paired comparisons — the CRN correlation ensures that
-natural stochastic variation (weather, random timing) is shared across
-scenarios, isolating the effect of the intervention or parameter change.
-
-### 7.3 Derived Quantities
+### 10.3 Derived Quantities
 
 ```toml
 [compare.derived]
@@ -562,7 +736,7 @@ abs_difference = "abs(reference.peak_I - test.peak_I)"
 match a name in the model's `output { summary { } }` block (language spec §17).
 Previously-defined derived quantities can be referenced by name.
 
-### 7.4 Derived Expression Language
+### 10.4 Derived Expression Language
 
 Evaluated per-seed: for seed 42, `reference.total_cases` looks up
 `(reference_scenario, seed=42)` in the summary.
@@ -589,276 +763,144 @@ expression evaluates to a scalar per seed.
 **Evaluation order:** topological sort of the dependency graph. Cycles are an
 error.
 
-**Implementation:** ~120 lines of Rust in `derived_eval.rs`.
+---
 
-### 7.5 Dependency on Summary Post-Processing
+## 11. Parameter Files
 
-Pipeline:
+### 11.1 Baseline Parameters (params.toml)
 
+A point m ∈ M. One key-value pair per declared parameter:
+
+```toml
+beta = 0.3
+gamma = 0.1
+sigma = 0.2
+rho = 0.4
+k = 5.0
+N0 = 1000000
+I0 = 10
 ```
-camdl experiment run         → trajectories per (scenario, seed)
-camdl experiment summarize   → summary TSVs per scenario
-camdl experiment compare     → comparison TSVs using derived expressions
+
+Every parameter declared in the `.camdl` file must have a value here (or a
+default in the declaration). The CLI validates at load time and reports missing
+parameters with their declared types.
+
+### 11.2 Layered Parameters
+
+```toml
+[experiment]
+params = ["params/base.toml", "params/fitted_2024.toml"]
 ```
 
-Summary computation requires the model's `output { summary { } }` block
-(language spec §17.3).
+Later files override earlier ones. `fitted_2024.toml` might contain only
+`beta = 0.35` and `rho = 0.42`, overriding those values from `base.toml`.
+
+### 11.3 Indexed Parameter Overrides
+
+For spatial models (`R0[patch]` expanding to 238 scalar parameters), use
+`--param-vec` to supply values from a keyed TSV:
+
+```tsv
+R0_kano     2.1
+R0_lagos    1.8
+R0_sokoto   2.4
+```
+
+```bash
+camdl simulate model.camdl --params p.toml --param-vec R0=r0_init.tsv
+```
+
+Matched by parameter name (not position). Error if a constructed name doesn't
+match, or if a matching parameter has no entry.
 
 ---
 
-## 8. Content-Addressable Output Structure
+## 12. Output File Schemas
 
-### 8.1 Directory Layout
+### 12.1 Trajectories
 
-```
-{output_dir}/
-  manifest.json
-  model.ir.json
-  geo/boundaries.geojson          (if geo= specified)
-  runs/
-    {sim_hash_8}/                 # model + base params + backend + dt
-      {scenario_slug}-{scen_hash_8}/   # scenario overrides
-        seed_{seed}/              # individual run
-          traj.tsv
-          run.json
-```
+One row per output time. Format: `t: float64`, then one column per compartment
+(`int64` for stochastic compartments, `float64` for real-valued).
 
-Example with two scenarios:
+### 12.2 Flows
 
-```
-runs/3a7f2c1d/baseline-00000000/seed_1/
-runs/3a7f2c1d/with_sia-f9e2b047/seed_1/
-```
+One row per output time. One `uint64` column per transition (flow count since
+previous output).
 
-After tweaking `with_sia` only — baseline cache is untouched:
+### 12.3 Summary
 
-```
-runs/3a7f2c1d/with_sia-d4e2a391/seed_1/   ← new
-runs/3a7f2c1d/baseline-00000000/seed_1/   ← reused
-```
+One row per seed. Columns from `output { summary { } }` in `.camdl`:
 
-After changing base params — nothing reused:
-
-```
-runs/cc8b1a90/baseline-00000000/seed_1/
-runs/cc8b1a90/with_sia-f9e2b047/seed_1/
-```
-
-Scenario slug: scenario name lowercased, non-`[a-z0-9_]` replaced with `_`. Seed
-directory: `seed_{N}` with verbatim u64, no zero-padding.
-
-### 8.2 Hash Computation
-
-**Sim hash** — full simulation identity (model + base params + backend + dt):
-
-```
-sim_hash = sha256(
-    model_ir_json_bytes
-    + canonical_sorted(base_param key=value pairs)
-    + backend
-    + dt
-    + camdl_version
-)   # full 64-char hex; first 8 used in dir name
-```
-
-`model_ir_json_bytes` is the compiled IR — it captures all structural content:
-compartments, parameters, transitions, interventions, init, etc.
-
-**Scenario hash** — scenario delta identity:
-
-```
-scen_hash = sha256(
-    sorted(enable list)
-    + sorted(disable list)
-    + canonical_sorted(scenario param overrides)
-)   # full 64-char hex; first 8 used in dir name
-```
-
-A scenario with no overrides, enables, or disables always hashes to the same
-value (`sha256("") = ...`), producing `00000000` in the directory name.
-
-`scen_hash` covers only the _delta_ — the scenario's own enable/disable lists
-and param overrides. Base params are already in `sim_hash`. Renaming a scenario
-without changing its definition preserves `scen_hash` and reuses cached runs.
-
-### 8.3 Cache Reuse Matrix
-
-| What changed                       | sim_hash  | scen_hash         | Reuse               |
-| ---------------------------------- | --------- | ----------------- | ------------------- |
-| IR / model                         | changes   | —                 | none                |
-| base params                        | changes   | —                 | none                |
-| backend or dt                      | changes   | —                 | none                |
-| scenario A's enable/disable/params | unchanged | A changes, B same | B's runs reused     |
-| add more seeds                     | unchanged | unchanged         | all existing reused |
-| rename a scenario                  | unchanged | unchanged         | reused (same sim)   |
-
-### 8.4 Manifest
-
-`manifest.json` at the output root lists every completed run:
-
-```json
-{
-  "runs": [
-    {
-      "scenario": "baseline",
-      "seed": 1,
-      "run_path": "3a7f2c1d/baseline-00000000/seed_1"
-    },
-    {
-      "scenario": "with_sia",
-      "seed": 1,
-      "run_path": "3a7f2c1d/with_sia-f9e2b047/seed_1"
-    }
-  ]
-}
-```
-
-The web app constructs trajectory URLs as `GET /runs/{run_path}/traj.tsv`.
-
----
-
-## 9. Run-Level Metadata
-
-Each run produces a `run.json`:
-
-```json
-{
-  "sim_hash": "3a7f2c1d...",
-  "scen_hash": "f9e2b047...",
-  "scenario": "with_sia",
-  "seed": 42,
-  "backend": "tau_leap",
-  "dt": 1.0,
-  "camdl_version": "0.1.0",
-  "model_file": "model.camdl",
-  "params_file": "params.toml",
-  "wall_time_seconds": 1.23,
-  "timestamp": "2026-03-23T14:30:00Z"
-}
-```
-
-Cache key: if the run directory
-(`runs/{sim_hash_8}/{slug}-{scen_hash_8}/seed_{N}/`) already exists, the run is
-skipped. Pass `--force` to re-run.
-
----
-
-## 10. Output File Schemas
-
-### 10.1 Trajectories (trajectories.parquet)
-
-One row per output time:
-
-```
-t: float64
-{compartment_name}: int64/float64
-```
-
-### 10.2 Flows (flows.parquet)
-
-One row per output time:
-
-```
-t: float64
-{transition_name}: uint64            # flow count since previous output
-```
-
-### 10.3 Summary (analysis/summaries/{scenario}.tsv)
-
-One row per seed. Columns from `output { summary { } }`:
-
-```
+```tsv
 seed	peak_I	total_cases	final_size
 42	4523	89201	0.089
 ```
 
-Computed post-simulation by `camdl experiment summarize`.
+**Summary functions:** `max(expr)`, `min(expr)`, `cumulative(transition)`,
+`at(expr, timepoint)`.
 
-**Summary functions** (language spec §17.3):
+**Valid timepoints for `at()`:** `t_start`, `t_end`, or numeric literal in
+model time_unit. User-defined timepoints (v0.2+).
 
-```
-max(expr)                  maximum value over all output times
-min(expr)                  minimum value
-cumulative(transition)     total firings over entire simulation
-at(expr, timepoint)        value at specific time
-```
+### 12.4 Diagnostics
 
-**Valid timepoints for `at()`:**
+Per-transition firing statistics, written unconditionally per run:
 
-- `t_start` — simulation start (reserved identifier from `simulate { from }`)
-- `t_end` — simulation end (reserved identifier from `simulate { to }`)
-- Numeric literal — `at(I, 365.0)` (in model time_unit)
-- User-defined timepoints from `timepoints { }` block (v0.2+)
-
-### 10.4 Diagnostics (diagnostics.tsv)
-
-Per-transition firing statistics, written unconditionally:
-
-```
-transition_name	total_firings	mean_propensity	max_propensity	first_firing	last_firing
+```tsv
+transition_name	total_firings	mean_propensity	max_propensity
 ```
 
-### 10.5 Ensembles (analysis/ensembles/{scenario}.parquet)
+### 12.5 Comparisons
 
-All seeds stacked:
+One row per seed, written to `analysis/comparisons/{ref}-vs-{test}.tsv`:
 
-```
-seed: uint64
-t: float64
-{compartment_name}: int64/float64
-```
-
-### 10.6 Comparisons (analysis/comparisons/{ref}-vs-{test}.tsv)
-
-One row per seed:
-
-```
+```tsv
 seed	cases_averted	relative_reduction	peak_reduction
 ```
 
 ---
 
-## 11. CLI Commands
+## 13. CLI Commands
 
-### 11.1 Single Run (No Experiment File)
+### 13.1 Single Run
 
 ```bash
-# Baseline
 camdl simulate model.camdl --params params.toml --seed 42
-
-# Named scenario from .camdl
 camdl simulate model.camdl --params params.toml --scenario with_sia --seed 42
-
-# Ad-hoc intervention toggle
-camdl simulate model.camdl --params params.toml --enable sia_round_1 --seed 42
-
-# Parameter override (M layer — always valid, with or without scenario)
 camdl simulate model.camdl --params params.toml --param beta=0.5 --seed 42
-camdl simulate model.camdl --params params.toml --scenario with_sia --param beta=0.5 --seed 42
-
-# Content-addressable output
-camdl simulate model.camdl --params params.toml --seed 42 --output-dir output/
+camdl simulate model.camdl --params params.toml --param-vec R0=r0.tsv --seed 42
 ```
 
-**Flag rules:**
-
-- `--scenario` and `--enable`/`--disable` are **mutually exclusive** (both σ)
-- `--param` is **always valid** (M layer, independent of σ)
-- Without `--output-dir`, output goes to stdout as TSV
-
-### 11.2 Experiment Execution
+### 13.2 Experiment Execution (Rust + Rayon + indicatif)
 
 ```bash
 camdl experiment run EXPERIMENT.toml
+camdl experiment run EXPERIMENT.toml --parallel 16
 camdl experiment run EXPERIMENT.toml --force
 camdl experiment run EXPERIMENT.toml --scenario with_sia
-camdl experiment run EXPERIMENT.toml --scenario with_sia --seed 42
 camdl experiment run EXPERIMENT.toml --resume
 ```
 
-`--parallel N` runs N simulations concurrently. File writes are atomic.
+All simulation is Rust-native with Rayon parallelism and indicatif progress
+bars:
 
-### 11.3 Post-Processing
+```
+Nigeria SIA evaluation 2024
+  ████████████████████░░░░░░░░░ 12,450 / 18,000 runs  69%  [2:14<~1:01]
+  baseline × vacc_eff=0.5: 500/500 seeds ✓
+  with_sia × vacc_eff=0.5: 412/500 seeds ...
+  Cached: 3,200 runs reused
+```
+
+The experiment runner:
+1. Compiles the `.camdl` model once
+2. Loads and layers params.toml files
+3. Generates the run grid (sweep × scenarios × seeds OR design × scenarios × seeds)
+4. Calls `plan_runs()` to classify cache hits vs new runs
+5. Executes new runs with Rayon `par_iter` + indicatif
+6. Writes atomic output files (write to `.tmp`, rename)
+
+### 13.3 Post-Processing (Rust)
 
 ```bash
 camdl experiment summarize EXPERIMENT.toml
@@ -868,18 +910,206 @@ camdl experiment status EXPERIMENT.toml
 
 Pipeline: `run → summarize → compare`.
 
-### 11.4 Verification
+### 13.4 Sensitivity Analysis (Rust)
 
 ```bash
-camdl experiment verify EXPERIMENT.toml    # check run.json hashes
-camdl experiment check EXPERIMENT.toml     # detect stale results
+camdl experiment analyze EXPERIMENT.toml
+camdl experiment analyze EXPERIMENT.toml --design current
+camdl experiment analyze EXPERIMENT.toml --json
+camdl experiment analyze EXPERIMENT.toml --bootstrap 2000 --confidence 0.99
+```
+
+Reads `parameter_points.tsv` + `outputs.tsv` for each design. Computes Sobol
+indices and bootstrap confidence intervals in Rust. Writes TSV outputs to
+`analysis/sensitivity/{design}/`. Optional `--json` writes alongside the TSV.
+
+See §14 for output file schemas.
+
+### 13.5 Verification
+
+```bash
+camdl experiment verify EXPERIMENT.toml     # check run.json hashes
+camdl experiment check EXPERIMENT.toml      # detect stale results
 ```
 
 ---
 
-## 12. Caching, Staleness, and Provenance
+## 14. Sensitivity Analysis: `camdl experiment analyze`
 
-### 12.1 Cache Hit
+### 14.1 Overview
+
+`camdl experiment analyze` reads simulation outputs and computes global
+sensitivity indices in Rust. No Python required for the computation step.
+Python (`camdl-analysis`) is used only for figure generation (§15).
+
+### 14.2 Sobol Index Computation (Saltelli 2010)
+
+For each design using `method = "sobol"`, the structured sample matrices
+(A, B, A_Bi) generated during `experiment run` are used to compute variance-
+based sensitivity indices.
+
+For n samples and k parameters, given output Y for a single scalar summary:
+
+- A-block: rows 0..n → Y_A
+- B-block: rows n..2n → Y_B
+- A_Bi block i: rows (2+i)×n..(3+i)×n → Y_ABi
+
+Saltelli et al. (2010) estimators, equations (b) and (f):
+
+```
+V_total = Var(Y_A)
+S1[i]   = (1/n) Σ_j Y_B[j] * (Y_ABi[j] - Y_A[j])  / V_total    [eq. (b)]
+ST[i]   = (1/2n) Σ_j (Y_A[j] - Y_ABi[j])^2          / V_total    [eq. (f)]
+```
+
+Bootstrap confidence intervals: resample rows of (A, B, A_Bi) jointly,
+recompute S1 and ST 1000 times (configurable with `--bootstrap`), take the
+α/2 and 1-α/2 quantiles.
+
+### 14.3 `[analyze]` Block (Optional)
+
+Specifying which outputs to analyze in the experiment TOML:
+
+```toml
+[analyze]
+sobol_indices = true
+outputs = ["peak_I", "total_cases", "cases_averted"]
+confidence = 0.95
+```
+
+If absent, all float columns in `outputs.tsv` are analyzed. `--outputs X,Y,Z`
+on the CLI overrides for ad-hoc use.
+
+### 14.4 Output Files
+
+All sensitivity output is written to `{output_dir}/analysis/sensitivity/{design}/`:
+
+**`sobol_indices.tsv`:**
+
+```tsv
+design	output	parameter	S1	S1_ci_low	S1_ci_high	ST	ST_ci_low	ST_ci_high
+current	peak_I	vacc_eff	0.62	0.58	0.66	0.71	0.67	0.75
+current	peak_I	R0	0.23	0.19	0.27	0.29	0.25	0.33
+better_coverage	peak_I	vacc_eff	0.15	0.11	0.19	0.22	0.18	0.26
+better_coverage	peak_I	R0	0.55	0.51	0.59	0.63	0.59	0.67
+```
+
+**`convergence.tsv`:** Indices recomputed at n/8, n/4, n/2, n — shows whether
+estimates have stabilized.
+
+```tsv
+design	output	parameter	n_samples	S1	ST
+current	peak_I	vacc_eff	128	0.58	0.69
+current	peak_I	vacc_eff	256	0.61	0.70
+current	peak_I	vacc_eff	512	0.62	0.71
+current	peak_I	vacc_eff	1024	0.62	0.71
+```
+
+**`assumptions.txt` (auto-generated, always written):**
+
+```
+Sensitivity analysis assumptions:
+
+Methodology:
+  Sobol first-order and total-order indices (Saltelli 2010)
+  Bootstrap confidence intervals (1000 resamples, 95% level)
+
+Sampling:
+  Uniform over specified parameter ranges
+  Output variance decomposition is CONDITIONAL on these bounds
+  Different bounds (designs) produce different indices
+
+Design "current":
+  vacc_eff ∈ [0.1, 0.9] (uniform)
+  R0 ∈ [1.0, 5.0] (uniform)
+  kappa ∈ [0.001, 0.1] (log-uniform)
+
+Design "better_coverage":
+  vacc_eff ∈ [0.6, 0.8] (uniform)
+  R0 ∈ [1.0, 5.0] (uniform)
+  kappa ∈ [0.001, 0.1] (log-uniform)
+
+Cross-design VOI interpretation:
+  Variance reduction from "current" → "better_coverage" ≈ 47%
+  for output "peak_I". This estimates the value of reducing
+  coverage uncertainty. It is a sensitivity landscape comparison,
+  NOT a Bayesian posterior. For prior-weighted analysis, use
+  parameter_points.tsv and outputs.tsv with importance weights.
+```
+
+The assumptions file is non-negotiable — it is always generated and states
+exactly what was assumed. Raw data (`parameter_points.tsv`, `outputs.tsv`) is
+always available for external reanalysis.
+
+If `--json` is passed, `sobol_indices.json` is written alongside the TSV with
+equivalent content.
+
+---
+
+## 15. Python Analysis Package (`camdl-analysis`)
+
+A separate Python package for figure generation. Computation is handled
+entirely by `camdl experiment analyze` (§14). Python reads TSV outputs and
+generates matplotlib figures.
+
+### 15.1 Architecture
+
+```
+python/
+  pyproject.toml          # matplotlib, polars, defopt
+  camdl_analysis/
+    __init__.py
+    cli.py                # defopt entry points
+    sensitivity.py        # read sobol_indices.tsv → bar chart
+    voi.py                # read multi-design sobol_indices.tsv → waterfall
+    scatter.py            # read outputs.tsv → scatter matrix
+    convergence.py        # read convergence.tsv → line plot
+```
+
+**No computation in Python.** All index values come from Rust-generated TSV
+files. No scipy, no SALib.
+
+### 15.2 CLI (defopt)
+
+```bash
+# Sobol bar chart per design
+camdl-analysis sensitivity experiment.toml --output figures/
+
+# VOI waterfall: cross-design variance reduction
+camdl-analysis voi experiment.toml --output figures/
+
+# Scatter matrix: parameter values vs output values
+camdl-analysis scatter experiment.toml --design current --output figures/
+
+# Convergence diagnostic: index estimate vs N
+camdl-analysis convergence experiment.toml --design current --output figures/
+```
+
+All commands read from `{output_dir}/analysis/sensitivity/` (resolved via
+experiment.toml) and write figures to `--output`.
+
+### 15.3 Figure Descriptions
+
+**Sobol bar chart (per design):** Grouped bars, one pair per parameter (S1
+darker, ST lighter), CI whiskers. Side-by-side panels across designs show how
+the sensitivity landscape shifts.
+
+**VOI waterfall:** Horizontal bars, one per information acquisition (design B
+vs A, C vs A). Length = variance reduction. Sorted by magnitude. Answers
+"which data is most worth collecting?"
+
+**Scatter matrix (per design):** Lower triangle: parameter value vs output
+value. Diagonal: marginal histograms. Upper triangle: Spearman correlations.
+Shows nonlinearities Sobol indices compress.
+
+**Convergence diagnostic:** Index estimate vs N with CI band. Shows whether
+estimates have stabilized. Suggests increasing N if not converged.
+
+---
+
+## 16. Caching, Staleness, and Provenance
+
+### 16.1 Cache Hit
 
 A run is a cache hit when
 `runs/{sim_hash_8}/{scenario_slug}-{scen_hash_8}/seed_{N}/` already exists. The
@@ -890,7 +1120,7 @@ lists or param overrides changes `scen_hash_8`.
 Scenario changes only invalidate runs for that scenario — other scenarios'
 directories are unaffected.
 
-### 12.2 Provenance Guarantees
+### 16.2 Provenance Guarantees
 
 1. **Self-contained.** `manifest.json` + `model.ir.json` describe the analysis
    completely.
@@ -904,86 +1134,61 @@ directories are unaffected.
 
 ---
 
-## 13. Relationship to the Parameter Grammar
+## 17. Relationship to the Parameter Grammar
 
 | Grammar concept      | Implementation                                       |
 | -------------------- | ---------------------------------------------------- |
-| **Sim(m, c, s) → Y** | One cell: `runs/{scenario}/seed-{s}/`                |
+| **Sim(m, c, s) → Y** | One run: `runs/{sim_hash_8}/{scen_hash_8}/seed_{s}/` |
 | **M**                | `parameters { }` in `.camdl`                         |
 | **C**                | `.camdl` structure + `[config]` overrides            |
-| **S**                | `seeds` in experiment or `--seed` on CLI             |
+| **S**                | `seeds` in experiment or `--seed`                    |
 | **Point m ∈ M**      | `params.toml` (layered)                              |
-| **Scenario σ**       | `scenarios { }` in `.camdl` (merged with experiment) |
+| **Scenario σ**       | `scenarios { }` (merged with experiment)             |
+| **Sweep**            | Deterministic M-layer grid                           |
+| **Design**           | Named belief state → space-filling sample            |
+| **VOI**              | Cross-design sensitivity comparison                  |
 | **Baseline σ₀**      | Identity patch                                       |
 | **σ₂ ∘ σ₁**          | `compose = ["A", "B"]`                               |
-| **M override**       | `--param` CLI flag                                   |
 | **View V**           | `view.toml` (v0.2+)                                  |
 | **Transform T_V**    | `priors.toml` (v0.2+)                                |
 
-The downward chain:
-
-```
-z ∈ Z_V       inference engine proposes a vector
-  │ T_V⁻¹     back-transform (exp, expit)
-  ▼
-p ∈ P_V       free parameter values
-  │ κ_V       fill in fixed values from params.toml
-  ▼
-m ∈ M         complete parameter set
-  │ --param   CLI overrides (if any)
-  ▼
-m' ∈ M        parameter set with CLI overrides
-  │ σ         apply scenario patch
-  ▼
-(m'', c')     patched parameters + configuration
-  │ Sim(·,·,s)
-  ▼
-y ∈ Y         trajectory → runs/{scenario}/seed-{s}/
-```
-
 ---
 
-## 14. Implementation Phases
+## 18. Implementation Phases
 
-### v0.1-core: Single-run CLI
+### v0.1-core (implemented)
 
-- `camdl simulate MODEL --params FILE --seed N` → TSV to stdout
-- `--backend`, `--dt`, `--param`, `--param-vec`, `--params` flags
-- Diagnostics TSV written unconditionally
+Single-run CLI, scenario support, batch experiment execution with Rayon
+parallel + indicatif, content-addressable output, `plan_runs()` cache
+classification.
 
-### v0.1-scenarios: Scenario support _(implemented)_
+### v0.1-sweep
 
-- `.camdl` `scenarios { }` block: `enable`/`disable`/`set` operations
-- Scenario manifest serialized in IR JSON `"presets"` field
-- `--scenario NAME` on `camdl simulate` (lookup from manifest)
-- `--enable NAME` / `--disable NAME` ad-hoc scenario flags
-- Mutual exclusion: `--scenario` vs `--enable`/`--disable`
-- `--param` always valid alongside either mode
-- Baseline = no interventions; scenarios explicitly enable them
+`[sweep]` with `linspace`, `logspace`, `range`, explicit lists. Sweep ×
+scenario Cartesian product. ~60 lines Rust in `experiment.rs`.
 
-### v0.1-batch: Experiment execution
+### v0.1-post
 
-- `camdl experiment run` with scenario × seed iteration
-- `[config]` loading with closed schema validation
-- `[config.simulate]` and `[config.output.*]` override merging
-- Scenario merge-with-override (experiment + `.camdl`)
-- Scenario `enable`/`disable` wiring (filter model interventions)
-- Frozen experiment.toml (only for experiment runs)
-- `--parallel N`, `--resume`, `camdl experiment status`
+Summary computation, derived expression evaluator (~120 lines Rust),
+`camdl experiment summarize`, `compare`.
 
-### v0.1-post: Post-processing
+### v0.2-design
 
-- Summary computation from trajectory parquets (`output { summary { } }`)
-- `at(expr, timepoint)` with `t_start`, `t_end`, numeric literals
-- Ensemble stacking
-- Derived expression evaluator (~120 lines Rust)
-- `camdl experiment summarize`, `compare`, `verify`, `check`
+`[design.*]` named belief states. Saltelli sampling (sobol), LHS, random.
+Design × scenario execution. `parameter_points.tsv` output.
+New `sampling.rs` module.
 
-### v0.2: Inference + timepoints
+### v0.2-analysis
 
-- `view.toml`, `priors.toml`
-- Scoring primitive
-- Particle filter, IF2
-- `camdl fit`
-- User-defined `timepoints { }` block wired through expander
-- `scale` and `compose` scenario operations
+`camdl experiment analyze` Rust subcommand. Sobol index computation with
+bootstrap CIs. Auto-generated `assumptions.txt`.
+
+### v0.2-python
+
+`camdl-analysis` Python package. Reads TSV outputs, generates matplotlib
+figures. No computation — all numbers from Rust.
+
+### v0.2-inference
+
+`view.toml`, `priors.toml`. Scoring primitive. Particle filter, IF2.
+`camdl fit`.

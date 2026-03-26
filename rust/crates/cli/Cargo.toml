@@ -18,6 +18,7 @@ toml = { version = "0.8", features = ["parse"] }
 sha2 = "0.10"
 hex = "0.4"
 rayon = "1"
+csv = "1"
 axum = "0.7"
 tokio = { version = "1", features = ["rt-multi-thread", "net", "macros"] }
 tower-http = { version = "0.5", features = ["fs", "cors"] }
