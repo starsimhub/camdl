@@ -9,12 +9,13 @@
 #   (narrows gamma) — would most reduce model output uncertainty?
 #
 # Three belief-state designs:
-#   current       — no studies done; wide log-uniform uncertainty on all 3
+#   current       — no studies done; beta ∈ [0.1, 0.5] (R0_min ≈ 2.9, avoids
+#                   near-threshold stochastic fadeout); sigma, gamma wide
 #   narrow_beta   — seroprevalence study done; beta constrained to [0.2, 0.4]
 #   narrow_gamma  — household study done; gamma constrained to [0.1, 0.3]
 #
-# Run count: 3 designs × 256 × (2×3+2) = 3 × 2,048 = 6,144 parameter
-# points × 3 seeds = 18,432 total runs.
+# N=1024 (base sample count): total = N×(k+2) = 1024×5 = 5120 points per
+# design × 3 seeds = 15,360 runs per design × 3 designs = 46,080 total runs.
 #
 # Run from repo root:
 #   camdl-sim experiment run examples/seir_age_sobol/experiment.toml --parallel 8
@@ -33,13 +34,19 @@ from = 0.0
 to   = 365.0
 
 # ── Design A: current knowledge — wide log-uniform uncertainty ──────────────
+# Beta lower bound raised from 0.05 → 0.1.
+# With the age contact matrix (dominant eigenvalue ≈ 14.5):
+#   R0 = (beta/gamma) × 14.5
+#   R0_min = (0.1 / 0.5) × 14.5 = 2.9  (vs 1.45 at beta=0.05 — near-threshold)
+# Keeps all design points safely supercritical; avoids stochastic fadeout
+# distorting the Sobol decomposition.
 
 [design.current]
 method = "sobol"
-n      = 256
+n      = 1024
 
 [design.current.parameters.beta]
-range     = { min = 0.05, max = 0.5 }
+range     = { min = 0.1, max = 0.5 }
 transform = "log"
 
 [design.current.parameters.sigma]
@@ -54,7 +61,7 @@ transform = "log"
 
 [design.narrow_beta]
 method = "sobol"
-n      = 256
+n      = 1024
 
 [design.narrow_beta.parameters.beta]
 range     = { min = 0.2, max = 0.4 }
@@ -72,10 +79,10 @@ transform = "log"
 
 [design.narrow_gamma]
 method = "sobol"
-n      = 256
+n      = 1024
 
 [design.narrow_gamma.parameters.beta]
-range     = { min = 0.05, max = 0.5 }
+range     = { min = 0.1, max = 0.5 }
 transform = "log"
 
 [design.narrow_gamma.parameters.sigma]

@@ -224,6 +224,9 @@ pub struct RunPlan {
     pub seed: u64,
     /// Sweep parameter overrides for this run (empty if no sweep).
     pub sweep_overrides: HashMap<String, f64>,
+    /// Index of the design/sweep point (0-based). Used by design experiments
+    /// to write run.json so analyze can recover point_id without hashing.
+    pub point_idx: usize,
     /// Path relative to runs/: {sim_hash_8}/{scenario_slug}-{scen_hash_8}/seed_{seed}
     pub run_path: String,
     /// Absolute path to the run directory.
@@ -255,7 +258,7 @@ pub fn plan_runs(
     };
 
     let mut plans = Vec::with_capacity(effective_points.len() * scenarios.len() * seeds.len());
-    for sweep in effective_points {
+    for (pt_idx, sweep) in effective_points.iter().enumerate() {
         for sc in scenarios {
             // Merge sweep overrides into scenario params for hashing
             let mut merged_params = sc.params.clone();
@@ -276,6 +279,7 @@ pub fn plan_runs(
                     scenario: sc.name.clone(),
                     seed,
                     sweep_overrides: sweep.clone(),
+                    point_idx: pt_idx,
                     run_path,
                     run_dir,
                     decision,
@@ -699,6 +703,10 @@ fn run_design_experiment(
                             eprintln!("error: cannot write traj.tsv in {}: {}", plan.run_dir, e);
                             return;
                         }
+                        // Write run.json so analyze can recover design_point_index
+                        // without re-hashing parameter values.
+                        let run_json = format!("{{\"design_point_index\":{}}}\n", plan.point_idx);
+                        let _ = std::fs::write(&format!("{}/run.json", plan.run_dir), run_json);
                         let n = counter.fetch_add(1, Ordering::Relaxed) + 1;
                         eprintln!("[{}/{}] design={} scenario={} seed={}", n, total, design_name, plan.scenario, plan.seed);
                     }

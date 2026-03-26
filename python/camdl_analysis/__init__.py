@@ -11,9 +11,9 @@ CLI usage:
     camdl-analysis plot-convergence experiment.toml --design current
 """
 
-from .sensitivity import plot_sensitivity
-from .voi import plot_voi
+from .response import plot_response
 from .scatter import plot_scatter
+from .sensitivity import plot_sensitivity
 from .convergence import plot_convergence
 
-__all__ = ["plot_sensitivity", "plot_voi", "plot_scatter", "plot_convergence"]
+__all__ = ["plot_response", "plot_scatter", "plot_sensitivity", "plot_convergence"]

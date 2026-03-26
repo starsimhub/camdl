@@ -10,17 +10,17 @@ Sampling:
   Different bounds (designs) produce different indices
 
 Design "narrow_beta":
-  Base sample size: n = 256
+  Base sample size: n = 1024
   Parameters: k = 3
-  Total points: n(2k+2) = 1280
+  Total points: n(2k+2) = 5120
 
 Results summary:
-  narrow_beta | peak_I_child | beta: S1=0.036 ST=1.034
-  narrow_beta | peak_I_child | gamma: S1=0.161 ST=0.873
-  narrow_beta | peak_I_child | sigma: S1=0.112 ST=0.899
-  narrow_beta | peak_I_adult | beta: S1=0.038 ST=1.029
-  narrow_beta | peak_I_adult | gamma: S1=0.171 ST=0.873
-  narrow_beta | peak_I_adult | sigma: S1=0.122 ST=0.903
+  narrow_beta | peak_I_child | beta: S1=0.001 ST=0.003
+  narrow_beta | peak_I_child | gamma: S1=0.617 ST=0.613
+  narrow_beta | peak_I_child | sigma: S1=0.372 ST=0.386
+  narrow_beta | peak_I_adult | beta: S1=0.001 ST=0.004
+  narrow_beta | peak_I_adult | gamma: S1=0.630 ST=0.627
+  narrow_beta | peak_I_adult | sigma: S1=0.357 ST=0.373
 
 Cross-design VOI interpretation:
   Comparing sensitivity indices across designs estimates the VALUE of

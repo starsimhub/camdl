@@ -10,17 +10,17 @@ Sampling:
   Different bounds (designs) produce different indices
 
 Design "current":
-  Base sample size: n = 256
+  Base sample size: n = 1024
   Parameters: k = 3
-  Total points: n(2k+2) = 1280
+  Total points: n(2k+2) = 5120
 
 Results summary:
-  current | peak_I_child | beta: S1=-0.083 ST=0.979
-  current | peak_I_child | gamma: S1=0.021 ST=0.948
-  current | peak_I_child | sigma: S1=0.530 ST=0.909
-  current | peak_I_adult | beta: S1=-0.065 ST=0.985
-  current | peak_I_adult | gamma: S1=0.033 ST=0.950
-  current | peak_I_adult | sigma: S1=0.514 ST=0.907
+  current | peak_I_child | beta: S1=0.021 ST=0.026
+  current | peak_I_child | gamma: S1=0.645 ST=0.642
+  current | peak_I_child | sigma: S1=0.322 ST=0.340
+  current | peak_I_adult | beta: S1=0.025 ST=0.032
+  current | peak_I_adult | gamma: S1=0.655 ST=0.655
+  current | peak_I_adult | sigma: S1=0.306 ST=0.321
 
 Cross-design VOI interpretation:
   Comparing sensitivity indices across designs estimates the VALUE of

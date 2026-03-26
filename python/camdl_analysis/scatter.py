@@ -79,27 +79,42 @@ def plot_scatter(
 
     data = {col: df[col].to_numpy() for col in all_cols}
 
+    # Colour scheme: inputs are blue, output is orange.
+    # Panels that touch the output row/col are "response" panels and get
+    # orange points; pure parameter-parameter panels stay blue.
+    C_PARAM  = "#4393c3"   # blue  — sampling design panels
+    C_OUTPUT = "#e08214"   # orange — response surface panels
+    C_DIAG_PARAM  = "#4393c3"
+    C_DIAG_OUTPUT = "#e08214"
+
+    def _is_output(idx: int) -> bool:
+        return idx == n - 1   # last column = output
+
     fig, axes = plt.subplots(n, n, figsize=(2.5 * n, 2.5 * n))
 
     for i, col_i in enumerate(all_cols):
         for j, col_j in enumerate(all_cols):
             ax = axes[i, j]
+            response_panel = _is_output(i) or _is_output(j)
+            pt_color = C_OUTPUT if response_panel else C_PARAM
+
             if i == j:
-                ax.hist(data[col_i], bins=30, color="#4393c3", edgecolor="none")
-                ax.set_xlabel("")
-                ax.set_ylabel("")
+                diag_color = C_DIAG_OUTPUT if _is_output(i) else C_DIAG_PARAM
+                ax.hist(data[col_i], bins=30, color=diag_color, edgecolor="none", alpha=0.8)
             elif i > j:
                 # Lower triangle: scatter
                 ax.scatter(data[col_j], data[col_i],
-                           s=3, alpha=alpha, color="#4393c3", rasterized=True)
+                           s=3, alpha=alpha, color=pt_color, rasterized=True)
             else:
                 # Upper triangle: Spearman r
                 r = _spearman(data[col_j], data[col_i])
+                strong = abs(r) > 0.3
                 ax.text(0.5, 0.5, f"r = {r:.2f}",
                         ha="center", va="center",
                         transform=ax.transAxes,
                         fontsize=10,
-                        color="#d6604d" if abs(r) > 0.3 else "black")
+                        fontweight="bold" if strong else "normal",
+                        color="#d6604d" if strong else "black")
                 ax.set_axis_off()
 
             if j == 0:
@@ -109,6 +124,11 @@ def plot_scatter(
 
             ax.tick_params(labelsize=6)
             ax.spines[["top", "right"]].set_visible(False)
+
+    # Light orange background on the output row and column to make them pop
+    for idx in range(n):
+        for ax in [axes[n - 1, idx], axes[idx, n - 1]]:
+            ax.set_facecolor("#fff8f0")
 
     fig.suptitle(
         f"Parameter × output scatter — design: {design}, output: {output}",

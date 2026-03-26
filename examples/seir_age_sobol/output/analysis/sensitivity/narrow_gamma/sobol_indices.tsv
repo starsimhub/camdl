@@ -1,7 +1,7 @@
 design	output	parameter	S1	S1_ci_low	S1_ci_high	ST	ST_ci_low	ST_ci_high
-narrow_gamma	peak_I_child	beta	0.6275	0.0159	1.2654	1.2162	1.0088	1.4619
-narrow_gamma	peak_I_child	gamma	0.7151	0.1491	1.2673	0.9997	0.8180	1.2356
-narrow_gamma	peak_I_child	sigma	0.6697	0.1660	1.2238	0.8704	0.7347	1.0401
-narrow_gamma	peak_I_adult	beta	0.5733	-0.0024	1.1891	1.1987	0.9937	1.4440
-narrow_gamma	peak_I_adult	gamma	0.6665	0.1309	1.1850	1.0023	0.8253	1.2356
-narrow_gamma	peak_I_adult	sigma	0.5986	0.1242	1.1263	0.8551	0.7177	1.0181
+narrow_gamma	peak_I_child	beta	0.0448	-0.0178	0.1075	0.0472	0.0419	0.0538
+narrow_gamma	peak_I_child	gamma	0.2914	0.1426	0.4521	0.2827	0.2572	0.3115
+narrow_gamma	peak_I_child	sigma	0.6532	0.4037	0.9067	0.6754	0.6195	0.7359
+narrow_gamma	peak_I_adult	beta	0.0489	-0.0218	0.1144	0.0598	0.0530	0.0681
+narrow_gamma	peak_I_adult	gamma	0.2997	0.1491	0.4571	0.2962	0.2695	0.3257
+narrow_gamma	peak_I_adult	sigma	0.6284	0.3890	0.8788	0.6518	0.5978	0.7096
