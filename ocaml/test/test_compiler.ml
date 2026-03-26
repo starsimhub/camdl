@@ -226,8 +226,9 @@ let test_output_step_default () =
 
 let test_parameterised_table () =
   let src = {|
+    dimensions { sex = [m, f] }
     compartments { S, I, R }
-    stratify(by = sex, levels = [m, f])
+    stratify(by = sex)
     parameters {
       beta_mf : rate
       beta_fm : rate
@@ -409,10 +410,10 @@ let test_time_func_in_rate () =
     if not (expr_contains_time_func "seasonal" infection.Ir.rate) then
       Alcotest.fail "infection rate should contain Ir.TimeFunc \"seasonal\", got Const 0.0"
 
-(* ── read_long tests ─────────────────────────────────────────────────────────
+(* ── read tests ──────────────────────────────────────────────────────────────
 
    These tests write temporary TSV files to a temp directory, compile a model
-   that references them via read_long, and assert the expected IR.
+   that references them via read(), and assert the expected IR.
    The ~filename argument ensures source_dir is set to the temp directory so
    relative paths in the model source resolve correctly.                      *)
 
@@ -427,11 +428,12 @@ let test_read_long_1d () =
   let dir = Filename.get_temp_dir_name () in
   let _tsv_path = write_tmp_file dir "test_rates.tsv" "grp\trate\na\t0.5\nb\t1.5\nc\t2.5\n" in
   let src = {|
-    stratify(by = grp, levels = [a, b, c])
+    dimensions { grp = [a, b, c] }
     compartments { S, I }
+    stratify(by = grp)
     parameters { gamma : rate }
     tables {
-      rates : grp = read_long("test_rates.tsv")
+      rates : grp = read("test_rates.tsv")
     }
     transitions {
       recovery[g in grp] : I[g] --> S[g] @ rates[g] * I[g]
@@ -458,15 +460,16 @@ let test_read_long_1d () =
        Alcotest.(check (list (float 1e-9))) "values match TSV" [0.5; 1.5; 2.5] vals)
 
 let test_read_long_defines () =
-  (* Test that defines(dim) derives levels from the data file *)
+  (* Test that dimensions { grp = read(...) } derives levels from the data file *)
   let dir = Filename.get_temp_dir_name () in
   let _tsv_path = write_tmp_file dir "test_pop.tsv" "grp\tpop\nalpha\t1000.0\nbeta\t2000.0\n" in
   let src = {|
+    dimensions { grp = read("test_pop.tsv", column = "grp") }
     compartments { S, I }
     parameters { beta : rate }
     stratify(by = grp)
     tables {
-      pop : defines(grp) = read_long("test_pop.tsv")
+      pop : grp = read("test_pop.tsv")
     }
     transitions {
       infection[g in grp] : S[g] --> I[g] @ beta * S[g] * I[g]
@@ -491,10 +494,11 @@ let test_read_long_missing_file () =
      and inspect ctx.diags for the expected error. *)
   let dir = Filename.get_temp_dir_name () in
   let src = {|
-    stratify(by = grp, levels = [a, b])
+    dimensions { grp = [a, b] }
     compartments { S }
+    stratify(by = grp)
     tables {
-      rates : grp = read_long("nonexistent_xyz_12345.tsv")
+      rates : grp = read("nonexistent_xyz_12345.tsv")
     }
     simulate { from = 0  to = 10 }
   |} in
@@ -528,6 +532,62 @@ let test_read_long_missing_file () =
   ) errors in
   Alcotest.(check bool) "error message contains filename" true found_filename
 
+let test_read_header_reordered () =
+  (* Header columns in wrong order → E216 *)
+  let dir = Filename.get_temp_dir_name () in
+  (* File has columns 'sex' then 'age' but model expects 'age' then 'sex' *)
+  let _tsv = write_tmp_file dir "test_reorder.tsv"
+    "sex\tage\tvalue\nm\tyoung\t1.0\nm\told\t2.0\nf\tyoung\t3.0\nf\told\t4.0\n" in
+  let src = {|
+    dimensions { age = [young, old]  sex = [m, f] }
+    compartments { S }
+    stratify(by = age)
+    stratify(by = sex)
+    tables {
+      mx : age × sex = read("test_reorder.tsv")
+    }
+    simulate { from = 0  to = 10 }
+  |} in
+  let fake_src_file = Filename.concat dir "model.camdl" in
+  let lexbuf = Lexing.from_string src in
+  let decls = try Parser.file Lexer.token lexbuf
+              with _ -> Alcotest.fail "parse failed" in
+  let (_model, ctx, _summary) =
+    Expander.expand_detail ~source_dir:(Filename.dirname fake_src_file)
+      "test_reorder" decls
+  in
+  let errors = ctx.diags.Diagnostics.diags
+    |> List.filter (fun d -> d.Diagnostics.severity = Diagnostics.Error) in
+  let found_e216 = List.exists (fun d -> d.Diagnostics.code = "E216") errors in
+  Alcotest.(check bool) "E216 emitted for reordered columns" true found_e216
+
+let test_read_header_mismatch () =
+  (* Header names don't match dim names → W201 *)
+  let dir = Filename.get_temp_dir_name () in
+  let _tsv = write_tmp_file dir "test_mismatch.tsv"
+    "zone\tvalue\na\t1.0\nb\t2.0\n" in
+  let src = {|
+    dimensions { patch = [a, b] }
+    compartments { S }
+    stratify(by = patch)
+    tables {
+      pop : patch = read("test_mismatch.tsv")
+    }
+    simulate { from = 0  to = 10 }
+  |} in
+  let fake_src_file = Filename.concat dir "model.camdl" in
+  let lexbuf = Lexing.from_string src in
+  let decls = try Parser.file Lexer.token lexbuf
+              with _ -> Alcotest.fail "parse failed" in
+  let (_model, ctx, _summary) =
+    Expander.expand_detail ~source_dir:(Filename.dirname fake_src_file)
+      "test_mismatch" decls
+  in
+  let warnings = ctx.diags.Diagnostics.diags
+    |> List.filter (fun d -> d.Diagnostics.severity = Diagnostics.Warning) in
+  let found_w201 = List.exists (fun d -> d.Diagnostics.code = "W201") warnings in
+  Alcotest.(check bool) "W201 emitted for mismatched column name" true found_w201
+
 (* ── Indexed parameter tests ─────────────────────────────────────────────────
    These tests verify that indexed parameter declarations like `R0[patch]` are
    expanded to scalar IR parameters, resolved correctly in rate expressions, and
@@ -535,8 +595,9 @@ let test_read_long_missing_file () =
 
 let test_indexed_param_scalar_expansion () =
   let src = {|
-    stratify(by = patch, levels = [a, b])
+    dimensions { patch = [a, b] }
     compartments { S, I }
+    stratify(by = patch)
     parameters {
       R0[patch] : positive
       gamma     : rate
@@ -563,8 +624,9 @@ let test_indexed_param_scalar_expansion () =
 
 let test_indexed_param_variable_index () =
   let src = {|
-    stratify(by = patch, levels = [a, b])
+    dimensions { patch = [a, b] }
     compartments { S, I }
+    stratify(by = patch)
     parameters {
       R0[patch] : positive
       gamma     : rate
@@ -598,8 +660,9 @@ let test_indexed_param_variable_index () =
 
 let test_indexed_param_literal_index () =
   let src = {|
-    stratify(by = patch, levels = [kano, lagos])
+    dimensions { patch = [kano, lagos] }
     compartments { S, I }
+    stratify(by = patch)
     parameters {
       R0[patch] : positive
       gamma     : rate
@@ -623,8 +686,9 @@ let test_indexed_param_literal_index () =
 
 let test_indexed_param_no_default () =
   let src = {|
-    stratify(by = patch, levels = [x, y])
+    dimensions { patch = [x, y] }
     compartments { S, I }
+    stratify(by = patch)
     parameters {
       z[patch] : real
       gamma    : rate
@@ -647,8 +711,9 @@ let test_indexed_param_no_default () =
 
 let test_indexed_param_bad_index () =
   let src = {|
-    stratify(by = patch, levels = [urban, rural])
+    dimensions { patch = [urban, rural] }
     compartments { S, I }
+    stratify(by = patch)
     parameters {
       R0[patch] : positive
       gamma     : rate
@@ -676,8 +741,9 @@ let test_indexed_param_bad_index () =
 let test_indexed_param_shadow_warning () =
   (* 'kano' is both a let binding and a stratum value → W103 *)
   let src = {|
-    stratify(by = patch, levels = [kano, lagos])
+    dimensions { patch = [kano, lagos] }
     compartments { S, I }
+    stratify(by = patch)
     parameters {
       R0[patch] : positive
       gamma     : rate
@@ -731,8 +797,9 @@ let test_scalar_bounds () =
 
 let test_indexed_bounds () =
   let src = {|
-    stratify(by = patch, levels = [urban, rural])
+    dimensions { patch = [urban, rural] }
     compartments { S, I }
+    stratify(by = patch)
     parameters {
       R0[patch] : positive in [1.0, 10.0]
       gamma     : rate
@@ -754,6 +821,140 @@ let test_indexed_bounds () =
         Alcotest.(check (float 1e-12)) (pname ^ " hi = 10.0") 10.0 hi
       | None -> Alcotest.failf "%s bounds expected" pname
     ) ["R0_urban"; "R0_rural"]
+
+(* ── Shaped let bindings ─────────────────────────────────────────────────────
+   let B : sex × sex = [[0.0, beta_mf], [beta_fm, 0.0]]
+   B[female, male] → Param "beta_mf"  (row-major: 0*2+1 = 1)
+   B[female,female]→ Const 0.0        (row-major: 0*2+0 = 0)
+   B[male,  male]  → Const 0.0        (row-major: 1*2+1 = 3)              ── *)
+
+let test_shaped_let () =
+  let src = {|
+    dimensions { sex = [female, male] }
+    compartments { S, I }
+    stratify(by = sex)
+    parameters {
+      gamma    : rate
+      beta_mf  : rate
+      beta_fm  : rate
+    }
+    let B : sex × sex = [[0.0, beta_mf], [beta_fm, 0.0]]
+    transitions {
+      inf_ff[a in sex] : S[a] --> I[a]
+        @ B[female, female] * S[a] * I[a]
+      inf_fm[a in sex] : S[a] --> I[a]
+        @ B[female, male]   * S[a] * I[a]
+      inf_mm[a in sex] : S[a] --> I[a]
+        @ B[male,   male]   * S[a] * I[a]
+    }
+    simulate { from = 0  to = 10 }
+  |} in
+  match Compiler.compile ~name:"test_shaped_let" src with
+  | Error e -> Alcotest.failf "compile failed: %s" e
+  | Ok m ->
+    let find_tr name =
+      match List.find_opt (fun (t : Ir.transition) -> t.Ir.name = name) m.Ir.transitions with
+      | None -> Alcotest.failf "transition %s not found" name
+      | Some t -> t
+    in
+    let rec has_param pname = function
+      | Ir.Param n -> n = pname
+      | Ir.BinOp b -> has_param pname b.Ir.left || has_param pname b.Ir.right
+      | Ir.UnOp u  -> has_param pname u.Ir.arg
+      | Ir.Cond c  -> has_param pname c.Ir.pred
+                   || has_param pname c.Ir.then_
+                   || has_param pname c.Ir.else_
+      | _ -> false
+    in
+    let rec has_const f = function
+      | Ir.Const v -> v = f
+      | Ir.BinOp b -> has_const f b.Ir.left || has_const f b.Ir.right
+      | _ -> false
+    in
+    (* inf_fm_female: B[female,male]=beta_mf (index 1) *)
+    let inf_fm_f = find_tr "inf_fm_female" in
+    Alcotest.(check bool) "B[female,male] → beta_mf" true
+      (has_param "beta_mf" inf_fm_f.Ir.rate);
+    (* inf_ff_female: B[female,female]=0.0 (index 0) *)
+    let inf_ff_f = find_tr "inf_ff_female" in
+    Alcotest.(check bool) "B[female,female] → 0.0" true
+      (has_const 0.0 inf_ff_f.Ir.rate);
+    (* inf_mm_male: B[male,male]=0.0 (index 3) *)
+    let inf_mm_m = find_tr "inf_mm_male" in
+    Alcotest.(check bool) "B[male,male] → 0.0" true
+      (has_const 0.0 inf_mm_m.Ir.rate)
+
+(* ── E217: where guard compile-time check ────────────────────────────────────
+   A where guard must only reference dimension level names or loop variables.
+   Referencing a parameter or compartment name emits E217.                  ── *)
+
+let test_where_param_in_guard () =
+  (* 'gamma' is a parameter — must not appear in a where guard *)
+  let src = {|
+    dimensions { patch = [urban, rural] }
+    compartments { S, I }
+    stratify(by = patch)
+    parameters { gamma : rate }
+    transitions {
+      recovery[p in patch] : I[p] --> S[p] @ gamma * I[p]
+        where p == gamma
+    }
+    simulate { from = 0  to = 10 }
+  |} in
+  let lexbuf = Lexing.from_string src in
+  let decls = try Parser.file Lexer.token lexbuf
+              with _ -> Alcotest.fail "parse failed" in
+  let (_model, ctx, _summary) = Expander.expand_detail "test_where_param" decls in
+  let errors = ctx.diags.Diagnostics.diags
+    |> List.filter (fun d -> d.Diagnostics.severity = Diagnostics.Error) in
+  let found_e217 = List.exists (fun d -> d.Diagnostics.code = "E217") errors in
+  Alcotest.(check bool) "E217 emitted for param in where guard" true found_e217
+
+let test_where_compartment_in_guard () =
+  (* 'S' is a compartment — must not appear in a where guard *)
+  let src = {|
+    dimensions { patch = [urban, rural] }
+    compartments { S, I }
+    stratify(by = patch)
+    parameters { gamma : rate }
+    transitions {
+      recovery[p in patch] : I[p] --> S[p] @ gamma * I[p]
+        where p == S
+    }
+    simulate { from = 0  to = 10 }
+  |} in
+  let lexbuf = Lexing.from_string src in
+  let decls = try Parser.file Lexer.token lexbuf
+              with _ -> Alcotest.fail "parse failed" in
+  let (_model, ctx, _summary) = Expander.expand_detail "test_where_comp" decls in
+  let errors = ctx.diags.Diagnostics.diags
+    |> List.filter (fun d -> d.Diagnostics.severity = Diagnostics.Error) in
+  let found_e217 = List.exists (fun d -> d.Diagnostics.code = "E217") errors in
+  Alcotest.(check bool) "E217 emitted for compartment in where guard" true found_e217
+
+let test_where_ivguard_filters () =
+  (* ivguard where p == urban should skip rural intervention *)
+  let src = {|
+    dimensions { patch = [urban, rural] }
+    compartments { S, V, I }
+    stratify(by = patch)
+    parameters { vacc_frac : positive }
+    transitions {
+      infection[p in patch] : S[p] --> I[p] @ S[p] * I[p]
+    }
+    interventions {
+      vacc[p in patch] : transfer(fraction = vacc_frac, from = S[p], to = V[p]) at [30]
+        where p == urban
+    }
+    simulate { from = 0  to = 100 }
+  |} in
+  match Compiler.compile ~name:"test_ivguard" src with
+  | Error e -> Alcotest.failf "compile failed: %s" e
+  | Ok m ->
+    (* Only vacc_urban should be emitted; vacc_rural filtered out *)
+    let iv_names = List.map (fun (iv : Ir.intervention) -> iv.Ir.name) m.Ir.interventions in
+    Alcotest.(check bool) "vacc_urban present" true (List.mem "vacc_urban" iv_names);
+    Alcotest.(check bool) "vacc_rural absent" true (not (List.mem "vacc_rural" iv_names))
 
 (* ── Issue 2: Bare function name in rate resolves to Ir.TimeFunc ─────────────
    Using `seasonal` without parens in a rate expression should resolve to
@@ -941,6 +1142,38 @@ let test_preset_enable_seir_vaccine () =
     Alcotest.(check (list string)) "with_sia preset_enable"
       ["sia_round_1"] with_sia.Ir.preset_enable
 
+(* ── origin + date() ──────────────────────────────────────────────────────── *)
+
+let test_date_to_const () =
+  (* 2019-07-01 − 2019-01-01 = 181 days *)
+  let src = {|
+    time_unit = 'days
+    origin = date("2019-01-01")
+    compartments { S }
+    simulate { from = date("2019-01-01")  to = date("2019-07-01") }
+  |} in
+  match Compiler.compile ~name:"t" src with
+  | Error e -> Alcotest.failf "compile failed: %s" e
+  | Ok m ->
+    Alcotest.(check (option string)) "origin stored" (Some "2019-01-01") m.Ir.origin;
+    Alcotest.(check (float 1e-9)) "t_start = 0" 0.0 m.Ir.simulation.Ir.t_start;
+    Alcotest.(check (float 1e-9)) "t_end = 181 days" 181.0 m.Ir.simulation.Ir.t_end
+
+let test_date_requires_origin () =
+  let src = {|
+    time_unit = 'days
+    compartments { S }
+    simulate { from = date("2019-07-01")  to = date("2019-07-01") }
+  |} in
+  let lexbuf = Lexing.from_string src in
+  let decls = try Parser.file Lexer.token lexbuf
+              with _ -> Alcotest.fail "parse failed" in
+  let (_model, ctx, _summary) = Expander.expand_detail "t" decls in
+  let errors = ctx.diags.Diagnostics.diags
+    |> List.filter (fun d -> d.Diagnostics.severity = Diagnostics.Error) in
+  let found_e220 = List.exists (fun d -> d.Diagnostics.code = "E220") errors in
+  Alcotest.(check bool) "E220 emitted when origin missing" true found_e220
+
 let () =
   Alcotest.run "compiler" [
     "golden", [
@@ -956,6 +1189,7 @@ let () =
       Alcotest.test_case "seir_vaccine_seasonal"   `Quick (test_golden "seir_vaccine_seasonal");
       Alcotest.test_case "polio_age"               `Quick (test_golden "polio_age");
       Alcotest.test_case "polio_spatial_5"         `Quick (test_golden "polio_spatial_5");
+      Alcotest.test_case "seir_seasonal_patch"     `Quick (test_golden "seir_seasonal_patch");
     ];
     "table_lookup_flattening", [
       Alcotest.test_case "single index per lookup" `Quick test_table_lookup_single_index;
@@ -986,6 +1220,8 @@ let () =
       Alcotest.test_case "1D array from TSV file"            `Quick test_read_long_1d;
       Alcotest.test_case "defines() stratify dimension"      `Quick test_read_long_defines;
       Alcotest.test_case "missing file handled gracefully"   `Quick test_read_long_missing_file;
+      Alcotest.test_case "reordered columns → E216"          `Quick test_read_header_reordered;
+      Alcotest.test_case "mismatched column name → W201"     `Quick test_read_header_mismatch;
     ];
     "indexed_params", [
       Alcotest.test_case "scalar expansion per stratum"      `Quick test_indexed_param_scalar_expansion;
@@ -999,11 +1235,23 @@ let () =
       Alcotest.test_case "scalar param in [lo, hi]"          `Quick test_scalar_bounds;
       Alcotest.test_case "indexed param bounds expand to all strata" `Quick test_indexed_bounds;
     ];
+    "shaped_let", [
+      Alcotest.test_case "2D matrix literal row-major indexing" `Quick test_shaped_let;
+    ];
+    "where_guards", [
+      Alcotest.test_case "param in where guard → E217"        `Quick test_where_param_in_guard;
+      Alcotest.test_case "compartment in where guard → E217"  `Quick test_where_compartment_in_guard;
+      Alcotest.test_case "ivguard filters intervention combos" `Quick test_where_ivguard_filters;
+    ];
     "polio_models", [
       Alcotest.test_case "age-targeted SIA targets S_under5 → V_under5" `Quick test_polio_age_sia_targets_under5;
       Alcotest.test_case "spatial where p!=q gives 20 importation transitions" `Quick test_spatial_5_importation_count;
     ];
     "scenario_presets", [
       Alcotest.test_case "with_sia preset_enable = [\"sia_round_1\"]" `Quick test_preset_enable_seir_vaccine;
+    ];
+    "origin_date", [
+      Alcotest.test_case "date() converts to float days since origin" `Quick test_date_to_const;
+      Alcotest.test_case "date() without origin → E220"               `Quick test_date_requires_origin;
     ];
   ]

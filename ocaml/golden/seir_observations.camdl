@@ -29,13 +29,13 @@ observations {
   weekly_cases : {
     projected  = incidence(infection)
     every      = 7 'days
-    likelihood : neg_binomial { mean = rho * projected  r = k }
+    likelihood = neg_binomial(mean = rho * projected, r = k)
   }
 
   detection : {
     projected  = prevalence(I)
     every      = 14 'days
-    likelihood : bernoulli { p = p_detect }
+    likelihood = bernoulli(p = p_detect)
   }
 }
 

@@ -119,7 +119,36 @@ Invalid operations:
 Mixed-unit values in tables that aren't compatible are compile errors.
 Dimensionless zero (`0.0`) is compatible with any unit context.
 
-### 2.3 Table Unit Annotations
+### 2.3 Date Literals
+
+The `date("YYYY-MM-DD")` expression converts an ISO 8601 date to a float offset
+from the model's declared `origin` date, in the model's `time_unit`:
+
+```
+origin = date("2019-01-01")   # top-level declaration (optional)
+
+simulate {
+  to = date("2021-06-30")     # 912 days from origin (in time_unit = 'days)
+}
+```
+
+`date(...)` uses proleptic Gregorian calendar arithmetic. The result is exact
+(integer day count) when `time_unit = 'days`, and divided by the appropriate
+factor for other units (e.g., 365.25 for years).
+
+**E220.** Using `date(...)` without a top-level `origin = date(...)` declaration
+is a compile error:
+
+```
+# ERROR E220: date("2021-06-30") used but no 'origin' declared
+simulate { to = date("2021-06-30") }
+```
+
+The `origin` value is stored in the IR (`"origin": "2019-01-01"`). It does not
+affect simulation dynamics — it is purely a coordinate reference for converting
+calendar dates to simulation time.
+
+### 2.4 Table Unit Annotations
 
 Tables carry a single unit for all values:
 
@@ -296,17 +325,26 @@ with `in [1.0, 20.0]` is implicitly also constrained to `> 0`.
 
 ## 5. Index Dimensions and Stratification
 
-```
-stratify(by = age, levels = [child, adult])
-stratify(by = sex, levels = [female, male])
-stratify(by = patch)                          # levels derived from data (see §6.3)
-```
-
-Each `stratify` declaration adds a dimension to **all** compartments by default.
-Partial stratification restricts to specific compartments:
+Dimension levels are declared in a `dimensions {}` block. Levels can be inline
+or read from a data file:
 
 ```
-stratify(by = immunity, levels = [natural, vaccine], only = [R])
+dimensions {
+  age   = [child, adult]
+  sex   = [female, male]
+  patch = read("data/lga_pop.tsv", column = "patch")   # levels from data column
+}
+stratify(by = age)
+stratify(by = sex)
+stratify(by = patch)
+```
+
+Each `stratify` declaration applies a dimension to **all** compartments by
+default. Partial stratification restricts to specific compartments:
+
+```
+dimensions { immunity = [natural, vaccine] }
+stratify(by = immunity, only = [R])
 ```
 
 After this, S/E/I have dimensions `[age, sex]` but R has `[age, sex, immunity]`.
@@ -407,11 +445,11 @@ tables {
   age_dur    : age 'years         = [5, 60]
 
   # File-based data (long format)
-  kernel     : patch × patch      = read_long("data/spatial_kernel.tsv")
-  distances  : patch × patch      = read_long("data/lga_dist.tsv", default = 0.0)
+  kernel     : patch × patch      = read("data/spatial_kernel.tsv")
+  distances  : patch × patch      = read("data/lga_dist.tsv", default = 0.0)
 
-  # Data-derived dimension + table
-  pop        : defines(patch)     = read_long("data/lga_pop.tsv")
+  # Patch population (levels were declared in dimensions block)
+  pop        : patch              = read("data/lga_pop.tsv")
 }
 ```
 
@@ -429,9 +467,9 @@ values. The compiler normalizes to the model time unit and checks dimensional
 consistency when table values appear in expressions.
 
 Multi-dimensional: `: age × sex × risk` for 3D tables. Inline via nested
-brackets. For large tables, use `read_long`.
+brackets. For large tables, use `read(...)` (see §6.2).
 
-### 6.2 Loading from Files: `read_long`
+### 6.2 Loading from Files: `read`
 
 All file-based tables use **long format** (one row per observation, index columns
 then value column):
@@ -446,7 +484,7 @@ borno_gwoza      78000
 
 ```
 tables {
-  pop : patch = read_long("data/lga_pop.tsv")
+  pop : patch = read("data/lga_pop.tsv")
 }
 ```
 
@@ -463,7 +501,7 @@ the file:
 
 ```
 tables {
-  distances : patch × patch = read_long("data/lga_dist.tsv", default = 0.0)
+  distances : patch × patch = read("data/lga_dist.tsv", default = 0.0)
 }
 ```
 
@@ -479,28 +517,34 @@ Index values are the actual level names (not integer positions). The compiler
 validates each value against the known dimension levels and errors on typos.
 Without `default`, every index combination must have a row (dense check).
 
-### 6.3 Data-Derived Dimension Levels: `defines()`
+### 6.3 Data-Derived Dimension Levels: `dimensions { dim = read(...) }`
 
 For large models (hundreds of patches), listing levels inline is impractical.
-`defines(dim)` derives dimension membership from the first column of a data file:
+Use `read(...)` in the `dimensions {}` block to derive dimension membership from
+a data file column:
 
 ```
-stratify(by = patch)                    # no inline levels — derived from data
+dimensions {
+  patch = read("data/lga_pop.tsv", column = "patch")
+}
+
+stratify(by = patch)
 
 tables {
-  pop : defines(patch) = read_long("data/lga_pop.tsv")
+  pop : patch = read("data/lga_pop.tsv")
 }
 ```
 
-The `defines(patch)` position reads the `patch` column, collects unique values
-in first-occurrence order, and those become the levels of the `patch` dimension.
-All other tables referencing `patch` validate against these derived levels.
+The `read(file, column = "col")` form reads the named column, collects unique
+values in first-occurrence order, and those become the levels of the dimension.
+All tables referencing `patch` validate against these derived levels.
 
 **Rules:**
-- Each dimension is defined exactly once. Two `defines(patch)` → compile error.
-- `defines()` and inline `levels = [...]` are mutually exclusive for the same dim.
-- A `stratify(by = X)` with no `levels` clause **must** be fulfilled by a
-  `defines(X)` table. If none is found → compile error.
+- Each dimension is defined exactly once. Two `patch = [...]` entries →
+  compile error.
+- Inline `[...]` and `read(...)` are mutually exclusive for the same dimension.
+- A `stratify(by = X)` whose dimension `X` was declared via `read(...)` must be
+  present; levels come entirely from the file.
 - Bare dimension names in type signatures (`pop : patch = ...`) validate against
   the known levels; typos → error with Levenshtein suggestion.
 
@@ -511,7 +555,7 @@ left of `:`:
 
 ```
 tables {
-  pop, init_sus : defines(patch) = read_long("data/demographics.tsv")
+  pop, init_sus : patch = read("data/demographics.tsv")
 }
 ```
 
@@ -812,7 +856,8 @@ times:
 
 ```
 # Erlang-3 latent period: E passes through 3 sub-stages
-stratify(by = erlang_E, levels = [e1, e2, e3], only = [E])
+dimensions { erlang_E = [e1, e2, e3] }
+stratify(by = erlang_E, only = [E])
 
 progression[(s, s_next) in consecutive(erlang_E)]
   : E[s] --> E[s_next]
@@ -1068,8 +1113,13 @@ you're infected with / recovered from), not on S.
 ```
 compartments { S, E, I, R }
 
-stratify(by = age, levels = [child, adult])
-stratify(by = strain, levels = [wt, delta], only = [E, I, R])
+dimensions {
+  age    = [child, adult]
+  strain = [wt, delta]
+}
+
+stratify(by = age)
+stratify(by = strain, only = [E, I, R])
 
 tables {
   C_age    : age × age       = [[12.0, 4.0], [4.0, 8.0]]
@@ -1180,20 +1230,20 @@ observations {
   weekly_cases : {
     projected  = incidence(infection)
     every      = 7 'days
-    likelihood : neg_binomial { mean = rho * projected  r = k }
+    likelihood = neg_binomial(mean = rho * projected, r = k)
   }
 
   detection : {
     projected  = prevalence(I)
     every      = 14 'days
-    likelihood : bernoulli { p = p_detect }
+    likelihood = bernoulli(p = p_detect)
   }
 }
 ```
 
 Syntax notes: the observation name is followed by `: {` (colon required).
-`likelihood` uses `: KIND { ... }` (colon, not `=`). Keyword arguments inside
-`{ }` are whitespace-separated — no commas.
+`likelihood` uses `= KIND(...)` (equals sign, function-call form with named
+arguments separated by commas).
 
 ### 13.1 Projections
 
@@ -1216,12 +1266,12 @@ projection value for that observation.
 ### 13.2 Likelihood Families
 
 ```
-neg_binomial { mean = EXPR  r = EXPR }         overdispersed counts
-poisson      { rate = EXPR }                   Poisson counts
-normal       { mean = EXPR  sd = EXPR }        continuous
-binomial     { n = EXPR  p = EXPR }            bounded counts
-beta_binomial{ n = EXPR  alpha = EXPR  beta = EXPR }
-bernoulli    { p = EXPR }                      binary outcome
+neg_binomial(mean = EXPR, r = EXPR)            overdispersed counts
+poisson(rate = EXPR)                           Poisson counts
+normal(mean = EXPR, sd = EXPR)                 continuous
+binomial(n = EXPR, p = EXPR)                   bounded counts
+beta_binomial(n = EXPR, alpha = EXPR, beta = EXPR)
+bernoulli(p = EXPR)                            binary outcome
 ```
 
 ### 13.3 Indexed Observations
@@ -1231,7 +1281,7 @@ observations {
   cases_by_patch[p in patch] : {
     projected  = incidence(infection[patch = p])
     every      = 7 'days
-    likelihood : neg_binomial { mean = rho * projected  r = k }
+    likelihood = neg_binomial(mean = rho * projected, r = k)
   }
 }
 ```
@@ -1261,9 +1311,7 @@ Enabled via scenarios or CLI.
 
 ```
 interventions {
-  sia_round_1 : transfer(fraction = 0.80, from = S, to = V) {
-    at = [180 'days, 545 'days]
-  }
+  sia_round_1 : transfer(fraction = 0.80, from = S, to = V) at [180, 545]
 
   routine_vacc : transfer(fraction = vacc_rate, from = S, to = V) {
     every = 30 'days
@@ -1271,9 +1319,7 @@ interventions {
     until = 2 'years
   }
 
-  importation_pulse : set(I[child, p1], value = I[child, p1] + 10) {
-    at = [90 'days]
-  }
+  importation_pulse : set(I[child, p1], value = I[child, p1] + 10) at [90]
 }
 ```
 
@@ -1297,11 +1343,20 @@ indexing: `set(I[child, p1], value = ...)`. Named indexing is supported:
 
 ### 14.2 Scheduling
 
+**Inline `at` form** (specific times, most common):
+
 ```
-at    = [DURATION, ...]      specific times
-every = DURATION             recurring
-from  = DURATION             start of recurring
-until = DURATION             end of recurring
+NAME : ACTION at [TIME, ...]     # times in model time_unit
+```
+
+**Block form** (recurring or complex schedules):
+
+```
+NAME : ACTION {
+  every = DURATION             recurring interval
+  from  = DURATION             start of recurring (default: t_start)
+  until = DURATION             end of recurring (default: t_end)
+}
 ```
 
 ### 14.3 Indexed Interventions
@@ -1312,13 +1367,11 @@ of interventions — one per stratum — in a single line:
 ```
 interventions {
   # Declares sia_north, sia_south, sia_east (one per patch)
-  sia[p in patch] : transfer(fraction = vacc_eff * sia_cov, from = S[p], to = V[p]) {
-    at = [180 'days, 545 'days]
-  }
+  sia[p in patch] : transfer(fraction = vacc_eff * sia_cov, from = S[p], to = V[p]) at [180, 545]
 }
 ```
 
-Syntax: `NAME[INDEX_VAR in DIMENSION] : ACTION { schedule }`
+Syntax: `NAME[INDEX_VAR in DIMENSION] : ACTION at [TIME, ...]` (or a `{ ... }` block for recurring schedules)
 
 The expanded members share a **`base_name`** (the unindexed name, `"sia"`
 above). In scenario `enable`/`disable` lists, passing `"sia"` resolves to all
@@ -1333,13 +1386,12 @@ patch, store the schedule in a table and reference it in the `at` list:
 
 ```
 tables {
-  sia_day : patch × round = read_long("data/sia_schedule.tsv")
+  sia_day : patch × round = read("data/sia_schedule.tsv")
 }
 
 interventions {
-  sia[p in patch] : transfer(fraction = vacc_eff * sia_cov, from = S[p], to = V[p]) {
-    at = [sia_day[p, 0] 'days, sia_day[p, 1] 'days]
-  }
+  sia[p in patch] : transfer(fraction = vacc_eff * sia_cov, from = S[p], to = V[p])
+    at [sia_day[p, 0], sia_day[p, 1]]
 }
 ```
 
@@ -1460,7 +1512,7 @@ a table (§6) and reference it directly in init expressions:
 
 ```
 tables {
-  N0 : patch = read_long("data/population.tsv")
+  N0 : patch = read("data/population.tsv")
 }
 
 parameters {
@@ -2099,7 +2151,8 @@ time_unit = 'days
 
 compartments { S, E, I, R }
 
-stratify(by = age, levels = [child, adult])
+dimensions { age = [child, adult] }
+stratify(by = age)
 
 let N_local[a in age] = S[a] + E[a] + I[a] + R[a]
 
@@ -2130,7 +2183,8 @@ time_unit = 'days
 compartments { S, E, I, R }
 let N = S + E + I + R
 
-stratify(by = age, levels = [child, adult])
+dimensions { age = [child, adult] }
+stratify(by = age)
 
 parameters {
   beta   : rate
@@ -2164,7 +2218,8 @@ time_unit = 'days
 
 compartments { S, I, R }
 
-stratify(by = sex, levels = [female, male])
+dimensions { sex = [female, male] }
+stratify(by = sex)
 
 let N_local[s in sex] = S[s] + I[s] + R[s]
 
@@ -2243,7 +2298,8 @@ time_unit = 'days
 
 compartments { S, I, R }
 
-stratify(by = age, levels = [age_0_5, age_5_15, age_15_50, age_50_65, age_65p])
+dimensions { age = [age_0_5, age_5_15, age_15_50, age_50_65, age_65p] }
+stratify(by = age)
 
 parameters {
   beta  : rate
@@ -2252,7 +2308,7 @@ parameters {
 }
 
 tables {
-  C_age   : age × age 'per_day = read_long("data/polymod_5x5.tsv")
+  C_age   : age × age 'per_day = read("data/polymod_5x5.tsv")
   age_dur : age 'years          = [5, 10, 35, 15, 20]
   mu_age  : age 'per_day        = [0.00008, 0.00002, 0.00003, 0.0001, 0.0005]
 }
@@ -2297,7 +2353,8 @@ time_unit = 'days
 compartments { S, E, I, R }
 
 # E passes through 3 sub-stages for Erlang-distributed latent period
-stratify(by = latent_stage, levels = [e1, e2, e3], only = [E])
+dimensions { latent_stage = [e1, e2, e3] }
+stratify(by = latent_stage, only = [E])
 
 parameters {
   beta  : rate
@@ -2338,8 +2395,13 @@ let N = S + E + I + R + V
 
 ## ── Index dimensions ───────────────────────────────────
 
-stratify(by = age, levels = [child, adult])
-stratify(by = patch)                          # levels derived from pop table below
+dimensions {
+  age   = [child, adult]
+  patch = read("data/lga_pop.tsv", column = "patch")  # levels from data
+}
+
+stratify(by = age)
+stratify(by = patch)
 
 ## ── Parameters ─────────────────────────────────────────
 
@@ -2365,8 +2427,8 @@ tables {
   mu_age    : age 'per_day       = [0.0000685, 0.0000411]
   fertility : age 'per_day       = [0.0, 0.02]
   age_dur   : age 'years         = [5, 60]
-  pop       : defines(patch)     = read_long("data/lga_pop.tsv")
-  distance  : patch × patch      = read_long("data/lga_dist.tsv", default = 0.0)
+  pop       : patch               = read("data/lga_pop.tsv")
+  distance  : patch × patch      = read("data/lga_dist.tsv", default = 0.0)
 }
 
 ## ── Computed quantities ────────────────────────────────
@@ -2431,9 +2493,7 @@ transitions {
 ## ── Interventions ──────────────────────────────────────
 
 interventions {
-  sia_round_1 : transfer(fraction = vacc_frac, from = S, to = V) {
-    at = [180 'days, 545 'days]
-  }
+  sia_round_1 : transfer(fraction = vacc_frac, from = S, to = V) at [180, 545]
 }
 
 ## ── Data ───────────────────────────────────────────────
@@ -2448,13 +2508,10 @@ data {
 ## ── Observations ───────────────────────────────────────
 
 observations {
-  weekly_cases {
+  weekly_cases : {
     projected  = incidence(infection)
     every      = 7 'days
-    likelihood = neg_binomial(
-      mean       = rho * projected,
-      dispersion = k
-    )
+    likelihood = neg_binomial(mean = rho * projected, r = k)
   }
 }
 
@@ -2549,8 +2606,10 @@ file := declaration*
 
 declaration :=
   | time_unit_decl                    # time_unit = 'days
+  | origin_decl                       # origin = date("YYYY-MM-DD")
   | compartments_block                # compartments { ... }
   | parameters_block                  # parameters { ... }
+  | dimensions_block                  # dimensions { dim = [...] | read(...) }
   | tables_block                      # tables { ... }
   | functions_block                   # functions { ... }
   | transitions_block                 # transitions { ... }
@@ -2674,9 +2733,7 @@ PopSum(["R_child", "R_adult"])
 
 ```
 # DSL:
-sia_round_1 : transfer(fraction = 0.80, from = S, to = V) {
-  at = [180 'days]
-}
+sia_round_1 : transfer(fraction = 0.80, from = S, to = V) at [180]
 
 # IR (with age = [child, adult]):
 # Intervention at t=180, two actions (one per stratum):
@@ -2813,9 +2870,7 @@ Interventions on stratified compartments expand over **all** dimensions:
 
 ```
 # DSL:
-sia_round_1 : transfer(fraction = 0.80, from = S, to = V) {
-  at = [180 'days]
-}
+sia_round_1 : transfer(fraction = 0.80, from = S, to = V) at [180]
 # S and V have dimensions [age, patch] (2 × 774)
 
 # IR: one FractionTransfer per (age × patch) = 1548 atomic transfers
@@ -2891,7 +2946,8 @@ infection[a in age] : S[a] --> E[a]
 ### 27.3 Partial Stratification Stoichiometry
 
 ```
-stratify(by = immunity, levels = [natural, vaccine], only = [R])
+dimensions { immunity = [natural, vaccine] }
+stratify(by = immunity, only = [R])
 
 recovery[a in age] : I[a] --> R[a]  @ gamma * I[a]
 # ERROR at line 55: R has dimensions [age, immunity] but destination
@@ -2911,7 +2967,8 @@ recovery[a in age, r in habitat] : I[a, r] --> R[a, r]  @ gamma * I[a, r]
 ### 27.5 Compartment Doesn't Have Dimension
 
 ```
-stratify(by = immunity, levels = [natural, vaccine], only = [R])
+dimensions { immunity = [natural, vaccine] }
+stratify(by = immunity, only = [R])
 
 waning[a in age] : I[a, natural] --> S[a]  @ wane * I[a, natural]
 # ERROR at line 55: I does not have dimension 'immunity'.
@@ -3012,9 +3069,10 @@ compartments { NAME, ... }           integer-valued populations
 compartments { NAME : real }         continuous-valued state
 
 # Dimensions
-stratify(by = DIM, levels = [...])   add index dimension (inline levels)
-stratify(by = DIM)                   add index dimension (levels from defines())
-stratify(..., only = [COMP, ...])    partial stratification
+dimensions { DIM = [...] }           declare dimension levels (inline)
+dimensions { DIM = read(FILE, column = "COL") }  dimension levels from file
+stratify(by = DIM)                   apply dimension to all compartments
+stratify(by = DIM, only = [COMP, ...])  partial stratification
 
 # Indexing
 NAME[val]                            concrete stratum access

@@ -17,8 +17,10 @@ let make_split ctx =
     ) ctx.Expander.stratifies in
     (cd.cname, dims)
   ) ctx.Expander.comp_decls in
-  let dim_vals = List.map (fun sd ->
-    (sd.sdim, sd.svalues)
+  let dim_vals = List.filter_map (fun sd ->
+    match List.assoc_opt sd.sdim ctx.Expander.dim_registry with
+    | Some vs -> Some (sd.sdim, vs)
+    | None    -> None
   ) ctx.Expander.stratifies in
   Pp_expr.make_split_map base_dims dim_vals
 
@@ -143,8 +145,10 @@ let run_summary ppf (model : Ir.model) ctx (sum : Expander.model_summary) =
    else begin
      num sum.base_compartment_count;
      (* Show dimension breakdown *)
-     let dims = List.map (fun sd ->
-       Printf.sprintf "%d %s" (List.length sd.svalues) sd.sdim
+     let dims = List.filter_map (fun sd ->
+       match List.assoc_opt sd.sdim ctx.Expander.dim_registry with
+       | Some vs -> Some (Printf.sprintf "%d %s" (List.length vs) sd.sdim)
+       | None    -> None
      ) ctx.Expander.stratifies in
      if dims <> [] then (
        Fmt.pf ppf " base";
@@ -214,7 +218,7 @@ let run_summary ppf (model : Ir.model) ctx (sum : Expander.model_summary) =
     List.iteri (fun i td ->
       if i > 0 then Fmt.pf ppf ", ";
       Term_style.table Fmt.string ppf (String.concat ", " td.tnames);
-      let dim_names = List.map (function TDim d -> d | TDimUnit (d,_) -> d | TDefines d -> d) td.tdims in
+      let dim_names = List.map (function TDim d -> d | TDimUnit (d,_) -> d) td.tdims in
       if dim_names <> [] then (
         Term_style.dim_style Fmt.string ppf ": ";
         Term_style.dim_style Fmt.string ppf (String.concat " \xc3\x97 " dim_names)
@@ -246,10 +250,12 @@ let run_summary ppf (model : Ir.model) ctx (sum : Expander.model_summary) =
       if i > 0 then Fmt.pf ppf ", ";
       Term_style.dimension Fmt.string ppf sd.sdim;
       Fmt.pf ppf " = [";
+      let vs = match List.assoc_opt sd.sdim ctx.Expander.dim_registry with
+        | Some vs -> vs | None -> [] in
       List.iteri (fun j v ->
         if j > 0 then Fmt.pf ppf ", ";
         Fmt.pf ppf "%s" v
-      ) sd.svalues;
+      ) vs;
       Fmt.pf ppf "]"
     ) strats;
   Fmt.pf ppf "@\n";
@@ -317,7 +323,9 @@ let run_compartments ppf (model : Ir.model) ctx =
   Term_style.bold Fmt.string ppf (fmt_number n_exp);
   Fmt.pf ppf " expanded compartments (%d base" n_base;
   List.iter (fun sd ->
-    Fmt.pf ppf " \xc3\x97 %d " (List.length sd.svalues);
+    let n = match List.assoc_opt sd.sdim ctx.Expander.dim_registry with
+      | Some vs -> List.length vs | None -> 0 in
+    Fmt.pf ppf " \xc3\x97 %d " n;
     Term_style.dimension Fmt.string ppf sd.sdim
   ) ctx.Expander.stratifies;
   Fmt.pf ppf ")@\n"
@@ -685,75 +693,9 @@ let run_let ppf (model : Ir.model) ctx name =
 
 (* ── --expansion NAME ────────────────────────────────────────────────────── *)
 
-(** Show the coupling sugar before/after for a transition. *)
-let run_expansion ppf ctx name =
-  let arrow = "\xe2\x86\x92" in  (* → *)
-  let at    = "@" in
-  match List.find_opt (fun tr -> tr.trname = name) ctx.Expander.orig_transitions with
-  | None ->
-    Fmt.epr "error: no transition named '%s'@\n" name
-  | Some orig ->
-    let has_coupling = orig.trcoupling <> [] in
-    Term_style.bold (Term_style.transition Fmt.string) ppf name;
-    if not has_coupling then (
-      Term_style.dim_style Fmt.string ppf " \xe2\x80\x94 no sugar expansion (already in primitive form)@\n"
-    ) else begin
-      Term_style.dim_style Fmt.string ppf " \xe2\x80\x94 sugar expansion@\n@\n";
-      Fmt.pf ppf "  DSL source (before):@\n";
-      (* Show the original transition *)
-      let src_str = match orig.trsrc with
-        | None -> ""
-        | Some (c, []) -> c
-        | Some (c, idxs) ->
-          let idx_strs = List.map (function
-            | IPosn (EIdent (s, _)) -> s | IPosn _ -> "?" | INamed (_, EIdent (s, _)) -> s | INamed _ -> "?"
-          ) idxs in
-          c ^ "[" ^ String.concat ", " idx_strs ^ "]"
-      in
-      let dst_str = match orig.trdst with
-        | None -> ""
-        | Some (c, []) -> c
-        | Some (c, idxs) ->
-          let idx_strs = List.map (function
-            | IPosn (EIdent (s, _)) -> s | IPosn _ -> "?" | INamed (_, EIdent (s, _)) -> s | INamed _ -> "?"
-          ) idxs in
-          c ^ "[" ^ String.concat ", " idx_strs ^ "]"
-      in
-      Fmt.pf ppf "    %s" name;
-      if orig.trindices <> [] then pp_indices ppf orig.trindices;
-      Fmt.pf ppf " : %s %s %s %s ...\n"
-        src_str arrow dst_str at;
-      Fmt.pf ppf "      {@\n";
-      List.iter (fun (dim, matrix) ->
-        Fmt.pf ppf "        coupling(";
-        Term_style.dimension Fmt.string ppf dim;
-        Fmt.pf ppf ") = ";
-        Term_style.table Fmt.string ppf matrix;
-        Fmt.pf ppf "@\n"
-      ) orig.trcoupling;
-      Fmt.pf ppf "      }@\n@\n";
-      (* Show desugared version *)
-      let desugared = Expander.desugar_coupling ctx orig in
-      Fmt.pf ppf "  expanded to primitive form:@\n";
-      Fmt.pf ppf "    %s" name;
-      if desugared.trindices <> [] then pp_indices ppf desugared.trindices;
-      let src2 = match desugared.trsrc with
-        | None -> "" | Some (c, []) -> c
-        | Some (c, idxs) ->
-          let ss = List.map (function
-            | IPosn (EIdent (s, _)) -> s | _ -> "?") idxs in
-          c ^ "[" ^ String.concat ", " ss ^ "]"
-      in
-      let dst2 = match desugared.trdst with
-        | None -> "" | Some (c, []) -> c
-        | Some (c, idxs) ->
-          let ss = List.map (function
-            | IPosn (EIdent (s, _)) -> s | _ -> "?") idxs in
-          c ^ "[" ^ String.concat ", " ss ^ "]"
-      in
-      Fmt.pf ppf " : %s %s %s@\n" src2 arrow dst2;
-      Fmt.pf ppf "      @@ (see above for full expanded rate)@\n"
-    end
+(** --expansion is no longer supported (coupling sugar removed). *)
+let run_expansion ppf _ctx _name =
+  Fmt.pf ppf "note: coupling sugar has been removed; --expansion is no longer applicable.@\n"
 
 (* ── Main entry point ────────────────────────────────────────────────────── *)
 

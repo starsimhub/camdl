@@ -7,7 +7,11 @@ time_unit = 'days
 
 compartments { S, E, I, R, V }
 
-stratify(by = patch, levels = [north, south, east, west, center])
+dimensions {
+  patch = [north, south, east, west, center]
+}
+
+stratify(by = patch)
 
 let N[p in patch] = S[p] + E[p] + I[p] + R[p] + V[p]
 

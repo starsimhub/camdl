@@ -75,8 +75,7 @@
     "consecutive",   CONSECUTIVE;
     "in",            IN;
     "by",            BY;
-    "levels",        LEVELS;
-    "defines",       DEFINES;
+    "dimensions",    DIMENSIONS;
     "only",          ONLY;
     "real",          REAL;
     "integer",       INTEGER;
@@ -90,7 +89,6 @@
     "if",            IF;
     "then",          THEN;
     "else",          ELSE;
-    "coupling",      COUPLING;
     "every",         EVERY;
     "at",            AT_KW;
     "format",        FORMAT;
@@ -98,6 +96,8 @@
     "tag",           TAG;
     "null",          NULL;
     "transfer",      TRANSFER;
+    "likelihood",    LIKELIHOOD;
+    "origin",        ORIGIN;
   ]
 
   let lookup_kw s =

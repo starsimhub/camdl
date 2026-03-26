@@ -32,8 +32,8 @@
 %token TIME_UNIT COMPARTMENTS PARAMETERS TABLES FUNCTIONS
 %token TRANSITIONS OBSERVATIONS INTERVENTIONS ODE OUTPUT SIMULATE
 %token INIT TIMEPOINTS SCENARIOS STRATIFY LET FROM TO WHERE SUM
-%token CONSECUTIVE IN BY LEVELS DEFINES ONLY REAL INTEGER RATE PROBABILITY POSITIVE COUNT
-%token AND OR NOT IF THEN ELSE COUPLING EVERY AT_KW FORMAT DESCRIPTION TAG NULL TRANSFER
+%token CONSECUTIVE IN BY DIMENSIONS ONLY REAL INTEGER RATE PROBABILITY POSITIVE COUNT
+%token AND OR NOT IF THEN ELSE EVERY AT_KW FORMAT DESCRIPTION TAG NULL TRANSFER LIKELIHOOD ORIGIN
 
 %token EOF
 
@@ -61,6 +61,12 @@ declaration:
       { DTimeUnit u }
   | DESCRIPTION EQ s = STRING
       { DDescription s }
+  | ORIGIN EQ e = expr
+      { match e with
+        | EFuncCall ("date", [("", EIdent (s, _))]) -> DOrigin s
+        | _ -> failwith "origin must be date(\"YYYY-MM-DD\")" }
+  | DIMENSIONS LBRACE es = list(dim_entry) RBRACE
+      { DDimensions es }
   | COMPARTMENTS LBRACE cs = compartment_list RBRACE
       { DCompartments cs }
   | PARAMETERS LBRACE ps = param_list RBRACE
@@ -87,8 +93,8 @@ declaration:
       { DTimepoints tps }
   | STRATIFY LPAREN sa = stratify_args RPAREN
       { DStratify sa }
-  | LET name = IDENT ibs = index_bindings_opt EQ body = expr
-      { DLet { lname = name; lindices = ibs; lbody = body } }
+  | LET name = IDENT ibs = index_bindings_opt shape = let_shape_opt EQ body = expr
+      { DLet { lname = name; lindices = ibs; lshape = shape; lbody = body } }
   | SCENARIOS LBRACE ss = list(scenario_block) RBRACE
       { DScenarios ss }
 
@@ -159,7 +165,6 @@ table_dims_nonempty:
 table_dim_entry:
   | name = IDENT { TDim name }
   | name = IDENT u = unit_lit { TDimUnit (name, u) }
-  | DEFINES LPAREN name = IDENT RPAREN { TDefines name }
 
 (* ── Function block ─────────────────────────────────────────────────────── *)
 
@@ -167,8 +172,8 @@ func_list:
   | fs = list(func_decl) { fs }
 
 func_decl:
-  | name = IDENT COLON kind = IDENT LBRACE args = func_args RBRACE
-      { { fname = name; fkind = kind; fargs = args } }
+  | name = IDENT ibs = index_bindings_opt COLON kind = IDENT LBRACE args = func_args RBRACE
+      { { fname = name; findices = ibs; fkind = kind; fargs = args } }
 
 func_args:
   | kvs = list(func_arg) { kvs }
@@ -183,16 +188,16 @@ transition_list:
 
 transition_decl:
   (* inline: name[...] : src --> dst @ rate where guard *)
-  | name = IDENT ibs = index_bindings_opt COLON src = stoich_ref_opt ARROW dst = stoich_ref_opt AT rate = expr guard = where_clause_opt tag = tag_opt coupling = coupling_opt
+  | name = IDENT ibs = index_bindings_opt COLON src = stoich_ref_opt ARROW dst = stoich_ref_opt AT rate = expr guard = where_clause_opt tag = tag_opt
       { { trname = name; trindices = ibs;
           trsrc = src; trdst = dst;
-          trrate = rate; trguard = guard; trtag = tag; trcoupling = coupling } }
-  (* block form: name[...] : src --> dst { rate = ...; tag = ...; coupling = ... } *)
+          trrate = rate; trguard = guard; trtag = tag } }
+  (* block form: name[...] : src --> dst { rate = ...; tag = ... } *)
   | name = IDENT ibs = index_bindings_opt COLON src = stoich_ref_opt ARROW dst = stoich_ref_opt LBRACE tbody = transition_body RBRACE
-      { let (rate, guard, tag, coupling) = tbody in
+      { let (rate, guard, tag) = tbody in
         { trname = name; trindices = ibs;
           trsrc = src; trdst = dst;
-          trrate = rate; trguard = guard; trtag = tag; trcoupling = coupling } }
+          trrate = rate; trguard = guard; trtag = tag } }
 
 stoich_ref_opt:
   | (* empty *) { None }
@@ -213,31 +218,26 @@ where_clause_opt:
 tag_opt:
   | (* empty *) { None }
 
-coupling_opt:
-  | (* empty *) { [] }
+let_shape_opt:
+  | (* empty *) { None }
+  | COLON ds = separated_nonempty_list(CROSS, IDENT) { Some ds }
 
 transition_body:
   | kvs = list(transition_body_entry)
-      { let rate   = ref (EConst 0.0) in
-        let guard  = ref None in
-        let tag    = ref None in
-        let coupling = ref [] in
+      { let rate  = ref (EConst 0.0) in
+        let guard = ref None in
+        let tag   = ref None in
         List.iter (function
-          | `Rate e   -> rate := e
-          | `Guard g  -> guard := Some g
-          | `Tag s    -> tag := Some s
-          | `Coupling c -> coupling := c
+          | `Rate e  -> rate := e
+          | `Guard g -> guard := Some g
+          | `Tag s   -> tag := Some s
         ) kvs;
-        (!rate, !guard, !tag, !coupling) }
+        (!rate, !guard, !tag) }
 
 transition_body_entry:
   | RATE EQ e = expr { `Rate e }
   | WHERE g = guard_expr { `Guard g }
   | TAG EQ s = STRING { `Tag s }
-  | COUPLING LBRACKET cs = separated_list(COMMA, coupling_pair) RBRACKET { `Coupling cs }
-
-coupling_pair:
-  | dim = IDENT EQ tbl = IDENT { (dim, tbl) }
 
 guard_expr:
   | g = guard_atom { g }
@@ -286,15 +286,17 @@ obs_kv:
   | EVERY EQ e = expr { `Schedule (ObsEvery e) }
   | AT_KW EQ LBRACKET ts = separated_list(COMMA, expr) RBRACKET { `Schedule (ObsTimes ts) }
   | IDENT EQ proj = obs_projection { `Proj proj }
-  | IDENT COLON lik_kind = IDENT LBRACE lik_args = list(func_arg) RBRACE
-      { `Lik (match lik_kind with
-        | "neg_binomial"  -> LikNegBinomial  lik_args
-        | "poisson"       -> LikPoisson      lik_args
-        | "normal"        -> LikNormal       lik_args
-        | "binomial"      -> LikBinomial     lik_args
-        | "beta_binomial" -> LikBetaBinomial lik_args
-        | "bernoulli"     -> LikBernoulli    lik_args
-        | s -> failwith ("unknown likelihood: " ^ s)) }
+  | LIKELIHOOD EQ e = expr
+      { `Lik (match e with
+        | EFuncCall (kind, args) -> (match kind with
+            | "neg_binomial"  -> LikNegBinomial  args
+            | "poisson"       -> LikPoisson      args
+            | "normal"        -> LikNormal       args
+            | "binomial"      -> LikBinomial     args
+            | "beta_binomial" -> LikBetaBinomial args
+            | "bernoulli"     -> LikBernoulli    args
+            | s -> failwith ("unknown likelihood: " ^ s))
+        | _ -> failwith "likelihood value must be a function call like neg_binomial(...)") }
 
 obs_projection:
   | e = expr { ProjDerived e }
@@ -305,16 +307,16 @@ intervention_list:
   | ivs = list(intervention_decl) { ivs }
 
 intervention_decl:
-  | name = IDENT ibs = index_bindings_opt COLON LBRACE iv_kvs = list(iv_kv) RBRACE
+  | name = IDENT ibs = index_bindings_opt COLON LBRACE iv_kvs = list(iv_kv) RBRACE guard = where_clause_opt
       { let action = ref (ATransfer []) in
         let sched  = ref (SAtTimes []) in
         List.iter (function
           | `Action a -> action := a
           | `Schedule s -> sched := s
         ) iv_kvs;
-        { ivname = name; ivindices = ibs; ivaction = !action; ivschedule = !sched } }
-  | name = IDENT ibs = index_bindings_opt COLON TRANSFER LPAREN kwargs = separated_list(COMMA, transfer_kwarg) RPAREN AT_KW LBRACKET ts = separated_list(COMMA, expr) RBRACKET
-      { { ivname = name; ivindices = ibs; ivaction = ATransfer kwargs; ivschedule = SAtTimes ts } }
+        { ivname = name; ivindices = ibs; ivaction = !action; ivschedule = !sched; ivguard = guard } }
+  | name = IDENT ibs = index_bindings_opt COLON TRANSFER LPAREN kwargs = separated_list(COMMA, transfer_kwarg) RPAREN AT_KW LBRACKET ts = separated_list(COMMA, expr) RBRACKET guard = where_clause_opt
+      { { ivname = name; ivindices = ibs; ivaction = ATransfer kwargs; ivschedule = SAtTimes ts; ivguard = guard } }
 
 transfer_kwarg:
   | k = IDENT EQ e = expr { (k, e) }
@@ -413,27 +415,31 @@ timepoint_list:
 timepoint_decl:
   | name = IDENT EQ t = expr { { tpname = name; tptime = t } }
 
+(* ── Dimensions ─────────────────────────────────────────────────────────── *)
+
+dim_entry:
+  | name = IDENT EQ src = dim_source_expr { { dename = name; desrc = src } }
+
+dim_source_expr:
+  | LBRACKET vs = separated_list(COMMA, IDENT) RBRACKET
+      { DInline vs }
+  | IDENT LPAREN path = STRING COMMA kwname = IDENT EQ col = STRING RPAREN
+      { ignore kwname; DRead (path, col) }
+
 (* ── Stratify ────────────────────────────────────────────────────────────── *)
 
 stratify_args:
   | kvs = separated_list(COMMA, stratify_kv)
-      { let dim       = ref "" in
-        let vals_src  = ref Ast.SValuesPending in
-        let only      = ref None in
+      { let dim  = ref "" in
+        let only = ref None in
         List.iter (function
-          | `By d          -> dim  := d
-          | `Levels src    -> vals_src := src
-          | `Only cs       -> only := Some cs
+          | `By d    -> dim := d
+          | `Only cs -> only := Some cs
         ) kvs;
-        let svalues = match !vals_src with
-          | Ast.SValuesLit vs -> vs
-          | Ast.SValuesPending -> []  (* populated later by derive_defines_dims *)
-        in
-        { sdim = !dim; svalues; svalues_src = !vals_src; sonly = !only } }
+        { sdim = !dim; sonly = !only } }
 
 stratify_kv:
   | BY EQ d = IDENT { `By d }
-  | LEVELS EQ LBRACKET vs = separated_list(COMMA, IDENT) RBRACKET { `Levels (Ast.SValuesLit vs) }
   | ONLY EQ LBRACKET cs = separated_list(COMMA, IDENT) RBRACKET { `Only cs }
 
 (* ── Expression grammar ──────────────────────────────────────────────────── *)

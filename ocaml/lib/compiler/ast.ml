@@ -62,11 +62,10 @@ type param_decl =
   | PScalar  of { pname: string; pkind: param_type; pbounds: (expr * expr) option }
   | PIndexed of { pname: string; pdims: string list; pkind: param_type; pbounds: (expr * expr) option }
 
-(** Table dimension entry: bare dim name, dim + unit, or defines(dim) *)
+(** Table dimension entry: bare dim name, or dim + unit *)
 type table_dim_entry =
   | TDim     of string
   | TDimUnit of string * unit_lit
-  | TDefines of string            (* defines(dim) — derives levels from this column *)
 
 (** Table value: inline literal or EFuncCall for read_long/external *)
 type table_decl = {
@@ -86,24 +85,18 @@ type transition_decl = {
   trrate    : expr;
   trguard   : guard option;
   trtag     : string option;
-  trcoupling: (string * string) list;  (* [(dim_name, table_name)] *)
 }
 
 type let_binding = {
   lname    : string;
   lindices : index_binding list;
+  lshape   : string list option;  (* Some dims → shaped literal, None → scalar/indexed *)
   lbody    : expr;
 }
 
-type stratify_values_src =
-  | SValuesLit     of string list          (* levels = [a, b, c] *)
-  | SValuesPending                         (* no levels clause — must be fulfilled by defines() *)
-
 type stratify_decl = {
-  sdim    : string;
-  svalues : string list;       (* populated after parsing or after derive_defines_dims *)
-  svalues_src : stratify_values_src;
-  sonly   : string list option;
+  sdim  : string;
+  sonly : string list option;
 }
 
 type init_entry = {
@@ -152,14 +145,16 @@ type intervention_decl = {
   ivindices : index_binding list;   (* [] for non-indexed interventions *)
   ivaction  : action_decl;
   ivschedule: schedule_decl;
+  ivguard   : guard option;         (* where expr — compile-time filter *)
 }
 
 type ode_decl = { ocomp: string; oderiv: expr }
 
 type func_decl = {
-  fname  : string;
-  fkind  : string;
-  fargs  : (string * expr) list;
+  fname    : string;
+  findices : index_binding list;
+  fkind    : string;
+  fargs    : (string * expr) list;
 }
 
 type output_traj_decl = {
@@ -197,9 +192,21 @@ type scenario_decl = {
   scfields : scenario_field list;
 }
 
+(** Source of dimension levels: inline list or read from a file column *)
+type dim_source =
+  | DInline of string list
+  | DRead   of string * string    (* path, column_name *)
+
+type dimensions_entry = {
+  dename : string;
+  desrc  : dim_source;
+}
+
 type declaration =
   | DTimeUnit    of unit_lit
   | DDescription of string
+  | DOrigin      of string
+  | DDimensions  of dimensions_entry list
   | DCompartments of compartment_decl list
   | DParameters   of param_decl list
   | DTables       of table_decl list

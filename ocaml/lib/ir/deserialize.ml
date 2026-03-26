@@ -455,6 +455,7 @@ let model_of_json (j : Yojson.Safe.t) : model =
     version            = as_string (member "version"            j);
     time_unit          = (match member_opt "time_unit" j with Some (`String s) -> s | _ -> "days");
     description        = (match member_opt "description" j with Some `Null | None -> None | Some s -> Some (as_string s));
+    origin             = (match member_opt "origin" j with Some (`String s) -> Some s | _ -> None);
     compartments       = List.map compartment_of_json      (as_list (member "compartments"   j));
     transitions        = List.map transition_of_json       (as_list (member "transitions"    j));
     ode_equations      = List.map ode_equation_of_json     (as_list (member "ode_equations"  j));

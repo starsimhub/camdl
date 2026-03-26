@@ -1,7 +1,15 @@
+# Age-structured SIR with contact matrix transmission
+# Demonstrates explicit age-stratified coupling via sum(b in age, C[a,b] * I[b] / N[b])
+# The old coupling[] sugar has been removed; this is the recommended explicit pattern.
+
 time_unit = 'days
 
 compartments { S, I, R }
-stratify(by=age, levels=[young, old])
+dimensions {
+  age = [young, old]
+}
+
+stratify(by = age)
 
 tables {
   C_age : age × age = [[10.0, 3.0], [3.0, 7.0]]
@@ -14,13 +22,11 @@ parameters {
   I0    : count in [1, 1000]
 }
 
-let N = S + I + R
+let N[a in age] = S[a] + I[a] + R[a]
 
 transitions {
-  infection : S --> I {
-    rate = beta * S * I / N
-    coupling[age = C_age]
-  }
+  infection[a in age] : S[a] --> I[a]
+    @ beta * S[a] * sum(b in age, C_age[a, b] * I[b] / N[b])
   recovery[a in age] : I[a] --> R[a] @ gamma * I[a]
 }
 

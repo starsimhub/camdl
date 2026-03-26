@@ -17,27 +17,27 @@
       "stoichiometry": [ [ "S_young", -1 ], [ "I_young", 1 ] ],
       "rate": {
         "bin_op": {
-          "op": "add",
+          "op": "mul",
           "left": {
             "bin_op": {
               "op": "mul",
+              "left": { "param": "beta" },
+              "right": { "pop": "S_young" }
+            }
+          },
+          "right": {
+            "bin_op": {
+              "op": "add",
               "left": {
-                "table_lookup": {
-                  "table": "C_age",
-                  "indices": [ { "const": 0.0 } ]
-                }
-              },
-              "right": {
                 "bin_op": {
                   "op": "div",
                   "left": {
                     "bin_op": {
                       "op": "mul",
                       "left": {
-                        "bin_op": {
-                          "op": "mul",
-                          "left": { "param": "beta" },
-                          "right": { "pop": "S_young" }
+                        "table_lookup": {
+                          "table": "C_age",
+                          "indices": [ { "const": 0.0 } ]
                         }
                       },
                       "right": { "pop": "I_young" }
@@ -45,17 +45,6 @@
                   },
                   "right": { "pop_sum": [ "S_young", "I_young", "R_young" ] }
                 }
-              }
-            }
-          },
-          "right": {
-            "bin_op": {
-              "op": "mul",
-              "left": {
-                "table_lookup": {
-                  "table": "C_age",
-                  "indices": [ { "const": 1.0 } ]
-                }
               },
               "right": {
                 "bin_op": {
@@ -64,10 +53,9 @@
                     "bin_op": {
                       "op": "mul",
                       "left": {
-                        "bin_op": {
-                          "op": "mul",
-                          "left": { "param": "beta" },
-                          "right": { "pop": "S_young" }
+                        "table_lookup": {
+                          "table": "C_age",
+                          "indices": [ { "const": 1.0 } ]
                         }
                       },
                       "right": { "pop": "I_old" }
@@ -92,27 +80,27 @@
       "stoichiometry": [ [ "S_old", -1 ], [ "I_old", 1 ] ],
       "rate": {
         "bin_op": {
-          "op": "add",
+          "op": "mul",
           "left": {
             "bin_op": {
               "op": "mul",
+              "left": { "param": "beta" },
+              "right": { "pop": "S_old" }
+            }
+          },
+          "right": {
+            "bin_op": {
+              "op": "add",
               "left": {
-                "table_lookup": {
-                  "table": "C_age",
-                  "indices": [ { "const": 2.0 } ]
-                }
-              },
-              "right": {
                 "bin_op": {
                   "op": "div",
                   "left": {
                     "bin_op": {
                       "op": "mul",
                       "left": {
-                        "bin_op": {
-                          "op": "mul",
-                          "left": { "param": "beta" },
-                          "right": { "pop": "S_old" }
+                        "table_lookup": {
+                          "table": "C_age",
+                          "indices": [ { "const": 2.0 } ]
                         }
                       },
                       "right": { "pop": "I_young" }
@@ -120,17 +108,6 @@
                   },
                   "right": { "pop_sum": [ "S_young", "I_young", "R_young" ] }
                 }
-              }
-            }
-          },
-          "right": {
-            "bin_op": {
-              "op": "mul",
-              "left": {
-                "table_lookup": {
-                  "table": "C_age",
-                  "indices": [ { "const": 3.0 } ]
-                }
               },
               "right": {
                 "bin_op": {
@@ -139,10 +116,9 @@
                     "bin_op": {
                       "op": "mul",
                       "left": {
-                        "bin_op": {
-                          "op": "mul",
-                          "left": { "param": "beta" },
-                          "right": { "pop": "S_old" }
+                        "table_lookup": {
+                          "table": "C_age",
+                          "indices": [ { "const": 3.0 } ]
                         }
                       },
                       "right": { "pop": "I_old" }

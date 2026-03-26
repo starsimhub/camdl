@@ -24,7 +24,9 @@ fn minimal_model(compartments: Vec<Compartment>, params: Vec<Parameter>) -> Mode
     Model {
         name: "test".into(),
         version: "0.3".into(),
+        time_unit: "days".into(),
         description: None,
+        origin: None,
         compartments,
         transitions: vec![],
         ode_equations: vec![],

@@ -3,7 +3,11 @@ time_unit = 'days
 
 compartments { S, E, I, R }
 
-stratify(by = latent_stage, levels = [e1, e2, e3], only = [E])
+dimensions {
+  latent_stage = [e1, e2, e3]
+}
+
+stratify(by = latent_stage, only = [E])
 
 parameters {
   beta  : rate in [0.001, 2.0]

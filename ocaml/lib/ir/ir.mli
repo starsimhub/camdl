@@ -188,6 +188,7 @@ type model = {
   version:            string;
   time_unit:          string;
   description:        string option;
+  origin:             string option;
   compartments:       compartment list;
   transitions:        transition list;
   ode_equations:      ode_equation list;

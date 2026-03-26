@@ -1,7 +1,12 @@
 # Two-patch SIR: demonstrates indexed parameters N[patch] and R0[patch]
-stratify(by = patch, levels = [urban, rural])
+
+dimensions {
+  patch = [urban, rural]
+}
 
 compartments { S, I, R }
+
+stratify(by = patch)
 
 parameters {
   gamma    : positive in [0.01, 1.0]

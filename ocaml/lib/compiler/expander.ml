@@ -25,8 +25,11 @@ type context = {
   mutable diags           : Diagnostics.t;  (* collected errors/warnings *)
   mutable source_dir      : string;         (* directory of the source file *)
   mutable expanded_comp_cache : string list option;
-  mutable defines_dims    : (string * string list) list;
-  (* dim name → ordered unique levels derived from defines() tables in pass 1 *)
+  mutable dim_decls       : dimensions_entry list;
+  mutable dim_registry    : (string * string list) list;
+  (* dim name → ordered levels; populated by resolve_dimensions pass *)
+  mutable origin          : string option;
+  (* ISO date string for date() → float conversion *)
 }
 
 let empty_context ?(source_dir = "") () = {
@@ -50,7 +53,9 @@ let empty_context ?(source_dir = "") () = {
   diags                = Diagnostics.create ();
   source_dir;
   expanded_comp_cache  = None;
-  defines_dims         = [];
+  dim_decls            = [];
+  dim_registry         = [];
+  origin               = None;
 }
 
 (* ── Model summary ────────────────────────────────────────────────────────── *)
@@ -67,6 +72,38 @@ type model_summary = {
   obs_count                 : int;
   interv_count              : int;
 }
+
+(* ── Date arithmetic ─────────────────────────────────────────────────────── *)
+
+(** Proleptic Gregorian day number (relative to an internal epoch).
+    Formula from Hatcher / Richards — works for dates CE 1583+. *)
+let days_of_date y m d =
+  let y' = if m <= 2 then y - 1 else y in
+  let m' = if m <= 2 then m + 12 else m in
+  365 * y' + y'/4 - y'/100 + y'/400 + (153*(m'+1))/5 + d - 694025
+
+let parse_iso_date s =
+  match String.split_on_char '-' s with
+  | [ys; ms; ds] ->
+    (try (int_of_string ys, int_of_string ms, int_of_string ds)
+     with _ -> failwith (Printf.sprintf "invalid date literal '%s'" s))
+  | _ -> failwith (Printf.sprintf "date literal must be YYYY-MM-DD, got '%s'" s)
+
+let days_per_unit = function
+  | Days      -> 1.0
+  | Weeks     -> 7.0
+  | Months    -> 365.2425 /. 12.0
+  | Years     -> 365.2425
+  | PerDay    -> 1.0
+  | PerWeek   -> 7.0
+  | PerMonth  -> 365.2425 /. 12.0
+  | PerYear   -> 365.2425
+
+let parse_date_to_float origin_str date_str time_unit =
+  let (oy, om, od) = parse_iso_date origin_str in
+  let (ty, tm, td) = parse_iso_date date_str in
+  let delta = days_of_date ty tm td - days_of_date oy om od in
+  float_of_int delta /. days_per_unit time_unit
 
 (* ── Data loading helpers ─────────────────────────────────────────────────── *)
 
@@ -87,12 +124,12 @@ let split_by sep line =
   parts := Buffer.contents buf :: !parts;
   List.rev !parts
 
-(** Load a `read_long(path, ...)` file → list of n_values float arrays (row-major).
+(** Load a `read(path, ...)` file → list of n_values float arrays (row-major).
     The file must have a header row.
-    dims is the list of table_dim_entry (TDim/TDimUnit/TDefines) for index columns.
+    dims is the list of table_dim_entry (TDim/TDimUnit) for index columns.
     n_values is the number of value columns (= List.length tnames).
     default_val = Some f → sparse (missing cells get f); None → dense (all cells required). *)
-let load_long_floats ctx path ~dims ~n_values ~default_val =
+let load_table_data ctx path ~dims ~n_values ~default_val =
   let abs_path = resolve_data_path ctx path in
   if not (Sys.file_exists abs_path) then begin
     Diagnostics.error ctx.diags
@@ -119,16 +156,11 @@ let load_long_floats ctx path ~dims ~n_values ~default_val =
     (* Compute dimension sizes and level lists *)
     let dim_info = List.map (fun de ->
       let dname = match de with
-        | TDim d | TDimUnit (d, _) | TDefines d -> d
+        | TDim d | TDimUnit (d, _) -> d
       in
-      let levels =
-        (* check defines_dims first, then stratifies *)
-        match List.assoc_opt dname ctx.defines_dims with
+      let levels = match List.assoc_opt dname ctx.dim_registry with
         | Some vs -> vs
-        | None ->
-          (match List.find_opt (fun s -> s.sdim = dname) ctx.stratifies with
-           | Some s -> s.svalues
-           | None -> [])
+        | None    -> []
       in
       (dname, levels)
     ) dims in
@@ -142,10 +174,41 @@ let load_long_floats ctx path ~dims ~n_values ~default_val =
     let arrays = Array.init n_values (fun _ -> Array.make total sentinel) in
     (* Keep track of which cells were set, for duplicate detection *)
     let set_flags = Array.make total false in
+    let dim_names = List.map fst dim_info in
     let ic = open_in abs_path in
     (try
-      (* Read header row *)
-      let _header = input_line ic in
+      (* Read and validate header row *)
+      let header_line = input_line ic in
+      let header_cols = split_by sep header_line in
+      let header_dims =
+        List.init (min n_dims (List.length header_cols))
+          (fun i -> String.trim (List.nth header_cols i))
+      in
+      if header_dims <> dim_names then begin
+        let header_sorted = List.sort compare header_dims in
+        let expected_sorted = List.sort compare dim_names in
+        if header_sorted = expected_sorted then
+          Diagnostics.error ctx.diags
+            ~code:"E216"
+            ~loc:Diagnostics.no_loc
+            ~message:(Printf.sprintf
+              "%s: dimension columns appear reordered; expected %s, got %s"
+              path
+              (String.concat ", " dim_names)
+              (String.concat ", " header_dims))
+            ()
+        else
+          List.iteri (fun i (expected, actual) ->
+            if expected <> actual then
+              Diagnostics.warning ctx.diags
+                ~code:"W201"
+                ~loc:Diagnostics.no_loc
+                ~message:(Printf.sprintf
+                  "%s: column %d is named '%s' but maps to dimension '%s'"
+                  path (i + 1) actual expected)
+                ()
+          ) (List.combine dim_names header_dims)
+      end;
       let row_num = ref 1 in
       (try while true do
         let raw_line = input_line ic in
@@ -260,6 +323,8 @@ let collect_declarations ctx decls =
   List.iter (fun d -> match d with
     | DTimeUnit u        -> ctx.time_unit <- u
     | DDescription s     -> ctx.description <- Some s
+    | DOrigin s          -> ctx.origin <- Some s
+    | DDimensions es     -> ctx.dim_decls <- ctx.dim_decls @ es
     | DCompartments cs   -> ctx.comp_decls <- ctx.comp_decls @ cs
     | DParameters ps     -> ctx.param_decls <- ctx.param_decls @ ps
     | DLet lb            -> ctx.let_bindings <- ctx.let_bindings @ [lb]
@@ -279,114 +344,114 @@ let collect_declarations ctx decls =
   ) decls;
   ctx.orig_transitions <- ctx.transitions
 
-(* ── Defines-dims pass ───────────────────────────────────────────────────── *)
+(* ── Dimensions pass ─────────────────────────────────────────────────────── *)
 
-(** Pass 1: scan table_decls for TDefines entries, load level names from files,
-    register in ctx.defines_dims, and fill in svalues for SValuesPending stratify decls. *)
-let derive_defines_dims ctx =
-  (* collect_defines_from_file: open the file, skip header, collect unique values
-     in the dim column at position col_pos, preserving first-occurrence order. *)
-  let collect_levels_from_file path col_pos =
-    let abs_path = resolve_data_path ctx path in
-    if not (Sys.file_exists abs_path) then begin
-      Diagnostics.error ctx.diags
-        ~code:"E200"
-        ~loc:Diagnostics.no_loc
-        ~message:(Printf.sprintf "data file not found: %s" path)
-        ~hint:"check the path is relative to the .camdl source file"
-        ();
-      []
-    end else begin
-      let ext = String.lowercase_ascii (Filename.extension path) in
-      let sep = match ext with
-        | ".csv" -> ','
-        | ".tsv" -> '\t'
-        | _ ->
-          Diagnostics.error ctx.diags
-            ~code:"E205"
-            ~loc:Diagnostics.no_loc
-            ~message:(Printf.sprintf "unrecognized extension '%s' in %s; use .csv or .tsv" ext path)
-            ();
-          '\t'
-      in
-      let ic = open_in abs_path in
-      let seen = Hashtbl.create 8 in
-      let order = ref [] in
-      (try
-        let _hdr = input_line ic in
-        (try while true do
-          let raw = input_line ic in
-          let line = String.trim raw in
-          if line <> "" && not (String.length line > 0 && line.[0] = '#') then begin
-            let cols = split_by sep line in
-            match List.nth_opt cols col_pos with
+(** Read unique values from a named column in a file, preserving first-occurrence order.
+    Returns (levels, n_rows, n_duplicates). *)
+let read_dim_column_from_file ctx path col_name =
+  let abs_path = resolve_data_path ctx path in
+  if not (Sys.file_exists abs_path) then begin
+    Diagnostics.error ctx.diags
+      ~code:"E200"
+      ~loc:Diagnostics.no_loc
+      ~message:(Printf.sprintf "data file not found: %s" path)
+      ~hint:"check the path is relative to the .camdl source file"
+      ();
+    ([], 0, 0)
+  end else begin
+    let ext = String.lowercase_ascii (Filename.extension path) in
+    let sep = match ext with
+      | ".csv" -> ','
+      | ".tsv" -> '\t'
+      | _ ->
+        Diagnostics.error ctx.diags
+          ~code:"E205"
+          ~loc:Diagnostics.no_loc
+          ~message:(Printf.sprintf "unrecognized extension '%s' in %s; use .csv or .tsv" ext path)
+          ();
+        '\t'
+    in
+    let ic = open_in abs_path in
+    let col_pos = ref (-1) in
+    let seen = Hashtbl.create 16 in
+    let order = ref [] in
+    let n_rows = ref 0 in
+    let n_dups = ref 0 in
+    (try
+      let hdr = input_line ic in
+      let headers = List.map String.trim (split_by sep hdr) in
+      (match List.find_index (fun h -> h = col_name) headers with
+       | Some i -> col_pos := i
+       | None ->
+         Diagnostics.error ctx.diags
+           ~code:"E218"
+           ~loc:Diagnostics.no_loc
+           ~message:(Printf.sprintf "column '%s' not found in %s (headers: %s)"
+             col_name path (String.concat ", " headers))
+           ());
+      (try while true do
+        let raw = input_line ic in
+        let line = String.trim raw in
+        if line <> "" && not (String.length line > 0 && line.[0] = '#') then begin
+          incr n_rows;
+          let cols = split_by sep line in
+          if !col_pos >= 0 then
+            match List.nth_opt cols !col_pos with
             | None -> ()
             | Some cell ->
               let v = String.trim cell in
-              if v <> "" && not (Hashtbl.mem seen v) then begin
-                Hashtbl.add seen v ();
-                order := v :: !order
+              if v <> "" then begin
+                if Hashtbl.mem seen v then incr n_dups
+                else begin
+                  Hashtbl.add seen v ();
+                  order := v :: !order
+                end
               end
-          end
-        done with End_of_file -> ())
-      with End_of_file -> ());
-      close_in ic;
-      List.rev !order
-    end
-  in
-  List.iteri (fun _ti td ->
-    List.iteri (fun col_pos de ->
-      match de with
-      | TDefines dname ->
-        (* Error if already defined *)
-        if List.mem_assoc dname ctx.defines_dims then begin
-          Diagnostics.error ctx.diags
-            ~code:"E212"
-            ~loc:Diagnostics.no_loc
-            ~message:(Printf.sprintf "dimension '%s' is already defined by another defines() table" dname)
-            ()
-        end else if List.exists (fun sd ->
-            sd.sdim = dname && sd.svalues_src <> SValuesPending
-          ) ctx.stratifies then begin
-          Diagnostics.error ctx.diags
-            ~code:"E213"
-            ~loc:Diagnostics.no_loc
-            ~message:(Printf.sprintf "dimension '%s' already has levels from a stratify declaration" dname)
-            ()
-        end else begin
-          let path = match td.tvalue with
-            | EFuncCall ("read_long", args) ->
-              (match List.find_map (fun (_, e) ->
-                match e with EIdent (s, _) -> Some s | _ -> None) args with
-               | Some p -> p
-               | None -> "")
-            | _ -> ""
-          in
-          if path = "" then ()
-          else begin
-            let levels = collect_levels_from_file path col_pos in
-            ctx.defines_dims <- ctx.defines_dims @ [(dname, levels)]
-          end
         end
-      | TDim _ | TDimUnit _ -> ()
-    ) td.tdims
-  ) ctx.table_decls;
-  (* Fill in svalues for SValuesPending stratify decls *)
-  ctx.stratifies <- List.map (fun sd ->
-    match sd.svalues_src with
-    | SValuesPending ->
-      (match List.assoc_opt sd.sdim ctx.defines_dims with
-       | Some levels -> { sd with svalues = levels }
-       | None ->
-         Diagnostics.error ctx.diags
-           ~code:"E214"
-           ~loc:Diagnostics.no_loc
-           ~message:(Printf.sprintf
-             "stratify(by = '%s') has no levels: add levels = [...] or a defines(%s) table"
-             sd.sdim sd.sdim)
-           ();
-         sd)
-    | SValuesLit _ -> sd
+      done with End_of_file -> ())
+    with End_of_file -> ());
+    close_in ic;
+    (List.rev !order, !n_rows, !n_dups)
+  end
+
+(** Pass 1: process DDimensions declarations, build dim_registry.
+    Emits info messages for file-derived dimensions. *)
+let resolve_dimensions ctx =
+  List.iter (fun de ->
+    if List.mem_assoc de.dename ctx.dim_registry then
+      Diagnostics.error ctx.diags
+        ~code:"E212"
+        ~loc:Diagnostics.no_loc
+        ~message:(Printf.sprintf "dimension '%s' is declared more than once in dimensions {}" de.dename)
+        ()
+    else begin
+      let levels = match de.desrc with
+        | DInline vs -> vs
+        | DRead (path, col_name) ->
+          let (vs, n_rows, n_dups) = read_dim_column_from_file ctx path col_name in
+          let msg = if n_dups = 0 then
+            Printf.sprintf "info: dimension '%s': %d levels from %s column \"%s\" (%d rows)"
+              de.dename (List.length vs) path col_name n_rows
+          else
+            Printf.sprintf "info: dimension '%s': %d levels from %s column \"%s\" (%d rows, %d duplicates)"
+              de.dename (List.length vs) path col_name n_rows n_dups
+          in
+          Printf.eprintf "%s\n%!" msg;
+          vs
+      in
+      ctx.dim_registry <- ctx.dim_registry @ [(de.dename, levels)]
+    end
+  ) ctx.dim_decls;
+  (* Validate: every stratify dimension must be in dim_registry *)
+  List.iter (fun sd ->
+    if not (List.mem_assoc sd.sdim ctx.dim_registry) then
+      Diagnostics.error ctx.diags
+        ~code:"E214"
+        ~loc:Diagnostics.no_loc
+        ~message:(Printf.sprintf
+          "stratify(by = '%s') has no levels: declare it in dimensions { %s = [...] }"
+          sd.sdim sd.sdim)
+        ()
   ) ctx.stratifies
 
 (* ── Unit conversion ─────────────────────────────────────────────────────── *)
@@ -423,13 +488,9 @@ let unit_to_model_time ctx f u =
 (* ── Stratification helpers ──────────────────────────────────────────────── *)
 
 let dim_values ctx dim =
-  match List.find_opt (fun s -> s.sdim = dim) ctx.stratifies with
-  | Some s -> s.svalues
-  | None   ->
-    (* fall back to defines_dims (populated by derive_defines_dims pass) *)
-    (match List.assoc_opt dim ctx.defines_dims with
-     | Some vs -> vs
-     | None    -> [])
+  match List.assoc_opt dim ctx.dim_registry with
+  | Some vs -> vs
+  | None    -> []
 
 let strat_applies_to _ctx cname sd =
   match sd.sonly with
@@ -468,7 +529,7 @@ let get_expanded_compartments ctx =
 (* ── Table helpers ───────────────────────────────────────────────────────── *)
 
 let dim_name_of_entry = function
-  | TDim d | TDimUnit (d, _) | TDefines d -> d
+  | TDim d | TDimUnit (d, _) -> d
 
 let table_dims ctx tname =
   match List.find_opt (fun td -> List.mem tname td.tnames) ctx.table_decls with
@@ -556,8 +617,7 @@ let resolve_index ctx (env : (string * string) list) idx =
   match List.assoc_opt idx env with
   | Some concrete -> concrete
   | None ->
-    let all_vals = List.concat_map (fun sd -> sd.svalues) ctx.stratifies
-      @ List.concat_map snd ctx.defines_dims in
+    let all_vals = List.concat_map snd ctx.dim_registry in
     if List.mem idx all_vals then idx
     else begin
       Diagnostics.error ctx.diags
@@ -581,6 +641,31 @@ let index_item_to_str env item =
   | IPosn _                   -> "?"
   | INamed (_, EIdent (s, _)) -> (match List.assoc_opt s env with Some v -> v | None -> s)
   | INamed (_, _)             -> "?"
+
+(** Flatten a nested EList into a depth-first left-to-right list of leaf exprs. *)
+let rec flatten_ast_list = function
+  | EList es -> List.concat_map flatten_ast_list es
+  | other    -> [other]
+
+(** Compute the row-major flat index for a shaped let lookup.
+    shape is the list of dimension names; items are the index arguments;
+    env maps loop variable names to concrete level strings. *)
+let shape_index ctx shape items env =
+  let n = List.length shape in
+  let pairs = List.mapi (fun i dim ->
+    let item     = List.nth items i in
+    let val_name = index_item_to_str env item in
+    let idx      = int_of_float (dim_value_index ctx dim val_name) in
+    let size     = List.length (dim_values ctx dim) in
+    (idx, size)
+  ) shape in
+  (* Row-major: stride for dim i = product of sizes of dims i+1 ... n-1 *)
+  let strides = Array.make n 1 in
+  for i = n - 2 downto 0 do
+    strides.(i) <- strides.(i + 1) * snd (List.nth pairs (i + 1))
+  done;
+  List.fold_left (fun acc (i, (idx, _)) -> acc + idx * strides.(i))
+    0 (List.mapi (fun i p -> (i, p)) pairs)
 
 let rec resolve_expr ctx (env : (string * string) list) (e : expr) : Ir.expr =
   match e with
@@ -634,7 +719,27 @@ let rec resolve_expr ctx (env : (string * string) list) (e : expr) : Ir.expr =
         (var_name, val_name)
       ) lb.lindices in
       normalize_expr (resolve_expr ctx (inner_env @ env) lb.lbody)
+    (* 2b. Shaped let? → flatten body, compute row-major index, resolve cell *)
+    | Some lb when lb.lshape <> None ->
+      let shape = Option.get lb.lshape in
+      let flat  = flatten_ast_list lb.lbody in
+      let idx   = shape_index ctx shape items env in
+      if idx >= 0 && idx < List.length flat then
+        normalize_expr (resolve_expr ctx env (List.nth flat idx))
+      else begin
+        Diagnostics.error ctx.diags
+          ~code:"E218" ~loc:Diagnostics.no_loc
+          ~message:(Printf.sprintf
+            "shaped let '%s': index %d out of bounds (size %d)"
+            base_name idx (List.length flat)) ();
+        Ir.Const 0.0
+      end
     | _ ->
+    (* 2c. Indexed time function: beta[p] → Ir.TimeFunc "beta_urban" *)
+    if List.exists (fun (fd : func_decl) -> fd.fname = base_name && fd.findices <> []) ctx.func_decls then
+      let idx_vals = List.map (index_item_to_str env) items in
+      Ir.TimeFunc (String.concat "_" (base_name :: idx_vals))
+    else
     (* 3. Indexed parameter? → resolve index and return Ir.Param of mangled name *)
     if is_indexed_param ctx base_name then
       (match items with
@@ -674,6 +779,27 @@ let rec resolve_expr ctx (env : (string * string) list) (e : expr) : Ir.expr =
       List.fold_left (fun acc t ->
         Ir.BinOp { op = Ir.Add; left = acc; right = t }
       ) (List.hd terms) (List.tl terms)
+  | EFuncCall ("date", args) ->
+    let date_str = match args with
+      | [("", EIdent (s, _))] -> s
+      | _ ->
+        Diagnostics.error ctx.diags ~code:"E220" ~loc:Diagnostics.no_loc
+          ~message:"date() expects a single quoted string argument, e.g. date(\"2020-01-01\")"
+          ();
+        ""
+    in
+    (match ctx.origin with
+     | Some origin_str ->
+       (try Ir.Const (parse_date_to_float origin_str date_str ctx.time_unit)
+        with Failure msg ->
+          Diagnostics.error ctx.diags ~code:"E220" ~loc:Diagnostics.no_loc
+            ~message:msg ();
+          Ir.Const 0.0)
+     | None ->
+       Diagnostics.error ctx.diags ~code:"E220" ~loc:Diagnostics.no_loc
+         ~message:"date() requires a top-level origin declaration, e.g. origin = date(\"2020-01-01\")"
+         ();
+       Ir.Const 0.0)
   | EFuncCall (fname, _args) ->
     if List.exists (fun (fd : func_decl) -> fd.fname = fname) ctx.func_decls
     then Ir.TimeFunc fname
@@ -825,6 +951,64 @@ let rec eval_guard env = function
   | GAnd (g1, g2) -> eval_guard env g1 && eval_guard env g2
   | GOr  (g1, g2) -> eval_guard env g1 || eval_guard env g2
 
+(** Validate that every identifier in a guard is either a loop variable,
+    a dimension level value, or an unknown name — but NOT a parameter or
+    compartment name (which cannot be meaningfully compared at compile time).
+    Emits E217 for each bad identifier found. *)
+let check_guard_compile_time ctx decl_name loop_vars guard =
+  let all_dim_levels = List.concat_map snd ctx.dim_registry in
+  let param_names = List.filter_map (function
+    | PScalar  p -> Some p.pname
+    | PIndexed p -> Some p.pname
+  ) ctx.param_decls in
+  let comp_names = List.map (fun c -> c.cname) ctx.comp_decls in
+  let check_ident ident =
+    if List.mem ident loop_vars || List.mem ident all_dim_levels then ()
+    else if List.mem ident param_names then
+      Diagnostics.error ctx.diags
+        ~code:"E217" ~loc:Diagnostics.no_loc
+        ~message:(Printf.sprintf
+          "%s: where guard references '%s', which is a parameter; \
+           use it in the rate expression instead"
+          decl_name ident) ()
+    else if List.mem ident comp_names then
+      Diagnostics.error ctx.diags
+        ~code:"E217" ~loc:Diagnostics.no_loc
+        ~message:(Printf.sprintf
+          "%s: where guard references '%s', which is a compartment; \
+           use it in the rate expression instead"
+          decl_name ident) ()
+  in
+  let rec walk = function
+    | GEq (a, b) | GNeq (a, b) -> check_ident a; check_ident b
+    | GAnd (g1, g2) | GOr (g1, g2) -> walk g1; walk g2
+  in
+  walk guard
+
+let loop_vars_of_indices indices =
+  List.concat_map (function
+    | IBind (v, _)       -> [v]
+    | IConsec (v, vn, _) -> [v; vn]
+    | IComp v            -> [v]
+  ) indices
+
+(** Check all transition and intervention guards for E217 (non-evaluable idents). *)
+let check_guards ctx =
+  List.iter (fun tr ->
+    match tr.trguard with
+    | None -> ()
+    | Some g ->
+      check_guard_compile_time ctx tr.trname
+        (loop_vars_of_indices tr.trindices) g
+  ) ctx.transitions;
+  List.iter (fun iv ->
+    match iv.ivguard with
+    | None -> ()
+    | Some g ->
+      check_guard_compile_time ctx iv.ivname
+        (loop_vars_of_indices iv.ivindices) g
+  ) ctx.interv_decls
+
 (* ── Transition expansion ────────────────────────────────────────────────── *)
 
 let expand_transitions_counted ctx =
@@ -875,117 +1059,6 @@ let expand_transitions_counted ctx =
 
 let expand_transitions ctx =
   fst (expand_transitions_counted ctx)
-
-(* ── Coupling sugar desugaring ────────────────────────────────────────────── *)
-
-(** Build the auto-denominator for stratum b: sum of all integer compartments
-    each indexed by [b].  E.g. for S I R → S[b] + I[b] + R[b]. *)
-let auto_denom_expr b ctx =
-  let int_comps = List.filter_map (fun cd ->
-    match cd.ckind with Integer -> Some cd.cname | Real -> None
-  ) ctx.comp_decls in
-  match int_comps with
-  | [] -> EConst 1.0
-  | first :: rest ->
-    List.fold_left (fun acc c ->
-      EBinOp (Add, acc, EIndex (c, [IPosn (EIdent (b, dummy_loc))]))
-    ) (EIndex (first, [IPosn (EIdent (b, dummy_loc))])) rest
-
-(** Collect bare compartment names referenced in an AST expression. *)
-let rec collect_comp_idents ctx = function
-  | EIdent (name, _) when List.exists (fun cd -> cd.cname = name) ctx.comp_decls -> [name]
-  | EBinOp (_, l, r) -> collect_comp_idents ctx l @ collect_comp_idents ctx r
-  | EUnOp  (_, e)    -> collect_comp_idents ctx e
-  | _                -> []
-
-(** True if a let-binding body references every integer compartment exactly
-    once (i.e. it is a total-population expression like N = S + I + R). *)
-let is_total_pop_binding ctx lbody =
-  let int_comps = List.filter_map (fun cd ->
-    match cd.ckind with Integer -> Some cd.cname | Real -> None
-  ) ctx.comp_decls in
-  let found    = List.sort_uniq compare (collect_comp_idents ctx lbody) in
-  let expected = List.sort_uniq compare int_comps in
-  found = expected && found <> []
-
-(** Walk an AST rate expression and substitute for one coupling dimension:
-    - bare source compartment (src_name)  → comp[a]  (self-index)
-    - bare non-source compartments        → comp[b]  (sum-index)
-    - already-indexed compartments        → append a or b as appropriate
-    - total-population let-binding        → auto_denom_expr b ctx
-    - parameters and other non-comp idents remain unchanged *)
-let rec subst_for_coupling ctx src_name a b = function
-  | EIdent (name, _) as e ->
-    if name = src_name then
-      EIndex (name, [IPosn (EIdent (a, dummy_loc))])
-    else if List.exists (fun cd -> cd.cname = name) ctx.comp_decls then
-      EIndex (name, [IPosn (EIdent (b, dummy_loc))])
-    else begin
-      match List.find_opt (fun lb -> lb.lname = name) ctx.let_bindings with
-      | Some lb when is_total_pop_binding ctx lb.lbody ->
-        auto_denom_expr b ctx
-      | _ -> e  (* parameter or other — leave as-is *)
-    end
-  | EIndex (name, idxs) ->
-    (* For an already-indexed compartment, append the new dimension index. *)
-    if name = src_name then
-      EIndex (name, idxs @ [IPosn (EIdent (a, dummy_loc))])
-    else if List.exists (fun cd -> cd.cname = name) ctx.comp_decls then
-      EIndex (name, idxs @ [IPosn (EIdent (b, dummy_loc))])
-    else
-      (* Non-compartment index expression (e.g. table row variable) — recurse
-         only into the index arguments, not the name. *)
-      EIndex (name, List.map (function
-        | IPosn e       -> IPosn  (subst_for_coupling ctx src_name a b e)
-        | INamed (k, e) -> INamed (k, subst_for_coupling ctx src_name a b e)
-      ) idxs)
-  | EBinOp (op, l, r) ->
-    EBinOp (op,
-      subst_for_coupling ctx src_name a b l,
-      subst_for_coupling ctx src_name a b r)
-  | EUnOp  (op, e)     -> EUnOp (op, subst_for_coupling ctx src_name a b e)
-  | ECond  (p, t, el)  ->
-    ECond (subst_for_coupling ctx src_name a b p,
-           subst_for_coupling ctx src_name a b t,
-           subst_for_coupling ctx src_name a b el)
-  | ESum   (v, d, body) ->
-    ESum (v, d, subst_for_coupling ctx src_name a b body)
-  | other -> other
-
-(** Desugar all coupling declarations on one transition into explicit index
-    bindings + a contact-matrix-weighted sum rate.
-
-    coupling(dim) = M  →
-      add IBind(a, dim) to trindices;
-      localize src/dst to [a];
-      rate → sum(b in dim, M[a,b] * rate_with_src→src[a]_others→others[b]) *)
-let desugar_coupling ctx tr =
-  if tr.trcoupling = [] then tr
-  else begin
-    let src_name = Option.map (fun (cname, _) -> cname) tr.trsrc in
-    List.fold_left (fun tr_acc (dim, matrix_name) ->
-      let a = "_ca_" ^ dim in   (* self-index variable, e.g. _ca_age *)
-      let b = "_cb_" ^ dim in   (* sum-index variable,  e.g. _cb_age *)
-      let add_idx idxs = idxs @ [IPosn (EIdent (a, dummy_loc))] in
-      let inner = match src_name with
-        | Some sn -> subst_for_coupling ctx sn a b tr_acc.trrate
-        | None    -> tr_acc.trrate
-      in
-      let new_rate =
-        ESum (b, dim,
-          EBinOp (Mul,
-            EIndex (matrix_name, [IPosn (EIdent (a, dummy_loc)); IPosn (EIdent (b, dummy_loc))]),
-            inner))
-      in
-      { tr_acc with
-        trindices  = tr_acc.trindices @ [IBind (a, dim)];
-        trsrc      = Option.map (fun (c, idxs) -> (c, add_idx idxs)) tr_acc.trsrc;
-        trdst      = Option.map (fun (c, idxs) -> (c, add_idx idxs)) tr_acc.trdst;
-        trrate     = new_rate;
-        trcoupling = [];
-      }
-    ) tr tr.trcoupling
-  end
 
 (* ── Parameter expansion ─────────────────────────────────────────────────── *)
 
@@ -1090,9 +1163,9 @@ let expand_tables ctx =
   List.concat_map (fun td ->
     let dim_entries = td.tdims in
     match td.tvalue with
-    | EFuncCall ("read_long", args) ->
+    | EFuncCall ("read", args) ->
       (* Multi-value loader: produces one Ir.table per name in td.tnames *)
-      (match extract_path_arg ctx "read_long" args with
+      (match extract_path_arg ctx "read" args with
        | None -> []
        | Some path ->
          let default_val = match List.find_map (fun (k, e) ->
@@ -1101,7 +1174,7 @@ let expand_tables ctx =
            | _ -> None
          in
          let n_values = List.length td.tnames in
-         let arrays = load_long_floats ctx path
+         let arrays = load_table_data ctx path
            ~dims:dim_entries ~n_values ~default_val in
          List.mapi (fun col_idx name ->
            let arr = List.nth arrays col_idx in
@@ -1115,7 +1188,7 @@ let expand_tables ctx =
       (* Single-value path: external() or inline literal *)
       let name = match td.tnames with [n] -> n | _ ->
         Diagnostics.error ctx.diags ~code:"E215" ~loc:Diagnostics.no_loc
-          ~message:"multi-name table declaration requires read_long(...)" ();
+          ~message:"multi-name table declaration requires read(...)" ();
         List.hd td.tnames
       in
       let source = table_source_of_expr ctx dim_entries td.tvalue in
@@ -1237,6 +1310,56 @@ let resolve_comp_name ctx env e =
 
 (* ── Time function expansion ──────────────────────────────────────────────── *)
 
+(** Load times and values for one level of an indexed interpolated function.
+    Reads the file, finds columns by name from header, filters rows where the
+    key column equals key_val. Returns (times, values) as float lists. *)
+let load_interpolated_for_level ctx path ~key_col ~key_val ~time_col ~value_col =
+  let abs_path = resolve_data_path ctx path in
+  if not (Sys.file_exists abs_path) then begin
+    Diagnostics.error ctx.diags ~code:"E200" ~loc:Diagnostics.no_loc
+      ~message:(Printf.sprintf "data file not found: %s" path) ();
+    ([], [])
+  end else begin
+    let ext = String.lowercase_ascii (Filename.extension path) in
+    let sep = match ext with ".csv" -> ',' | _ -> '\t' in
+    let ic = open_in abs_path in
+    let result = (try
+      let header_line = input_line ic in
+      let headers = List.map String.trim (split_by sep header_line) in
+      let find_col name =
+        match List.find_index (fun h -> h = name) headers with
+        | Some i -> i
+        | None ->
+          Diagnostics.error ctx.diags ~code:"E219" ~loc:Diagnostics.no_loc
+            ~message:(Printf.sprintf "%s: column '%s' not found in header" path name) ();
+          0
+      in
+      let key_ci   = find_col key_col in
+      let time_ci  = find_col time_col in
+      let value_ci = find_col value_col in
+      let times  = ref [] in
+      let values = ref [] in
+      (try while true do
+        let line = String.trim (input_line ic) in
+        if line <> "" && not (line.[0] = '#') then begin
+          let cols = split_by sep line in
+          let get i = String.trim (try List.nth cols i with _ -> "") in
+          if get key_ci = key_val then begin
+            (match float_of_string_opt (get time_ci) with
+             | Some t -> times  := !times  @ [t]
+             | None   -> ());
+            (match float_of_string_opt (get value_ci) with
+             | Some v -> values := !values @ [v]
+             | None   -> ())
+          end
+        end
+      done with End_of_file -> ());
+      (!times, !values)
+    with e -> close_in ic; raise e) in
+    close_in ic;
+    result
+  end
+
 (** Resolve a func_decl kwarg to an Ir.expr, preserving Param references.
     Raises if the key is missing. *)
 let get_expr_kwarg ctx kwargs key =
@@ -1251,48 +1374,98 @@ let get_expr_list_kwarg ctx kwargs key =
     | EList es -> List.map (resolve_expr ctx []) es
     | _ -> [resolve_expr ctx [] e]
 
+let expand_time_function_one ctx fname (env : (string * string) list) fkind fargs =
+  let get_kw key =
+    match List.assoc_opt key fargs with
+    | None   -> failwith (Printf.sprintf "time function missing required argument '%s'" key)
+    | Some e -> resolve_expr ctx env e
+  in
+  let get_kw_list key =
+    match List.assoc_opt key fargs with
+    | None   -> failwith (Printf.sprintf "time function missing required argument '%s'" key)
+    | Some e -> match e with
+      | EList es -> List.map (resolve_expr ctx env) es
+      | _ -> [resolve_expr ctx env e]
+  in
+  let get_str_kw key default = match List.assoc_opt key fargs with
+    | Some (EIdent (s, _)) -> s
+    | Some _ | None -> default
+  in
+  let kind = match fkind with
+    | "sinusoidal" ->
+      Ir.Sinusoidal {
+        amplitude = get_kw "amplitude";
+        period    = get_kw "period";
+        phase     = get_kw "phase";
+        baseline  = get_kw "baseline";
+      }
+    | "piecewise" ->
+      Ir.Piecewise {
+        breakpoints = get_kw_list "breakpoints";
+        values      = get_kw_list "values";
+      }
+    | "interpolated" ->
+      let method_ = get_str_kw "method" "linear" in
+      (* File-backed form: data = "path" key_col = X time_col = Y value_col = Z *)
+      (match List.assoc_opt "data" fargs with
+       | Some (EIdent (path, _)) ->
+         let key_col   = get_str_kw "key_col"   "key"   in
+         let time_col  = get_str_kw "time_col"  "time"  in
+         let value_col = get_str_kw "value_col" "value" in
+         (* key_val is the concrete level for this env, from the key_col dim *)
+         let key_val = match List.assoc_opt key_col env with
+           | Some v -> v
+           | None   -> ""
+         in
+         let (times, values) =
+           load_interpolated_for_level ctx path
+             ~key_col ~key_val ~time_col ~value_col
+         in
+         Ir.Interpolated {
+           times   = List.map (fun f -> Ir.Const f) times;
+           values  = List.map (fun f -> Ir.Const f) values;
+           method_;
+         }
+       | _ ->
+         Ir.Interpolated {
+           times   = get_kw_list "times";
+           values  = get_kw_list "values";
+           method_;
+         })
+    | "periodic" ->
+      Ir.Periodic {
+        period = get_kw "period";
+        values = get_kw_list "values";
+      }
+    | k -> failwith (Printf.sprintf "unknown time function kind '%s'" k)
+  in
+  { Ir.name = fname; Ir.kind }
+
 let expand_time_functions ctx : Ir.time_function list =
-  List.map (fun (fd : func_decl) ->
-    let kind = match fd.fkind with
-      | "sinusoidal" ->
-        Ir.Sinusoidal {
-          amplitude = get_expr_kwarg ctx fd.fargs "amplitude";
-          period    = get_expr_kwarg ctx fd.fargs "period";
-          phase     = get_expr_kwarg ctx fd.fargs "phase";
-          baseline  = get_expr_kwarg ctx fd.fargs "baseline";
-        }
-      | "piecewise" ->
-        Ir.Piecewise {
-          breakpoints = get_expr_list_kwarg ctx fd.fargs "breakpoints";
-          values      = get_expr_list_kwarg ctx fd.fargs "values";
-        }
-      | "interpolated" ->
-        let method_ = match List.assoc_opt "method" fd.fargs with
-          | Some (EConst _) | None -> "linear"
-          | Some e -> (match e with
-            | EIdent (s, _) -> s
-            | _ -> "linear")
-        in
-        Ir.Interpolated {
-          times   = get_expr_list_kwarg ctx fd.fargs "times";
-          values  = get_expr_list_kwarg ctx fd.fargs "values";
-          method_;
-        }
-      | "periodic" ->
-        Ir.Periodic {
-          period = get_expr_kwarg ctx fd.fargs "period";
-          values = get_expr_list_kwarg ctx fd.fargs "values";
-        }
-      | k -> failwith (Printf.sprintf "unknown time function kind '%s'" k)
-    in
-    { Ir.name = fd.fname; Ir.kind }
+  List.concat_map (fun (fd : func_decl) ->
+    if fd.findices = [] then
+      [expand_time_function_one ctx fd.fname [] fd.fkind fd.fargs]
+    else begin
+      let combos = cartesian_product fd.findices ctx in
+      List.map (fun env ->
+        let parts = name_parts_from_bindings fd.findices env in
+        let fname = fd.fname ^ "_" ^ String.concat "_" parts in
+        expand_time_function_one ctx fname env fd.fkind fd.fargs
+      ) combos
+    end
   ) ctx.func_decls
 
 let expand_interventions ctx =
   List.concat_map (fun iv ->
     let base_name = if iv.ivindices = [] then None else Some iv.ivname in
     let combos = cartesian_product iv.ivindices ctx in
-    List.map (fun env ->
+    List.filter_map (fun env ->
+      let pass_guard = match iv.ivguard with
+        | None   -> true
+        | Some g -> eval_guard env g
+      in
+      if not pass_guard then None
+      else
       let parts = name_parts_from_bindings iv.ivindices env in
       let iv_name =
         if parts = [] then iv.ivname
@@ -1337,7 +1510,7 @@ let expand_interventions ctx =
             else String.concat "_" (comp :: idx_vals) in
           [Ir.Set { Ir.compartment = concrete; Ir.value = resolve_expr ctx env expr }]
       in
-      { Ir.name = iv_name; Ir.base_name; Ir.schedule; Ir.actions }
+      Some { Ir.name = iv_name; Ir.base_name; Ir.schedule; Ir.actions }
     ) combos
   ) ctx.interv_decls
 
@@ -1441,7 +1614,8 @@ let expand_observations ctx =
 (** Emit W103 for any let binding whose name also appears as a stratum value. *)
 let check_shadowing ctx =
   let all_strat_vals = List.concat_map (fun sd ->
-    List.map (fun v -> (v, sd.sdim)) sd.svalues
+    let vs = match List.assoc_opt sd.sdim ctx.dim_registry with Some vs -> vs | None -> [] in
+    List.map (fun v -> (v, sd.sdim)) vs
   ) ctx.stratifies in
   List.iter (fun lb ->
     match List.assoc_opt lb.lname all_strat_vals with
@@ -1511,8 +1685,10 @@ let find_base_compname ctx expanded_name =
   |> Option.map (fun cd -> cd.cname)
 
 let build_model_structure ctx expanded_trs =
-  let dimensions = List.map (fun sd ->
-    { Ir.dim_name = sd.sdim; Ir.dim_values = sd.svalues }
+  let dimensions = List.filter_map (fun sd ->
+    match List.assoc_opt sd.sdim ctx.dim_registry with
+    | Some vs -> Some { Ir.dim_name = sd.sdim; Ir.dim_values = vs }
+    | None    -> None
   ) ctx.stratifies in
   let base_compartments = List.map (fun cd -> cd.cname) ctx.comp_decls in
   let compartment_dims = List.map (fun cd ->
@@ -1571,14 +1747,14 @@ let expand_detail ?(source_dir = "") (name : string) (decls : declaration list)
     : Ir.model * context * model_summary =
   let ctx = empty_context ~source_dir () in
   collect_declarations ctx decls;
-  (* Pass 1: derive dimension levels from defines() tables *)
-  derive_defines_dims ctx;
+  (* Pass 1: resolve dimensions {} block, build dim_registry *)
+  resolve_dimensions ctx;
   (* W103 shadowing check: let bindings vs stratum values *)
   check_shadowing ctx;
+  (* E217: check that guard expressions only reference dim levels / loop vars *)
+  check_guards ctx;
   (* Save original transitions before desugaring *)
   ctx.orig_transitions <- ctx.transitions;
-  (* Desugar coupling sugar before expansion *)
-  ctx.transitions <- List.map (desugar_coupling ctx) ctx.transitions;
   let expanded_comps = expand_compartments ctx in
   let (expanded_trs, filtered_n) = expand_transitions_counted ctx in
   let ms = build_model_structure ctx expanded_trs in
@@ -1587,6 +1763,7 @@ let expand_detail ?(source_dir = "") (name : string) (decls : declaration list)
     Ir.version            = "0.3";
     Ir.time_unit          = unit_lit_to_string ctx.time_unit;
     Ir.description        = ctx.description;
+    Ir.origin             = ctx.origin;
     Ir.compartments       = expanded_comps;
     Ir.transitions        = expanded_trs;
     Ir.ode_equations      = [];

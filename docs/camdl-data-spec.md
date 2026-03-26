@@ -65,7 +65,7 @@ and which are values (everything remaining).
 A table declaration maps CSV structure to DSL objects:
 
 ```
-name : dim₁ × dim₂ × ... = read_long("file.tsv")
+name : dim₁ × dim₂ × ... = read("file.tsv")
 ```
 
 The dimensions map **positionally** to index columns in the CSV. The remaining
@@ -74,7 +74,7 @@ value column (the last).
 
 ```camdl
 tables {
-  pop : patch = read_long("data/pop.tsv")
+  pop : patch = read("data/pop.tsv")
 }
 ```
 
@@ -92,7 +92,7 @@ For a 2D table:
 
 ```camdl
 tables {
-  adj : patch × patch = read_long("data/adj.tsv", default = 0.0)
+  adj : patch × patch = read("data/adj.tsv", default = 0.0)
 }
 ```
 
@@ -112,52 +112,75 @@ it.)
 
 ---
 
-## `defines()`: where dimension levels come from
+## `dimensions {}`: where dimension levels come from
 
 A dimension is a named set of **levels** — the valid values for that index.
 `age` has levels `{under5, over5}`. `patch` has levels
 `{kano_dala, borno_maiduguri, ...}`.
 
-Levels come from two sources:
+Levels come from the `dimensions {}` block, which is declared at the top level
+of the file. Two forms are supported:
 
-**Inline** — small structural dimensions declared directly:
-
-```camdl
-stratify(by = age, levels = [under5, over5])
-```
-
-**Data-derived** — large or data-driven dimensions declared via `defines()` in a
-table's type signature:
+**Inline** — small structural dimensions:
 
 ```camdl
-tables {
-  pop : defines(patch) = read_long("data/pop.tsv")
+dimensions {
+  age = [under5, over5]
 }
 ```
 
-`defines(patch)` means: "read this CSV column, extract unique values (preserving
-first-occurrence order), and those ARE the levels of the `patch` dimension." The
-dimension is created here. All other tables referencing `patch` validate against
-these levels.
+**Data-derived** — large or data-driven dimensions read from a file column:
+
+```camdl
+dimensions {
+  patch = read("data/pop.tsv", column = "patch")
+}
+```
+
+The `read(file, column = "col")` form reads the named column, collects unique
+values in first-occurrence order, and those become the levels of the dimension.
+All tables referencing `patch` validate against these derived levels.
+
+After declaring dimensions, `stratify(by = X)` applies them to compartments:
+
+```camdl
+dimensions {
+  age   = [under5, over5]
+  patch = read("data/pop.tsv", column = "patch")
+}
+
+stratify(by = age)
+stratify(by = patch)
+
+tables {
+  pop : patch = read("data/pop.tsv")
+  adj : patch × patch = read("data/adj.tsv", default = 0.0)
+}
+```
 
 ### Rules
 
 **1. Each dimension is defined exactly once.**
 
 ```camdl
-# OK: patch defined by pop, used by adj
-pop : defines(patch) = read_long("data/pop.tsv")
-adj : patch × patch  = read_long("data/adj.tsv", default = 0.0)
+# OK: patch defined once, referenced by two tables
+dimensions { patch = read("data/pop.tsv", column = "patch") }
+tables {
+  pop : patch = read("data/pop.tsv")
+  adj : patch × patch = read("data/adj.tsv", default = 0.0)
+}
 
-# ERROR: "dimension 'patch' is already defined by table 'pop'"
-pop  : defines(patch) = read_long("data/pop.tsv")
-pop2 : defines(patch) = read_long("data/pop2.tsv")
+# ERROR: "dimension 'patch' declared twice in dimensions block"
+dimensions {
+  patch = read("data/pop.tsv", column = "patch")
+  patch = read("data/pop2.tsv", column = "patch")
+}
 ```
 
 **2. Validation is exhaustive and strict.**
 
-When a table references a known dimension (bare name, no `defines()`), the
-compiler checks the CSV column values against the dimension's known levels:
+When a table references a known dimension, the compiler checks the CSV column
+values against the dimension's known levels:
 
 - CSV value not in dimension → **error**:
   `"'kano_dala_north' in
@@ -169,53 +192,51 @@ compiler checks the CSV column values against the dimension's known levels:
     no entry in adj.tsv"` (dense — every
     level must appear)
 
-**3. `defines()` columns are also exhaustively checked.**
+**3. Dimension levels are exhaustively validated.**
 
-If `stratify(by = patch)` appears (declaring that patch stratifies
-compartments), then the levels from `defines(patch)` become the compartment
-expansion set. The compiler ensures every level in the defining CSV column
-produces a valid identifier (no spaces, no special characters beyond `_`).
+If `stratify(by = patch)` appears, the levels from the `dimensions {}` block
+become the compartment expansion set. The compiler ensures every level produces
+a valid identifier (no spaces, no special characters beyond `_`).
 
-**4. Bare dimension names must already be defined.**
+**4. Bare dimension names must already be declared.**
 
 Unknown bare name in a type signature → **error**:
 `"unknown dimension
 'ptach' — did you mean 'patch'?"` (with Levenshtein
 suggestion). This catches typos that implicit derivation would silently accept.
 
-**5. `defines()` and inline `levels = [...]` are mutually exclusive.**
+**5. Inline `[...]` and `read(...)` are mutually exclusive for the same dim.**
 
 ```camdl
 # OK: inline levels
-stratify(by = age, levels = [under5, over5])
+dimensions { age = [under5, over5] }
 
 # OK: data-derived levels
-stratify(by = patch)
-tables { pop : defines(patch) = read_long("data/pop.tsv") }
+dimensions { patch = read("data/pop.tsv", column = "patch") }
 
-# ERROR: "dimension 'age' already has levels from stratify declaration"
-stratify(by = age, levels = [under5, over5])
-tables { ages : defines(age) = read_long("data/ages.tsv") }
+# ERROR: "dimension 'age' declared with both inline levels and read()"
+dimensions { age = [under5, over5] }
+# (cannot also have age = read(...) in the same block)
 ```
 
 ---
 
 ## Two ways to specify dimensions
 
-| Source           | Declaration                                         | Stratifies compartments? | Levels from |
-| ---------------- | --------------------------------------------------- | ------------------------ | ----------- |
-| Inline           | `stratify(by = age, levels = [under5, over5])`      | yes                      | inline list |
-| Data, stratified | `stratify(by = patch)` + `defines(patch)` in tables | yes                      | CSV column  |
-| Data, index-only | `defines(sia_time)` in tables (no `stratify`)       | no                       | CSV column  |
+| Source           | Declaration                                                              | Stratifies compartments? | Levels from |
+| ---------------- | ------------------------------------------------------------------------ | ------------------------ | ----------- |
+| Inline           | `dimensions { age = [under5, over5] }` + `stratify(by = age)`           | yes                      | inline list |
+| Data, stratified | `dimensions { patch = read(f, column="c") }` + `stratify(by = patch)`   | yes                      | CSV column  |
+| Data, index-only | `dimensions { sia_time = read(f, column="c") }` (no `stratify`)         | no                       | CSV column  |
 
 All three produce the same thing internally: a named set of levels. They differ
 in: (a) whether the dimension stratifies compartments, and (b) where the levels
 come from.
 
-`stratify` declares the role: "this dimension applies to compartments."
-`defines()` or `levels = [...]` provides the membership. Role and membership are
-orthogonal — you can declare a dimension from data without stratifying
-(`defines(sia_time)` with no `stratify`), or stratify with inline levels.
+`stratify(by = X)` declares the role: "this dimension applies to compartments."
+The `dimensions {}` block provides the membership. Role and membership are
+orthogonal — you can declare a dimension from data without stratifying (e.g.,
+`sia_time = read(...)` with no `stratify`), or stratify with inline levels.
 
 ---
 
@@ -226,7 +247,7 @@ List multiple table names on the left of `:`:
 
 ```camdl
 tables {
-  pop, sex_ratio : defines(patch) = read_long("data/demographics.tsv")
+  pop, sex_ratio : patch = read("data/demographics.tsv")
 }
 ```
 
@@ -253,8 +274,14 @@ the index space, values are what the table stores.
 `default = 0.0` fills index combinations with no CSV row:
 
 ```camdl
-adj     : patch × patch = read_long("data/adj.tsv", default = 0.0)
-sia_cov : patch × defines(sia_time) = read_long("data/sia.tsv", default = 0.0)
+dimensions {
+  sia_time = read("data/sia.tsv", column = "day")
+}
+
+tables {
+  adj     : patch × patch          = read("data/adj.tsv", default = 0.0)
+  sia_cov : patch × sia_time       = read("data/sia.tsv", default = 0.0)
+}
 ```
 
 | Table                    | What default means                      |
@@ -294,8 +321,12 @@ borno_gwoza	190	0.45
 The model:
 
 ```camdl
+dimensions {
+  sia_time = read("data/sia.tsv", column = "day")
+}
+
 tables {
-  sia_cov : patch × defines(sia_time) = read_long("data/sia.tsv", default = 0.0)
+  sia_cov : patch × sia_time = read("data/sia.tsv", default = 0.0)
 }
 
 interventions {
@@ -309,9 +340,8 @@ interventions {
 
 **What the compiler does:**
 
-1. Reads `sia.tsv`. Column 1 → `patch` (known, validated). Column 2 → `sia_time`
-   (new, defined from unique values: `[180, 182, 190, 365,
-   370, 540]`).
+1. Reads `sia.tsv`. Column "day" → `sia_time` levels (unique values:
+   `[180, 182, 190, 365, 370, 540]`). Column 1 → `patch` (known, validated).
    Column 3 → value.
 
 2. Builds `sia_cov` as sparse `238 × 6` table. Most cells are 0.0.
@@ -339,9 +369,14 @@ type error.
 **Two campaign data sources.** If routine and outbreak campaigns are separate:
 
 ```camdl
+dimensions {
+  routine_time  = read("data/routine.tsv",  column = "day")
+  outbreak_time = read("data/outbreak.tsv", column = "day")
+}
+
 tables {
-  routine_cov  : patch × defines(routine_time)  = read_long("data/routine.tsv", default = 0.0)
-  outbreak_cov : patch × defines(outbreak_time) = read_long("data/outbreak.tsv", default = 0.0)
+  routine_cov  : patch × routine_time  = read("data/routine.tsv",  default = 0.0)
+  outbreak_cov : patch × outbreak_time = read("data/outbreak.tsv", default = 0.0)
 }
 
 interventions {
@@ -400,8 +435,13 @@ compile-time lookups. Time-varying covariates need runtime interpolation.
 **The design: indexed time functions (future).**
 
 ```camdl
+dimensions {
+  patch_clim   = read("data/temperature.tsv", column = "patch")
+  climate_week = read("data/temperature.tsv", column = "week")
+}
+
 tables {
-  temp_data : defines(patch_clim) × defines(climate_week) = read_long("data/temperature.tsv")
+  temp_data : patch_clim × climate_week = read("data/temperature.tsv")
 }
 
 functions {
@@ -449,25 +489,25 @@ forward generative model.
 
 ## Stress test: every epi data type
 
-| Data type                      | Type signature                          | Works?                                 |
-| ------------------------------ | --------------------------------------- | -------------------------------------- |
-| Population                     | `defines(patch) → f64`                  | ✅                                     |
-| Population × age               | `patch × age → f64`                     | ✅                                     |
-| Contact matrix                 | `age × age → f64`                       | ✅                                     |
-| Spatial adjacency (sparse)     | `patch × patch → f64`                   | ✅ `default = 0.0`                     |
-| SIA campaigns (ragged)         | `patch × defines(sia_time) → f64`       | ✅ `where > 0` filter                  |
-| Demographics (multi-value)     | `defines(patch) → (f64, f64)`           | ✅ `pop, sex_ratio : ...`              |
-| Seroprevalence                 | `patch × age → f64`                     | ✅                                     |
-| Environmental covariates       | `patch → f64`                           | ✅                                     |
-| Routine immunization           | `patch × age × defines(ri_month) → f64` | ✅ 3D table                            |
-| Detection probability          | `patch → f64`                           | ✅                                     |
-| Genetic distances              | `strain × strain → f64`                 | ✅                                     |
-| Climate / time-varying spatial | `patch × week → f64`                    | ⚠️ Needs indexed time functions         |
-| Case data (for fitting)        | observation data                        | separate pipeline (observations block) |
+| Data type                      | Type signature                    | Works?                                 |
+| ------------------------------ | --------------------------------- | -------------------------------------- |
+| Population                     | `patch → f64`                     | ✅                                     |
+| Population × age               | `patch × age → f64`               | ✅                                     |
+| Contact matrix                 | `age × age → f64`                 | ✅                                     |
+| Spatial adjacency (sparse)     | `patch × patch → f64`             | ✅ `default = 0.0`                     |
+| SIA campaigns (ragged)         | `patch × sia_time → f64`          | ✅ `where > 0` filter                  |
+| Demographics (multi-value)     | `patch → (f64, f64)`              | ✅ `pop, sex_ratio : patch = read(...)` |
+| Seroprevalence                 | `patch × age → f64`               | ✅                                     |
+| Environmental covariates       | `patch → f64`                     | ✅                                     |
+| Routine immunization           | `patch × age × ri_month → f64`    | ✅ 3D table                            |
+| Detection probability          | `patch → f64`                     | ✅                                     |
+| Genetic distances              | `strain × strain → f64`           | ✅                                     |
+| Climate / time-varying spatial | `patch × week → f64`              | ⚠️ Needs indexed time functions         |
+| Case data (for fitting)        | observation data                  | separate pipeline (observations block) |
 
 One gap: per-patch time-varying covariates need indexed time functions.
-Everything else works with `dims → scalar` tables, `defines()`, and the existing
-`[i in dim]` iteration.
+Everything else works with `dims → scalar` tables, the `dimensions {}` block,
+and the existing `[i in dim]` iteration.
 
 ---
 
@@ -490,7 +530,7 @@ Everything else works with `dims → scalar` tables, `defines()`, and the existi
   are also all-numeric, warn:
   `"first row of
   'data.tsv' looks like data, not a header; add a header row"`
-- Comment lines: off by default. `read_long(..., comment = "#")` enables
+- Comment lines: off by default. `read(..., comment = "#")` enables
   skipping lines starting with `#`
 
 ---
@@ -502,7 +542,13 @@ time_unit = 'days
 
 compartments { S, E, I, R, V }
 
-stratify(by = age, levels = [under5, over5])
+dimensions {
+  age      = [under5, over5]
+  patch    = read("data/demographics.tsv", column = "patch")
+  sia_time = read("data/sia.tsv", column = "day")
+}
+
+stratify(by = age)
 stratify(by = patch)
 
 parameters {
@@ -519,12 +565,12 @@ let beta[p in patch] = R0[p] * gamma
 let N[a in age, p in patch] = S[a, p] + E[a, p] + I[a, p] + R[a, p] + V[a, p]
 
 tables {
-  # defines(patch) provides the 238 LGA levels for the patch dimension
-  pop, init_sus : defines(patch) = read_long("data/demographics.tsv")
+  # patch levels derived from demographics.tsv (238 LGAs)
+  pop, init_sus : patch                = read("data/demographics.tsv")
 
-  adj      : patch × patch              = read_long("data/adj.tsv", default = 0.0)
-  age_frac : age                        = inline([0.18, 0.82])
-  sia_cov  : patch × defines(sia_time)  = read_long("data/sia.tsv", default = 0.0)
+  adj      : patch × patch             = read("data/adj.tsv", default = 0.0)
+  age_frac : age                       = [0.18, 0.82]
+  sia_cov  : patch × sia_time          = read("data/sia.tsv", default = 0.0)
 }
 
 transitions {
@@ -573,21 +619,20 @@ scenarios {
 
 ## Summary
 
-| Concept                     | Mechanism                               | Example                               |
-| --------------------------- | --------------------------------------- | ------------------------------------- |
-| Small structural dimension  | `stratify(by = X, levels = [...])`      | `age = [under5, over5]`               |
-| Large data-driven dimension | `defines(X)` in table type signature    | `defines(patch)` from pop.tsv         |
-| Index-only dimension        | `defines(X)` without `stratify`         | `defines(sia_time)` from sia.tsv      |
-| Dimension validation        | bare `X` in type signature              | adj references known `patch`          |
-| Table loading               | `read_long("file.tsv")`                 | positional column → dimension mapping |
-| Sparse tables               | `default = 0.0`                         | missing index combinations → default  |
-| Multiple values             | `a, b : dims = read_long(...)`          | two tables from one CSV               |
-| Numeric level coercion      | `at = t` where `t` iterates numeric dim | campaign times as floats              |
-| Compile-time filtering      | `where expr > 0`                        | skip zero-coverage events             |
-| Time-varying spatial        | indexed time functions (future)         | `temperature[p in patch]`             |
+| Concept                     | Mechanism                               | Example                                  |
+| --------------------------- | --------------------------------------- | ---------------------------------------- |
+| Small structural dimension  | `dimensions { X = [...] }`              | `age = [under5, over5]`                  |
+| Large data-driven dimension | `dimensions { X = read(f, column="c") }`| `patch = read("pop.tsv", column="patch")`|
+| Index-only dimension        | `dimensions { X = ... }` (no stratify) | `sia_time = read("sia.tsv", column="day")`|
+| Dimension validation        | bare `X` in type signature              | adj references known `patch`             |
+| Table loading               | `read("file.tsv")`                      | positional column → dimension mapping    |
+| Sparse tables               | `default = 0.0`                         | missing index combinations → default     |
+| Multiple values             | `a, b : dims = read(...)`               | two tables from one CSV                  |
+| Numeric level coercion      | `at = t` where `t` iterates numeric dim | campaign times as floats                 |
+| Compile-time filtering      | `where expr > 0`                        | skip zero-coverage events                |
+| Time-varying spatial        | indexed time functions (future)         | `temperature[p in patch]`                |
 
 **One loader, one table type, one iteration syntax.** All external data is
-`dims → scalar`. All iteration is `[i in dim]`. Dimensions are defined once
-(`defines()` or inline `levels`), validated everywhere. No union, no
-intersection, no implicit derivation. Every mapping from CSV to model is
-explicit and traceable.
+`dims → scalar`. All iteration is `[i in dim]`. Dimensions are declared in the
+`dimensions {}` block, validated everywhere. No union, no intersection, no
+implicit derivation. Every mapping from CSV to model is explicit and traceable.

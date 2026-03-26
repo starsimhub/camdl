@@ -1,5 +1,9 @@
 time_unit = 'days
 
+dimensions {
+  patch = read("data/seir_defines_adj_pop.tsv", column = "patch")
+}
+
 compartments { S, E, I, R }
 
 stratify(by = patch)
@@ -15,8 +19,8 @@ parameters {
 let N[p in patch] = S[p] + E[p] + I[p] + R[p]
 
 tables {
-  pop, init_sus : defines(patch) = read_long("data/seir_defines_adj_pop.tsv")
-  adj           : patch × patch  = read_long("data/seir_defines_adj_w.tsv", default = 0.0)
+  pop, init_sus : patch          = read("data/seir_defines_adj_pop.tsv")
+  adj           : patch × patch  = read("data/seir_defines_adj_w.tsv", default = 0.0)
 }
 
 transitions {

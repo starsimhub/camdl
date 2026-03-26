@@ -3,7 +3,11 @@ time_unit = 'days
 
 compartments { S, I, R }
 
-stratify(by = age, levels = [age_0_5, age_5_15, age_15_50, age_50_65, age_65p])
+dimensions {
+  age = [age_0_5, age_5_15, age_15_50, age_50_65, age_65p]
+}
+
+stratify(by = age)
 
 let N_local[a in age] = S[a] + I[a] + R[a]
 

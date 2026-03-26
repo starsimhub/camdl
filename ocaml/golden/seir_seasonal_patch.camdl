@@ -1,0 +1,66 @@
+# SEIR with patch-indexed sinusoidal seasonality
+# Demonstrates indexed time functions: seasonal[p in patch]
+# Each patch gets its own expanded function (seasonal_urban, seasonal_rural).
+
+time_unit = 'days
+
+compartments { S, E, I, R }
+
+dimensions {
+  patch = [urban, rural]
+}
+
+stratify(by = patch)
+
+let N[p in patch] = S[p] + E[p] + I[p] + R[p]
+
+parameters {
+  sigma     : rate     in [0.01, 1.0]
+  gamma     : rate     in [0.01, 1.0]
+  baseline  : rate     in [0.01, 1.0]
+  amp[patch]: positive in [0.0,  1.0]
+  N0[patch] : count    in [100,  1000000]
+  I0        : count    in [1,    1000]
+}
+
+functions {
+  seasonal[p in patch] : sinusoidal {
+    amplitude = amp[p]
+    period    = 365.0
+    baseline  = baseline
+    phase     = 0.0
+  }
+}
+
+transitions {
+  infection[p in patch]   : S[p] --> E[p]  @ seasonal[p] * S[p] * I[p] / N[p]
+  progression[p in patch] : E[p] --> I[p]  @ sigma * E[p]
+  recovery[p in patch]    : I[p] --> R[p]  @ gamma * I[p]
+}
+
+init {
+  S[urban] = N0_urban - I0
+  I[urban] = I0
+  S[rural] = N0_rural
+}
+
+simulate {
+  from = 0 'days
+  to   = 365 'days
+}
+
+scenarios {
+  baseline_scenario {
+    label = "baseline"
+    set = {
+      sigma    = 0.2
+      gamma    = 0.1
+      baseline = 0.3
+      amp_urban  = 0.4
+      amp_rural  = 0.2
+      N0_urban   = 100000
+      N0_rural   = 50000
+      I0         = 10
+    }
+  }
+}

@@ -165,9 +165,9 @@ textual substitution.
 ```camdl
 tables {
   C_age    : age × age  = [[12.0, 4.0], [4.0, 8.0]]
-  pop      : patch      = read_csv("data/lga_pop.csv")
-  adj      : patch × patch = read_csv("data/lga_adj.csv", format = sparse, default = 0.0)
-  coverage : patch      = read_csv("data/lga_coverage.csv")
+  pop      : patch      = read("data/lga_pop.tsv")
+  adj      : patch × patch = read("data/lga_adj.tsv", default = 0.0)
+  coverage : patch      = read("data/lga_coverage.tsv")
 }
 ```
 
@@ -176,14 +176,10 @@ population sizes, spatial adjacency weights, vaccination coverage estimates,
 distance matrices, historical immunization records. Anything that's
 observational or structural input to the model — not a quantity you'd infer.
 
-**Table dimensions are stratification dimensions.** The `age × age` in
-`C_age : age × age` refers to the `age` dimension declared by
-`stratify(by = age, values = [child, adult])`. The compiler uses the
-stratification values to compute table sizes and resolve indexed lookups like
-`C_age[a, b]` into linear indices. This means you can't currently have a table
-dimension that isn't also a stratification dimension — a limitation that matters
-for things like `schedule : patch × round` where `round` shouldn't stratify
-compartments. (This is a known gap.)
+**Table dimensions come from the `dimensions {}` block.** The `age × age` in
+`C_age : age × age` refers to the `age` dimension declared in `dimensions { age
+= [child, adult] }`. The compiler uses the dimension levels to compute table
+sizes and resolve indexed lookups like `C_age[a, b]` into linear indices.
 
 **Table lookups are resolved at compile time.** `C_age[child, adult]` becomes
 `TableLookup("C_age", Const(1))` in the IR — the index is a pre-computed
@@ -211,7 +207,8 @@ to mirror mathematical subscripts:
 Declare a dimension:
 
 ```camdl
-stratify(by = age, values = [child, adult])
+dimensions { age = [child, adult] }
+stratify(by = age)
 ```
 
 This expands every compartment: `S` becomes `S_child` and `S_adult` in the IR.
@@ -222,7 +219,8 @@ Add age structure to the SIR:
 
 ```camdl
 compartments { S, I, R }
-stratify(by = age, values = [child, adult])
+dimensions { age = [child, adult] }
+stratify(by = age)
 
 let N[a in age] = S[a] + I[a] + R[a]
 
@@ -248,11 +246,15 @@ with concrete compartment names and numeric table indices.
 
 ## Multiple dimensions compose
 
-Stack `stratify` declarations for a Cartesian product:
+Stack dimension declarations and `stratify` for a Cartesian product:
 
 ```camdl
-stratify(by = age, values = [child, adult])
-stratify(by = patch, values = [north, south])
+dimensions {
+  age   = [child, adult]
+  patch = [north, south]
+}
+stratify(by = age)
+stratify(by = patch)
 ```
 
 This gives `S_child_north`, `S_child_south`, `S_adult_north`, `S_adult_south`.
@@ -281,13 +283,11 @@ individuals instantaneously.
 
 ```camdl
 interventions {
-  sia : transfer(fraction = 0.8, from = S, to = V) {
-    at = [180 'days, 545 'days]
-  }
+  sia : transfer(fraction = 0.8, from = S, to = V) at [180, 545]
 }
 ```
 
-At day 180 and 545, 80% of S moves to V.
+At day 180 and 545, 80% of S moves to V. Times are in the model's `time_unit`.
 
 Interventions support `[i in dim]`, table lookups in expressions, and the full
 composability of transitions:
@@ -298,14 +298,14 @@ parameters {
 }
 
 tables {
-  coverage : patch = read_csv("data/lga_coverage.csv")  # per-LGA field data (fixed)
+  coverage : patch = read("data/lga_coverage.tsv")  # per-LGA field data (fixed)
 }
 
 interventions {
   sia[p in patch] : transfer(
     fraction = vacc_eff * coverage[p],
     from = S[p], to = V[p]
-  ) { at = [180 'days, 545 'days] }
+  ) at [180, 545]
 }
 ```
 
@@ -320,7 +320,7 @@ you infer from what you measured.
 sia[p in patch] : transfer(
   fraction = vacc_eff * coverage[p],
   from = S[under5, p], to = V[under5, p]
-) { at = [180 'days, 545 'days] }
+) at [180, 545]
 ```
 
 Bound `p` iterates patches. Concrete `under5` is fixed. Adults are untouched.
@@ -398,7 +398,7 @@ everything, then patch the exceptions.
 
 ```camdl
 observations {
-  weekly_cases {
+  weekly_cases : {
     projected  = incidence(infection)
     every      = 7 'days
     likelihood = neg_binomial(mean = rho * projected, r = k)
@@ -421,7 +421,12 @@ A 238-patch Nigerian polio model in ~55 lines:
 time_unit = 'days
 
 compartments { S, E, I, R, V }
-stratify(by = patch, values = read_values("data/lga_names.txt"))
+
+dimensions {
+  patch = read("data/lga_pop.tsv", column = "patch")   # 238 LGAs from data
+}
+
+stratify(by = patch)
 
 let N[p in patch] = S[p] + E[p] + I[p] + R[p] + V[p]
 
@@ -439,8 +444,8 @@ parameters {
 let beta[p in patch] = R0[p] * gamma
 
 tables {
-  adj      : patch × patch = read_csv("data/lga_adj.csv", format = sparse, default = 0.0)
-  coverage : patch         = read_csv("data/lga_coverage.csv")
+  adj      : patch × patch = read("data/lga_adj.tsv", default = 0.0)
+  coverage : patch         = read("data/lga_coverage.tsv")
 }
 
 transitions {
@@ -460,7 +465,7 @@ interventions {
   sia[p in patch] : transfer(
     fraction = vacc_eff * coverage[p],
     from = S[p], to = V[p]
-  ) { at = [180 'days, 545 'days] }
+  ) at [180, 545]
 }
 
 init {
@@ -486,30 +491,29 @@ scenarios {
 
 ## Quick reference
 
-| Concern            | Syntax                               | Notes                                        |
-| ------------------ | ------------------------------------ | -------------------------------------------- |
-| Compartments       | `compartments { S, I, R }`           | what exists                                  |
-| Dimensions         | `stratify(by = age, values = [...])` | Cartesian product                            |
-| Derived quantities | `let N = S + I + R`                  | inlined at compile time                      |
-| Parameters         | `parameters { beta : rate }`         | external, supplied at runtime                |
-| Tables             | `tables { C : age × age = [...] }`   | fixed data, dims must be stratification dims |
-| Continuous flow    | `src --> dst @ propensity`           | Gillespie / tau-leap events                  |
-| Scheduled events   | `transfer(...) at [times]`           | interventions, discrete                      |
-| Observations       | `incidence(...)`, likelihood         | inference + synthetic data                   |
-| Initial state      | `init { S = expr }`                  | override-by-source-order                     |
-| Scenarios          | `enable`, `set`, `scale`, `compose`  | counterfactual selection                     |
-| Time range         | `simulate { from, to }`              | defaults, overridable                        |
+| Concern            | Syntax                                         | Notes                              |
+| ------------------ | ---------------------------------------------- | ---------------------------------- |
+| Compartments       | `compartments { S, I, R }`                     | what exists                        |
+| Dimensions         | `dimensions { age = [...] }` + `stratify(by=X)`| Cartesian product                  |
+| Derived quantities | `let N = S + I + R`                            | inlined at compile time            |
+| Parameters         | `parameters { beta : rate }`                   | external, supplied at runtime      |
+| Tables             | `tables { C : age × age = [...] }`             | fixed data arrays                  |
+| Continuous flow    | `src --> dst @ propensity`                     | Gillespie / tau-leap events        |
+| Scheduled events   | `transfer(...) at [times]`                     | interventions, discrete            |
+| Observations       | `incidence(...)`, likelihood                   | inference + synthetic data         |
+| Initial state      | `init { S = expr }`                            | override-by-source-order           |
+| Scenarios          | `enable`, `set`, `scale`, `compose`            | counterfactual selection           |
+| Time range         | `simulate { from, to }`                        | defaults, overridable              |
 
 ---
 
 ## Known limitations
 
-**Table dimensions must be stratification dimensions.** You can't declare
-`schedule : patch × round` unless `round` is a stratification dimension — but
-stratifying compartments by round makes no sense. This limits data-driven
-per-patch scheduling. Workaround: use table columns as explicit indices (e.g.,
-`sia_day[p, 0]`, `sia_day[p, 1]`). A future extension may support table-only
-dimensions.
+**Index-only dimensions require a `dimensions {}` entry.** You can declare
+`dimensions { round = [r1, r2, r3] }` without a `stratify` to create a
+dimension that indexes tables but doesn't expand compartments. This supports
+per-patch scheduling tables like `sia_day : patch × round`. Table-only
+dimensions are declared the same way as stratification dimensions.
 
 **Observation block not yet exercised in golden tests.** The syntax compiles but
 end-to-end inference (scoring, particle filter) is not yet implemented.

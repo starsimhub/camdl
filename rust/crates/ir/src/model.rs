@@ -119,6 +119,8 @@ pub struct Model {
     #[serde(default = "default_time_unit")]
     pub time_unit:          String,
     pub description:        Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin:             Option<String>,
     pub compartments:       Vec<Compartment>,
     pub transitions:        Vec<Transition>,
     pub ode_equations:      Vec<OdeEquation>,

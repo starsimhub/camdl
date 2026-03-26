@@ -1,4 +1,4 @@
-src	dst	weight
+patch	patch	weight
 north	south	0.10
 north	east	0.05
 south	north	0.10

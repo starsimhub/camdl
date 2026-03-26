@@ -254,6 +254,7 @@ type model = {
   version:            string;
   time_unit:          string;           (* declared time unit, e.g. "days" *)
   description:        string option;
+  origin:             string option;    (* ISO date string, e.g. "2020-01-01" *)
   compartments:       compartment list;
   transitions:        transition list;
   ode_equations:      ode_equation list;

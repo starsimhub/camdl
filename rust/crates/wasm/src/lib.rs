@@ -103,6 +103,7 @@ fn simulate_inner(ir_json: &str, config_json: &str) -> Result<String, String> {
         SimConfig::Gillespie(_)     => GillespieSim.run(&compiled, &params, seed, &sim_config),
         SimConfig::TauLeap(_)       => TauLeapSim.run(&compiled, &params, seed, &sim_config),
         SimConfig::ChainBinomial(_) => ChainBinomialSim.run(&compiled, &params, seed, &sim_config),
+        SimConfig::Ode(_) => return Err("ODE backend not yet supported in WASM".into()),
     }.map_err(|e| e.to_string())?;
 
     let snapshots: Vec<serde_json::Value> = trajectory.snapshots.iter().map(|snap| {

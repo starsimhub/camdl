@@ -26,7 +26,9 @@ fn minimal_model_with_interventions(
     Model {
         name: "test".into(),
         version: "0.3".into(),
+        time_unit: "days".into(),
         description: None,
+        origin: None,
         compartments,
         transitions: vec![],
         ode_equations: vec![],

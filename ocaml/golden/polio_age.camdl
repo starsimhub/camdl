@@ -6,7 +6,11 @@ time_unit = 'days
 
 compartments { S, E, I, R, V }
 
-stratify(by = age, levels = [under5, over5])
+dimensions {
+  age = [under5, over5]
+}
+
+stratify(by = age)
 
 let N[a in age] = S[a] + E[a] + I[a] + R[a] + V[a]
 
