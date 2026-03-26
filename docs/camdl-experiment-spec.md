@@ -162,6 +162,15 @@ chain: `params.toml → scenario set/scale → --param`.
 
 Without `--output-dir`, output goes to stdout as TSV.
 
+### 3.4 With Content-Addressable Output
+
+```bash
+camdl simulate model.camdl --params params.toml --seed 42 --output-dir output/
+```
+
+Creates the content-addressable directory structure (§8) for a single run. No
+experiment file needed — content addressing works at single-run granularity too.
+
 ---
 
 ## 4. The Experiment File
@@ -480,6 +489,21 @@ range = { min = 1.0, max = 5.0 }
 [design.better_coverage.parameters.kappa]
 range = { min = 0.001, max = 0.1 }
 transform = "log"
+
+# Design C: "what if we had better transmission estimates?"
+[design.better_transmission]
+method = "sobol"
+n = 1024
+
+[design.better_transmission.parameters.vacc_eff]
+range = { min = 0.1, max = 0.9 }
+
+[design.better_transmission.parameters.R0]
+range = { min = 2.0, max = 3.5 }
+
+[design.better_transmission.parameters.kappa]
+range = { min = 0.001, max = 0.1 }
+transform = "log"
 ```
 
 ### 7.3 Design Methods
@@ -532,8 +556,9 @@ Cross-design comparison quantifies value of information:
 - **Difference A → B:** learning coverage reduces peak_I variance by ~47%.
   This estimates the value of a coverage survey.
 - **Design C (better transmission):** R0 drops to 8%, vacc_eff still 58%
-- **Difference A → C:** learning R0 reduces variance by ~15%. A transmission
-  study is worth ~3x less than a coverage survey.
+- **Difference A → C:** learning R0 reduces variance by ~15%.
+
+A coverage survey is worth ~3x more than a transmission study for peak_I.
 
 **Important caveats:** This is a sensitivity landscape comparison, not a
 Bayesian posterior calculation. The "variance explained" is conditional on
@@ -966,9 +991,10 @@ Bootstrap confidence intervals: resample rows of (A, B, A_Bi) jointly,
 recompute S1 and ST 1000 times (configurable with `--bootstrap`), take the
 α/2 and 1-α/2 quantiles.
 
-### 14.3 `[analyze]` Block (Optional)
+### 14.3 `[analyze]` Block (Optional Convenience)
 
-Specifying which outputs to analyze in the experiment TOML:
+For experiments that want built-in Sobol computation without the Python package,
+add an optional `[analyze]` block to the experiment TOML:
 
 ```toml
 [analyze]
@@ -979,6 +1005,10 @@ confidence = 0.95
 
 If absent, all float columns in `outputs.tsv` are analyzed. `--outputs X,Y,Z`
 on the CLI overrides for ad-hoc use.
+
+This covers the common case (Sobol S1/ST + bootstrap CIs). The Python package
+(`camdl-analysis`) provides richer analysis: Morris screening, cross-design VOI
+waterfall, sweep figures, and the `Experiment` API.
 
 ### 14.4 Output Files
 
@@ -1061,13 +1091,15 @@ python/
     __init__.py
     cli.py                # defopt entry points
     sensitivity.py        # read sobol_indices.tsv → bar chart
+    morris.py             # read morris_indices.tsv → mu*/sigma scatter
     voi.py                # read multi-design sobol_indices.tsv → waterfall
     scatter.py            # read outputs.tsv → scatter matrix
     convergence.py        # read convergence.tsv → line plot
 ```
 
-**No computation in Python.** All index values come from Rust-generated TSV
-files. No scipy, no SALib.
+**No computation in Python for Sobol.** First-order and total-order index values
+come from Rust-generated TSV files. Morris screening (`mu*_i`, `sigma_i`)
+may be computed in Python since it does not need the structured Saltelli matrices.
 
 ### 15.2 CLI (defopt)
 
@@ -1083,10 +1115,17 @@ camdl-analysis scatter experiment.toml --design current --output figures/
 
 # Convergence diagnostic: index estimate vs N
 camdl-analysis convergence experiment.toml --design current --output figures/
+
+# Sweep result figures: output distributions across sweep grid
+camdl-analysis sweep-figures experiment.toml --output figures/
+
+# All analysis + figures in one step
+camdl-analysis all experiment.toml --output figures/
 ```
 
-All commands read from `{output_dir}/analysis/sensitivity/` (resolved via
-experiment.toml) and write figures to `--output`.
+All commands read from `{output_dir}/analysis/` (resolved via experiment.toml)
+and write figures to `--output`. VOI results are written to
+`{output_dir}/analysis/voi/comparison.tsv`.
 
 ### 15.3 Figure Descriptions
 
@@ -1105,9 +1144,121 @@ Shows nonlinearities Sobol indices compress.
 **Convergence diagnostic:** Index estimate vs N with CI band. Shows whether
 estimates have stabilized. Suggests increasing N if not converged.
 
+**Morris screening (when `method = "morris"`):** mu* vs sigma scatter,
+one point per parameter. High mu*, low sigma → large linear effect. High
+sigma → nonlinear or interactive. Useful for screening large parameter sets
+(>10) before a full Sobol analysis.
+
 ---
 
-## 16. Caching, Staleness, and Provenance
+## 16. Worked Example: Dangerous Middle
+
+Testing whether intermediate vaccination coverage creates increased cVDPV2
+emergence risk (the "dangerous middle" hypothesis).
+
+### 16.1 Sweep Experiment
+
+```toml
+[experiment]
+name = "Dangerous middle: coverage sweep"
+model = "models/seir_nigeria_reversion.camdl"
+params = ["params/base.toml"]
+
+[config]
+backend = "gillespie"
+seeds = { n = 500 }
+parallel = 16
+output_dir = "output/dangerous_middle"
+
+[sweep]
+vacc_eff = { linspace = { min = 0.05, max = 0.95, n = 19 } }
+
+[[scenario]]
+name = "baseline"
+
+[[scenario]]
+name = "with_sia"
+enable = ["sia"]
+
+[compare]
+pairs = [["baseline", "with_sia"]]
+
+[compare.derived]
+cases_averted = "reference.total_cases - test.total_cases"
+emergence_events = "test.cum_reversion"
+```
+
+**19 coverage levels × 2 scenarios × 500 seeds = 19,000 runs.**
+
+Expected result: `P(emergence_events > threshold)` vs `vacc_eff` produces a
+non-monotonic curve peaking at intermediate coverage.
+
+### 16.2 VOI Extension
+
+"Is the dangerous middle's location more sensitive to coverage uncertainty or
+R0 uncertainty?"
+
+```toml
+[experiment]
+name = "Dangerous middle: VOI analysis"
+model = "models/seir_nigeria_reversion.camdl"
+params = ["params/base.toml"]
+
+[config]
+backend = "gillespie"
+seeds = { n = 100 }
+parallel = 16
+output_dir = "output/dangerous_middle_voi"
+
+[design.current]
+method = "sobol"
+n = 512
+
+[design.current.parameters.vacc_eff]
+range = { min = 0.1, max = 0.9 }
+
+[design.current.parameters.R0]
+range = { min = 1.0, max = 5.0 }
+
+[design.better_coverage]
+method = "sobol"
+n = 512
+
+[design.better_coverage.parameters.vacc_eff]
+range = { min = 0.3, max = 0.6 }
+
+[design.better_coverage.parameters.R0]
+range = { min = 1.0, max = 5.0 }
+
+[design.better_transmission]
+method = "sobol"
+n = 512
+
+[design.better_transmission.parameters.vacc_eff]
+range = { min = 0.1, max = 0.9 }
+
+[design.better_transmission.parameters.R0]
+range = { min = 2.0, max = 3.5 }
+
+[[scenario]]
+name = "with_sia"
+enable = ["sia"]
+```
+
+**3 designs × N(2×2+2) = 3 × 3,072 = 9,216 parameter points × 1 scenario
+× 100 seeds = 921,600 runs.** Expensive — use fewer seeds and lean on the
+cross-design comparison structure.
+
+```bash
+camdl experiment run experiment_voi.toml --parallel 16
+camdl experiment analyze experiment_voi.toml
+camdl-analysis sensitivity experiment_voi.toml
+camdl-analysis voi experiment_voi.toml --output figures/
+```
+
+---
+
+## 17. Caching, Staleness, and Provenance
 
 ### 16.1 Cache Hit
 
@@ -1134,7 +1285,7 @@ directories are unaffected.
 
 ---
 
-## 17. Relationship to the Parameter Grammar
+## 18. Relationship to the Parameter Grammar
 
 | Grammar concept      | Implementation                                       |
 | -------------------- | ---------------------------------------------------- |
@@ -1154,7 +1305,7 @@ directories are unaffected.
 
 ---
 
-## 18. Implementation Phases
+## 19. Implementation Phases
 
 ### v0.1-core (implemented)
 
@@ -1185,10 +1336,37 @@ bootstrap CIs. Auto-generated `assumptions.txt`.
 
 ### v0.2-python
 
-`camdl-analysis` Python package. Reads TSV outputs, generates matplotlib
-figures. No computation — all numbers from Rust.
+`camdl-analysis` Python package. Sobol figures from Rust TSV outputs.
+Morris screening. Cross-design VOI waterfall. Sweep result figures.
 
 ### v0.2-inference
 
 `view.toml`, `priors.toml`. Scoring primitive. Particle filter, IF2.
 `camdl fit`.
+
+---
+
+## Appendix A: Analyze Block
+
+See §14.3.
+
+---
+
+## Appendix B: Runtime Testing Protocol
+
+Every new feature in the experiment system should be tested at three levels:
+
+1. **Unit test** — function produces correct output for known input. Examples:
+   sweep expansion, Sobol estimator, hash stability, cache hit/miss classification.
+
+2. **Integration test** — minimal experiment.toml compiles, runs, and produces
+   the expected directory structure. Check that `run.json` is present, hashes
+   are stable, and adding seeds reuses existing runs.
+
+3. **Golden test** — fixed experiment + fixed seed produces byte-identical
+   output across versions. Run `make update-expected` to regenerate, review
+   the diff, commit all three (fixture + IR + expected) together.
+
+For the analyze subcommand, add a validation test against an analytically
+tractable model where expected Sobol indices are known (e.g., additive linear
+model y = a·x₁ + b·x₂).
