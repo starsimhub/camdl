@@ -530,14 +530,32 @@ total-order indices per parameter. For n=1024 and k=3 parameters: 1024 × 8 =
 
 ```toml
 [design.NAME.parameters.PARAM]
-range = { min = 0.1, max = 0.9 }    # required
-transform = "log"                    # optional: "log" | "logit"
+range     = { min = 0.1, max = 0.9 }                   # required
+transform = "log"                                       # optional: "log" | "logit"
+prior     = { dist = "beta", alpha = 4.0, beta = 6.0 } # optional: for VOI
 ```
 
 `range` defines the sampling bounds. `transform` changes the sampling
 space: `"log"` samples uniformly in log space (appropriate for rates and R0);
 `"logit"` samples uniformly in logit space (appropriate for probabilities
 bounded away from 0 and 1).
+
+`prior` specifies the parameter's prior distribution for VOI (value of
+information) analysis. Supported distributions:
+
+| `dist`        | Required fields          | Use for                        |
+|---------------|--------------------------|--------------------------------|
+| `beta`        | `alpha`, `beta`          | Probabilities (vacc_eff, etc.) |
+| `log_normal`  | `mu`, `sigma`            | Rates, R0, positive quantities |
+| `normal`      | `mu`, `sigma`            | Unbounded continuous params    |
+| `uniform`     | *(none)*                 | Maximum-entropy assumption     |
+
+If `prior` is omitted, uniform over `range` is assumed for sampling and for
+VOI importance weighting. The prior does **not** affect how design points are
+sampled — it is metadata consumed by `camdl voi run` (see VOI Specification).
+
+When `prior` is present, the experiment runner writes a `priors.txt` file in
+`designs/{name}/` alongside `parameter_points.tsv`.
 
 Parameters not mentioned in a design are held at their base values from
 params.toml.

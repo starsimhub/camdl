@@ -6,7 +6,7 @@ use rayon::prelude::*;
 
 use crate::util::{run_simulation, write_traj_tsv, load_params_toml, resolve_ir_path, SimRun};
 use crate::hashing::{model_hash, sim_hash, scen_hash, canonical_params, slug};
-use crate::sampling::{generate_design, DesignParam};
+use crate::sampling::{generate_design, DesignParam, PriorSpec};
 
 // ─── TOML schema ─────────────────────────────────────────────────────────────
 
@@ -39,6 +39,8 @@ struct DesignParamToml {
     range: RangeMinMax,
     #[serde(default)]
     transform: Option<String>,   // "log" | "logit" | None (linear)
+    #[serde(default)]
+    prior: Option<PriorSpec>,    // prior distribution for VOI importance weighting
 }
 
 #[derive(Debug, Deserialize)]
@@ -610,6 +612,7 @@ fn run_design_experiment(
                 min: p.range.min,
                 max: p.range.max,
                 transform: p.transform.clone(),
+                prior: p.prior.clone(),
             })
         }).collect();
 
@@ -646,6 +649,13 @@ fn run_design_experiment(
             eprintln!("warning: could not write {}: {}", pts_path, e);
         });
         eprintln!("  Wrote {}", pts_path);
+
+        // Write priors.txt if any parameter has a prior specification
+        let priors_txt = build_priors_txt(&params);
+        if let Some(txt) = priors_txt {
+            let priors_path = format!("{}/priors.txt", design_dir);
+            let _ = std::fs::write(&priors_path, txt);
+        }
 
         // Run all (point, scenario, seed) combinations
         let runs_dir = format!("{}/designs/{}/runs", output_dir, design_name);
@@ -715,6 +725,37 @@ fn run_design_experiment(
         });
         eprintln!("Design '{}' complete.", design_name);
     }
+}
+
+// ─── Prior spec helpers ───────────────────────────────────────────────────────
+
+/// Build human-readable priors.txt content for a design's parameter list.
+/// Returns None if no parameters have prior specifications.
+fn build_priors_txt(params: &[(String, DesignParam)]) -> Option<String> {
+    let with_priors: Vec<&(String, DesignParam)> = params.iter()
+        .filter(|(_, p)| p.prior.is_some())
+        .collect();
+    if with_priors.is_empty() {
+        return None;
+    }
+    let mut txt = String::from("Parameter priors:\n\n");
+    for (name, param) in params {
+        let prior_desc = match &param.prior {
+            Some(p) => p.describe(),
+            None => "Uniform (no prior specified)".to_string(),
+        };
+        let transform_desc = match param.transform.as_deref() {
+            Some("log") => " [log-uniform sampling]",
+            Some("logit") => " [logit-uniform sampling]",
+            _ => "",
+        };
+        txt.push_str(&format!("  {}: {} over [{}, {}]{}\n",
+            name, prior_desc, param.min, param.max, transform_desc));
+    }
+    txt.push('\n');
+    txt.push_str("These priors are used by the VOI tool (camdl voi run) for importance\n");
+    txt.push_str("weighting. If no prior is specified for a parameter, uniform is assumed.\n");
+    Some(txt)
 }
 
 // ─── cmd_experiment_status ───────────────────────────────────────────────────

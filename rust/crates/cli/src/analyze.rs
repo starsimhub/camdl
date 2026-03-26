@@ -211,7 +211,7 @@ pub fn cmd_experiment_analyze(args: &[String]) {
         write_convergence_tsv(&format!("{}/convergence.tsv", sens_dir),
                               &conv_ys, n, k, &param_names, design_name);
         write_assumptions_txt(&format!("{}/assumptions.txt", sens_dir),
-                              &design_results, design_name, &param_names, n, k,
+                              &design_results, design_name, design_dir, &param_names, n, k,
                               bootstrap_n, effective_confidence);
         if emit_json {
             write_sobol_indices_json(&format!("{}/sobol_indices.json", sens_dir), &design_results);
@@ -695,6 +695,7 @@ fn write_assumptions_txt(
     path: &str,
     results: &[SobolResult],
     design_name: &str,
+    design_dir: &str,
     param_names: &[String],
     n: usize,
     k: usize,
@@ -721,12 +722,19 @@ fn write_assumptions_txt(
             r.design, r.output, r.parameter, r.s1, r.st));
     }
     txt.push('\n');
-    txt.push_str("Cross-design VOI interpretation:\n");
-    txt.push_str("  Comparing sensitivity indices across designs estimates the VALUE of\n");
-    txt.push_str("  narrowing parameter uncertainty. This is a sensitivity landscape\n");
-    txt.push_str("  comparison, NOT a Bayesian posterior. The magnitude depends on the\n");
-    txt.push_str("  assumed ranges. For prior-weighted analysis, use parameter_points.tsv\n");
-    txt.push_str("  and outputs.tsv with importance weights.\n");
+    txt.push_str("Cross-design comparison:\n");
+    txt.push_str("  Comparing sensitivity indices across designs shows how the model's\n");
+    txt.push_str("  sensitivity landscape shifts as parameter uncertainty narrows.\n");
+    txt.push_str("  This is NOT a decision-theoretic quantity. For formal value of\n");
+    txt.push_str("  information analysis (EVSI), see the VOI Specification (voi.toml).\n");
+
+    // Append prior specs if available from the experiment run
+    let priors_path = format!("{}/priors.txt", design_dir);
+    if let Ok(priors_txt) = std::fs::read_to_string(&priors_path) {
+        txt.push('\n');
+        txt.push_str(&priors_txt);
+    }
+
     let _ = std::fs::write(path, &txt);
 }
 

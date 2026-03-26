@@ -11,6 +11,45 @@
 /// map them to the desired parameter range.
 
 use std::collections::HashMap;
+use serde::Deserialize;
+
+/// Prior distribution specification for a design parameter.
+///
+/// Used by the VOI tool for importance-weighted preposterior analysis.
+/// If omitted, the parameter is treated as having a uniform prior over its range.
+///
+/// ```toml
+/// prior = { dist = "beta", alpha = 4.0, beta = 6.0 }
+/// prior = { dist = "log_normal", mu = 1.0, sigma = 0.5 }
+/// prior = { dist = "normal", mu = 0.3, sigma = 0.1 }
+/// ```
+#[derive(Debug, Clone, Deserialize)]
+pub struct PriorSpec {
+    pub dist: String,           // "beta" | "log_normal" | "normal" | "uniform"
+    pub alpha: Option<f64>,     // Beta(alpha, beta): shape parameter 1
+    pub beta: Option<f64>,      // Beta(alpha, beta): shape parameter 2
+    pub mu: Option<f64>,        // Normal / LogNormal: mean (log space for log_normal)
+    pub sigma: Option<f64>,     // Normal / LogNormal: standard deviation
+}
+
+impl PriorSpec {
+    /// Human-readable description for assumptions.txt and error messages.
+    pub fn describe(&self) -> String {
+        match self.dist.as_str() {
+            "beta" => format!("Beta(alpha={}, beta={})",
+                self.alpha.unwrap_or(f64::NAN),
+                self.beta.unwrap_or(f64::NAN)),
+            "log_normal" => format!("LogNormal(mu={}, sigma={})",
+                self.mu.unwrap_or(f64::NAN),
+                self.sigma.unwrap_or(f64::NAN)),
+            "normal" => format!("Normal(mu={}, sigma={})",
+                self.mu.unwrap_or(f64::NAN),
+                self.sigma.unwrap_or(f64::NAN)),
+            "uniform" => "Uniform".to_string(),
+            other => format!("{}(?)", other),
+        }
+    }
+}
 
 /// A single parameter's sampling bounds and transform.
 #[derive(Debug, Clone)]
@@ -19,6 +58,9 @@ pub struct DesignParam {
     pub max: f64,
     /// None = linear, "log" = log-uniform, "logit" = logit-uniform
     pub transform: Option<String>,
+    /// Optional prior distribution for VOI importance weighting.
+    /// If None, uniform over [min, max] is assumed.
+    pub prior: Option<PriorSpec>,
 }
 
 impl DesignParam {
@@ -49,8 +91,6 @@ impl DesignParam {
 /// for LHS/random they are unstructured.
 pub struct DesignPoints {
     pub points: Vec<HashMap<String, f64>>,
-    /// For Sobol: block size n (total = n(2k+2)); None for unstructured designs.
-    pub sobol_n: Option<usize>,
     /// Parameter names in the order they appear in the Sobol matrices (for analysis).
     pub param_names: Vec<String>,
 }
@@ -216,10 +256,10 @@ pub fn generate_design(
     let k = params.len();
     let param_names: Vec<String> = params.iter().map(|(name, _)| name.clone()).collect();
 
-    let (unit_matrix, sobol_n) = match method {
-        "sobol" => (saltelli_matrices(n, k), Some(n)),
-        "lhs"   => (lhs_matrix(n, k), None),
-        _       => (random_matrix(n, k), None),   // "random" + fallback
+    let unit_matrix = match method {
+        "sobol" => saltelli_matrices(n, k),
+        "lhs"   => lhs_matrix(n, k),
+        _       => random_matrix(n, k),   // "random" + fallback
     };
 
     let points = unit_matrix.iter().map(|row| {
@@ -228,7 +268,7 @@ pub fn generate_design(
         }).collect()
     }).collect();
 
-    DesignPoints { points, sobol_n, param_names }
+    DesignPoints { points, param_names }
 }
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
@@ -238,11 +278,11 @@ mod tests {
     use super::*;
 
     fn linear_param(min: f64, max: f64) -> DesignParam {
-        DesignParam { min, max, transform: None }
+        DesignParam { min, max, transform: None, prior: None }
     }
 
     fn log_param(min: f64, max: f64) -> DesignParam {
-        DesignParam { min, max, transform: Some("log".to_string()) }
+        DesignParam { min, max, transform: Some("log".to_string()), prior: None }
     }
 
     #[test]
@@ -335,8 +375,7 @@ mod tests {
             ("kappa".to_string(), log_param(0.001, 0.1)),
         ];
         let design = generate_design(&params, 64, "sobol");
-        assert_eq!(design.points.len(), 64 * (2 + 3));  // n(2k+2)
-        assert_eq!(design.sobol_n, Some(64));
+        assert_eq!(design.points.len(), 64 * (2 + 3));  // n(2+k) = n(2k+2)
     }
 
     #[test]
@@ -347,7 +386,6 @@ mod tests {
         ];
         let design = generate_design(&params, 100, "lhs");
         assert_eq!(design.points.len(), 100);
-        assert!(design.sobol_n.is_none());
     }
 
     #[test]
