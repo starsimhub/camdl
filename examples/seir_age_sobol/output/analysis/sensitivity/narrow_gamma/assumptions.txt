@@ -22,9 +22,8 @@ Results summary:
   narrow_gamma | peak_I_adult | gamma: S1=0.300 ST=0.296
   narrow_gamma | peak_I_adult | sigma: S1=0.628 ST=0.652
 
-Cross-design VOI interpretation:
-  Comparing sensitivity indices across designs estimates the VALUE of
-  narrowing parameter uncertainty. This is a sensitivity landscape
-  comparison, NOT a Bayesian posterior. The magnitude depends on the
-  assumed ranges. For prior-weighted analysis, use parameter_points.tsv
-  and outputs.tsv with importance weights.
+Cross-design comparison:
+  Comparing sensitivity indices across designs shows how the model's
+  sensitivity landscape shifts as parameter uncertainty narrows.
+  This is NOT a decision-theoretic quantity. For formal value of
+  information analysis (EVSI), see the VOI Specification (voi.toml).

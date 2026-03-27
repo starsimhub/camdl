@@ -150,12 +150,13 @@ pub fn cmd_experiment_analyze(args: &[String]) {
             .or_else(|| toml_outputs.clone())
             .unwrap_or_default();   // empty = use all columns from outputs.tsv
 
-        // Build outputs.tsv path (aggregated from all scenario runs — computed lazily)
+        // Read outputs.tsv written by `camdl experiment summarize`
         let outputs_path = format!("{}/outputs.tsv", design_dir);
-        let output_matrix = match build_outputs_tsv(design_dir, &outputs_path) {
+        let output_matrix = match read_design_outputs(&outputs_path) {
             Ok(v) => v,
             Err(e) => {
-                eprintln!("  warning: cannot build outputs.tsv: {}", e);
+                eprintln!("  warning: cannot read {}: {}", outputs_path, e);
+                eprintln!("  Run 'camdl experiment summarize {}' first.", design_dir);
                 continue;
             }
         };
@@ -381,114 +382,48 @@ fn bootstrap_ci(
 // ─── Output aggregation ───────────────────────────────────────────────────────
 
 /// Load or build `outputs.tsv`: one row per (point_id, scenario, seed) with
-/// summary statistics from `traj.tsv`.
+/// Read `outputs.tsv` written by `camdl experiment summarize`.
 ///
-/// For now, computes peak value for each compartment column found in traj.tsv.
-/// Returns (column_names, rows) where each row is a Vec<f64> of column values.
-fn build_outputs_tsv(
-    design_dir: &str,
-    outputs_path: &str,
-) -> Result<(Vec<String>, Vec<(usize, Vec<f64>)>), String> {
-    // If outputs.tsv already exists, read it
-    if std::path::Path::new(outputs_path).exists() {
-        let (col_names, rows) = read_tsv_with_point_id(outputs_path)?;
-        return Ok((col_names, rows));
-    }
-
-    // Build from traj.tsv files in runs/ subdirectory
-    let runs_dir = format!("{}/runs", design_dir);
-    if !std::path::Path::new(&runs_dir).exists() {
-        return Err(format!("no runs directory found at {} and no outputs.tsv", runs_dir));
-    }
-
-    // Walk the runs tree: runs/{sim_hash_8}/{scen_slug}-{scen_hash_8}/seed_{N}/traj.tsv
-    let mut output_col_names: Option<Vec<String>> = None;
-    let mut rows: Vec<(usize, Vec<f64>)> = Vec::new();
-
-    for sim_dir in walk_dirs(&runs_dir)? {
-        for scen_dir in walk_dirs(&sim_dir)? {
-            for seed_dir in walk_dirs(&scen_dir)? {
-                let traj_path = format!("{}/traj.tsv", seed_dir);
-                if !std::path::Path::new(&traj_path).exists() { continue; }
-
-                // Extract point_id from run.json if available, else skip
-                let run_json_path = format!("{}/run.json", seed_dir);
-                let point_id = extract_point_id_from_run_json(&run_json_path);
-
-                match compute_peak_outputs(&traj_path) {
-                    Err(e) => eprintln!("    warning: {}: {}", traj_path, e),
-                    Ok((col_names, peak_values)) => {
-                        if output_col_names.is_none() {
-                            output_col_names = Some(col_names);
-                        }
-                        rows.push((point_id.unwrap_or(rows.len()), peak_values));
-                    }
-                }
-            }
-        }
-    }
-
-    let col_names = output_col_names.ok_or_else(|| "no traj.tsv files found".to_string())?;
-
-    // Write outputs.tsv for future use
-    let mut tsv = String::from("point_id");
-    for name in &col_names {
-        tsv.push('\t');
-        tsv.push_str(name);
-    }
-    tsv.push('\n');
-    for (pid, vals) in &rows {
-        tsv.push_str(&pid.to_string());
-        for v in vals {
-            tsv.push('\t');
-            tsv.push_str(&format!("{:.6}", v));
-        }
-        tsv.push('\n');
-    }
-    let _ = std::fs::write(outputs_path, &tsv);
-
-    Ok((col_names, rows))
-}
-
-fn walk_dirs(path: &str) -> Result<Vec<String>, String> {
-    std::fs::read_dir(path)
-        .map_err(|e| e.to_string())?
-        .filter_map(|e| e.ok())
-        .filter(|e| e.path().is_dir())
-        .map(|e| Ok(e.path().to_string_lossy().to_string()))
-        .collect()
-}
-
-fn extract_point_id_from_run_json(path: &str) -> Option<usize> {
-    let src = std::fs::read_to_string(path).ok()?;
-    let v: serde_json::Value = serde_json::from_str(&src).ok()?;
-    v.get("design_point_index")?.as_u64().map(|n| n as usize)
-}
-
-/// Compute peak value for each (non-t) column in a traj.tsv.
-fn compute_peak_outputs(traj_path: &str) -> Result<(Vec<String>, Vec<f64>), String> {
-    let src = std::fs::read_to_string(traj_path).map_err(|e| e.to_string())?;
+/// The file has schema: point_id, scenario, seed, col1, col2, ...
+/// This function skips the non-numeric identity columns and returns
+/// (data_col_names, rows) where each row is (point_id, Vec<f64>).
+/// Rows from multiple scenarios and seeds for the same point_id are all
+/// returned; `average_over_seeds` groups them by point_id for Sobol.
+fn read_design_outputs(path: &str) -> Result<(Vec<String>, Vec<(usize, Vec<f64>)>), String> {
+    let src = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
     let mut lines = src.lines();
-    let header = lines.next().ok_or("empty traj.tsv")?;
-    let col_names: Vec<String> = header.split('\t')
-        .skip(1)   // skip 't' column
-        .map(|s| format!("peak_{}", s))
+    let header_line = lines.next().ok_or("empty outputs.tsv")?;
+    let header: Vec<&str> = header_line.split('\t').collect();
+
+    // Identify columns to exclude from the float matrix
+    const SKIP: &[&str] = &["point_id", "scenario", "seed"];
+    let id_idx = header.iter().position(|h| *h == "point_id");
+    let keep: Vec<usize> = header.iter().enumerate()
+        .filter(|(_, h)| !SKIP.contains(h))
+        .map(|(i, _)| i)
         .collect();
-    let k = col_names.len();
-    let mut peaks = vec![f64::NEG_INFINITY; k];
+    let col_names: Vec<String> = header.iter().enumerate()
+        .filter(|(_, h)| !SKIP.contains(h))
+        .map(|(_, h)| h.to_string())
+        .collect();
 
+    let mut rows = Vec::new();
     for line in lines {
+        if line.trim().is_empty() { continue; }
         let parts: Vec<&str> = line.split('\t').collect();
-        for (i, p) in parts.iter().skip(1).enumerate().take(k) {
-            if let Ok(v) = p.parse::<f64>() {
-                if v > peaks[i] { peaks[i] = v; }
-            }
-        }
+        let point_id = id_idx
+            .and_then(|i| parts.get(i))
+            .and_then(|v| v.parse::<usize>().ok())
+            .unwrap_or(0);
+        let vals: Vec<f64> = keep.iter()
+            .map(|&i| parts.get(i).and_then(|v| v.parse::<f64>().ok()).unwrap_or(0.0))
+            .collect();
+        rows.push((point_id, vals));
     }
-    // Replace -inf with 0 for completely empty columns
-    for v in &mut peaks { if v.is_infinite() { *v = 0.0; } }
-
-    Ok((col_names, peaks))
+    if rows.is_empty() {
+        return Err("outputs.tsv has no data rows".to_string());
+    }
+    Ok((col_names, rows))
 }
 
 /// Average output values over seeds for each point_id.
@@ -547,35 +482,6 @@ fn read_tsv_matrix(path: &str, skip_col: Option<&str>) -> Result<(Vec<String>, V
     Ok((col_names, rows))
 }
 
-/// Read a TSV file with a `point_id` column, returning (non-id columns, rows with point_id).
-fn read_tsv_with_point_id(path: &str) -> Result<(Vec<String>, Vec<(usize, Vec<f64>)>), String> {
-    let src = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
-    let mut lines = src.lines();
-    let header_line = lines.next().ok_or("empty file")?;
-    let header: Vec<&str> = header_line.split('\t').collect();
-    let id_idx = header.iter().position(|h| *h == "point_id");
-
-    let col_names: Vec<String> = header.iter().enumerate()
-        .filter(|(i, _)| Some(*i) != id_idx)
-        .map(|(_, h)| h.to_string())
-        .collect();
-
-    let mut rows = Vec::new();
-    for line in lines {
-        if line.trim().is_empty() { continue; }
-        let parts: Vec<&str> = line.split('\t').collect();
-        let point_id = id_idx
-            .and_then(|i| parts.get(i))
-            .and_then(|v| v.parse::<usize>().ok())
-            .unwrap_or(0);
-        let vals: Vec<f64> = parts.iter().enumerate()
-            .filter(|(i, _)| Some(*i) != id_idx)
-            .map(|(_, v)| v.parse::<f64>().unwrap_or(0.0))
-            .collect();
-        rows.push((point_id, vals));
-    }
-    Ok((col_names, rows))
-}
 
 // ─── TOML extraction (minimal, no full parse needed) ─────────────────────────
 
@@ -758,10 +664,6 @@ fn analyze_usage() -> ! {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn linspace(min: f64, max: f64, n: usize) -> Vec<f64> {
-        (0..n).map(|i| min + (max - min) * i as f64 / (n - 1) as f64).collect()
-    }
 
     /// Build a synthetic Saltelli output for a linear model: y = a*x1 + b*x2
     /// where x1, x2 are sampled from their respective matrices.

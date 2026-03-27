@@ -713,9 +713,14 @@ fn run_design_experiment(
                             eprintln!("error: cannot write traj.tsv in {}: {}", plan.run_dir, e);
                             return;
                         }
-                        // Write run.json so analyze can recover design_point_index
-                        // without re-hashing parameter values.
-                        let run_json = format!("{{\"design_point_index\":{}}}\n", plan.point_idx);
+                        // Write run.json so summarize can recover (point_id, scenario, seed)
+                        // without parsing directory names.
+                        let run_json = format!(
+                            "{{\"design_point_index\":{},\"scenario\":{},\"seed\":{}}}\n",
+                            plan.point_idx,
+                            serde_json::to_string(&plan.scenario).unwrap_or_default(),
+                            plan.seed,
+                        );
                         let _ = std::fs::write(&format!("{}/run.json", plan.run_dir), run_json);
                         let n = counter.fetch_add(1, Ordering::Relaxed) + 1;
                         eprintln!("[{}/{}] design={} scenario={} seed={}", n, total, design_name, plan.scenario, plan.seed);

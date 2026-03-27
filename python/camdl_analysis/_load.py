@@ -57,3 +57,31 @@ def load_all_sobol(
             df = df.with_columns(pl.lit(d).alias("design"))
         frames.append(df)
     return pl.concat(frames)
+
+
+def _voi_dir(output_dir: pathlib.Path) -> pathlib.Path:
+    return output_dir / "analysis" / "voi"
+
+
+def load_evsi(output_dir: pathlib.Path) -> pl.DataFrame:
+    path = _voi_dir(output_dir) / "evsi.tsv"
+    if not path.exists():
+        raise FileNotFoundError(
+            f"evsi.tsv not found at {path}\n"
+            "Run 'camdl voi run' first."
+        )
+    return pl.read_csv(path, separator="\t")
+
+
+def load_diminishing_returns(output_dir: pathlib.Path) -> pl.DataFrame:
+    path = _voi_dir(output_dir) / "diminishing_returns.tsv"
+    if not path.exists():
+        raise FileNotFoundError(f"diminishing_returns.tsv not found at {path}")
+    return pl.read_csv(path, separator="\t")
+
+
+def load_action_sensitivity(output_dir: pathlib.Path) -> pl.DataFrame:
+    path = _voi_dir(output_dir) / "action_sensitivity.tsv"
+    if not path.exists():
+        raise FileNotFoundError(f"action_sensitivity.tsv not found at {path}")
+    return pl.read_csv(path, separator="\t")

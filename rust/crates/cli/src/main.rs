@@ -5,6 +5,7 @@ mod experiment;
 mod analyze;
 mod serve;
 mod summarize;
+mod voi;
 
 use sim::{write_diagnostics_tsv, warn_zero_firings};
 use std::collections::HashMap;
@@ -40,6 +41,15 @@ fn main() {
                 Some("analyze")   => analyze::cmd_experiment_analyze(&all_args[2..]),
                 _ => {
                     eprintln!("usage: camdl experiment <run|status|summarize|analyze> ...");
+                    std::process::exit(1);
+                }
+            }
+        }
+        "voi" => {
+            match all_args.get(1).map(|s| s.as_str()) {
+                Some("run") => voi::cmd_voi_run(&all_args[2..]),
+                _ => {
+                    eprintln!("usage: camdl voi run VOI.toml");
                     std::process::exit(1);
                 }
             }
