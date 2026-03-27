@@ -70,6 +70,10 @@ struct EvsiRow {
 }
 
 // ─── Simple LCG RNG ──────────────────────────────────────────────────────────
+//
+// Knuth's MMIX LCG: multiplier 6364136223846793005, addend 1442695040888963407.
+// Period 2^64. Adequate for M=1000 MC draws per EVSI estimate.
+// seed+1 in new() avoids the degenerate fixed-point at state=0.
 
 struct Lcg { state: u64 }
 
@@ -90,14 +94,16 @@ impl Lcg {
         (-2.0 * u1.ln()).sqrt() * (2.0 * std::f64::consts::PI * u2).cos()
     }
 
-    /// Binomial(n, p) sample.  Uses normal approximation for n > 30 (fast).
+    /// Binomial(n, p) sample.
+    /// Uses normal approximation only when n > 30 AND np >= 5 AND n(1-p) >= 5.
+    /// Falls back to exact Bernoulli trials otherwise (handles small-p edge cases).
     fn binomial(&mut self, n: usize, p: f64) -> usize {
         if p <= 0.0 { return 0; }
         if p >= 1.0 { return n; }
-        if n > 30 {
-            let mu    = n as f64 * p;
-            let sigma = (mu * (1.0 - p)).sqrt();
-            ((mu + sigma * self.normal()).round() as isize).max(0).min(n as isize) as usize
+        let np = n as f64 * p;
+        if n > 30 && np >= 5.0 && n as f64 * (1.0 - p) >= 5.0 {
+            let sigma = (np * (1.0 - p)).sqrt();
+            ((np + sigma * self.normal()).round() as isize).max(0).min(n as isize) as usize
         } else {
             (0..n).filter(|_| self.next_f64() < p).count()
         }
@@ -533,8 +539,11 @@ pub fn cmd_voi_run(args: &[String]) {
         eprintln!("error: cannot read experiment '{}': {}", voi_file.voi.experiment, e);
         std::process::exit(1);
     });
-    let exp_output_dir = extract_output_dir(&exp_toml_src)
-        .unwrap_or_else(|| "output".to_string());
+    let exp_info = crate::util::parse_experiment_toml(&exp_toml_src).unwrap_or_else(|e| {
+        eprintln!("error: {}", e);
+        std::process::exit(1);
+    });
+    let exp_output_dir = exp_info.output_dir;
     let design_dir = format!("{}/designs/{}", exp_output_dir, voi_file.voi.design);
 
     // Output directory
@@ -658,14 +667,4 @@ fn voi_usage() -> ! {
     std::process::exit(1);
 }
 
-fn extract_output_dir(toml_src: &str) -> Option<String> {
-    for line in toml_src.lines() {
-        let t = line.trim();
-        if t.starts_with("output_dir") {
-            if let Some(eq) = t.find('=') {
-                return Some(t[eq+1..].trim().trim_matches('"').trim_matches('\'').to_string());
-            }
-        }
-    }
-    None
-}
+

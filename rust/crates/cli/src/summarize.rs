@@ -157,8 +157,12 @@ fn summarize_design(toml_path: &str) {
         std::process::exit(1);
     });
 
-    let output_dir = extract_output_dir(&toml_src).unwrap_or_else(|| "output".to_string());
-    let design_names = extract_design_names(&toml_src);
+    let exp_info = crate::util::parse_experiment_toml(&toml_src).unwrap_or_else(|e| {
+        eprintln!("error: {}", e);
+        std::process::exit(1);
+    });
+    let output_dir   = exp_info.output_dir;
+    let design_names = exp_info.design_names;
 
     if design_names.is_empty() {
         eprintln!("error: no [design.*] blocks found in {}", toml_path);
@@ -376,34 +380,4 @@ fn usage() -> ! {
     std::process::exit(1);
 }
 
-// ─── TOML extraction helpers ──────────────────────────────────────────────────
 
-fn extract_output_dir(toml_src: &str) -> Option<String> {
-    for line in toml_src.lines() {
-        let t = line.trim();
-        if t.starts_with("output_dir") {
-            if let Some(eq) = t.find('=') {
-                return Some(t[eq+1..].trim().trim_matches('"').trim_matches('\'').to_string());
-            }
-        }
-    }
-    None
-}
-
-fn extract_design_names(toml_src: &str) -> Vec<String> {
-    let mut names = Vec::new();
-    for line in toml_src.lines() {
-        let t = line.trim();
-        if t.starts_with("[design.") && !t.contains("parameters") {
-            let inner = t.trim_start_matches('[').trim_end_matches(']');
-            // "[design.NAME]" → "NAME"
-            if let Some(name) = inner.strip_prefix("design.") {
-                let name = name.trim().to_string();
-                if !name.is_empty() && !names.contains(&name) {
-                    names.push(name);
-                }
-            }
-        }
-    }
-    names
-}

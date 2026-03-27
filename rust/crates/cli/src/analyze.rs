@@ -70,14 +70,14 @@ pub fn cmd_experiment_analyze(args: &[String]) {
         std::process::exit(1);
     });
 
-    // Extract output_dir from TOML (minimal parse)
-    let output_dir = output_dir_override.unwrap_or_else(|| {
-        extract_output_dir(&toml_src).unwrap_or_else(|| "output".to_string())
+    let exp_info = crate::util::parse_experiment_toml(&toml_src).unwrap_or_else(|e| {
+        eprintln!("error: {}", e);
+        std::process::exit(1);
     });
 
-    // Extract [analyze] block for outputs list
-    let toml_outputs = extract_analyze_outputs(&toml_src);
-    let toml_confidence = extract_analyze_confidence(&toml_src).unwrap_or(0.95);
+    let output_dir = output_dir_override.unwrap_or(exp_info.output_dir);
+    let toml_outputs = exp_info.analyze_outputs;
+    let toml_confidence = exp_info.analyze_confidence.unwrap_or(0.95);
     let effective_confidence = if confidence != 0.95 { confidence } else { toml_confidence };
 
     // Find design directories
@@ -482,59 +482,6 @@ fn read_tsv_matrix(path: &str, skip_col: Option<&str>) -> Result<(Vec<String>, V
     Ok((col_names, rows))
 }
 
-
-// ─── TOML extraction (minimal, no full parse needed) ─────────────────────────
-
-fn extract_output_dir(toml_src: &str) -> Option<String> {
-    for line in toml_src.lines() {
-        let trimmed = line.trim();
-        if trimmed.starts_with("output_dir") {
-            if let Some(eq) = trimmed.find('=') {
-                let val = trimmed[eq+1..].trim().trim_matches('"').trim_matches('\'');
-                return Some(val.to_string());
-            }
-        }
-    }
-    None
-}
-
-fn extract_analyze_outputs(toml_src: &str) -> Option<Vec<String>> {
-    // Look for outputs = ["X", "Y", "Z"] in [analyze] section
-    let mut in_analyze = false;
-    for line in toml_src.lines() {
-        let trimmed = line.trim();
-        if trimmed == "[analyze]" { in_analyze = true; continue; }
-        if trimmed.starts_with('[') { in_analyze = false; continue; }
-        if in_analyze && trimmed.starts_with("outputs") {
-            if let Some(bracket) = trimmed.find('[') {
-                if let Some(end) = trimmed.rfind(']') {
-                    let inner = &trimmed[bracket+1..end];
-                    let names: Vec<String> = inner.split(',')
-                        .map(|s| s.trim().trim_matches('"').trim_matches('\'').to_string())
-                        .filter(|s| !s.is_empty())
-                        .collect();
-                    if !names.is_empty() { return Some(names); }
-                }
-            }
-        }
-    }
-    None
-}
-
-fn extract_analyze_confidence(toml_src: &str) -> Option<f64> {
-    let mut in_analyze = false;
-    for line in toml_src.lines() {
-        let trimmed = line.trim();
-        if trimmed == "[analyze]" { in_analyze = true; continue; }
-        if trimmed.starts_with('[') { in_analyze = false; continue; }
-        if in_analyze && trimmed.starts_with("confidence") {
-            if let Some(eq) = trimmed.find('=') {
-                return trimmed[eq+1..].trim().parse::<f64>().ok();
-            }
-        }
-    }
-    None
-}
 
 // ─── File writers ─────────────────────────────────────────────────────────────
 

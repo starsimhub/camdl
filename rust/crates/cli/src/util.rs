@@ -1,12 +1,59 @@
 use std::collections::HashMap;
 use ir::table::TableSource;
 use ir::intervention::Intervention;
+use serde::Deserialize;
 use sim::{
     CompiledModel, GillespieSim, TauLeapSim, ChainBinomialSim, OdeSim,
     config::{GillespieConfig, TauLeapConfig, ChainBinomialConfig, OdeConfig, SimConfig},
     simulate::Simulate,
     Trajectory,
 };
+
+// ─── Experiment TOML parsing ─────────────────────────────────────────────────
+
+/// Fields extracted from an experiment.toml needed by summarize, analyze, voi.
+pub struct ExperimentInfo {
+    pub output_dir:         String,
+    pub design_names:       Vec<String>,
+    pub analyze_outputs:    Option<Vec<String>>,
+    pub analyze_confidence: Option<f64>,
+}
+
+/// Parse an experiment.toml source string using proper TOML deserialization.
+/// Returns an error string on parse failure.
+pub fn parse_experiment_toml(src: &str) -> Result<ExperimentInfo, String> {
+    #[derive(Deserialize, Default)]
+    struct ConfigSection {
+        output_dir: Option<String>,
+    }
+    #[derive(Deserialize, Default)]
+    struct AnalyzeSection {
+        outputs:    Option<Vec<String>>,
+        confidence: Option<f64>,
+    }
+    #[derive(Deserialize)]
+    struct ExperimentDoc {
+        #[serde(default)]
+        config:  ConfigSection,
+        #[serde(default)]
+        design:  HashMap<String, toml::Value>,
+        #[serde(default)]
+        analyze: AnalyzeSection,
+    }
+
+    let doc: ExperimentDoc = toml::from_str(src)
+        .map_err(|e| format!("experiment TOML parse error: {}", e))?;
+
+    let mut design_names: Vec<String> = doc.design.into_keys().collect();
+    design_names.sort();
+
+    Ok(ExperimentInfo {
+        output_dir:         doc.config.output_dir.unwrap_or_else(|| "output".to_string()),
+        design_names,
+        analyze_outputs:    doc.analyze.outputs,
+        analyze_confidence: doc.analyze.confidence,
+    })
+}
 
 // ─── IR path resolver ────────────────────────────────────────────────────────
 
