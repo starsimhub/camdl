@@ -215,6 +215,96 @@ fn test_unop_exp() {
 }
 
 #[test]
+fn test_unop_neg() {
+    let model = CompiledModel::new(minimal_model(vec![int_comp("S")], vec![])).unwrap();
+    let int_s = IntState::new(1);
+    let real_s = RealState::new(0);
+    let expr = Expr::UnOp(UnOpWrap {
+        un_op: UnOpExpr {
+            op: UnOp::Neg,
+            arg: Box::new(Expr::Const(ConstExpr { value: 5.0 })),
+        },
+    });
+    let ctx = EvalCtx { model: &model, int_s: &int_s, real_s: &real_s, params: &[], t: 0.0 };
+    assert!((eval_expr(&expr, &ctx).unwrap() - (-5.0)).abs() < 1e-12);
+}
+
+#[test]
+fn test_unop_log() {
+    let model = CompiledModel::new(minimal_model(vec![int_comp("S")], vec![])).unwrap();
+    let int_s = IntState::new(1);
+    let real_s = RealState::new(0);
+    let expr = Expr::UnOp(UnOpWrap {
+        un_op: UnOpExpr {
+            op: UnOp::Log,
+            arg: Box::new(Expr::Const(ConstExpr { value: std::f64::consts::E })),
+        },
+    });
+    let ctx = EvalCtx { model: &model, int_s: &int_s, real_s: &real_s, params: &[], t: 0.0 };
+    assert!((eval_expr(&expr, &ctx).unwrap() - 1.0).abs() < 1e-10);
+}
+
+#[test]
+fn test_unop_sqrt() {
+    let model = CompiledModel::new(minimal_model(vec![int_comp("S")], vec![])).unwrap();
+    let int_s = IntState::new(1);
+    let real_s = RealState::new(0);
+    let expr = Expr::UnOp(UnOpWrap {
+        un_op: UnOpExpr {
+            op: UnOp::Sqrt,
+            arg: Box::new(Expr::Const(ConstExpr { value: 16.0 })),
+        },
+    });
+    let ctx = EvalCtx { model: &model, int_s: &int_s, real_s: &real_s, params: &[], t: 0.0 };
+    assert!((eval_expr(&expr, &ctx).unwrap() - 4.0).abs() < 1e-12);
+}
+
+#[test]
+fn test_unop_abs() {
+    let model = CompiledModel::new(minimal_model(vec![int_comp("S")], vec![])).unwrap();
+    let int_s = IntState::new(1);
+    let real_s = RealState::new(0);
+    let expr = Expr::UnOp(UnOpWrap {
+        un_op: UnOpExpr {
+            op: UnOp::Abs,
+            arg: Box::new(Expr::Const(ConstExpr { value: -7.5 })),
+        },
+    });
+    let ctx = EvalCtx { model: &model, int_s: &int_s, real_s: &real_s, params: &[], t: 0.0 };
+    assert!((eval_expr(&expr, &ctx).unwrap() - 7.5).abs() < 1e-12);
+}
+
+#[test]
+fn test_unop_floor() {
+    let model = CompiledModel::new(minimal_model(vec![int_comp("S")], vec![])).unwrap();
+    let int_s = IntState::new(1);
+    let real_s = RealState::new(0);
+    let expr = Expr::UnOp(UnOpWrap {
+        un_op: UnOpExpr {
+            op: UnOp::Floor,
+            arg: Box::new(Expr::Const(ConstExpr { value: 3.7 })),
+        },
+    });
+    let ctx = EvalCtx { model: &model, int_s: &int_s, real_s: &real_s, params: &[], t: 0.0 };
+    assert!((eval_expr(&expr, &ctx).unwrap() - 3.0).abs() < 1e-12);
+}
+
+#[test]
+fn test_unop_ceil() {
+    let model = CompiledModel::new(minimal_model(vec![int_comp("S")], vec![])).unwrap();
+    let int_s = IntState::new(1);
+    let real_s = RealState::new(0);
+    let expr = Expr::UnOp(UnOpWrap {
+        un_op: UnOpExpr {
+            op: UnOp::Ceil,
+            arg: Box::new(Expr::Const(ConstExpr { value: 3.2 })),
+        },
+    });
+    let ctx = EvalCtx { model: &model, int_s: &int_s, real_s: &real_s, params: &[], t: 0.0 };
+    assert!((eval_expr(&expr, &ctx).unwrap() - 4.0).abs() < 1e-12);
+}
+
+#[test]
 fn test_cond_pred_positive() {
     let model = CompiledModel::new(minimal_model(vec![int_comp("S")], vec![])).unwrap();
     let int_s = IntState::new(1);
