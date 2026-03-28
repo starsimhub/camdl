@@ -3,6 +3,7 @@ use crate::{
     config::SimConfig,
     error::SimError,
     state::Trajectory,
+    Capabilities,
 };
 
 pub trait Simulate {
@@ -13,4 +14,10 @@ pub trait Simulate {
         seed: u64,
         config: &SimConfig,
     ) -> Result<Trajectory, SimError>;
+
+    /// Features this backend supports.
+    fn capabilities(&self) -> Capabilities;
+
+    /// Human-readable backend name for error messages.
+    fn name(&self) -> &'static str;
 }

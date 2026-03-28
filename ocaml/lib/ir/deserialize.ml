@@ -143,6 +143,9 @@ let transition_of_json j =
     metadata     = (match member_opt "metadata" j with
                     | None | Some `Null -> None
                     | Some m -> Some (metadata_of_json m));
+    overdispersion = (match member_opt "overdispersion" j with
+                      | None | Some `Null -> None
+                      | Some e -> Some (expr_of_json e));
   }
 
 (* ── ODE equation ────────────────────────────────────────────────────────── *)

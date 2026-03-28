@@ -1,6 +1,6 @@
 use rand::SeedableRng;
 use rand_chacha::ChaCha8Rng;
-use rand_distr::{Distribution, Poisson, Exp};
+use rand_distr::{Distribution, Poisson, Exp, Gamma};
 use ahash::AHasher;
 use std::hash::{Hash, Hasher};
 
@@ -66,6 +66,19 @@ impl StatefulRng {
     pub fn exp(&mut self, rate: f64) -> f64 {
         if rate <= 0.0 { return f64::INFINITY; }
         Exp::new(rate).unwrap().sample(&mut self.0)
+    }
+
+    /// Gamma-Poisson compound draw (= NegBinomial) for overdispersed event
+    /// counts.  `mean` is the expected count, `sigma_sq` is σ²_SE (the
+    /// variance of the Gamma multiplier, which has mean 1).
+    ///
+    /// Gamma(shape = mean/σ², scale = σ²) → rate ~ Gamma, then Poisson(rate).
+    pub fn neg_binomial(&mut self, mean: f64, sigma_sq: f64) -> u64 {
+        if mean <= 0.0 || sigma_sq <= 0.0 { return self.poisson(mean); }
+        let shape = mean / sigma_sq;
+        let scale = sigma_sq;
+        let gamma_draw = Gamma::new(shape, scale).unwrap().sample(&mut self.0);
+        self.poisson(gamma_draw)
     }
 
     /// Uniform [0, 1) — used for Gillespie event selection.

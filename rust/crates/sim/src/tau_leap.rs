@@ -6,7 +6,7 @@ use crate::{
     intervention::{all_intervention_times, apply_interventions_at},
     ode_integrator::rk4_step,
     output::output_times as get_output_times,
-    propensity::eval_propensities,
+    propensity::{eval_propensities, eval_expr, EvalCtx},
     simulate::Simulate,
     state::{FlowVec, Snapshot, Trajectory},
 };
@@ -30,6 +30,12 @@ impl Simulate for TauLeapSim {
         };
         run_tau_leap(model, params, seed, cfg)
     }
+
+    fn capabilities(&self) -> crate::Capabilities {
+        crate::Capabilities::OVERDISPERSION | crate::Capabilities::REAL_COMPARTMENTS
+    }
+
+    fn name(&self) -> &'static str { "tau_leap" }
 }
 
 fn run_tau_leap(
@@ -99,9 +105,23 @@ fn run_tau_leap(
         // Evaluate propensities at current state
         eval_propensities(model, &int_s, &real_s, params, t, &mut propensities)?;
 
-        // Draw Poisson counts for each transition via CRN (stateful RNG, same seed = same draws)
+        // Draw event counts for each transition via CRN
+        // Pre-evaluate overdispersion expressions before mutating int_s
+        let od_values: Vec<Option<f64>> = {
+            let ctx = EvalCtx { model, int_s: &int_s, real_s: &real_s, params, t };
+            model.model.transitions.iter()
+                .map(|tr| match &tr.overdispersion {
+                    Some(od_expr) => eval_expr(od_expr, &ctx).map(Some),
+                    None => Ok(None),
+                })
+                .collect::<Result<_, _>>()?
+        };
         for (i, &lambda) in propensities.iter().enumerate() {
-            let count = rng.poisson(lambda * dt);
+            let mean = lambda * dt;
+            let count = match od_values[i] {
+                Some(sigma_sq) => rng.neg_binomial(mean, sigma_sq),
+                None => rng.poisson(mean),
+            };
 
             // Apply stoichiometry
             for &(local, delta) in &model.transition_stoich[i] {

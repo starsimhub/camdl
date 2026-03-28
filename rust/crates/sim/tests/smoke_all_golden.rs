@@ -99,14 +99,20 @@ fn test_smoke_all_ocaml_golden() {
             ),
         ];
 
+        let required = compiled.required_capabilities();
         for (backend, config) in backends {
             let label = format!("{}/{}", name, backend);
-            let traj = match *backend {
-                "gillespie" => GillespieSim.run(&compiled, &params, 42, config),
-                "tau_leap" => TauLeapSim.run(&compiled, &params, 42, config),
-                _ => ChainBinomialSim.run(&compiled, &params, 42, config),
+            let sim: &dyn Simulate = match *backend {
+                "gillespie" => &GillespieSim,
+                "tau_leap" => &TauLeapSim,
+                _ => &ChainBinomialSim,
+            };
+            // Skip backends that don't support the model's required capabilities
+            if !(required - sim.capabilities()).is_empty() {
+                continue;
             }
-            .unwrap_or_else(|e| panic!("{}: sim error: {:?}", label, e));
+            let traj = sim.run(&compiled, &params, 42, config)
+                .unwrap_or_else(|e| panic!("{}: sim error: {:?}", label, e));
 
             check_invariants(&label, &traj);
         }

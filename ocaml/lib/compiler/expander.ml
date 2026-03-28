@@ -1024,7 +1024,14 @@ let expand_transitions_counted ctx =
       else begin
         let src_name = Option.map (resolve_stoich_ref ctx env) tr.trsrc in
         let dst_name = Option.map (resolve_stoich_ref ctx env) tr.trdst in
-        let rate     = normalize_expr (resolve_expr ctx env tr.trrate) in
+        (* Extract overdispersed(inner_rate, variance) before resolving *)
+        let raw_rate, raw_od = match tr.trrate with
+          | EFuncCall ("overdispersed", [("", inner); ("", var)]) ->
+            (inner, Some var)
+          | _ -> (tr.trrate, None)
+        in
+        let rate = normalize_expr (resolve_expr ctx env raw_rate) in
+        let od   = Option.map (fun e -> normalize_expr (resolve_expr ctx env e)) raw_od in
         let origin_kind = infer_origin_kind src_name dst_name rate in
         let stoich =
           (match src_name with Some s -> [(s, -1)] | None -> []) @
@@ -1042,15 +1049,16 @@ let expand_transitions_counted ctx =
             Printf.sprintf "%s_%s:{firing_index}" tr.trname (String.concat "_" parts)
         in
         Some {
-          Ir.name          = tr_name;
-          Ir.stoichiometry = stoich;
-          Ir.rate          = rate;
-          Ir.event_key     = Some event_key;
-          Ir.metadata      = Some {
+          Ir.name            = tr_name;
+          Ir.stoichiometry   = stoich;
+          Ir.rate            = rate;
+          Ir.event_key       = Some event_key;
+          Ir.metadata        = Some {
             Ir.origin_kind        = Some origin_kind;
             Ir.source_compartment = src_name;
             Ir.dest_compartment   = dst_name;
           };
+          Ir.overdispersion  = od;
         }
       end
     ) combos

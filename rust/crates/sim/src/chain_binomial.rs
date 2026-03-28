@@ -6,7 +6,7 @@ use crate::{
     intervention::{all_intervention_times, apply_interventions_at},
     ode_integrator::rk4_step,
     output::output_times as get_output_times,
-    propensity::eval_propensities,
+    propensity::{eval_propensities, eval_expr, EvalCtx},
     simulate::Simulate,
     state::{FlowVec, Snapshot, Trajectory},
 };
@@ -30,6 +30,12 @@ impl Simulate for ChainBinomialSim {
         };
         run_chain_binomial(model, params, seed, cfg)
     }
+
+    fn capabilities(&self) -> crate::Capabilities {
+        crate::Capabilities::OVERDISPERSION | crate::Capabilities::REAL_COMPARTMENTS
+    }
+
+    fn name(&self) -> &'static str { "chain_binomial" }
 }
 
 fn run_chain_binomial(
@@ -77,6 +83,16 @@ fn run_chain_binomial(
 
         // Binomial draws for each transition
         // p = 1 - exp(-rate * dt) converts continuous-time rate to per-step probability
+        // Pre-evaluate overdispersion expressions before mutating int_s
+        let od_values: Vec<Option<f64>> = {
+            let ctx = EvalCtx { model, int_s: &int_s, real_s: &real_s, params, t };
+            model.model.transitions.iter()
+                .map(|tr| match &tr.overdispersion {
+                    Some(od_expr) => eval_expr(od_expr, &ctx).map(Some),
+                    None => Ok(None),
+                })
+                .collect::<Result<_, _>>()?
+        };
         for (i, &rate) in propensities.iter().enumerate() {
             let p = 1.0 - (-rate * dt).exp();
             if p <= 0.0 { continue; }
@@ -91,9 +107,11 @@ fn run_chain_binomial(
 
             if n_src == 0 { continue; }
 
-            // Poisson(n*p) approximates Binomial(n, p); CRN via stateful RNG
             let lambda = (n_src as f64) * p;
-            let count = rng.poisson(lambda).min(n_src as u64);
+            let count = match od_values[i] {
+                Some(sigma_sq) => rng.neg_binomial(lambda, sigma_sq).min(n_src as u64),
+                None => rng.poisson(lambda).min(n_src as u64),
+            };
 
             for &(local, delta) in &model.transition_stoich[i] {
                 int_s.counts[local] += delta * count as i64;

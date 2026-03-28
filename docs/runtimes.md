@@ -367,9 +367,43 @@ important ways:
 | Speed (small N)         | fast          | overhead    | overhead       | fast               |
 | Real compartments       | PDMP (approx) | hybrid      | hybrid         | native             |
 | CRN coupling            | yes           | yes         | yes            | n/a                |
+| Overdispersion          | incompatible  | supported   | supported      | incompatible       |
 | Int rounding during RK4 | n/a           | n/a         | n/a            | yes (O(1/N) error) |
 
 **Rule of thumb:** use Gillespie for N < 10 000 and when extinction matters;
 tau-leap or chain-binomial for N > 10 000 in production stochastic runs
 (chain-binomial if the generation interval aligns with your Δt); ODE for fast
-parameter sweeps or very large spatial models.
+parameter sweeps or very large spatial models. If the model uses
+`overdispersed()` transitions, Gillespie and ODE are rejected at runtime — use
+tau-leap or chain-binomial.
+
+---
+
+## Extra-demographic stochasticity (overdispersion)
+
+Transitions wrapped in `overdispersed(rate, σ²)` receive Gamma-distributed
+multiplicative noise on their rate (He et al. 2010). The Poisson-Gamma compound
+produces NegBinomial event counts with mean = rate × Δt and variance inflated by
+σ²_SE.
+
+**Tau-leap implementation.** For each overdispersed transition per step:
+
+1. Evaluate propensity λ and overdispersion σ² from the current state
+2. Draw a Gamma-distributed rate: ε ~ Gamma(shape = λΔt/σ², scale = σ²)
+3. Draw events: ΔN ~ Poisson(ε)
+
+This is equivalent to ΔN ~ NegBinomial(mean = λΔt, size = λΔt/σ²). When σ² → 0,
+the Gamma concentrates at its mean and the draw converges to Poisson(λΔt).
+
+**Chain-binomial implementation.** Same Gamma-Poisson compound applied to the
+expected count n·p (where p = 1 − exp(−λΔt)), capped at the source population.
+
+**Backend capability system.** Each model declares required capabilities (derived
+from the IR at compile time). Each backend declares what it supports. Mismatch
+produces a hard error before simulation starts — no silent wrong answers.
+
+```
+$ camdl-sim model.ir.json --backend gillespie --seed 42
+error: model requires capabilities not supported by backend 'gillespie':
+  - OVERDISPERSION: transitions with overdispersion require --backend tau_leap or chain_binomial
+```

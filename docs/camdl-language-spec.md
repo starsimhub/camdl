@@ -1012,6 +1012,47 @@ globally unique key.
 EKRNG is automatic — the user does not write event keys. The compiler generates
 them from the transition's name and index bindings.
 
+### 9.9 Extra-Demographic Stochasticity (`overdispersed`)
+
+Demographic stochasticity (Poisson event draws) scales as 1/√N and is negligible
+for large populations. Extra-demographic stochasticity models rate-level noise —
+correlated fluctuations in contact rates, weather effects, superspreading — that
+doesn't scale away with population size (He et al. 2010).
+
+The `overdispersed(rate_expr, σ²_SE)` function wraps a rate expression with
+Gamma-distributed multiplicative noise:
+
+```
+infection : S --> I  @ overdispersed(beta * S * I / N, sigma_se)
+recovery  : I --> R  @ gamma * I
+```
+
+The first argument is the base rate (a standard propensity expression). The
+second is σ²_SE, the variance of the Gamma noise multiplier (which has mean 1).
+The resulting event count distribution is NegBinomial — the Poisson-Gamma
+compound.
+
+`overdispersed` is syntactically a function call in expression position. The
+compiler extracts it during expansion: the inner rate goes to `transition.rate`,
+the variance goes to `transition.overdispersion` in the IR. Transitions without
+`overdispersed` have `overdispersion: null` — standard Poisson draws.
+
+**Backend compatibility.** Overdispersion is incompatible with Gillespie SSA
+(which assumes deterministic rates between events) and meaningless for ODE
+(deterministic). It is supported by tau-leap (NegBinomial replaces Poisson
+draws) and chain-binomial (same). The runtime enforces this: requesting
+`--backend gillespie` for a model with `overdispersed` transitions produces a
+hard error with a hint to use `--backend tau_leap`.
+
+**Composability.** Each transition independently chooses whether to be
+overdispersed, and with what variance:
+
+```
+infection : S --> I  @ overdispersed(beta * S * I / N, sigma_inf)
+recovery  : I --> R  @ overdispersed(gamma * I, sigma_rec)
+waning    : R --> S  @ omega * R   # no extra noise
+```
+
 ---
 
 ## 10. Coupling Sugar (Shorthand for Stratified Transmission)

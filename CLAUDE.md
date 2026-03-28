@@ -133,6 +133,20 @@ simulation backend — `StatefulRng` (seeded ChaCha8) is used exclusively. The
 v0.2/v0.3 fields are present in the schema as nullable so the serialization
 format never breaks between phases.
 
+### Backend capabilities
+
+Model features constrain which backends can run them. The `Capabilities`
+bitflags in `rust/crates/sim/src/lib.rs` enforce this at dispatch time:
+
+- `OVERDISPERSION`: transitions using `overdispersed(rate, σ²)` require
+  tau-leap or chain-binomial (NegBinomial draws). Gillespie and ODE reject
+  these models with a hard error.
+- `REAL_COMPARTMENTS`: real-valued compartments with ODE equations.
+
+The `CompiledModel::required_capabilities()` scans the IR; each backend's
+`Simulate::capabilities()` declares what it supports. Mismatch → error before
+simulation starts.
+
 ### Scheduled interventions and simulation backends
 
 Interventions are deterministic state modifications (not stochastic events).

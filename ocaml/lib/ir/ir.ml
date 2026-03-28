@@ -46,11 +46,12 @@ type transition_metadata = {
 }
 
 type transition = {
-  name:         string;
-  stoichiometry: stoichiometry_entry list;
-  rate:         expr;
-  event_key:    string option;
-  metadata:     transition_metadata option;
+  name:            string;
+  stoichiometry:   stoichiometry_entry list;
+  rate:            expr;
+  event_key:       string option;
+  metadata:        transition_metadata option;
+  overdispersion:  expr option;
 }
 
 (* ── ODE equation ────────────────────────────────────────────────────────────── *)

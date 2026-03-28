@@ -87,7 +87,11 @@ let transition_to_json (t : transition) : Yojson.Safe.t =
       ("rate",         expr_to_json t.rate);
       ("event_key",    match t.event_key with None -> null | Some s -> str s);
       ("metadata",     match t.metadata  with None -> null | Some m -> metadata_to_json m);
-    ])
+    ]
+    @ (match t.overdispersion with
+       | None   -> []
+       | Some e -> [("overdispersion", expr_to_json e)])
+  )
 
 (* ── ODE equation ────────────────────────────────────────────────────────── *)
 

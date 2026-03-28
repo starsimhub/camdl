@@ -28,6 +28,12 @@ impl Simulate for OdeSim {
         };
         run_ode(model, params, cfg)
     }
+
+    fn capabilities(&self) -> crate::Capabilities {
+        crate::Capabilities::REAL_COMPARTMENTS
+    }
+
+    fn name(&self) -> &'static str { "ode" }
 }
 
 /// Evaluate ODE derivatives at the current (int_vals, real_vals) state.

@@ -430,13 +430,31 @@ pub fn run_simulation(run: &SimRun) -> Result<(Trajectory, ir::Model), String> {
         s => return Err(format!("unknown backend: {}", s)),
     };
 
-    let traj = match run.backend.as_str() {
-        "gillespie"      => GillespieSim.run(&compiled, &params, run.seed, &config),
-        "tau_leap"       => TauLeapSim.run(&compiled, &params, run.seed, &config),
-        "chain_binomial" => ChainBinomialSim.run(&compiled, &params, run.seed, &config),
-        "ode"            => OdeSim.run(&compiled, &params, run.seed, &config),
+    // Check backend compatibility before running
+    let backend: &dyn Simulate = match run.backend.as_str() {
+        "gillespie"      => &GillespieSim,
+        "tau_leap"       => &TauLeapSim,
+        "chain_binomial" => &ChainBinomialSim,
+        "ode"            => &OdeSim,
         _ => unreachable!(),
-    }.map_err(|e| format!("simulation error: {:?}", e))?;
+    };
+    let unsupported = compiled.required_capabilities() - backend.capabilities();
+    if !unsupported.is_empty() {
+        let mut features = Vec::new();
+        if unsupported.contains(sim::Capabilities::OVERDISPERSION) {
+            features.push("OVERDISPERSION: transitions with overdispersion require --backend tau_leap or chain_binomial");
+        }
+        if unsupported.contains(sim::Capabilities::REAL_COMPARTMENTS) {
+            features.push("REAL_COMPARTMENTS: real-valued compartments with ODE equations");
+        }
+        return Err(format!(
+            "model requires capabilities not supported by backend '{}':\n  - {}",
+            backend.name(), features.join("\n  - ")
+        ));
+    }
+
+    let traj = backend.run(&compiled, &params, run.seed, &config)
+        .map_err(|e| format!("simulation error: {:?}", e))?;
 
     Ok((traj, model))
 }

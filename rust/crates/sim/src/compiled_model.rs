@@ -389,6 +389,18 @@ impl CompiledModel {
         })
     }
 
+    /// Features this model requires from a backend.
+    pub fn required_capabilities(&self) -> crate::Capabilities {
+        let mut caps = crate::Capabilities::empty();
+        if self.model.transitions.iter().any(|t| t.overdispersion.is_some()) {
+            caps |= crate::Capabilities::OVERDISPERSION;
+        }
+        if !self.real_comp_indices.is_empty() {
+            caps |= crate::Capabilities::REAL_COMPARTMENTS;
+        }
+        caps
+    }
+
     /// Build the initial state from model.initial_conditions + params.
     pub fn initial_state(
         &self,

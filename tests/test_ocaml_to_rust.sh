@@ -39,12 +39,19 @@ print(s[0]['name'] if s else '')
 
     ok=1
     for backend in gillespie tau_leap chain_binomial; do
+        tmperr=$(mktemp /tmp/camdl_err_XXXXXX)
         # shellcheck disable=SC2086
-        if ! "$CAMDL" simulate "$tmpir" $params_flag --backend "$backend" --seed 42 > /dev/null; then
+        if ! "$CAMDL" simulate "$tmpir" $params_flag --backend "$backend" --seed 42 > /dev/null 2>"$tmperr"; then
+            if grep -q "requires capabilities" "$tmperr"; then
+                # Expected: model needs features this backend doesn't support
+                rm -f "$tmperr"
+                continue
+            fi
             echo "FAIL [$backend] $name"
             ok=0
             FAIL=$((FAIL + 1))
         fi
+        rm -f "$tmperr"
     done
 
     if [ $ok -eq 1 ]; then

@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 ahash = "0.8"
+bitflags = "2"
 ir = { path = "../ir" }
 log = "0.4"
 rand = "0.8"

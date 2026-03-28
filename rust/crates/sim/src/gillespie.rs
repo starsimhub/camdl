@@ -34,6 +34,12 @@ impl Simulate for GillespieSim {
         };
         run_gillespie(model, params, seed, cfg)
     }
+
+    fn capabilities(&self) -> crate::Capabilities {
+        crate::Capabilities::REAL_COMPARTMENTS
+    }
+
+    fn name(&self) -> &'static str { "gillespie" }
 }
 
 /// Evaluate a single transition's propensity, clamping negative values to 0.0.

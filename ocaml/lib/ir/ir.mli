@@ -32,11 +32,12 @@ type transition_metadata = {
   dest_compartment:   string option;
 }
 type transition = {
-  name:          string;
-  stoichiometry: stoichiometry_entry list;
-  rate:          expr;
-  event_key:     string option;
-  metadata:      transition_metadata option;
+  name:            string;
+  stoichiometry:   stoichiometry_entry list;
+  rate:            expr;
+  event_key:       string option;
+  metadata:        transition_metadata option;
+  overdispersion:  expr option;
 }
 
 type ode_equation = { compartment: string; derivative: expr }
