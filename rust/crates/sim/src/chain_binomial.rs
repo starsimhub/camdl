@@ -93,16 +93,37 @@ fn run_chain_binomial(
                 })
                 .collect::<Result<_, _>>()?
         };
-        // Track which transitions have been handled by a multinomial group
+        // ── CRITICAL: deferred state update ────────────────────────────────
+        //
+        // All draws must use the START-OF-STEP state. Updates are buffered
+        // and applied simultaneously AFTER all draws complete.
+        //
+        // Why this matters: in an SEIR model, if infection (S→E) draws are
+        // applied immediately, the E compartment grows mid-step. When the
+        // progression (E→I) group is processed next, it reads the inflated E
+        // and draws more progressions than should occur in one dt. This
+        // creates a "pipeline acceleration" where individuals flow through
+        // S→E→I→R within a single timestep — physically impossible for dt
+        // shorter than the latent + infectious period.
+        //
+        // pomp's reulermultinom draws all multinomials from a frozen state
+        // snapshot, then applies all deltas at once. We do the same by
+        // accumulating (compartment_index, delta) pairs in a buffer.
+        //
+        // The propensities (line 82) are already evaluated from start-of-step
+        // state, so those are correct. The n_src reads (line below) also need
+        // the frozen state — we read from int_s which is NOT mutated during
+        // the draw loop.
+        // ──────────────────────────────────────────────────────────────────
+
+        let mut pending_deltas: Vec<(usize, i64)> = Vec::new();
         let mut handled = vec![false; n_transitions];
 
         // Multinomial draws for transitions sharing a source compartment.
-        // For a source with k competing outflows, draw sequentially:
-        //   count_1 ~ Binomial(n_remaining, p_1 / p_remaining)
-        //   n_remaining -= count_1; p_remaining -= p_1
-        //   count_2 ~ Binomial(n_remaining, p_2 / p_remaining)
-        //   ...
-        // This is exact and guarantees Σ counts ≤ n_src.
+        // Sequential conditional binomial decomposition:
+        //   count_1 ~ Binom(n_remaining, p_1 / (1 - 0))
+        //   count_2 ~ Binom(n_remaining - count_1, p_2 / (1 - p_1))
+        // Exact for the multinomial. Guarantees Σ counts ≤ n_src.
         for &(src_local, ref group) in &model.source_groups {
             let n_src = int_s.counts[src_local].max(0);
             if n_src == 0 {
@@ -110,7 +131,6 @@ fn run_chain_binomial(
                 continue;
             }
 
-            // Compute per-capita probabilities for each competing transition
             let mut probs: Vec<(usize, f64)> = Vec::with_capacity(group.len());
             for &tr_idx in group {
                 let rate = propensities[tr_idx];
@@ -127,12 +147,6 @@ fn run_chain_binomial(
                 probs.push((tr_idx, p.clamp(0.0, 1.0)));
             }
 
-            // Sequential multinomial draw (conditional binomial decomposition).
-            // Each individual independently faces competing risks with probabilities
-            // p_1, p_2, ..., p_k, p_stay = 1 - Σp_i. We draw sequentially:
-            //   count_1 ~ Binom(n_remaining, p_1 / (1 - Σ_{j<1} p_j))
-            //   count_2 ~ Binom(n_remaining, p_2 / (1 - p_1 - Σ_{j<2} p_j))
-            // This is exact for the multinomial distribution.
             let mut n_remaining = n_src as u64;
             let mut p_consumed = 0.0_f64;
 
@@ -151,23 +165,29 @@ fn run_chain_binomial(
                 n_remaining -= count;
                 p_consumed += p_i;
 
+                // Buffer the stoichiometry deltas — do NOT apply to int_s yet.
                 for &(local, delta) in &model.transition_stoich[tr_idx] {
-                    int_s.counts[local] += delta * count as i64;
+                    pending_deltas.push((local, delta * count as i64));
                 }
                 current_flows.add(tr_idx, count);
                 handled[tr_idx] = true;
             }
         }
 
-        // Handle inflows and any ungrouped transitions (no source compartment)
+        // Inflows and ungrouped transitions (no source compartment)
         for (i, &rate) in propensities.iter().enumerate() {
             if handled[i] || rate <= 0.0 { continue; }
-            // Inflow: draw from total propensity directly
             let count = rng.poisson(rate * dt);
             for &(local, delta) in &model.transition_stoich[i] {
-                int_s.counts[local] += delta * count as i64;
+                pending_deltas.push((local, delta * count as i64));
             }
             current_flows.add(i, count);
+        }
+
+        // Apply all deltas simultaneously — the state transitions atomically
+        // from start-of-step to end-of-step with no intermediate visibility.
+        for (local, delta) in pending_deltas {
+            int_s.counts[local] += delta;
         }
 
         let clamped = int_s.clamp_nonneg();
