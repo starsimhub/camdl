@@ -6,6 +6,7 @@ mod analyze;
 mod serve;
 mod summarize;
 mod voi;
+mod eval;
 
 use sim::{write_diagnostics_tsv, warn_zero_firings};
 use std::collections::HashMap;
@@ -53,6 +54,9 @@ fn main() {
                     std::process::exit(1);
                 }
             }
+        }
+        "eval" => {
+            eval::cmd_eval(&all_args[1..]);
         }
         "serve" => {
             serve::cmd_serve(&all_args[1..]);

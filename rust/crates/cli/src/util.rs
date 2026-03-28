@@ -166,6 +166,17 @@ pub fn load_params_toml(path: &str) -> Result<HashMap<String, f64>, String> {
     Ok(out)
 }
 
+/// Load a TOML params file and apply values to the model's parameters.
+pub fn apply_params_file(model: &mut ir::Model, path: &str) -> Result<(), String> {
+    let vals = load_params_toml(path)?;
+    for p in &mut model.parameters {
+        if let Some(&v) = vals.get(&p.name) {
+            p.value = Some(v);
+        }
+    }
+    Ok(())
+}
+
 /// Load a keyed TSV file (two columns: name<TAB>value) for --param-vec.
 pub fn load_keyed_tsv(path: &str) -> Result<Vec<(String, f64)>, String> {
     let content = std::fs::read_to_string(path)
