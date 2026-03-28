@@ -51,16 +51,19 @@ fn test_pure_death_distribution() {
     let mean = samples.iter().sum::<f64>() / n;
     let var = samples.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / (n - 1.0);
 
-    // Theoretical: E[I(10)] = 100 * exp(-1) ≈ 36.79, Var ≈ 23.25
-    let expected_mean = 100.0 * (-1.0f64).exp();
-    let expected_var = expected_mean * (1.0 - (-1.0f64).exp());
+    // N=1000, mu=0.1, t=10: E[N(10)] = 1000 * exp(-1) ≈ 367.88
+    // Var = N * p * (1-p) where p = exp(-mu*t) = exp(-1)
+    let n0 = 1000.0;
+    let p = (-1.0_f64).exp();
+    let expected_mean = n0 * p;
+    let expected_var = n0 * p * (1.0 - p);
 
     assert!(
-        (mean - expected_mean).abs() < 2.0,
+        (mean - expected_mean).abs() < 5.0,
         "pure death mean wrong: got {:.2}, expected {:.2}", mean, expected_mean
     );
     assert!(
-        (var - expected_var).abs() < 3.0,
+        (var - expected_var).abs() < 15.0,
         "pure death variance wrong: got {:.2}, expected {:.2}", var, expected_var
     );
 }
@@ -89,7 +92,9 @@ fn test_two_state_equilibrium() {
 
     let n = a_samples.len() as f64;
     let mean = a_samples.iter().sum::<f64>() / n;
-    let expected_mean = 50.0 * 0.7 / (0.3 + 0.7); // = 35.0
+    // A↔B: alpha=0.5 (A→B), beta_r=0.3 (B→A), N=100
+    // E[A] = N * beta_r / (alpha + beta_r) = 100 * 0.3 / 0.8 = 37.5
+    let expected_mean = 100.0 * 0.3 / (0.5 + 0.3);
 
     assert!(
         (mean - expected_mean).abs() < 1.5,
@@ -192,19 +197,19 @@ fn test_pure_death_variance() {
     let mean = samples.iter().sum::<f64>() / n;
     let var = samples.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / (n - 1.0);
 
-    // Binomial(100, exp(-1)): mean = 36.79, var = mean * (1 - exp(-1)) = 36.79 * 0.6321 = 23.25
+    // Binomial(1000, exp(-1)): mean ≈ 367.9, var = 1000 * p * (1-p) ≈ 232.5
     let p = (-1.0_f64).exp();
-    let expected_mean = 100.0 * p;
-    let expected_var = 100.0 * p * (1.0 - p);
+    let expected_mean = 1000.0 * p;
+    let expected_var = 1000.0 * p * (1.0 - p);
 
-    // With 5000 samples, SE of mean ≈ sqrt(23.25/5000) ≈ 0.068, so 3σ ≈ 0.2
+    // With 5000 samples, SE of mean ≈ sqrt(232.5/5000) ≈ 0.22, so 3σ ≈ 0.65
     assert!(
-        (mean - expected_mean).abs() < 0.5,
+        (mean - expected_mean).abs() < 2.0,
         "pure death mean: got {:.3}, expected {:.3}", mean, expected_mean
     );
-    // SE of variance ≈ var * sqrt(2/(n-1)) ≈ 23.25 * 0.02 ≈ 0.47
+    // SE of variance ≈ var * sqrt(2/(n-1)) ≈ 232.5 * 0.02 ≈ 4.65
     assert!(
-        (var - expected_var).abs() < 2.0,
+        (var - expected_var).abs() < 15.0,
         "pure death variance: got {:.3}, expected {:.3}", var, expected_var
     );
 }
