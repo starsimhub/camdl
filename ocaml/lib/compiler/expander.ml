@@ -817,7 +817,22 @@ let rec resolve_expr ctx (env : (string * string) list) (e : expr) : Ir.expr =
          ();
        Ir.Const 0.0)
   | EFuncCall (fname, args) ->
-    if List.exists (fun (fd : func_decl) -> fd.fname = fname) ctx.func_decls
+    (* Built-in math functions → Ir.UnOp *)
+    let builtin_un_op = match fname with
+      | "exp" -> Some Ir.Exp | "log" -> Some Ir.Log | "sqrt" -> Some Ir.Sqrt
+      | "abs" -> Some Ir.Abs | "floor" -> Some Ir.Floor | "ceil" -> Some Ir.Ceil
+      | _ -> None in
+    if Option.is_some builtin_un_op then begin
+      let op = Option.get builtin_un_op in
+      match args with
+      | [("", arg)] -> Ir.UnOp { op; arg = resolve_expr ctx env arg }
+      | _ ->
+        Diagnostics.error ctx.diags ~code:"E101" ~loc:Diagnostics.no_loc
+          ~message:(Printf.sprintf "built-in function '%s' takes exactly one argument" fname)
+          ~hint:(Printf.sprintf "usage: %s(expr)" fname) ();
+        Ir.Const 0.0
+    end
+    else if List.exists (fun (fd : func_decl) -> fd.fname = fname) ctx.func_decls
     then begin
       let ok = match args with
         | [] -> true                                       (* bare: seasonal *)

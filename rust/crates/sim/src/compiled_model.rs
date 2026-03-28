@@ -11,8 +11,89 @@ use crate::state::{IntState, RealState};
 pub enum CompiledTimeFuncKind {
     Sinusoidal { amplitude: f64, period: f64, phase: f64, baseline: f64 },
     Piecewise   { breakpoints: Vec<f64>, values: Vec<f64> },
-    Interpolated { times: Vec<f64>, values: Vec<f64>, method: InterpMethod },
+    Interpolated { times: Vec<f64>, values: Vec<f64> },
+    CubicSpline(CubicSpline),
     Periodic    { period: f64, values: Vec<f64> },
+}
+
+/// Natural cubic spline with precomputed coefficients.
+/// S_i(x) = a_i + b_i(x - x_i) + c_i(x - x_i)² + d_i(x - x_i)³
+#[derive(Debug, Clone)]
+pub struct CubicSpline {
+    pub xs: Vec<f64>,
+    pub ys: Vec<f64>,
+    pub b: Vec<f64>,
+    pub c: Vec<f64>,
+    pub d: Vec<f64>,
+}
+
+impl CubicSpline {
+    /// Build a natural cubic spline (second derivative = 0 at endpoints).
+    /// Thomas algorithm on the tridiagonal system, O(n).
+    pub fn new(xs: &[f64], ys: &[f64]) -> Self {
+        let n = xs.len();
+        assert!(n >= 2 && n == ys.len());
+        if n == 2 {
+            // Degenerate: linear interpolation
+            let slope = (ys[1] - ys[0]) / (xs[1] - xs[0]);
+            return CubicSpline {
+                xs: xs.to_vec(), ys: ys.to_vec(),
+                b: vec![slope, slope], c: vec![0.0, 0.0], d: vec![0.0, 0.0],
+            };
+        }
+        let nm1 = n - 1;
+        let h: Vec<f64> = (0..nm1).map(|i| xs[i + 1] - xs[i]).collect();
+
+        // Build tridiagonal system for c coefficients
+        // Equations: h[i-1]*c[i-1] + 2*(h[i-1]+h[i])*c[i] + h[i]*c[i+1]
+        //            = 3*((y[i+1]-y[i])/h[i] - (y[i]-y[i-1])/h[i-1])
+        let mut alpha = vec![0.0; n];
+        for i in 1..nm1 {
+            alpha[i] = 3.0 * ((ys[i + 1] - ys[i]) / h[i] - (ys[i] - ys[i - 1]) / h[i - 1]);
+        }
+
+        // Thomas algorithm: forward sweep
+        let mut l = vec![1.0; n];
+        let mut mu = vec![0.0; n];
+        let mut z = vec![0.0; n];
+        for i in 1..nm1 {
+            l[i] = 2.0 * (xs[i + 1] - xs[i - 1]) - h[i - 1] * mu[i - 1];
+            mu[i] = h[i] / l[i];
+            z[i] = (alpha[i] - h[i - 1] * z[i - 1]) / l[i];
+        }
+
+        // Back substitution
+        let mut c = vec![0.0; n]; // natural: c[0] = c[n-1] = 0
+        for j in (0..nm1).rev() {
+            c[j] = z[j] - mu[j] * c[j + 1];
+        }
+
+        // Compute b, d from c
+        let mut b = vec![0.0; n];
+        let mut d = vec![0.0; n];
+        for i in 0..nm1 {
+            b[i] = (ys[i + 1] - ys[i]) / h[i] - h[i] * (c[i + 1] + 2.0 * c[i]) / 3.0;
+            d[i] = (c[i + 1] - c[i]) / (3.0 * h[i]);
+        }
+
+        CubicSpline { xs: xs.to_vec(), ys: ys.to_vec(), b, c, d }
+    }
+
+    /// Evaluate the spline at time t. Clamps to boundary values.
+    pub fn eval(&self, t: f64) -> f64 {
+        let n = self.xs.len();
+        if t <= self.xs[0] { return self.ys[0]; }
+        if t >= self.xs[n - 1] { return self.ys[n - 1]; }
+        // Binary search for segment
+        let mut lo = 0;
+        let mut hi = n - 1;
+        while hi - lo > 1 {
+            let mid = (lo + hi) / 2;
+            if self.xs[mid] > t { hi = mid; } else { lo = mid; }
+        }
+        let dx = t - self.xs[lo];
+        self.ys[lo] + self.b[lo] * dx + self.c[lo] * dx * dx + self.d[lo] * dx * dx * dx
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -350,10 +431,13 @@ impl CompiledModel {
                     let vals: Result<Vec<f64>, SimError> = i.values.iter()
                         .map(|e| eval_table_expr(e, &param_index, &default_params))
                         .collect();
-                    CompiledTimeFuncKind::Interpolated {
-                        times: times?,
-                        values: vals?,
-                        method: i.method.clone(),
+                    let ts = times?;
+                    let vs = vals?;
+                    match i.method {
+                        ir::time_func::InterpMethod::Spline =>
+                            CompiledTimeFuncKind::CubicSpline(CubicSpline::new(&ts, &vs)),
+                        ir::time_func::InterpMethod::Linear =>
+                            CompiledTimeFuncKind::Interpolated { times: ts, values: vs },
                     }
                 }
                 TimeFuncKind::Periodic(p) => {

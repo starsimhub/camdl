@@ -178,8 +178,7 @@ pub fn eval_time_func(kind: &CompiledTimeFuncKind, t: f64) -> f64 {
             }
             result
         }
-        CompiledTimeFuncKind::Interpolated { times, values, .. } => {
-            // Linear interpolation
+        CompiledTimeFuncKind::Interpolated { times, values } => {
             if times.is_empty() || values.is_empty() { return 0.0; }
             if t <= times[0] { return values[0]; }
             if t >= *times.last().unwrap() { return *values.last().unwrap(); }
@@ -191,6 +190,7 @@ pub fn eval_time_func(kind: &CompiledTimeFuncKind, t: f64) -> f64 {
             }
             *values.last().unwrap()
         }
+        CompiledTimeFuncKind::CubicSpline(spline) => spline.eval(t),
         CompiledTimeFuncKind::Periodic { period, values } => {
             if values.is_empty() || *period <= 0.0 { return 0.0; }
             let phase = t.rem_euclid(*period);
