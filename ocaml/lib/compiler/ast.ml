@@ -210,7 +210,7 @@ type declaration =
   | DCompartments of compartment_decl list
   | DParameters   of param_decl list
   | DTables       of table_decl list
-  | DFunctions    of func_decl list
+  | DForcing      of func_decl list
   | DTransitions  of transition_decl list
   | DObservations of obs_decl list
   | DInterventions of intervention_decl list

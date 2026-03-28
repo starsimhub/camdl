@@ -23,7 +23,7 @@ parameters {
   I0        : count    in [1,    1000]
 }
 
-functions {
+forcing {
   seasonal[p in patch] : sinusoidal {
     amplitude = amp[p]
     period    = 365.0

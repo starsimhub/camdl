@@ -56,7 +56,7 @@
     "compartments",  COMPARTMENTS;
     "parameters",    PARAMETERS;
     "tables",        TABLES;
-    "functions",     FUNCTIONS;
+    "forcing",       FORCING;
     "transitions",   TRANSITIONS;
     "observations",  OBSERVATIONS;
     "interventions", INTERVENTIONS;

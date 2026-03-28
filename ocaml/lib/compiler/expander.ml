@@ -334,7 +334,7 @@ let collect_declarations ctx decls =
     | DInit ies          -> ctx.init_entries <- ctx.init_entries @ ies
     | DSimulate sd       -> ctx.simulate <- Some sd
     | DODE odes          -> ctx.ode_decls <- ctx.ode_decls @ odes
-    | DFunctions fs      -> ctx.func_decls <- ctx.func_decls @ fs
+    | DForcing fs        -> ctx.func_decls <- ctx.func_decls @ fs
     | DObservations obs  -> ctx.obs_decls <- ctx.obs_decls @ obs
     | DInterventions ivs -> ctx.interv_decls <- ctx.interv_decls @ ivs
     | DOutput od         -> ctx.output_decl <- Some od
@@ -1342,7 +1342,7 @@ let load_interpolated_for_level ctx path ~key_col ~key_val ~time_col ~value_col 
             ~message:(Printf.sprintf "%s: column '%s' not found in header" path name) ();
           0
       in
-      let key_ci   = find_col key_col in
+      let key_ci   = if key_col = "" then -1 else find_col key_col in
       let time_ci  = find_col time_col in
       let value_ci = find_col value_col in
       let times  = ref [] in
@@ -1352,7 +1352,7 @@ let load_interpolated_for_level ctx path ~key_col ~key_val ~time_col ~value_col 
         if line <> "" && not (line.[0] = '#') then begin
           let cols = split_by sep line in
           let get i = String.trim (try List.nth cols i with _ -> "") in
-          if get key_ci = key_val then begin
+          if key_ci < 0 || get key_ci = key_val then begin
             (match float_of_string_opt (get time_ci) with
              | Some t -> times  := !times  @ [t]
              | None   -> ());
@@ -1417,17 +1417,23 @@ let expand_time_function_one ctx fname (env : (string * string) list) fkind farg
       (* File-backed form: data = "path" key_col = X time_col = Y value_col = Z *)
       (match List.assoc_opt "data" fargs with
        | Some (EIdent (path, _)) ->
-         let key_col   = get_str_kw "key_col"   "key"   in
          let time_col  = get_str_kw "time_col"  "time"  in
          let value_col = get_str_kw "value_col" "value" in
-         (* key_val is the concrete level for this env, from the key_col dim *)
-         let key_val = match List.assoc_opt key_col env with
-           | Some v -> v
-           | None   -> ""
-         in
+         (* For indexed functions, filter rows by key_col = level.
+            For non-indexed functions (env is empty), read all rows. *)
          let (times, values) =
-           load_interpolated_for_level ctx path
-             ~key_col ~key_val ~time_col ~value_col
+           if env = [] then
+             (* Non-indexed: read all rows, no key filtering *)
+             load_interpolated_for_level ctx path
+               ~key_col:"" ~key_val:"" ~time_col ~value_col
+           else
+             let key_col = get_str_kw "key_col" "key" in
+             let key_val = match List.assoc_opt key_col env with
+               | Some v -> v
+               | None   -> ""
+             in
+             load_interpolated_for_level ctx path
+               ~key_col ~key_val ~time_col ~value_col
          in
          Ir.Interpolated {
            times   = List.map (fun f -> Ir.Const f) times;

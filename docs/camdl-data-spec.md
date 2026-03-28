@@ -444,7 +444,7 @@ tables {
   temp_data : patch_clim × climate_week = read("data/temperature.tsv")
 }
 
-functions {
+forcing {
   temperature[p in patch] = interpolated(
     times  = climate_week,        # the time index levels (as floats)
     values = temp_data[p, :],     # the row of the table for this patch
@@ -471,7 +471,7 @@ pattern used everywhere else.
 parameters works:
 
 ```camdl
-functions {
+forcing {
   seasonal = sinusoidal(amplitude = 1.0, period = 365.25 'days,
     phase = phi_season, baseline = 1.0)
 }

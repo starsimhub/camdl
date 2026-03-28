@@ -600,10 +600,10 @@ same row.
 
 ---
 
-## 7. Functions
+## 7. Forcing
 
-Named functions of time, usable in rate expressions. Four built-in function
-types cover real-world needs:
+Named time-dependent forcing functions, usable in rate expressions. Four
+built-in types cover real-world needs:
 
 - `sinusoidal` — smooth seasonal forcing
 - `periodic` — repeating step function (day-of-week, month-of-year effects)
@@ -611,7 +611,7 @@ types cover real-world needs:
 - `interpolated` — data-driven time series (empirical covariates)
 
 ```
-functions {
+forcing {
   seasonal = sinusoidal(
     amplitude = alpha,        # can reference parameters (for inference)
     period    = 365.25 'days,
@@ -638,7 +638,7 @@ functions {
 }
 ```
 
-Functions compile to `TimeFunc` nodes in the IR. Their arguments can reference
+Forcing functions compile to `TimeFunc` nodes in the IR. Their arguments can reference
 parameters (e.g., `amplitude = alpha`), enabling inference over function
 characteristics (e.g., inferring seasonal amplitude).
 
@@ -988,7 +988,7 @@ evaluation modes depending on context:
   This becomes `Cond(Pop("I"), <rate_expr>, Const(0.0))` in the IR.
 
 Names are resolved in order: **compartments → parameters → let bindings →
-functions → tables**. The compiler reports an error if a name exists in multiple
+forcing → tables**. The compiler reports an error if a name exists in multiple
 namespaces. User names cannot shadow reserved identifiers (see §15).
 
 ### 9.8 Event-Keyed Random Number Generation (EKRNG)
@@ -2482,7 +2482,7 @@ let mig[i in patch, j in patch] =
 
 ## ── Functions ──────────────────────────────────────────
 
-functions {
+forcing {
   seasonal = sinusoidal(
     amplitude = alpha,
     period    = 365.25 'days,
@@ -2652,7 +2652,7 @@ declaration :=
   | parameters_block                  # parameters { ... }
   | dimensions_block                  # dimensions { dim = [...] | read(...) }
   | tables_block                      # tables { ... }
-  | functions_block                   # functions { ... }
+  | forcing_block                   # forcing { ... }
   | transitions_block                 # transitions { ... }
   | observations_block                # observations { ... }
   | interventions_block               # interventions { ... }
@@ -3072,7 +3072,7 @@ migrate[c in compartments, src in patch, dst in patch]
 ### 27.10 Name Resolution
 
 Names are resolved in order: compartments → parameters → let bindings →
-functions → tables. The compiler reports errors for:
+forcing → tables. The compiler reports errors for:
 
 - **Shadowing reserved identifiers**: `t_start`, `t_end`, `compartments`, etc.
 - **Duplicate declarations**: two parameters named `beta`, two compartments

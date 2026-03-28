@@ -328,7 +328,7 @@ let test_sinusoidal_time_func () =
       N0    : count
       I0    : count
     }
-    functions {
+    forcing {
       seasonal : sinusoidal {
         amplitude = 0.3
         period    = 365.0
@@ -384,7 +384,7 @@ let test_time_func_in_rate () =
       N0    : count
       I0    : count
     }
-    functions {
+    forcing {
       seasonal : sinusoidal {
         amplitude = 0.3
         period    = 365.0
@@ -968,7 +968,7 @@ let test_bare_func_name_in_rate () =
       N0    : count
       I0    : count
     }
-    functions {
+    forcing {
       seasonal : sinusoidal {
         amplitude = 0.3
         period    = 365.0
@@ -1005,7 +1005,7 @@ let test_unknown_func_call_e100 () =
       N0    : count
       I0    : count
     }
-    functions {
+    forcing {
       seasonal : sinusoidal {
         amplitude = 0.3
         period    = 365.0
@@ -1049,7 +1049,7 @@ let test_time_func_param_arg () =
       N0    : count
       I0    : count
     }
-    functions {
+    forcing {
       seasonal : sinusoidal {
         amplitude = alpha
         period    = 365.0

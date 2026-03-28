@@ -17,7 +17,7 @@ parameters {
   I0             : count
 }
 
-functions {
+forcing {
   seasonal : sinusoidal {
     amplitude = alpha
     period    = 365.25

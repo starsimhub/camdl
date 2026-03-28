@@ -29,7 +29,7 @@
 %token CROSS       (* × *)
 
 (* ── Keywords ───────────────────────────────────────────────────────────── *)
-%token TIME_UNIT COMPARTMENTS PARAMETERS TABLES FUNCTIONS
+%token TIME_UNIT COMPARTMENTS PARAMETERS TABLES FORCING
 %token TRANSITIONS OBSERVATIONS INTERVENTIONS ODE OUTPUT SIMULATE
 %token INIT TIMEPOINTS SCENARIOS STRATIFY LET FROM TO WHERE SUM
 %token CONSECUTIVE IN BY DIMENSIONS ONLY REAL INTEGER RATE PROBABILITY POSITIVE COUNT
@@ -73,8 +73,8 @@ declaration:
       { DParameters ps }
   | TABLES LBRACE ts = table_list RBRACE
       { DTables ts }
-  | FUNCTIONS LBRACE fs = func_list RBRACE
-      { DFunctions fs }
+  | FORCING LBRACE fs = func_list RBRACE
+      { DForcing fs }
   | TRANSITIONS LBRACE trs = transition_list RBRACE
       { DTransitions trs }
   | OBSERVATIONS LBRACE obs = obs_list RBRACE
