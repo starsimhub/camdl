@@ -73,7 +73,13 @@ pub fn eval_expr(expr: &Expr, ctx: &EvalCtx<'_>) -> Result<f64, SimError> {
                         a / b
                     }
                 }
-                BinOp::Pow => a.powf(b),
+                BinOp::Pow => {
+                    let r = a.powf(b);
+                    if r.is_nan() || r.is_infinite() {
+                        log::warn!("eval_expr: {}^{} = {} at t={}, returning 0.0", a, b, r, ctx.t);
+                        0.0
+                    } else { r }
+                }
                 BinOp::Min => a.min(b),
                 BinOp::Max => a.max(b),
                 BinOp::Eq  => if a == b { 1.0 } else { 0.0 },
@@ -87,15 +93,21 @@ pub fn eval_expr(expr: &Expr, ctx: &EvalCtx<'_>) -> Result<f64, SimError> {
 
         Expr::UnOp(w) => {
             let a = eval_expr(&w.un_op.arg, ctx)?;
-            Ok(match w.un_op.op {
+            let result = match w.un_op.op {
                 UnOp::Neg   => -a,
                 UnOp::Exp   => a.exp(),
-                UnOp::Log   => a.ln(),
-                UnOp::Sqrt  => a.sqrt(),
+                UnOp::Log   => if a > 0.0 { a.ln() } else { f64::NEG_INFINITY },
+                UnOp::Sqrt  => if a >= 0.0 { a.sqrt() } else { 0.0 },
                 UnOp::Abs   => a.abs(),
                 UnOp::Floor => a.floor(),
                 UnOp::Ceil  => a.ceil(),
-            })
+            };
+            if result.is_nan() {
+                log::warn!("eval_expr: NaN from {:?}({}) at t={}", w.un_op.op, a, ctx.t);
+                Ok(0.0)
+            } else {
+                Ok(result)
+            }
         }
 
         Expr::Cond(w) => {

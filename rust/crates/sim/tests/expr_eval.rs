@@ -426,3 +426,65 @@ fn test_binop_le() {
     let result = eval_expr(&expr, &ctx).unwrap();
     assert_eq!(result, 1.0);
 }
+
+// ── NaN / edge-case guard tests ───────────────────────────────────────
+
+#[test]
+fn test_log_negative_returns_neg_inf() {
+    let model = CompiledModel::new(minimal_model(vec![int_comp("S")], vec![])).unwrap();
+    let int_s = IntState::new(1);
+    let real_s = RealState::new(0);
+    let expr = Expr::UnOp(UnOpWrap {
+        un_op: UnOpExpr { op: UnOp::Log, arg: Box::new(Expr::Const(ConstExpr { value: -1.0 })) },
+    });
+    let ctx = EvalCtx { model: &model, int_s: &int_s, real_s: &real_s, params: &[], t: 0.0 };
+    let result = eval_expr(&expr, &ctx).unwrap();
+    assert!(result.is_infinite() && result < 0.0, "log(-1) should be -inf, got {}", result);
+}
+
+#[test]
+fn test_sqrt_negative_returns_zero() {
+    let model = CompiledModel::new(minimal_model(vec![int_comp("S")], vec![])).unwrap();
+    let int_s = IntState::new(1);
+    let real_s = RealState::new(0);
+    let expr = Expr::UnOp(UnOpWrap {
+        un_op: UnOpExpr { op: UnOp::Sqrt, arg: Box::new(Expr::Const(ConstExpr { value: -4.0 })) },
+    });
+    let ctx = EvalCtx { model: &model, int_s: &int_s, real_s: &real_s, params: &[], t: 0.0 };
+    let result = eval_expr(&expr, &ctx).unwrap();
+    assert_eq!(result, 0.0, "sqrt(-4) should be guarded to 0, got {}", result);
+}
+
+#[test]
+fn test_pow_negative_base_fractional_exp_returns_zero() {
+    let model = CompiledModel::new(minimal_model(vec![int_comp("S")], vec![])).unwrap();
+    let int_s = IntState::new(1);
+    let real_s = RealState::new(0);
+    let expr = Expr::BinOp(BinOpWrap {
+        bin_op: BinOpExpr {
+            op: BinOp::Pow,
+            left: Box::new(Expr::Const(ConstExpr { value: -2.0 })),
+            right: Box::new(Expr::Const(ConstExpr { value: 0.5 })),
+        },
+    });
+    let ctx = EvalCtx { model: &model, int_s: &int_s, real_s: &real_s, params: &[], t: 0.0 };
+    let result = eval_expr(&expr, &ctx).unwrap();
+    assert_eq!(result, 0.0, "(-2)^0.5 should be guarded to 0, got {}", result);
+}
+
+#[test]
+fn test_pow_zero_to_negative_returns_zero() {
+    let model = CompiledModel::new(minimal_model(vec![int_comp("S")], vec![])).unwrap();
+    let int_s = IntState::new(1);
+    let real_s = RealState::new(0);
+    let expr = Expr::BinOp(BinOpWrap {
+        bin_op: BinOpExpr {
+            op: BinOp::Pow,
+            left: Box::new(Expr::Const(ConstExpr { value: 0.0 })),
+            right: Box::new(Expr::Const(ConstExpr { value: -1.0 })),
+        },
+    });
+    let ctx = EvalCtx { model: &model, int_s: &int_s, real_s: &real_s, params: &[], t: 0.0 };
+    let result = eval_expr(&expr, &ctx).unwrap();
+    assert_eq!(result, 0.0, "0^(-1) should be guarded to 0, got {}", result);
+}

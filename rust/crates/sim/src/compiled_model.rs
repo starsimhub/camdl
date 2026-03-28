@@ -33,8 +33,13 @@ impl CubicSpline {
     pub fn new(xs: &[f64], ys: &[f64]) -> Self {
         let n = xs.len();
         assert!(n >= 2 && n == ys.len());
+        // Validate strictly increasing x-values
+        for i in 0..n - 1 {
+            assert!(xs[i] < xs[i + 1],
+                "CubicSpline: x-values must be strictly increasing, but xs[{}]={} >= xs[{}]={}",
+                i, xs[i], i + 1, xs[i + 1]);
+        }
         if n == 2 {
-            // Degenerate: linear interpolation
             let slope = (ys[1] - ys[0]) / (xs[1] - xs[0]);
             return CubicSpline {
                 xs: xs.to_vec(), ys: ys.to_vec(),
