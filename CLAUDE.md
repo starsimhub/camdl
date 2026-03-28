@@ -168,6 +168,14 @@ state; do not resume with remaining exponential time.
 
 ## Design Principles
 
+### No loose semantics
+
+Never silently accept invalid input. If a construct looks like it means
+something, it must either mean exactly that or produce a clear error.
+Examples: `_args` patterns that discard function arguments, optional
+fields that default to "works but wrong." If the compiler accepts it,
+the behavior must be fully specified and intentional.
+
 ### Backwards compatibility is a non-goal
 
 This is unreleased software. Do not add backwards-compatibility shims,
