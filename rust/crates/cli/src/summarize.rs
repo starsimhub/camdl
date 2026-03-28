@@ -59,7 +59,8 @@ fn parse_traj_tsv(path: &str) -> Result<(Vec<String>, Vec<Vec<f64>>), String> {
 /// Compute summary scalars for a single trajectory.
 /// Returns a sorted Vec of (column_name, value) pairs.
 ///
-/// For each non-time column produces: peak_X, tpeak_X, final_X, cum_X.
+/// For each non-time column produces: peak_X, tpeak_X, final_X, integral_X.
+/// `integral_X` is the time-integral (sum of values across timesteps ≈ person-days).
 pub fn summarize_trajectory(headers: &[String], rows: &[Vec<f64>]) -> Vec<(String, f64)> {
     if rows.is_empty() || headers.is_empty() { return vec![]; }
     let n_cols = headers.len();
@@ -83,7 +84,7 @@ pub fn summarize_trajectory(headers: &[String], rows: &[Vec<f64>]) -> Vec<(Strin
         out.push((format!("peak_{}", hdr),  pv));
         out.push((format!("tpeak_{}", hdr), tpeak[j]));
         out.push((format!("final_{}", hdr), last.get(j).copied().unwrap_or(f64::NAN)));
-        out.push((format!("cum_{}", hdr),   cumsum[j]));
+        out.push((format!("integral_{}", hdr), cumsum[j]));
     }
     out.sort_by(|(a, _), (b, _)| a.cmp(b));
     out

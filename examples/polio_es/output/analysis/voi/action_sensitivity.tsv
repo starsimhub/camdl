@@ -1,0 +1,6 @@
+study	sample_size	P_switch	most_common_switch
+es	5	0.8370	target_10 → no_sia
+es	10	0.8120	target_10 → no_sia
+es	20	0.8030	target_10 → no_sia
+es	30	0.8150	target_10 → no_sia
+es	50	0.8040	target_10 → no_sia

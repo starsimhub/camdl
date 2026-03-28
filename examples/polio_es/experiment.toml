@@ -60,4 +60,4 @@ enable = [
 ]
 
 [analyze]
-outputs = ["cum_I"]
+outputs = ["integral_I"]
