@@ -121,8 +121,20 @@ pub fn cmd_eval(args: &[String]) {
         std::process::exit(1);
     }
 
-    // Load and prepare model (reuse util infrastructure)
-    let mut model: ir::Model = {
+    // Load model: if .camdl, compile via camdlc; if .ir.json, load directly
+    let mut model: ir::Model = if ir_path.ends_with(".camdl") {
+        let camdlc = std::env::var("CAMDLC").unwrap_or_else(|_| "camdlc".into());
+        let output = std::process::Command::new(&camdlc)
+            .arg(&ir_path)
+            .output()
+            .unwrap_or_else(|e| { eprintln!("cannot run camdlc: {} (set CAMDLC env var if not on PATH)", e); std::process::exit(1); });
+        if !output.status.success() {
+            eprintln!("{}", String::from_utf8_lossy(&output.stderr));
+            std::process::exit(1);
+        }
+        serde_json::from_slice(&output.stdout)
+            .unwrap_or_else(|e| { eprintln!("cannot parse camdlc output: {}", e); std::process::exit(1); })
+    } else {
         let contents = std::fs::read_to_string(&ir_path)
             .unwrap_or_else(|e| { eprintln!("cannot read {}: {}", ir_path, e); std::process::exit(1); });
         serde_json::from_str(&contents)
