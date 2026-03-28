@@ -319,15 +319,31 @@ let load_table_data ctx path ~dims ~n_values ~default_val =
     Array.to_list arrays
   end
 
+let reserved_time_names = ["t"; "t_start"; "t_end"]
+
+let check_reserved ctx name kind =
+  if List.mem name reserved_time_names then
+    Diagnostics.error ctx.diags ~code:"E100" ~loc:Diagnostics.no_loc
+      ~message:(Printf.sprintf "%s name '%s' is reserved for simulation time" kind name)
+      ~hint:"choose a different name" ()
+
 let collect_declarations ctx decls =
   List.iter (fun d -> match d with
     | DTimeUnit u        -> ctx.time_unit <- u
     | DDescription s     -> ctx.description <- Some s
     | DOrigin s          -> ctx.origin <- Some s
     | DDimensions es     -> ctx.dim_decls <- ctx.dim_decls @ es
-    | DCompartments cs   -> ctx.comp_decls <- ctx.comp_decls @ cs
-    | DParameters ps     -> ctx.param_decls <- ctx.param_decls @ ps
-    | DLet lb            -> ctx.let_bindings <- ctx.let_bindings @ [lb]
+    | DCompartments cs   ->
+      List.iter (fun (c : compartment_decl) -> check_reserved ctx c.cname "compartment") cs;
+      ctx.comp_decls <- ctx.comp_decls @ cs
+    | DParameters ps     ->
+      List.iter (fun p -> match p with
+        | PScalar s  -> check_reserved ctx s.pname "parameter"
+        | PIndexed s -> check_reserved ctx s.pname "parameter") ps;
+      ctx.param_decls <- ctx.param_decls @ ps
+    | DLet lb            ->
+      check_reserved ctx lb.lname "let binding";
+      ctx.let_bindings <- ctx.let_bindings @ [lb]
     | DStratify sd       ->
       ctx.stratifies <- ctx.stratifies @ [sd]
     | DTransitions trs   -> ctx.transitions <- ctx.transitions @ trs
@@ -800,13 +816,24 @@ let rec resolve_expr ctx (env : (string * string) list) (e : expr) : Ir.expr =
          ~message:"date() requires a top-level origin declaration, e.g. origin = date(\"2020-01-01\")"
          ();
        Ir.Const 0.0)
-  | EFuncCall (fname, _args) ->
+  | EFuncCall (fname, args) ->
     if List.exists (fun (fd : func_decl) -> fd.fname = fname) ctx.func_decls
-    then Ir.TimeFunc fname
+    then begin
+      let ok = match args with
+        | [] -> true                                       (* bare: seasonal *)
+        | [("", EIdent ("t", _))] -> true                  (* explicit: seasonal(t) *)
+        | _ -> false
+      in
+      if not ok then
+        Diagnostics.error ctx.diags ~code:"E101" ~loc:Diagnostics.no_loc
+          ~message:(Printf.sprintf "forcing function '%s' takes no arguments, or (t) for the current simulation time" fname)
+          ~hint:(Printf.sprintf "write '%s' or '%s(t)'" fname fname) ();
+      Ir.TimeFunc fname
+    end
     else begin
       Diagnostics.error ctx.diags ~code:"E100" ~loc:Diagnostics.no_loc
         ~message:(Printf.sprintf "undeclared function '%s'" fname)
-        ~hint:"check spelling, or add a declaration in functions { }" ();
+        ~hint:"check spelling, or add a declaration in forcing { }" ();
       Ir.Const 0.0
     end
   | EList _     -> Ir.Const 0.0
@@ -831,6 +858,8 @@ and resolve_ident_name ctx name ~loc =
     Ir.Param name
   else if List.exists (fun (fd : func_decl) -> fd.fname = name) ctx.func_decls then
     Ir.TimeFunc name
+  else if name = "t" then
+    Ir.Time
   else if name = "projected" then
     (* Special keyword in likelihood expressions: refers to the observation projection output. *)
     Ir.Projected
