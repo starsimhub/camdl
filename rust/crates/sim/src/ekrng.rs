@@ -82,6 +82,16 @@ impl StatefulRng {
         self.poisson(mean * g)
     }
 
+    /// Unit-mean Gamma multiplier for overdispersed rates (He et al. 2010).
+    /// G ~ Gamma(dt/σ², σ²/dt), E[G] = 1, Var[G] = σ²/dt.
+    /// Used by chain-binomial to noise the rate before probability conversion.
+    pub fn gamma_multiplier(&mut self, sigma_sq: f64, dt: f64) -> f64 {
+        if sigma_sq <= 0.0 { return 1.0; }
+        let shape = dt / sigma_sq;
+        let scale = sigma_sq / dt;
+        Gamma::new(shape, scale).unwrap().sample(&mut self.0)
+    }
+
     /// Uniform [0, 1) — used for Gillespie event selection.
     pub fn uniform(&mut self) -> f64 {
         use rand::Rng;

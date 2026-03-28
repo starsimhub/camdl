@@ -94,7 +94,15 @@ fn run_chain_binomial(
                 .collect::<Result<_, _>>()?
         };
         for (i, &rate) in propensities.iter().enumerate() {
-            let p = 1.0 - (-rate * dt).exp();
+            // Apply overdispersion to the RATE before probability conversion.
+            // G ~ Gamma(dt/σ², σ²/dt) is a unit-mean multiplier on the rate;
+            // the noisy rate then converts to probability via 1 - exp(-r'·dt).
+            let effective_rate = match od_values[i] {
+                Some(sigma_sq) => rate * rng.gamma_multiplier(sigma_sq, dt),
+                None => rate,
+            };
+
+            let p = 1.0 - (-effective_rate * dt).exp();
             if p <= 0.0 { continue; }
 
             // Source population for this transition (first compartment with negative delta)
@@ -108,10 +116,7 @@ fn run_chain_binomial(
             if n_src == 0 { continue; }
 
             let lambda = (n_src as f64) * p;
-            let count = match od_values[i] {
-                Some(sigma_sq) => rng.neg_binomial(lambda, sigma_sq, dt).min(n_src as u64),
-                None => rng.poisson(lambda).min(n_src as u64),
-            };
+            let count = rng.poisson(lambda).min(n_src as u64);
 
             for &(local, delta) in &model.transition_stoich[i] {
                 int_s.counts[local] += delta * count as i64;
