@@ -278,6 +278,12 @@ pub struct CompiledModel {
     /// Indices of transitions whose rate expression contains a time function.
     /// These must be re-evaluated whenever simulation time advances.
     pub time_dep_transitions: Vec<usize>,
+
+    /// For chain-binomial multinomial draws: transitions grouped by source
+    /// compartment. Key = local int index of source compartment, value = list
+    /// of transition indices that draw from it. Transitions with no source
+    /// (inflows) are not included — they use Poisson draws directly.
+    pub source_groups: Vec<(usize, Vec<usize>)>,
 }
 
 impl CompiledModel {
@@ -369,6 +375,17 @@ impl CompiledModel {
                 time_dep_transitions.push(tr_idx);
             }
         }
+
+        // Group transitions by source compartment for multinomial draws
+        let source_groups: Vec<(usize, Vec<usize>)> = {
+            let mut groups: HashMap<usize, Vec<usize>> = HashMap::new();
+            for (tr_idx, stoich) in transition_stoich.iter().enumerate() {
+                if let Some(&(src_local, _)) = stoich.iter().find(|&&(_, d)| d < 0) {
+                    groups.entry(src_local).or_default().push(tr_idx);
+                }
+            }
+            groups.into_iter().collect()
+        };
 
         // Pre-compute ODE equation → real local index
         let mut ode_real_indices = Vec::with_capacity(model.ode_equations.len());
@@ -468,6 +485,7 @@ impl CompiledModel {
             ode_real_indices,
             table_values_cache,
             time_func_cache,
+            source_groups,
             comp_to_transitions,
             time_dep_transitions,
         })

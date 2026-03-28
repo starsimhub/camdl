@@ -93,42 +93,78 @@ fn run_chain_binomial(
                 })
                 .collect::<Result<_, _>>()?
         };
-        for (i, &rate) in propensities.iter().enumerate() {
-            if rate <= 0.0 { continue; }
+        // Track which transitions have been handled by a multinomial group
+        let mut handled = vec![false; n_transitions];
 
-            // Source population (first compartment with negative stoichiometry).
-            // For inflows (no source), n_src = 0 → use Poisson on total propensity.
-            let n_src: i64 = model.transition_stoich[i].iter()
-                .filter(|&&(_, d)| d < 0)
-                .map(|&(local, _)| int_s.counts[local])
-                .next()
-                .unwrap_or(0)
-                .max(0);
-
+        // Multinomial draws for transitions sharing a source compartment.
+        // For a source with k competing outflows, draw sequentially:
+        //   count_1 ~ Binomial(n_remaining, p_1 / p_remaining)
+        //   n_remaining -= count_1; p_remaining -= p_1
+        //   count_2 ~ Binomial(n_remaining, p_2 / p_remaining)
+        //   ...
+        // This is exact and guarantees Σ counts ≤ n_src.
+        for &(src_local, ref group) in &model.source_groups {
+            let n_src = int_s.counts[src_local].max(0);
             if n_src == 0 {
-                // Inflow: no source compartment, draw from total propensity directly
-                let count = rng.poisson(rate * dt);
-                for &(local, delta) in &model.transition_stoich[i] {
-                    int_s.counts[local] += delta * count as i64;
-                }
-                current_flows.add(i, count);
+                for &tr_idx in group { handled[tr_idx] = true; }
                 continue;
             }
 
-            // Convert total propensity → per-capita rate, then to probability.
-            // rate = per_capita * n_src, so per_capita = rate / n_src.
-            let per_capita = rate / n_src as f64;
+            // Compute per-capita probabilities for each competing transition
+            let mut probs: Vec<(usize, f64)> = Vec::with_capacity(group.len());
+            for &tr_idx in group {
+                let rate = propensities[tr_idx];
+                if rate <= 0.0 {
+                    handled[tr_idx] = true;
+                    continue;
+                }
+                let per_capita = rate / n_src as f64;
+                let effective = match od_values[tr_idx] {
+                    Some(sigma_sq) => per_capita * rng.gamma_multiplier(sigma_sq, dt),
+                    None => per_capita,
+                };
+                let p = 1.0 - (-effective * dt).exp();
+                probs.push((tr_idx, p.clamp(0.0, 1.0)));
+            }
 
-            // Apply overdispersion to the per-capita rate before probability conversion.
-            let effective_per_capita = match od_values[i] {
-                Some(sigma_sq) => per_capita * rng.gamma_multiplier(sigma_sq, dt),
-                None => per_capita,
-            };
+            // Sequential multinomial draw (conditional binomial decomposition).
+            // Each individual independently faces competing risks with probabilities
+            // p_1, p_2, ..., p_k, p_stay = 1 - Σp_i. We draw sequentially:
+            //   count_1 ~ Binom(n_remaining, p_1 / (1 - Σ_{j<1} p_j))
+            //   count_2 ~ Binom(n_remaining, p_2 / (1 - p_1 - Σ_{j<2} p_j))
+            // This is exact for the multinomial distribution.
+            let mut n_remaining = n_src as u64;
+            let mut p_consumed = 0.0_f64;
 
-            let p = 1.0 - (-effective_per_capita * dt).exp();
-            let lambda = (n_src as f64) * p;
-            let count = rng.poisson(lambda).min(n_src as u64);
+            for &(tr_idx, p_i) in &probs {
+                if n_remaining == 0 {
+                    handled[tr_idx] = true;
+                    continue;
+                }
+                let p_budget = 1.0 - p_consumed;
+                if p_budget <= 0.0 {
+                    handled[tr_idx] = true;
+                    continue;
+                }
+                let cond_p = (p_i / p_budget).clamp(0.0, 1.0);
+                let lambda = n_remaining as f64 * cond_p;
+                let count = rng.poisson(lambda).min(n_remaining);
+                n_remaining -= count;
+                p_consumed += p_i;
 
+                for &(local, delta) in &model.transition_stoich[tr_idx] {
+                    int_s.counts[local] += delta * count as i64;
+                }
+                current_flows.add(tr_idx, count);
+                handled[tr_idx] = true;
+            }
+        }
+
+        // Handle inflows and any ungrouped transitions (no source compartment)
+        for (i, &rate) in propensities.iter().enumerate() {
+            if handled[i] || rate <= 0.0 { continue; }
+            // Inflow: draw from total propensity directly
+            let count = rng.poisson(rate * dt);
             for &(local, delta) in &model.transition_stoich[i] {
                 int_s.counts[local] += delta * count as i64;
             }

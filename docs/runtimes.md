@@ -224,44 +224,67 @@ independent (no competition between transitions for the same source).
 
 ### Implementation details (`chain_binomial.rs`)
 
-**Binomial via Poisson approximation.** The implementation draws
-`Poisson(n_src · p)` rather than a true `Binomial(n_src, p)`, then caps at
-`n_src`:
+**Multinomial competing risks.** When multiple transitions draw from the same
+source compartment (e.g., infection and death both depleting S), the
+chain-binomial uses a multinomial draw — not independent binomials. This
+matches pomp's `reulermultinom` semantics: the total number leaving a
+compartment is bounded by the compartment size, and the split between competing
+outflows is proportional to their rates.
 
-```rust
-let lambda = (n_src as f64) * p;
-let count = rng.poisson(lambda).min(n_src as u64);
-```
+Transitions are precomputed into **source groups** at model compilation time
+(`CompiledModel::source_groups`). For a source compartment with k competing
+outflows at per-capita probabilities p₁, …, p_k:
 
-For large n_src and moderate p, Poisson ≈ Binomial; the cap prevents the rare
-over-draw. For very small n_src (< 20) or p close to 1, true Binomial sampling
-would be more accurate.
+1. Compute per-capita rate for each outflow: `r_i = propensity_i / n_src`
+2. Convert to probability: `p_i = 1 − exp(−r_i · Δt)`
+3. Draw sequentially (conditional binomial decomposition):
+   - `count_1 ~ Binom(n_remaining, p_1 / (1 − 0))`
+   - `count_2 ~ Binom(n_remaining − count_1, p_2 / (1 − p_1))`
+   - `count_3 ~ Binom(n_remaining − count_1 − count_2, p_3 / (1 − p_1 − p_2))`
+4. Guarantee: `Σ count_i ≤ n_src` (no overdraw)
 
-**Source population selection.** The source of a transition is identified as the
-first compartment with a negative stoichiometry entry. For multi-source
-transitions this is ambiguous; the current implementation uses whichever
-compartment appears first in the stoichiometry.
+This sequential decomposition is exact for the multinomial distribution. For
+source groups of size 1 (single outflow), it reduces to a standard binomial.
 
-**No clamping needed** (in principle). Since Δnⱼ ≤ n_src by construction, and
-all transitions draw from the start-of-step state, over-draw is prevented. The
-residual clamping guard is defensive.
+**Poisson approximation for draws.** Individual draws use `Poisson(n · p)`
+capped at `n`, which approximates `Binomial(n, p)` for large n. This is
+adequate for epidemic models where compartments typically hold hundreds to
+millions of individuals.
 
-**Transition ordering.** Draws are made using the integer state at the _start_
-of the step. This is the standard chain-binomial semantics: all transitions
-compete for the same pool simultaneously.
+**Inflows.** Transitions with no source compartment (births, importation) are
+not part of any source group. They draw from the total propensity directly
+via `Poisson(rate · dt)`.
 
-**Real compartments.** Advanced with RK4 _before_ the binomial draws (using the
-start-of-step integer state). The ordering difference from tau-leap is
+**Per-capita rate conversion.** The IR stores total propensities (e.g.,
+`mu × S`). The chain-binomial divides by `n_src` to recover the per-capita
+rate before converting to probability. This is critical: using the total
+propensity directly would give `p = 1 − exp(−mu·S·dt) ≈ 1.0` for large
+compartments, killing the entire population in one step.
+
+**Overdispersion.** When a transition has `overdispersed(rate, σ²)`, the
+Gamma multiplier is applied to the per-capita rate before probability
+conversion: `effective_rate = per_capita × G` where `G ~ Gamma(dt/σ², σ²/dt)`.
+
+**Real compartments.** Advanced with RK4 _before_ the multinomial draws (using
+the start-of-step integer state). The ordering difference from tau-leap is
 intentional: for chain-binomial, the continuous dynamics represent processes
 that run in parallel with (rather than after) the discrete transitions.
 
 ### Relationship to tau-leap
 
 Chain-binomial and tau-leap agree in the limit of large populations and small p:
-`Binomial(n, p) ≈ Poisson(n·p)`. The difference is the cap at n_src:
-chain-binomial cannot remove more individuals than exist, giving it correct
-extinction behavior at low prevalence. Tau-leap needs clamping; chain-binomial
-does not (by construction).
+`Binomial(n, p) ≈ Poisson(n·p)`. The key differences:
+
+1. **Multinomial vs independent.** Chain-binomial draws competing transitions
+   from a shared source as a multinomial (bounded). Tau-leap draws them
+   independently as Poisson (can overdraw, requires clamping).
+
+2. **No clamping needed.** The multinomial guarantees `Σ count_i ≤ n_src` by
+   construction. Tau-leap needs post-step clamping to zero.
+
+3. **Matches Euler-multinomial.** The chain-binomial is equivalent to pomp's
+   `reulermultinom` when using the same per-capita probabilities — making it
+   the appropriate backend for validating against pomp implementations.
 
 ---
 
