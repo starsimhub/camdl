@@ -1,6 +1,6 @@
 use rand::SeedableRng;
 use rand_chacha::ChaCha8Rng;
-use rand_distr::{Distribution, Poisson, Exp, Gamma};
+use rand_distr::{Distribution, Poisson, Exp, Gamma, Binomial};
 use ahash::AHasher;
 use std::hash::{Hash, Hasher};
 
@@ -90,6 +90,14 @@ impl StatefulRng {
         let shape = dt / sigma_sq;
         let scale = sigma_sq / dt;
         Gamma::new(shape, scale).unwrap().sample(&mut self.0)
+    }
+
+    /// Binomial(n, p) draw. Used by chain-binomial for exact multinomial
+    /// competing-risk decomposition (not the Poisson approximation).
+    pub fn binomial(&mut self, n: u64, p: f64) -> u64 {
+        if n == 0 || p <= 0.0 { return 0; }
+        if p >= 1.0 { return n; }
+        Binomial::new(n, p).unwrap().sample(&mut self.0)
     }
 
     /// Uniform [0, 1) — used for Gillespie event selection.

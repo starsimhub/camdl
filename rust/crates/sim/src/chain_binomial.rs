@@ -147,8 +147,7 @@ fn run_chain_binomial(
                     continue;
                 }
                 let cond_p = (p_i / p_budget).clamp(0.0, 1.0);
-                let lambda = n_remaining as f64 * cond_p;
-                let count = rng.poisson(lambda).min(n_remaining);
+                let count = rng.binomial(n_remaining, cond_p);
                 n_remaining -= count;
                 p_consumed += p_i;
 
