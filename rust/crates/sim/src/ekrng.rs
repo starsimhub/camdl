@@ -68,17 +68,18 @@ impl StatefulRng {
         Exp::new(rate).unwrap().sample(&mut self.0)
     }
 
-    /// Gamma-Poisson compound draw (= NegBinomial) for overdispersed event
-    /// counts.  `mean` is the expected count, `sigma_sq` is σ²_SE (the
-    /// variance of the Gamma multiplier, which has mean 1).
+    /// Multiplicative Gamma-Poisson compound (He et al. 2010).
     ///
-    /// Gamma(shape = mean/σ², scale = σ²) → rate ~ Gamma, then Poisson(rate).
-    pub fn neg_binomial(&mut self, mean: f64, sigma_sq: f64) -> u64 {
+    /// Draw a unit-mean Gamma multiplier G ~ Gamma(dt/σ², σ²/dt), then
+    /// Poisson(mean × G).  E[count] = mean, Var[count] = mean + mean²·σ²/dt.
+    /// The dt scaling ensures aggregate noise is invariant to step size:
+    /// halving dt halves per-step noise but doubles the number of steps.
+    pub fn neg_binomial(&mut self, mean: f64, sigma_sq: f64, dt: f64) -> u64 {
         if mean <= 0.0 || sigma_sq <= 0.0 { return self.poisson(mean); }
-        let shape = mean / sigma_sq;
-        let scale = sigma_sq;
-        let gamma_draw = Gamma::new(shape, scale).unwrap().sample(&mut self.0);
-        self.poisson(gamma_draw)
+        let shape = dt / sigma_sq;
+        let scale = sigma_sq / dt;
+        let g = Gamma::new(shape, scale).unwrap().sample(&mut self.0);
+        self.poisson(mean * g)
     }
 
     /// Uniform [0, 1) — used for Gillespie event selection.

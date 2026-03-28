@@ -109,7 +109,7 @@ fn run_chain_binomial(
 
             let lambda = (n_src as f64) * p;
             let count = match od_values[i] {
-                Some(sigma_sq) => rng.neg_binomial(lambda, sigma_sq).min(n_src as u64),
+                Some(sigma_sq) => rng.neg_binomial(lambda, sigma_sq, dt).min(n_src as u64),
                 None => rng.poisson(lambda).min(n_src as u64),
             };
 

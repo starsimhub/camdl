@@ -119,7 +119,7 @@ fn run_tau_leap(
         for (i, &lambda) in propensities.iter().enumerate() {
             let mean = lambda * dt;
             let count = match od_values[i] {
-                Some(sigma_sq) => rng.neg_binomial(mean, sigma_sq),
+                Some(sigma_sq) => rng.neg_binomial(mean, sigma_sq, dt),
                 None => rng.poisson(mean),
             };
 
