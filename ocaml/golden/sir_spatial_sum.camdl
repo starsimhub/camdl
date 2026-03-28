@@ -1,0 +1,73 @@
+# 4-patch SIR with gravity coupling via sum(q in patch, w[p,q] * I[q] / N[q]).
+#
+# Demonstrates that compile-time expansion of sum() over a spatial dimension
+# produces valid IR using only existing nodes (BinOp, TableLookup, Pop, PopSum).
+# No IR extension required — same pattern as age-structured contact matrix mixing.
+#
+# Force of infection in patch p:
+#   beta * S[p] * (local pressure + rho * imported pressure)
+#   = beta * S[p] * (I[p]/N[p] + rho * sum(q in patch, w[p,q] * I[q] / N[q]))
+#
+# For 4 patches, sum(q in patch, ...) expands to 4 BinOp(Add) terms at
+# compile time. For 50 patches it would be 50 terms — all existing IR nodes.
+
+time_unit = 'days
+
+compartments { S, I, R }
+
+dimensions {
+  patch = [p0, p1, p2, p3]
+}
+
+stratify(by = patch)
+
+parameters {
+  beta  : rate        in [0.0, 2.0]
+  gamma : rate        in [0.0, 1.0]
+  rho   : probability in [0.0, 1.0]
+}
+
+tables {
+  # Gravity coupling weights: w[p, q] = coupling from patch q into patch p.
+  # Arranged as a linear chain: p0-p1-p2-p3 with decay by distance.
+  w : patch × patch = [[0.0, 1.0, 0.5, 0.1],
+                        [1.0, 0.0, 1.0, 0.5],
+                        [0.5, 1.0, 0.0, 1.0],
+                        [0.1, 0.5, 1.0, 0.0]]
+}
+
+let N[p in patch] = S[p] + I[p] + R[p]
+
+transitions {
+  infection[p in patch] : S[p] --> I[p]
+    @ beta * S[p] * (I[p] / N[p] + rho * sum(q in patch, w[p, q] * I[q] / N[q]))
+  recovery[p in patch]  : I[p] --> R[p]  @ gamma * I[p]
+}
+
+init {
+  S[p0] = 4999
+  I[p0] = 1
+  S[p1] = 10000
+  S[p2] = 8000
+  S[p3] = 3000
+}
+
+simulate {
+  from = 0 'days
+  to   = 200 'days
+}
+
+scenarios {
+  no_coupling {
+    label = "independent patches (rho = 0)"
+    set = { beta = 0.3  gamma = 0.1  rho = 0.0 }
+  }
+  weak_coupling {
+    label = "weak spatial coupling (rho = 0.01)"
+    set = { beta = 0.3  gamma = 0.1  rho = 0.01 }
+  }
+  strong_coupling {
+    label = "strong spatial coupling (rho = 0.1)"
+    set = { beta = 0.3  gamma = 0.1  rho = 0.1 }
+  }
+}

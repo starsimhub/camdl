@@ -56,3 +56,4 @@ fn deser_golden(name: &str) {
 #[test] fn golden_cholera_siwr()      { deser_golden("cholera_siwr"); }
 #[test] fn golden_seir_age()          { deser_golden("seir_age"); }
 #[test] fn golden_sir_placebo_ekrng() { deser_golden("sir_placebo_ekrng"); }
+#[test] fn golden_sir_spatial_sum()   { deser_golden("sir_spatial_sum"); }
