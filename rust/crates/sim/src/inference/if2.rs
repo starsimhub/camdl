@@ -132,7 +132,9 @@ pub fn run_if2(
     let n = config.n_particles;
     let n_int = model.int_local_to_global.len();
     let n_tr = model.model.transitions.len();
-    let n_params = base_params.len();
+
+    // Mutable copy of params — updated each iteration with the filter mean
+    let mut current_params = base_params.to_vec();
 
     let mut iterations = Vec::with_capacity(config.n_iterations);
 
@@ -140,7 +142,7 @@ pub fn run_if2(
         let cooling = config.cooling_fraction.powi(iter as i32);
 
         // Initialize particles: all start from model's initial state
-        let (init_int, _) = model.initial_state(base_params)?;
+        let (init_int, _) = model.initial_state(&current_params)?;
         let mut states: Vec<ParticleState> = (0..n)
             .map(|_| {
                 let mut s = ParticleState::new(n_int, n_tr);
@@ -149,8 +151,8 @@ pub fn run_if2(
             })
             .collect();
 
-        // Per-particle parameter vectors, initialized from base + perturbation
-        let mut particle_params: Vec<Vec<f64>> = vec![base_params.to_vec(); n];
+        // Per-particle parameter vectors, initialized from current estimate
+        let mut particle_params: Vec<Vec<f64>> = vec![current_params.clone(); n];
 
         // Per-particle RNGs
         let mut rngs: Vec<StatefulRng> = (0..n)
@@ -218,8 +220,8 @@ pub fn run_if2(
             for lw in &mut log_weights { *lw = 0.0; }
         }
 
-        // Compute parameter means across particles
-        let mut param_means = base_params.to_vec();
+        // Compute parameter means across particles → next iteration's starting point
+        let mut param_means = current_params.clone();
         for spec in if2_params {
             let mean: f64 = particle_params.iter()
                 .map(|pp| pp[spec.index])
@@ -233,10 +235,8 @@ pub fn run_if2(
             param_means: param_means.clone(),
         });
 
-        // Update base_params for next iteration (filter mean → new starting point)
-        // This is the "plug-in" approach: next iteration starts from the
-        // current mean estimate.
-        // (Don't mutate the original base_params — copy)
+        // Feed filter mean back as next iteration's starting params
+        current_params = param_means;
     }
 
     let final_iter = iterations.last().unwrap();

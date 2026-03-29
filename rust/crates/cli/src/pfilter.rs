@@ -242,6 +242,10 @@ pub fn cmd_pfilter(args: &[String]) {
 /// Load observation data from a TSV file.
 /// Expected columns: time, then one or more value columns.
 /// Uses the first value column.
+pub fn load_data_tsv_pub(path: &str) -> Result<Vec<Observation>, String> {
+    load_data_tsv(path)
+}
+
 fn load_data_tsv(path: &str) -> Result<Vec<Observation>, String> {
     let content = std::fs::read_to_string(path)
         .map_err(|e| format!("{}: {}", path, e))?;
