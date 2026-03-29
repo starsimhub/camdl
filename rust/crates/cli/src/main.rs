@@ -7,6 +7,7 @@ mod serve;
 mod summarize;
 mod voi;
 mod eval;
+mod pfilter;
 
 use sim::{write_diagnostics_tsv, warn_zero_firings};
 use std::collections::HashMap;
@@ -57,6 +58,9 @@ fn main() {
         }
         "eval" => {
             eval::cmd_eval(&all_args[1..]);
+        }
+        "pfilter" => {
+            pfilter::cmd_pfilter(&all_args[1..]);
         }
         "serve" => {
             serve::cmd_serve(&all_args[1..]);

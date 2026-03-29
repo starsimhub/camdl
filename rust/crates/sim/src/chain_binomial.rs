@@ -13,6 +13,25 @@ use crate::{
 
 pub struct ChainBinomialSim;
 
+/// Chain-binomial process simulator for inference (particle filter, IF2).
+/// Wraps a CompiledModel reference and implements ProcessSimulator.
+pub struct ChainBinomialProcess<'a> {
+    pub model: &'a CompiledModel,
+}
+
+impl<'a> crate::inference::ProcessSimulator for ChainBinomialProcess<'a> {
+    fn step(
+        &self,
+        state: &mut crate::inference::ParticleState,
+        params: &[f64],
+        t: f64,
+        dt: f64,
+        rng: &mut crate::ekrng::StatefulRng,
+    ) -> Result<(), crate::error::SimError> {
+        step_one(self.model, &mut state.counts, &mut state.flow_accumulators, params, t, dt, rng)
+    }
+}
+
 impl Simulate for ChainBinomialSim {
     fn run(
         &self,
@@ -249,4 +268,130 @@ fn run_chain_binomial(
     }
 
     Ok(traj)
+}
+
+/// Advance integer compartment state by one chain-binomial step.
+///
+/// This is the core Euler-multinomial step, extracted for use by the
+/// particle filter and other inference algorithms. It operates on raw
+/// slices to avoid coupling to IntState/FlowVec/ParticleState.
+///
+/// # Arguments
+/// * `model` — compiled model (stoichiometry, source groups, transitions)
+/// * `counts` — mutable integer compartment counts (local int indices)
+/// * `flows` — mutable flow accumulators (one per transition), incremented
+/// * `params` — parameter values
+/// * `t` — current time
+/// * `dt` — step size
+/// * `rng` — stateful RNG for this particle
+pub fn step_one(
+    model: &CompiledModel,
+    counts: &mut [i64],
+    flows: &mut [u64],
+    params: &[f64],
+    t: f64,
+    dt: f64,
+    rng: &mut StatefulRng,
+) -> Result<(), SimError> {
+    use crate::state::{IntState, RealState};
+
+    let n_transitions = model.model.transitions.len();
+
+    // Build temporary IntState/RealState views for propensity evaluation.
+    // The propensity evaluator needs these types, but we don't allocate —
+    // we wrap the existing slice.
+    let int_s = IntState { counts: counts.to_vec() };
+    let real_s = RealState::new(model.real_local_to_global.len());
+
+    let mut propensities = Vec::with_capacity(n_transitions);
+    eval_propensities(model, &int_s, &real_s, params, t, &mut propensities)?;
+
+    // Pre-evaluate draw methods from start-of-step state
+    enum ResolvedDraw { Poisson, Deterministic, Overdispersed(f64) }
+    let draws: Vec<ResolvedDraw> = {
+        let ctx = EvalCtx { model, int_s: &int_s, real_s: &real_s, params, t };
+        model.model.transitions.iter()
+            .map(|tr| match &tr.draw_method {
+                ir::transition::DrawMethod::Poisson => Ok(ResolvedDraw::Poisson),
+                ir::transition::DrawMethod::Deterministic => Ok(ResolvedDraw::Deterministic),
+                ir::transition::DrawMethod::Overdispersed(expr) =>
+                    eval_expr(expr, &ctx).map(ResolvedDraw::Overdispersed),
+            })
+            .collect::<Result<_, _>>()?
+    };
+
+    // ── Deferred state update (see run_chain_binomial for full explanation) ──
+    let mut pending_deltas: Vec<(usize, i64)> = Vec::new();
+    let mut handled = vec![false; n_transitions];
+
+    // Multinomial draws for transitions sharing a source compartment
+    for &(src_local, ref group) in &model.source_groups {
+        let n_src = counts[src_local].max(0);
+        if n_src == 0 {
+            for &tr_idx in group { handled[tr_idx] = true; }
+            continue;
+        }
+
+        let mut probs: Vec<(usize, f64)> = Vec::with_capacity(group.len());
+        for &tr_idx in group {
+            let rate = propensities[tr_idx];
+            if rate <= 0.0 { handled[tr_idx] = true; continue; }
+            let per_capita = rate / n_src as f64;
+            match &draws[tr_idx] {
+                ResolvedDraw::Deterministic => { handled[tr_idx] = true; continue; }
+                _ => {}
+            }
+            let effective = match &draws[tr_idx] {
+                ResolvedDraw::Overdispersed(sigma_sq) =>
+                    per_capita * rng.gamma_multiplier(*sigma_sq, dt),
+                _ => per_capita,
+            };
+            let p = 1.0 - (-effective * dt).exp();
+            probs.push((tr_idx, p.clamp(0.0, 1.0)));
+        }
+
+        let mut n_remaining = n_src as u64;
+        let mut p_consumed = 0.0_f64;
+        for &(tr_idx, p_i) in &probs {
+            if n_remaining == 0 || (1.0 - p_consumed) <= 0.0 {
+                handled[tr_idx] = true; continue;
+            }
+            let cond_p = (p_i / (1.0 - p_consumed)).clamp(0.0, 1.0);
+            let count = rng.binomial(n_remaining, cond_p);
+            n_remaining -= count;
+            p_consumed += p_i;
+            for &(local, delta) in &model.transition_stoich[tr_idx] {
+                pending_deltas.push((local, delta * count as i64));
+            }
+            flows[tr_idx] += count;
+            handled[tr_idx] = true;
+        }
+    }
+
+    // Inflows and ungrouped transitions
+    for (i, &rate) in propensities.iter().enumerate() {
+        if handled[i] || rate <= 0.0 { continue; }
+        let mean = rate * dt;
+        let count = match &draws[i] {
+            ResolvedDraw::Poisson => rng.poisson(mean),
+            ResolvedDraw::Deterministic => mean.round() as u64,
+            ResolvedDraw::Overdispersed(sigma_sq) => rng.neg_binomial(mean, *sigma_sq, dt),
+        };
+        for &(local, delta) in &model.transition_stoich[i] {
+            pending_deltas.push((local, delta * count as i64));
+        }
+        flows[i] += count;
+    }
+
+    // Apply all deltas atomically
+    for (local, delta) in pending_deltas {
+        counts[local] += delta;
+    }
+
+    // Clamp
+    for c in counts.iter_mut() {
+        if *c < 0 { *c = 0; }
+    }
+
+    Ok(())
 }
