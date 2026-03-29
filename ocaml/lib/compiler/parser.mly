@@ -487,8 +487,12 @@ atom_expr:
         in
         EIdent (name, l) }
   | LPAREN e = expr RPAREN     { e }
-  | LBRACKET es = separated_list(COMMA, expr) RBRACKET
+  | LBRACKET es = separated_list(COMMA, list_element) RBRACKET
       { EList es }
+
+list_element:
+  | lo = atom_expr COLON hi = atom_expr { ERange (lo, hi) }
+  | e = expr                            { e }
 
 kw_expr:
   | k = IDENT EQ v = expr { (k, v) }

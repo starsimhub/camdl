@@ -635,6 +635,15 @@ forcing {
     period = 7 'days,
     values = [1.2, 1.1, 1.0, 1.0, 0.9, 0.8, 0.7]
   )
+
+  # Range-based periodic: specify active ranges instead of listing values.
+  # step = bin width; on = list of lo:hi ranges where the value is 1.0.
+  # Bins outside the ranges are 0.0. The compiler generates the values array.
+  school : periodic {
+    period = 365.25 'days
+    step   = 1 'days
+    on     = [7:100, 115:199, 252:300, 308:356]
+  }
 }
 ```
 
@@ -642,14 +651,25 @@ Forcing functions compile to `TimeFunc` nodes in the IR. Their arguments can ref
 parameters (e.g., `amplitude = alpha`), enabling inference over function
 characteristics (e.g., inferring seasonal amplitude).
 
-Functions are used in rate expressions by name:
+The `periodic` type supports two forms:
+
+- **Values form:** `values = [1.0, 0.0, 1.0, ...]` — explicit list. Bin width =
+  period / len(values). Use for general periodic patterns.
+- **Range form:** `step = 1 'days` + `on = [7:100, 115:199]` — binary on/off with
+  range literals. The compiler generates the values array. Use for calendars with
+  known active periods (school terms, work weeks, campaign windows).
+
+Forcing functions are used in rate expressions by name or with explicit `(t)`:
 
 ```
 transitions {
-  infection : S --> I  @ beta * seasonal * S * I / N
-  #                          ^^^^^^^^ function reference
+  infection : S --> I  @ beta * school(t) * S * I / N
+  #                          ^^^^^^^^ forcing function reference
 }
 ```
+
+Both `school` and `school(t)` are valid; `school(42)` or other non-`t` arguments
+produce an error.
 
 `periodic` is primarily useful in v0.2 reporting pipelines for day-of-week
 effects on case reporting.
