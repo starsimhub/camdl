@@ -19,7 +19,7 @@ pub mod types;
 
 // Re-exports
 pub use types::{ParticleState, ParticleSwarm};
-pub use obs_loglik::{negbin_logpmf, normal_logpdf};
+pub use obs_loglik::{negbin_logpmf, normal_logpdf, discretized_normal_logpmf, normal_cdf};
 pub use particle_filter::bootstrap_filter;
 
 /// Required for all inference. Every model can do this.

@@ -29,6 +29,7 @@ pub fn cmd_pfilter(args: &[String]) {
     let mut overrides: HashMap<String, f64> = HashMap::new();
     let mut scenario_name: Option<String> = None;
     let mut adhoc_enable: Vec<String> = Vec::new();
+    let mut obs_model = "negbin".to_string(); // "negbin" or "discretized_normal"
 
     let mut i = 0;
     while i < args.len() {
@@ -41,6 +42,7 @@ pub fn cmd_pfilter(args: &[String]) {
             "--trace"     => { trace = true; }
             "--scenario"  => { i += 1; scenario_name = Some(args[i].clone()); }
             "--enable"    => { i += 1; adhoc_enable.push(args[i].clone()); }
+            "--obs-model" => { i += 1; obs_model = args[i].clone(); }
             "--param"     => {
                 i += 1;
                 let kv = &args[i];
@@ -153,13 +155,14 @@ pub fn cmd_pfilter(args: &[String]) {
         infection_flow_indices
     };
 
-    // Get rho and k from params
+    // Get observation model parameters
     let rho_idx = compiled.param_index.get("rho").copied();
     let k_idx = compiled.param_index.get("k").copied();
+    let psi_idx = compiled.param_index.get("psi").copied();
+
+    eprintln!("pfilter: obs_model={}", obs_model);
 
     // Run particle filter
-    let process = ChainBinomialProcess { model: &compiled };
-
     let step_fn = |state: &mut sim::inference::ParticleState, t: f64, step_dt: f64, rng: &mut sim::ekrng::StatefulRng| -> Result<(), sim::error::SimError> {
         step_one(&compiled, &mut state.counts, &mut state.flow_accumulators, &params, t, step_dt, rng)
     };
@@ -168,16 +171,34 @@ pub fn cmd_pfilter(args: &[String]) {
         flow_indices.iter().map(|&i| state.flow_accumulators[i] as f64).sum()
     };
 
-    let dmeasure_fn = |projected: f64, observed: f64| -> f64 {
-        let rho = rho_idx.map_or(1.0, |i| params[i]);
-        let k = k_idx.map_or(10.0, |i| params[i]);
-        let mu = rho * projected;
-        negbin_logpmf(observed, mu, k)
+    let dmeasure_fn: Box<dyn Fn(f64, f64) -> f64> = match obs_model.as_str() {
+        "negbin" => {
+            let rho = rho_idx.map_or(1.0, |i| params[i]);
+            let k = k_idx.map_or(10.0, |i| params[i]);
+            Box::new(move |projected: f64, observed: f64| -> f64 {
+                let mu = rho * projected;
+                negbin_logpmf(observed, mu, k)
+            })
+        }
+        "discretized_normal" => {
+            use sim::inference::obs_loglik::discretized_normal_logpmf;
+            let rho = rho_idx.map_or(1.0, |i| params[i]);
+            let psi = psi_idx.map_or(0.116, |i| params[i]);
+            Box::new(move |projected: f64, observed: f64| -> f64 {
+                let mu = rho * projected;
+                let variance = mu * (1.0 - rho + psi * psi * mu);
+                discretized_normal_logpmf(observed, mu, variance)
+            })
+        }
+        other => {
+            eprintln!("error: unknown --obs-model '{}'. Use 'negbin' or 'discretized_normal'", other);
+            std::process::exit(1);
+        }
     };
 
     let result = bootstrap_filter(
         &compiled, &params, &observations, n_particles, dt,
-        &step_fn, &project_fn, &dmeasure_fn, seed,
+        &step_fn, &project_fn, &*dmeasure_fn, seed,
     ).unwrap_or_else(|e| {
         eprintln!("pfilter error: {:?}", e);
         std::process::exit(1);
