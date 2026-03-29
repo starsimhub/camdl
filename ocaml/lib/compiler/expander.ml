@@ -1535,6 +1535,15 @@ let expand_time_function_one ctx fname (env : (string * string) list) fkind farg
               let hi = match hi_e with EConst f -> int_of_float f
                 | EUnit (f, u) -> int_of_float (unit_to_model_time ctx f u)
                 | _ -> failwith "range upper bound must be a constant" in
+              let step_int = int_of_float step_f in
+              if step_int > 1 && (lo mod step_int <> 0 || (hi + 1) mod step_int <> 0) then
+                Diagnostics.warning ctx.diags ~code:"W301" ~loc:Diagnostics.no_loc
+                  ~message:(Printf.sprintf
+                    "periodic range %d:%d is not aligned to step size %d; \
+                     school fraction may differ from intended value"
+                    lo hi step_int)
+                  ~hint:"use step = 1 for exact boundaries, or adjust ranges to multiples of step"
+                  ();
               for i = lo to (min hi (n_bins - 1)) do
                 arr.(i) <- 1.0
               done
