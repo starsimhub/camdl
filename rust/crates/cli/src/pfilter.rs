@@ -31,6 +31,7 @@ pub fn cmd_pfilter(args: &[String]) {
     let mut adhoc_enable: Vec<String> = Vec::new();
     let mut obs_model = "negbin".to_string(); // "negbin" or "discretized_normal"
     let mut tol = sim::inference::obs_loglik::DEFAULT_TOL;
+    let mut flow_name: Option<String> = None; // --flow recovery → project that transition
 
     let mut i = 0;
     while i < args.len() {
@@ -45,6 +46,7 @@ pub fn cmd_pfilter(args: &[String]) {
             "--enable"    => { i += 1; adhoc_enable.push(args[i].clone()); }
             "--obs-model" => { i += 1; obs_model = args[i].clone(); }
             "--tol"       => { i += 1; tol = args[i].parse().expect("--tol needs a number"); }
+            "--flow"      => { i += 1; flow_name = Some(args[i].clone()); }
             "--param"     => {
                 i += 1;
                 let kv = &args[i];
@@ -139,22 +141,36 @@ pub fn cmd_pfilter(args: &[String]) {
     eprintln!("pfilter: {} observations, {} particles, dt={}, seed={}",
         observations.len(), n_particles, dt, seed);
 
-    // Find the observation projection — for now, use the first observation model's
-    // projection. The projection is "incidence(infection)" → sum of infection flows.
-    let infection_flow_indices: Vec<usize> = model.transitions.iter().enumerate()
-        .filter(|(_, tr)| {
-            tr.metadata.as_ref()
-                .and_then(|m| m.origin_kind.as_deref())
-                .map_or(false, |k| k == "transmission")
-        })
-        .map(|(i, _)| i)
-        .collect();
-    let flow_indices = if infection_flow_indices.is_empty() {
-        // Fallback: use first transition as the observation target
-        eprintln!("warning: no transmission transitions found, using first transition for projection");
-        vec![0]
+    // Find the observation projection: sum of flows for the specified transition(s).
+    // --flow NAME: project incidence of that transition (e.g., --flow recovery).
+    // Default: project all transitions with origin_kind = "transmission".
+    let flow_indices: Vec<usize> = if let Some(ref name) = flow_name {
+        let indices: Vec<usize> = model.transitions.iter().enumerate()
+            .filter(|(_, tr)| tr.name == *name || tr.name.starts_with(&format!("{}_", name)))
+            .map(|(i, _)| i)
+            .collect();
+        if indices.is_empty() {
+            eprintln!("error: no transition named '{}' found. Available: {}",
+                name, model.transitions.iter().map(|t| t.name.as_str()).collect::<Vec<_>>().join(", "));
+            std::process::exit(1);
+        }
+        eprintln!("pfilter: projecting incidence({}) → {} flow(s)", name, indices.len());
+        indices
     } else {
-        infection_flow_indices
+        let indices: Vec<usize> = model.transitions.iter().enumerate()
+            .filter(|(_, tr)| {
+                tr.metadata.as_ref()
+                    .and_then(|m| m.origin_kind.as_deref())
+                    .map_or(false, |k| k == "transmission")
+            })
+            .map(|(i, _)| i)
+            .collect();
+        if indices.is_empty() {
+            eprintln!("warning: no transmission transitions found; use --flow NAME to specify projection");
+            vec![0]
+        } else {
+            indices
+        }
     };
 
     // Get observation model parameters
