@@ -17,6 +17,15 @@ pub struct Observation {
     pub value: f64,
 }
 
+/// One-step-ahead prediction diagnostics at a single observation time.
+#[derive(Clone, Debug)]
+pub struct PredictionDiag {
+    pub mean: f64,
+    pub q05: f64,
+    pub q50: f64,
+    pub q95: f64,
+}
+
 /// Result of a particle filter run.
 pub struct PFilterResult {
     /// Estimated log p(y_{1:T} | θ).
@@ -25,6 +34,9 @@ pub struct PFilterResult {
     pub ess_trace: Vec<f64>,
     /// Log-likelihood increment at each observation time.
     pub ll_increments: Vec<f64>,
+    /// One-step-ahead prediction diagnostics at each observation time.
+    /// Weighted quantiles of the projected quantity (before resampling).
+    pub predictions: Vec<PredictionDiag>,
 }
 
 /// Signature for a single-step function that advances particle state.
@@ -77,6 +89,7 @@ pub fn bootstrap_filter(
     let mut total_loglik = 0.0;
     let mut ess_trace = Vec::with_capacity(observations.len());
     let mut ll_increments = Vec::with_capacity(observations.len());
+    let mut predictions = Vec::with_capacity(observations.len());
     let mut t = model.model.simulation.t_start;
 
     // Resampling RNG (separate from particle RNGs)
@@ -104,6 +117,11 @@ pub fn bootstrap_filter(
         ll_increments.push(ll_increment);
         ess_trace.push(swarm.ess());
 
+        // One-step-ahead prediction diagnostics (before resampling).
+        // Compute weighted quantiles of the projected quantity across particles.
+        let projections: Vec<f64> = swarm.states.iter().map(|s| project_fn(s)).collect();
+        predictions.push(weighted_prediction_diag(&projections, &swarm.log_weights));
+
         // Resample
         let indices = systematic_resample(&swarm.log_weights, &mut resample_rng);
         let old_states: Vec<ParticleState> = swarm.states.clone();
@@ -122,7 +140,51 @@ pub fn bootstrap_filter(
 
     Ok(PFilterResult {
         log_likelihood: total_loglik,
+        predictions,
         ess_trace,
         ll_increments,
     })
+}
+
+/// Compute weighted mean and quantiles from log-weighted samples.
+/// Used for one-step-ahead prediction diagnostics.
+fn weighted_prediction_diag(values: &[f64], log_weights: &[f64]) -> PredictionDiag {
+    let n = values.len();
+    if n == 0 {
+        return PredictionDiag { mean: 0.0, q05: 0.0, q50: 0.0, q95: 0.0 };
+    }
+
+    // Normalize weights
+    let max_lw = log_weights.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+    let weights: Vec<f64> = if max_lw.is_infinite() {
+        vec![1.0 / n as f64; n]
+    } else {
+        let raw: Vec<f64> = log_weights.iter().map(|&lw| (lw - max_lw).exp()).collect();
+        let sum: f64 = raw.iter().sum();
+        if sum == 0.0 { vec![1.0 / n as f64; n] }
+        else { raw.iter().map(|&w| w / sum).collect() }
+    };
+
+    // Weighted mean
+    let mean: f64 = values.iter().zip(&weights).map(|(&v, &w)| v * w).sum();
+
+    // Weighted quantiles: sort by value, walk cumulative weight
+    let mut sorted: Vec<(f64, f64)> = values.iter().zip(&weights).map(|(&v, &w)| (v, w)).collect();
+    sorted.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+
+    let quantile = |p: f64| -> f64 {
+        let mut cumw = 0.0;
+        for &(val, w) in &sorted {
+            cumw += w;
+            if cumw >= p { return val; }
+        }
+        sorted.last().map_or(0.0, |&(v, _)| v)
+    };
+
+    PredictionDiag {
+        mean,
+        q05: quantile(0.05),
+        q50: quantile(0.50),
+        q95: quantile(0.95),
+    }
 }

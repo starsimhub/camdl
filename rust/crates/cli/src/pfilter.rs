@@ -206,9 +206,12 @@ pub fn cmd_pfilter(args: &[String]) {
 
     // Output
     if trace {
-        println!("time\tll_increment\tESS");
+        println!("time\tll_increment\tESS\tpred_mean\tpred_q05\tpred_q50\tpred_q95\tobserved");
         for (i, obs) in observations.iter().enumerate() {
-            println!("{}\t{:.4}\t{:.1}", obs.time, result.ll_increments[i], result.ess_trace[i]);
+            let p = &result.predictions[i];
+            println!("{}\t{:.4}\t{:.1}\t{:.1}\t{:.0}\t{:.0}\t{:.0}\t{:.0}",
+                obs.time, result.ll_increments[i], result.ess_trace[i],
+                p.mean, p.q05, p.q50, p.q95, obs.value);
         }
     }
 
