@@ -100,6 +100,16 @@ pub fn normal_cdf(x: f64) -> f64 {
 /// and ψ is the overdispersion coefficient. This gives tight observations
 /// during inter-epidemic troughs (binomial sampling dominates) and loose
 /// observations during peaks (correlated reporting noise dominates).
+/// Minimum likelihood tolerance — matches pomp's `tol` parameter.
+///
+/// When the observation probability is essentially zero (particle predicted
+/// ~0 cases, data shows 80), both the 0-particle and the 5-particle are
+/// equally wrong. Flooring at 1e-18 treats them equivalently, preventing
+/// extreme weight differences that collapse ESS. Using 1e-300 instead
+/// creates a 650 log-unit gap between "zero" and "nearly zero" predictions,
+/// making weights far more extreme than necessary.
+const DTOL: f64 = 1e-18;
+
 pub fn discretized_normal_logpmf(y: f64, mean: f64, variance: f64) -> f64 {
     let sd = variance.max(1e-30).sqrt();
     let y = y.round().max(0.0);
@@ -107,9 +117,9 @@ pub fn discretized_normal_logpmf(y: f64, mean: f64, variance: f64) -> f64 {
     let prob = if y > 0.0 {
         let upper = normal_cdf((y + 0.5 - mean) / sd);
         let lower = normal_cdf((y - 0.5 - mean) / sd);
-        (upper - lower).max(1e-300)
+        (upper - lower).max(DTOL)
     } else {
-        normal_cdf((0.5 - mean) / sd).max(1e-300)
+        normal_cdf((0.5 - mean) / sd).max(DTOL)
     };
 
     prob.ln()
