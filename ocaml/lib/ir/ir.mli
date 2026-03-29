@@ -1,6 +1,6 @@
 [@@@warning "-30-50"]  (* allow duplicate record field names; suppress docstring warning *)
 
-type bin_op = Add | Sub | Mul | Div | Pow | Min | Max | Eq | Neq | Lt | Gt | Le | Ge
+type bin_op = Add | Sub | Mul | Div | Pow | Mod | Min | Max | Eq | Neq | Lt | Gt | Le | Ge
 type un_op  = Neg | Exp | Log | Sqrt | Abs | Floor | Ceil
 
 type bin_op_expr      = { op: bin_op; left: expr; right: expr }
@@ -31,13 +31,18 @@ type transition_metadata = {
   source_compartment: string option;
   dest_compartment:   string option;
 }
+type draw_method =
+  | DrawPoisson
+  | DrawOverdispersed of expr
+  | DrawDeterministic
+
 type transition = {
   name:            string;
   stoichiometry:   stoichiometry_entry list;
   rate:            expr;
   event_key:       string option;
   metadata:        transition_metadata option;
-  overdispersion:  expr option;
+  draw_method:     draw_method;
 }
 
 type ode_equation = { compartment: string; derivative: expr }

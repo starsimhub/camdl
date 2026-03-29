@@ -81,15 +81,17 @@ fn run_chain_binomial(
         // Evaluate propensities
         eval_propensities(model, &int_s, &real_s, params, t, &mut propensities)?;
 
-        // Binomial draws for each transition
-        // p = 1 - exp(-rate * dt) converts continuous-time rate to per-step probability
-        // Pre-evaluate overdispersion expressions before mutating int_s
-        let od_values: Vec<Option<f64>> = {
+        // Pre-evaluate draw methods (resolves overdispersion σ² expressions
+        // from start-of-step state before any mutations).
+        enum ResolvedDraw { Poisson, Deterministic, Overdispersed(f64) }
+        let draws: Vec<ResolvedDraw> = {
             let ctx = EvalCtx { model, int_s: &int_s, real_s: &real_s, params, t };
             model.model.transitions.iter()
-                .map(|tr| match &tr.overdispersion {
-                    Some(od_expr) => eval_expr(od_expr, &ctx).map(Some),
-                    None => Ok(None),
+                .map(|tr| match &tr.draw_method {
+                    ir::transition::DrawMethod::Poisson => Ok(ResolvedDraw::Poisson),
+                    ir::transition::DrawMethod::Deterministic => Ok(ResolvedDraw::Deterministic),
+                    ir::transition::DrawMethod::Overdispersed(expr) =>
+                        eval_expr(expr, &ctx).map(ResolvedDraw::Overdispersed),
                 })
                 .collect::<Result<_, _>>()?
         };
@@ -139,9 +141,19 @@ fn run_chain_binomial(
                     continue;
                 }
                 let per_capita = rate / n_src as f64;
-                let effective = match od_values[tr_idx] {
-                    Some(sigma_sq) => per_capita * rng.gamma_multiplier(sigma_sq, dt),
-                    None => per_capita,
+                match &draws[tr_idx] {
+                    ResolvedDraw::Deterministic => {
+                        // Deterministic inflows handled separately below
+                        // (shouldn't appear in source groups, but guard anyway)
+                        handled[tr_idx] = true;
+                        continue;
+                    }
+                    _ => {}
+                }
+                let effective = match &draws[tr_idx] {
+                    ResolvedDraw::Overdispersed(sigma_sq) =>
+                        per_capita * rng.gamma_multiplier(*sigma_sq, dt),
+                    _ => per_capita,
                 };
                 let p = 1.0 - (-effective * dt).exp();
                 probs.push((tr_idx, p.clamp(0.0, 1.0)));
@@ -177,7 +189,12 @@ fn run_chain_binomial(
         // Inflows and ungrouped transitions (no source compartment)
         for (i, &rate) in propensities.iter().enumerate() {
             if handled[i] || rate <= 0.0 { continue; }
-            let count = rng.poisson(rate * dt);
+            let mean = rate * dt;
+            let count = match &draws[i] {
+                ResolvedDraw::Poisson => rng.poisson(mean),
+                ResolvedDraw::Deterministic => mean.round() as u64,
+                ResolvedDraw::Overdispersed(sigma_sq) => rng.neg_binomial(mean, *sigma_sq, dt),
+            };
             for &(local, delta) in &model.transition_stoich[i] {
                 pending_deltas.push((local, delta * count as i64));
             }

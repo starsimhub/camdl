@@ -121,7 +121,7 @@ fn birth_death_model(birth_rate: f64, death_rate: f64) -> Model {
                 rate: Expr::Param(ParamExpr { param: "lambda".into() }),
                 event_key: None,
                 metadata: None,
-                overdispersion: None,
+                draw_method: ir::transition::DrawMethod::Poisson,
             },
             Transition {
                 name: "death".into(),
@@ -129,7 +129,7 @@ fn birth_death_model(birth_rate: f64, death_rate: f64) -> Model {
                 rate: Expr::Param(ParamExpr { param: "mu_times_n".into() }),
                 event_key: None,
                 metadata: None,
-                overdispersion: None,
+                draw_method: ir::transition::DrawMethod::Poisson,
             },
         ],
         ode_equations: vec![],
@@ -254,7 +254,8 @@ fn test_overdispersion_variance_tau_leap() {
                 }),
                 event_key: None,
                 metadata: None,
-                overdispersion: Some(Expr::Param(ParamExpr { param: "sigma_sq".into() })),
+                draw_method: ir::transition::DrawMethod::Overdispersed(
+                    Expr::Param(ParamExpr { param: "sigma_sq".into() })),
             },
         ],
         ode_equations: vec![],

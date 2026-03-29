@@ -56,7 +56,7 @@ let opt_null f = function
 
 let bin_op_of_str = function
   | "add" -> Add | "sub" -> Sub | "mul" -> Mul
-  | "div" -> Div | "pow" -> Pow | "min" -> Min | "max" -> Max
+  | "div" -> Div | "pow" -> Pow | "mod" -> Mod | "min" -> Min | "max" -> Max
   | "eq"  -> Eq  | "neq" -> Neq | "lt"  -> Lt  | "gt"  -> Gt
   | "le"  -> Le  | "ge"  -> Ge
   | s -> fail "unknown bin_op '%s'" s
@@ -135,6 +135,13 @@ let metadata_of_json j =
     dest_compartment   = opt_null as_string (match member_opt "dest_compartment"   j with Some v -> v | None -> `Null);
   }
 
+let draw_method_of_json j =
+  match j with
+  | `String "poisson"       -> Ir.DrawPoisson
+  | `String "deterministic" -> Ir.DrawDeterministic
+  | `Assoc [("overdispersed", e)] -> Ir.DrawOverdispersed (expr_of_json e)
+  | _ -> fail "draw_method must be \"poisson\", \"deterministic\", or {\"overdispersed\": expr}"
+
 let transition_of_json j =
   { name         = as_string (member "name" j);
     stoichiometry = List.map stoich_entry_of_json (as_list (member "stoichiometry" j));
@@ -143,9 +150,9 @@ let transition_of_json j =
     metadata     = (match member_opt "metadata" j with
                     | None | Some `Null -> None
                     | Some m -> Some (metadata_of_json m));
-    overdispersion = (match member_opt "overdispersion" j with
-                      | None | Some `Null -> None
-                      | Some e -> Some (expr_of_json e));
+    draw_method  = (match member_opt "draw_method" j with
+                    | None | Some `Null -> Ir.DrawPoisson
+                    | Some dm -> draw_method_of_json dm);
   }
 
 (* ── ODE equation ────────────────────────────────────────────────────────── *)

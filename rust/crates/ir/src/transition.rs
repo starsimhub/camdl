@@ -15,6 +15,31 @@ pub struct TransitionMetadata {
     pub dest_compartment:   Option<String>,
 }
 
+/// How event counts are drawn for this transition.
+///
+/// Rate wrappers (`overdispersed`, `deterministic`) are compiler-recognized
+/// forms in the DSL, not general-purpose functions. They are not composable
+/// — `overdispersed(deterministic(rate), σ²)` is meaningless and rejected.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DrawMethod {
+    /// Standard Poisson draw: count ~ Poisson(rate × dt).
+    /// Default for all transitions.
+    Poisson,
+    /// Multiplicative Gamma-Poisson (He et al. 2010):
+    /// G ~ Gamma(dt/σ², σ²/dt), count ~ Poisson(rate × G × dt).
+    /// Var[count] = mean + mean² · σ²/dt (quadratic scaling).
+    Overdispersed(Expr),
+    /// Deterministic rounding: count = nearbyint(rate × dt).
+    /// Used for demographic flows where Poisson noise is unphysical
+    /// (e.g., constant immigration into a large population).
+    Deterministic,
+}
+
+impl Default for DrawMethod {
+    fn default() -> Self { DrawMethod::Poisson }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Transition {
     pub name:           String,
@@ -22,8 +47,11 @@ pub struct Transition {
     pub rate:           Expr,
     pub event_key:      Option<String>,
     pub metadata:       Option<TransitionMetadata>,
-    /// Extra-demographic stochasticity: σ²_SE for Gamma-Poisson (NegBinomial)
-    /// draws in tau-leap / chain-binomial backends.  `None` → standard Poisson.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub overdispersion: Option<Expr>,
+    /// How event counts are drawn. Defaults to Poisson.
+    #[serde(default, skip_serializing_if = "is_poisson")]
+    pub draw_method:    DrawMethod,
+}
+
+fn is_poisson(m: &DrawMethod) -> bool {
+    matches!(m, DrawMethod::Poisson)
 }

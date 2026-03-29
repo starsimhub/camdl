@@ -80,6 +80,7 @@ pub fn eval_expr(expr: &Expr, ctx: &EvalCtx<'_>) -> Result<f64, SimError> {
                         0.0
                     } else { r }
                 }
+                BinOp::Mod => if b == 0.0 { 0.0 } else { a.rem_euclid(b) },
                 BinOp::Min => a.min(b),
                 BinOp::Max => a.max(b),
                 BinOp::Eq  => if a == b { 1.0 } else { 0.0 },

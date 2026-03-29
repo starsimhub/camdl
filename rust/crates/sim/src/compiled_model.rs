@@ -2,7 +2,6 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use ir::{Model, model::CompartmentKind};
 use ir::expr::{BinOp, Expr, UnOp};
-use ir::time_func::InterpMethod;
 use crate::error::SimError;
 use crate::state::{IntState, RealState};
 
@@ -194,6 +193,7 @@ fn eval_table_expr(
                 BinOp::Mul => a * b,
                 BinOp::Div => if b == 0.0 { 0.0 } else { a / b },
                 BinOp::Pow => a.powf(b),
+                BinOp::Mod => if b == 0.0 { 0.0 } else { a.rem_euclid(b) },
                 BinOp::Min => a.min(b),
                 BinOp::Max => a.max(b),
                 BinOp::Eq  => if a == b { 1.0 } else { 0.0 },
@@ -499,7 +499,7 @@ impl CompiledModel {
     /// Features this model requires from a backend.
     pub fn required_capabilities(&self) -> crate::Capabilities {
         let mut caps = crate::Capabilities::empty();
-        if self.model.transitions.iter().any(|t| t.overdispersion.is_some()) {
+        if self.model.transitions.iter().any(|t| matches!(t.draw_method, ir::transition::DrawMethod::Overdispersed(_))) {
             caps |= crate::Capabilities::OVERDISPERSION;
         }
         if !self.real_comp_indices.is_empty() {

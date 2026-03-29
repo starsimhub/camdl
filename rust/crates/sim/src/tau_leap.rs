@@ -105,22 +105,26 @@ fn run_tau_leap(
         // Evaluate propensities at current state
         eval_propensities(model, &int_s, &real_s, params, t, &mut propensities)?;
 
-        // Draw event counts for each transition via CRN
-        // Pre-evaluate overdispersion expressions before mutating int_s
-        let od_values: Vec<Option<f64>> = {
+        // Pre-evaluate draw method for each transition (resolves overdispersion
+        // σ² expressions from start-of-step state before any mutations).
+        enum ResolvedDraw { Poisson, Deterministic, Overdispersed(f64) }
+        let draws: Vec<ResolvedDraw> = {
             let ctx = EvalCtx { model, int_s: &int_s, real_s: &real_s, params, t };
             model.model.transitions.iter()
-                .map(|tr| match &tr.overdispersion {
-                    Some(od_expr) => eval_expr(od_expr, &ctx).map(Some),
-                    None => Ok(None),
+                .map(|tr| match &tr.draw_method {
+                    ir::transition::DrawMethod::Poisson => Ok(ResolvedDraw::Poisson),
+                    ir::transition::DrawMethod::Deterministic => Ok(ResolvedDraw::Deterministic),
+                    ir::transition::DrawMethod::Overdispersed(expr) =>
+                        eval_expr(expr, &ctx).map(ResolvedDraw::Overdispersed),
                 })
                 .collect::<Result<_, _>>()?
         };
         for (i, &lambda) in propensities.iter().enumerate() {
             let mean = lambda * dt;
-            let count = match od_values[i] {
-                Some(sigma_sq) => rng.neg_binomial(mean, sigma_sq, dt),
-                None => rng.poisson(mean),
+            let count = match draws[i] {
+                ResolvedDraw::Poisson => rng.poisson(mean),
+                ResolvedDraw::Deterministic => mean.round() as u64,
+                ResolvedDraw::Overdispersed(sigma_sq) => rng.neg_binomial(mean, sigma_sq, dt),
             };
 
             // Apply stoichiometry

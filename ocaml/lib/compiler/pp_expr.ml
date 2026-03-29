@@ -18,7 +18,7 @@ let no_split : split_fn = fun _ -> None
 
 let prec_binop = function
   | Ir.Add | Ir.Sub -> 6
-  | Ir.Mul | Ir.Div -> 7
+  | Ir.Mul | Ir.Div | Ir.Mod -> 7
   | Ir.Pow          -> 8
   | Ir.Min | Ir.Max -> 5
   | Ir.Eq | Ir.Neq | Ir.Lt | Ir.Gt | Ir.Le | Ir.Ge -> 4
@@ -36,6 +36,7 @@ let op_str ~ascii = function
   | Ir.Mul -> if ascii then "*" else "\xc3\x97"  (* × U+00D7 *)
   | Ir.Div -> "/"
   | Ir.Pow -> "^"
+  | Ir.Mod -> "mod"
   | Ir.Min -> "min"
   | Ir.Max -> "max"
   | Ir.Eq  -> "==" | Ir.Neq -> "!=" | Ir.Lt -> "<"

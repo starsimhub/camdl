@@ -10,6 +10,7 @@ pub enum BinOp {
     Mul,
     Div,
     Pow,
+    Mod,
     Min,
     Max,
     Eq,

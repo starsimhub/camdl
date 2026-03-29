@@ -18,7 +18,7 @@ let int  n    : Yojson.Safe.t = `Int n
 
 let bin_op_str = function
   | Add -> "add" | Sub -> "sub" | Mul -> "mul"
-  | Div -> "div" | Pow -> "pow" | Min -> "min" | Max -> "max"
+  | Div -> "div" | Pow -> "pow" | Mod -> "mod" | Min -> "min" | Max -> "max"
   | Eq  -> "eq"  | Neq -> "neq" | Lt  -> "lt"  | Gt  -> "gt"
   | Le  -> "le"  | Ge  -> "ge"
 
@@ -80,6 +80,12 @@ let metadata_to_json (m : transition_metadata) : Yojson.Safe.t =
     ("dest_compartment",   match m.dest_compartment   with None -> null | Some s -> str s);
   ]
 
+let draw_method_to_json (dm : draw_method) : Yojson.Safe.t =
+  match dm with
+  | DrawPoisson       -> str "poisson"
+  | DrawDeterministic -> str "deterministic"
+  | DrawOverdispersed e -> obj [("overdispersed", expr_to_json e)]
+
 let transition_to_json (t : transition) : Yojson.Safe.t =
   obj (
     [ ("name",         str t.name);
@@ -88,9 +94,9 @@ let transition_to_json (t : transition) : Yojson.Safe.t =
       ("event_key",    match t.event_key with None -> null | Some s -> str s);
       ("metadata",     match t.metadata  with None -> null | Some m -> metadata_to_json m);
     ]
-    @ (match t.overdispersion with
-       | None   -> []
-       | Some e -> [("overdispersion", expr_to_json e)])
+    @ (match t.draw_method with
+       | DrawPoisson -> []
+       | dm          -> [("draw_method", draw_method_to_json dm)])
   )
 
 (* ── ODE equation ────────────────────────────────────────────────────────── *)

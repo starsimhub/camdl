@@ -37,7 +37,7 @@
         "source_compartment": "S",
         "dest_compartment": "I"
       },
-      "overdispersion": { "param": "sigma_se" }
+      "draw_method": { "overdispersed": { "param": "sigma_se" } }
     },
     {
       "name": "recovery",

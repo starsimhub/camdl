@@ -832,6 +832,16 @@ let rec resolve_expr ctx (env : (string * string) list) (e : expr) : Ir.expr =
           ~hint:(Printf.sprintf "usage: %s(expr)" fname) ();
         Ir.Const 0.0
     end
+    else if fname = "mod" then begin
+      match args with
+      | [("", a); ("", b)] ->
+        Ir.BinOp { op = Ir.Mod; left = resolve_expr ctx env a; right = resolve_expr ctx env b }
+      | _ ->
+        Diagnostics.error ctx.diags ~code:"E101" ~loc:Diagnostics.no_loc
+          ~message:"built-in function 'mod' takes exactly two arguments"
+          ~hint:"usage: mod(a, b)" ();
+        Ir.Const 0.0
+    end
     else if List.exists (fun (fd : func_decl) -> fd.fname = fname) ctx.func_decls
     then begin
       let ok = match args with
@@ -1068,14 +1078,16 @@ let expand_transitions_counted ctx =
       else begin
         let src_name = Option.map (resolve_stoich_ref ctx env) tr.trsrc in
         let dst_name = Option.map (resolve_stoich_ref ctx env) tr.trdst in
-        (* Extract overdispersed(inner_rate, variance) before resolving *)
-        let raw_rate, raw_od = match tr.trrate with
+        (* Extract rate wrappers: overdispersed(rate, σ²) or deterministic(rate) *)
+        let raw_rate, draw_method = match tr.trrate with
           | EFuncCall ("overdispersed", [("", inner); ("", var)]) ->
-            (inner, Some var)
-          | _ -> (tr.trrate, None)
+            let resolved_var = normalize_expr (resolve_expr ctx env var) in
+            (inner, Ir.DrawOverdispersed resolved_var)
+          | EFuncCall ("deterministic", [("", inner)]) ->
+            (inner, Ir.DrawDeterministic)
+          | _ -> (tr.trrate, Ir.DrawPoisson)
         in
         let rate = normalize_expr (resolve_expr ctx env raw_rate) in
-        let od   = Option.map (fun e -> normalize_expr (resolve_expr ctx env e)) raw_od in
         let origin_kind = infer_origin_kind src_name dst_name rate in
         let stoich =
           (match src_name with Some s -> [(s, -1)] | None -> []) @
@@ -1102,7 +1114,7 @@ let expand_transitions_counted ctx =
             Ir.source_compartment = src_name;
             Ir.dest_compartment   = dst_name;
           };
-          Ir.overdispersion  = od;
+          Ir.draw_method     = draw_method;
         }
       end
     ) combos
