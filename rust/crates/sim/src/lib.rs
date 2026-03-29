@@ -13,6 +13,7 @@ pub mod ode;
 pub mod intervention;
 pub mod simulate;
 pub mod transition_diagnostics;
+pub mod inference;
 
 pub use config::{GillespieConfig, TauLeapConfig, ChainBinomialConfig, OdeConfig, SimConfig};
 pub use error::SimError;
