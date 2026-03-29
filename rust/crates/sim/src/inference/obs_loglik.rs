@@ -100,26 +100,34 @@ pub fn normal_cdf(x: f64) -> f64 {
 /// and ψ is the overdispersion coefficient. This gives tight observations
 /// during inter-epidemic troughs (binomial sampling dominates) and loose
 /// observations during peaks (correlated reporting noise dominates).
-/// Minimum likelihood tolerance — matches pomp's `tol` parameter.
-///
-/// When the observation probability is essentially zero (particle predicted
-/// ~0 cases, data shows 80), both the 0-particle and the 5-particle are
-/// equally wrong. Flooring at 1e-18 treats them equivalently, preventing
-/// extreme weight differences that collapse ESS. Using 1e-300 instead
-/// creates a 650 log-unit gap between "zero" and "nearly zero" predictions,
-/// making weights far more extreme than necessary.
-const DTOL: f64 = 1e-18;
+/// Default likelihood tolerance — matches pomp's `tol` parameter.
+/// Exposed as `--tol` on the CLI for models where a different floor is needed.
+pub const DEFAULT_TOL: f64 = 1e-18;
 
 pub fn discretized_normal_logpmf(y: f64, mean: f64, variance: f64) -> f64 {
+    discretized_normal_logpmf_tol(y, mean, variance, DEFAULT_TOL)
+}
+
+/// Discretized Normal log-PMF with configurable tolerance floor.
+///
+/// `tol` is the minimum probability before taking log. At 1e-18 (pomp's
+/// default), particles that predict ~0 when data shows 80 get log-weight
+/// ≈ -41 regardless of exactly how wrong they are. At 1e-300, the gap
+/// between "zero" and "nearly zero" is 650 log-units, which collapses ESS.
+///
+/// For large-population models (London measles), 1e-18 is correct.
+/// For small-population models where observing 3 vs 0 is informative,
+/// a tighter tolerance (e.g., 1e-30) preserves that signal.
+pub fn discretized_normal_logpmf_tol(y: f64, mean: f64, variance: f64, tol: f64) -> f64 {
     let sd = variance.max(1e-30).sqrt();
     let y = y.round().max(0.0);
 
     let prob = if y > 0.0 {
         let upper = normal_cdf((y + 0.5 - mean) / sd);
         let lower = normal_cdf((y - 0.5 - mean) / sd);
-        (upper - lower).max(DTOL)
+        (upper - lower).max(tol)
     } else {
-        normal_cdf((0.5 - mean) / sd).max(DTOL)
+        normal_cdf((0.5 - mean) / sd).max(tol)
     };
 
     prob.ln()

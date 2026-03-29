@@ -30,6 +30,7 @@ pub fn cmd_pfilter(args: &[String]) {
     let mut scenario_name: Option<String> = None;
     let mut adhoc_enable: Vec<String> = Vec::new();
     let mut obs_model = "negbin".to_string(); // "negbin" or "discretized_normal"
+    let mut tol = sim::inference::obs_loglik::DEFAULT_TOL;
 
     let mut i = 0;
     while i < args.len() {
@@ -43,6 +44,7 @@ pub fn cmd_pfilter(args: &[String]) {
             "--scenario"  => { i += 1; scenario_name = Some(args[i].clone()); }
             "--enable"    => { i += 1; adhoc_enable.push(args[i].clone()); }
             "--obs-model" => { i += 1; obs_model = args[i].clone(); }
+            "--tol"       => { i += 1; tol = args[i].parse().expect("--tol needs a number"); }
             "--param"     => {
                 i += 1;
                 let kv = &args[i];
@@ -181,13 +183,13 @@ pub fn cmd_pfilter(args: &[String]) {
             })
         }
         "discretized_normal" => {
-            use sim::inference::obs_loglik::discretized_normal_logpmf;
+            use sim::inference::obs_loglik::discretized_normal_logpmf_tol;
             let rho = rho_idx.map_or(1.0, |i| params[i]);
             let psi = psi_idx.map_or(0.116, |i| params[i]);
             Box::new(move |projected: f64, observed: f64| -> f64 {
                 let mu = rho * projected;
                 let variance = mu * (1.0 - rho + psi * psi * mu);
-                discretized_normal_logpmf(observed, mu, variance)
+                discretized_normal_logpmf_tol(observed, mu, variance, tol)
             })
         }
         other => {
