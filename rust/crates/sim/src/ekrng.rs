@@ -1,6 +1,6 @@
 use rand::SeedableRng;
 use rand_chacha::ChaCha8Rng;
-use rand_distr::{Distribution, Poisson, Exp, Gamma, Binomial};
+use rand_distr::{Distribution, Poisson, Exp, Gamma, Binomial, StandardNormal};
 use ahash::AHasher;
 use std::hash::{Hash, Hasher};
 
@@ -98,6 +98,11 @@ impl StatefulRng {
         if n == 0 || p <= 0.0 { return 0; }
         if p >= 1.0 { return n; }
         Binomial::new(n, p).unwrap().sample(&mut self.0)
+    }
+
+    /// Standard normal draw N(0, 1). Used for IF2 parameter perturbations.
+    pub fn normal(&mut self) -> f64 {
+        StandardNormal.sample(&mut self.0)
     }
 
     /// Uniform [0, 1) — used for Gillespie event selection.

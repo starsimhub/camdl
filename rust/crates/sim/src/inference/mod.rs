@@ -14,6 +14,7 @@
 pub mod obs_loglik;
 pub mod resampling;
 pub mod particle_filter;
+pub mod if2;
 pub mod types;
 
 // Re-exports
