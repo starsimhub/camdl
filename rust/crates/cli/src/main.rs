@@ -9,6 +9,7 @@ mod voi;
 mod eval;
 mod pfilter;
 mod if2;
+mod profile;
 
 use sim::{write_diagnostics_tsv, warn_zero_firings};
 use std::collections::HashMap;
@@ -65,6 +66,9 @@ fn main() {
         }
         "if2" | "mif2" => {
             if2::cmd_if2(&all_args[1..]);
+        }
+        "profile" => {
+            profile::cmd_profile(&all_args[1..]);
         }
         "serve" => {
             serve::cmd_serve(&all_args[1..]);
