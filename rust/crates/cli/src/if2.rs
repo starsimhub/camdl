@@ -29,6 +29,56 @@ use sim::{
 use std::collections::HashMap;
 use std::sync::Arc;
 
+fn run_one_chain(
+    chain_id: usize,
+    compiled: &CompiledModel,
+    params: &[f64],
+    if2_params: &[IF2Param],
+    observations: &[Observation],
+    config: &IF2Config,
+    flow_indices: &[usize],
+    obs_model: &str,
+    rho_idx: Option<usize>,
+    k_idx: Option<usize>,
+    psi_idx: Option<usize>,
+    tol: f64,
+    base_seed: u64,
+) -> IF2Result {
+    let chain_seed = base_seed ^ (chain_id as u64).wrapping_mul(0x9e3779b97f4a7c15);
+
+    let step_fn = |state: &mut ParticleState, p: &[f64], t: f64, step_dt: f64, rng: &mut StatefulRng| {
+        step_one(compiled, &mut state.counts, &mut state.flow_accumulators, p, t, step_dt, rng)
+    };
+    let project_fn = |state: &ParticleState| -> f64 {
+        flow_indices.iter().map(|&i| state.flow_accumulators[i] as f64).sum()
+    };
+    let dmeasure_fn: Box<dyn Fn(f64, f64, &[f64]) -> f64> = match obs_model {
+        "negbin" => Box::new(move |proj: f64, obs: f64, p: &[f64]| {
+            let rho = rho_idx.map_or(1.0, |i| p[i]);
+            let k = k_idx.map_or(10.0, |i| p[i]);
+            negbin_logpmf(obs, rho * proj, k)
+        }),
+        _ => Box::new(move |proj: f64, obs: f64, p: &[f64]| {
+            let rho = rho_idx.map_or(1.0, |i| p[i]);
+            let psi = psi_idx.map_or(0.116, |i| p[i]);
+            let mu = rho * proj;
+            discretized_normal_logpmf_tol(obs, mu, mu * (1.0 - rho + psi * psi * mu), tol)
+        }),
+    };
+
+    eprintln!("  chain {} starting...", chain_id + 1);
+    let result = run_if2(
+        compiled, params, if2_params, observations, config,
+        &step_fn, &project_fn, &*dmeasure_fn, chain_seed,
+    ).unwrap_or_else(|e| {
+        eprintln!("chain {} error: {:?}", chain_id + 1, e);
+        std::process::exit(1);
+    });
+
+    eprintln!("  chain {} done: loglik={:.1}", chain_id + 1, result.final_loglik);
+    result
+}
+
 pub fn cmd_if2(args: &[String]) {
     let mut ir_path: Option<String> = None;
     let mut params_files: Vec<String> = Vec::new();
@@ -292,48 +342,36 @@ pub fn cmd_if2(args: &[String]) {
     let observations = Arc::new(observations);
     let flow_indices = Arc::new(flow_indices);
 
-    // ── Multi-chain parallel execution ───────────────────────────────────
-    let chain_results: Vec<(usize, IF2Result)> = {
+    // ── Multi-chain execution ──────────────────────────────────────────────
+    // Use std::thread::scope for parallel chains — allows borrowing shared
+    // data (compiled, params, observations) without Arc/Send constraints.
+    let chain_results: Vec<(usize, IF2Result)> = if parallel > 1 && n_chains > 1 {
+        std::thread::scope(|s| {
+            let handles: Vec<_> = (0..n_chains).map(|chain_id| {
+                let compiled = &*compiled;
+                let if2_params = &*if2_params;
+                let observations = &*observations;
+                let flow_indices = &*flow_indices;
+                let params = &params;
+                let config = &config;
+
+                let obs_model_str = obs_model.as_str();
+                s.spawn(move || {
+                    run_one_chain(chain_id, compiled, params, if2_params, observations,
+                        config, flow_indices, obs_model_str, rho_idx, k_idx, psi_idx, tol, seed)
+                })
+            }).collect();
+
+            handles.into_iter().enumerate().map(|(i, h)| {
+                (i, h.join().unwrap())
+            }).collect()
+        })
+    } else {
+        // Sequential
         (0..n_chains).map(|chain_id| {
-            let compiled = Arc::clone(&compiled);
-            let if2_params = Arc::clone(&if2_params);
-            let observations = Arc::clone(&observations);
-            let flow_indices = Arc::clone(&flow_indices);
-
-            let chain_seed = seed ^ (chain_id as u64).wrapping_mul(0x9e3779b97f4a7c15);
-
-            let step_fn = |state: &mut ParticleState, p: &[f64], t: f64, step_dt: f64, rng: &mut StatefulRng| {
-                step_one(&compiled, &mut state.counts, &mut state.flow_accumulators, p, t, step_dt, rng)
-            };
-            let project_fn = |state: &ParticleState| -> f64 {
-                flow_indices.iter().map(|&i| state.flow_accumulators[i] as f64).sum()
-            };
-
-            // Each chain needs its own dmeasure closure (can't share across threads without Send)
-            let dmeasure_fn: Box<dyn Fn(f64, f64, &[f64]) -> f64> = match obs_model.as_str() {
-                "negbin" => Box::new(move |proj: f64, obs: f64, p: &[f64]| {
-                    let rho = rho_idx.map_or(1.0, |i| p[i]);
-                    let k = k_idx.map_or(10.0, |i| p[i]);
-                    negbin_logpmf(obs, rho * proj, k)
-                }),
-                _ => Box::new(move |proj: f64, obs: f64, p: &[f64]| {
-                    let rho = rho_idx.map_or(1.0, |i| p[i]);
-                    let psi = psi_idx.map_or(0.116, |i| p[i]);
-                    let mu = rho * proj;
-                    discretized_normal_logpmf_tol(obs, mu, mu * (1.0 - rho + psi * psi * mu), tol)
-                }),
-            };
-
-            eprintln!("  chain {} starting IF2...", chain_id + 1);
-            let result = run_if2(
-                &compiled, &params, &if2_params, &observations, &config,
-                &step_fn, &project_fn, &*dmeasure_fn, chain_seed,
-            ).unwrap_or_else(|e| {
-                eprintln!("chain {} error: {:?}", chain_id + 1, e);
-                std::process::exit(1);
-            });
-
-            eprintln!("  chain {} done: loglik={:.1}", chain_id + 1, result.final_loglik);
+            let result = run_one_chain(chain_id, &compiled, &params, &if2_params,
+                &observations, &config, &flow_indices, &obs_model,
+                rho_idx, k_idx, psi_idx, tol, seed);
             (chain_id, result)
         }).collect()
     };
