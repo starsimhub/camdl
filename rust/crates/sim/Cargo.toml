@@ -15,4 +15,9 @@ thiserror = "1"
 
 [dev-dependencies]
 approx = "0.5"
+criterion = { version = "0.5", features = ["html_reports"] }
 serde_json = "1"
+
+[[bench]]
+name = "inference"
+harness = false
