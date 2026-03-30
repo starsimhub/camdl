@@ -1,0 +1,36 @@
+//! `fit_state.toml` — inter-stage handoff file.
+
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct FitState {
+    pub stage: String,
+    pub seed: u64,
+    pub timestamp: String,
+    pub best_loglik: f64,
+    pub initial_loglik: f64,
+    pub best_chain: usize,
+    pub n_chains: usize,
+    pub n_good_chains: Option<usize>,
+    pub start_values: HashMap<String, f64>,
+    pub rw_sd: HashMap<String, f64>,
+}
+
+impl FitState {
+    pub fn load(dir: &str) -> Result<Self, String> {
+        let path = format!("{}/fit_state.toml", dir);
+        let contents = std::fs::read_to_string(&path)
+            .map_err(|e| format!("cannot read {}: {}", path, e))?;
+        toml::from_str(&contents)
+            .map_err(|e| format!("parse error in {}: {}", path, e))
+    }
+
+    pub fn save(&self, dir: &str) -> Result<(), String> {
+        let path = format!("{}/fit_state.toml", dir);
+        let contents = toml::to_string_pretty(self)
+            .map_err(|e| format!("serialize error: {}", e))?;
+        std::fs::write(&path, contents)
+            .map_err(|e| format!("cannot write {}: {}", path, e))
+    }
+}

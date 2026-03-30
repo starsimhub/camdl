@@ -2128,13 +2128,17 @@ camdl pfilter MODEL --params P.toml --data cases.tsv \
     --flow recovery --obs-model discretized_normal --tol 1e-18 \
     --trace
 
-# Iterated filtering — maximum likelihood estimation
+# Iterated filtering — explicit rw_sd (the list IS the partition)
 camdl if2 MODEL --params P.toml --data cases.tsv \
     --rw-sd "R0=5,sigma=0.01,gamma=0.01" \
     --particles 2000 --iterations 100 --cooling 0.95 \
-    --chains 4 --regime scout \
-    --fixed "N0,mu" --ivp "S0,I0" \
+    --chains 4 --regime scout --ivp "S0,I0" \
     --flow recovery --obs-model discretized_normal
+
+# Auto rw_sd from parameter bounds (--fixed excludes non-estimable params)
+camdl if2 MODEL --params P.toml --data cases.tsv \
+    --rw-sd auto --fixed "N0,mu,k" \
+    --regime scout --flow recovery
 
 # Profile likelihood — parameter identifiability
 camdl profile MODEL --params P.toml --data cases.tsv \
@@ -2154,11 +2158,55 @@ case notifications that count recoveries, not infections).
 **`--obs-model`**: `negbin` (default) or `discretized_normal` (He et al.
 heteroscedastic variance).
 
+**`--rw-sd`**: Perturbation scale per parameter. Three modes:
+- Explicit: `--rw-sd "R0=5,sigma=0.01"` — the list IS the partition.
+  Parameters not listed are held fixed. No `--fixed` needed.
+- Auto: `--rw-sd auto` — heuristic from parameter bounds (`(hi-lo)/6`
+  on transformed scale). Use `--fixed "N0,mu,k"` to exclude params.
+- Mixed: `--rw-sd "R0=5,sigma=auto"` — explicit where you know, auto
+  where you don't.
+
 **`--regime`**: IF2 presets — `scout` (8 chains, no cooling, explore),
 `refine` (4 chains, cooling, converge), `validate` (high particles, full
 convergence).
 
 **`--ivp "S0,I0"`**: Initial value parameters, perturbed only at t=0.
+
+### 22.6 Fit Workflow
+
+```bash
+# Structured three-stage fitting pipeline
+camdl fit scout    fit.toml [--seed N] [--force]
+camdl fit refine   fit.toml --starts-from scout/ [--seed N]
+camdl fit validate fit.toml --starts-from refine/ [--seed N]
+camdl fit status   fit.toml
+```
+
+Driven by a `fit.toml` that declares which parameters to estimate,
+which to fix, and where the data lives. See `docs/camdl-inference-spec.md`
+for the full specification.
+
+### 22.7 Particle State Export
+
+```bash
+# Save final particle states for prediction workflows
+camdl pfilter MODEL --params P.toml --data train.tsv \
+    --particles 5000 --save-final-state final_particles.tsv
+```
+
+### 22.8 Value of Information
+
+```bash
+camdl voi run voi.toml
+```
+
+### 22.9 Web Server
+
+```bash
+camdl serve [--port 8080] [DIR]
+```
+
+Serves experiment output directories over HTTP for the web editor.
 
 ---
 

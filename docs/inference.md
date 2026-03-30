@@ -424,15 +424,29 @@ The particle filter and IF2 in camdl match pomp's semantics
 (Euler-multinomial transitions, bootstrap resampling, parameter
 perturbation with cooling). Several improvements are possible:
 
-### Adaptive rw_sd tuning
+### Auto rw_sd
 
-Both pomp and camdl require the user to specify `rw_sd` per
-parameter. Bad values cause non-convergence (too small) or
-instability (too large). An adaptive approach: run a short scout,
-measure the parameter spread across surviving particles, and set
-`rw_sd` proportional to that spread. This is adaptive MCMC (Haario
-et al. 2001) applied to IF2 — the highest-leverage usability
-improvement.
+pomp requires explicit `rw.sd(R0=5, sigma=0.01, ...)` for every
+parameter — the #1 usability complaint. camdl provides two tiers
+of automatic rw_sd:
+
+**Tier 1: Bounds-based (for scout / quick tests).** For each
+estimated parameter with bounds `[lo, hi]`, compute
+`(hi - lo) / 6` on the transformed scale. This gives perturbations
+that explore roughly the middle third of the parameter range —
+appropriate for broad exploration. Available via `--rw-sd auto` on
+`camdl if2` or by omitting `rw_sd` in `fit.toml`.
+
+**Tier 2: MAD-based (from scout chains).** After scout completes,
+compute the Median Absolute Deviation of each parameter's best-loglik
+value across chains. `rw_sd = 0.5 × MAD` of good chains. MAD is
+breakdown-resistant — one outlier chain in a secondary mode doesn't
+corrupt the scale estimate. This is the `fit_state.toml [rw_sd]`
+that refine reads automatically.
+
+Tier 1 doesn't need to be precise — it just needs the right order
+of magnitude. Tier 2 is data-driven and produces calibrated values
+appropriate for convergent IF2.
 
 ### ESS-adaptive resampling
 
@@ -518,3 +532,61 @@ R₀ and sigma have converged (Rhat < 1.1, tight range). Gamma has not (Rhat=3.2
 wide range). This means gamma is either poorly identified or the surface is
 multimodal along the gamma axis. Run a profile likelihood for gamma to
 distinguish.
+
+---
+
+## The fit workflow
+
+The low-level commands (`camdl pfilter`, `camdl if2`, `camdl profile`) are
+building blocks. For routine model fitting, `camdl fit` provides a structured
+three-stage workflow driven by a `fit.toml` configuration file:
+
+```
+fit.toml + model.camdl + data.tsv
+    │
+    ├── camdl fit scout fit.toml          → scout/fit_state.toml
+    ├── camdl fit refine fit.toml         → refine/mle_params.toml
+    └── camdl fit validate fit.toml       → validate/mle_params.toml
+```
+
+**Scout** (8 chains, 200 particles, no cooling): random starts across the
+parameter space, MAD-based auto-calibration of rw_sd. Identifies the
+likelihood basin and filters out divergent chains.
+
+**Refine** (4 chains, 1000 particles, cooling=0.95): convergent IF2 from
+scout's best parameters and auto-calibrated rw_sd. Produces an initial MLE.
+
+**Validate** (4 chains, 5000 particles, cooling=0.95): final IF2 + profile
+likelihoods for all estimated parameters + precise pfilter at the MLE for
+log-likelihood and ESS measurement.
+
+Each stage reads the previous stage's `fit_state.toml` and writes its own.
+The final output is `mle_params.toml` — a standard params file with
+provenance hashing that feeds directly into `camdl simulate` and
+`camdl experiment run`.
+
+```bash
+# Full pipeline
+camdl fit scout    fit.toml --seed 1
+camdl fit refine   fit.toml --starts-from fit/he2010/scout/
+camdl fit validate fit.toml --starts-from fit/he2010/refine/
+camdl fit status   fit.toml
+```
+
+See `docs/camdl-inference-spec.md` for the full specification: fit.toml
+format, exhaustive partition rule, provenance hashing, inter-stage handoff,
+and the connection to the experiment system.
+
+### Saving final particle states
+
+For prediction workflows, `camdl pfilter --save-final-state` writes the
+particle ensemble at the last observation time:
+
+```bash
+camdl pfilter model.camdl --data train.tsv --params mle.toml \
+    --particles 5000 --save-final-state final_particles.tsv
+```
+
+Output is a TSV with one row per particle, columns for each compartment
+and flow accumulator. This enables forward simulation from the filtered
+state without re-running the particle filter.

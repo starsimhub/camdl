@@ -10,6 +10,7 @@ mod eval;
 mod pfilter;
 mod if2;
 mod profile;
+mod fit;
 
 use sim::{write_diagnostics_tsv, warn_zero_firings};
 use std::collections::HashMap;
@@ -69,6 +70,18 @@ fn main() {
         }
         "profile" => {
             profile::cmd_profile(&all_args[1..]);
+        }
+        "fit" => {
+            match all_args.get(1).map(|s| s.as_str()) {
+                Some("scout")    => fit::cmd_fit_scout(&all_args[2..]),
+                Some("refine")   => fit::cmd_fit_refine(&all_args[2..]),
+                Some("validate") => fit::cmd_fit_validate(&all_args[2..]),
+                Some("status")   => fit::cmd_fit_status(&all_args[2..]),
+                _ => {
+                    eprintln!("usage: camdl fit <scout|refine|validate|status> FIT.toml");
+                    std::process::exit(1);
+                }
+            }
         }
         "serve" => {
             serve::cmd_serve(&all_args[1..]);

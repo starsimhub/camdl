@@ -37,6 +37,9 @@ pub struct PFilterResult {
     /// One-step-ahead prediction diagnostics at each observation time.
     /// Weighted quantiles of the projected quantity (before resampling).
     pub predictions: Vec<PredictionDiag>,
+    /// Final particle states after the last observation (post-resampling).
+    /// Only populated when `save_final_state` is true.
+    pub final_states: Option<Vec<ParticleState>>,
 }
 
 /// Signature for a single-step function that advances particle state.
@@ -143,6 +146,7 @@ pub fn bootstrap_filter(
         predictions,
         ess_trace,
         ll_increments,
+        final_states: Some(swarm.states),
     })
 }
 

@@ -133,10 +133,12 @@ pub struct IF2IterResult {
 /// Result of the full IF2 run.
 pub struct IF2Result {
     pub iterations: Vec<IF2IterResult>,
-    /// Final MLE estimate (param means from last iteration).
+    /// MLE estimate: param means from the best-loglik iteration.
     pub mle: Vec<f64>,
-    /// Final log-likelihood.
+    /// Best log-likelihood across all iterations.
     pub final_loglik: f64,
+    /// Last iteration's log-likelihood (for diagnostics).
+    pub last_loglik: f64,
 }
 
 /// Observation for IF2 (same as particle_filter::Observation).
@@ -157,6 +159,10 @@ pub struct Observation {
 /// * `project_fn` — extract projected quantity from particle state
 /// * `dmeasure_fn` — observation log-likelihood (takes projected, observed, params)
 /// * `seed` — base RNG seed
+/// Optional callback invoked after each IF2 iteration.
+/// Arguments: (iteration_index, log_likelihood).
+pub type ProgressCallback<'a> = Option<&'a dyn Fn(usize, f64)>;
+
 pub fn run_if2(
     model: &CompiledModel,
     base_params: &[f64],
@@ -167,6 +173,22 @@ pub fn run_if2(
     project_fn: &dyn Fn(&ParticleState) -> f64,
     dmeasure_fn: &dyn Fn(f64, f64, &[f64]) -> f64,
     seed: u64,
+) -> Result<IF2Result, SimError> {
+    run_if2_with_progress(model, base_params, if2_params, observations, config,
+        step_fn, project_fn, dmeasure_fn, seed, None)
+}
+
+pub fn run_if2_with_progress(
+    model: &CompiledModel,
+    base_params: &[f64],
+    if2_params: &[IF2Param],
+    observations: &[Observation],
+    config: &IF2Config,
+    step_fn: &dyn Fn(&mut ParticleState, &[f64], f64, f64, &mut StatefulRng) -> Result<(), SimError>,
+    project_fn: &dyn Fn(&ParticleState) -> f64,
+    dmeasure_fn: &dyn Fn(f64, f64, &[f64]) -> f64,
+    seed: u64,
+    on_iteration: ProgressCallback,
 ) -> Result<IF2Result, SimError> {
     let n = config.n_particles;
     let n_int = model.int_local_to_global.len();
@@ -292,14 +314,25 @@ pub fn run_if2(
             param_means: param_means.clone(),
         });
 
+        // Report progress
+        if let Some(cb) = &on_iteration {
+            cb(iter, total_loglik);
+        }
+
         // Feed filter mean back as next iteration's starting params
         current_params = param_means;
     }
 
-    let final_iter = iterations.last().unwrap();
+    let last_iter = iterations.last().unwrap();
+    let best_iter = iterations.iter()
+        .filter(|it| it.log_likelihood.is_finite())
+        .max_by(|a, b| a.log_likelihood.partial_cmp(&b.log_likelihood).unwrap())
+        .unwrap_or(last_iter);
+
     Ok(IF2Result {
-        mle: final_iter.param_means.clone(),
-        final_loglik: final_iter.log_likelihood,
+        mle: best_iter.param_means.clone(),
+        final_loglik: best_iter.log_likelihood,
+        last_loglik: last_iter.log_likelihood,
         iterations,
     })
 }

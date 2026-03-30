@@ -15,13 +15,12 @@
 //!   With --output-dir: writes per-chain traces + summary JSON.
 
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
-use rayon::prelude::*;
 use sim::{
     compiled_model::CompiledModel,
     chain_binomial::step_one,
     inference::{
         obs_loglik::{negbin_logpmf, discretized_normal_logpmf_tol, DEFAULT_TOL},
-        if2::{run_if2, IF2Config, IF2Param, IF2Result, Observation, Transform},
+        if2::{run_if2_with_progress, IF2Config, IF2Param, IF2Result, Observation, Transform},
         ParticleState,
     },
     ekrng::StatefulRng,
@@ -43,6 +42,7 @@ fn run_one_chain(
     psi_idx: Option<usize>,
     tol: f64,
     base_seed: u64,
+    pb: Option<&ProgressBar>,
 ) -> IF2Result {
     let chain_seed = base_seed ^ (chain_id as u64).wrapping_mul(0x9e3779b97f4a7c15);
 
@@ -66,16 +66,31 @@ fn run_one_chain(
         }),
     };
 
-    eprintln!("  chain {} starting...", chain_id + 1);
-    let result = run_if2(
+    // Progress callback that updates the indicatif bar
+    let progress_cb = |iter: usize, loglik: f64| {
+        if let Some(bar) = pb {
+            bar.set_position((iter + 1) as u64);
+            if loglik.is_finite() {
+                bar.set_message(format!("ll={:.1}", loglik));
+            } else {
+                bar.set_message("ll=-inf".to_string());
+            }
+        }
+    };
+
+    let result = run_if2_with_progress(
         compiled, params, if2_params, observations, config,
         &step_fn, &project_fn, &*dmeasure_fn, chain_seed,
+        Some(&progress_cb),
     ).unwrap_or_else(|e| {
         eprintln!("chain {} error: {:?}", chain_id + 1, e);
         std::process::exit(1);
     });
 
-    eprintln!("  chain {} done: loglik={:.1}", chain_id + 1, result.final_loglik);
+    if let Some(bar) = pb {
+        bar.finish_with_message(format!("ll={:.1}", result.final_loglik));
+    }
+
     result
 }
 
@@ -185,19 +200,28 @@ pub fn cmd_if2(args: &[String]) {
         eprintln!("error: --data required"); std::process::exit(1);
     });
     let rw_sd_str = rw_sd_str.unwrap_or_else(|| {
-        eprintln!("error: --rw-sd required (e.g., --rw-sd \"R0=5,sigma=0.01\")"); std::process::exit(1);
+        eprintln!("error: --rw-sd required (e.g., --rw-sd \"R0=5,sigma=0.01\" or --rw-sd auto)"); std::process::exit(1);
     });
 
-    // Parse --rw-sd "R0=5,sigma=0.01,gamma=0.01"
-    let rw_sd_map: HashMap<String, f64> = rw_sd_str.split(',')
-        .map(|kv| {
-            let mut parts = kv.trim().splitn(2, '=');
-            let k = parts.next().unwrap().to_string();
-            let v: f64 = parts.next().and_then(|s| s.parse().ok())
-                .unwrap_or_else(|| { eprintln!("bad --rw-sd entry: {}", kv); std::process::exit(1); });
-            (k, v)
-        })
-        .collect();
+    // Parse --rw-sd: "auto" | "R0=5,sigma=auto,gamma=0.01"
+    let rw_sd_auto = rw_sd_str.trim() == "auto";
+    let rw_sd_map: HashMap<String, Option<f64>> = if rw_sd_auto {
+        HashMap::new() // all auto — will be filled after model load
+    } else {
+        rw_sd_str.split(',')
+            .map(|kv| {
+                let mut parts = kv.trim().splitn(2, '=');
+                let k = parts.next().unwrap().to_string();
+                let v_str = parts.next().unwrap_or("auto");
+                let v: Option<f64> = if v_str == "auto" { None } else {
+                    Some(v_str.parse().unwrap_or_else(|_| {
+                        eprintln!("bad --rw-sd entry: {}", kv); std::process::exit(1);
+                    }))
+                };
+                (k, v)
+            })
+            .collect()
+    };
 
     // Parse --fixed "N0,mu,k"
     let ivp_set: std::collections::HashSet<String> = ivp_str
@@ -272,28 +296,50 @@ pub fn cmd_if2(args: &[String]) {
     }
 
     // Build IF2Param specs from --rw-sd
+    //
+    // Two modes:
+    //   Explicit: --rw-sd "R0=5,sigma=0.01" → only named params estimated.
+    //     The rw_sd list IS the partition. --fixed is ignored.
+    //   Auto:     --rw-sd auto → all params estimated unless in --fixed.
+    //     Uses bounds-based heuristic: (hi-lo)/6 on transformed scale.
+    //     --fixed carves out non-estimable params (N0, mu, k, etc.).
+    //     Per-param auto: --rw-sd "R0=5,sigma=auto" mixes explicit + auto.
+    let param_names_to_estimate: Vec<String> = if rw_sd_auto {
+        let names: Vec<String> = model.parameters.iter()
+            .filter(|p| !fixed_set.contains(&p.name))
+            .map(|p| p.name.clone())
+            .collect();
+
+        // Warn if estimating everything (no --fixed with auto)
+        if fixed_set.is_empty() && names.len() > 4 {
+            eprintln!("\x1b[33mwarning: --rw-sd auto is estimating ALL {} parameters.\x1b[0m", names.len());
+            eprintln!("  Use --fixed to exclude parameters that should be held constant.");
+            eprintln!("  Estimating: {}", names.join(", "));
+            eprintln!("  Example: --fixed \"N0,mu,k\"");
+            eprintln!("  For calibrated rw_sd, use 'camdl fit' instead.");
+            eprintln!();
+        }
+        names
+    } else {
+        // Explicit mode: --fixed is ignored, rw_sd list is the partition
+        rw_sd_map.keys().cloned().collect()
+    };
+
     let mut if2_params: Vec<IF2Param> = Vec::new();
-    for (name, &rw_sd) in &rw_sd_map {
+    let mut any_auto = false;
+    for name in &param_names_to_estimate {
         let idx = compiled.param_index.get(name.as_str()).copied()
             .unwrap_or_else(|| { eprintln!("error: --rw-sd parameter '{}' not in model", name); std::process::exit(1); });
 
-        // Derive transform from parameter type and bounds.
-        // Key rule: if BOTH bounds are finite, use scaled logit to enforce them.
-        // Log only when the upper bound is infinite (truly unbounded positive).
-        // This prevents parameters from wandering outside their declared range
-        // during IF2 perturbation (the log transform ignores finite bounds).
         let ir_param = model.parameters.iter().find(|p| p.name == *name).unwrap();
         let (transform, lower, upper) = match ir_param.bounds {
             Some((lo, hi)) if lo.is_finite() && hi.is_finite() => {
-                // Both bounds finite → scaled logit enforces [lo, hi]
                 (Transform::Logit, lo, hi)
             }
             Some((lo, _)) if lo >= 0.0 => {
-                // Lower bound only (positive, no upper) → log
                 (Transform::Log, lo, f64::INFINITY)
             }
             _ => {
-                // No bounds or explicit transform override
                 match ir_param.transform {
                     Some(ir::parameter::Transform::Log) => (Transform::Log, 0.0, f64::INFINITY),
                     Some(ir::parameter::Transform::Logit) => (Transform::Logit, 0.0, 1.0),
@@ -301,6 +347,13 @@ pub fn cmd_if2(args: &[String]) {
                 }
             }
         };
+
+        // rw_sd: explicit value > auto from bounds
+        let explicit_rw_sd = rw_sd_map.get(name).and_then(|v| *v);
+        let rw_sd = explicit_rw_sd.unwrap_or_else(|| {
+            any_auto = true;
+            crate::fit::runner::auto_rw_sd_from_bounds_pub(lower, upper, &transform)
+        });
 
         if2_params.push(IF2Param {
             name: name.clone(),
@@ -314,16 +367,39 @@ pub fn cmd_if2(args: &[String]) {
         });
     }
 
+    // Report auto rw_sd values
+    if any_auto || rw_sd_auto {
+        eprintln!("if2: auto rw_sd (heuristic from bounds — use 'camdl fit' for calibrated values):");
+        for spec in &if2_params {
+            let explicit = rw_sd_map.get(&spec.name).and_then(|v| *v);
+            let source = if explicit.is_some() { "explicit" } else { "auto" };
+            let transform_name = match spec.transform {
+                Transform::Log => "log",
+                Transform::Logit => "logit",
+                Transform::None => "none",
+            };
+            let bounds_str = if spec.lower.is_finite() && spec.upper.is_finite() {
+                format!("[{}, {}]", spec.lower, spec.upper)
+            } else if spec.lower.is_finite() {
+                format!("[{}, ∞)", spec.lower)
+            } else {
+                "unbounded".to_string()
+            };
+            eprintln!("  {:12} rw_sd={:<10.4} ({}, {}, {})", spec.name, spec.rw_sd, transform_name, bounds_str, source);
+        }
+    }
+
     // Observation model parameters
     let rho_idx = compiled.param_index.get("rho").copied();
     let k_idx = compiled.param_index.get("k").copied();
     let psi_idx = compiled.param_index.get("psi").copied();
 
+    let n_fixed = model.parameters.len() - if2_params.len();
     let regime_name = regime.as_deref().unwrap_or("manual");
     eprintln!("if2: {} observations, {} chains × {} particles × {} iterations, cooling={}, dt={}, seed={}",
         observations.len(), n_chains, n_particles, n_iterations, cooling, dt, seed);
     eprintln!("if2: regime={}, estimating {} parameters, {} fixed, parallel={}",
-        regime_name, if2_params.len(), fixed_set.len(), parallel);
+        regime_name, if2_params.len(), n_fixed, parallel);
 
     // Parameter scale diagnostics
     for spec in &if2_params {
@@ -355,9 +431,20 @@ pub fn cmd_if2(args: &[String]) {
     let observations = Arc::new(observations);
     let flow_indices = Arc::new(flow_indices);
 
-    // ── Multi-chain execution ──────────────────────────────────────────────
-    // Use std::thread::scope for parallel chains — allows borrowing shared
-    // data (compiled, params, observations) without Arc/Send constraints.
+    // ── Multi-chain execution with indicatif progress ──────────────────────
+    let mp = MultiProgress::new();
+    let bar_style = ProgressStyle::default_bar()
+        .template("  chain {prefix} [{bar:25.cyan/dim}] {pos}/{len} {msg}")
+        .unwrap()
+        .progress_chars("━╸─");
+
+    let bars: Vec<ProgressBar> = (0..n_chains).map(|chain_id| {
+        let pb = mp.add(ProgressBar::new(n_iterations as u64));
+        pb.set_style(bar_style.clone());
+        pb.set_prefix(format!("{}", chain_id + 1));
+        pb
+    }).collect();
+
     let chain_results: Vec<(usize, IF2Result)> = if parallel > 1 && n_chains > 1 {
         std::thread::scope(|s| {
             let handles: Vec<_> = (0..n_chains).map(|chain_id| {
@@ -367,11 +454,13 @@ pub fn cmd_if2(args: &[String]) {
                 let flow_indices = &*flow_indices;
                 let params = &params;
                 let config = &config;
+                let pb = &bars[chain_id];
 
                 let obs_model_str = obs_model.as_str();
                 s.spawn(move || {
                     run_one_chain(chain_id, compiled, params, if2_params, observations,
-                        config, flow_indices, obs_model_str, rho_idx, k_idx, psi_idx, tol, seed)
+                        config, flow_indices, obs_model_str, rho_idx, k_idx, psi_idx, tol, seed,
+                        Some(pb))
                 })
             }).collect();
 
@@ -384,7 +473,8 @@ pub fn cmd_if2(args: &[String]) {
         (0..n_chains).map(|chain_id| {
             let result = run_one_chain(chain_id, &compiled, &params, &if2_params,
                 &observations, &config, &flow_indices, &obs_model,
-                rho_idx, k_idx, psi_idx, tol, seed);
+                rho_idx, k_idx, psi_idx, tol, seed,
+                Some(&bars[chain_id]));
             (chain_id, result)
         }).collect()
     };

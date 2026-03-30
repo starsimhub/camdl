@@ -32,6 +32,7 @@ pub fn cmd_pfilter(args: &[String]) {
     let mut obs_model = "negbin".to_string(); // "negbin" or "discretized_normal"
     let mut tol = sim::inference::obs_loglik::DEFAULT_TOL;
     let mut flow_name: Option<String> = None; // --flow recovery → project that transition
+    let mut save_final_state: Option<String> = None;
 
     let mut i = 0;
     while i < args.len() {
@@ -47,6 +48,7 @@ pub fn cmd_pfilter(args: &[String]) {
             "--obs-model" => { i += 1; obs_model = args[i].clone(); }
             "--tol"       => { i += 1; tol = args[i].parse().expect("--tol needs a number"); }
             "--flow"      => { i += 1; flow_name = Some(args[i].clone()); }
+            "--save-final-state" => { i += 1; save_final_state = Some(args[i].clone()); }
             "--param"     => {
                 i += 1;
                 let kv = &args[i];
@@ -233,6 +235,17 @@ pub fn cmd_pfilter(args: &[String]) {
         }
     }
 
+    // Save final particle states if requested
+    if let Some(ref path) = save_final_state {
+        if let Some(ref states) = result.final_states {
+            write_final_states(path, states, &model).unwrap_or_else(|e| {
+                eprintln!("error writing final states: {}", e);
+                std::process::exit(1);
+            });
+            eprintln!("final particle states ({} particles) written to {}", states.len(), path);
+        }
+    }
+
     // Always print total log-likelihood to stdout (or stderr if trace mode)
     let out = if trace { &mut std::io::stderr() as &mut dyn std::io::Write }
               else { &mut std::io::stdout() as &mut dyn std::io::Write };
@@ -274,3 +287,40 @@ fn load_data_tsv(path: &str) -> Result<Vec<Observation>, String> {
 }
 
 use std::io::Write;
+
+/// Write final particle states to a TSV file.
+/// Columns: particle_id, then one column per compartment, then flow_<transition>.
+fn write_final_states(
+    path: &str,
+    states: &[sim::inference::ParticleState],
+    model: &ir::Model,
+) -> Result<(), String> {
+    let mut f = std::fs::File::create(path)
+        .map_err(|e| format!("cannot create {}: {}", path, e))?;
+
+    // Header
+    write!(f, "particle").unwrap();
+    for c in &model.compartments {
+        if c.kind == ir::model::CompartmentKind::Integer {
+            write!(f, "\t{}", c.name).unwrap();
+        }
+    }
+    for tr in &model.transitions {
+        write!(f, "\tflow_{}", tr.name).unwrap();
+    }
+    writeln!(f).unwrap();
+
+    // Rows
+    for (i, state) in states.iter().enumerate() {
+        write!(f, "{}", i).unwrap();
+        for &c in &state.counts {
+            write!(f, "\t{}", c).unwrap();
+        }
+        for &fl in &state.flow_accumulators {
+            write!(f, "\t{}", fl).unwrap();
+        }
+        writeln!(f).unwrap();
+    }
+
+    Ok(())
+}
