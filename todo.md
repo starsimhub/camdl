@@ -6,8 +6,8 @@ Updated 2026-03-29.
 
 - [ ] Fix rayon parallelism in `camdl if2 --chains` (currently sequential;
       rayon + closure captures need debugging)
-- [ ] Install script / Makefile target: `make install` should copy
-      camdl-sim + camdlc + bin/camdl to ~/.local/bin reliably
+- [ ] Install script / Makefile target: `make install` should copy camdl-sim +
+      camdlc + bin/camdl to ~/.local/bin reliably
 
 ## Inference (inference-v0 branch, pre-merge)
 

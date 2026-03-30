@@ -3,22 +3,22 @@
 # to assess elimination probability differences.
 
 [config]
-model   = "ocaml/golden/polio_spatial_5.camdl"
-params  = "ocaml/golden/polio_spatial_5.params.toml"
+model = "ocaml/golden/polio_spatial_5.camdl"
+params = "ocaml/golden/polio_spatial_5.params.toml"
 backend = "tau_leap"
-dt      = 1.0
+dt = 1.0
 
 [config.seeds]
 n = 15
 
 [[scenario]]
-name   = "isolated"
+name = "isolated"
 params = { kappa = 0.0 }
 
 [[scenario]]
-name   = "coupled"
+name = "coupled"
 params = { kappa = 0.05 }
 
 [[scenario]]
-name   = "with_sia"
+name = "with_sia"
 enable = ["sia_north", "sia_south", "sia_east", "sia_west", "sia_center"]

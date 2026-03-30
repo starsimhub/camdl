@@ -177,9 +177,11 @@ distance matrices, historical immunization records. Anything that's
 observational or structural input to the model — not a quantity you'd infer.
 
 **Table dimensions come from the `dimensions {}` block.** The `age × age` in
-`C_age : age × age` refers to the `age` dimension declared in `dimensions { age
-= [child, adult] }`. The compiler uses the dimension levels to compute table
-sizes and resolve indexed lookups like `C_age[a, b]` into linear indices.
+`C_age : age × age` refers to the `age` dimension declared in
+`dimensions { age
+= [child, adult] }`. The compiler uses the dimension levels to
+compute table sizes and resolve indexed lookups like `C_age[a, b]` into linear
+indices.
 
 **Table lookups are resolved at compile time.** `C_age[child, adult]` becomes
 `TableLookup("C_age", Const(1))` in the IR — the index is a pre-computed
@@ -491,29 +493,29 @@ scenarios {
 
 ## Quick reference
 
-| Concern            | Syntax                                         | Notes                              |
-| ------------------ | ---------------------------------------------- | ---------------------------------- |
-| Compartments       | `compartments { S, I, R }`                     | what exists                        |
-| Dimensions         | `dimensions { age = [...] }` + `stratify(by=X)`| Cartesian product                  |
-| Derived quantities | `let N = S + I + R`                            | inlined at compile time            |
-| Parameters         | `parameters { beta : rate }`                   | external, supplied at runtime      |
-| Tables             | `tables { C : age × age = [...] }`             | fixed data arrays                  |
-| Continuous flow    | `src --> dst @ propensity`                     | Gillespie / tau-leap events        |
-| Scheduled events   | `transfer(...) at [times]`                     | interventions, discrete            |
-| Observations       | `incidence(...)`, likelihood                   | inference + synthetic data         |
-| Initial state      | `init { S = expr }`                            | override-by-source-order           |
-| Scenarios          | `enable`, `set`, `scale`, `compose`            | counterfactual selection           |
-| Time range         | `simulate { from, to }`                        | defaults, overridable              |
+| Concern            | Syntax                                          | Notes                         |
+| ------------------ | ----------------------------------------------- | ----------------------------- |
+| Compartments       | `compartments { S, I, R }`                      | what exists                   |
+| Dimensions         | `dimensions { age = [...] }` + `stratify(by=X)` | Cartesian product             |
+| Derived quantities | `let N = S + I + R`                             | inlined at compile time       |
+| Parameters         | `parameters { beta : rate }`                    | external, supplied at runtime |
+| Tables             | `tables { C : age × age = [...] }`              | fixed data arrays             |
+| Continuous flow    | `src --> dst @ propensity`                      | Gillespie / tau-leap events   |
+| Scheduled events   | `transfer(...) at [times]`                      | interventions, discrete       |
+| Observations       | `incidence(...)`, likelihood                    | inference + synthetic data    |
+| Initial state      | `init { S = expr }`                             | override-by-source-order      |
+| Scenarios          | `enable`, `set`, `scale`, `compose`             | counterfactual selection      |
+| Time range         | `simulate { from, to }`                         | defaults, overridable         |
 
 ---
 
 ## Known limitations
 
 **Index-only dimensions require a `dimensions {}` entry.** You can declare
-`dimensions { round = [r1, r2, r3] }` without a `stratify` to create a
-dimension that indexes tables but doesn't expand compartments. This supports
-per-patch scheduling tables like `sia_day : patch × round`. Table-only
-dimensions are declared the same way as stratification dimensions.
+`dimensions { round = [r1, r2, r3] }` without a `stratify` to create a dimension
+that indexes tables but doesn't expand compartments. This supports per-patch
+scheduling tables like `sia_day : patch × round`. Table-only dimensions are
+declared the same way as stratification dimensions.
 
 **Observation block not yet exercised in golden tests.** The syntax compiles but
 end-to-end inference (scoring, particle filter) is not yet implemented.

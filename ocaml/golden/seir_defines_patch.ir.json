@@ -20,7 +20,7 @@
   "transitions": [
     {
       "name": "infection_north",
-      "stoichiometry": [ [ "S_north", -1 ], [ "E_north", 1 ] ],
+      "stoichiometry": [["S_north", -1], ["E_north", 1]],
       "rate": {
         "bin_op": {
           "op": "div",
@@ -38,7 +38,7 @@
             }
           },
           "right": {
-            "pop_sum": [ "S_north", "E_north", "I_north", "R_north" ]
+            "pop_sum": ["S_north", "E_north", "I_north", "R_north"]
           }
         }
       },
@@ -51,7 +51,7 @@
     },
     {
       "name": "infection_south",
-      "stoichiometry": [ [ "S_south", -1 ], [ "E_south", 1 ] ],
+      "stoichiometry": [["S_south", -1], ["E_south", 1]],
       "rate": {
         "bin_op": {
           "op": "div",
@@ -69,7 +69,7 @@
             }
           },
           "right": {
-            "pop_sum": [ "S_south", "E_south", "I_south", "R_south" ]
+            "pop_sum": ["S_south", "E_south", "I_south", "R_south"]
           }
         }
       },
@@ -82,7 +82,7 @@
     },
     {
       "name": "infection_east",
-      "stoichiometry": [ [ "S_east", -1 ], [ "E_east", 1 ] ],
+      "stoichiometry": [["S_east", -1], ["E_east", 1]],
       "rate": {
         "bin_op": {
           "op": "div",
@@ -99,7 +99,7 @@
               "right": { "pop": "I_east" }
             }
           },
-          "right": { "pop_sum": [ "S_east", "E_east", "I_east", "R_east" ] }
+          "right": { "pop_sum": ["S_east", "E_east", "I_east", "R_east"] }
         }
       },
       "event_key": "infection_east:{firing_index}",
@@ -111,7 +111,7 @@
     },
     {
       "name": "progression_north",
-      "stoichiometry": [ [ "E_north", -1 ], [ "I_north", 1 ] ],
+      "stoichiometry": [["E_north", -1], ["I_north", 1]],
       "rate": {
         "bin_op": {
           "op": "mul",
@@ -128,7 +128,7 @@
     },
     {
       "name": "progression_south",
-      "stoichiometry": [ [ "E_south", -1 ], [ "I_south", 1 ] ],
+      "stoichiometry": [["E_south", -1], ["I_south", 1]],
       "rate": {
         "bin_op": {
           "op": "mul",
@@ -145,7 +145,7 @@
     },
     {
       "name": "progression_east",
-      "stoichiometry": [ [ "E_east", -1 ], [ "I_east", 1 ] ],
+      "stoichiometry": [["E_east", -1], ["I_east", 1]],
       "rate": {
         "bin_op": {
           "op": "mul",
@@ -162,7 +162,7 @@
     },
     {
       "name": "recovery_north",
-      "stoichiometry": [ [ "I_north", -1 ], [ "R_north", 1 ] ],
+      "stoichiometry": [["I_north", -1], ["R_north", 1]],
       "rate": {
         "bin_op": {
           "op": "mul",
@@ -179,7 +179,7 @@
     },
     {
       "name": "recovery_south",
-      "stoichiometry": [ [ "I_south", -1 ], [ "R_south", 1 ] ],
+      "stoichiometry": [["I_south", -1], ["R_south", 1]],
       "rate": {
         "bin_op": {
           "op": "mul",
@@ -196,7 +196,7 @@
     },
     {
       "name": "recovery_east",
-      "stoichiometry": [ [ "I_east", -1 ], [ "R_east", 1 ] ],
+      "stoichiometry": [["I_east", -1], ["R_east", 1]],
       "rate": {
         "bin_op": {
           "op": "mul",
@@ -218,7 +218,9 @@
     {
       "name": "pop",
       "values": [
-        { "const": 50000.0 }, { "const": 30000.0 }, { "const": 20000.0 }
+        { "const": 50000.0 },
+        { "const": 30000.0 },
+        { "const": 20000.0 }
       ],
       "out_of_bounds": "error"
     }
@@ -229,7 +231,7 @@
     {
       "name": "beta",
       "value": null,
-      "bounds": [ 0.001, 1.0 ],
+      "bounds": [0.001, 1.0],
       "prior": null,
       "transform": null,
       "initial_value": null
@@ -237,7 +239,7 @@
     {
       "name": "sigma",
       "value": null,
-      "bounds": [ 0.001, 1.0 ],
+      "bounds": [0.001, 1.0],
       "prior": null,
       "transform": null,
       "initial_value": null
@@ -245,7 +247,7 @@
     {
       "name": "gamma",
       "value": null,
-      "bounds": [ 0.001, 1.0 ],
+      "bounds": [0.001, 1.0],
       "prior": null,
       "transform": null,
       "initial_value": null
@@ -253,7 +255,7 @@
     {
       "name": "I0",
       "value": null,
-      "bounds": [ 1.0, 1000.0 ],
+      "bounds": [1.0, 1000.0],
       "prior": null,
       "transform": null,
       "initial_value": null
@@ -267,7 +269,7 @@
           "left": {
             "table_lookup": {
               "table": "pop",
-              "indices": [ { "const": 0.0 } ]
+              "indices": [{ "const": 0.0 }]
             }
           },
           "right": { "param": "I0" }
@@ -279,7 +281,7 @@
           "left": {
             "table_lookup": {
               "table": "pop",
-              "indices": [ { "const": 1.0 } ]
+              "indices": [{ "const": 1.0 }]
             }
           },
           "right": { "param": "I0" }
@@ -291,7 +293,7 @@
           "left": {
             "table_lookup": {
               "table": "pop",
-              "indices": [ { "const": 2.0 } ]
+              "indices": [{ "const": 2.0 }]
             }
           },
           "right": { "param": "I0" }
@@ -328,16 +330,16 @@
   ],
   "model_structure": {
     "dimensions": [
-      { "name": "patch", "values": [ "north", "south", "east" ] }
+      { "name": "patch", "values": ["north", "south", "east"] }
     ],
     "compartment_dims": {
-      "S": [ "patch" ],
-      "E": [ "patch" ],
-      "I": [ "patch" ],
-      "R": [ "patch" ]
+      "S": ["patch"],
+      "E": ["patch"],
+      "I": ["patch"],
+      "R": ["patch"]
     },
-    "base_compartments": [ "S", "E", "I", "R" ],
-    "transmission_transitions": [ "infection" ],
-    "infectious_compartments": [ "I" ]
+    "base_compartments": ["S", "E", "I", "R"],
+    "transmission_transitions": ["infection"],
+    "infectious_compartments": ["I"]
   }
 }

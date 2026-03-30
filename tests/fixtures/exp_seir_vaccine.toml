@@ -3,10 +3,10 @@
 # Exercises the params file integration path.
 
 [config]
-model   = "ocaml/golden/seir_vaccine.camdl"
-params  = "ocaml/golden/seir_vaccine.params.toml"
+model = "ocaml/golden/seir_vaccine.camdl"
+params = "ocaml/golden/seir_vaccine.params.toml"
 backend = "chain_binomial"
-dt      = 1.0
+dt = 1.0
 
 [config.seeds]
 n = 15
@@ -15,5 +15,5 @@ n = 15
 name = "no_sia"
 
 [[scenario]]
-name   = "with_sia"
+name = "with_sia"
 enable = ["sia_round_1"]

@@ -1,7 +1,7 @@
-import type { TrajectoryJson } from './trajectory';
+import type { TrajectoryJson } from "./trajectory";
 
 export interface RunConfig {
-  backend: 'gillespie' | 'tau_leap' | 'chain_binomial';
+  backend: "gillespie" | "tau_leap" | "chain_binomial";
   nSeeds: number;
   baseSeed: number;
   tEnd?: number;
@@ -21,6 +21,6 @@ export interface Scenario {
   paramOverrides: Record<string, number>;
   runs: ScenarioRun[];
   seedsCompleted: number;
-  status: 'idle' | 'running' | 'ok' | 'error';
+  status: "idle" | "running" | "ok" | "error";
   error?: string;
 }

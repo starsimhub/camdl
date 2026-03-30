@@ -1,12 +1,18 @@
-import type { FeatureCollection } from 'geojson';
-import type { IrModel } from '../types/ir';
-import type { Scenario, ScenarioRun } from '../types/experiment';
-import type { TrajectoryJson, TrajectorySnapshot } from '../types/trajectory';
+import type { FeatureCollection } from "geojson";
+import type { Scenario, ScenarioRun } from "../types/experiment";
+import type { IrModel } from "../types/ir";
+import type { TrajectoryJson, TrajectorySnapshot } from "../types/trajectory";
 
 // Mirror of SCENARIO_COLORS from store — avoids circular import
 const SCENARIO_COLORS = [
-  '#2dd4bf', '#f97316', '#a78bfa', '#22c55e',
-  '#f59e0b', '#ec4899', '#3b82f6', '#f43f5e',
+  "#2dd4bf",
+  "#f97316",
+  "#a78bfa",
+  "#22c55e",
+  "#f59e0b",
+  "#ec4899",
+  "#3b82f6",
+  "#f43f5e",
 ];
 
 interface RemoteRunEntry {
@@ -35,21 +41,21 @@ export interface RemoteExperiment {
 
 /** Parse a TSV trajectory into TrajectoryJson using the IR for column mapping. */
 function parseTsvTrajectory(tsv: string, ir: IrModel): TrajectoryJson {
-  const lines = tsv.trim().split('\n');
-  if (lines.length < 1) throw new Error('empty trajectory TSV');
-  const headers = lines[0].split('\t');
+  const lines = tsv.trim().split("\n");
+  if (lines.length < 1) throw new Error("empty trajectory TSV");
+  const headers = lines[0].split("\t");
 
   const intNames = ir.compartments
-    .filter((c) => c.kind === 'integer')
+    .filter((c) => c.kind === "integer")
     .map((c) => c.name);
   const realNames = ir.compartments
-    .filter((c) => c.kind === 'real')
+    .filter((c) => c.kind === "real")
     .map((c) => c.name);
   // Only build flowIdxs if the TSV actually has flow columns — checking up front avoids
   // 57k× headers.indexOf() calls and a 57k-element flows array per snapshot.
-  const hasFlowCols = headers.some((h) => h.startsWith('flow_'));
+  const hasFlowCols = headers.some((h) => h.startsWith("flow_"));
   const trNames = hasFlowCols ? ir.transitions.map((t) => t.name) : [];
-  const flowIdxs = hasFlowCols ? trNames.map((n) => headers.indexOf('flow_' + n)) : [];
+  const flowIdxs = hasFlowCols ? trNames.map((n) => headers.indexOf("flow_" + n)) : [];
 
   const tIdx = 0;
   const intIdxs = intNames.map((n) => headers.indexOf(n));
@@ -57,9 +63,9 @@ function parseTsvTrajectory(tsv: string, ir: IrModel): TrajectoryJson {
 
   const snapshots: TrajectorySnapshot[] = lines
     .slice(1)
-    .filter((l) => l.trim() !== '')
+    .filter((l) => l.trim() !== "")
     .map((line) => {
-      const cols = line.split('\t').map(Number);
+      const cols = line.split("\t").map(Number);
       return {
         t: cols[tIdx] ?? 0,
         counts: intIdxs.map((i) => (i >= 0 ? (cols[i] ?? 0) : 0)),
@@ -85,22 +91,22 @@ function parseTsvTrajectory(tsv: string, ir: IrModel): TrajectoryJson {
  *   GET {baseUrl}/runs/{hash}/traj.tsv — one per completed run (fetched in parallel)
  */
 export async function loadRemoteExperiment(baseUrl: string): Promise<RemoteExperiment> {
-  const url = baseUrl.replace(/\/$/, '');
+  const url = baseUrl.replace(/\/$/, "");
 
   // 1. Fetch manifest
   const manifestRes = await fetch(`${url}/manifest.json`);
   if (!manifestRes.ok) {
     throw new Error(
-      `Could not fetch manifest.json (${manifestRes.status} ${manifestRes.statusText}). ` +
-      `Is camdl serve running at ${url}?`
+      `Could not fetch manifest.json (${manifestRes.status} ${manifestRes.statusText}). `
+        + `Is camdl serve running at ${url}?`,
     );
   }
   const manifest: RemoteManifest = await manifestRes.json();
 
   if (!manifest.runs || manifest.runs.length === 0) {
     throw new Error(
-      `No completed runs found in manifest (completed=${manifest.completed ?? 0}/${manifest.total_runs ?? 0}). ` +
-      `Run "camdl experiment run" first.`
+      `No completed runs found in manifest (completed=${manifest.completed ?? 0}/${manifest.total_runs ?? 0}). `
+        + `Run "camdl experiment run" first.`,
     );
   }
 
@@ -108,8 +114,8 @@ export async function loadRemoteExperiment(baseUrl: string): Promise<RemoteExper
   const irRes = await fetch(`${url}/model.ir.json`);
   if (!irRes.ok) {
     throw new Error(
-      `Could not fetch model.ir.json (${irRes.status} ${irRes.statusText}). ` +
-      `Re-run the experiment to regenerate it.`
+      `Could not fetch model.ir.json (${irRes.status} ${irRes.statusText}). `
+        + `Re-run the experiment to regenerate it.`,
     );
   }
   const ir: IrModel = await irRes.json();
@@ -124,7 +130,7 @@ export async function loadRemoteExperiment(baseUrl: string): Promise<RemoteExper
       const tsv = await tsvRes.text();
       const trajectory = parseTsvTrajectory(tsv, ir);
       return { run, trajectory };
-    })
+    }),
   );
 
   // 4. Fetch GeoJSON boundary file if advertised in manifest (non-fatal if missing)
@@ -149,12 +155,12 @@ export async function loadRemoteExperiment(baseUrl: string): Promise<RemoteExper
 
   const scenarios: Scenario[] = manifest.scenarios.map((name, i) => ({
     id: crypto.randomUUID(),
-    name: i === 0 ? 'Baseline' : name,
+    name: i === 0 ? "Baseline" : name,
     color: SCENARIO_COLORS[i % SCENARIO_COLORS.length],
     paramOverrides: {},
     runs: grouped.get(name) ?? [],
     seedsCompleted: grouped.get(name)?.length ?? 0,
-    status: 'ok' as const,
+    status: "ok" as const,
   }));
 
   return { ir, scenarios, geo };

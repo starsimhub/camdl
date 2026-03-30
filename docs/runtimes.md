@@ -226,10 +226,10 @@ independent (no competition between transitions for the same source).
 
 **Multinomial competing risks.** When multiple transitions draw from the same
 source compartment (e.g., infection and death both depleting S), the
-chain-binomial uses a multinomial draw — not independent binomials. This
-matches pomp's `reulermultinom` semantics: the total number leaving a
-compartment is bounded by the compartment size, and the split between competing
-outflows is proportional to their rates.
+chain-binomial uses a multinomial draw — not independent binomials. This matches
+pomp's `reulermultinom` semantics: the total number leaving a compartment is
+bounded by the compartment size, and the split between competing outflows is
+proportional to their rates.
 
 Transitions are precomputed into **source groups** at model compilation time
 (`CompiledModel::source_groups`). For a source compartment with k competing
@@ -247,23 +247,23 @@ This sequential decomposition is exact for the multinomial distribution. For
 source groups of size 1 (single outflow), it reduces to a standard binomial.
 
 **Poisson approximation for draws.** Individual draws use `Poisson(n · p)`
-capped at `n`, which approximates `Binomial(n, p)` for large n. This is
-adequate for epidemic models where compartments typically hold hundreds to
-millions of individuals.
+capped at `n`, which approximates `Binomial(n, p)` for large n. This is adequate
+for epidemic models where compartments typically hold hundreds to millions of
+individuals.
 
 **Inflows.** Transitions with no source compartment (births, importation) are
-not part of any source group. They draw from the total propensity directly
-via `Poisson(rate · dt)`.
+not part of any source group. They draw from the total propensity directly via
+`Poisson(rate · dt)`.
 
 **Per-capita rate conversion.** The IR stores total propensities (e.g.,
-`mu × S`). The chain-binomial divides by `n_src` to recover the per-capita
-rate before converting to probability. This is critical: using the total
-propensity directly would give `p = 1 − exp(−mu·S·dt) ≈ 1.0` for large
-compartments, killing the entire population in one step.
+`mu × S`). The chain-binomial divides by `n_src` to recover the per-capita rate
+before converting to probability. This is critical: using the total propensity
+directly would give `p = 1 − exp(−mu·S·dt) ≈ 1.0` for large compartments,
+killing the entire population in one step.
 
-**Overdispersion.** When a transition has `overdispersed(rate, σ²)`, the
-Gamma multiplier is applied to the per-capita rate before probability
-conversion: `effective_rate = per_capita × G` where `G ~ Gamma(dt/σ², σ²/dt)`.
+**Overdispersion.** When a transition has `overdispersed(rate, σ²)`, the Gamma
+multiplier is applied to the per-capita rate before probability conversion:
+`effective_rate = per_capita × G` where `G ~ Gamma(dt/σ², σ²/dt)`.
 
 **Real compartments.** Advanced with RK4 _before_ the multinomial draws (using
 the start-of-step integer state). The ordering difference from tau-leap is
@@ -283,8 +283,8 @@ Chain-binomial and tau-leap agree in the limit of large populations and small p:
    construction. Tau-leap needs post-step clamping to zero.
 
 3. **Matches Euler-multinomial.** The chain-binomial is equivalent to pomp's
-   `reulermultinom` when using the same per-capita probabilities — making it
-   the appropriate backend for validating against pomp implementations.
+   `reulermultinom` when using the same per-capita probabilities — making it the
+   appropriate backend for validating against pomp implementations.
 
 ---
 
@@ -421,9 +421,10 @@ the Gamma concentrates at its mean and the draw converges to Poisson(λΔt).
 **Chain-binomial implementation.** Same Gamma-Poisson compound applied to the
 expected count n·p (where p = 1 − exp(−λΔt)), capped at the source population.
 
-**Backend capability system.** Each model declares required capabilities (derived
-from the IR at compile time). Each backend declares what it supports. Mismatch
-produces a hard error before simulation starts — no silent wrong answers.
+**Backend capability system.** Each model declares required capabilities
+(derived from the IR at compile time). Each backend declares what it supports.
+Mismatch produces a hard error before simulation starts — no silent wrong
+answers.
 
 ```
 $ camdl-sim model.ir.json --backend gillespie --seed 42

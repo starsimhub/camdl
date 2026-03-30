@@ -28,19 +28,19 @@
 
 [voi]
 experiment = "examples/polio_es/experiment.toml"
-design     = "prior"
+design = "prior"
 
 [decision]
-actions    = ["no_sia", "target_10", "sia_all"]
-reference  = "no_sia"
-utility    = "total_cases"
-direction  = "minimize"
+actions = ["no_sia", "target_10", "sia_all"]
+reference = "no_sia"
+utility = "total_cases"
+direction = "minimize"
 
 [decision.cost]
 target_10 = 36000.0
-sia_all   = 78000.0
+sia_all = 78000.0
 
 [study.es]
-parameter    = "p_positive"
-likelihood   = "binomial"
+parameter = "p_positive"
+likelihood = "binomial"
 sample_sizes = [5, 10, 20, 30, 50]

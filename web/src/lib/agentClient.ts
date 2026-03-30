@@ -1,9 +1,9 @@
 // Claude API agent with tool use — proxied through compiler-server to keep key server-side.
 
-import { useStore } from '../store';
-import { compile as compileApi } from './compilerClient';
-import { simulate as wasmSimulate } from './wasm';
-import { buildAgentContext } from './agentContext';
+import { useStore } from "../store";
+import { buildAgentContext } from "./agentContext";
+import { compile as compileApi } from "./compilerClient";
+import { simulate as wasmSimulate } from "./wasm";
 
 const SYSTEM_PROMPT = `You are an expert in stochastic compartmental epidemic modelling using the camdl DSL.
 
@@ -69,48 +69,48 @@ Rules:
 - Note: editing the DSL (via propose_edit) clears all experiment results. The user will need to re-run their experiment after accepting any edits.`;
 
 interface Message {
-  role: 'user' | 'assistant';
+  role: "user" | "assistant";
   content: string | ContentBlock[];
 }
 
 interface ContentBlock {
-  type: 'text' | 'tool_use' | 'tool_result';
+  type: "text" | "tool_use" | "tool_result";
   [key: string]: unknown;
 }
 
 const TOOLS = [
   {
-    name: 'compile',
-    description: 'Compile camdl DSL source to IR JSON. Use this to check validity before propose_edit.',
+    name: "compile",
+    description: "Compile camdl DSL source to IR JSON. Use this to check validity before propose_edit.",
     input_schema: {
-      type: 'object',
-      properties: { dsl: { type: 'string', description: 'camdl DSL source code' } },
-      required: ['dsl'],
+      type: "object",
+      properties: { dsl: { type: "string", description: "camdl DSL source code" } },
+      required: ["dsl"],
     },
   },
   {
-    name: 'simulate',
-    description: 'Run simulation given IR JSON. Returns trajectory summary statistics.',
+    name: "simulate",
+    description: "Run simulation given IR JSON. Returns trajectory summary statistics.",
     input_schema: {
-      type: 'object',
+      type: "object",
       properties: {
-        ir_json:  { type: 'string' },
-        backend:  { type: 'string', enum: ['gillespie', 'tau_leap', 'chain_binomial'], default: 'gillespie' },
-        seed:     { type: 'number', default: 42 },
+        ir_json: { type: "string" },
+        backend: { type: "string", enum: ["gillespie", "tau_leap", "chain_binomial"], default: "gillespie" },
+        seed: { type: "number", default: 42 },
       },
-      required: ['ir_json'],
+      required: ["ir_json"],
     },
   },
   {
-    name: 'propose_edit',
-    description: 'Propose a change to the current DSL. The user will see a diff and can accept or reject.',
+    name: "propose_edit",
+    description: "Propose a change to the current DSL. The user will see a diff and can accept or reject.",
     input_schema: {
-      type: 'object',
+      type: "object",
       properties: {
-        modified:    { type: 'string', description: 'Complete modified DSL source' },
-        explanation: { type: 'string', description: 'Plain English explanation of what changed and why' },
+        modified: { type: "string", description: "Complete modified DSL source" },
+        explanation: { type: "string", description: "Plain English explanation of what changed and why" },
       },
-      required: ['modified', 'explanation'],
+      required: ["modified", "explanation"],
     },
   },
 ];
@@ -119,8 +119,8 @@ const TOOLS = [
 async function executeTool(name: string, input: Record<string, unknown>): Promise<string> {
   const store = useStore.getState();
 
-  if (name === 'compile') {
-    const result = await compileApi(String(input.dsl ?? ''));
+  if (name === "compile") {
+    const result = await compileApi(String(input.dsl ?? ""));
     if (result.ok) {
       return JSON.stringify({ ok: true, ir: result.ir });
     } else {
@@ -128,29 +128,33 @@ async function executeTool(name: string, input: Record<string, unknown>): Promis
     }
   }
 
-  if (name === 'simulate') {
+  if (name === "simulate") {
     try {
-      const traj = await wasmSimulate(String(input.ir_json ?? ''), {
-        backend: (input.backend as 'gillespie') ?? 'gillespie',
+      const traj = await wasmSimulate(String(input.ir_json ?? ""), {
+        backend: (input.backend as "gillespie") ?? "gillespie",
         seed: Number(input.seed ?? 42),
       });
       // Return summary stats instead of full trajectory
       const last = traj.snapshots[traj.snapshots.length - 1];
       const summary: Record<string, number> = {};
-      traj.int_compartment_names.forEach((n, i) => { summary[n] = last?.counts[i] ?? 0; });
-      traj.real_compartment_names.forEach((n, i) => { summary[n] = last?.values[i] ?? 0; });
+      traj.int_compartment_names.forEach((n, i) => {
+        summary[n] = last?.counts[i] ?? 0;
+      });
+      traj.real_compartment_names.forEach((n, i) => {
+        summary[n] = last?.values[i] ?? 0;
+      });
       return JSON.stringify({ ok: true, final_state: summary, n_snapshots: traj.snapshots.length });
     } catch (e) {
       return JSON.stringify({ ok: false, error: String(e) });
     }
   }
 
-  if (name === 'propose_edit') {
+  if (name === "propose_edit") {
     store.setPendingDiff({
-      modified:    String(input.modified ?? ''),
-      explanation: String(input.explanation ?? ''),
+      modified: String(input.modified ?? ""),
+      explanation: String(input.explanation ?? ""),
     });
-    return JSON.stringify({ ok: true, message: 'Diff shown to user for review.' });
+    return JSON.stringify({ ok: true, message: "Diff shown to user for review." });
   }
 
   return JSON.stringify({ error: `Unknown tool: ${name}` });
@@ -166,16 +170,18 @@ export async function sendMessage(userText: string) {
 
   const history: Message[] = store.messages
     .slice(-19)
-    .filter((m) => m.role === 'user' || m.role === 'assistant')
+    .filter((m) => m.role === "user" || m.role === "assistant")
     .map((m) => ({ role: m.role, content: m.content }));
 
   history.push({
-    role: 'user',
-    content: `${userText}\n\n---\nCurrent model DSL:\n\`\`\`camdl\n${dslSource}\n\`\`\`\n\nApp state:\n\`\`\`json\n${JSON.stringify(ctx, null, 2)}\n\`\`\``,
+    role: "user",
+    content: `${userText}\n\n---\nCurrent model DSL:\n\`\`\`camdl\n${dslSource}\n\`\`\`\n\nApp state:\n\`\`\`json\n${
+      JSON.stringify(ctx, null, 2)
+    }\n\`\`\``,
   });
 
   store.addUserMessage(userText);
-  store.setAgentPhase('waiting');
+  store.setAgentPhase("waiting");
 
   const assistantMsgId = crypto.randomUUID();
   store.startAssistantMessage(assistantMsgId);
@@ -186,16 +192,16 @@ export async function sendMessage(userText: string) {
     let iterations = 0;
     while (iterations++ < 10) {
       const body = {
-        model: 'claude-opus-4-6',
+        model: "claude-opus-4-6",
         max_tokens: 4096,
         system: SYSTEM_PROMPT,
         tools: TOOLS,
         messages,
       };
 
-      const res = await fetch('/api/agent/stream', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+      const res = await fetch("/api/agent/stream", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
 
@@ -208,90 +214,96 @@ export async function sendMessage(userText: string) {
       // Parse SSE stream
       const reader = res.body!.getReader();
       const decoder = new TextDecoder();
-      let buf = '';
+      let buf = "";
 
-      let stopReason = '';
+      let stopReason = "";
       const toolUses: { id: string; name: string; inputStr: string }[] = [];
-      let currentToolId = '';
+      let currentToolId = "";
 
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
         buf += decoder.decode(value, { stream: true });
 
-        const lines = buf.split('\n');
-        buf = lines.pop() ?? '';
+        const lines = buf.split("\n");
+        buf = lines.pop() ?? "";
 
         for (const line of lines) {
-          if (!line.startsWith('data: ')) continue;
+          if (!line.startsWith("data: ")) continue;
           const data = line.slice(6).trim();
-          if (data === '[DONE]' || !data) continue;
+          if (data === "[DONE]" || !data) continue;
 
           let event: Record<string, unknown>;
-          try { event = JSON.parse(data); } catch { continue; }
+          try {
+            event = JSON.parse(data);
+          } catch {
+            continue;
+          }
 
           const t = event.type as string;
 
-          if (t === 'content_block_start') {
+          if (t === "content_block_start") {
             const block = event.content_block as { type: string; id?: string; name?: string };
-            if (block.type === 'tool_use') {
-              currentToolId = block.id ?? '';
-              toolUses.push({ id: currentToolId, name: block.name ?? '', inputStr: '' });
-              store.addToolCall(assistantMsgId, block.name ?? '', 'running', '');
+            if (block.type === "tool_use") {
+              currentToolId = block.id ?? "";
+              toolUses.push({ id: currentToolId, name: block.name ?? "", inputStr: "" });
+              store.addToolCall(assistantMsgId, block.name ?? "", "running", "");
             }
           }
 
-          if (t === 'content_block_delta') {
+          if (t === "content_block_delta") {
             const delta = event.delta as { type: string; text?: string; partial_json?: string };
-            if (delta.type === 'text_delta' && delta.text) {
-              store.setAgentPhase('streaming');
+            if (delta.type === "text_delta" && delta.text) {
+              store.setAgentPhase("streaming");
               store.appendAssistantChunk(assistantMsgId, delta.text);
             }
-            if (delta.type === 'input_json_delta' && delta.partial_json) {
+            if (delta.type === "input_json_delta" && delta.partial_json) {
               const tu = toolUses.find((t) => t.id === currentToolId);
               if (tu) tu.inputStr += delta.partial_json;
             }
           }
 
-          if (t === 'message_delta') {
+          if (t === "message_delta") {
             const d = event.delta as { stop_reason?: string };
-            stopReason = d.stop_reason ?? '';
+            stopReason = d.stop_reason ?? "";
           }
         }
       }
 
-      if (stopReason !== 'tool_use' || toolUses.length === 0) break;
+      if (stopReason !== "tool_use" || toolUses.length === 0) break;
 
       // Execute tool calls
-      store.setAgentPhase('tool_calling');
+      store.setAgentPhase("tool_calling");
       const toolResults = [];
       for (const tu of toolUses) {
         let input: Record<string, unknown> = {};
-        try { input = JSON.parse(tu.inputStr); } catch {}
+        try {
+          input = JSON.parse(tu.inputStr);
+        } catch {}
 
-        store.addToolCall(assistantMsgId, tu.name, 'running', `${tu.name}(…)`);
+        store.addToolCall(assistantMsgId, tu.name, "running", `${tu.name}(…)`);
         const result = await executeTool(tu.name, input);
-        store.addToolCall(assistantMsgId, tu.name, 'done', `${tu.name} ✓`);
+        store.addToolCall(assistantMsgId, tu.name, "done", `${tu.name} ✓`);
 
-        toolResults.push({ type: 'tool_result', tool_use_id: tu.id, content: result });
+        toolResults.push({ type: "tool_result", tool_use_id: tu.id, content: result });
       }
-      store.setAgentPhase('waiting');
+      store.setAgentPhase("waiting");
 
       // Continue conversation with tool results
       messages.push({
-        role: 'assistant',
+        role: "assistant",
         content: toolUses.map((tu) => ({
-          type: 'tool_use',
+          type: "tool_use",
           id: tu.id,
           name: tu.name,
-          input: JSON.parse(tu.inputStr || '{}'),
+          input: JSON.parse(tu.inputStr || "{}"),
         })),
       });
-      messages.push({ role: 'user', content: toolResults as unknown as string });
+      messages.push({ role: "user", content: toolResults as unknown as string });
     }
   } catch (e) {
     store.appendAssistantChunk(assistantMsgId, `\n\n[Error: ${e}]`);
   } finally {
-    store.setAgentPhase('idle');
+    store.setAgentPhase("idle");
   }
 }

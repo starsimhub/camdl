@@ -10,9 +10,9 @@
  * "Patch name" is the slug for that index (or `p${N}` for numeric convention).
  */
 
-import type { IrModel } from '../types/ir';
-import type { TrajectoryJson } from '../types/trajectory';
-import type { Scenario } from '../types/experiment';
+import type { Scenario } from "../types/experiment";
+import type { IrModel } from "../types/ir";
+import type { TrajectoryJson } from "../types/trajectory";
 
 export interface PatchInfo {
   /** Sorted list of all patch indices (0-based). */
@@ -40,14 +40,14 @@ export function detectPatches(traj: TrajectoryJson, ir?: IrModel | null): PatchI
   const allNames = [...traj.int_compartment_names, ...traj.real_compartment_names];
 
   // ── Strategy 1: use model_structure dimension named "patch" ────────────────
-  const patchDim = ir?.model_structure?.dimensions?.find((d) => d.name === 'patch');
+  const patchDim = ir?.model_structure?.dimensions?.find((d) => d.name === "patch");
   if (patchDim && patchDim.values.length > 0) {
     const slugs = patchDim.values;
     const slugSet = new Set(slugs);
 
     // Confirm at least one compartment has a matching suffix
     const hasPatch = allNames.some((n) => {
-      const uIdx = n.indexOf('_');
+      const uIdx = n.indexOf("_");
       if (uIdx < 0) return false;
       const suffix = n.slice(uIdx + 1);
       return slugSet.has(suffix);
@@ -57,7 +57,7 @@ export function detectPatches(traj: TrajectoryJson, ir?: IrModel | null): PatchI
     // Extract compartment type prefixes (first `_`-token) for compartments with a patch suffix
     const types = new Set<string>();
     for (const n of allNames) {
-      const uIdx = n.indexOf('_');
+      const uIdx = n.indexOf("_");
       if (uIdx < 0) continue;
       const base = n.slice(0, uIdx);
       const suffix = n.slice(uIdx + 1);
@@ -84,7 +84,7 @@ export function detectPatches(traj: TrajectoryJson, ir?: IrModel | null): PatchI
   const types = new Set<string>();
   for (const n of allNames) {
     if (/_p\d+$/.test(n)) {
-      types.add(n.split('_')[0]);
+      types.add(n.split("_")[0]);
     }
   }
 

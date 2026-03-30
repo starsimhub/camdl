@@ -16,7 +16,7 @@
   "transitions": [
     {
       "name": "infection_urban",
-      "stoichiometry": [ [ "S_urban", -1 ], [ "E_urban", 1 ] ],
+      "stoichiometry": [["S_urban", -1], ["E_urban", 1]],
       "rate": {
         "bin_op": {
           "op": "div",
@@ -34,7 +34,7 @@
             }
           },
           "right": {
-            "pop_sum": [ "S_urban", "E_urban", "I_urban", "R_urban" ]
+            "pop_sum": ["S_urban", "E_urban", "I_urban", "R_urban"]
           }
         }
       },
@@ -47,7 +47,7 @@
     },
     {
       "name": "infection_rural",
-      "stoichiometry": [ [ "S_rural", -1 ], [ "E_rural", 1 ] ],
+      "stoichiometry": [["S_rural", -1], ["E_rural", 1]],
       "rate": {
         "bin_op": {
           "op": "div",
@@ -65,7 +65,7 @@
             }
           },
           "right": {
-            "pop_sum": [ "S_rural", "E_rural", "I_rural", "R_rural" ]
+            "pop_sum": ["S_rural", "E_rural", "I_rural", "R_rural"]
           }
         }
       },
@@ -78,7 +78,7 @@
     },
     {
       "name": "progression_urban",
-      "stoichiometry": [ [ "E_urban", -1 ], [ "I_urban", 1 ] ],
+      "stoichiometry": [["E_urban", -1], ["I_urban", 1]],
       "rate": {
         "bin_op": {
           "op": "mul",
@@ -95,7 +95,7 @@
     },
     {
       "name": "progression_rural",
-      "stoichiometry": [ [ "E_rural", -1 ], [ "I_rural", 1 ] ],
+      "stoichiometry": [["E_rural", -1], ["I_rural", 1]],
       "rate": {
         "bin_op": {
           "op": "mul",
@@ -112,7 +112,7 @@
     },
     {
       "name": "recovery_urban",
-      "stoichiometry": [ [ "I_urban", -1 ], [ "R_urban", 1 ] ],
+      "stoichiometry": [["I_urban", -1], ["R_urban", 1]],
       "rate": {
         "bin_op": {
           "op": "mul",
@@ -129,7 +129,7 @@
     },
     {
       "name": "recovery_rural",
-      "stoichiometry": [ [ "I_rural", -1 ], [ "R_rural", 1 ] ],
+      "stoichiometry": [["I_rural", -1], ["R_rural", 1]],
       "rate": {
         "bin_op": {
           "op": "mul",
@@ -177,7 +177,7 @@
     {
       "name": "sigma",
       "value": null,
-      "bounds": [ 0.01, 1.0 ],
+      "bounds": [0.01, 1.0],
       "prior": null,
       "transform": null,
       "initial_value": null
@@ -185,7 +185,7 @@
     {
       "name": "gamma",
       "value": null,
-      "bounds": [ 0.01, 1.0 ],
+      "bounds": [0.01, 1.0],
       "prior": null,
       "transform": null,
       "initial_value": null
@@ -193,7 +193,7 @@
     {
       "name": "baseline",
       "value": null,
-      "bounds": [ 0.01, 1.0 ],
+      "bounds": [0.01, 1.0],
       "prior": null,
       "transform": null,
       "initial_value": null
@@ -201,7 +201,7 @@
     {
       "name": "amp_urban",
       "value": null,
-      "bounds": [ 0.0, 1.0 ],
+      "bounds": [0.0, 1.0],
       "prior": null,
       "transform": null,
       "initial_value": null
@@ -209,7 +209,7 @@
     {
       "name": "amp_rural",
       "value": null,
-      "bounds": [ 0.0, 1.0 ],
+      "bounds": [0.0, 1.0],
       "prior": null,
       "transform": null,
       "initial_value": null
@@ -217,7 +217,7 @@
     {
       "name": "N0_urban",
       "value": null,
-      "bounds": [ 100.0, 1000000.0 ],
+      "bounds": [100.0, 1000000.0],
       "prior": null,
       "transform": null,
       "initial_value": null
@@ -225,7 +225,7 @@
     {
       "name": "N0_rural",
       "value": null,
-      "bounds": [ 100.0, 1000000.0 ],
+      "bounds": [100.0, 1000000.0],
       "prior": null,
       "transform": null,
       "initial_value": null
@@ -233,7 +233,7 @@
     {
       "name": "I0",
       "value": null,
-      "bounds": [ 1.0, 1000.0 ],
+      "bounds": [1.0, 1000.0],
       "prior": null,
       "transform": null,
       "initial_value": null
@@ -286,15 +286,15 @@
     }
   ],
   "model_structure": {
-    "dimensions": [ { "name": "patch", "values": [ "urban", "rural" ] } ],
+    "dimensions": [{ "name": "patch", "values": ["urban", "rural"] }],
     "compartment_dims": {
-      "S": [ "patch" ],
-      "E": [ "patch" ],
-      "I": [ "patch" ],
-      "R": [ "patch" ]
+      "S": ["patch"],
+      "E": ["patch"],
+      "I": ["patch"],
+      "R": ["patch"]
     },
-    "base_compartments": [ "S", "E", "I", "R" ],
-    "transmission_transitions": [ "infection" ],
-    "infectious_compartments": [ "I" ]
+    "base_compartments": ["S", "E", "I", "R"],
+    "transmission_transitions": ["infection"],
+    "infectious_compartments": ["I"]
   }
 }

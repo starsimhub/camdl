@@ -8,20 +8,20 @@ name = "camdl-sim"
 path = "src/main.rs"
 
 [dependencies]
+axum = "0.7"
+csv = "1"
+hex = "0.4"
+indicatif = "0.17"
 io = { path = "../io" }
 ir = { path = "../ir" }
 observe = { path = "../observe" }
+rayon = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-sim = { path = "../sim" }
-toml = { version = "0.8", features = ["parse"] }
 sha2 = "0.10"
-hex = "0.4"
-rayon = "1"
-indicatif = "0.17"
-csv = "1"
-axum = "0.7"
+sim = { path = "../sim" }
 tokio = { version = "1", features = ["rt-multi-thread", "net", "macros"] }
+toml = { version = "0.8", features = ["parse"] }
 tower-http = { version = "0.5", features = ["fs", "cors"] }
 
 [dev-dependencies]

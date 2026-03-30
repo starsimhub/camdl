@@ -1,23 +1,23 @@
-import { create } from 'zustand';
-import type { Node, Edge } from '@xyflow/react';
-import type { FeatureCollection } from 'geojson';
-import type { IrModel, Diagnostic } from '../types/ir';
-import type { RunConfig, Scenario } from '../types/experiment';
-import type { Span, SpanMap } from '../lib/spanExtractor';
-import { compile as compileApi } from '../lib/compilerClient';
-import { simulate as wasmSimulate } from '../lib/wasm';
-import { irToCanvas } from '../lib/irToCanvas';
-import { extractSpans } from '../lib/spanExtractor';
-import { EXAMPLES } from '../lib/examples';
-import { loadRemoteExperiment } from '../lib/remoteDataSource';
+import type { Edge, Node } from "@xyflow/react";
+import type { FeatureCollection } from "geojson";
+import { create } from "zustand";
+import { compile as compileApi } from "../lib/compilerClient";
+import { EXAMPLES } from "../lib/examples";
+import { irToCanvas } from "../lib/irToCanvas";
+import { loadRemoteExperiment } from "../lib/remoteDataSource";
+import type { Span, SpanMap } from "../lib/spanExtractor";
+import { extractSpans } from "../lib/spanExtractor";
+import { simulate as wasmSimulate } from "../lib/wasm";
+import type { RunConfig, Scenario } from "../types/experiment";
+import type { Diagnostic, IrModel } from "../types/ir";
 
-export type ActiveTab = 'dsl' | 'agent';
+export type ActiveTab = "dsl" | "agent";
 
 export interface AgentMessage {
   id: string;
-  role: 'user' | 'assistant';
+  role: "user" | "assistant";
   content: string;
-  toolCalls?: { name: string; status: 'running' | 'done' | 'error'; summary: string }[];
+  toolCalls?: { name: string; status: "running" | "done" | "error"; summary: string }[];
 }
 
 export interface ProposedEdit {
@@ -26,16 +26,22 @@ export interface ProposedEdit {
 }
 
 // Re-export for consumers
-export type { Scenario, RunConfig, ScenarioRun } from '../types/experiment';
+export type { RunConfig, Scenario, ScenarioRun } from "../types/experiment";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 const SCENARIO_COLORS = [
-  '#2dd4bf', '#f97316', '#a78bfa', '#22c55e',
-  '#f59e0b', '#ec4899', '#3b82f6', '#f43f5e',
+  "#2dd4bf",
+  "#f97316",
+  "#a78bfa",
+  "#22c55e",
+  "#f59e0b",
+  "#ec4899",
+  "#3b82f6",
+  "#f43f5e",
 ];
 
-const SCENARIO_DASHES = ['', '6 3', '2 3', '10 4 2 4', '1 4'];
+const SCENARIO_DASHES = ["", "6 3", "2 3", "10 4 2 4", "1 4"];
 
 function nextColor(scenarios: Scenario[]): string {
   return SCENARIO_COLORS[scenarios.length % SCENARIO_COLORS.length];
@@ -45,17 +51,17 @@ function nextDash(scenarios: Scenario[]): string {
   return SCENARIO_DASHES[scenarios.length % SCENARIO_DASHES.length];
 }
 
-export { SCENARIO_COLORS, SCENARIO_DASHES, nextDash };
+export { nextDash, SCENARIO_COLORS, SCENARIO_DASHES };
 
 function makeBaseline(): Scenario {
   return {
     id: crypto.randomUUID(),
-    name: 'Baseline',
+    name: "Baseline",
     color: SCENARIO_COLORS[0],
     paramOverrides: {},
     runs: [],
     seedsCompleted: 0,
-    status: 'idle',
+    status: "idle",
   };
 }
 
@@ -63,17 +69,17 @@ function makeBaseline(): Scenario {
  *  Non-baseline scenarios inherit the baseline's params, then apply their own
  *  overrides on top — so a scenario with only enable/disable and no set={} gets
  *  sensible starting values in the parameter panel. */
-function scenariosFromPresets(presets: IrModel['scenarios'] | IrModel['presets']): Scenario[] {
+function scenariosFromPresets(presets: IrModel["scenarios"] | IrModel["presets"]): Scenario[] {
   if (!presets || presets.length === 0) return [makeBaseline()];
   const baseParams = presets[0]?.params ?? {};
   return presets.map((p, i) => ({
     id: crypto.randomUUID(),
-    name: i === 0 ? 'Baseline' : p.label,
+    name: i === 0 ? "Baseline" : p.label,
     color: SCENARIO_COLORS[i % SCENARIO_COLORS.length],
     paramOverrides: { ...baseParams, ...p.params },
     runs: [],
     seedsCompleted: 0,
-    status: 'idle' as const,
+    status: "idle" as const,
   }));
 }
 
@@ -84,8 +90,7 @@ function patchIr(ir: IrModel, paramOverrides: Record<string, number>, runConfig:
     parameters: ir.parameters.map((p) =>
       paramOverrides[p.name] !== undefined ? { ...p, value: paramOverrides[p.name] } : p
     ),
-    simulation:
-      runConfig.tEnd != null ? { ...ir.simulation, t_end: runConfig.tEnd } : ir.simulation,
+    simulation: runConfig.tEnd != null ? { ...ir.simulation, t_end: runConfig.tEnd } : ir.simulation,
   };
 }
 
@@ -102,7 +107,7 @@ interface CamdlStore {
   ir: IrModel | null;
   irHash: string | null;
   diagnostics: Diagnostic[];
-  compileStatus: 'idle' | 'compiling' | 'ok' | 'error';
+  compileStatus: "idle" | "compiling" | "ok" | "error";
   compile: () => Promise<void>;
 
   // ── Canvas ────────────────────────────────────────────────────────────────────
@@ -118,7 +123,7 @@ interface CamdlStore {
   setRunConfig: (c: Partial<RunConfig>) => void;
 
   // ── Experiment ────────────────────────────────────────────────────────────────
-  experimentStatus: 'idle' | 'running' | 'ok' | 'error';
+  experimentStatus: "idle" | "running" | "ok" | "error";
   runExperiment: () => Promise<void>;
   stopExperiment: () => void;
 
@@ -138,19 +143,19 @@ interface CamdlStore {
   // ── Agent ─────────────────────────────────────────────────────────────────────
   messages: AgentMessage[];
   /** idle → waiting → streaming ↔ tool_calling → idle */
-  agentPhase: 'idle' | 'waiting' | 'streaming' | 'tool_calling';
+  agentPhase: "idle" | "waiting" | "streaming" | "tool_calling";
   pendingDiff: ProposedEdit | null;
   addUserMessage: (text: string) => void;
   appendAssistantChunk: (id: string, chunk: string) => void;
   startAssistantMessage: (id: string) => void;
-  addToolCall: (msgId: string, name: string, status: 'running' | 'done' | 'error', summary: string) => void;
-  setAgentPhase: (p: 'idle' | 'waiting' | 'streaming' | 'tool_calling') => void;
+  addToolCall: (msgId: string, name: string, status: "running" | "done" | "error", summary: string) => void;
+  setAgentPhase: (p: "idle" | "waiting" | "streaming" | "tool_calling") => void;
   setPendingDiff: (d: ProposedEdit | null) => void;
   acceptDiff: () => void;
   rejectDiff: () => void;
 
   // ── Remote data source ────────────────────────────────────────────────────────
-  connectStatus: 'idle' | 'loading' | 'error';
+  connectStatus: "idle" | "loading" | "error";
   connectError: string | null;
   connectRemote: (url: string) => Promise<void>;
   remoteGeo: FeatureCollection | null;
@@ -202,7 +207,7 @@ simulate {
 export const useStore = create<CamdlStore>((set, get) => ({
   // DSL
   dslSource: DEFAULT_DSL,
-  modelName: 'sir_basic',
+  modelName: "sir_basic",
   setModelName: (n) => set({ modelName: n }),
 
   setDslSource: (s) => {
@@ -215,11 +220,11 @@ export const useStore = create<CamdlStore>((set, get) => ({
   ir: null,
   irHash: null,
   diagnostics: [],
-  compileStatus: 'idle',
+  compileStatus: "idle",
 
   compile: async () => {
     const { dslSource, modelName } = get();
-    set({ compileStatus: 'compiling' });
+    set({ compileStatus: "compiling" });
     try {
       const result = await compileApi(dslSource, modelName);
       if (result.ok) {
@@ -233,7 +238,7 @@ export const useStore = create<CamdlStore>((set, get) => ({
         if (irChanged) {
           const irScenarios = (ir: IrModel) => ir.scenarios ?? ir.presets ?? [];
           const prevPresetKey = JSON.stringify(irScenarios(get().ir ?? {} as IrModel).map(p => p.name));
-          const newPresetKey  = JSON.stringify(irScenarios(result.ir).map(p => p.name));
+          const newPresetKey = JSON.stringify(irScenarios(result.ir).map(p => p.name));
           const presetsChanged = prevPresetKey !== newPresetKey;
 
           if (presetsChanged) {
@@ -242,16 +247,20 @@ export const useStore = create<CamdlStore>((set, get) => ({
             const tEnd = irScenarios(result.ir)[0]?.t_end ?? undefined;
             set((s) => ({
               scenarios: newScenarios,
-              experimentStatus: 'idle',
+              experimentStatus: "idle",
               runConfig: tEnd != null ? { ...s.runConfig, tEnd } : s.runConfig,
             }));
           } else {
             // IR changed but presets didn't — just clear runs.
             set((s) => ({
               scenarios: s.scenarios.map((sc) => ({
-                ...sc, runs: [], seedsCompleted: 0, status: 'idle' as const, error: undefined,
+                ...sc,
+                runs: [],
+                seedsCompleted: 0,
+                status: "idle" as const,
+                error: undefined,
               })),
-              experimentStatus: 'idle',
+              experimentStatus: "idle",
             }));
           }
         }
@@ -260,23 +269,23 @@ export const useStore = create<CamdlStore>((set, get) => ({
           ir: result.ir,
           irHash: newHash,
           diagnostics: [],
-          compileStatus: 'ok',
+          compileStatus: "ok",
           canvasNodes: nodes,
           canvasEdges: edges,
           spanMap,
         });
       } else {
-        set({ ir: null, diagnostics: result.diagnostics, compileStatus: 'error' });
+        set({ ir: null, diagnostics: result.diagnostics, compileStatus: "error" });
       }
     } catch (e) {
       set({
-        compileStatus: 'error',
+        compileStatus: "error",
         diagnostics: [
           {
-            severity: 'error',
-            code: 'E000',
+            severity: "error",
+            code: "E000",
             message: String(e),
-            loc: { file: '', line: 0, col: 0, end_line: 0, end_col: 0 },
+            loc: { file: "", line: 0, col: 0, end_line: 0, end_col: 0 },
           },
         ],
       });
@@ -297,11 +306,11 @@ export const useStore = create<CamdlStore>((set, get) => ({
   },
 
   // Run config
-  runConfig: { backend: 'gillespie', nSeeds: 10, baseSeed: 42 },
+  runConfig: { backend: "gillespie", nSeeds: 10, baseSeed: 42 },
   setRunConfig: (c) => set((s) => ({ runConfig: { ...s.runConfig, ...c } })),
 
   // Experiment
-  experimentStatus: 'idle',
+  experimentStatus: "idle",
 
   runExperiment: async () => {
     const { ir, runConfig, scenarios } = get();
@@ -309,12 +318,12 @@ export const useStore = create<CamdlStore>((set, get) => ({
 
     // Reset all scenario runs
     set((s) => ({
-      experimentStatus: 'running',
+      experimentStatus: "running",
       scenarios: s.scenarios.map((sc) => ({
         ...sc,
         runs: [],
         seedsCompleted: 0,
-        status: 'idle' as const,
+        status: "idle" as const,
         error: undefined,
       })),
     }));
@@ -324,7 +333,7 @@ export const useStore = create<CamdlStore>((set, get) => ({
     outer: for (const seed of seeds) {
       for (const sc of get().scenarios) {
         // Check stop
-        if (get().experimentStatus !== 'running') break outer;
+        if (get().experimentStatus !== "running") break outer;
 
         const currentIr = get().ir;
         if (!currentIr) break outer;
@@ -332,7 +341,7 @@ export const useStore = create<CamdlStore>((set, get) => ({
         // Mark this scenario as running
         set((s) => ({
           scenarios: s.scenarios.map((scenario) =>
-            scenario.id === sc.id ? { ...scenario, status: 'running' } : scenario
+            scenario.id === sc.id ? { ...scenario, status: "running" } : scenario
           ),
         }));
 
@@ -348,11 +357,11 @@ export const useStore = create<CamdlStore>((set, get) => ({
             scenarios: s.scenarios.map((scenario) =>
               scenario.id === sc.id
                 ? {
-                    ...scenario,
-                    runs: [...scenario.runs, { seed, trajectory: traj }],
-                    seedsCompleted: scenario.seedsCompleted + 1,
-                    status: 'running' as const,
-                  }
+                  ...scenario,
+                  runs: [...scenario.runs, { seed, trajectory: traj }],
+                  seedsCompleted: scenario.seedsCompleted + 1,
+                  status: "running" as const,
+                }
                 : scenario
             ),
           }));
@@ -360,7 +369,7 @@ export const useStore = create<CamdlStore>((set, get) => ({
           set((s) => ({
             scenarios: s.scenarios.map((scenario) =>
               scenario.id === sc.id
-                ? { ...scenario, status: 'error' as const, error: String(e) }
+                ? { ...scenario, status: "error" as const, error: String(e) }
                 : scenario
             ),
           }));
@@ -370,15 +379,13 @@ export const useStore = create<CamdlStore>((set, get) => ({
 
     // Finalize
     set((s) => ({
-      experimentStatus: s.experimentStatus === 'running' ? 'ok' : s.experimentStatus,
-      scenarios: s.scenarios.map((sc) =>
-        sc.status === 'running' ? { ...sc, status: 'ok' as const } : sc
-      ),
+      experimentStatus: s.experimentStatus === "running" ? "ok" : s.experimentStatus,
+      scenarios: s.scenarios.map((sc) => sc.status === "running" ? { ...sc, status: "ok" as const } : sc),
     }));
   },
 
   stopExperiment: () => {
-    set({ experimentStatus: 'ok' });
+    set({ experimentStatus: "ok" });
   },
 
   // Scenarios
@@ -395,7 +402,7 @@ export const useStore = create<CamdlStore>((set, get) => ({
         paramOverrides: src ? { ...src.paramOverrides } : {},
         runs: [],
         seedsCompleted: 0,
-        status: 'idle',
+        status: "idle",
       };
       return { scenarios: [...s.scenarios, scenario] };
     });
@@ -414,7 +421,7 @@ export const useStore = create<CamdlStore>((set, get) => ({
       paramOverrides: { ...preset.values },
       runs: [],
       seedsCompleted: 0,
-      status: 'idle',
+      status: "idle",
     };
     set((s) => ({ scenarios: [...s.scenarios, scenario] }));
   },
@@ -448,29 +455,27 @@ export const useStore = create<CamdlStore>((set, get) => ({
     })),
 
   // Editor panel tab
-  activeTab: 'dsl',
+  activeTab: "dsl",
   setActiveTab: (t) => set({ activeTab: t }),
 
   // Agent
   messages: [],
-  agentPhase: 'idle',
+  agentPhase: "idle",
   pendingDiff: null,
 
   addUserMessage: (text) => {
-    const msg: AgentMessage = { id: crypto.randomUUID(), role: 'user', content: text };
-    set((s) => ({ messages: [...s.messages, msg], activeTab: 'agent' as const }));
+    const msg: AgentMessage = { id: crypto.randomUUID(), role: "user", content: text };
+    set((s) => ({ messages: [...s.messages, msg], activeTab: "agent" as const }));
   },
 
   startAssistantMessage: (id) => {
-    const msg: AgentMessage = { id, role: 'assistant', content: '' };
+    const msg: AgentMessage = { id, role: "assistant", content: "" };
     set((s) => ({ messages: [...s.messages, msg] }));
   },
 
   appendAssistantChunk: (id, chunk) => {
     set((s) => ({
-      messages: s.messages.map((m) =>
-        m.id === id ? { ...m, content: m.content + chunk } : m
-      ),
+      messages: s.messages.map((m) => m.id === id ? { ...m, content: m.content + chunk } : m),
     }));
   },
 
@@ -479,7 +484,7 @@ export const useStore = create<CamdlStore>((set, get) => ({
       messages: s.messages.map((m) => {
         if (m.id !== msgId) return m;
         const existing = m.toolCalls ?? [];
-        const idx = existing.findIndex((tc) => tc.name === name && tc.status === 'running');
+        const idx = existing.findIndex((tc) => tc.name === name && tc.status === "running");
         if (idx >= 0) {
           const updated = [...existing];
           updated[idx] = { name, status, summary };
@@ -507,21 +512,21 @@ export const useStore = create<CamdlStore>((set, get) => ({
     const ex = EXAMPLES.find((e) => e.name === name);
     if (!ex) return;
     // Reset irHash so compile always sees presets as "changed" and rebuilds scenarios.
-    set({ modelName: ex.name, irHash: null, scenarios: [makeBaseline()], experimentStatus: 'idle' });
+    set({ modelName: ex.name, irHash: null, scenarios: [makeBaseline()], experimentStatus: "idle" });
     get().setDslSource(ex.dsl);
   },
 
   openFile: async () => {
-    const input = document.createElement('input');
-    input.type = 'file';
-    input.accept = '.camdl,.json';
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".camdl,.json";
     input.onchange = async () => {
       const file = input.files?.[0];
       if (!file) return;
       const text = await file.text();
-      const name = file.name.replace(/\.(camdl|json)$/, '');
+      const name = file.name.replace(/\.(camdl|json)$/, "");
       get().resetExperiment();
-      set({ modelName: name, runConfig: { backend: 'gillespie', nSeeds: 10, baseSeed: 42 } });
+      set({ modelName: name, runConfig: { backend: "gillespie", nSeeds: 10, baseSeed: 42 } });
       get().setDslSource(text);
     };
     input.click();
@@ -529,9 +534,9 @@ export const useStore = create<CamdlStore>((set, get) => ({
 
   saveFile: () => {
     const { dslSource, modelName } = get();
-    const blob = new Blob([dslSource], { type: 'text/plain' });
+    const blob = new Blob([dslSource], { type: "text/plain" });
     const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
+    const a = document.createElement("a");
     a.href = url;
     a.download = `${modelName}.camdl`;
     a.click();
@@ -540,14 +545,14 @@ export const useStore = create<CamdlStore>((set, get) => ({
 
   resetExperiment: () =>
     set((s) => ({
-      experimentStatus: 'idle',
+      experimentStatus: "idle",
       // Clear runs AND paramOverrides — called on loadExample/openFile where
       // the model changes entirely, making old overrides meaningless.
       scenarios: s.scenarios.map((sc) => ({
         ...sc,
         runs: [],
         seedsCompleted: 0,
-        status: 'idle' as const,
+        status: "idle" as const,
         error: undefined,
         paramOverrides: {},
       })),
@@ -555,31 +560,31 @@ export const useStore = create<CamdlStore>((set, get) => ({
 
   // ── Remote connect ────────────────────────────────────────────────────────────
 
-  connectStatus: 'idle',
+  connectStatus: "idle",
   connectError: null,
   remoteGeo: null,
 
   connectRemote: async (url: string) => {
-    set({ connectStatus: 'loading', connectError: null });
+    set({ connectStatus: "loading", connectError: null });
     try {
       const { ir, scenarios, geo } = await loadRemoteExperiment(url);
       const { nodes, edges } = irToCanvas(ir);
       set({
         ir,
-        irHash: url,  // use URL as irHash proxy to prevent scenario rebuild on re-render
+        irHash: url, // use URL as irHash proxy to prevent scenario rebuild on re-render
         scenarios,
         canvasNodes: nodes,
         canvasEdges: edges,
-        compileStatus: 'ok',
-        modelName: (ir as { name?: string }).name ?? 'remote',
-        connectStatus: 'idle',
+        compileStatus: "ok",
+        modelName: (ir as { name?: string }).name ?? "remote",
+        connectStatus: "idle",
         connectError: null,
-        experimentStatus: 'ok',
+        experimentStatus: "ok",
         remoteGeo: geo ?? null,
       });
     } catch (e) {
       set({
-        connectStatus: 'error',
+        connectStatus: "error",
         connectError: e instanceof Error ? e.message : String(e),
       });
     }

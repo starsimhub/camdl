@@ -8,9 +8,9 @@ version = "0.1.0"
 description = "Figure generation for camdl sensitivity analysis output"
 requires-python = ">=3.11"
 dependencies = [
-    "matplotlib>=3.7",
-    "polars>=0.20",
-    "defopt>=6.4",
+  "matplotlib>=3.7",
+  "polars>=0.20",
+  "defopt>=6.4",
 ]
 
 [project.scripts]

@@ -13,7 +13,7 @@ export type SpanMap = Map<string, Span>; // "comp:S" | "tr:infection" | "param:b
 
 export function extractSpans(source: string): SpanMap {
   const map: SpanMap = new Map();
-  const lines = source.split('\n');
+  const lines = source.split("\n");
 
   // Track which block we're in
   let inCompartments = false;
@@ -26,14 +26,27 @@ export function extractSpans(source: string): SpanMap {
     const trimmed = line.trim();
 
     // Detect block starts
-    if (/^compartments\s*\{/.test(trimmed)) { inCompartments = true; inTransitions = false; inParameters = false; }
-    else if (/^transitions\s*\{/.test(trimmed)) { inTransitions = true; inCompartments = false; inParameters = false; }
-    else if (/^parameters\s*\{/.test(trimmed)) { inParameters = true; inCompartments = false; inTransitions = false; }
-    else if (/^\}/.test(trimmed)) { inCompartments = false; inTransitions = false; inParameters = false; }
+    if (/^compartments\s*\{/.test(trimmed)) {
+      inCompartments = true;
+      inTransitions = false;
+      inParameters = false;
+    } else if (/^transitions\s*\{/.test(trimmed)) {
+      inTransitions = true;
+      inCompartments = false;
+      inParameters = false;
+    } else if (/^parameters\s*\{/.test(trimmed)) {
+      inParameters = true;
+      inCompartments = false;
+      inTransitions = false;
+    } else if (/^\}/.test(trimmed)) {
+      inCompartments = false;
+      inTransitions = false;
+      inParameters = false;
+    }
 
     // Compartments block: comma-separated identifiers
     if (inCompartments) {
-      const names = trimmed.replace(/[{}]/g, '').split(/[\s,]+/).filter(n => /^[A-Za-z_]\w*$/.test(n));
+      const names = trimmed.replace(/[{}]/g, "").split(/[\s,]+/).filter(n => /^[A-Za-z_]\w*$/.test(n));
       for (const name of names) {
         if (!map.has(`comp:${name}`)) {
           const col = line.indexOf(name) + 1;

@@ -6,16 +6,16 @@ What makes camdl pleasant to write models in.
 
 ## Write the math, not the code
 
-camdl reads like the math it represents. A transition is "from → to at
-rate." An index is a mathematical subscript. A table is a lookup array.
+camdl reads like the math it represents. A transition is "from → to at rate." An
+index is a mathematical subscript. A table is a lookup array.
 
 ```camdl
 infection[a in age] : S[a] --> I[a]
   @ beta * S[a] * sum(b in age, C[a, b] * I[b] / N[b])
 ```
 
-No hidden multiplication by population counts. No implicit scope rules.
-The rate is the total propensity — what you'd write on paper.
+No hidden multiplication by population counts. No implicit scope rules. The rate
+is the total propensity — what you'd write on paper.
 
 ---
 
@@ -45,15 +45,15 @@ simulate {
 
 Supported: `'days`, `'weeks`, `'months`, `'years`, `'per_day`, `'per_week`,
 `'per_month`, `'per_year`. Mixed-unit arithmetic works:
-`0.1 'per_day * 5 'days = 0.5` (dimensionless). Adding a rate to a duration
-is a compile error.
+`0.1 'per_day * 5 'days = 0.5` (dimensionless). Adding a rate to a duration is a
+compile error.
 
 ---
 
 ## Calendar-based forcing with range syntax
 
-Specify school terms, work weeks, or campaign windows as day ranges instead
-of raw arrays. The compiler generates the values.
+Specify school terms, work weeks, or campaign windows as day ranges instead of
+raw arrays. The compiler generates the values.
 
 ```camdl
 forcing {
@@ -77,9 +77,9 @@ explicit. Bare `school` also works.
 
 ## Stochastic process control
 
-Rate wrappers control how event counts are drawn per transition. The default
-is Poisson (demographic stochasticity). Two alternatives for specific
-modeling needs:
+Rate wrappers control how event counts are drawn per transition. The default is
+Poisson (demographic stochasticity). Two alternatives for specific modeling
+needs:
 
 ```camdl
 transitions {
@@ -97,15 +97,15 @@ transitions {
 ```
 
 Models with `overdispersed()` transitions produce a hard error on
-`--backend gillespie` — the capabilities system catches incompatible
-backend choices before simulation starts.
+`--backend gillespie` — the capabilities system catches incompatible backend
+choices before simulation starts.
 
 ---
 
 ## Math functions and time
 
-`t` is the current simulation time, available anywhere in expressions.
-Standard math functions work as expected:
+`t` is the current simulation time, available anywhere in expressions. Standard
+math functions work as expected:
 
 ```camdl
 let day_of_year = mod(t, 365.25)
@@ -142,8 +142,8 @@ S[age = child]    # = S[child, north] + S[child, south] + S[child, east]
 
 ## Data-driven dimensions
 
-Dimension levels can come from data files. No manual enumeration of 774
-district names:
+Dimension levels can come from data files. No manual enumeration of 774 district
+names:
 
 ```camdl
 dimensions {
@@ -186,9 +186,8 @@ migration[c in compartments, src in patch, dst in patch]
   where src != dst
 ```
 
-The compiler expands the Cartesian product and filters at compile time.
-774² = 599,076 candidate transitions, minus 774 self-loops, in one
-declaration.
+The compiler expands the Cartesian product and filters at compile time. 774² =
+599,076 candidate transitions, minus 774 self-loops, in one declaration.
 
 ---
 
@@ -221,8 +220,8 @@ trajectories. Pre-intervention trajectories are byte-identical.
 
 ## Inspect without simulating
 
-`camdl eval` evaluates time-dependent expressions at a grid without running
-a simulation. Useful for verifying forcing curves, covariates, and parameter
+`camdl eval` evaluates time-dependent expressions at a grid without running a
+simulation. Useful for verifying forcing curves, covariates, and parameter
 formulas:
 
 ```bash
@@ -237,8 +236,8 @@ instead.
 
 ## Particle filter diagnostics
 
-`camdl pfilter --trace` shows one-step-ahead predictions alongside the data,
-not just a log-likelihood number:
+`camdl pfilter --trace` shows one-step-ahead predictions alongside the data, not
+just a log-likelihood number:
 
 ```
 time  ll_increment  ESS    pred_mean  pred_q05  pred_q50  pred_q95  observed
@@ -267,8 +266,8 @@ warning[W301]: periodic range 7:100 is not aligned to step size 7
   = hint: use step = 1 for exact boundaries
 ```
 
-Dimension mismatches, missing indices, wrong function arities, reserved
-name collisions, and unit errors are all caught before simulation starts.
+Dimension mismatches, missing indices, wrong function arities, reserved name
+collisions, and unit errors are all caught before simulation starts.
 
 ---
 
@@ -280,8 +279,8 @@ Every simulation run is stored in a directory determined by its inputs:
 runs/{sim_hash}/{scenario}-{scen_hash}/seed_{N}/
 ```
 
-Same inputs → same hash → cached. Different inputs → different directory.
-Add more seeds without re-running existing ones. Change one scenario without
+Same inputs → same hash → cached. Different inputs → different directory. Add
+more seeds without re-running existing ones. Change one scenario without
 invalidating others.
 
 ---
@@ -290,12 +289,12 @@ invalidating others.
 
 One model, four backends. Choose the right tradeoff:
 
-| Backend | When to use |
-|---------|-------------|
-| `gillespie` | Small populations, extinction matters |
-| `tau_leap` | Large populations, fast approximate |
+| Backend          | When to use                                       |
+| ---------------- | ------------------------------------------------- |
+| `gillespie`      | Small populations, extinction matters             |
+| `tau_leap`       | Large populations, fast approximate               |
 | `chain_binomial` | Euler-multinomial (matches pomp's reulermultinom) |
-| `ode` | Deterministic parameter sweeps |
+| `ode`            | Deterministic parameter sweeps                    |
 
 ```bash
 camdl simulate model.camdl --params p.toml --backend chain_binomial --dt 0.5 --seed 42
@@ -361,9 +360,9 @@ S += nearbyint(pop*br*dt) - trans[0] - trans[1];
 infection : S --> E  @ overdispersed(beta * seas * S * ((I + iota) ^ alpha) / pop(t), sigma_se)
 ```
 
-The `overdispersed()` wrapper handles the Gamma-Poisson compound internally.
-The compiler expands the stoichiometry. The runtime handles competing risks.
-No manual index arithmetic.
+The `overdispersed()` wrapper handles the Gamma-Poisson compound internally. The
+compiler expands the stoichiometry. The runtime handles competing risks. No
+manual index arithmetic.
 
 ### Observation model
 
@@ -415,8 +414,8 @@ parameters {
 }
 ```
 
-No separate declaration. The type system implies the transform. If you declare
-a parameter as `probability`, the inference engine knows it lives on [0,1] and
+No separate declaration. The type system implies the transform. If you declare a
+parameter as `probability`, the inference engine knows it lives on [0,1] and
 uses logit. You can't accidentally forget to list a parameter in the transform
 declaration.
 
@@ -424,12 +423,12 @@ declaration.
 
 pomp stitches together C code strings, R function calls, covariate tables,
 parameter name vectors, and state variable lists. The model structure
-(compartments, transitions, stoichiometry) is implicit in the C snippets —
-you have to read the code to know that `trans[0]` is infection and `rate[2]`
-is sigma.
+(compartments, transitions, stoichiometry) is implicit in the C snippets — you
+have to read the code to know that `trans[0]` is infection and `rate[2]` is
+sigma.
 
 camdl is one file where every piece has a name: compartments are declared,
 transitions read as "from → to at rate," tables have typed dimensions, and the
 compiler validates everything at compile time. A dimension mismatch, a missing
-index, or a unit confusion produces a clear error before simulation starts —
-not a segfault in dynamically compiled C code at runtime.
+index, or a unit confusion produces a clear error before simulation starts — not
+a segfault in dynamically compiled C code at runtime.

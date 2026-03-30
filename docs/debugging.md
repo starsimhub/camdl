@@ -6,9 +6,9 @@ Tools for inspecting what the simulator computes without guessing.
 
 ## `camdl eval` — Evaluate Expressions at a Time Grid
 
-Evaluate time-dependent expressions without running a simulation. No
-compartment state, no RNG, no trajectories. Useful for inspecting forcing
-curves, covariates, and parameter-derived quantities.
+Evaluate time-dependent expressions without running a simulation. No compartment
+state, no RNG, no trajectories. Useful for inspecting forcing curves,
+covariates, and parameter-derived quantities.
 
 ### Usage
 
@@ -75,8 +75,8 @@ camdl eval model.ir.json --params p.toml --expr "pop" --from 0 --to 7665 --every
 ## `--trace` — Named Quantities During Simulation _(planned)_
 
 Emit forcing function values and let binding evaluations as additional TSV
-columns alongside trajectory output. Useful for debugging unexpected dynamics
-by seeing what the simulator computed at each step.
+columns alongside trajectory output. Useful for debugging unexpected dynamics by
+seeing what the simulator computed at each step.
 
 ```bash
 camdl simulate model.ir.json --params p.toml --backend tau_leap --dt 1 --seed 42 --trace
@@ -90,5 +90,5 @@ t   S       E     I     R     flow_infection  ...  school  beta_base
 1   73080   198   127   2.4M  71              ...  1.000   4.540
 ```
 
-Not yet implemented. Use `camdl eval` for time-dependent quantities and
-post-hoc trajectory analysis for state-dependent quantities.
+Not yet implemented. Use `camdl eval` for time-dependent quantities and post-hoc
+trajectory analysis for state-dependent quantities.

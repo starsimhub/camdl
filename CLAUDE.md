@@ -138,9 +138,9 @@ format never breaks between phases.
 Model features constrain which backends can run them. The `Capabilities`
 bitflags in `rust/crates/sim/src/lib.rs` enforce this at dispatch time:
 
-- `OVERDISPERSION`: transitions using `overdispersed(rate, σ²)` require
-  tau-leap or chain-binomial (NegBinomial draws). Gillespie and ODE reject
-  these models with a hard error.
+- `OVERDISPERSION`: transitions using `overdispersed(rate, σ²)` require tau-leap
+  or chain-binomial (NegBinomial draws). Gillespie and ODE reject these models
+  with a hard error.
 - `REAL_COMPARTMENTS`: real-valued compartments with ODE equations.
 
 The `CompiledModel::required_capabilities()` scans the IR; each backend's
@@ -171,14 +171,14 @@ state; do not resume with remaining exponential time.
 ### No loose semantics
 
 Never silently accept invalid input. If a construct looks like it means
-something, it must either mean exactly that or produce a clear error.
-Examples: `_args` patterns that discard function arguments, optional
-fields that default to "works but wrong." If the compiler accepts it,
-the behavior must be fully specified and intentional.
+something, it must either mean exactly that or produce a clear error. Examples:
+`_args` patterns that discard function arguments, optional fields that default
+to "works but wrong." If the compiler accepts it, the behavior must be fully
+specified and intentional.
 
 ### Backwards compatibility is a non-goal
 
-This is unreleased software. Do not add backwards-compatibility shims,
-`alias` attributes, fallback deserialization paths, or deprecated field
-names. When a field is renamed, rename it everywhere atomically. When a
-format changes, update all golden files. Clean design beats legacy support.
+This is unreleased software. Do not add backwards-compatibility shims, `alias`
+attributes, fallback deserialization paths, or deprecated field names. When a
+field is renamed, rename it everywhere atomically. When a format changes, update
+all golden files. Clean design beats legacy support.

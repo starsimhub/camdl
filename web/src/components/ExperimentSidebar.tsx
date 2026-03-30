@@ -1,6 +1,6 @@
-import { useState, useRef, useEffect } from 'react';
-import { useStore } from '../store';
-import { EXAMPLES } from '../lib/examples';
+import { useEffect, useRef, useState } from "react";
+import { EXAMPLES } from "../lib/examples";
+import { useStore } from "../store";
 
 export default function ExperimentSidebar() {
   const ir = useStore((s) => s.ir);
@@ -14,7 +14,7 @@ export default function ExperimentSidebar() {
   const setScenarioParam = useStore((s) => s.setScenarioParam);
   const clearScenarioParam = useStore((s) => s.clearScenarioParam);
 
-  const [selectedId, setSelectedId] = useState<string>(() => scenarios[0]?.id ?? '');
+  const [selectedId, setSelectedId] = useState<string>(() => scenarios[0]?.id ?? "");
   const [editingName, setEditingName] = useState<string | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -34,13 +34,12 @@ export default function ExperimentSidebar() {
         setMenuOpen(false);
       }
     };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
   }, [menuOpen]);
 
   return (
     <div className="flex flex-col h-full overflow-hidden bg-gray-50 border-r border-gray-200 dark:bg-surface-1 dark:border-surface-border">
-
       {/* ── Scenarios header ──────────────────────────────────────────────────── */}
       <div className="px-3 pt-3 pb-2 border-b border-gray-200 flex-shrink-0 dark:border-surface-border">
         <div className="flex items-center justify-between mb-2">
@@ -59,11 +58,16 @@ export default function ExperimentSidebar() {
               <div className="absolute right-0 top-full mt-1 z-50 min-w-[140px] bg-white border border-gray-200 rounded shadow-lg py-0.5 dark:bg-surface-2 dark:border-surface-border">
                 {examplePresets.length > 0 && (
                   <>
-                    <div className="px-2.5 py-1 text-xs text-gray-400 uppercase tracking-wider dark:text-gray-600">Presets</div>
+                    <div className="px-2.5 py-1 text-xs text-gray-400 uppercase tracking-wider dark:text-gray-600">
+                      Presets
+                    </div>
                     {examplePresets.map((p) => (
                       <button
                         key={p.name}
-                        onClick={() => { addPresetScenario(p.name); setMenuOpen(false); }}
+                        onClick={() => {
+                          addPresetScenario(p.name);
+                          setMenuOpen(false);
+                        }}
                         className="w-full text-left px-2.5 py-1 text-xs text-gray-700 hover:bg-gray-100 hover:text-gray-900 transition-colors dark:text-gray-300 dark:hover:bg-surface-3 dark:hover:text-gray-100"
                       >
                         {p.label}
@@ -73,13 +77,19 @@ export default function ExperimentSidebar() {
                   </>
                 )}
                 <button
-                  onClick={() => { addScenario(true); setMenuOpen(false); }}
+                  onClick={() => {
+                    addScenario(true);
+                    setMenuOpen(false);
+                  }}
                   className="w-full text-left px-2.5 py-1 text-xs text-gray-700 hover:bg-gray-100 hover:text-gray-900 transition-colors dark:text-gray-300 dark:hover:bg-surface-3 dark:hover:text-gray-100"
                 >
                   From baseline
                 </button>
                 <button
-                  onClick={() => { addScenario(false); setMenuOpen(false); }}
+                  onClick={() => {
+                    addScenario(false);
+                    setMenuOpen(false);
+                  }}
                   className="w-full text-left px-2.5 py-1 text-xs text-gray-700 hover:bg-gray-100 hover:text-gray-900 transition-colors dark:text-gray-300 dark:hover:bg-surface-3 dark:hover:text-gray-100"
                 >
                   Clone last
@@ -97,23 +107,23 @@ export default function ExperimentSidebar() {
               onClick={() => setSelectedId(sc.id)}
               className={`flex items-center gap-1.5 px-2 py-1 rounded text-xs transition-colors ${
                 sc.id === selected?.id
-                  ? 'ring-1 ring-offset-0 bg-gray-200 text-gray-900 dark:bg-surface-3 dark:text-gray-100'
-                  : 'bg-gray-100 text-gray-600 hover:text-gray-900 dark:bg-surface-2 dark:text-gray-400 dark:hover:text-gray-200'
+                  ? "ring-1 ring-offset-0 bg-gray-200 text-gray-900 dark:bg-surface-3 dark:text-gray-100"
+                  : "bg-gray-100 text-gray-600 hover:text-gray-900 dark:bg-surface-2 dark:text-gray-400 dark:hover:text-gray-200"
               }`}
               style={{ borderLeft: `3px solid ${sc.color}` }}
             >
-              {sc.status === 'running' && <span className="animate-pulse text-accent">●</span>}
-              {sc.status === 'ok' && sc.runs.length > 0 && <span style={{ color: sc.color }}>●</span>}
-              {sc.status === 'error' && <span className="text-red-400">●</span>}
-              {sc.status === 'idle' && <span className="text-gray-400 dark:text-gray-600">○</span>}
-              <span>{idx === 0 ? 'Baseline' : sc.name}</span>
+              {sc.status === "running" && <span className="animate-pulse text-accent">●</span>}
+              {sc.status === "ok" && sc.runs.length > 0 && <span style={{ color: sc.color }}>●</span>}
+              {sc.status === "error" && <span className="text-red-400">●</span>}
+              {sc.status === "idle" && <span className="text-gray-400 dark:text-gray-600">○</span>}
+              <span>{idx === 0 ? "Baseline" : sc.name}</span>
               {idx > 0 && (
                 <span
                   className="text-gray-400 hover:text-red-400 ml-0.5 leading-none dark:text-gray-600"
                   onClick={(e) => {
                     e.stopPropagation();
                     removeScenario(sc.id);
-                    if (selectedId === sc.id) setSelectedId(scenarios[0]?.id ?? '');
+                    if (selectedId === sc.id) setSelectedId(scenarios[0]?.id ?? "");
                   }}
                 >
                   ×
@@ -130,23 +140,31 @@ export default function ExperimentSidebar() {
           {/* Scenario name */}
           <div className="flex items-center gap-2 mb-2">
             <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: selected.color }} />
-            {!isBaseline && editingName === selected.id ? (
-              <input
-                className="flex-1 text-xs bg-white border border-accent rounded px-1.5 py-0.5 text-gray-900 focus:outline-none dark:bg-surface-2 dark:text-gray-100"
-                autoFocus
-                value={selected.name}
-                onChange={(e) => renameScenario(selected.id, e.target.value)}
-                onBlur={() => setEditingName(null)}
-                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === 'Escape') setEditingName(null); }}
-              />
-            ) : (
-              <span
-                className={`text-xs text-gray-700 dark:text-gray-300 ${!isBaseline ? 'cursor-pointer hover:text-gray-900 dark:hover:text-gray-100' : ''}`}
-                onClick={() => { if (!isBaseline) setEditingName(selected.id); }}
-              >
-                {isBaseline ? 'Baseline' : selected.name}
-              </span>
-            )}
+            {!isBaseline && editingName === selected.id
+              ? (
+                <input
+                  className="flex-1 text-xs bg-white border border-accent rounded px-1.5 py-0.5 text-gray-900 focus:outline-none dark:bg-surface-2 dark:text-gray-100"
+                  autoFocus
+                  value={selected.name}
+                  onChange={(e) => renameScenario(selected.id, e.target.value)}
+                  onBlur={() => setEditingName(null)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === "Escape") setEditingName(null);
+                  }}
+                />
+              )
+              : (
+                <span
+                  className={`text-xs text-gray-700 dark:text-gray-300 ${
+                    !isBaseline ? "cursor-pointer hover:text-gray-900 dark:hover:text-gray-100" : ""
+                  }`}
+                  onClick={() => {
+                    if (!isBaseline) setEditingName(selected.id);
+                  }}
+                >
+                  {isBaseline ? "Baseline" : selected.name}
+                </span>
+              )}
             {selected.seedsCompleted > 0 && (
               <span className="text-xs text-gray-400 ml-auto dark:text-gray-600">
                 {selected.seedsCompleted}/{runConfig.nSeeds}
@@ -178,19 +196,21 @@ export default function ExperimentSidebar() {
               <div className="flex flex-col gap-1">
                 {irParams.map((p) => {
                   const overridden = selected.paramOverrides[p.name] !== undefined;
-                  const irValue = (p.value as number | null);
+                  const irValue = p.value as number | null;
                   const baselineVal = isBaseline
                     ? null
                     : (scenarios[0]?.paramOverrides[p.name] ?? irValue);
-                  const displayVal = overridden ? selected.paramOverrides[p.name]
-                    : isBaseline ? irValue
+                  const displayVal = overridden
+                    ? selected.paramOverrides[p.name]
+                    : isBaseline
+                    ? irValue
                     : baselineVal;
                   const noValue = displayVal === null || displayVal === undefined;
                   return (
                     <div key={p.name} className="flex items-center gap-1.5">
                       <span
                         className={`text-xs w-16 truncate flex-shrink-0 ${
-                          overridden ? 'text-accent' : noValue ? 'text-yellow-500' : 'text-gray-500'
+                          overridden ? "text-accent" : noValue ? "text-yellow-500" : "text-gray-500"
                         }`}
                         title={p.name}
                       >
@@ -198,18 +218,18 @@ export default function ExperimentSidebar() {
                       </span>
                       <input
                         type="number"
-                        value={displayVal ?? ''}
-                        placeholder={noValue ? 'unset' : undefined}
+                        value={displayVal ?? ""}
+                        placeholder={noValue ? "unset" : undefined}
                         onChange={(e) => {
                           const v = parseFloat(e.target.value);
                           if (!isNaN(v)) setScenarioParam(selected.id, p.name, v);
                         }}
                         className={`w-20 text-xs rounded px-1.5 py-0.5 focus:outline-none focus:ring-1 focus:ring-accent ${
                           overridden
-                            ? 'bg-white border border-accent text-gray-900 dark:bg-surface-2 dark:text-gray-100'
+                            ? "bg-white border border-accent text-gray-900 dark:bg-surface-2 dark:text-gray-100"
                             : noValue
-                            ? 'bg-white border border-yellow-400/50 text-gray-600 placeholder-yellow-600 dark:bg-surface-2 dark:border-yellow-600/50 dark:text-gray-400 dark:placeholder-yellow-700'
-                            : 'bg-white border border-gray-200 text-gray-600 dark:bg-surface-2 dark:border-surface-border dark:text-gray-400'
+                            ? "bg-white border border-yellow-400/50 text-gray-600 placeholder-yellow-600 dark:bg-surface-2 dark:border-yellow-600/50 dark:text-gray-400 dark:placeholder-yellow-700"
+                            : "bg-white border border-gray-200 text-gray-600 dark:bg-surface-2 dark:border-surface-border dark:text-gray-400"
                         }`}
                         step="any"
                       />
@@ -217,7 +237,7 @@ export default function ExperimentSidebar() {
                         <button
                           onClick={() => clearScenarioParam(selected.id, p.name)}
                           className="text-xs text-gray-400 hover:text-red-400 transition-colors leading-none dark:text-gray-600"
-                          title={isBaseline ? 'Clear value' : 'Reset to baseline'}
+                          title={isBaseline ? "Clear value" : "Reset to baseline"}
                         >
                           ×
                         </button>

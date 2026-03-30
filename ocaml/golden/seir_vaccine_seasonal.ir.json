@@ -13,7 +13,7 @@
   "transitions": [
     {
       "name": "infection",
-      "stoichiometry": [ [ "S", -1 ], [ "E", 1 ] ],
+      "stoichiometry": [["S", -1], ["E", 1]],
       "rate": {
         "bin_op": {
           "op": "div",
@@ -36,7 +36,7 @@
               "right": { "pop": "I" }
             }
           },
-          "right": { "pop_sum": [ "S", "E", "I", "R", "V" ] }
+          "right": { "pop_sum": ["S", "E", "I", "R", "V"] }
         }
       },
       "event_key": "infection:{firing_index}",
@@ -48,7 +48,7 @@
     },
     {
       "name": "progression",
-      "stoichiometry": [ [ "E", -1 ], [ "I", 1 ] ],
+      "stoichiometry": [["E", -1], ["I", 1]],
       "rate": {
         "bin_op": {
           "op": "mul",
@@ -65,7 +65,7 @@
     },
     {
       "name": "recovery",
-      "stoichiometry": [ [ "I", -1 ], [ "R", 1 ] ],
+      "stoichiometry": [["I", -1], ["R", 1]],
       "rate": {
         "bin_op": {
           "op": "mul",
@@ -82,7 +82,7 @@
     },
     {
       "name": "waning",
-      "stoichiometry": [ [ "R", -1 ], [ "S", 1 ] ],
+      "stoichiometry": [["R", -1], ["S", 1]],
       "rate": {
         "bin_op": {
           "op": "mul",
@@ -99,7 +99,7 @@
     },
     {
       "name": "vacc_waning",
-      "stoichiometry": [ [ "V", -1 ], [ "S", 1 ] ],
+      "stoichiometry": [["V", -1], ["S", 1]],
       "rate": {
         "bin_op": {
           "op": "mul",
@@ -116,7 +116,7 @@
     },
     {
       "name": "reversion",
-      "stoichiometry": [ [ "V", -1 ], [ "E", 1 ] ],
+      "stoichiometry": [["V", -1], ["E", 1]],
       "rate": {
         "bin_op": {
           "op": "mul",
@@ -150,7 +150,7 @@
   "interventions": [
     {
       "name": "sia_round_1",
-      "schedule": { "at_times": [ 180.0, 545.0, 910.0 ] },
+      "schedule": { "at_times": [180.0, 545.0, 910.0] },
       "actions": [
         {
           "fraction_transfer": {
@@ -295,7 +295,7 @@
       "name": "with_sia",
       "label": "with SIA rounds",
       "params": {},
-      "enable": [ "sia_round_1" ],
+      "enable": ["sia_round_1"],
       "disable": [],
       "t_end": null
     }
@@ -303,8 +303,8 @@
   "model_structure": {
     "dimensions": [],
     "compartment_dims": { "S": [], "E": [], "I": [], "R": [], "V": [] },
-    "base_compartments": [ "S", "E", "I", "R", "V" ],
-    "transmission_transitions": [ "infection" ],
-    "infectious_compartments": [ "I" ]
+    "base_compartments": ["S", "E", "I", "R", "V"],
+    "transmission_transitions": ["infection"],
+    "infectious_compartments": ["I"]
   }
 }

@@ -1,7 +1,7 @@
-beta      = 0.3
-sigma     = 0.2
-gamma     = 0.1
-omega     = 0.003
+beta = 0.3
+sigma = 0.2
+gamma = 0.1
+omega = 0.003
 vacc_frac = 0.8
-N0        = 100000
-I0        = 10
+N0 = 100000
+I0 = 10
