@@ -13,12 +13,12 @@
 //! observation log-likelihood (dmeasure). This makes it compatible
 //! with any simulation backend.
 
+use crate::chain_binomial::StepScratch;
 use crate::compiled_model::CompiledModel;
 use crate::ekrng::StatefulRng;
 use crate::error::SimError;
 use super::types::{ParticleState, log_sum_exp};
 use super::resampling::systematic_resample;
-use super::obs_loglik;
 
 /// One parameter's transform and perturbation spec.
 #[derive(Clone, Debug)]
@@ -169,7 +169,7 @@ pub fn run_if2(
     if2_params: &[IF2Param],
     observations: &[Observation],
     config: &IF2Config,
-    step_fn: &dyn Fn(&mut ParticleState, &[f64], f64, f64, &mut StatefulRng) -> Result<(), SimError>,
+    step_fn: &dyn Fn(&mut ParticleState, &[f64], f64, f64, &mut StatefulRng, &mut StepScratch) -> Result<(), SimError>,
     project_fn: &dyn Fn(&ParticleState) -> f64,
     dmeasure_fn: &dyn Fn(f64, f64, &[f64]) -> f64,
     seed: u64,
@@ -184,7 +184,7 @@ pub fn run_if2_with_progress(
     if2_params: &[IF2Param],
     observations: &[Observation],
     config: &IF2Config,
-    step_fn: &dyn Fn(&mut ParticleState, &[f64], f64, f64, &mut StatefulRng) -> Result<(), SimError>,
+    step_fn: &dyn Fn(&mut ParticleState, &[f64], f64, f64, &mut StatefulRng, &mut StepScratch) -> Result<(), SimError>,
     project_fn: &dyn Fn(&ParticleState) -> f64,
     dmeasure_fn: &dyn Fn(f64, f64, &[f64]) -> f64,
     seed: u64,
@@ -228,6 +228,10 @@ pub fn run_if2_with_progress(
                 seed ^ ((iter as u64) << 32) ^ (i as u64).wrapping_mul(0x517cc1b727220a95)
             ))
             .collect();
+        // Per-particle scratch buffers (allocated once per iteration, reused across steps)
+        let mut scratches: Vec<StepScratch> = (0..n)
+            .map(|_| StepScratch::new(model))
+            .collect();
         let mut resample_rng = StatefulRng::new(
             seed.wrapping_add(0xdeadbeef).wrapping_add(iter as u64)
         );
@@ -255,7 +259,7 @@ pub fn run_if2_with_progress(
             while t < obs.time - 1e-10 {
                 let step_dt = config.dt.min(obs.time - t);
                 for i in 0..n {
-                    step_fn(&mut states[i], &particle_params[i], t, step_dt, &mut rngs[i])?;
+                    step_fn(&mut states[i], &particle_params[i], t, step_dt, &mut rngs[i], &mut scratches[i])?;
                 }
                 t += step_dt;
             }

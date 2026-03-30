@@ -5,6 +5,7 @@
 //! advance particles — any simulation backend works (chain-binomial,
 //! tau-leap, etc.).
 
+use crate::chain_binomial::StepScratch;
 use crate::compiled_model::CompiledModel;
 use crate::ekrng::StatefulRng;
 use crate::error::SimError;
@@ -45,7 +46,8 @@ pub struct PFilterResult {
 /// Signature for a single-step function that advances particle state.
 /// This is what the ProcessSimulator trait provides, but we use a closure
 /// for flexibility (allows capturing the CompiledModel and params).
-pub type StepFn<'a> = dyn Fn(&mut ParticleState, f64, f64, &mut StatefulRng) -> Result<(), SimError> + 'a;
+/// Takes a `&mut StepScratch` to avoid per-call heap allocations.
+pub type StepFn<'a> = dyn Fn(&mut ParticleState, f64, f64, &mut StatefulRng, &mut StepScratch) -> Result<(), SimError> + 'a;
 
 /// Signature for the observation log-likelihood (dmeasure).
 /// Takes (projected_value, observed_value) → log p(y | projected, θ).
@@ -89,6 +91,11 @@ pub fn bootstrap_filter(
         .map(|i| StatefulRng::new(seed ^ (i as u64).wrapping_mul(0x517cc1b727220a95)))
         .collect();
 
+    // Per-particle scratch buffers (allocated once, reused across all steps)
+    let mut scratches: Vec<StepScratch> = (0..n_particles)
+        .map(|_| StepScratch::new(model))
+        .collect();
+
     let mut total_loglik = 0.0;
     let mut ess_trace = Vec::with_capacity(observations.len());
     let mut ll_increments = Vec::with_capacity(observations.len());
@@ -103,7 +110,7 @@ pub fn bootstrap_filter(
         while t < obs.time - 1e-10 {
             let step_dt = dt.min(obs.time - t);
             for (i, state) in swarm.states.iter_mut().enumerate() {
-                step_fn(state, t, step_dt, &mut rngs[i])?;
+                step_fn(state, t, step_dt, &mut rngs[i], &mut scratches[i])?;
             }
             t += step_dt;
         }

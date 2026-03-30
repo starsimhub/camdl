@@ -275,8 +275,8 @@ pub fn cmd_profile(args: &[String]) {
             };
             let job_seed = seed ^ (grid_idx as u64 * 1000 + start_idx as u64);
 
-            let step_fn = |state: &mut ParticleState, p: &[f64], t: f64, step_dt: f64, rng: &mut StatefulRng| {
-                step_one(&compiled, &mut state.counts, &mut state.flow_accumulators, p, t, step_dt, rng)
+            let step_fn = |state: &mut ParticleState, p: &[f64], t: f64, step_dt: f64, rng: &mut StatefulRng, scratch: &mut sim::chain_binomial::StepScratch| {
+                step_one(&compiled, &mut state.counts, &mut state.flow_accumulators, p, t, step_dt, rng, scratch)
             };
             let project_fn = |state: &ParticleState| -> f64 {
                 flow_indices.iter().map(|&i| state.flow_accumulators[i] as f64).sum()
