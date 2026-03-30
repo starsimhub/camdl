@@ -304,3 +304,132 @@ camdl simulate model.camdl --params p.toml --backend chain_binomial --dt 0.5 --s
 The chain-binomial uses true multinomial competing-risk draws with deferred
 state updates — the exact Euler-multinomial algorithm used in the pomp
 ecosystem.
+
+---
+
+## Why camdl: a side-by-side comparison
+
+The He et al. (2010) London measles model — the same model, in pomp and camdl.
+
+### School-term forcing
+
+**pomp** — 20 lines of C inside a string:
+
+```c
+// Inside Csnippet("...")
+seas = 1.0 - amplitude;
+if ((t-floor(t)) >= 7.0/365.0 && (t-floor(t)) <= 100.0/365.0)
+  seas = 1.0 + amplitude * 0.2411/0.7589;
+else if ((t-floor(t)) >= 115.0/365.0 && (t-floor(t)) <= 199.0/365.0)
+  seas = 1.0 + amplitude * 0.2411/0.7589;
+else if ((t-floor(t)) >= 252.0/365.0 && (t-floor(t)) <= 300.0/365.0)
+  seas = 1.0 + amplitude * 0.2411/0.7589;
+else if ((t-floor(t)) >= 308.0/365.0 && (t-floor(t)) <= 356.0/365.0)
+  seas = 1.0 + amplitude * 0.2411/0.7589;
+```
+
+**camdl** — 4 ranges:
+
+```camdl
+forcing {
+  school : periodic {
+    period = 365.25 'days
+    step   = 1 'days
+    on     = [7:100, 115:199, 252:300, 308:356]
+  }
+}
+let seas = 1.0 - amplitude + amplitude * (1.0 + 0.2411 / 0.7589) * school(t)
+```
+
+### Transmission with overdispersion
+
+**pomp** — manual Gamma draw and rate arithmetic:
+
+```c
+dw = rgammawn(sigmaSE, dt);
+beta = R0 * (gamma+mu) * seas;
+foi = beta * pow(I+iota, alpha) / pop * dw/dt;
+rate[0] = foi;
+rate[1] = mu;
+reulermultinom(2, S, &rate[0], dt, &trans[0]);
+S += nearbyint(pop*br*dt) - trans[0] - trans[1];
+```
+
+**camdl** — the transition reads as math:
+
+```camdl
+infection : S --> E  @ overdispersed(beta * seas * S * ((I + iota) ^ alpha) / pop(t), sigma_se)
+```
+
+The `overdispersed()` wrapper handles the Gamma-Poisson compound internally.
+The compiler expands the stoichiometry. The runtime handles competing risks.
+No manual index arithmetic.
+
+### Observation model
+
+**pomp** — 8 lines of C:
+
+```c
+double m = rho*C;
+double v = m*(1.0-rho+psi*psi*m);
+double tol = 1e-18;
+if (cases > 0.0)
+  lik = pnorm(cases+0.5,m,sqrt(v),1,0) - pnorm(cases-0.5,m,sqrt(v),1,0) + tol;
+else
+  lik = pnorm(0.5,m,sqrt(v),1,0) + tol;
+if (give_log) lik = log(lik);
+```
+
+**camdl** — one block:
+
+```camdl
+observations {
+  weekly_cases : {
+    projected  = incidence(recovery)
+    every      = 7 'days
+    likelihood = neg_binomial(mean = rho * projected, r = k)
+  }
+}
+```
+
+### Parameter transforms
+
+**pomp** — separate declaration, manual enumeration:
+
+```r
+partrans = parameter_trans(
+  log = c("R0","sigma","gamma","alpha","iota","sigmaSE","psi"),
+  logit = c("rho","cohort","amplitude"),
+  barycentric = c("S_0","E_0","I_0","R_0")
+)
+```
+
+**camdl** — derived from parameter types:
+
+```camdl
+parameters {
+  R0        : positive       # → log transform
+  sigma     : rate           # → log transform
+  rho       : probability    # → logit transform
+  amplitude : probability    # → logit transform
+}
+```
+
+No separate declaration. The type system implies the transform. If you declare
+a parameter as `probability`, the inference engine knows it lives on [0,1] and
+uses logit. You can't accidentally forget to list a parameter in the transform
+declaration.
+
+### The model as a whole
+
+pomp stitches together C code strings, R function calls, covariate tables,
+parameter name vectors, and state variable lists. The model structure
+(compartments, transitions, stoichiometry) is implicit in the C snippets —
+you have to read the code to know that `trans[0]` is infection and `rate[2]`
+is sigma.
+
+camdl is one file where every piece has a name: compartments are declared,
+transitions read as "from → to at rate," tables have typed dimensions, and the
+compiler validates everything at compile time. A dimension mismatch, a missing
+index, or a unit confusion produces a clear error before simulation starts —
+not a segfault in dynamically compiled C code at runtime.
