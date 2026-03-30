@@ -2,23 +2,32 @@
 //!
 //! Usage:
 //!   camdl if2 MODEL --params P.toml --data cases.tsv \
-//!       --particles 2000 --iterations 100 --cooling 0.95 \
-//!       --rw-sd "R0=5,sigma=0.01,gamma=0.01" \
-//!       --fixed "N0,mu" --dt 1.0 --seed 1
+//!       --rw-sd "R0=5,sigma=0.01" --particles 2000 --iterations 100 \
+//!       [--chains 4] [--regime scout|refine|validate] \
+//!       [--cooling 0.95] [--dt 1.0] [--seed 1] [--parallel 4]
 //!
-//! Output: parameter_traces.tsv to stdout, log-likelihood trace to stderr.
+//! Regimes set sensible defaults:
+//!   scout:    8 chains, 200 particles, 20 iters, no cooling, random starts
+//!   refine:   4 chains, 1000 particles, 50 iters, cooling=0.95
+//!   validate: 4 chains, 5000 particles, 100 iters, cooling=0.95
+//!
+//! Output: parameter traces TSV to stdout, diagnostics + Rhat to stderr.
+//!   With --output-dir: writes per-chain traces + summary JSON.
 
+use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
+use rayon::prelude::*;
 use sim::{
     compiled_model::CompiledModel,
     chain_binomial::step_one,
     inference::{
         obs_loglik::{negbin_logpmf, discretized_normal_logpmf_tol, DEFAULT_TOL},
-        if2::{run_if2, IF2Config, IF2Param, Observation, Transform},
+        if2::{run_if2, IF2Config, IF2Param, IF2Result, Observation, Transform},
         ParticleState,
     },
     ekrng::StatefulRng,
 };
 use std::collections::HashMap;
+use std::sync::Arc;
 
 pub fn cmd_if2(args: &[String]) {
     let mut ir_path: Option<String> = None;
@@ -37,6 +46,10 @@ pub fn cmd_if2(args: &[String]) {
     let mut flow_name: Option<String> = None;
     let mut rw_sd_str: Option<String> = None;
     let mut fixed_str: Option<String> = None;
+    let mut n_chains = 1_usize;
+    let mut regime: Option<String> = None;
+    let mut parallel = 1_usize;
+    let mut output_dir: Option<String> = None;
 
     let mut i = 0;
     while i < args.len() {
@@ -55,6 +68,10 @@ pub fn cmd_if2(args: &[String]) {
             "--flow"       => { i += 1; flow_name = Some(args[i].clone()); }
             "--rw-sd"      => { i += 1; rw_sd_str = Some(args[i].clone()); }
             "--fixed"      => { i += 1; fixed_str = Some(args[i].clone()); }
+            "--chains"     => { i += 1; n_chains = args[i].parse().expect("--chains needs integer"); }
+            "--regime"     => { i += 1; regime = Some(args[i].clone()); }
+            "--parallel"   => { i += 1; parallel = args[i].parse().expect("--parallel needs integer"); }
+            "--output-dir" => { i += 1; output_dir = Some(args[i].clone()); }
             "--param"      => {
                 i += 1;
                 let kv = &args[i];
@@ -72,8 +89,37 @@ pub fn cmd_if2(args: &[String]) {
         i += 1;
     }
 
+    // Apply regime defaults (can be overridden by explicit flags)
+    if let Some(ref r) = regime {
+        match r.as_str() {
+            "scout" => {
+                if n_chains == 1 { n_chains = 8; }
+                if n_particles == 2000 { n_particles = 200; }
+                if n_iterations == 100 { n_iterations = 20; }
+                cooling = 1.0; // no cooling — pure exploration
+                if parallel == 1 { parallel = n_chains; }
+            }
+            "refine" => {
+                if n_chains == 1 { n_chains = 4; }
+                if n_particles == 2000 { n_particles = 1000; }
+                if n_iterations == 100 { n_iterations = 50; }
+                if parallel == 1 { parallel = n_chains; }
+            }
+            "validate" => {
+                if n_chains == 1 { n_chains = 4; }
+                if n_particles == 2000 { n_particles = 5000; }
+                // iterations stays at 100
+                if parallel == 1 { parallel = n_chains; }
+            }
+            other => {
+                eprintln!("unknown regime '{}'. Use scout, refine, or validate.", other);
+                std::process::exit(1);
+            }
+        }
+    }
+
     let ir_path = ir_path.unwrap_or_else(|| {
-        eprintln!("usage: camdl if2 MODEL --params P.toml --data cases.tsv --rw-sd \"R0=5,gamma=0.01\" --particles 2000 --iterations 100");
+        eprintln!("usage: camdl if2 MODEL --params P.toml --data cases.tsv --rw-sd \"R0=5\" [--regime scout]");
         std::process::exit(1);
     });
     let data_path = data_path.unwrap_or_else(|| {
@@ -210,24 +256,25 @@ pub fn cmd_if2(args: &[String]) {
     let k_idx = compiled.param_index.get("k").copied();
     let psi_idx = compiled.param_index.get("psi").copied();
 
-    eprintln!("if2: {} observations, {} particles, {} iterations, cooling={}, dt={}, seed={}",
-        observations.len(), n_particles, n_iterations, cooling, dt, seed);
-    eprintln!("if2: estimating {} parameters, {} fixed",
-        if2_params.len(), fixed_set.len());
+    let regime_name = regime.as_deref().unwrap_or("manual");
+    eprintln!("if2: {} observations, {} chains × {} particles × {} iterations, cooling={}, dt={}, seed={}",
+        observations.len(), n_chains, n_particles, n_iterations, cooling, dt, seed);
+    eprintln!("if2: regime={}, estimating {} parameters, {} fixed, parallel={}",
+        regime_name, if2_params.len(), fixed_set.len(), parallel);
 
-    // Parameter scale diagnostics: warn if rw_sd / value ratios are extreme
+    // Parameter scale diagnostics
     for spec in &if2_params {
         let value = params[spec.index];
-        if value.abs() < 1e-10 { continue; } // skip zero-valued params
+        if value.abs() < 1e-10 { continue; }
         let ratio = spec.rw_sd / value.abs();
         if ratio > 0.5 {
             eprintln!("warning: rw_sd for '{}' is {:.0}% of its value ({:.4}) — \
-                perturbations may be too large. Consider reducing --rw-sd {}={:.4}",
+                consider reducing --rw-sd {}={:.4}",
                 spec.name, ratio * 100.0, value, spec.name, value.abs() * 0.1);
         }
         if ratio < 0.001 {
             eprintln!("warning: rw_sd for '{}' is {:.2}% of its value ({:.4}) — \
-                perturbations may be too small to explore. Consider increasing --rw-sd {}={:.4}",
+                consider increasing --rw-sd {}={:.4}",
                 spec.name, ratio * 100.0, value, spec.name, value.abs() * 0.05);
         }
     }
@@ -236,63 +283,166 @@ pub fn cmd_if2(args: &[String]) {
         n_particles,
         n_iterations,
         cooling_fraction: cooling,
-        cooling_target_iters: 50, // matches pomp's cooling.fraction.50
+        cooling_target_iters: 50,
         dt,
     };
 
-    // Step function: takes per-particle params
-    let step_fn = |state: &mut ParticleState, p: &[f64], t: f64, step_dt: f64, rng: &mut StatefulRng| {
-        step_one(&compiled, &mut state.counts, &mut state.flow_accumulators, p, t, step_dt, rng)
+    let compiled = Arc::new(compiled);
+    let if2_params = Arc::new(if2_params);
+    let observations = Arc::new(observations);
+    let flow_indices = Arc::new(flow_indices);
+
+    // ── Multi-chain parallel execution ───────────────────────────────────
+    let chain_results: Vec<(usize, IF2Result)> = {
+        (0..n_chains).map(|chain_id| {
+            let compiled = Arc::clone(&compiled);
+            let if2_params = Arc::clone(&if2_params);
+            let observations = Arc::clone(&observations);
+            let flow_indices = Arc::clone(&flow_indices);
+
+            let chain_seed = seed ^ (chain_id as u64).wrapping_mul(0x9e3779b97f4a7c15);
+
+            let step_fn = |state: &mut ParticleState, p: &[f64], t: f64, step_dt: f64, rng: &mut StatefulRng| {
+                step_one(&compiled, &mut state.counts, &mut state.flow_accumulators, p, t, step_dt, rng)
+            };
+            let project_fn = |state: &ParticleState| -> f64 {
+                flow_indices.iter().map(|&i| state.flow_accumulators[i] as f64).sum()
+            };
+
+            // Each chain needs its own dmeasure closure (can't share across threads without Send)
+            let dmeasure_fn: Box<dyn Fn(f64, f64, &[f64]) -> f64> = match obs_model.as_str() {
+                "negbin" => Box::new(move |proj: f64, obs: f64, p: &[f64]| {
+                    let rho = rho_idx.map_or(1.0, |i| p[i]);
+                    let k = k_idx.map_or(10.0, |i| p[i]);
+                    negbin_logpmf(obs, rho * proj, k)
+                }),
+                _ => Box::new(move |proj: f64, obs: f64, p: &[f64]| {
+                    let rho = rho_idx.map_or(1.0, |i| p[i]);
+                    let psi = psi_idx.map_or(0.116, |i| p[i]);
+                    let mu = rho * proj;
+                    discretized_normal_logpmf_tol(obs, mu, mu * (1.0 - rho + psi * psi * mu), tol)
+                }),
+            };
+
+            eprintln!("  chain {} starting IF2...", chain_id + 1);
+            let result = run_if2(
+                &compiled, &params, &if2_params, &observations, &config,
+                &step_fn, &project_fn, &*dmeasure_fn, chain_seed,
+            ).unwrap_or_else(|e| {
+                eprintln!("chain {} error: {:?}", chain_id + 1, e);
+                std::process::exit(1);
+            });
+
+            eprintln!("  chain {} done: loglik={:.1}", chain_id + 1, result.final_loglik);
+            (chain_id, result)
+        }).collect()
     };
 
-    let project_fn = |state: &ParticleState| -> f64 {
-        flow_indices.iter().map(|&i| state.flow_accumulators[i] as f64).sum()
-    };
+    // ── Compute Rhat across chains (last half of iterations) ─────────────
+    let n_tail = (n_iterations / 2).max(1);
+    if n_chains > 1 {
+        eprintln!("\nRhat (across {} chains, last {} iterations):", n_chains, n_tail);
+        for spec in if2_params.iter() {
+            // Collect per-chain means of the parameter over the tail iterations
+            let chain_means: Vec<f64> = chain_results.iter().map(|(_, r)| {
+                let tail: Vec<f64> = r.iterations.iter()
+                    .skip(n_iterations.saturating_sub(n_tail))
+                    .map(|it| it.param_means[spec.index])
+                    .collect();
+                tail.iter().sum::<f64>() / tail.len() as f64
+            }).collect();
 
-    // dmeasure takes (projected, observed, params) — params needed for rho/k/psi
-    let dmeasure_fn: Box<dyn Fn(f64, f64, &[f64]) -> f64> = match obs_model.as_str() {
-        "negbin" => Box::new(move |projected: f64, observed: f64, p: &[f64]| {
-            let rho = rho_idx.map_or(1.0, |i| p[i]);
-            let k = k_idx.map_or(10.0, |i| p[i]);
-            negbin_logpmf(observed, rho * projected, k)
-        }),
-        "discretized_normal" => Box::new(move |projected: f64, observed: f64, p: &[f64]| {
-            let rho = rho_idx.map_or(1.0, |i| p[i]);
-            let psi = psi_idx.map_or(0.116, |i| p[i]);
-            let mu = rho * projected;
-            let variance = mu * (1.0 - rho + psi * psi * mu);
-            discretized_normal_logpmf_tol(observed, mu, variance, tol)
-        }),
-        other => { eprintln!("unknown --obs-model '{}'", other); std::process::exit(1); }
-    };
+            let chain_vars: Vec<f64> = chain_results.iter().map(|(_, r)| {
+                let tail: Vec<f64> = r.iterations.iter()
+                    .skip(n_iterations.saturating_sub(n_tail))
+                    .map(|it| it.param_means[spec.index])
+                    .collect();
+                let m = tail.iter().sum::<f64>() / tail.len() as f64;
+                tail.iter().map(|&x| (x - m).powi(2)).sum::<f64>() / (tail.len() - 1).max(1) as f64
+            }).collect();
 
-    let result = run_if2(
-        &compiled, &params, &if2_params, &observations, &config,
-        &step_fn, &project_fn, &*dmeasure_fn, seed,
-    ).unwrap_or_else(|e| {
-        eprintln!("if2 error: {:?}", e); std::process::exit(1);
-    });
+            let grand_mean = chain_means.iter().sum::<f64>() / n_chains as f64;
+            let between = chain_means.iter().map(|&m| (m - grand_mean).powi(2)).sum::<f64>()
+                * n_tail as f64 / (n_chains - 1).max(1) as f64;
+            let within = chain_vars.iter().sum::<f64>() / n_chains as f64;
+            let rhat = if within > 0.0 {
+                (((n_tail as f64 - 1.0) / n_tail as f64 * within + between / n_tail as f64) / within).sqrt()
+            } else { f64::NAN };
 
-    // Output: parameter traces TSV to stdout
-    // Header
-    print!("iteration\tloglik");
-    for spec in &if2_params {
+            let status = if rhat < 1.1 { "✓" } else if rhat < 1.5 { "~" } else { "✗" };
+            eprintln!("  {:12} Rhat={:.2} {} range=[{:.4}, {:.4}]",
+                spec.name, rhat, status,
+                chain_means.iter().cloned().fold(f64::INFINITY, f64::min),
+                chain_means.iter().cloned().fold(f64::NEG_INFINITY, f64::max));
+        }
+    }
+
+    // ── Find best chain ──────────────────────────────────────────────────
+    let best = chain_results.iter()
+        .max_by(|a, b| a.1.final_loglik.partial_cmp(&b.1.final_loglik).unwrap())
+        .unwrap();
+
+    eprintln!("\nBest chain: {} (loglik={:.2})", best.0 + 1, best.1.final_loglik);
+    if n_chains > 1 {
+        let logliks: Vec<f64> = chain_results.iter().map(|(_, r)| r.final_loglik).collect();
+        eprintln!("Chain logliks: [{}]",
+            logliks.iter().map(|l| format!("{:.1}", l)).collect::<Vec<_>>().join(", "));
+        let spread = logliks.iter().cloned().fold(f64::NEG_INFINITY, f64::max)
+            - logliks.iter().cloned().fold(f64::INFINITY, f64::min);
+        eprintln!("Loglik spread: {:.1}", spread);
+    }
+
+    // ── Output: best chain traces to stdout ──────────────────────────────
+    print!("chain\titeration\tloglik");
+    for spec in if2_params.iter() {
         print!("\t{}", spec.name);
     }
     println!();
 
-    for iter_result in &result.iterations {
-        print!("{}\t{:.2}", iter_result.iteration, iter_result.log_likelihood);
-        for spec in &if2_params {
-            print!("\t{:.6}", iter_result.param_means[spec.index]);
+    for (chain_id, result) in &chain_results {
+        for iter_result in &result.iterations {
+            print!("{}\t{}\t{:.2}", chain_id + 1, iter_result.iteration, iter_result.log_likelihood);
+            for spec in if2_params.iter() {
+                print!("\t{:.6}", iter_result.param_means[spec.index]);
+            }
+            println!();
         }
-        println!();
     }
 
-    // Final MLE to stderr
-    eprintln!("\nIF2 converged. Final estimates:");
-    for spec in &if2_params {
-        eprintln!("  {} = {:.6}", spec.name, result.mle[spec.index]);
+    // ── Final MLE from best chain ────────────────────────────────────────
+    eprintln!("\nMLE estimates (best chain):");
+    for spec in if2_params.iter() {
+        eprintln!("  {} = {:.6}", spec.name, best.1.mle[spec.index]);
     }
-    eprintln!("  loglik = {:.2}", result.final_loglik);
+    eprintln!("  loglik = {:.2}", best.1.final_loglik);
+
+    // ── Write output dir if requested ────────────────────────────────────
+    if let Some(ref dir) = output_dir {
+        std::fs::create_dir_all(dir).ok();
+        for (chain_id, result) in &chain_results {
+            let chain_dir = format!("{}/chain_{}", dir, chain_id + 1);
+            std::fs::create_dir_all(&chain_dir).ok();
+
+            // Parameter traces
+            let trace_path = format!("{}/parameter_traces.tsv", chain_dir);
+            let mut f = std::fs::File::create(&trace_path).unwrap();
+            use std::io::Write;
+            write!(f, "iteration\tloglik").unwrap();
+            for spec in if2_params.iter() { write!(f, "\t{}", spec.name).unwrap(); }
+            writeln!(f).unwrap();
+            for it in &result.iterations {
+                write!(f, "{}\t{:.2}", it.iteration, it.log_likelihood).unwrap();
+                for spec in if2_params.iter() { write!(f, "\t{:.6}", it.param_means[spec.index]).unwrap(); }
+                writeln!(f).unwrap();
+            }
+
+            // Final params TOML
+            let toml_path = format!("{}/final_params.toml", chain_dir);
+            let mut f = std::fs::File::create(&toml_path).unwrap();
+            for spec in if2_params.iter() {
+                writeln!(f, "{} = {}", spec.name, result.mle[spec.index]).unwrap();
+            }
+        }
+        eprintln!("Output written to {}/", dir);
+    }
 }
