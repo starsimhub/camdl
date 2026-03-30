@@ -169,26 +169,27 @@ pub fn cmd_if2(args: &[String]) {
         let idx = compiled.param_index.get(name.as_str()).copied()
             .unwrap_or_else(|| { eprintln!("error: --rw-sd parameter '{}' not in model", name); std::process::exit(1); });
 
-        // Derive transform from parameter type
+        // Derive transform from parameter type and bounds.
+        // Key rule: if BOTH bounds are finite, use scaled logit to enforce them.
+        // Log only when the upper bound is infinite (truly unbounded positive).
+        // This prevents parameters from wandering outside their declared range
+        // during IF2 perturbation (the log transform ignores finite bounds).
         let ir_param = model.parameters.iter().find(|p| p.name == *name).unwrap();
-        let (transform, lower, upper) = match ir_param.transform {
-            Some(ir::parameter::Transform::Log) => (Transform::Log, 0.0, f64::INFINITY),
-            Some(ir::parameter::Transform::Logit) => {
-                let (lo, hi) = ir_param.bounds.unwrap_or((0.0, 1.0));
+        let (transform, lower, upper) = match ir_param.bounds {
+            Some((lo, hi)) if lo.is_finite() && hi.is_finite() => {
+                // Both bounds finite → scaled logit enforces [lo, hi]
                 (Transform::Logit, lo, hi)
             }
+            Some((lo, _)) if lo >= 0.0 => {
+                // Lower bound only (positive, no upper) → log
+                (Transform::Log, lo, f64::INFINITY)
+            }
             _ => {
-                // Infer from bounds
-                if let Some((lo, hi)) = ir_param.bounds {
-                    if lo == 0.0 && hi == 1.0 {
-                        (Transform::Logit, 0.0, 1.0)
-                    } else if lo >= 0.0 {
-                        (Transform::Log, lo, hi)
-                    } else {
-                        (Transform::None, lo, hi)
-                    }
-                } else {
-                    (Transform::Log, 0.0, f64::INFINITY)
+                // No bounds or explicit transform override
+                match ir_param.transform {
+                    Some(ir::parameter::Transform::Log) => (Transform::Log, 0.0, f64::INFINITY),
+                    Some(ir::parameter::Transform::Logit) => (Transform::Logit, 0.0, 1.0),
+                    _ => (Transform::Log, 0.0, f64::INFINITY),
                 }
             }
         };
