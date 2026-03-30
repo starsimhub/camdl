@@ -83,7 +83,7 @@ def plot_benchmarks(df: pl.DataFrame, output: Path) -> None:
     ax.set_yticks(y_pos)
     ax.set_yticklabels(names, fontsize=9, fontfamily="monospace")
     ax.set_xlabel(f"Time ({unit})", fontsize=11)
-    ax.set_title("Criterion Benchmark Results (baseline)", fontsize=13, fontweight="bold")
+    ax.set_title("Criterion Benchmark Results", fontsize=13, fontweight="bold")
     ax.invert_yaxis()
     ax.grid(axis="x", alpha=0.3)
 
