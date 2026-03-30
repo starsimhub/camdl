@@ -862,6 +862,7 @@ let rec resolve_expr ctx (env : (string * string) list) (e : expr) : Ir.expr =
       Ir.Const 0.0
     end
   | EList _     -> Ir.Const 0.0
+  | ERange _    -> Ir.Const 0.0  (* ranges only valid inside periodic on = [...] *)
 
 and resolve_ident_name ctx name ~loc =
   (* 1. Let binding? Inline it. *)
@@ -1503,10 +1504,57 @@ let expand_time_function_one ctx fname (env : (string * string) list) fkind farg
            method_;
          })
     | "periodic" ->
-      Ir.Periodic {
-        period = get_kw "period";
-        values = get_kw_list "values";
-      }
+      let period_expr = get_kw "period" in
+      let values =
+        match List.assoc_opt "on" fargs with
+        | Some on_expr ->
+          (* Range-based periodic: on = [7:100, 115:199, ...]
+             step = bin width (required with on).
+             Generates a binary values array: 1.0 for bins in ranges, 0.0 otherwise. *)
+          let step_expr = match List.assoc_opt "step" fargs with
+            | Some e -> resolve_expr ctx env e
+            | None -> failwith "periodic with 'on' requires 'step' (bin width)"
+          in
+          let period_f = match period_expr with Ir.Const f -> f | _ ->
+            failwith "periodic 'period' must be a constant when using 'on'" in
+          let step_f = match step_expr with Ir.Const f -> f | _ ->
+            failwith "periodic 'step' must be a constant when using 'on'" in
+          let n_bins = (period_f /. step_f +. 0.5) |> int_of_float in
+          let arr = Array.make n_bins 0.0 in
+          (* Extract ranges from the on = [...] expression *)
+          let ranges = match on_expr with
+            | EList items -> items
+            | _ -> failwith "periodic 'on' must be a list of ranges [lo:hi, ...]"
+          in
+          List.iter (fun range ->
+            match range with
+            | ERange (lo_e, hi_e) ->
+              let lo = match lo_e with EConst f -> int_of_float f
+                | EUnit (f, u) -> int_of_float (unit_to_model_time ctx f u)
+                | _ -> failwith "range lower bound must be a constant" in
+              let hi = match hi_e with EConst f -> int_of_float f
+                | EUnit (f, u) -> int_of_float (unit_to_model_time ctx f u)
+                | _ -> failwith "range upper bound must be a constant" in
+              let step_int = int_of_float step_f in
+              if step_int > 1 && (lo mod step_int <> 0 || (hi + 1) mod step_int <> 0) then
+                Diagnostics.warning ctx.diags ~code:"W301" ~loc:Diagnostics.no_loc
+                  ~message:(Printf.sprintf
+                    "periodic range %d:%d is not aligned to step size %d; \
+                     school fraction may differ from intended value"
+                    lo hi step_int)
+                  ~hint:"use step = 1 for exact boundaries, or adjust ranges to multiples of step"
+                  ();
+              for i = lo to (min hi (n_bins - 1)) do
+                arr.(i) <- 1.0
+              done
+            | _ -> failwith "periodic 'on' elements must be ranges (lo:hi)"
+          ) ranges;
+          Array.to_list arr |> List.map (fun f -> Ir.Const f)
+        | None ->
+          (* Traditional form: explicit values array *)
+          get_kw_list "values"
+      in
+      Ir.Periodic { period = period_expr; values }
     | k -> failwith (Printf.sprintf "unknown time function kind '%s'" k)
   in
   { Ir.name = fname; Ir.kind }

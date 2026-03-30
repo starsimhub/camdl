@@ -16,9 +16,9 @@ make build       # build both OCaml and Rust
 make install     # copy binaries to ~/.local/bin
 ```
 
-`make install` puts `camdlc`, `camdl-sim`, and `camdl` in `~/.local/bin`.
-Make sure that's on your `PATH`. (Dune names its output `camdlc.exe`
-internally — `make install` strips the suffix.)
+`make install` puts `camdlc`, `camdl-sim`, and `camdl` in `~/.local/bin`. Make
+sure that's on your `PATH`. (Dune names its output `camdlc.exe` internally —
+`make install` strips the suffix.)
 
 ## Quick start
 
@@ -159,15 +159,14 @@ interventions {
 
 Action kinds: `transfer(fraction=..., from=..., to=...)`,
 `transfer(count=..., from=..., to=...)`, and direct compartment assignment
-(`name = value`). Schedule kinds: `at [t1, t2, ...]` and
-`every E from F to T`.
+(`name = value`). Schedule kinds: `at [t1, t2, ...]` and `every E from F to T`.
 
 ### Erlang-staged compartments (linear chain trick)
 
-A single compartment has an exponentially distributed residence time — often
-too memoryless to be realistic. To get a Gamma-distributed duration (sharply
-peaked around the mean), split the compartment into `n` sequential sub-stages,
-each at rate `n * sigma`. This is the linear chain trick.
+A single compartment has an exponentially distributed residence time — often too
+memoryless to be realistic. To get a Gamma-distributed duration (sharply peaked
+around the mean), split the compartment into `n` sequential sub-stages, each at
+rate `n * sigma`. This is the linear chain trick.
 
 With 3 latent sub-stages written out explicitly:
 
@@ -206,12 +205,13 @@ transitions {
 }
 ```
 
-`consecutive(latent_stage)` produces the pairs `(e1, e2)` and `(e2, e3)` —
-one transition per pair. The transition family is named `latent`; the IR
-contains `latent_e1_e2` and `latent_e2_e3`. Both forms compile to identical IR.
+`consecutive(latent_stage)` produces the pairs `(e1, e2)` and `(e2, e3)` — one
+transition per pair. The transition family is named `latent`; the IR contains
+`latent_e1_e2` and `latent_e2_e3`. Both forms compile to identical IR.
 
 Use `n` sub-stages and rate `n * sigma` to control the shape: more stages →
-narrower distribution → more realistic incubation or infectious period modelling.
+narrower distribution → more realistic incubation or infectious period
+modelling.
 
 ### Key language features
 
@@ -223,12 +223,11 @@ narrower distribution → more realistic incubation or infectious period modelli
   and Erlang sub-staging
 - **Guards**: `where src != dst` — compile-time filtering; self-loops are
   dropped before the IR is written
-- **Coupling sugar**: `coupling(age) = C_age` expands contact-matrix mixing
-  into explicit indexed sums; the compiler auto-generates per-stratum
-  denominators
+- **Coupling sugar**: `coupling(age) = C_age` expands contact-matrix mixing into
+  explicit indexed sums; the compiler auto-generates per-stratum denominators
 - **Let bindings**: `let name[indices] = expr` — inlined at every use site
-- **Parameterized tables**: table entries can reference parameters,
-  e.g. `[[0.0, beta_mf], [beta_fm, 0.0]]`
+- **Parameterized tables**: table entries can reference parameters, e.g.
+  `[[0.0, beta_mf], [beta_fm, 0.0]]`
 - **Comparison operators**: `==`, `!=`, `<`, `>`, `<=`, `>=` usable in rate
   expressions (evaluate to 1.0/0.0) for conditional rates
 
@@ -240,9 +239,9 @@ Full language reference: `camdl-language-spec.md`
 
 ### Compile
 
-Compile a `.camdl` file to IR JSON on stdout. Parameter values are not
-required — the IR stores symbolic `Param("beta")` references. Use `--set` to
-resolve them before serialization:
+Compile a `.camdl` file to IR JSON on stdout. Parameter values are not required
+— the IR stores symbolic `Param("beta")` references. Use `--set` to resolve them
+before serialization:
 
 ```bash
 # Symbolic IR
@@ -335,8 +334,8 @@ sir_five_age
   dimensions      age = [age_0_5, age_5_15, age_15_50, age_50_65, age_65p]
 ```
 
-Other flags: `--let "N_local[child]"`, `--expansion infection`, `--ir`
-(raw IR JSON dump).
+Other flags: `--let "N_local[child]"`, `--expansion infection`, `--ir` (raw IR
+JSON dump).
 
 ---
 
@@ -354,8 +353,8 @@ Options:
   --set      NAME=VALUE  override a parameter value
 ```
 
-Output is a TSV trajectory on stdout. A `diagnostics.tsv` is also written to
-the current directory:
+Output is a TSV trajectory on stdout. A `diagnostics.tsv` is also written to the
+current directory:
 
 ```
 transition     total_firings  mean_propensity  ...
@@ -368,11 +367,11 @@ Zero-firing transitions are reported as warnings on stderr with a hint to use
 
 ### Simulation backends
 
-| Backend | Command | Notes |
-|---|---|---|
-| Gillespie SSA | `--backend gillespie` | Exact; default |
-| Tau-leap | `--backend tau_leap --dt 0.5` | Fast approximation; needs `--dt` |
-| Chain-binomial | `--backend chain_binomial --dt 1.0` | Discrete-time; needs `--dt` |
+| Backend        | Command                             | Notes                            |
+| -------------- | ----------------------------------- | -------------------------------- |
+| Gillespie SSA  | `--backend gillespie`               | Exact; default                   |
+| Tau-leap       | `--backend tau_leap --dt 0.5`       | Fast approximation; needs `--dt` |
+| Chain-binomial | `--backend chain_binomial --dt 1.0` | Discrete-time; needs `--dt`      |
 
 All backends use a stateful PRNG seeded by `--seed`. Same seed → identical
 trajectory (Common Random Numbers). Useful for counterfactual comparisons: run
@@ -420,10 +419,10 @@ cargo test --test gillespie_determinism # CRN seed reproducibility
 
 ### Golden files
 
-| Directory | Contents | Tested by |
-|---|---|---|
-| `ocaml/golden/` | `.camdl` sources + compiled `.ir.json` | OCaml compiler tests |
-| `ir/golden/` | Canonical `.ir.json` files | Rust deserialization tests |
+| Directory       | Contents                               | Tested by                  |
+| --------------- | -------------------------------------- | -------------------------- |
+| `ocaml/golden/` | `.camdl` sources + compiled `.ir.json` | OCaml compiler tests       |
+| `ir/golden/`    | Canonical `.ir.json` files             | Rust deserialization tests |
 
 Both sets are committed. Regenerate after compiler changes:
 
@@ -500,5 +499,6 @@ stochastic compartmental models.
 
 ## Documentation
 
-- `camdl-language-spec.md` — full DSL reference (syntax, expansion rules, error catalog)
+- `camdl-language-spec.md` — full DSL reference (syntax, expansion rules, error
+  catalog)
 - `compartmental-ir-spec.md` — IR schema and expression language reference

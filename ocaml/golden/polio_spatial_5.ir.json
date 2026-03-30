@@ -33,7 +33,7 @@
   "transitions": [
     {
       "name": "infection_north",
-      "stoichiometry": [ [ "S_north", -1 ], [ "E_north", 1 ] ],
+      "stoichiometry": [["S_north", -1], ["E_north", 1]],
       "rate": {
         "bin_op": {
           "op": "div",
@@ -58,7 +58,11 @@
           },
           "right": {
             "pop_sum": [
-              "S_north", "E_north", "I_north", "R_north", "V_north"
+              "S_north",
+              "E_north",
+              "I_north",
+              "R_north",
+              "V_north"
             ]
           }
         }
@@ -72,7 +76,7 @@
     },
     {
       "name": "infection_south",
-      "stoichiometry": [ [ "S_south", -1 ], [ "E_south", 1 ] ],
+      "stoichiometry": [["S_south", -1], ["E_south", 1]],
       "rate": {
         "bin_op": {
           "op": "div",
@@ -97,7 +101,11 @@
           },
           "right": {
             "pop_sum": [
-              "S_south", "E_south", "I_south", "R_south", "V_south"
+              "S_south",
+              "E_south",
+              "I_south",
+              "R_south",
+              "V_south"
             ]
           }
         }
@@ -111,7 +119,7 @@
     },
     {
       "name": "infection_east",
-      "stoichiometry": [ [ "S_east", -1 ], [ "E_east", 1 ] ],
+      "stoichiometry": [["S_east", -1], ["E_east", 1]],
       "rate": {
         "bin_op": {
           "op": "div",
@@ -135,7 +143,7 @@
             }
           },
           "right": {
-            "pop_sum": [ "S_east", "E_east", "I_east", "R_east", "V_east" ]
+            "pop_sum": ["S_east", "E_east", "I_east", "R_east", "V_east"]
           }
         }
       },
@@ -148,7 +156,7 @@
     },
     {
       "name": "infection_west",
-      "stoichiometry": [ [ "S_west", -1 ], [ "E_west", 1 ] ],
+      "stoichiometry": [["S_west", -1], ["E_west", 1]],
       "rate": {
         "bin_op": {
           "op": "div",
@@ -172,7 +180,7 @@
             }
           },
           "right": {
-            "pop_sum": [ "S_west", "E_west", "I_west", "R_west", "V_west" ]
+            "pop_sum": ["S_west", "E_west", "I_west", "R_west", "V_west"]
           }
         }
       },
@@ -185,7 +193,7 @@
     },
     {
       "name": "infection_center",
-      "stoichiometry": [ [ "S_center", -1 ], [ "E_center", 1 ] ],
+      "stoichiometry": [["S_center", -1], ["E_center", 1]],
       "rate": {
         "bin_op": {
           "op": "div",
@@ -210,7 +218,11 @@
           },
           "right": {
             "pop_sum": [
-              "S_center", "E_center", "I_center", "R_center", "V_center"
+              "S_center",
+              "E_center",
+              "I_center",
+              "R_center",
+              "V_center"
             ]
           }
         }
@@ -224,7 +236,7 @@
     },
     {
       "name": "importation_north_south",
-      "stoichiometry": [ [ "S_north", -1 ], [ "E_north", 1 ] ],
+      "stoichiometry": [["S_north", -1], ["E_north", 1]],
       "rate": {
         "bin_op": {
           "op": "div",
@@ -241,7 +253,7 @@
                       "right": {
                         "table_lookup": {
                           "table": "W_patch",
-                          "indices": [ { "const": 1.0 } ]
+                          "indices": [{ "const": 1.0 }]
                         }
                       }
                     }
@@ -254,7 +266,11 @@
           },
           "right": {
             "pop_sum": [
-              "S_south", "E_south", "I_south", "R_south", "V_south"
+              "S_south",
+              "E_south",
+              "I_south",
+              "R_south",
+              "V_south"
             ]
           }
         }
@@ -268,7 +284,7 @@
     },
     {
       "name": "importation_north_east",
-      "stoichiometry": [ [ "S_north", -1 ], [ "E_north", 1 ] ],
+      "stoichiometry": [["S_north", -1], ["E_north", 1]],
       "rate": {
         "bin_op": {
           "op": "div",
@@ -285,7 +301,7 @@
                       "right": {
                         "table_lookup": {
                           "table": "W_patch",
-                          "indices": [ { "const": 2.0 } ]
+                          "indices": [{ "const": 2.0 }]
                         }
                       }
                     }
@@ -297,7 +313,7 @@
             }
           },
           "right": {
-            "pop_sum": [ "S_east", "E_east", "I_east", "R_east", "V_east" ]
+            "pop_sum": ["S_east", "E_east", "I_east", "R_east", "V_east"]
           }
         }
       },
@@ -310,7 +326,7 @@
     },
     {
       "name": "importation_north_west",
-      "stoichiometry": [ [ "S_north", -1 ], [ "E_north", 1 ] ],
+      "stoichiometry": [["S_north", -1], ["E_north", 1]],
       "rate": {
         "bin_op": {
           "op": "div",
@@ -327,7 +343,7 @@
                       "right": {
                         "table_lookup": {
                           "table": "W_patch",
-                          "indices": [ { "const": 3.0 } ]
+                          "indices": [{ "const": 3.0 }]
                         }
                       }
                     }
@@ -339,7 +355,7 @@
             }
           },
           "right": {
-            "pop_sum": [ "S_west", "E_west", "I_west", "R_west", "V_west" ]
+            "pop_sum": ["S_west", "E_west", "I_west", "R_west", "V_west"]
           }
         }
       },
@@ -352,7 +368,7 @@
     },
     {
       "name": "importation_north_center",
-      "stoichiometry": [ [ "S_north", -1 ], [ "E_north", 1 ] ],
+      "stoichiometry": [["S_north", -1], ["E_north", 1]],
       "rate": {
         "bin_op": {
           "op": "div",
@@ -369,7 +385,7 @@
                       "right": {
                         "table_lookup": {
                           "table": "W_patch",
-                          "indices": [ { "const": 4.0 } ]
+                          "indices": [{ "const": 4.0 }]
                         }
                       }
                     }
@@ -382,7 +398,11 @@
           },
           "right": {
             "pop_sum": [
-              "S_center", "E_center", "I_center", "R_center", "V_center"
+              "S_center",
+              "E_center",
+              "I_center",
+              "R_center",
+              "V_center"
             ]
           }
         }
@@ -396,7 +416,7 @@
     },
     {
       "name": "importation_south_north",
-      "stoichiometry": [ [ "S_south", -1 ], [ "E_south", 1 ] ],
+      "stoichiometry": [["S_south", -1], ["E_south", 1]],
       "rate": {
         "bin_op": {
           "op": "div",
@@ -413,7 +433,7 @@
                       "right": {
                         "table_lookup": {
                           "table": "W_patch",
-                          "indices": [ { "const": 5.0 } ]
+                          "indices": [{ "const": 5.0 }]
                         }
                       }
                     }
@@ -426,7 +446,11 @@
           },
           "right": {
             "pop_sum": [
-              "S_north", "E_north", "I_north", "R_north", "V_north"
+              "S_north",
+              "E_north",
+              "I_north",
+              "R_north",
+              "V_north"
             ]
           }
         }
@@ -440,7 +464,7 @@
     },
     {
       "name": "importation_south_east",
-      "stoichiometry": [ [ "S_south", -1 ], [ "E_south", 1 ] ],
+      "stoichiometry": [["S_south", -1], ["E_south", 1]],
       "rate": {
         "bin_op": {
           "op": "div",
@@ -457,7 +481,7 @@
                       "right": {
                         "table_lookup": {
                           "table": "W_patch",
-                          "indices": [ { "const": 7.0 } ]
+                          "indices": [{ "const": 7.0 }]
                         }
                       }
                     }
@@ -469,7 +493,7 @@
             }
           },
           "right": {
-            "pop_sum": [ "S_east", "E_east", "I_east", "R_east", "V_east" ]
+            "pop_sum": ["S_east", "E_east", "I_east", "R_east", "V_east"]
           }
         }
       },
@@ -482,7 +506,7 @@
     },
     {
       "name": "importation_south_west",
-      "stoichiometry": [ [ "S_south", -1 ], [ "E_south", 1 ] ],
+      "stoichiometry": [["S_south", -1], ["E_south", 1]],
       "rate": {
         "bin_op": {
           "op": "div",
@@ -499,7 +523,7 @@
                       "right": {
                         "table_lookup": {
                           "table": "W_patch",
-                          "indices": [ { "const": 8.0 } ]
+                          "indices": [{ "const": 8.0 }]
                         }
                       }
                     }
@@ -511,7 +535,7 @@
             }
           },
           "right": {
-            "pop_sum": [ "S_west", "E_west", "I_west", "R_west", "V_west" ]
+            "pop_sum": ["S_west", "E_west", "I_west", "R_west", "V_west"]
           }
         }
       },
@@ -524,7 +548,7 @@
     },
     {
       "name": "importation_south_center",
-      "stoichiometry": [ [ "S_south", -1 ], [ "E_south", 1 ] ],
+      "stoichiometry": [["S_south", -1], ["E_south", 1]],
       "rate": {
         "bin_op": {
           "op": "div",
@@ -541,7 +565,7 @@
                       "right": {
                         "table_lookup": {
                           "table": "W_patch",
-                          "indices": [ { "const": 9.0 } ]
+                          "indices": [{ "const": 9.0 }]
                         }
                       }
                     }
@@ -554,7 +578,11 @@
           },
           "right": {
             "pop_sum": [
-              "S_center", "E_center", "I_center", "R_center", "V_center"
+              "S_center",
+              "E_center",
+              "I_center",
+              "R_center",
+              "V_center"
             ]
           }
         }
@@ -568,7 +596,7 @@
     },
     {
       "name": "importation_east_north",
-      "stoichiometry": [ [ "S_east", -1 ], [ "E_east", 1 ] ],
+      "stoichiometry": [["S_east", -1], ["E_east", 1]],
       "rate": {
         "bin_op": {
           "op": "div",
@@ -585,7 +613,7 @@
                       "right": {
                         "table_lookup": {
                           "table": "W_patch",
-                          "indices": [ { "const": 10.0 } ]
+                          "indices": [{ "const": 10.0 }]
                         }
                       }
                     }
@@ -598,7 +626,11 @@
           },
           "right": {
             "pop_sum": [
-              "S_north", "E_north", "I_north", "R_north", "V_north"
+              "S_north",
+              "E_north",
+              "I_north",
+              "R_north",
+              "V_north"
             ]
           }
         }
@@ -612,7 +644,7 @@
     },
     {
       "name": "importation_east_south",
-      "stoichiometry": [ [ "S_east", -1 ], [ "E_east", 1 ] ],
+      "stoichiometry": [["S_east", -1], ["E_east", 1]],
       "rate": {
         "bin_op": {
           "op": "div",
@@ -629,7 +661,7 @@
                       "right": {
                         "table_lookup": {
                           "table": "W_patch",
-                          "indices": [ { "const": 11.0 } ]
+                          "indices": [{ "const": 11.0 }]
                         }
                       }
                     }
@@ -642,7 +674,11 @@
           },
           "right": {
             "pop_sum": [
-              "S_south", "E_south", "I_south", "R_south", "V_south"
+              "S_south",
+              "E_south",
+              "I_south",
+              "R_south",
+              "V_south"
             ]
           }
         }
@@ -656,7 +692,7 @@
     },
     {
       "name": "importation_east_west",
-      "stoichiometry": [ [ "S_east", -1 ], [ "E_east", 1 ] ],
+      "stoichiometry": [["S_east", -1], ["E_east", 1]],
       "rate": {
         "bin_op": {
           "op": "div",
@@ -673,7 +709,7 @@
                       "right": {
                         "table_lookup": {
                           "table": "W_patch",
-                          "indices": [ { "const": 13.0 } ]
+                          "indices": [{ "const": 13.0 }]
                         }
                       }
                     }
@@ -685,7 +721,7 @@
             }
           },
           "right": {
-            "pop_sum": [ "S_west", "E_west", "I_west", "R_west", "V_west" ]
+            "pop_sum": ["S_west", "E_west", "I_west", "R_west", "V_west"]
           }
         }
       },
@@ -698,7 +734,7 @@
     },
     {
       "name": "importation_east_center",
-      "stoichiometry": [ [ "S_east", -1 ], [ "E_east", 1 ] ],
+      "stoichiometry": [["S_east", -1], ["E_east", 1]],
       "rate": {
         "bin_op": {
           "op": "div",
@@ -715,7 +751,7 @@
                       "right": {
                         "table_lookup": {
                           "table": "W_patch",
-                          "indices": [ { "const": 14.0 } ]
+                          "indices": [{ "const": 14.0 }]
                         }
                       }
                     }
@@ -728,7 +764,11 @@
           },
           "right": {
             "pop_sum": [
-              "S_center", "E_center", "I_center", "R_center", "V_center"
+              "S_center",
+              "E_center",
+              "I_center",
+              "R_center",
+              "V_center"
             ]
           }
         }
@@ -742,7 +782,7 @@
     },
     {
       "name": "importation_west_north",
-      "stoichiometry": [ [ "S_west", -1 ], [ "E_west", 1 ] ],
+      "stoichiometry": [["S_west", -1], ["E_west", 1]],
       "rate": {
         "bin_op": {
           "op": "div",
@@ -759,7 +799,7 @@
                       "right": {
                         "table_lookup": {
                           "table": "W_patch",
-                          "indices": [ { "const": 15.0 } ]
+                          "indices": [{ "const": 15.0 }]
                         }
                       }
                     }
@@ -772,7 +812,11 @@
           },
           "right": {
             "pop_sum": [
-              "S_north", "E_north", "I_north", "R_north", "V_north"
+              "S_north",
+              "E_north",
+              "I_north",
+              "R_north",
+              "V_north"
             ]
           }
         }
@@ -786,7 +830,7 @@
     },
     {
       "name": "importation_west_south",
-      "stoichiometry": [ [ "S_west", -1 ], [ "E_west", 1 ] ],
+      "stoichiometry": [["S_west", -1], ["E_west", 1]],
       "rate": {
         "bin_op": {
           "op": "div",
@@ -803,7 +847,7 @@
                       "right": {
                         "table_lookup": {
                           "table": "W_patch",
-                          "indices": [ { "const": 16.0 } ]
+                          "indices": [{ "const": 16.0 }]
                         }
                       }
                     }
@@ -816,7 +860,11 @@
           },
           "right": {
             "pop_sum": [
-              "S_south", "E_south", "I_south", "R_south", "V_south"
+              "S_south",
+              "E_south",
+              "I_south",
+              "R_south",
+              "V_south"
             ]
           }
         }
@@ -830,7 +878,7 @@
     },
     {
       "name": "importation_west_east",
-      "stoichiometry": [ [ "S_west", -1 ], [ "E_west", 1 ] ],
+      "stoichiometry": [["S_west", -1], ["E_west", 1]],
       "rate": {
         "bin_op": {
           "op": "div",
@@ -847,7 +895,7 @@
                       "right": {
                         "table_lookup": {
                           "table": "W_patch",
-                          "indices": [ { "const": 17.0 } ]
+                          "indices": [{ "const": 17.0 }]
                         }
                       }
                     }
@@ -859,7 +907,7 @@
             }
           },
           "right": {
-            "pop_sum": [ "S_east", "E_east", "I_east", "R_east", "V_east" ]
+            "pop_sum": ["S_east", "E_east", "I_east", "R_east", "V_east"]
           }
         }
       },
@@ -872,7 +920,7 @@
     },
     {
       "name": "importation_west_center",
-      "stoichiometry": [ [ "S_west", -1 ], [ "E_west", 1 ] ],
+      "stoichiometry": [["S_west", -1], ["E_west", 1]],
       "rate": {
         "bin_op": {
           "op": "div",
@@ -889,7 +937,7 @@
                       "right": {
                         "table_lookup": {
                           "table": "W_patch",
-                          "indices": [ { "const": 19.0 } ]
+                          "indices": [{ "const": 19.0 }]
                         }
                       }
                     }
@@ -902,7 +950,11 @@
           },
           "right": {
             "pop_sum": [
-              "S_center", "E_center", "I_center", "R_center", "V_center"
+              "S_center",
+              "E_center",
+              "I_center",
+              "R_center",
+              "V_center"
             ]
           }
         }
@@ -916,7 +968,7 @@
     },
     {
       "name": "importation_center_north",
-      "stoichiometry": [ [ "S_center", -1 ], [ "E_center", 1 ] ],
+      "stoichiometry": [["S_center", -1], ["E_center", 1]],
       "rate": {
         "bin_op": {
           "op": "div",
@@ -933,7 +985,7 @@
                       "right": {
                         "table_lookup": {
                           "table": "W_patch",
-                          "indices": [ { "const": 20.0 } ]
+                          "indices": [{ "const": 20.0 }]
                         }
                       }
                     }
@@ -946,7 +998,11 @@
           },
           "right": {
             "pop_sum": [
-              "S_north", "E_north", "I_north", "R_north", "V_north"
+              "S_north",
+              "E_north",
+              "I_north",
+              "R_north",
+              "V_north"
             ]
           }
         }
@@ -960,7 +1016,7 @@
     },
     {
       "name": "importation_center_south",
-      "stoichiometry": [ [ "S_center", -1 ], [ "E_center", 1 ] ],
+      "stoichiometry": [["S_center", -1], ["E_center", 1]],
       "rate": {
         "bin_op": {
           "op": "div",
@@ -977,7 +1033,7 @@
                       "right": {
                         "table_lookup": {
                           "table": "W_patch",
-                          "indices": [ { "const": 21.0 } ]
+                          "indices": [{ "const": 21.0 }]
                         }
                       }
                     }
@@ -990,7 +1046,11 @@
           },
           "right": {
             "pop_sum": [
-              "S_south", "E_south", "I_south", "R_south", "V_south"
+              "S_south",
+              "E_south",
+              "I_south",
+              "R_south",
+              "V_south"
             ]
           }
         }
@@ -1004,7 +1064,7 @@
     },
     {
       "name": "importation_center_east",
-      "stoichiometry": [ [ "S_center", -1 ], [ "E_center", 1 ] ],
+      "stoichiometry": [["S_center", -1], ["E_center", 1]],
       "rate": {
         "bin_op": {
           "op": "div",
@@ -1021,7 +1081,7 @@
                       "right": {
                         "table_lookup": {
                           "table": "W_patch",
-                          "indices": [ { "const": 22.0 } ]
+                          "indices": [{ "const": 22.0 }]
                         }
                       }
                     }
@@ -1033,7 +1093,7 @@
             }
           },
           "right": {
-            "pop_sum": [ "S_east", "E_east", "I_east", "R_east", "V_east" ]
+            "pop_sum": ["S_east", "E_east", "I_east", "R_east", "V_east"]
           }
         }
       },
@@ -1046,7 +1106,7 @@
     },
     {
       "name": "importation_center_west",
-      "stoichiometry": [ [ "S_center", -1 ], [ "E_center", 1 ] ],
+      "stoichiometry": [["S_center", -1], ["E_center", 1]],
       "rate": {
         "bin_op": {
           "op": "div",
@@ -1063,7 +1123,7 @@
                       "right": {
                         "table_lookup": {
                           "table": "W_patch",
-                          "indices": [ { "const": 23.0 } ]
+                          "indices": [{ "const": 23.0 }]
                         }
                       }
                     }
@@ -1075,7 +1135,7 @@
             }
           },
           "right": {
-            "pop_sum": [ "S_west", "E_west", "I_west", "R_west", "V_west" ]
+            "pop_sum": ["S_west", "E_west", "I_west", "R_west", "V_west"]
           }
         }
       },
@@ -1088,7 +1148,7 @@
     },
     {
       "name": "progression_north",
-      "stoichiometry": [ [ "E_north", -1 ], [ "I_north", 1 ] ],
+      "stoichiometry": [["E_north", -1], ["I_north", 1]],
       "rate": {
         "bin_op": {
           "op": "mul",
@@ -1105,7 +1165,7 @@
     },
     {
       "name": "progression_south",
-      "stoichiometry": [ [ "E_south", -1 ], [ "I_south", 1 ] ],
+      "stoichiometry": [["E_south", -1], ["I_south", 1]],
       "rate": {
         "bin_op": {
           "op": "mul",
@@ -1122,7 +1182,7 @@
     },
     {
       "name": "progression_east",
-      "stoichiometry": [ [ "E_east", -1 ], [ "I_east", 1 ] ],
+      "stoichiometry": [["E_east", -1], ["I_east", 1]],
       "rate": {
         "bin_op": {
           "op": "mul",
@@ -1139,7 +1199,7 @@
     },
     {
       "name": "progression_west",
-      "stoichiometry": [ [ "E_west", -1 ], [ "I_west", 1 ] ],
+      "stoichiometry": [["E_west", -1], ["I_west", 1]],
       "rate": {
         "bin_op": {
           "op": "mul",
@@ -1156,7 +1216,7 @@
     },
     {
       "name": "progression_center",
-      "stoichiometry": [ [ "E_center", -1 ], [ "I_center", 1 ] ],
+      "stoichiometry": [["E_center", -1], ["I_center", 1]],
       "rate": {
         "bin_op": {
           "op": "mul",
@@ -1173,7 +1233,7 @@
     },
     {
       "name": "recovery_north",
-      "stoichiometry": [ [ "I_north", -1 ], [ "R_north", 1 ] ],
+      "stoichiometry": [["I_north", -1], ["R_north", 1]],
       "rate": {
         "bin_op": {
           "op": "mul",
@@ -1190,7 +1250,7 @@
     },
     {
       "name": "recovery_south",
-      "stoichiometry": [ [ "I_south", -1 ], [ "R_south", 1 ] ],
+      "stoichiometry": [["I_south", -1], ["R_south", 1]],
       "rate": {
         "bin_op": {
           "op": "mul",
@@ -1207,7 +1267,7 @@
     },
     {
       "name": "recovery_east",
-      "stoichiometry": [ [ "I_east", -1 ], [ "R_east", 1 ] ],
+      "stoichiometry": [["I_east", -1], ["R_east", 1]],
       "rate": {
         "bin_op": {
           "op": "mul",
@@ -1224,7 +1284,7 @@
     },
     {
       "name": "recovery_west",
-      "stoichiometry": [ [ "I_west", -1 ], [ "R_west", 1 ] ],
+      "stoichiometry": [["I_west", -1], ["R_west", 1]],
       "rate": {
         "bin_op": {
           "op": "mul",
@@ -1241,7 +1301,7 @@
     },
     {
       "name": "recovery_center",
-      "stoichiometry": [ [ "I_center", -1 ], [ "R_center", 1 ] ],
+      "stoichiometry": [["I_center", -1], ["R_center", 1]],
       "rate": {
         "bin_op": {
           "op": "mul",
@@ -1258,7 +1318,7 @@
     },
     {
       "name": "waning_north",
-      "stoichiometry": [ [ "V_north", -1 ], [ "S_north", 1 ] ],
+      "stoichiometry": [["V_north", -1], ["S_north", 1]],
       "rate": {
         "bin_op": {
           "op": "mul",
@@ -1275,7 +1335,7 @@
     },
     {
       "name": "waning_south",
-      "stoichiometry": [ [ "V_south", -1 ], [ "S_south", 1 ] ],
+      "stoichiometry": [["V_south", -1], ["S_south", 1]],
       "rate": {
         "bin_op": {
           "op": "mul",
@@ -1292,7 +1352,7 @@
     },
     {
       "name": "waning_east",
-      "stoichiometry": [ [ "V_east", -1 ], [ "S_east", 1 ] ],
+      "stoichiometry": [["V_east", -1], ["S_east", 1]],
       "rate": {
         "bin_op": {
           "op": "mul",
@@ -1309,7 +1369,7 @@
     },
     {
       "name": "waning_west",
-      "stoichiometry": [ [ "V_west", -1 ], [ "S_west", 1 ] ],
+      "stoichiometry": [["V_west", -1], ["S_west", 1]],
       "rate": {
         "bin_op": {
           "op": "mul",
@@ -1326,7 +1386,7 @@
     },
     {
       "name": "waning_center",
-      "stoichiometry": [ [ "V_center", -1 ], [ "S_center", 1 ] ],
+      "stoichiometry": [["V_center", -1], ["S_center", 1]],
       "rate": {
         "bin_op": {
           "op": "mul",
@@ -1380,7 +1440,7 @@
   "interventions": [
     {
       "name": "sia_north",
-      "schedule": { "at_times": [ 180.0, 545.0, 910.0 ] },
+      "schedule": { "at_times": [180.0, 545.0, 910.0] },
       "actions": [
         {
           "fraction_transfer": {
@@ -1393,7 +1453,7 @@
     },
     {
       "name": "sia_south",
-      "schedule": { "at_times": [ 190.0, 555.0, 920.0 ] },
+      "schedule": { "at_times": [190.0, 555.0, 920.0] },
       "actions": [
         {
           "fraction_transfer": {
@@ -1406,7 +1466,7 @@
     },
     {
       "name": "sia_east",
-      "schedule": { "at_times": [ 200.0, 565.0, 930.0 ] },
+      "schedule": { "at_times": [200.0, 565.0, 930.0] },
       "actions": [
         {
           "fraction_transfer": {
@@ -1419,7 +1479,7 @@
     },
     {
       "name": "sia_west",
-      "schedule": { "at_times": [ 200.0, 565.0, 930.0 ] },
+      "schedule": { "at_times": [200.0, 565.0, 930.0] },
       "actions": [
         {
           "fraction_transfer": {
@@ -1432,7 +1492,7 @@
     },
     {
       "name": "sia_center",
-      "schedule": { "at_times": [ 185.0, 550.0, 915.0 ] },
+      "schedule": { "at_times": [185.0, 550.0, 915.0] },
       "actions": [
         {
           "fraction_transfer": {
@@ -1449,7 +1509,7 @@
     {
       "name": "sigma",
       "value": null,
-      "bounds": [ 0.01, 1.0 ],
+      "bounds": [0.01, 1.0],
       "prior": null,
       "transform": null,
       "initial_value": null
@@ -1457,7 +1517,7 @@
     {
       "name": "gamma",
       "value": null,
-      "bounds": [ 0.01, 1.0 ],
+      "bounds": [0.01, 1.0],
       "prior": null,
       "transform": null,
       "initial_value": null
@@ -1465,7 +1525,7 @@
     {
       "name": "omega",
       "value": null,
-      "bounds": [ 0.0001, 0.1 ],
+      "bounds": [0.0001, 0.1],
       "prior": null,
       "transform": null,
       "initial_value": null
@@ -1473,7 +1533,7 @@
     {
       "name": "kappa",
       "value": null,
-      "bounds": [ 0.0, 0.5 ],
+      "bounds": [0.0, 0.5],
       "prior": null,
       "transform": null,
       "initial_value": null
@@ -1481,7 +1541,7 @@
     {
       "name": "vacc_frac",
       "value": null,
-      "bounds": [ 0.0, 1.0 ],
+      "bounds": [0.0, 1.0],
       "prior": null,
       "transform": null,
       "initial_value": null
@@ -1489,7 +1549,7 @@
     {
       "name": "R0_north",
       "value": null,
-      "bounds": [ 0.5, 10.0 ],
+      "bounds": [0.5, 10.0],
       "prior": null,
       "transform": null,
       "initial_value": null
@@ -1497,7 +1557,7 @@
     {
       "name": "R0_south",
       "value": null,
-      "bounds": [ 0.5, 10.0 ],
+      "bounds": [0.5, 10.0],
       "prior": null,
       "transform": null,
       "initial_value": null
@@ -1505,7 +1565,7 @@
     {
       "name": "R0_east",
       "value": null,
-      "bounds": [ 0.5, 10.0 ],
+      "bounds": [0.5, 10.0],
       "prior": null,
       "transform": null,
       "initial_value": null
@@ -1513,7 +1573,7 @@
     {
       "name": "R0_west",
       "value": null,
-      "bounds": [ 0.5, 10.0 ],
+      "bounds": [0.5, 10.0],
       "prior": null,
       "transform": null,
       "initial_value": null
@@ -1521,7 +1581,7 @@
     {
       "name": "R0_center",
       "value": null,
-      "bounds": [ 0.5, 10.0 ],
+      "bounds": [0.5, 10.0],
       "prior": null,
       "transform": null,
       "initial_value": null
@@ -1529,7 +1589,7 @@
     {
       "name": "N0_north",
       "value": null,
-      "bounds": [ 100.0, 1000000.0 ],
+      "bounds": [100.0, 1000000.0],
       "prior": null,
       "transform": null,
       "initial_value": null
@@ -1537,7 +1597,7 @@
     {
       "name": "N0_south",
       "value": null,
-      "bounds": [ 100.0, 1000000.0 ],
+      "bounds": [100.0, 1000000.0],
       "prior": null,
       "transform": null,
       "initial_value": null
@@ -1545,7 +1605,7 @@
     {
       "name": "N0_east",
       "value": null,
-      "bounds": [ 100.0, 1000000.0 ],
+      "bounds": [100.0, 1000000.0],
       "prior": null,
       "transform": null,
       "initial_value": null
@@ -1553,7 +1613,7 @@
     {
       "name": "N0_west",
       "value": null,
-      "bounds": [ 100.0, 1000000.0 ],
+      "bounds": [100.0, 1000000.0],
       "prior": null,
       "transform": null,
       "initial_value": null
@@ -1561,7 +1621,7 @@
     {
       "name": "N0_center",
       "value": null,
-      "bounds": [ 100.0, 1000000.0 ],
+      "bounds": [100.0, 1000000.0],
       "prior": null,
       "transform": null,
       "initial_value": null
@@ -1569,7 +1629,7 @@
     {
       "name": "I0",
       "value": null,
-      "bounds": [ 1.0, 1000.0 ],
+      "bounds": [1.0, 1000.0],
       "prior": null,
       "transform": null,
       "initial_value": null
@@ -1636,7 +1696,11 @@
       "label": "with SIA all patches",
       "params": {},
       "enable": [
-        "sia_north", "sia_south", "sia_east", "sia_west", "sia_center"
+        "sia_north",
+        "sia_south",
+        "sia_east",
+        "sia_west",
+        "sia_center"
       ],
       "disable": [],
       "t_end": null
@@ -1646,18 +1710,18 @@
     "dimensions": [
       {
         "name": "patch",
-        "values": [ "north", "south", "east", "west", "center" ]
+        "values": ["north", "south", "east", "west", "center"]
       }
     ],
     "compartment_dims": {
-      "S": [ "patch" ],
-      "E": [ "patch" ],
-      "I": [ "patch" ],
-      "R": [ "patch" ],
-      "V": [ "patch" ]
+      "S": ["patch"],
+      "E": ["patch"],
+      "I": ["patch"],
+      "R": ["patch"],
+      "V": ["patch"]
     },
-    "base_compartments": [ "S", "E", "I", "R", "V" ],
-    "transmission_transitions": [ "infection", "importation" ],
-    "infectious_compartments": [ "I" ]
+    "base_compartments": ["S", "E", "I", "R", "V"],
+    "transmission_transitions": ["infection", "importation"],
+    "infectious_compartments": ["I"]
   }
 }

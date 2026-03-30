@@ -14,14 +14,14 @@
  * for per-patch ensemble trajectory.
  */
 
-import { useState, useMemo, useCallback, useRef } from 'react';
-import 'leaflet/dist/leaflet.css';
-import { MapContainer, TileLayer, GeoJSON as LeafletGeoJSON } from 'react-leaflet';
-import type L from 'leaflet';
-import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
-import type { FeatureCollection, Feature } from 'geojson';
-import { useStore } from '../store';
-import { detectPatches, allPatchMedians, patchTimeSeries } from '../lib/patchStats';
+import { useCallback, useMemo, useRef, useState } from "react";
+import "leaflet/dist/leaflet.css";
+import type { Feature, FeatureCollection } from "geojson";
+import type L from "leaflet";
+import { GeoJSON as LeafletGeoJSON, MapContainer, TileLayer } from "react-leaflet";
+import { Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { allPatchMedians, detectPatches, patchTimeSeries } from "../lib/patchStats";
+import { useStore } from "../store";
 
 // ── Color scale (YlOrRd) ──────────────────────────────────────────────────────
 
@@ -55,7 +55,7 @@ interface PatchChartProps {
 }
 
 function PatchChart({ patchIdx, compType, scenarioName, color, data, onClose }: PatchChartProps) {
-  const seedKeys = Object.keys(data[0] ?? {}).filter((k) => k.startsWith('seed_'));
+  const seedKeys = Object.keys(data[0] ?? {}).filter((k) => k.startsWith("seed_"));
 
   return (
     <div className="absolute right-3 top-3 z-[1000] bg-white dark:bg-surface-1 border border-gray-200 dark:border-surface-border rounded-lg shadow-xl p-3 w-64">
@@ -76,7 +76,7 @@ function PatchChart({ patchIdx, compType, scenarioName, color, data, onClose }: 
           <XAxis dataKey="t" tick={{ fontSize: 9 }} tickLine={false} axisLine={false} />
           <YAxis tick={{ fontSize: 9 }} tickLine={false} axisLine={false} width={28} />
           <Tooltip
-            contentStyle={{ fontSize: 10, padding: '4px 8px' }}
+            contentStyle={{ fontSize: 10, padding: "4px 8px" }}
             formatter={(v: number) => [v.toFixed(0), compType]}
           />
           {seedKeys.map((k) => (
@@ -124,14 +124,14 @@ function PatchGrid({ patchIndices, values, minV, maxV, selectedPatch, onSelect }
   return (
     <div
       className="overflow-auto flex-1 p-3"
-      style={{ display: 'flex', alignItems: 'flex-start' }}
+      style={{ display: "flex", alignItems: "flex-start" }}
     >
       <div
         style={{
-          display: 'grid',
+          display: "grid",
           gridTemplateColumns: `repeat(${cols}, 1fr)`,
           gap: 3,
-          width: '100%',
+          width: "100%",
         }}
       >
         {patchIndices.map((p, i) => {
@@ -146,10 +146,10 @@ function PatchGrid({ patchIndices, values, minV, maxV, selectedPatch, onSelect }
               onClick={() => onSelect(p)}
               style={{
                 backgroundColor: bg,
-                aspectRatio: '1',
+                aspectRatio: "1",
                 borderRadius: 2,
-                cursor: 'pointer',
-                border: isSelected ? '2px solid #1a1a1a' : '1px solid rgba(0,0,0,0.1)',
+                cursor: "pointer",
+                border: isSelected ? "2px solid #1a1a1a" : "1px solid rgba(0,0,0,0.1)",
                 minWidth: 0,
               }}
             />
@@ -187,7 +187,7 @@ function GeoMap({ geoJson, patchIndices, values, minV, maxV, selectedPatch, onSe
   const featurePatchIndex = useCallback(
     (feature: Feature, arrayIdx: number): number => {
       const pi = (feature.properties as Record<string, unknown>)?.patch_index;
-      if (typeof pi === 'number') return pi;
+      if (typeof pi === "number") return pi;
       return arrayIdx;
     },
     [],
@@ -198,13 +198,13 @@ function GeoMap({ geoJson, patchIndices, values, minV, maxV, selectedPatch, onSe
       if (!feature) return {};
       const idx = geoJson.features.indexOf(feature);
       const pi = featurePatchIndex(feature, idx);
-      const color = colorByPatch.get(pi) ?? '#e5e7eb';
+      const color = colorByPatch.get(pi) ?? "#e5e7eb";
       const isSelected = pi === selectedPatch;
       return {
         fillColor: color,
         fillOpacity: 0.75,
         weight: isSelected ? 2 : 0.5,
-        color: isSelected ? '#1a1a1a' : '#666',
+        color: isSelected ? "#1a1a1a" : "#666",
       };
     },
     [colorByPatch, featurePatchIndex, selectedPatch, geoJson],
@@ -214,22 +214,21 @@ function GeoMap({ geoJson, patchIndices, values, minV, maxV, selectedPatch, onSe
     (feature: Feature, layer: L.Layer) => {
       const idx = geoJson.features.indexOf(feature);
       const pi = featurePatchIndex(feature, idx);
-      const name =
-        (feature.properties as Record<string, string>)?.name ??
-        (feature.properties as Record<string, string>)?.lga_name ??
-        `Patch ${pi}`;
-      (layer as L.Path).bindTooltip(name, { sticky: true, className: 'text-xs' });
-      layer.on('click', () => onSelect(pi));
+      const name = (feature.properties as Record<string, string>)?.name
+        ?? (feature.properties as Record<string, string>)?.lga_name
+        ?? `Patch ${pi}`;
+      (layer as L.Path).bindTooltip(name, { sticky: true, className: "text-xs" });
+      layer.on("click", () => onSelect(pi));
     },
     [geoJson, featurePatchIndex, onSelect],
   );
 
   // Use key based on values to force GeoJSON re-render on data change
-  const geoKey = useMemo(() => values.join(',') + (selectedPatch ?? ''), [values, selectedPatch]);
+  const geoKey = useMemo(() => values.join(",") + (selectedPatch ?? ""), [values, selectedPatch]);
 
   return (
     <MapContainer
-      style={{ width: '100%', height: '100%' }}
+      style={{ width: "100%", height: "100%" }}
       center={[10, 8]}
       zoom={6}
       scrollWheelZoom={true}
@@ -259,7 +258,7 @@ function ColorLegend({ minV, maxV }: { minV: number; maxV: number }) {
       <div
         className="flex-1 h-2.5 rounded"
         style={{
-          background: `linear-gradient(to right, ${stops.map((t) => choroplethColor(t)).join(', ')})`,
+          background: `linear-gradient(to right, ${stops.map((t) => choroplethColor(t)).join(", ")})`,
         }}
       />
       <span className="text-xs text-gray-500 dark:text-gray-400">{maxV.toFixed(0)}</span>
@@ -281,10 +280,10 @@ export default function MapPanel() {
     [firstTraj, ir],
   );
 
-  const [compType, setCompType] = useState(() => patchInfo?.compTypes[0] ?? 'I');
+  const [compType, setCompType] = useState(() => patchInfo?.compTypes[0] ?? "I");
   const effectiveCompType = patchInfo?.compTypes.includes(compType)
     ? compType
-    : (patchInfo?.compTypes[0] ?? 'I');
+    : (patchInfo?.compTypes[0] ?? "I");
 
   const maxSnap = (patchInfo?.nSnapshots ?? 1) - 1;
   const [snapIdx, setSnapIdx] = useState(0);
@@ -321,10 +320,10 @@ export default function MapPanel() {
         const parsed = JSON.parse(text) as FeatureCollection;
         setGeoJson(parsed);
       } catch {
-        alert('Could not parse GeoJSON file.');
+        alert("Could not parse GeoJSON file.");
       }
     });
-    e.target.value = '';
+    e.target.value = "";
   };
 
   if (!patchInfo || scenarios.every((s) => s.runs.length === 0)) {
@@ -332,8 +331,8 @@ export default function MapPanel() {
       <div className="flex flex-col items-center justify-center h-full gap-2 text-gray-500 text-sm">
         <span className="dark:text-gray-600">Map view requires a patch-stratified model</span>
         <span className="text-xs text-gray-400 dark:text-gray-700">
-          Add a <code className="font-mono">patch</code> dimension or use the{' '}
-          <code className="font-mono">_p{'{N}'}</code> suffix convention
+          Add a <code className="font-mono">patch</code> dimension or use the{" "}
+          <code className="font-mono">_p{"{N}"}</code> suffix convention
         </span>
       </div>
     );
@@ -373,7 +372,7 @@ export default function MapPanel() {
 
         {/* Time display */}
         <span className="text-xs text-gray-500 dark:text-gray-400">
-          t = {tCurrent?.toFixed(1) ?? '—'}
+          t = {tCurrent?.toFixed(1) ?? "—"}
         </span>
 
         <div className="flex-1" />
@@ -386,8 +385,8 @@ export default function MapPanel() {
           {geoJson
             ? `GeoJSON loaded (${geoJson.features.length} features)`
             : remoteGeo
-              ? `GeoJSON from server (${remoteGeo.features.length} features)`
-              : 'Load GeoJSON…'}
+            ? `GeoJSON from server (${remoteGeo.features.length} features)`
+            : "Load GeoJSON…"}
         </button>
         <input
           ref={fileInputRef}
@@ -415,22 +414,10 @@ export default function MapPanel() {
 
       {/* ── Main display ────────────────────────────────────────────────────── */}
       <div className="flex-1 min-h-0 relative">
-        {effectiveGeo ? (
-          <GeoMap
-            geoJson={effectiveGeo}
-            patchIndices={patchInfo.indices}
-            values={values}
-            minV={minV}
-            maxV={maxV}
-            selectedPatch={selectedPatch}
-            onSelect={setSelectedPatch}
-          />
-        ) : (
-          <div className="flex flex-col h-full">
-            <div className="text-xs text-gray-400 dark:text-gray-600 px-3 pt-1 pb-0.5">
-              Grid view — {patchInfo.indices.length} patches (load GeoJSON for geographic map)
-            </div>
-            <PatchGrid
+        {effectiveGeo
+          ? (
+            <GeoMap
+              geoJson={effectiveGeo}
               patchIndices={patchInfo.indices}
               values={values}
               minV={minV}
@@ -438,8 +425,22 @@ export default function MapPanel() {
               selectedPatch={selectedPatch}
               onSelect={setSelectedPatch}
             />
-          </div>
-        )}
+          )
+          : (
+            <div className="flex flex-col h-full">
+              <div className="text-xs text-gray-400 dark:text-gray-600 px-3 pt-1 pb-0.5">
+                Grid view — {patchInfo.indices.length} patches (load GeoJSON for geographic map)
+              </div>
+              <PatchGrid
+                patchIndices={patchInfo.indices}
+                values={values}
+                minV={minV}
+                maxV={maxV}
+                selectedPatch={selectedPatch}
+                onSelect={setSelectedPatch}
+              />
+            </div>
+          )}
 
         {/* Patch chart overlay */}
         {selectedPatch !== null && chartData.length > 0 && sc && (

@@ -1,8 +1,8 @@
 # Baseline: co-endemic An. funestus + An. arabiensis
 # Human demographics
-Pi_H  = 0.45
-mu_H  = 0.000045
-tau   = 0.0001
+Pi_H = 0.45
+mu_H = 0.000045
+tau = 0.0001
 eps_H = 0.083
 gamma = 0.02
 omega = 0.005
@@ -14,25 +14,25 @@ beta_HB = 0.08
 beta_HA = 0.06
 
 # Larval (shared)
-mu_L  = 0.05
+mu_L = 0.05
 tau_L = 0.1
 
 # An. funestus
-pi_B    = 500.0
-phi_B   = 0.3
-mu_B    = 0.05
-mu_R    = 0.05
-eps_B   = 0.067
-eps_R   = 0.067
+pi_B = 500.0
+phi_B = 0.3
+mu_B = 0.05
+mu_R = 0.05
+eps_B = 0.067
+eps_R = 0.067
 sigma_B = 0.33
 sigma_R = 0.5
 
 # An. arabiensis
-pi_A    = 500.0
-phi_A   = 0.3
-mu_A    = 0.06
-mu_r    = 0.06
-eps_A   = 0.067
-eps_r   = 0.067
+pi_A = 500.0
+phi_A = 0.3
+mu_A = 0.06
+mu_r = 0.06
+eps_A = 0.067
+eps_r = 0.067
 sigma_A = 0.33
 sigma_r = 0.5

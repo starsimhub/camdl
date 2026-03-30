@@ -1,78 +1,89 @@
-import type { Node, Edge } from '@xyflow/react';
-import type { IrModel, ModelStructure, Expr } from '../types/ir';
-import { applyDagreLayout } from './canvasLayout';
+import type { Edge, Node } from "@xyflow/react";
+import type { Expr, IrModel, ModelStructure } from "../types/ir";
+import { applyDagreLayout } from "./canvasLayout";
 
 // ── Expression pretty-printer ─────────────────────────────────────────────────
 
 function ppExpr(e: Expr): string {
-  if (!e || typeof e !== 'object') return String(e);
+  if (!e || typeof e !== "object") return String(e);
   const keys = Object.keys(e);
-  if (keys.length === 0) return '?';
+  if (keys.length === 0) return "?";
 
-  if ('const' in e) return String((e as { const: { value: number } }).const.value ?? e.const);
-  if ('param' in e) return String((e as { param: string }).param);
-  if ('pop' in e) return String((e as { pop: string }).pop);
-  if ('pop_sum' in e) {
+  if ("const" in e) return String((e as { const: { value: number } }).const.value ?? e.const);
+  if ("param" in e) return String((e as { param: string }).param);
+  if ("pop" in e) return String((e as { pop: string }).pop);
+  if ("pop_sum" in e) {
     const names = (e as { pop_sum: string[] }).pop_sum;
-    return `(${names.join('+')})`;
+    return `(${names.join("+")})`;
   }
-  if ('time' in e) return 't';
-  if ('time_func' in e) return String((e as { time_func: { name: string } }).time_func.name);
-  if ('table_lookup' in e) {
+  if ("time" in e) return "t";
+  if ("time_func" in e) return String((e as { time_func: { name: string } }).time_func.name);
+  if ("table_lookup" in e) {
     const tl = (e as { table_lookup: { table: string } }).table_lookup;
     return `${tl.table}[…]`;
   }
-  if ('bin_op' in e) {
+  if ("bin_op" in e) {
     const bo = (e as { bin_op: { op: string; left: Expr; right: Expr } }).bin_op;
     const opStr: Record<string, string> = {
-      add: '+', sub: '-', mul: '·', div: '/', pow: '^', min: 'min', max: 'max',
-      eq: '=', neq: '≠', lt: '<', gt: '>', le: '≤', ge: '≥',
+      add: "+",
+      sub: "-",
+      mul: "·",
+      div: "/",
+      pow: "^",
+      min: "min",
+      max: "max",
+      eq: "=",
+      neq: "≠",
+      lt: "<",
+      gt: ">",
+      le: "≤",
+      ge: "≥",
     };
     const op = opStr[bo.op] ?? bo.op;
     return `${ppExpr(bo.left)}${op}${ppExpr(bo.right)}`;
   }
-  if ('un_op' in e) {
+  if ("un_op" in e) {
     const uo = (e as { un_op: { op: string; arg: Expr } }).un_op;
     return `${uo.op}(${ppExpr(uo.arg)})`;
   }
-  if ('cond' in e) {
+  if ("cond" in e) {
     return `if …`;
   }
   return keys[0];
 }
 
 function truncate(s: string, max = 28) {
-  return s.length > max ? s.slice(0, max - 1) + '…' : s;
+  return s.length > max ? s.slice(0, max - 1) + "…" : s;
 }
 
 // ── Compartment colour by epidemic role ───────────────────────────────────────
 
 const COMP_COLORS: [RegExp, string][] = [
-  [/^S/i, '#3b82f6'],  // blue — susceptible
-  [/^E/i, '#f59e0b'],  // amber — exposed
-  [/^I/i, '#ef4444'],  // red — infectious
-  [/^R/i, '#22c55e'],  // green — recovered/removed
-  [/^D/i, '#6b7280'],  // gray — dead
-  [/^W/i, '#a78bfa'],  // purple — environmental
-  [/^V/i, '#06b6d4'],  // cyan — vaccinated
-  [/^L/i, '#a78bfa'],  // purple — larval / latent
-  [/^A/i, '#f97316'],  // orange — asymptomatic
+  [/^S/i, "#3b82f6"], // blue — susceptible
+  [/^E/i, "#f59e0b"], // amber — exposed
+  [/^I/i, "#ef4444"], // red — infectious
+  [/^R/i, "#22c55e"], // green — recovered/removed
+  [/^D/i, "#6b7280"], // gray — dead
+  [/^W/i, "#a78bfa"], // purple — environmental
+  [/^V/i, "#06b6d4"], // cyan — vaccinated
+  [/^L/i, "#a78bfa"], // purple — larval / latent
+  [/^A/i, "#f97316"], // orange — asymptomatic
 ];
 
 export function compartmentColor(name: string): string {
   for (const [re, color] of COMP_COLORS) {
     if (re.test(name)) return color;
   }
-  return '#8b5cf6';
+  return "#8b5cf6";
 }
 
 // ── Base model types ──────────────────────────────────────────────────────────
 
 interface BaseTransition {
-  key: string;          // unique: `${from ?? '*'}→${to ?? '*'}:${name}`
-  name: string;         // base transition name (e.g., "infection")
-  from: string | null;  // base source (null = inflow/birth)
-  to: string | null;    // base dest (null = outflow/death)
+  key: string; // unique: `${from ?? '*'}→${to ?? '*'}:${name}`
+  name: string; // base transition name (e.g., "infection")
+  from: string | null; // base source (null = inflow/birth)
+  to: string | null; // base dest (null = outflow/death)
   originKind: string;
 }
 
@@ -85,7 +96,7 @@ interface BaseTransition {
 function inferBaseTransName(trName: string, allDimValues: string[]): string {
   let earliest = trName.length;
   for (const dv of allDimValues) {
-    const idx = trName.indexOf('_' + dv);
+    const idx = trName.indexOf("_" + dv);
     if (idx >= 0 && idx < earliest) earliest = idx;
   }
   return trName.slice(0, earliest) || trName;
@@ -100,7 +111,7 @@ function buildBaseTransitions(ir: IrModel, ms: ModelStructure): BaseTransition[]
   const compToBase = new Map<string, string>();
   for (const base of ms.base_compartments) {
     for (const c of ir.compartments) {
-      if (c.name === base || c.name.startsWith(base + '_')) {
+      if (c.name === base || c.name.startsWith(base + "_")) {
         compToBase.set(c.name, base);
       }
     }
@@ -121,7 +132,7 @@ function buildBaseTransitions(ir: IrModel, ms: ModelStructure): BaseTransition[]
     const meta = tr.metadata;
     const fromExpanded = meta?.source_compartment ?? null;
     const toExpanded = meta?.dest_compartment ?? null;
-    const originKind = meta?.origin_kind ?? 'intrinsic';
+    const originKind = meta?.origin_kind ?? "intrinsic";
 
     const fromBase = fromExpanded ? (compToBase.get(fromExpanded) ?? null) : null;
     const toBase = toExpanded ? (compToBase.get(toExpanded) ?? null) : null;
@@ -130,7 +141,7 @@ function buildBaseTransitions(ir: IrModel, ms: ModelStructure): BaseTransition[]
     if (fromBase !== null && fromBase === toBase) continue;
 
     const name = inferBaseTransName(tr.name, allDimValues);
-    const key = `${fromBase ?? '*'}→${toBase ?? '*'}:${name}`;
+    const key = `${fromBase ?? "*"}→${toBase ?? "*"}:${name}`;
 
     if (seen.has(key)) {
       if (++dupStreak > 500) break;
@@ -153,7 +164,7 @@ function assignLayers(bases: string[], transitions: BaseTransition[]): {
   layers: Map<string, number>;
   backEdgeKeys: Set<string>;
 } {
-  const EPIDEMIC_ORDER = ['S', 'V', 'L', 'E', 'A', 'I', 'R', 'D'];
+  const EPIDEMIC_ORDER = ["S", "V", "L", "E", "A", "I", "R", "D"];
   const epidemicRank = (name: string) => {
     const idx = EPIDEMIC_ORDER.findIndex(r => name.toUpperCase().startsWith(r));
     return idx === -1 ? 999 : idx;
@@ -165,7 +176,7 @@ function assignLayers(bases: string[], transitions: BaseTransition[]): {
   const forwardEdges: BaseTransition[] = [];
 
   for (const t of flowEdges) {
-    const backward = epidemicRank(t.to!) < epidemicRank(t.from!) && t.originKind === 'intrinsic';
+    const backward = epidemicRank(t.to!) < epidemicRank(t.from!) && t.originKind === "intrinsic";
     if (backward) {
       backEdgeKeys.add(t.key);
     } else {
@@ -176,7 +187,10 @@ function assignLayers(bases: string[], transitions: BaseTransition[]): {
   // Build adjacency and in-degree for forward DAG
   const outAdj = new Map<string, string[]>();
   const inDeg = new Map<string, number>();
-  for (const b of bases) { outAdj.set(b, []); inDeg.set(b, 0); }
+  for (const b of bases) {
+    outAdj.set(b, []);
+    inDeg.set(b, 0);
+  }
 
   for (const t of forwardEdges) {
     outAdj.get(t.from!)!.push(t.to!);
@@ -249,10 +263,10 @@ function buildBaseModelLayout(ir: IrModel, ms: ModelStructure): { nodes: Node[];
     const dims = ms.compartment_dims[base] ?? [];
     return {
       id: `comp:${base}`,
-      type: 'compartmentNode',
+      type: "compartmentNode",
       data: {
         label: base,
-        subLabel: dims.length > 0 ? `[${dims.join(', ')}]` : '',
+        subLabel: dims.length > 0 ? `[${dims.join(", ")}]` : "",
         color: compartmentColor(base),
       },
       position: pos,
@@ -265,19 +279,27 @@ function buildBaseModelLayout(ir: IrModel, ms: ModelStructure): { nodes: Node[];
     id: `tr:${t.key}:${i}`,
     source: `comp:${t.from}`,
     target: `comp:${t.to}`,
-    type: 'transitionEdge',
-    data: { label: t.name, rate: '', originKind: t.originKind, isBack: backEdgeKeys.has(t.key) },
-    markerEnd: { type: 'arrowclosed' as const },
+    type: "transitionEdge",
+    data: { label: t.name, rate: "", originKind: t.originKind, isBack: backEdgeKeys.has(t.key) },
+    markerEnd: { type: "arrowclosed" as const },
   }));
 
   // Inflow/outflow stubs (births, deaths, immigration, emigration)
   const posMap = new Map(nodes.map(n => [n.id, n.position]));
   const stubSpecs: StubSpec[] = [
     ...baseTransitions.filter(t => t.from === null && t.to !== null).map(t => ({
-      trName: t.key, label: t.name, compId: `comp:${t.to}`, kind: 'in' as const, originKind: t.originKind,
+      trName: t.key,
+      label: t.name,
+      compId: `comp:${t.to}`,
+      kind: "in" as const,
+      originKind: t.originKind,
     })),
     ...baseTransitions.filter(t => t.from !== null && t.to === null).map(t => ({
-      trName: t.key, label: t.name, compId: `comp:${t.from}`, kind: 'out' as const, originKind: t.originKind,
+      trName: t.key,
+      label: t.name,
+      compId: `comp:${t.from}`,
+      kind: "out" as const,
+      originKind: t.originKind,
     })),
   ];
   const { nodes: stubNodes, edges: stubEdges } = buildStubNodesAndEdges(stubSpecs, posMap);
@@ -301,7 +323,7 @@ function buildCrossLaneTransitions(
   const compToBase = new Map<string, string>();
   for (const base of ms.base_compartments) {
     for (const c of ir.compartments) {
-      if (c.name === base || c.name.startsWith(base + '_')) {
+      if (c.name === base || c.name.startsWith(base + "_")) {
         compToBase.set(c.name, base);
       }
     }
@@ -338,7 +360,7 @@ function buildCrossLaneTransitions(
     const toDimVal = compToDimVal.get(toExpanded);
     if (!fromDimVal || !toDimVal || fromDimVal === toDimVal) continue;
 
-    const originKind = meta?.origin_kind ?? 'intrinsic';
+    const originKind = meta?.origin_kind ?? "intrinsic";
     const name = inferBaseTransName(tr.name, allDimValues);
     const key = `${fromBase}:${fromDimVal}→${toDimVal}:${name}`;
     if (seen.has(key)) {
@@ -377,7 +399,7 @@ function buildSwimLaneLayout(ir: IrModel, ms: ModelStructure, dimName: string): 
       for (const dv of dimValues) m.set(dv, base);
     } else {
       for (const c of ir.compartments) {
-        if (!(c.name === base || c.name.startsWith(base + '_'))) continue;
+        if (!(c.name === base || c.name.startsWith(base + "_"))) continue;
         for (const dv of dimValues) {
           if (c.name === `${base}_${dv}` || c.name.includes(`_${dv}`)) {
             if (!m.has(dv)) m.set(dv, c.name);
@@ -395,7 +417,7 @@ function buildSwimLaneLayout(ir: IrModel, ms: ModelStructure, dimName: string): 
   for (const [laneIdx, dv] of dimValues.entries()) {
     nodes.push({
       id: `lane:${dv}`,
-      type: 'swimLaneNode',
+      type: "swimLaneNode",
       position: { x: 0, y: laneIdx * laneStep },
       data: { label: dv, width: laneW, height: laneInnerH },
       selectable: false,
@@ -410,9 +432,9 @@ function buildSwimLaneLayout(ir: IrModel, ms: ModelStructure, dimName: string): 
     for (const [base, layer] of layers) {
       nodes.push({
         id: `comp:${base}:${dv}`,
-        type: 'compartmentNode',
+        type: "compartmentNode",
         position: { x: LANE_HEADER_W + layer * X_STEP, y: laneY + LANE_PAD_Y },
-        data: { label: base, subLabel: '', color: compartmentColor(base) },
+        data: { label: base, subLabel: "", color: compartmentColor(base) },
         zIndex: 1,
       } as Node);
     }
@@ -426,9 +448,9 @@ function buildSwimLaneLayout(ir: IrModel, ms: ModelStructure, dimName: string): 
         id: `tr:${t.key}:${dv}`,
         source: `comp:${t.from}:${dv}`,
         target: `comp:${t.to}:${dv}`,
-        type: 'transitionEdge',
-        data: { label: t.name, rate: '', originKind: t.originKind, isBack: backEdgeKeys.has(t.key) },
-        markerEnd: { type: 'arrowclosed' as const },
+        type: "transitionEdge",
+        data: { label: t.name, rate: "", originKind: t.originKind, isBack: backEdgeKeys.has(t.key) },
+        markerEnd: { type: "arrowclosed" as const },
       });
     }
   }
@@ -440,11 +462,11 @@ function buildSwimLaneLayout(ir: IrModel, ms: ModelStructure, dimName: string): 
       id: `cross:${cl.base}:${cl.fromDimVal}→${cl.toDimVal}:${cl.name}`,
       source: `comp:${cl.base}:${cl.fromDimVal}`,
       target: `comp:${cl.base}:${cl.toDimVal}`,
-      sourceHandle: 'bottom',
-      targetHandle: 'top',
-      type: 'transitionEdge',
-      data: { label: cl.name, rate: '', originKind: cl.originKind, isBack: false, isCrossLane: true },
-      markerEnd: { type: 'arrowclosed' as const },
+      sourceHandle: "bottom",
+      targetHandle: "top",
+      type: "transitionEdge",
+      data: { label: cl.name, rate: "", originKind: cl.originKind, isBack: false, isCrossLane: true },
+      markerEnd: { type: "arrowclosed" as const },
     });
   }
 
@@ -453,10 +475,16 @@ function buildSwimLaneLayout(ir: IrModel, ms: ModelStructure, dimName: string): 
 
 // ── Inflow/outflow stub helpers ───────────────────────────────────────────────
 
-const STUB_OFFSET_X = 60;   // birth stubs: this far left of target
-const STUB_BELOW_Y  = 30;   // death stubs: this far below source center
+const STUB_OFFSET_X = 60; // birth stubs: this far left of target
+const STUB_BELOW_Y = 30; // death stubs: this far below source center
 
-interface StubSpec { trName: string; label: string; compId: string; kind: 'in' | 'out'; originKind: string }
+interface StubSpec {
+  trName: string;
+  label: string;
+  compId: string;
+  kind: "in" | "out";
+  originKind: string;
+}
 
 function buildStubNodesAndEdges(
   stubs: StubSpec[],
@@ -472,28 +500,34 @@ function buildStubNodesAndEdges(
     counts.set(s.compId, n + 1);
 
     const stubId = `stub:${s.kind}:${s.trName}`;
-    if (s.kind === 'in') {
-      nodes.push({ id: stubId, type: 'stubNode', position: { x: pos.x - STUB_OFFSET_X, y: pos.y + n * 28 }, data: {} } as Node);
+    if (s.kind === "in") {
+      nodes.push(
+        { id: stubId, type: "stubNode", position: { x: pos.x - STUB_OFFSET_X, y: pos.y + n * 28 }, data: {} } as Node,
+      );
       edges.push({
         id: `trstub:${s.trName}`,
-        source: stubId, target: s.compId,
-        type: 'transitionEdge',
-        data: { label: s.label, rate: '', originKind: s.originKind, isBack: false },
-        markerEnd: { type: 'arrowclosed' as const },
+        source: stubId,
+        target: s.compId,
+        type: "transitionEdge",
+        data: { label: s.label, rate: "", originKind: s.originKind, isBack: false },
+        markerEnd: { type: "arrowclosed" as const },
       });
     } else {
       nodes.push({
-        id: stubId, type: 'stubNode',
+        id: stubId,
+        type: "stubNode",
         position: { x: pos.x + NODE_W / 2 - 5, y: pos.y + NODE_H + STUB_BELOW_Y + n * 28 },
         data: {},
       } as Node);
       edges.push({
         id: `trstub:${s.trName}`,
-        source: s.compId, target: stubId,
-        sourceHandle: 'bottom', targetHandle: 'top',
-        type: 'transitionEdge',
-        data: { label: s.label, rate: '', originKind: s.originKind, isBack: false },
-        markerEnd: { type: 'arrowclosed' as const },
+        source: s.compId,
+        target: stubId,
+        sourceHandle: "bottom",
+        targetHandle: "top",
+        type: "transitionEdge",
+        data: { label: s.label, rate: "", originKind: s.originKind, isBack: false },
+        markerEnd: { type: "arrowclosed" as const },
       });
     }
   }
@@ -505,8 +539,8 @@ function buildStubNodesAndEdges(
 function legacyExpandedLayout(model: IrModel): { nodes: Node[]; edges: Edge[] } {
   const compNodes: Node[] = model.compartments.map((c) => ({
     id: `comp:${c.name}`,
-    type: 'compartmentNode',
-    data: { label: c.name, subLabel: '', color: compartmentColor(c.name) },
+    type: "compartmentNode",
+    data: { label: c.name, subLabel: "", color: compartmentColor(c.name) },
     position: { x: 0, y: 0 },
   }));
 
@@ -527,17 +561,34 @@ function legacyExpandedLayout(model: IrModel): { nodes: Node[]; edges: Edge[] } 
     }
 
     if (!source && target) {
-      stubSpecs.push({ trName: tr.name, label: tr.name, compId: `comp:${target}`, kind: 'in', originKind: meta?.origin_kind ?? 'intrinsic' });
+      stubSpecs.push({
+        trName: tr.name,
+        label: tr.name,
+        compId: `comp:${target}`,
+        kind: "in",
+        originKind: meta?.origin_kind ?? "intrinsic",
+      });
     } else if (source && !target) {
-      stubSpecs.push({ trName: tr.name, label: tr.name, compId: `comp:${source}`, kind: 'out', originKind: meta?.origin_kind ?? 'intrinsic' });
+      stubSpecs.push({
+        trName: tr.name,
+        label: tr.name,
+        compId: `comp:${source}`,
+        kind: "out",
+        originKind: meta?.origin_kind ?? "intrinsic",
+      });
     } else if (source && target) {
       flowEdges.push({
         id: `tr:${tr.name}:${i}`,
         source: `comp:${source}`,
         target: `comp:${target}`,
-        type: 'transitionEdge',
-        data: { label: tr.name, rate: truncate(ppExpr(tr.rate)), originKind: meta?.origin_kind ?? 'intrinsic', isBack: false },
-        markerEnd: { type: 'arrowclosed' as const },
+        type: "transitionEdge",
+        data: {
+          label: tr.name,
+          rate: truncate(ppExpr(tr.rate)),
+          originKind: meta?.origin_kind ?? "intrinsic",
+          isBack: false,
+        },
+        markerEnd: { type: "arrowclosed" as const },
       });
     }
   }
@@ -551,7 +602,7 @@ function legacyExpandedLayout(model: IrModel): { nodes: Node[]; edges: Edge[] } 
 
 // ── Main export ───────────────────────────────────────────────────────────────
 
-export { NODE_W, NODE_H };
+export { NODE_H, NODE_W };
 
 export function irToCanvas(model: IrModel, expandDim?: string | null): { nodes: Node[]; edges: Edge[] } {
   if (model.model_structure) {

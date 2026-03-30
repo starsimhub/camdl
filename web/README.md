@@ -1,8 +1,8 @@
 # camdl web editor
 
 Browser-based visual editor for the camdl DSL. **Not part of the core
-compiler/simulator pipeline** — this is a separate UI layer that wraps the
-core tools.
+compiler/simulator pipeline** — this is a separate UI layer that wraps the core
+tools.
 
 ## What this is
 
@@ -17,12 +17,12 @@ A React/TypeScript single-page app that provides:
 
 ## How it connects to the core
 
-| Component | Role |
-|-----------|------|
-| `web/compiler-server/` | Small Express server that spawns `camdlc` and proxies compile requests to the browser; also proxies Claude API |
-| `rust/crates/wasm/` | WASM build of the Rust sim backends — compiled to `web/public/camdl_sim_bg.wasm`; exposes `validate(ir_json)` and `simulate(ir_json, config_json)` |
-| Core OCaml (`ocaml/`) | Not touched by the web app directly; reached only via `camdlc` subprocess |
-| Core Rust (`rust/crates/{ir,sim,observe,io,cli}`) | Sim backends live here; the WASM crate re-exports them |
+| Component                                         | Role                                                                                                                                               |
+| ------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `web/compiler-server/`                            | Small Express server that spawns `camdlc` and proxies compile requests to the browser; also proxies Claude API                                     |
+| `rust/crates/wasm/`                               | WASM build of the Rust sim backends — compiled to `web/public/camdl_sim_bg.wasm`; exposes `validate(ir_json)` and `simulate(ir_json, config_json)` |
+| Core OCaml (`ocaml/`)                             | Not touched by the web app directly; reached only via `camdlc` subprocess                                                                          |
+| Core Rust (`rust/crates/{ir,sim,observe,io,cli}`) | Sim backends live here; the WASM crate re-exports them                                                                                             |
 
 ## Setup
 
@@ -51,8 +51,10 @@ You do not need to touch anything in `web/` or `rust/crates/wasm/` to work on:
 - Golden tests (`ocaml/golden/`, `ir/golden/`)
 
 The web app tracks the IR schema automatically as long as:
+
 1. `rust/crates/ir/` types stay serde-compatible
 2. The WASM crate is rebuilt after backend changes (`wasm-pack build`)
-3. `web/src/types/ir.ts` is kept in sync with `ir/schema.json` if the schema changes
+3. `web/src/types/ir.ts` is kept in sync with `ir/schema.json` if the schema
+   changes
 
 See `CLAUDE.md` at the repo root for the full architecture and build commands.

@@ -433,6 +433,7 @@ let collect_let_refs_ast ctx ast_rate =
     | ECond (p, t, el) -> walk p; walk t; walk el
     | EFuncCall (_, args) -> List.iter (fun (_, e) -> walk e) args
     | EList es -> List.iter walk es
+    | ERange (a, b) -> walk a; walk b
     | EConst _ | EUnit _ -> ()
   in
   walk ast_rate;

@@ -3,8 +3,8 @@
 # and partial ITN coverage (50% reduction in mosquito→human transmission).
 
 [config]
-model   = "ocaml/golden/malaria_two_species.camdl"
-params  = "ocaml/golden/malaria_two_species.params.toml"
+model = "ocaml/golden/malaria_two_species.camdl"
+params = "ocaml/golden/malaria_two_species.params.toml"
 backend = "gillespie"
 
 [config.seeds]
@@ -12,15 +12,15 @@ n = 20
 
 [[scenario]]
 # Both species contribute roughly equally; baseline endemic state.
-name   = "co_endemic"
+name = "co_endemic"
 params = {}
 
 [[scenario]]
 # An. funestus dominant: higher recruitment and biting, arabiensis suppressed.
-name   = "funestus_dominant"
+name = "funestus_dominant"
 params = { pi_B = 800.0, pi_A = 100.0, beta_BH = 0.5, beta_AH = 0.05, beta_HB = 0.12, beta_HA = 0.02 }
 
 [[scenario]]
 # 50% ITN coverage: halve mosquito→human biting rates for both species.
-name   = "itn_50pct"
+name = "itn_50pct"
 params = { beta_BH = 0.15, beta_AH = 0.10 }

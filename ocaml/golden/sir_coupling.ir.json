@@ -14,7 +14,7 @@
   "transitions": [
     {
       "name": "infection_young",
-      "stoichiometry": [ [ "S_young", -1 ], [ "I_young", 1 ] ],
+      "stoichiometry": [["S_young", -1], ["I_young", 1]],
       "rate": {
         "bin_op": {
           "op": "mul",
@@ -37,13 +37,13 @@
                       "left": {
                         "table_lookup": {
                           "table": "C_age",
-                          "indices": [ { "const": 0.0 } ]
+                          "indices": [{ "const": 0.0 }]
                         }
                       },
                       "right": { "pop": "I_young" }
                     }
                   },
-                  "right": { "pop_sum": [ "S_young", "I_young", "R_young" ] }
+                  "right": { "pop_sum": ["S_young", "I_young", "R_young"] }
                 }
               },
               "right": {
@@ -55,13 +55,13 @@
                       "left": {
                         "table_lookup": {
                           "table": "C_age",
-                          "indices": [ { "const": 1.0 } ]
+                          "indices": [{ "const": 1.0 }]
                         }
                       },
                       "right": { "pop": "I_old" }
                     }
                   },
-                  "right": { "pop_sum": [ "S_old", "I_old", "R_old" ] }
+                  "right": { "pop_sum": ["S_old", "I_old", "R_old"] }
                 }
               }
             }
@@ -77,7 +77,7 @@
     },
     {
       "name": "infection_old",
-      "stoichiometry": [ [ "S_old", -1 ], [ "I_old", 1 ] ],
+      "stoichiometry": [["S_old", -1], ["I_old", 1]],
       "rate": {
         "bin_op": {
           "op": "mul",
@@ -100,13 +100,13 @@
                       "left": {
                         "table_lookup": {
                           "table": "C_age",
-                          "indices": [ { "const": 2.0 } ]
+                          "indices": [{ "const": 2.0 }]
                         }
                       },
                       "right": { "pop": "I_young" }
                     }
                   },
-                  "right": { "pop_sum": [ "S_young", "I_young", "R_young" ] }
+                  "right": { "pop_sum": ["S_young", "I_young", "R_young"] }
                 }
               },
               "right": {
@@ -118,13 +118,13 @@
                       "left": {
                         "table_lookup": {
                           "table": "C_age",
-                          "indices": [ { "const": 3.0 } ]
+                          "indices": [{ "const": 3.0 }]
                         }
                       },
                       "right": { "pop": "I_old" }
                     }
                   },
-                  "right": { "pop_sum": [ "S_old", "I_old", "R_old" ] }
+                  "right": { "pop_sum": ["S_old", "I_old", "R_old"] }
                 }
               }
             }
@@ -140,7 +140,7 @@
     },
     {
       "name": "recovery_young",
-      "stoichiometry": [ [ "I_young", -1 ], [ "R_young", 1 ] ],
+      "stoichiometry": [["I_young", -1], ["R_young", 1]],
       "rate": {
         "bin_op": {
           "op": "mul",
@@ -157,7 +157,7 @@
     },
     {
       "name": "recovery_old",
-      "stoichiometry": [ [ "I_old", -1 ], [ "R_old", 1 ] ],
+      "stoichiometry": [["I_old", -1], ["R_old", 1]],
       "rate": {
         "bin_op": {
           "op": "mul",
@@ -193,7 +193,7 @@
     {
       "name": "beta",
       "value": null,
-      "bounds": [ 0.001, 0.5 ],
+      "bounds": [0.001, 0.5],
       "prior": null,
       "transform": null,
       "initial_value": null
@@ -201,7 +201,7 @@
     {
       "name": "gamma",
       "value": null,
-      "bounds": [ 0.001, 1.0 ],
+      "bounds": [0.001, 1.0],
       "prior": null,
       "transform": null,
       "initial_value": null
@@ -209,7 +209,7 @@
     {
       "name": "N0",
       "value": null,
-      "bounds": [ 100.0, 100000.0 ],
+      "bounds": [100.0, 100000.0],
       "prior": null,
       "transform": null,
       "initial_value": null
@@ -217,7 +217,7 @@
     {
       "name": "I0",
       "value": null,
-      "bounds": [ 1.0, 1000.0 ],
+      "bounds": [1.0, 1000.0],
       "prior": null,
       "transform": null,
       "initial_value": null
@@ -269,10 +269,10 @@
     }
   ],
   "model_structure": {
-    "dimensions": [ { "name": "age", "values": [ "young", "old" ] } ],
-    "compartment_dims": { "S": [ "age" ], "I": [ "age" ], "R": [ "age" ] },
-    "base_compartments": [ "S", "I", "R" ],
-    "transmission_transitions": [ "infection" ],
-    "infectious_compartments": [ "I" ]
+    "dimensions": [{ "name": "age", "values": ["young", "old"] }],
+    "compartment_dims": { "S": ["age"], "I": ["age"], "R": ["age"] },
+    "base_compartments": ["S", "I", "R"],
+    "transmission_transitions": ["infection"],
+    "infectious_compartments": ["I"]
   }
 }

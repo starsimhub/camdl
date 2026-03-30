@@ -1,6 +1,6 @@
 // TypeScript mirror of ir/schema.json
 
-export type CompartmentKind = 'integer' | 'real';
+export type CompartmentKind = "integer" | "real";
 
 export interface Compartment {
   name: string;
@@ -56,7 +56,7 @@ export interface Dimension {
 
 export interface ModelStructure {
   dimensions: Dimension[];
-  compartment_dims: Record<string, string[]>;  // base → [dim_name, ...]
+  compartment_dims: Record<string, string[]>; // base → [dim_name, ...]
   base_compartments: string[];
   transmission_transitions: string[];
   infectious_compartments: string[];
@@ -92,7 +92,7 @@ export interface IrModel {
 }
 
 export interface Diagnostic {
-  severity: 'error' | 'warning';
+  severity: "error" | "warning";
   code: string;
   message: string;
   loc: {

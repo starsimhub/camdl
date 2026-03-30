@@ -223,11 +223,11 @@ dimensions { age = [under5, over5] }
 
 ## Two ways to specify dimensions
 
-| Source           | Declaration                                                              | Stratifies compartments? | Levels from |
-| ---------------- | ------------------------------------------------------------------------ | ------------------------ | ----------- |
-| Inline           | `dimensions { age = [under5, over5] }` + `stratify(by = age)`           | yes                      | inline list |
-| Data, stratified | `dimensions { patch = read(f, column="c") }` + `stratify(by = patch)`   | yes                      | CSV column  |
-| Data, index-only | `dimensions { sia_time = read(f, column="c") }` (no `stratify`)         | no                       | CSV column  |
+| Source           | Declaration                                                           | Stratifies compartments? | Levels from |
+| ---------------- | --------------------------------------------------------------------- | ------------------------ | ----------- |
+| Inline           | `dimensions { age = [under5, over5] }` + `stratify(by = age)`         | yes                      | inline list |
+| Data, stratified | `dimensions { patch = read(f, column="c") }` + `stratify(by = patch)` | yes                      | CSV column  |
+| Data, index-only | `dimensions { sia_time = read(f, column="c") }` (no `stratify`)       | no                       | CSV column  |
 
 All three produce the same thing internally: a named set of levels. They differ
 in: (a) whether the dimension stratifies compartments, and (b) where the levels
@@ -489,21 +489,21 @@ forward generative model.
 
 ## Stress test: every epi data type
 
-| Data type                      | Type signature                    | Works?                                 |
-| ------------------------------ | --------------------------------- | -------------------------------------- |
-| Population                     | `patch → f64`                     | ✅                                     |
-| Population × age               | `patch × age → f64`               | ✅                                     |
-| Contact matrix                 | `age × age → f64`                 | ✅                                     |
-| Spatial adjacency (sparse)     | `patch × patch → f64`             | ✅ `default = 0.0`                     |
-| SIA campaigns (ragged)         | `patch × sia_time → f64`          | ✅ `where > 0` filter                  |
-| Demographics (multi-value)     | `patch → (f64, f64)`              | ✅ `pop, sex_ratio : patch = read(...)` |
-| Seroprevalence                 | `patch × age → f64`               | ✅                                     |
-| Environmental covariates       | `patch → f64`                     | ✅                                     |
-| Routine immunization           | `patch × age × ri_month → f64`    | ✅ 3D table                            |
-| Detection probability          | `patch → f64`                     | ✅                                     |
-| Genetic distances              | `strain × strain → f64`           | ✅                                     |
-| Climate / time-varying spatial | `patch × week → f64`              | ⚠️ Needs indexed time functions         |
-| Case data (for fitting)        | observation data                  | separate pipeline (observations block) |
+| Data type                      | Type signature                 | Works?                                  |
+| ------------------------------ | ------------------------------ | --------------------------------------- |
+| Population                     | `patch → f64`                  | ✅                                      |
+| Population × age               | `patch × age → f64`            | ✅                                      |
+| Contact matrix                 | `age × age → f64`              | ✅                                      |
+| Spatial adjacency (sparse)     | `patch × patch → f64`          | ✅ `default = 0.0`                      |
+| SIA campaigns (ragged)         | `patch × sia_time → f64`       | ✅ `where > 0` filter                   |
+| Demographics (multi-value)     | `patch → (f64, f64)`           | ✅ `pop, sex_ratio : patch = read(...)` |
+| Seroprevalence                 | `patch × age → f64`            | ✅                                      |
+| Environmental covariates       | `patch → f64`                  | ✅                                      |
+| Routine immunization           | `patch × age × ri_month → f64` | ✅ 3D table                             |
+| Detection probability          | `patch → f64`                  | ✅                                      |
+| Genetic distances              | `strain × strain → f64`        | ✅                                      |
+| Climate / time-varying spatial | `patch × week → f64`           | ⚠️ Needs indexed time functions          |
+| Case data (for fitting)        | observation data               | separate pipeline (observations block)  |
 
 One gap: per-patch time-varying covariates need indexed time functions.
 Everything else works with `dims → scalar` tables, the `dimensions {}` block,
@@ -530,8 +530,8 @@ and the existing `[i in dim]` iteration.
   are also all-numeric, warn:
   `"first row of
   'data.tsv' looks like data, not a header; add a header row"`
-- Comment lines: off by default. `read(..., comment = "#")` enables
-  skipping lines starting with `#`
+- Comment lines: off by default. `read(..., comment = "#")` enables skipping
+  lines starting with `#`
 
 ---
 
@@ -619,18 +619,18 @@ scenarios {
 
 ## Summary
 
-| Concept                     | Mechanism                               | Example                                  |
-| --------------------------- | --------------------------------------- | ---------------------------------------- |
-| Small structural dimension  | `dimensions { X = [...] }`              | `age = [under5, over5]`                  |
-| Large data-driven dimension | `dimensions { X = read(f, column="c") }`| `patch = read("pop.tsv", column="patch")`|
-| Index-only dimension        | `dimensions { X = ... }` (no stratify) | `sia_time = read("sia.tsv", column="day")`|
-| Dimension validation        | bare `X` in type signature              | adj references known `patch`             |
-| Table loading               | `read("file.tsv")`                      | positional column → dimension mapping    |
-| Sparse tables               | `default = 0.0`                         | missing index combinations → default     |
-| Multiple values             | `a, b : dims = read(...)`               | two tables from one CSV                  |
-| Numeric level coercion      | `at = t` where `t` iterates numeric dim | campaign times as floats                 |
-| Compile-time filtering      | `where expr > 0`                        | skip zero-coverage events                |
-| Time-varying spatial        | indexed time functions (future)         | `temperature[p in patch]`                |
+| Concept                     | Mechanism                                | Example                                    |
+| --------------------------- | ---------------------------------------- | ------------------------------------------ |
+| Small structural dimension  | `dimensions { X = [...] }`               | `age = [under5, over5]`                    |
+| Large data-driven dimension | `dimensions { X = read(f, column="c") }` | `patch = read("pop.tsv", column="patch")`  |
+| Index-only dimension        | `dimensions { X = ... }` (no stratify)   | `sia_time = read("sia.tsv", column="day")` |
+| Dimension validation        | bare `X` in type signature               | adj references known `patch`               |
+| Table loading               | `read("file.tsv")`                       | positional column → dimension mapping      |
+| Sparse tables               | `default = 0.0`                          | missing index combinations → default       |
+| Multiple values             | `a, b : dims = read(...)`                | two tables from one CSV                    |
+| Numeric level coercion      | `at = t` where `t` iterates numeric dim  | campaign times as floats                   |
+| Compile-time filtering      | `where expr > 0`                         | skip zero-coverage events                  |
+| Time-varying spatial        | indexed time functions (future)          | `temperature[p in patch]`                  |
 
 **One loader, one table type, one iteration syntax.** All external data is
 `dims → scalar`. All iteration is `[i in dim]`. Dimensions are declared in the

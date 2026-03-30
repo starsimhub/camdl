@@ -45,6 +45,7 @@ and expr =
   | ECond   of expr * expr * expr            (* if p then a else b *)
   | EFuncCall of string * (string * expr) list  (* fname(kw=v,...) *)
   | EList   of expr list                     (* [1.0, 2.0] or [[...],[...]] *)
+  | ERange  of expr * expr                   (* 7:100 — range literal, only in [...] *)
 
 type guard =
   | GEq  of string * string   (* index_var == index_val_or_var *)

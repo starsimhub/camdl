@@ -1,22 +1,21 @@
 # camdl Value of Information Specification
 
-**Version:** 0.1-draft  
-**Date:** 2026-03-25  
+**Version:** 0.1-draft\
+**Date:** 2026-03-25\
 **Depends on:** camdl Experiment Spec v0.5 (§7 designs, §8 output structure)
 
 ---
 
 ## 1. Purpose
 
-This document specifies how to compute the Expected Value of Sample
-Information (EVSI) for epidemiological decision problems using camdl.
-It is a **consumer** of the experiment system — it reads experiment
-outputs and computes decision-theoretic quantities. It does not modify
-the experiment runner, the simulation engine, or the IR.
+This document specifies how to compute the Expected Value of Sample Information
+(EVSI) for epidemiological decision problems using camdl. It is a **consumer**
+of the experiment system — it reads experiment outputs and computes
+decision-theoretic quantities. It does not modify the experiment runner, the
+simulation engine, or the IR.
 
-If something in this spec cannot be expressed using the experiment
-spec's output schemas, that is a bug in the experiment spec, not a
-reason to extend this one.
+If something in this spec cannot be expressed using the experiment spec's output
+schemas, that is a bug in the experiment spec, not a reason to extend this one.
 
 ---
 
@@ -26,19 +25,19 @@ Every EVSI computation requires four ingredients:
 
 **1. Prior π(θ)** — current beliefs about model parameters.
 
-**2. Actions A** — the set of decisions available. In epi: "do 2 SIA
-rounds," "do 4 rounds," "do nothing."
+**2. Actions A** — the set of decisions available. In epi: "do 2 SIA rounds,"
+"do 4 rounds," "do nothing."
 
-**3. Utility U(a, θ)** — the value of taking action a when the true
-parameters are θ. In epi: cases averted minus cost, QALYs gained,
-probability of elimination.
+**3. Utility U(a, θ)** — the value of taking action a when the true parameters
+are θ. In epi: cases averted minus cost, QALYs gained, probability of
+elimination.
 
-**4. Study S** — a possible information acquisition. A coverage survey,
-a transmission study, a serosurvey. The study produces data d that
-updates beliefs: π(θ) → π(θ|d).
+**4. Study S** — a possible information acquisition. A coverage survey, a
+transmission study, a serosurvey. The study produces data d that updates
+beliefs: π(θ) → π(θ|d).
 
-**EVSI** answers: "what is the expected improvement in my decision
-outcome if I conduct study S before deciding?"
+**EVSI** answers: "what is the expected improvement in my decision outcome if I
+conduct study S before deciding?"
 
 ```
 EVSI(S) = E_d[ max_a E[U(a, θ) | d] ] − max_a E[U(a, θ)]
@@ -46,10 +45,9 @@ EVSI(S) = E_d[ max_a E[U(a, θ) | d] ] − max_a E[U(a, θ)]
       decide AFTER study              decide NOW
 ```
 
-The first term is the expected utility when you observe the study
-result and then choose optimally. The second is the utility when you
-choose optimally with current beliefs. The difference is what the
-study is worth.
+The first term is the expected utility when you observe the study result and
+then choose optimally. The second is the utility when you choose optimally with
+current beliefs. The difference is what the study is worth.
 
 ---
 
@@ -57,38 +55,37 @@ study is worth.
 
 The experiment spec provides the raw material:
 
-| Experiment concept | VOI role |
-|-------------------|----------|
-| `[design.*]` with `prior = {...}` | Generates θ samples from π(θ) |
-| `[[scenario]]` | Actions A |
-| `[compare.derived]` utility expression | U(a, θ) |
-| `parameter_points.tsv` | θ samples with prior weights |
-| `outputs.tsv` | U(a, θ) evaluated at each sample |
+| Experiment concept                     | VOI role                         |
+| -------------------------------------- | -------------------------------- |
+| `[design.*]` with `prior = {...}`      | Generates θ samples from π(θ)    |
+| `[[scenario]]`                         | Actions A                        |
+| `[compare.derived]` utility expression | U(a, θ)                          |
+| `parameter_points.tsv`                 | θ samples with prior weights     |
+| `outputs.tsv`                          | U(a, θ) evaluated at each sample |
 
-The VOI computation is **post-processing** on these outputs. No new
-simulations are needed — EVSI is computed by reweighting existing
-simulation results.
+The VOI computation is **post-processing** on these outputs. No new simulations
+are needed — EVSI is computed by reweighting existing simulation results.
 
 ---
 
 ## 4. The VOI File
 
-A TOML file that references a completed experiment and defines the
-decision problem:
+A TOML file that references a completed experiment and defines the decision
+problem:
 
 ```toml
 # voi.toml — value of a coverage survey
 
 [voi]
-experiment = "experiment.toml"       # path to completed experiment
-design = "prior"                      # which design's outputs to use
+experiment = "experiment.toml" # path to completed experiment
+design = "prior" # which design's outputs to use
 
 # ── The decision ───────────────────────────────────────
 
 [decision]
 actions = ["no_sia", "two_rounds", "four_rounds"]
-reference = "no_sia"                  # baseline for utility computation
-utility = "cases_averted"             # derived quantity from experiment
+reference = "no_sia" # baseline for utility computation
+utility = "cases_averted" # derived quantity from experiment
 
 # ── Studies to evaluate ────────────────────────────────
 
@@ -100,7 +97,7 @@ sample_sizes = [50, 200, 500, 2000]
 [study.transmission_study]
 parameter = "R0"
 likelihood = "log_normal"
-observation_sd = [0.5, 0.2, 0.1]     # sd of log(observed R0)
+observation_sd = [0.5, 0.2, 0.1] # sd of log(observed R0)
 
 [study.serosurvey]
 parameter = "vacc_eff"
@@ -110,36 +107,36 @@ sample_sizes = [100, 500, 1000]
 
 ### 4.1 `[decision]` Fields
 
-| Field       | Type         | Description                              |
-|------------|-------------|------------------------------------------|
-| `actions`   | list[string] | Scenario names (must exist in experiment) |
-| `reference` | string       | Baseline scenario for utility computation|
+| Field       | Type         | Description                                    |
+| ----------- | ------------ | ---------------------------------------------- |
+| `actions`   | list[string] | Scenario names (must exist in experiment)      |
+| `reference` | string       | Baseline scenario for utility computation      |
 | `utility`   | string       | Derived quantity name from `[compare.derived]` |
 
-The utility is a scalar per (action, θ, seed). For a given θ and seed,
-the optimal action is `argmax_a U(a, θ)`.
+The utility is a scalar per (action, θ, seed). For a given θ and seed, the
+optimal action is `argmax_a U(a, θ)`.
 
 ### 4.2 `[study.*]` Fields
 
 Each study block defines one possible information acquisition:
 
-| Field          | Type         | Description                            |
-|---------------|-------------|----------------------------------------|
-| `parameter`    | string       | Which parameter the study informs      |
-| `likelihood`   | string       | Data-generating model (see §5)         |
-| `sample_sizes` | list[int]    | Evaluate EVSI at multiple study sizes  |
+| Field            | Type        | Description                                              |
+| ---------------- | ----------- | -------------------------------------------------------- |
+| `parameter`      | string      | Which parameter the study informs                        |
+| `likelihood`     | string      | Data-generating model (see §5)                           |
+| `sample_sizes`   | list[int]   | Evaluate EVSI at multiple study sizes                    |
 | `observation_sd` | list[float] | For continuous likelihoods (alternative to sample_sizes) |
 
-Multiple studies can be defined. EVSI is computed independently for
-each study at each sample size / observation precision.
+Multiple studies can be defined. EVSI is computed independently for each study
+at each sample size / observation precision.
 
 ---
 
 ## 5. Study Likelihood Models
 
-The study likelihood p(d | θ) defines what data the study would
-produce given the true parameter value. This is NOT a prior — it's a
-forward model of the measurement process.
+The study likelihood p(d | θ) defines what data the study would produce given
+the true parameter value. This is NOT a prior — it's a forward model of the
+measurement process.
 
 ### 5.1 `beta_binomial`
 
@@ -149,8 +146,8 @@ For coverage surveys: observe k successes in n trials.
 d = k ~ Binomial(n, θ)
 ```
 
-Where θ is the true parameter value (e.g., vacc_eff). The posterior
-update for a Beta prior is analytic:
+Where θ is the true parameter value (e.g., vacc_eff). The posterior update for a
+Beta prior is analytic:
 
 ```
 π(θ) = Beta(α, β)
@@ -171,8 +168,8 @@ For transmission studies: observe a noisy estimate of a rate.
 d = log(θ_observed) ~ Normal(log(θ_true), σ²)
 ```
 
-Where σ is the observation standard deviation in log space, specified
-via `observation_sd`.
+Where σ is the observation standard deviation in log space, specified via
+`observation_sd`.
 
 ### 5.4 `normal`
 
@@ -184,8 +181,8 @@ d = θ_observed ~ Normal(θ_true, σ²)
 
 ### 5.5 Custom (future)
 
-User-defined likelihood functions for complex study designs
-(multi-parameter studies, hierarchical observations).
+User-defined likelihood functions for complex study designs (multi-parameter
+studies, hierarchical observations).
 
 ---
 
@@ -193,8 +190,8 @@ User-defined likelihood functions for complex study designs
 
 ### 6.1 The Algorithm
 
-Given N prior samples θ₁, ..., θ_N with corresponding utilities
-U(a, θᵢ) for each action a:
+Given N prior samples θ₁, ..., θ_N with corresponding utilities U(a, θᵢ) for
+each action a:
 
 ```
 For each study S at sample size n:
@@ -218,49 +215,47 @@ For each study S at sample size n:
   3. EVSI(S, n) = (1/M) Σⱼ V_j − V_current
 ```
 
-This is the **preposterior analysis** framework (Raiffa & Schlaifer
-1961, updated by Strong et al. 2014 for health economics).
+This is the **preposterior analysis** framework (Raiffa & Schlaifer 1961,
+updated by Strong et al. 2014 for health economics).
 
 ### 6.2 Importance Sampling Details
 
-The key insight: we don't re-run the model. The utilities U(a, θᵢ)
-are already computed from the experiment's `outputs.tsv`. The
-importance weights w_i = p(d_j | θᵢ) reweight these existing samples
-to approximate the posterior expectation.
+The key insight: we don't re-run the model. The utilities U(a, θᵢ) are already
+computed from the experiment's `outputs.tsv`. The importance weights w_i = p(d_j
+| θᵢ) reweight these existing samples to approximate the posterior expectation.
 
-For conjugate models (Beta-Binomial for coverage surveys), the
-posterior is analytic and the importance weights are:
+For conjugate models (Beta-Binomial for coverage surveys), the posterior is
+analytic and the importance weights are:
 
 ```
 w_i = p(d_j | θᵢ) = Binomial(k_j | n, θᵢ)
 ```
 
-Where k_j is the simulated number of survey successes and θᵢ is the
-i-th prior sample's value of the study parameter.
+Where k_j is the simulated number of survey successes and θᵢ is the i-th prior
+sample's value of the study parameter.
 
-**Effective sample size check:** after computing weights, check
-ESS = (Σ wᵢ)² / Σ wᵢ². If ESS < N/5, the importance sampling is
-unreliable — the study outcome is too informative for the prior
-sample to approximate the posterior. Flag in output.
+**Effective sample size check:** after computing weights, check ESS = (Σ wᵢ)² /
+Σ wᵢ². If ESS < N/5, the importance sampling is unreliable — the study outcome
+is too informative for the prior sample to approximate the posterior. Flag in
+output.
 
 ### 6.3 Handling Stochastic Seeds
 
-The experiment runs each θ-point at multiple seeds. For the EVSI
-computation, average U(a, θᵢ) over seeds first:
+The experiment runs each θ-point at multiple seeds. For the EVSI computation,
+average U(a, θᵢ) over seeds first:
 
 ```
 Ū(a, θᵢ) = (1/|seeds|) Σ_s U(a, θᵢ, s)
 ```
 
-Then use Ū in the importance-weighted expectation. This removes
-stochastic noise from the utility estimates.
+Then use Ū in the importance-weighted expectation. This removes stochastic noise
+from the utility estimates.
 
 ### 6.4 Computational Cost
 
-No new simulations. The EVSI computation is O(N × M × |A|) floating
-point operations, where N = prior samples (~1000-4000), M = study
-outcome Monte Carlo draws (~1000), |A| = number of actions (~3-5).
-This runs in milliseconds.
+No new simulations. The EVSI computation is O(N × M × |A|) floating point
+operations, where N = prior samples (~1000-4000), M = study outcome Monte Carlo
+draws (~1000), |A| = number of actions (~3-5). This runs in milliseconds.
 
 The expensive part was the original experiment run. EVSI is free
 post-processing.
@@ -281,10 +276,9 @@ transmission_study   50          456      98       45000       two_rounds
 transmission_study   200         1230     145      45000       two_rounds
 ```
 
-Reading: "a coverage survey of 500 people is expected to improve the
-decision outcome by ~3400 cases averted (SE = 189). A transmission
-study of 50 sites improves it by only ~456. The coverage survey is
-~7x more valuable."
+Reading: "a coverage survey of 500 people is expected to improve the decision
+outcome by ~3400 cases averted (SE = 189). A transmission study of 50 sites
+improves it by only ~456. The coverage survey is ~7x more valuable."
 
 ### 7.2 `study_comparison.tsv`
 
@@ -307,9 +301,9 @@ coverage_survey      500         0.31      two_rounds → four_rounds
 transmission_study   200         0.05      two_rounds → two_rounds
 ```
 
-If the study never changes the optimal action (P_switch ≈ 0), it has
-no decision value regardless of EVSI magnitude. This table catches
-the case where EVSI is nonzero but the decision is insensitive.
+If the study never changes the optimal action (P_switch ≈ 0), it has no decision
+value regardless of EVSI magnitude. This table catches the case where EVSI is
+nonzero but the decision is insensitive.
 
 ### 7.4 `diminishing_returns.tsv`
 
@@ -325,8 +319,8 @@ coverage_survey      1000        3580     179
 coverage_survey      2000        3650     70
 ```
 
-`marginal_EVSI` = EVSI(n) − EVSI(n_prev). Where this drops below
-the cost of additional sampling, stop collecting data.
+`marginal_EVSI` = EVSI(n) − EVSI(n_prev). Where this drops below the cost of
+additional sampling, stop collecting data.
 
 ### 7.5 `assumptions.txt`
 
@@ -374,19 +368,20 @@ Limitations:
 For VOI to work, the experiment must provide:
 
 **Required from experiment outputs:**
+
 - `parameter_points.tsv` with prior sample values (from `[design.*]`)
 - `outputs.tsv` with per-point, per-scenario, per-seed summaries
 - `[compare.derived]` defining the utility quantity
 
 **Required NEW in experiment spec (§7 extension):**
-- `prior = { dist = "beta", alpha = 4.0, beta = 6.0 }` on design
-  parameters. Currently the experiment spec has `range` and `transform`
-  but no distributional specification. For VOI, we need the prior to
-  compute importance weights. Without it, we can only assume uniform
-  over the range.
 
-This is the one extension the VOI spec requires of the experiment
-spec. Everything else is already there.
+- `prior = { dist = "beta", alpha = 4.0, beta = 6.0 }` on design parameters.
+  Currently the experiment spec has `range` and `transform` but no
+  distributional specification. For VOI, we need the prior to compute importance
+  weights. Without it, we can only assume uniform over the range.
+
+This is the one extension the VOI spec requires of the experiment spec.
+Everything else is already there.
 
 ```toml
 # In experiment.toml — the prior field is what VOI needs
@@ -399,9 +394,8 @@ range = { min = 1.0, max = 5.0 }
 prior = { dist = "log_normal", mu = 1.0, sigma = 0.5 }
 ```
 
-If `prior` is omitted, the design samples uniformly (current behavior)
-and VOI uses a uniform prior — which is a valid but less informative
-analysis.
+If `prior` is omitted, the design samples uniformly (current behavior) and VOI
+uses a uniform prior — which is a valid but less informative analysis.
 
 ---
 
@@ -418,8 +412,8 @@ camdl voi run voi.toml --output analysis/voi/
 camdl voi run voi.toml --json
 ```
 
-Implementation: Rust. ~200 lines. Reads TSVs, computes importance
-weights, evaluates nested expectation. No simulation.
+Implementation: Rust. ~200 lines. Reads TSVs, computes importance weights,
+evaluates nested expectation. No simulation.
 
 ---
 
@@ -438,25 +432,24 @@ camdl-analysis voi-compare voi.toml --output figures/
 camdl-analysis voi-actions voi.toml --output figures/
 ```
 
-**Diminishing returns plot:** X-axis = sample size (or 1/σ for
-continuous studies). Y-axis = EVSI. One curve per study. Shows where
-each curve flattens — the point where additional data isn't worth
-collecting. This is the most decision-relevant figure.
+**Diminishing returns plot:** X-axis = sample size (or 1/σ for continuous
+studies). Y-axis = EVSI. One curve per study. Shows where each curve flattens —
+the point where additional data isn't worth collecting. This is the most
+decision-relevant figure.
 
-**Study comparison bar chart:** Horizontal bars, one per study at a
-fixed sample size. Length = EVSI. Directly answers "which study should
-I fund?"
+**Study comparison bar chart:** Horizontal bars, one per study at a fixed sample
+size. Length = EVSI. Directly answers "which study should I fund?"
 
-**Action sensitivity heatmap:** For each study × sample size, color
-by P(action switches). Dark = study frequently changes the decision.
-Light = study is informative but decision-insensitive.
+**Action sensitivity heatmap:** For each study × sample size, color by P(action
+switches). Dark = study frequently changes the decision. Light = study is
+informative but decision-insensitive.
 
 ---
 
 ## 11. Worked Example: SIA Campaign Design
 
-"Should we fund a coverage survey or a transmission study before
-deciding how many SIA rounds to conduct in northern Nigeria?"
+"Should we fund a coverage survey or a transmission study before deciding how
+many SIA rounds to conduct in northern Nigeria?"
 
 **Step 1: Run the experiment**
 
@@ -465,10 +458,9 @@ camdl experiment run experiment.toml --parallel 16
 camdl experiment summarize experiment.toml
 ```
 
-The experiment has `[design.prior]` with 2048 LHS samples from
-informative priors on vacc_eff, R0, gamma. Three scenarios: no_sia,
-two_rounds, four_rounds. 100 seeds each. Total: 2048 × 3 × 100 =
-614,400 runs.
+The experiment has `[design.prior]` with 2048 LHS samples from informative
+priors on vacc_eff, R0, gamma. Three scenarios: no_sia, two_rounds, four_rounds.
+100 seeds each. Total: 2048 × 3 × 100 = 614,400 runs.
 
 **Step 2: Define the decision problem**
 
@@ -503,16 +495,14 @@ camdl-analysis voi-curves voi.toml --output figures/
 
 **Step 4: Read the results**
 
-The diminishing returns plot shows: coverage survey EVSI rises steeply
-to n=500, then flattens. Transmission study EVSI rises slowly and
-never exceeds coverage survey at any precision. The coverage survey
-at n=500 is the optimal study design — it's where EVSI per additional
-sample drops below the cost threshold.
+The diminishing returns plot shows: coverage survey EVSI rises steeply to n=500,
+then flattens. Transmission study EVSI rises slowly and never exceeds coverage
+survey at any precision. The coverage survey at n=500 is the optimal study
+design — it's where EVSI per additional sample drops below the cost threshold.
 
-The action sensitivity table shows: at n=500, P_switch = 0.31,
-mostly from "two_rounds → four_rounds." The study frequently changes
-the decision, confirming it has real decision value — not just
-variance reduction.
+The action sensitivity table shows: at n=500, P_switch = 0.31, mostly from
+"two_rounds → four_rounds." The study frequently changes the decision,
+confirming it has real decision value — not just variance reduction.
 
 ---
 
@@ -537,10 +527,10 @@ variance reduction.
 └──────────────────────────┘
 ```
 
-The dependency is one-way. The experiment spec never mentions VOI.
-The VOI spec references experiment output schemas. If VOI needs
-something the experiment doesn't provide, the experiment spec is
-extended — the VOI spec stays a pure consumer.
+The dependency is one-way. The experiment spec never mentions VOI. The VOI spec
+references experiment output schemas. If VOI needs something the experiment
+doesn't provide, the experiment spec is extended — the VOI spec stays a pure
+consumer.
 
 ---
 
@@ -549,8 +539,8 @@ extended — the VOI spec stays a pure consumer.
 ### v0.3-core: Basic EVSI
 
 - `[decision]` and `[study.*]` parsing
-- Importance sampling with conjugate likelihoods
-  (Beta-Binomial, LogNormal-Normal)
+- Importance sampling with conjugate likelihoods (Beta-Binomial,
+  LogNormal-Normal)
 - `evsi.tsv`, `diminishing_returns.tsv`, `assumptions.txt`
 - ESS diagnostic
 - ~200 lines Rust

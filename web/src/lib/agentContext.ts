@@ -1,6 +1,6 @@
-import type { IrModel } from '../types/ir';
-import type { Scenario, RunConfig } from '../types/experiment';
-import type { TrajectoryJson } from '../types/trajectory';
+import type { RunConfig, Scenario } from "../types/experiment";
+import type { IrModel } from "../types/ir";
+import type { TrajectoryJson } from "../types/trajectory";
 
 /** Compute mean of the final snapshot across runs for each compartment. */
 function meanFinalState(runs: { trajectory: TrajectoryJson }[]): Record<string, number> | null {
@@ -39,22 +39,22 @@ export function buildAgentContext(
       n_seeds: runConfig.nSeeds,
       base_seed: runConfig.baseSeed,
       ...(runConfig.tEnd != null ? { t_end: runConfig.tEnd } : {}),
-      ...(runConfig.dt   != null ? { dt:    runConfig.dt   } : {}),
+      ...(runConfig.dt != null ? { dt: runConfig.dt } : {}),
     },
   };
 
   if (ir) {
     ctx.model = {
-      name:         ir.name,
-      description:  ir.description ?? null,
-      time_unit:    ir.simulation.time_semantics,
+      name: ir.name,
+      description: ir.description ?? null,
+      time_unit: ir.simulation.time_semantics,
       simulation: {
         t_start: ir.simulation.t_start,
-        t_end:   ir.simulation.t_end,
+        t_end: ir.simulation.t_end,
       },
       compartments: ir.compartments.map((c) => ({ name: c.name, kind: c.kind })),
-      parameters:   ir.parameters.map((p) => ({
-        name:  p.name,
+      parameters: ir.parameters.map((p) => ({
+        name: p.name,
         value: p.value,
         ...(p.transform ? { transform: p.transform } : {}),
       })),
@@ -66,9 +66,9 @@ export function buildAgentContext(
 
   ctx.scenarios = scenarios.map((sc, idx) => {
     const entry: Record<string, unknown> = {
-      name:            idx === 0 ? 'Baseline' : sc.name,
-      is_baseline:     idx === 0,
-      status:          sc.status,
+      name: idx === 0 ? "Baseline" : sc.name,
+      is_baseline: idx === 0,
+      status: sc.status,
       seeds_completed: sc.seedsCompleted,
       param_overrides: sc.paramOverrides,
     };

@@ -3,17 +3,17 @@
 # in peak timing and final size.
 
 [config]
-model   = "ocaml/golden/sir_basic.camdl"
-params  = "ocaml/golden/sir_basic.params.toml"
+model = "ocaml/golden/sir_basic.camdl"
+params = "ocaml/golden/sir_basic.params.toml"
 backend = "gillespie"
 
 [config.seeds]
 n = 25
 
 [[scenario]]
-name   = "low_r0"
+name = "low_r0"
 params = { beta = 0.2, gamma = 0.1 }
 
 [[scenario]]
-name   = "high_r0"
+name = "high_r0"
 params = { beta = 0.5, gamma = 0.1 }

@@ -18,7 +18,7 @@
   "transitions": [
     {
       "name": "infection_under5",
-      "stoichiometry": [ [ "S_under5", -1 ], [ "E_under5", 1 ] ],
+      "stoichiometry": [["S_under5", -1], ["E_under5", 1]],
       "rate": {
         "bin_op": {
           "op": "mul",
@@ -41,7 +41,7 @@
                       "left": {
                         "table_lookup": {
                           "table": "C_age",
-                          "indices": [ { "const": 0.0 } ]
+                          "indices": [{ "const": 0.0 }]
                         }
                       },
                       "right": { "pop": "I_under5" }
@@ -49,7 +49,10 @@
                   },
                   "right": {
                     "pop_sum": [
-                      "S_under5", "E_under5", "I_under5", "R_under5",
+                      "S_under5",
+                      "E_under5",
+                      "I_under5",
+                      "R_under5",
                       "V_under5"
                     ]
                   }
@@ -64,7 +67,7 @@
                       "left": {
                         "table_lookup": {
                           "table": "C_age",
-                          "indices": [ { "const": 1.0 } ]
+                          "indices": [{ "const": 1.0 }]
                         }
                       },
                       "right": { "pop": "I_over5" }
@@ -72,7 +75,11 @@
                   },
                   "right": {
                     "pop_sum": [
-                      "S_over5", "E_over5", "I_over5", "R_over5", "V_over5"
+                      "S_over5",
+                      "E_over5",
+                      "I_over5",
+                      "R_over5",
+                      "V_over5"
                     ]
                   }
                 }
@@ -90,7 +97,7 @@
     },
     {
       "name": "infection_over5",
-      "stoichiometry": [ [ "S_over5", -1 ], [ "E_over5", 1 ] ],
+      "stoichiometry": [["S_over5", -1], ["E_over5", 1]],
       "rate": {
         "bin_op": {
           "op": "mul",
@@ -113,7 +120,7 @@
                       "left": {
                         "table_lookup": {
                           "table": "C_age",
-                          "indices": [ { "const": 2.0 } ]
+                          "indices": [{ "const": 2.0 }]
                         }
                       },
                       "right": { "pop": "I_under5" }
@@ -121,7 +128,10 @@
                   },
                   "right": {
                     "pop_sum": [
-                      "S_under5", "E_under5", "I_under5", "R_under5",
+                      "S_under5",
+                      "E_under5",
+                      "I_under5",
+                      "R_under5",
                       "V_under5"
                     ]
                   }
@@ -136,7 +146,7 @@
                       "left": {
                         "table_lookup": {
                           "table": "C_age",
-                          "indices": [ { "const": 3.0 } ]
+                          "indices": [{ "const": 3.0 }]
                         }
                       },
                       "right": { "pop": "I_over5" }
@@ -144,7 +154,11 @@
                   },
                   "right": {
                     "pop_sum": [
-                      "S_over5", "E_over5", "I_over5", "R_over5", "V_over5"
+                      "S_over5",
+                      "E_over5",
+                      "I_over5",
+                      "R_over5",
+                      "V_over5"
                     ]
                   }
                 }
@@ -162,7 +176,7 @@
     },
     {
       "name": "progression_under5",
-      "stoichiometry": [ [ "E_under5", -1 ], [ "I_under5", 1 ] ],
+      "stoichiometry": [["E_under5", -1], ["I_under5", 1]],
       "rate": {
         "bin_op": {
           "op": "mul",
@@ -179,7 +193,7 @@
     },
     {
       "name": "progression_over5",
-      "stoichiometry": [ [ "E_over5", -1 ], [ "I_over5", 1 ] ],
+      "stoichiometry": [["E_over5", -1], ["I_over5", 1]],
       "rate": {
         "bin_op": {
           "op": "mul",
@@ -196,7 +210,7 @@
     },
     {
       "name": "recovery_under5",
-      "stoichiometry": [ [ "I_under5", -1 ], [ "R_under5", 1 ] ],
+      "stoichiometry": [["I_under5", -1], ["R_under5", 1]],
       "rate": {
         "bin_op": {
           "op": "mul",
@@ -213,7 +227,7 @@
     },
     {
       "name": "recovery_over5",
-      "stoichiometry": [ [ "I_over5", -1 ], [ "R_over5", 1 ] ],
+      "stoichiometry": [["I_over5", -1], ["R_over5", 1]],
       "rate": {
         "bin_op": {
           "op": "mul",
@@ -230,7 +244,7 @@
     },
     {
       "name": "waning_under5",
-      "stoichiometry": [ [ "V_under5", -1 ], [ "S_under5", 1 ] ],
+      "stoichiometry": [["V_under5", -1], ["S_under5", 1]],
       "rate": {
         "bin_op": {
           "op": "mul",
@@ -247,7 +261,7 @@
     },
     {
       "name": "waning_over5",
-      "stoichiometry": [ [ "V_over5", -1 ], [ "S_over5", 1 ] ],
+      "stoichiometry": [["V_over5", -1], ["S_over5", 1]],
       "rate": {
         "bin_op": {
           "op": "mul",
@@ -280,7 +294,7 @@
   "interventions": [
     {
       "name": "sia_round_1",
-      "schedule": { "at_times": [ 180.0, 545.0, 910.0 ] },
+      "schedule": { "at_times": [180.0, 545.0, 910.0] },
       "actions": [
         {
           "fraction_transfer": {
@@ -297,7 +311,7 @@
     {
       "name": "beta",
       "value": null,
-      "bounds": [ 0.001, 0.5 ],
+      "bounds": [0.001, 0.5],
       "prior": null,
       "transform": null,
       "initial_value": null
@@ -305,7 +319,7 @@
     {
       "name": "sigma",
       "value": null,
-      "bounds": [ 0.01, 1.0 ],
+      "bounds": [0.01, 1.0],
       "prior": null,
       "transform": null,
       "initial_value": null
@@ -313,7 +327,7 @@
     {
       "name": "gamma",
       "value": null,
-      "bounds": [ 0.01, 1.0 ],
+      "bounds": [0.01, 1.0],
       "prior": null,
       "transform": null,
       "initial_value": null
@@ -321,7 +335,7 @@
     {
       "name": "omega",
       "value": null,
-      "bounds": [ 0.0001, 0.1 ],
+      "bounds": [0.0001, 0.1],
       "prior": null,
       "transform": null,
       "initial_value": null
@@ -329,7 +343,7 @@
     {
       "name": "vacc_frac",
       "value": null,
-      "bounds": [ 0.0, 1.0 ],
+      "bounds": [0.0, 1.0],
       "prior": null,
       "transform": null,
       "initial_value": null
@@ -337,7 +351,7 @@
     {
       "name": "N0_under5",
       "value": null,
-      "bounds": [ 100.0, 1000000.0 ],
+      "bounds": [100.0, 1000000.0],
       "prior": null,
       "transform": null,
       "initial_value": null
@@ -345,7 +359,7 @@
     {
       "name": "N0_over5",
       "value": null,
-      "bounds": [ 100.0, 1000000.0 ],
+      "bounds": [100.0, 1000000.0],
       "prior": null,
       "transform": null,
       "initial_value": null
@@ -353,7 +367,7 @@
     {
       "name": "I0",
       "value": null,
-      "bounds": [ 1.0, 1000.0 ],
+      "bounds": [1.0, 1000.0],
       "prior": null,
       "transform": null,
       "initial_value": null
@@ -408,22 +422,22 @@
       "name": "with_sia",
       "label": "with SIA targeting under-5",
       "params": {},
-      "enable": [ "sia_round_1" ],
+      "enable": ["sia_round_1"],
       "disable": [],
       "t_end": null
     }
   ],
   "model_structure": {
-    "dimensions": [ { "name": "age", "values": [ "under5", "over5" ] } ],
+    "dimensions": [{ "name": "age", "values": ["under5", "over5"] }],
     "compartment_dims": {
-      "S": [ "age" ],
-      "E": [ "age" ],
-      "I": [ "age" ],
-      "R": [ "age" ],
-      "V": [ "age" ]
+      "S": ["age"],
+      "E": ["age"],
+      "I": ["age"],
+      "R": ["age"],
+      "V": ["age"]
     },
-    "base_compartments": [ "S", "E", "I", "R", "V" ],
-    "transmission_transitions": [ "infection" ],
-    "infectious_compartments": [ "I" ]
+    "base_compartments": ["S", "E", "I", "R", "V"],
+    "transmission_transitions": ["infection"],
+    "infectious_compartments": ["I"]
   }
 }

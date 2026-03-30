@@ -1,7 +1,7 @@
-import type { TrajectoryJson } from '../types/trajectory';
+import type { TrajectoryJson } from "../types/trajectory";
 
 export interface SimConfig {
-  backend: 'gillespie' | 'tau_leap' | 'chain_binomial';
+  backend: "gillespie" | "tau_leap" | "chain_binomial";
   seed: number;
   dt?: number;
   output_dt?: number;
@@ -15,7 +15,7 @@ let loading: Promise<void> | null = null;
 async function load() {
   if (mod) return;
   if (!loading) {
-    loading = import('./wasm/pkg/camdl_wasm.js').then(async (m) => {
+    loading = import("./wasm/pkg/camdl_wasm.js").then(async (m) => {
       await m.default(); // wasm init
       mod = m;
     });

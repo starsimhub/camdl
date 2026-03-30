@@ -1,13 +1,13 @@
 # Outbreak Triage: Which Uncertainty to Resolve First?
 
-A novel respiratory pathogen is detected in a town of ~10,000 residents.
-Two age groups are at risk: children (school-age) and adults (working-age).
-Before recommending targeted interventions, the team wants to know:
+A novel respiratory pathogen is detected in a town of ~10,000 residents. Two age
+groups are at risk: children (school-age) and adults (working-age). Before
+recommending targeted interventions, the team wants to know:
 
 > **Given uncertainty in transmission (beta), latent period (sigma), and
-> recovery rate (gamma), which parameter most drives peak infections by age?
-> And which study — seroprevalence (narrows beta) or household shedding
-> (narrows gamma) — would most reduce model output uncertainty?**
+> recovery rate (gamma), which parameter most drives peak infections by age? And
+> which study — seroprevalence (narrows beta) or household shedding (narrows
+> gamma) — would most reduce model output uncertainty?**
 
 ## Model
 
@@ -19,15 +19,14 @@ exposed to infectious), gamma (recovery rate).
 
 Three belief-state designs are compared:
 
-| Design | Scenario | Parameters |
-|--------|----------|------------|
-| `current` | No studies done | beta∈[0.05,0.5], sigma∈[0.1,1.0], gamma∈[0.05,0.5] (log-uniform) |
-| `narrow_beta` | Seroprevalence study done | beta narrowed to [0.2,0.4] |
-| `narrow_gamma` | Household shedding study done | gamma narrowed to [0.1,0.3] |
+| Design         | Scenario                      | Parameters                                                       |
+| -------------- | ----------------------------- | ---------------------------------------------------------------- |
+| `current`      | No studies done               | beta∈[0.05,0.5], sigma∈[0.1,1.0], gamma∈[0.05,0.5] (log-uniform) |
+| `narrow_beta`  | Seroprevalence study done     | beta narrowed to [0.2,0.4]                                       |
+| `narrow_gamma` | Household shedding study done | gamma narrowed to [0.1,0.3]                                      |
 
-All ranges are log-uniform. Saltelli sampling (n=256) produces 2,048
-parameter points per design × 3 seeds = 6,144 runs per design,
-18,432 runs total.
+All ranges are log-uniform. Saltelli sampling (n=256) produces 2,048 parameter
+points per design × 3 seeds = 6,144 runs per design, 18,432 runs total.
 
 ## Running
 
@@ -67,17 +66,17 @@ camdl-analysis plot-convergence examples/seir_age_sobol/experiment.toml \
 
 ## Expected Findings
 
-Under `current` (wide priors), **beta dominates** peak_I_child: the scale
-of the epidemic is almost entirely driven by transmission intensity.
-sigma and gamma contribute, but at lower first-order indices.
+Under `current` (wide priors), **beta dominates** peak_I_child: the scale of the
+epidemic is almost entirely driven by transmission intensity. sigma and gamma
+contribute, but at lower first-order indices.
 
-After the seroprevalence study (`narrow_beta`), beta's S1 collapses because
-its range is now tight. sigma and gamma become relatively more important —
-the remaining uncertainty is in epidemic timing and duration, not scale.
+After the seroprevalence study (`narrow_beta`), beta's S1 collapses because its
+range is now tight. sigma and gamma become relatively more important — the
+remaining uncertainty is in epidemic timing and duration, not scale.
 
 After the household shedding study (`narrow_gamma`), beta and sigma still
-dominate. The VOI waterfall shows that the seroprevalence study removes
-more output variance than the household study — making it the higher-priority
+dominate. The VOI waterfall shows that the seroprevalence study removes more
+output variance than the household study — making it the higher-priority
 investigation to commission first.
 
 ## Output Directory Structure
@@ -104,18 +103,18 @@ output/
 
 ## Interpreting the Figures
 
-- **sensitivity_*.png**: S1 (dark bar) = direct effect of that parameter.
-  ST (light bar) = total effect including interactions. ST ≫ S1 indicates
-  strong interactions with other parameters.
+- **sensitivity_*.png**: S1 (dark bar) = direct effect of that parameter. ST
+  (light bar) = total effect including interactions. ST ≫ S1 indicates strong
+  interactions with other parameters.
 
 - **voi_*.png**: Horizontal bars show how much each parameter's total-order
   index decreases after a study. Larger bar = that parameter became less
   uncertain = the study was more informative.
 
-- **scatter_current.png**: Lower-triangle scatter plots reveal the shape of
-  the parameter-output relationship (monotone vs. non-monotone). Upper-triangle
+- **scatter_current.png**: Lower-triangle scatter plots reveal the shape of the
+  parameter-output relationship (monotone vs. non-monotone). Upper-triangle
   Spearman r confirms that beta vs. peak_I_child is strongly monotone.
 
-- **convergence_current.png**: S1/ST estimates at n/8, n/4, n/2, n. Flat
-  lines at n=256 confirm the indices have converged; instability at small n
-  shows why n≥128 is needed for log-uniform sampling.
+- **convergence_current.png**: S1/ST estimates at n/8, n/4, n/2, n. Flat lines
+  at n=256 confirm the indices have converged; instability at small n shows why
+  n≥128 is needed for log-uniform sampling.

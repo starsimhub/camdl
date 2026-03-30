@@ -3,8 +3,8 @@
 # Gillespie over a 160-day horizon.
 
 [config]
-model   = "ocaml/golden/seir_erlang.camdl"
-params  = "ocaml/golden/seir_erlang.params.toml"
+model = "ocaml/golden/seir_erlang.camdl"
+params = "ocaml/golden/seir_erlang.params.toml"
 backend = "gillespie"
 
 [config.seeds]
@@ -12,10 +12,10 @@ n = 20
 
 [[scenario]]
 # Short incubation (~1.7d mean): COVID-like, σ=0.6, β=0.45 → R0≈3
-name   = "short_incubation"
+name = "short_incubation"
 params = { beta = 0.45, sigma = 0.6 }
 
 [[scenario]]
 # Long incubation (~5d mean): Ebola-like, σ=0.2, β=0.3 → R0≈3
-name   = "long_incubation"
+name = "long_incubation"
 params = { beta = 0.3, sigma = 0.2 }

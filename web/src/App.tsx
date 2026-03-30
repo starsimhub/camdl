@@ -1,16 +1,18 @@
-import { useEffect } from 'react';
-import { PanelGroup, Panel, PanelResizeHandle } from 'react-resizable-panels';
-import Header from './components/Header';
-import ModelCanvas from './components/ModelCanvas';
-import EditorPanel from './components/EditorPanel';
-import BottomPanel from './components/BottomPanel';
-import { useStore } from './store';
+import { useEffect } from "react";
+import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
+import BottomPanel from "./components/BottomPanel";
+import EditorPanel from "./components/EditorPanel";
+import Header from "./components/Header";
+import ModelCanvas from "./components/ModelCanvas";
+import { useStore } from "./store";
 
 export default function App() {
   const loadExample = useStore((s) => s.loadExample);
 
   // Load sir_five_age with its baseline preset on mount
-  useEffect(() => { loadExample('sir_five_age'); }, [loadExample]);
+  useEffect(() => {
+    loadExample("sir_five_age");
+  }, [loadExample]);
 
   return (
     <div className="flex flex-col h-screen overflow-hidden bg-gray-50 dark:bg-surface-0">

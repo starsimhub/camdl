@@ -7,10 +7,12 @@ on SIA scope?**
 ## Model
 
 - 50 independent patches with heterogeneous OPV coverage (35%–89%)
-- Shared uncertain `beta` and `gamma`; per-patch `beta_eff[p] = beta * (1 - cov[p])`
+- Shared uncertain `beta` and `gamma`; per-patch
+  `beta_eff[p] = beta * (1 - cov[p])`
 - Three decisions: `no_sia`, `target_10` (10 lowest-coverage patches), `sia_all`
 - SIA fires at day 60, transferring `vacc_frac` of S→V per targeted patch
-- V compartment isolates SIA-vaccinated from natural infections so `final_R_p*` = cases only
+- V compartment isolates SIA-vaccinated from natural infections so `final_R_p*`
+  = cases only
 
 ## Pipeline (run from repo root)
 
@@ -42,9 +44,9 @@ camdl-analysis plot-study-comparison --voi-toml examples/polio_es/voi.toml \
 
 ## Key result
 
-EVSI saturates around **n=10 ES sites** — capturing ~95% of the value of
-full information. Beyond 10 sites, the binomial signal is already concentrated
-enough to resolve which transmission regime you're in.
+EVSI saturates around **n=10 ES sites** — capturing ~95% of the value of full
+information. Beyond 10 sites, the binomial signal is already concentrated enough
+to resolve which transmission regime you're in.
 
 ## Known limitations (toy model)
 
