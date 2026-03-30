@@ -471,8 +471,8 @@ brackets. For large tables, use `read(...)` (see §6.2).
 
 ### 6.2 Loading from Files: `read`
 
-All file-based tables use **long format** (one row per observation, index columns
-then value column):
+All file-based tables use **long format** (one row per observation, index
+columns then value column):
 
 ```
 # data/lga_pop.tsv
@@ -489,8 +489,8 @@ tables {
 ```
 
 The type signature declares how many index columns there are (one per dimension
-listed). The remaining column(s) are value(s). Column names in the file are
-for human readability — the compiler uses **positional mapping** from the type
+listed). The remaining column(s) are value(s). Column names in the file are for
+human readability — the compiler uses **positional mapping** from the type
 signature.
 
 **Extension determines separator:** `.tsv` → tab, `.csv` → comma, anything else
@@ -540,8 +540,9 @@ values in first-occurrence order, and those become the levels of the dimension.
 All tables referencing `patch` validate against these derived levels.
 
 **Rules:**
-- Each dimension is defined exactly once. Two `patch = [...]` entries →
-  compile error.
+
+- Each dimension is defined exactly once. Two `patch = [...]` entries → compile
+  error.
 - Inline `[...]` and `read(...)` are mutually exclusive for the same dimension.
 - A `stratify(by = X)` whose dimension `X` was declared via `read(...)` must be
   present; levels come entirely from the file.
@@ -568,8 +569,8 @@ borno_gwoza      78000  0.79
 ```
 
 Creates two tables with the same index: `pop[kano_dala] = 485000`,
-`init_sus[kano_dala] = 0.88`. Value columns map positionally to the names on
-the left. Name count must match non-index column count.
+`init_sus[kano_dala] = 0.88`. Value columns map positionally to the names on the
+left. Name count must match non-index column count.
 
 ### 6.5 External Table Loading
 
@@ -647,17 +648,18 @@ forcing {
 }
 ```
 
-Forcing functions compile to `TimeFunc` nodes in the IR. Their arguments can reference
-parameters (e.g., `amplitude = alpha`), enabling inference over function
-characteristics (e.g., inferring seasonal amplitude).
+Forcing functions compile to `TimeFunc` nodes in the IR. Their arguments can
+reference parameters (e.g., `amplitude = alpha`), enabling inference over
+function characteristics (e.g., inferring seasonal amplitude).
 
 The `periodic` type supports two forms:
 
 - **Values form:** `values = [1.0, 0.0, 1.0, ...]` — explicit list. Bin width =
   period / len(values). Use for general periodic patterns.
-- **Range form:** `step = 1 'days` + `on = [7:100, 115:199]` — binary on/off with
-  range literals. The compiler generates the values array. Use for calendars with
-  known active periods (school terms, work weeks, campaign windows).
+- **Range form:** `step = 1 'days` + `on = [7:100, 115:199]` — binary on/off
+  with range literals. The compiler generates the values array. Use for
+  calendars with known active periods (school terms, work weeks, campaign
+  windows).
 
 Forcing functions are used in rate expressions by name or with explicit `(t)`:
 
@@ -985,6 +987,41 @@ index := expr                             # positional: S[child]
 
 Comparison operators are available for `where` guards and summary expressions.
 `sum` is a keyword, not a user-definable function.
+
+**Built-in math functions.** These are recognized by the compiler as
+function-call syntax and produce IR expression nodes (not forcing functions):
+
+| Function | Arity | Result |
+|----------|-------|--------|
+| `exp(x)` | 1 | e^x |
+| `log(x)` | 1 | Natural logarithm (ln). Returns -∞ for x ≤ 0. |
+| `sqrt(x)` | 1 | Square root. Returns 0 for x < 0. |
+| `abs(x)` | 1 | Absolute value |
+| `floor(x)` | 1 | Floor (round toward -∞) |
+| `ceil(x)` | 1 | Ceiling (round toward +∞) |
+| `mod(a, b)` | 2 | Euclidean remainder (always non-negative). Returns 0 for b = 0. |
+
+Example:
+
+```
+let day_of_year = mod(t, 365.25)
+let pop_decay = N0 * exp(-mu * t)
+let is_pulse = (day_of_year > 250.0) * (day_of_year < 252.0)
+```
+
+**Rate wrappers.** Two compiler-recognized forms modify how event counts
+are drawn for a transition. They are NOT general-purpose functions — they
+wrap the entire rate expression and are extracted by the compiler during
+expansion.
+
+| Wrapper | Syntax | Effect |
+|---------|--------|--------|
+| `overdispersed(rate, σ²)` | `@ overdispersed(beta * S * I / N, sigma_se)` | Gamma-Poisson (NegBinomial) draws. Var = mean + mean²·σ²/dt. |
+| `deterministic(rate)` | `@ deterministic(mu * N)` | Rounded integer: nearbyint(rate × dt). No stochastic noise. |
+
+These are documented in §9.9 (overdispersion) and are compatible with
+tau-leap and chain-binomial backends. Gillespie and ODE reject models
+with `overdispersed()` transitions.
 
 **Compile-time vs runtime `if/else`.** The `if/then/else` expression has two
 evaluation modes depending on context:
@@ -1432,7 +1469,8 @@ interventions {
 }
 ```
 
-Syntax: `NAME[INDEX_VAR in DIMENSION] : ACTION at [TIME, ...]` (or a `{ ... }` block for recurring schedules)
+Syntax: `NAME[INDEX_VAR in DIMENSION] : ACTION at [TIME, ...]` (or a `{ ... }`
+block for recurring schedules)
 
 The expanded members share a **`base_name`** (the unindexed name, `"sia"`
 above). In scenario `enable`/`disable` lists, passing `"sia"` resolves to all
@@ -2024,97 +2062,103 @@ structural skeleton; the parameter grammar fills in the rest.
 
 ## 22. CLI
 
-The toolchain has two binaries: **`camdlc`** (OCaml compiler) and
-**`camdl-sim`** (Rust simulator). The planned unified `camdl` binary is a future
-integration.
+The unified `camdl` command routes to two backends: **`camdlc`** (OCaml
+compiler) for compilation/inspection and **`camdl-sim`** (Rust) for simulation,
+experiments, and inference. All commands accept `.camdl` files directly
+(auto-compiled via `camdlc`).
 
-### 22.1 camdlc — Compiler (OCaml)
+### 22.1 Compilation and Inspection
 
 ```bash
-# Compile a .camdl file to IR JSON (stdout)
-camdlc FILE.camdl [--param NAME=VALUE ...]
-
-# Validate model structure without producing IR
-camdlc check FILE.camdl
-
-# Inspect model: summary, compartments, transitions, let bindings, rates
-camdlc inspect FILE.camdl [--summary] [--compartments]
-                           [--transitions [PATTERN]] [--count]
-                           [--transition NAME --rate]
-                           [--let NAME] [--expansion NAME]
-                           [--ir] [--ascii] [--no-color]
+camdl compile MODEL.camdl              # compile to IR JSON (stdout)
+camdl check   MODEL.camdl              # validate structure (no output)
+camdl inspect MODEL.camdl [OPTIONS]    # inspect compartments, transitions, etc.
 ```
 
-`camdlc FILE.camdl` produces the IR with `Param("beta")` nodes for undeclared
-defaults and concrete float values for declared defaults. Output is written to
-stdout as JSON. Redirect with `camdlc model.camdl > model.ir.json`.
-
-The `--param NAME=VALUE` flag overrides a parameter value in the emitted IR
-(useful for inspection and debugging; not for inference).
-
-### 22.2 camdl-sim — Simulator (Rust)
+### 22.2 Simulation
 
 ```bash
-# Simulate from an IR JSON file (output: TSV to stdout)
-camdl-sim simulate MODEL.ir.json [OPTIONS]
-camdl-sim MODEL.ir.json [OPTIONS]       # 'simulate' subcommand is optional
-
-# Simulate directly from a .camdl source (compiles via camdlc automatically)
-camdl-sim MODEL.camdl [OPTIONS]         # requires camdlc on PATH (or $CAMDLC)
+camdl simulate MODEL --params P.toml --seed 42 [OPTIONS]
 
 Options:
-  --backend  gillespie|tau_leap|chain_binomial  (default: gillespie)
-  --dt       DT     step size for tau_leap / chain_binomial
-  --seed     N      RNG seed (default: 1)
-  --param     NAME=VALUE    override a scalar parameter value
-  --param-vec PREFIX=FILE   override indexed params from a keyed TSV
-  --table    NAME=FILE     supply a runtime external() table from CSV/TSV/JSON
+  --backend    gillespie|tau_leap|chain_binomial|ode  (default: gillespie)
+  --dt         DT         step size for tau_leap / chain_binomial / ode
+  --seed       N          RNG seed (default: 1)
+  --scenario   NAME       select a named scenario
+  --enable     NAME       enable an intervention (ad-hoc; mutually exclusive with --scenario)
+  --disable    NAME       disable an intervention
+  --param      NAME=VALUE override a parameter value
+  --param-vec  PREFIX=FILE override indexed params from a keyed TSV
+  --table      NAME=FILE  supply a runtime external() table
+  --params     FILE.toml  load parameter values (repeatable, later overrides earlier)
 ```
 
-**`--param NAME=VALUE`** overrides a single parameter. Can be repeated:
+Output is TSV to stdout: `t`, one column per compartment, `flow_<name>` per
+transition.
+
+### 22.3 Expression Evaluation
 
 ```bash
-camdl-sim model.ir.json --param gamma=0.1 --param beta=0.3
+camdl eval MODEL --params P.toml --expr "school,seas,R0" --from 0 --to 365 --every 1
+camdl eval MODEL --params P.toml --expr "school" --at 0,100,200,300
 ```
 
-**`--param-vec PREFIX=FILE`** loads a two-column keyed TSV (`name<TAB>value`)
-and applies it as per-stratum parameter overrides. The full parameter name is
-constructed as `PREFIX_name`:
+Evaluates time-dependent expressions (forcing functions, parameters, math
+expressions) at a time grid without simulation. Expressions that reference
+compartment state produce an error.
+
+### 22.4 Experiments
 
 ```bash
-# r0_values.tsv:
-#   urban   2.1
-#   rural   1.8
-camdl-sim model.ir.json --param-vec R0=r0_values.tsv
-# Sets R0_urban=2.1, R0_rural=1.8
+camdl experiment run    EXPERIMENT.toml [--parallel N] [--force]
+camdl experiment status EXPERIMENT.toml
+camdl experiment summarize OUTPUT_DIR
+camdl experiment analyze   EXPERIMENT.toml [--design NAME] [--bootstrap N]
 ```
 
-Unknown keys (constructed parameter name not in model) cause an immediate error
-with a clear message.
+Batch parameter sweeps, sensitivity analysis (Sobol indices), and scenario
+comparisons. See the Experiment Specification for details.
 
-**`--table NAME=FILE`** supplies a runtime external table. Models that declare
-`external("NAME")` tables require this flag; simulation fails if any external
-table is not provided.
-
-Output is a TSV to stdout with columns: `t`, one column per integer compartment,
-one column per real compartment, and `flow_<name>` per transition. A
-`diagnostics.tsv` is written unconditionally alongside.
-
-### 22.3 Planned CLI (v0.2+)
-
-The following commands are **planned** but not yet implemented:
+### 22.5 Inference
 
 ```bash
-# Planned unified CLI
-camdl simulate MODEL --params PARAMS [--seed N] [--seeds N:M]
-                     [--scenario NAME]
-                     [--backend gillespie|tau_leap|chain_binomial]
-                     [--param PARAM=VAL] [--output-dir DIR]
+# Particle filter — log-likelihood estimation
+camdl pfilter MODEL --params P.toml --data cases.tsv \
+    --particles 5000 --dt 1 --seed 42 \
+    --flow recovery --obs-model discretized_normal --tol 1e-18 \
+    --trace
 
-camdl compare   MODEL --params PARAMS [--seeds N:M]
-camdl verify    RUN_DIR
-camdl experiment FILE
+# Iterated filtering — maximum likelihood estimation
+camdl if2 MODEL --params P.toml --data cases.tsv \
+    --rw-sd "R0=5,sigma=0.01,gamma=0.01" \
+    --particles 2000 --iterations 100 --cooling 0.95 \
+    --chains 4 --regime scout \
+    --fixed "N0,mu" --ivp "S0,I0" \
+    --flow recovery --obs-model discretized_normal
+
+# Profile likelihood — parameter identifiability
+camdl profile MODEL --params P.toml --data cases.tsv \
+    --focal R0 --grid "10,20,30,40,50,60,70" \
+    --rw-sd "sigma=0.01,gamma=0.01" \
+    --particles 500 --iterations 30 --starts 3 --parallel 8
+
+# 2D profile
+camdl profile MODEL --focal alpha,gamma \
+    --grid-alpha "0.85,0.90,0.95" --grid-gamma "0.06,0.08,0.10" ...
 ```
+
+**`--flow NAME`**: Which transition's cumulative flow to project for the
+observation model. Must match what the data measures (e.g., `recovery` for
+case notifications that count recoveries, not infections).
+
+**`--obs-model`**: `negbin` (default) or `discretized_normal` (He et al.
+heteroscedastic variance).
+
+**`--regime`**: IF2 presets — `scout` (8 chains, no cooling, explore),
+`refine` (4 chains, cooling, converge), `validate` (high particles, full
+convergence).
+
+**`--ivp "S0,I0"`**: Initial value parameters, perturbed only at t=0.
 
 ---
 
@@ -3091,8 +3135,8 @@ migrate[c in compartments, src in patch, dst in patch]
 
 ### 27.10 Name Resolution
 
-Names are resolved in order: compartments → parameters → let bindings →
-forcing → tables. The compiler reports errors for:
+Names are resolved in order: compartments → parameters → let bindings → forcing
+→ tables. The compiler reports errors for:
 
 - **Shadowing reserved identifiers**: `t_start`, `t_end`, `compartments`, etc.
 - **Duplicate declarations**: two parameters named `beta`, two compartments
@@ -3152,13 +3196,30 @@ NAME[indices] : --> DST @ RATE       inflow (birth, importation)
 NAME[indices] : SRC --> @ RATE       outflow (death)
 ... where PRED                       guard clause (compile-time filtering)
 
+# Rate wrappers
+@ overdispersed(RATE, σ²)            Gamma-Poisson (NegBinomial) draws
+@ deterministic(RATE)                nearbyint(rate × dt), no stochasticity
+
 # Data
 table : dim × dim unit = [...]       typed, shape-checked, unit-annotated
 let name[indices] = expr              computed quantity (family of values)
 
+# Math functions
+exp(x), log(x), sqrt(x)             standard math (unary)
+abs(x), floor(x), ceil(x)           rounding and absolute value
+mod(a, b)                            Euclidean remainder (binary)
+
 # Time
+t                                    current simulation time
 at(expr, timepoint)                  value at specific time
 max(expr), cumulative(trans), ...    summary functions over trajectories
 
-# Everything else is sugar expanding to these primitives.
+# Forcing (time-dependent functions)
+forcing { NAME : sinusoidal { ... } }     smooth seasonal
+forcing { NAME : periodic { ... } }       repeating step (values or on = [lo:hi, ...])
+forcing { NAME : piecewise { ... } }      non-repeating step
+forcing { NAME : interpolated { ... } }   data-driven (linear or spline)
+
+# Reserved identifiers
+t, t_start, t_end, compartments, sum, consecutive
 ```

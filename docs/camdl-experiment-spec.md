@@ -1,7 +1,6 @@
 # camdl Experiment & Output System Specification
 
-**Version:** 0.5-draft
-**Date:** 2026-03-25
+**Version:** 0.5-draft **Date:** 2026-03-25
 
 > **Scope note:** This spec provides infrastructure for parameter exploration
 > and sensitivity analysis. The `[design.*]` system characterizes how model
@@ -36,8 +35,8 @@ required. The experiment file adds batch infrastructure on top.
 the `.camdl` syntax, you know the experiment file syntax.
 
 **Reproducibility is structural, not aspirational.** Every output file is
-content-addressed by the inputs that produced it. Same inputs → same hash →
-same directory. Different inputs → different hash → separate directory.
+content-addressed by the inputs that produced it. Same inputs → same hash → same
+directory. Different inputs → different hash → separate directory.
 
 **M and σ are distinct layers.** Parameter values (M) and scenario patches (σ)
 are different operations on different objects. The CLI makes this visible:
@@ -268,13 +267,13 @@ error: unknown config key 'beta' in [config].
 
 **Top-level config keys:**
 
-| Field        | Type   | Default       | Description                                                             |
-| ------------ | ------ | ------------- | ----------------------------------------------------------------------- |
-| `backend`    | string | `"gillespie"` | `gillespie`, `tau_leap`, `chain_binomial`                               |
-| `dt`         | float  | `1.0`         | Step size for discrete-time backends                                    |
+| Field        | Type   | Default       | Description                                                           |
+| ------------ | ------ | ------------- | --------------------------------------------------------------------- |
+| `backend`    | string | `"gillespie"` | `gillespie`, `tau_leap`, `chain_binomial`                             |
+| `dt`         | float  | `1.0`         | Step size for discrete-time backends                                  |
 | `seeds`      | table  | required      | `{ n = N }` or `{ from, to }` or `{ list = [...] }` or `{ n, start }` |
-| `parallel`   | int    | `1`           | Concurrent runs                                                         |
-| `output_dir` | path   | `"output/"`   | Root of content-addressable tree                                        |
+| `parallel`   | int    | `1`           | Concurrent runs                                                       |
+| `output_dir` | path   | `"output/"`   | Root of content-addressable tree                                      |
 
 **[config.simulate]** — mirrors `.camdl` `simulate { }`:
 
@@ -301,10 +300,10 @@ All `[config]` time values are bare floats in the model's declared `time_unit`.
 ### 4.5 Seeds
 
 ```toml
-seeds = { n = 1000 }                # 1, 2, ..., 1000
-seeds = { from = 1, to = 1000 }     # range: 1..1000
-seeds = { list = [42, 137, 256] }   # explicit list
-seeds = { n = 500, start = 1 }      # count from start: 1, 2, ..., 500
+seeds = { n = 1000 } # 1, 2, ..., 1000
+seeds = { from = 1, to = 1000 } # range: 1..1000
+seeds = { list = [42, 137, 256] } # explicit list
+seeds = { n = 500, start = 1 } # count from start: 1, 2, ..., 500
 ```
 
 ---
@@ -382,8 +381,9 @@ top (σ layer).
 
 ### 5.5 Scenario Manifest in the IR
 
-The compiler serializes scenario definitions into the IR JSON `"scenarios"` field.
-The simulation engine ignores this field. The CLI reads it for `--scenario` dispatch:
+The compiler serializes scenario definitions into the IR JSON `"scenarios"`
+field. The simulation engine ignores this field. The CLI reads it for
+`--scenario` dispatch:
 
 1. Compile `.camdl` → IR (baseline) + scenario manifest
 2. CLI reads manifest when `--scenario NAME` is passed
@@ -416,12 +416,12 @@ kappa = { logspace = { min = 0.001, max = 0.1, n = 5 } }
 R0 = { range = { min = 1.0, max = 5.0, step = 0.5 } }
 ```
 
-| Generator  | Parameters              | Description               |
-| ---------- | ----------------------- | ------------------------- |
-| (bare list)| —                       | Explicit values           |
-| `linspace` | `min`, `max`, `n`       | n evenly-spaced points    |
-| `logspace` | `min`, `max`, `n`       | n log-spaced points       |
-| `range`    | `min`, `max`, `step`    | Step from min toward max  |
+| Generator   | Parameters           | Description              |
+| ----------- | -------------------- | ------------------------ |
+| (bare list) | —                    | Explicit values          |
+| `linspace`  | `min`, `max`, `n`    | n evenly-spaced points   |
+| `logspace`  | `min`, `max`, `n`    | n log-spaced points      |
+| `range`     | `min`, `max`, `step` | Step from min toward max |
 
 All generator args are keyword — no positional ambiguity.
 
@@ -432,7 +432,7 @@ Multiple swept parameters produce a Cartesian product:
 ```toml
 [sweep]
 vacc_eff = { linspace = { min = 0.1, max = 0.9, n = 9 } }
-kappa    = { logspace = { min = 0.001, max = 0.1, n = 5 } }
+kappa = { logspace = { min = 0.001, max = 0.1, n = 5 } }
 # 9 × 5 = 45 parameter points × scenarios × seeds
 ```
 
@@ -446,8 +446,8 @@ precedence chain. Sweep parameter values fold into `scen_hash` (§8.2).
 
 A single experiment file uses either `[sweep]` (deterministic grid) or
 `[design.*]` (space-filling designs) — not both. They answer different
-questions: sweeps test specific values, designs characterize sensitivity
-across a parameter space.
+questions: sweeps test specific values, designs characterize sensitivity across
+a parameter space.
 
 ---
 
@@ -515,11 +515,11 @@ transform = "log"
 
 ### 7.3 Design Methods
 
-| Method    | Runs for k params | Description                          |
-| --------- | ----------------- | ------------------------------------ |
-| `sobol`   | N(2k + 2)         | Saltelli's scheme for Sobol indices  |
-| `lhs`     | N                 | Latin Hypercube Sampling             |
-| `random`  | N                 | Uniform random                       |
+| Method   | Runs for k params | Description                         |
+| -------- | ----------------- | ----------------------------------- |
+| `sobol`  | N(2k + 2)         | Saltelli's scheme for Sobol indices |
+| `lhs`    | N                 | Latin Hypercube Sampling            |
+| `random` | N                 | Uniform random                      |
 
 `sobol` generates structured parameter combinations via Saltelli's quasi-random
 sampling scheme, enabling variance decomposition into first-order and
@@ -530,28 +530,28 @@ total-order indices per parameter. For n=1024 and k=3 parameters: 1024 × 8 =
 
 ```toml
 [design.NAME.parameters.PARAM]
-range     = { min = 0.1, max = 0.9 }                   # required
-transform = "log"                                       # optional: "log" | "logit"
-prior     = { dist = "beta", alpha = 4.0, beta = 6.0 } # optional: for VOI
+range = { min = 0.1, max = 0.9 } # required
+transform = "log" # optional: "log" | "logit"
+prior = { dist = "beta", alpha = 4.0, beta = 6.0 } # optional: for VOI
 ```
 
-`range` defines the sampling bounds. `transform` changes the sampling
-space: `"log"` samples uniformly in log space (appropriate for rates and R0);
-`"logit"` samples uniformly in logit space (appropriate for probabilities
-bounded away from 0 and 1).
+`range` defines the sampling bounds. `transform` changes the sampling space:
+`"log"` samples uniformly in log space (appropriate for rates and R0); `"logit"`
+samples uniformly in logit space (appropriate for probabilities bounded away
+from 0 and 1).
 
 `prior` specifies the parameter's prior distribution for VOI (value of
 information) analysis. Supported distributions:
 
-| `dist`        | Required fields          | Use for                        |
-|---------------|--------------------------|--------------------------------|
-| `beta`        | `alpha`, `beta`          | Probabilities (vacc_eff, etc.) |
-| `log_normal`  | `mu`, `sigma`            | Rates, R0, positive quantities |
-| `normal`      | `mu`, `sigma`            | Unbounded continuous params    |
-| `uniform`     | *(none)*                 | Maximum-entropy assumption     |
+| `dist`       | Required fields | Use for                        |
+| ------------ | --------------- | ------------------------------ |
+| `beta`       | `alpha`, `beta` | Probabilities (vacc_eff, etc.) |
+| `log_normal` | `mu`, `sigma`   | Rates, R0, positive quantities |
+| `normal`     | `mu`, `sigma`   | Unbounded continuous params    |
+| `uniform`    | _(none)_        | Maximum-entropy assumption     |
 
-If `prior` is omitted, uniform over `range` is assumed for sampling and for
-VOI importance weighting. The prior does **not** affect how design points are
+If `prior` is omitted, uniform over `range` is assumed for sampling and for VOI
+importance weighting. The prior does **not** affect how design points are
 sampled — it is metadata consumed by `camdl voi run` (see VOI Specification).
 
 When `prior` is present, the experiment runner writes a `priors.txt` file in
@@ -647,8 +647,8 @@ runs/cc8b1a90/baseline-00000000/seed_1/
 runs/cc8b1a90/with_sia-f9e2b047/seed_1/
 ```
 
-Scenario slug: scenario name lowercased, non-`[a-z0-9_]` replaced with `_`.
-Seed directory: `seed_{N}` with verbatim u64, no zero-padding.
+Scenario slug: scenario name lowercased, non-`[a-z0-9_]` replaced with `_`. Seed
+directory: `seed_{N}` with verbatim u64, no zero-padding.
 
 ### 8.2 Hash Computation
 
@@ -683,14 +683,14 @@ hashes to the same value, producing `00000000` in the directory name.
 
 ### 8.3 Cache Reuse Matrix
 
-| What changed                       | sim_hash  | scen_hash         | Reuse               |
-| ---------------------------------- | --------- | ----------------- | ------------------- |
-| Model / base params                | changes   | —                 | none                |
-| Backend or dt                      | changes   | —                 | none                |
-| Scenario A's overrides             | unchanged | A changes, B same | B's runs reused     |
-| Sweep point values                 | unchanged | affected only     | other points reused |
-| Add more seeds                     | unchanged | unchanged         | all existing reused |
-| Rename a scenario                  | unchanged | unchanged         | reused              |
+| What changed           | sim_hash  | scen_hash         | Reuse               |
+| ---------------------- | --------- | ----------------- | ------------------- |
+| Model / base params    | changes   | —                 | none                |
+| Backend or dt          | changes   | —                 | none                |
+| Scenario A's overrides | unchanged | A changes, B same | B's runs reused     |
+| Sweep point values     | unchanged | affected only     | other points reused |
+| Add more seeds         | unchanged | unchanged         | all existing reused |
+| Rename a scenario      | unchanged | unchanged         | reused              |
 
 ### 8.4 Manifest
 
@@ -748,7 +748,7 @@ Cache key: if the run directory exists, the run is skipped. `--force` to re-run.
 pairs = [
   ["baseline", "with_sia"],
   ["baseline", "high_coverage"],
-  ["with_sia", "high_coverage"],   # non-baseline reference is valid
+  ["with_sia", "high_coverage"], # non-baseline reference is valid
 ]
 ```
 
@@ -888,8 +888,8 @@ seed	peak_I	total_cases	final_size
 **Summary functions:** `max(expr)`, `min(expr)`, `cumulative(transition)`,
 `at(expr, timepoint)`.
 
-**Valid timepoints for `at()`:** `t_start`, `t_end`, or numeric literal in
-model time_unit. User-defined timepoints (v0.2+).
+**Valid timepoints for `at()`:** `t_start`, `t_end`, or numeric literal in model
+time_unit. User-defined timepoints (v0.2+).
 
 ### 12.4 Diagnostics
 
@@ -942,9 +942,11 @@ Nigeria SIA evaluation 2024
 ```
 
 The experiment runner:
+
 1. Compiles the `.camdl` model once
 2. Loads and layers params.toml files
-3. Generates the run grid (sweep × scenarios × seeds OR design × scenarios × seeds)
+3. Generates the run grid (sweep × scenarios × seeds OR design × scenarios ×
+   seeds)
 4. Calls `plan_runs()` to classify cache hits vs new runs
 5. Executes new runs with Rayon `par_iter` + indicatif
 6. Writes atomic output files (write to `.tmp`, rename)
@@ -988,14 +990,14 @@ camdl experiment check EXPERIMENT.toml      # detect stale results
 ### 14.1 Overview
 
 `camdl experiment analyze` reads simulation outputs and computes global
-sensitivity indices in Rust. No Python required for the computation step.
-Python (`camdl-analysis`) is used only for figure generation (§15).
+sensitivity indices in Rust. No Python required for the computation step. Python
+(`camdl-analysis`) is used only for figure generation (§15).
 
 ### 14.2 Sobol Index Computation (Saltelli 2010)
 
-For each design using `method = "sobol"`, the structured sample matrices
-(A, B, A_Bi) generated during `experiment run` are used to compute variance-
-based sensitivity indices.
+For each design using `method = "sobol"`, the structured sample matrices (A, B,
+A_Bi) generated during `experiment run` are used to compute variance- based
+sensitivity indices.
 
 For n samples and k parameters, given output Y for a single scalar summary:
 
@@ -1011,9 +1013,9 @@ S1[i]   = (1/n) Σ_j Y_B[j] * (Y_ABi[j] - Y_A[j])  / V_total    [eq. (b)]
 ST[i]   = (1/2n) Σ_j (Y_A[j] - Y_ABi[j])^2          / V_total    [eq. (f)]
 ```
 
-Bootstrap confidence intervals: resample rows of (A, B, A_Bi) jointly,
-recompute S1 and ST 1000 times (configurable with `--bootstrap`), take the
-α/2 and 1-α/2 quantiles.
+Bootstrap confidence intervals: resample rows of (A, B, A_Bi) jointly, recompute
+S1 and ST 1000 times (configurable with `--bootstrap`), take the α/2 and 1-α/2
+quantiles.
 
 ### 14.3 `[analyze]` Block (Optional Convenience)
 
@@ -1027,8 +1029,8 @@ outputs = ["peak_I", "total_cases", "cases_averted"]
 confidence = 0.95
 ```
 
-If absent, all float columns in `outputs.tsv` are analyzed. `--outputs X,Y,Z`
-on the CLI overrides for ad-hoc use.
+If absent, all float columns in `outputs.tsv` are analyzed. `--outputs X,Y,Z` on
+the CLI overrides for ad-hoc use.
 
 This covers the common case (Sobol S1/ST + bootstrap CIs). The Python package
 (`camdl-analysis`) provides richer analysis: Morris screening, cross-design VOI
@@ -1036,7 +1038,8 @@ waterfall, sweep figures, and the `Experiment` API.
 
 ### 14.4 Output Files
 
-All sensitivity output is written to `{output_dir}/analysis/sensitivity/{design}/`:
+All sensitivity output is written to
+`{output_dir}/analysis/sensitivity/{design}/`:
 
 **`sobol_indices.tsv`:**
 
@@ -1102,9 +1105,9 @@ equivalent content.
 
 ## 15. Python Analysis Package (`camdl-analysis`)
 
-A separate Python package for figure generation. Computation is handled
-entirely by `camdl experiment analyze` (§14). Python reads TSV outputs and
-generates matplotlib figures.
+A separate Python package for figure generation. Computation is handled entirely
+by `camdl experiment analyze` (§14). Python reads TSV outputs and generates
+matplotlib figures.
 
 ### 15.1 Architecture
 
@@ -1122,8 +1125,8 @@ python/
 ```
 
 **No computation in Python for Sobol.** First-order and total-order index values
-come from Rust-generated TSV files. Morris screening (`mu*_i`, `sigma_i`)
-may be computed in Python since it does not need the structured Saltelli matrices.
+come from Rust-generated TSV files. Morris screening (`mu*_i`, `sigma_i`) may be
+computed in Python since it does not need the structured Saltelli matrices.
 
 ### 15.2 CLI (defopt)
 
@@ -1157,9 +1160,9 @@ and write figures to `--output`. VOI results are written to
 darker, ST lighter), CI whiskers. Side-by-side panels across designs show how
 the sensitivity landscape shifts.
 
-**VOI waterfall:** Horizontal bars, one per information acquisition (design B
-vs A, C vs A). Length = variance reduction. Sorted by magnitude. Answers
-"which data is most worth collecting?"
+**VOI waterfall:** Horizontal bars, one per information acquisition (design B vs
+A, C vs A). Length = variance reduction. Sorted by magnitude. Answers "which
+data is most worth collecting?"
 
 **Scatter matrix (per design):** Lower triangle: parameter value vs output
 value. Diagonal: marginal histograms. Upper triangle: Spearman correlations.
@@ -1168,10 +1171,10 @@ Shows nonlinearities Sobol indices compress.
 **Convergence diagnostic:** Index estimate vs N with CI band. Shows whether
 estimates have stabilized. Suggests increasing N if not converged.
 
-**Morris screening (when `method = "morris"`):** mu* vs sigma scatter,
-one point per parameter. High mu*, low sigma → large linear effect. High
-sigma → nonlinear or interactive. Useful for screening large parameter sets
-(>10) before a full Sobol analysis.
+**Morris screening (when `method = "morris"`):** mu* vs sigma scatter, one point
+per parameter. High mu*, low sigma → large linear effect. High sigma → nonlinear
+or interactive. Useful for screening large parameter sets (>10) before a full
+Sobol analysis.
 
 ---
 
@@ -1219,10 +1222,10 @@ non-monotonic curve peaking at intermediate coverage.
 
 ### 16.2 Sensitivity Characterization
 
-"Is the dangerous middle's location more sensitive to coverage uncertainty or
-R0 uncertainty?" — characterize how the model's sensitivity landscape shifts
-as each uncertainty is resolved. For formal value of information analysis
-(EVSI) using these outputs, see the VOI Specification.
+"Is the dangerous middle's location more sensitive to coverage uncertainty or R0
+uncertainty?" — characterize how the model's sensitivity landscape shifts as
+each uncertainty is resolved. For formal value of information analysis (EVSI)
+using these outputs, see the VOI Specification.
 
 ```toml
 [experiment]
@@ -1271,9 +1274,9 @@ name = "with_sia"
 enable = ["sia"]
 ```
 
-**3 designs × N(2×2+2) = 3 × 3,072 = 9,216 parameter points × 1 scenario
-× 100 seeds = 921,600 runs.** Expensive — use fewer seeds and lean on the
-cross-design comparison structure.
+**3 designs × N(2×2+2) = 3 × 3,072 = 9,216 parameter points × 1 scenario × 100
+seeds = 921,600 runs.** Expensive — use fewer seeds and lean on the cross-design
+comparison structure.
 
 ```bash
 camdl experiment run experiment_voi.toml --parallel 16
@@ -1341,8 +1344,8 @@ classification.
 
 ### v0.1-sweep
 
-`[sweep]` with `linspace`, `logspace`, `range`, explicit lists. Sweep ×
-scenario Cartesian product. ~60 lines Rust in `experiment.rs`.
+`[sweep]` with `linspace`, `logspace`, `range`, explicit lists. Sweep × scenario
+Cartesian product. ~60 lines Rust in `experiment.rs`.
 
 ### v0.1-post
 
@@ -1351,9 +1354,8 @@ Summary computation, derived expression evaluator (~120 lines Rust),
 
 ### v0.2-design
 
-`[design.*]` named belief states. Saltelli sampling (sobol), LHS, random.
-Design × scenario execution. `parameter_points.tsv` output.
-New `sampling.rs` module.
+`[design.*]` named belief states. Saltelli sampling (sobol), LHS, random. Design
+× scenario execution. `parameter_points.tsv` output. New `sampling.rs` module.
 
 ### v0.2-analysis
 
@@ -1362,13 +1364,26 @@ bootstrap CIs. Auto-generated `assumptions.txt`.
 
 ### v0.2-python
 
-`camdl-analysis` Python package. Sobol figures from Rust TSV outputs.
-Morris screening. Cross-design sensitivity comparison. Sweep result figures.
+`camdl-analysis` Python package. Sobol figures from Rust TSV outputs. Morris
+screening. Cross-design sensitivity comparison. Sweep result figures.
 
-### v0.2-inference
+### v0.2-inference (partially implemented on `inference-v0` branch)
 
-`view.toml`, `priors.toml`. Scoring primitive. Particle filter, IF2.
-`camdl fit`.
+Implemented:
+- `camdl pfilter` — bootstrap particle filter with prediction diagnostics,
+  discretized Normal observation model, configurable tolerance and flow projection.
+- `camdl if2` — iterated filtering with per-step cooling (pomp-compatible),
+  natural-scale rw_sd, scaled logit bounds, multi-chain with Rhat, regime
+  presets (scout/refine/validate), IVP parameter support.
+- `camdl profile` — 1D and 2D parallel profile likelihoods via IF2 grid search.
+- Observation log-likelihood: NegBinomial, Normal, Poisson, discretized Normal.
+
+Not yet implemented:
+- `camdl fit` — unified workflow (scout → refine → validate with auto-tuning).
+- PMMH (Bayesian posterior via MCMC with particle filter likelihood).
+- Content-addressable inference output integrated with experiment system.
+- `view.toml`, `priors.toml` for formal prior specification.
+- Inference output feeding back into experiment runner for post-fit simulation.
 
 ---
 
@@ -1383,15 +1398,16 @@ See §14.3.
 Every new feature in the experiment system should be tested at three levels:
 
 1. **Unit test** — function produces correct output for known input. Examples:
-   sweep expansion, Sobol estimator, hash stability, cache hit/miss classification.
+   sweep expansion, Sobol estimator, hash stability, cache hit/miss
+   classification.
 
 2. **Integration test** — minimal experiment.toml compiles, runs, and produces
    the expected directory structure. Check that `run.json` is present, hashes
    are stable, and adding seeds reuses existing runs.
 
 3. **Golden test** — fixed experiment + fixed seed produces byte-identical
-   output across versions. Run `make update-expected` to regenerate, review
-   the diff, commit all three (fixture + IR + expected) together.
+   output across versions. Run `make update-expected` to regenerate, review the
+   diff, commit all three (fixture + IR + expected) together.
 
 For the analyze subcommand, add a validation test against an analytically
 tractable model where expected Sobol indices are known (e.g., additive linear
