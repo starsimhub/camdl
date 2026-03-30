@@ -37,6 +37,57 @@ samply record target/release/deps/inference-* --bench -- pfilter
 
 _(Newest first)_
 
+### 2026-03-30 — Session summary and deferred items
+
+#### What shipped
+
+| Commit | Change | pfilter/1000p | Cumulative |
+|--------|--------|---------------|------------|
+| `12b62f3` | Criterion benchmark suite | — | baseline: 464 ms |
+| `b272403` | Pre-allocated scratch buffers | 391 ms | 1.19× |
+| `85c473d` | Rayon parallel particles | 110 ms | 4.2× |
+| `cbe1e5b` | Unified rayon threading | (no change) | 4.2× |
+
+Total: **3-4× speedup** on particle filter and IF2 inference (conservative
+estimate under load; 4.2× measured clean). An IF2 run that took 23 seconds
+now takes ~6 seconds. Profile likelihood that took 19 minutes now takes ~5.
+
+#### Deferred: pre-resolved expression indices
+
+Replace HashMap lookups in `eval_expr` (`param_index.get("beta")`) with
+pre-resolved integer indices (`params[3]`). Requires a `ResolvedExpr` enum
+with `Param(usize)` / `Pop(usize)` instead of string references, plus a
+conversion pass in `CompiledModel::new`.
+
+**Expected gain:** 1.3-1.5× on propensity eval, ~5-7% on pfilter overall.
+**Risk:** Semantic change to expression evaluator — silent wrong answers if
+index mapping is wrong. Golden tests catch most cases but failure mode is
+subtle. **Decision:** Deferred to a separate PR with its own review cycle.
+Diminishing returns compared to the 3-4× already captured.
+
+#### Deferred: double-buffered resampling
+
+Current resampling clones the full particle swarm (`states.clone()`) before
+permuting. For IF2 this is doubled (states + params). With 1000 particles
+and 50 iterations × 100 observations = 5000 clones per IF2 run.
+
+**Fix:** Pre-allocate two state buffers, swap after resampling. Eliminates
+the clone entirely. **Expected gain:** ~2-3% on pfilter. **Risk:** Low
+(structural, not semantic). **Decision:** Deferred. Small payoff, moderate
+implementation effort.
+
+#### Final codebase scan: nothing else on the floor
+
+Scanned all hot-path files (chain_binomial, propensity, particle_filter,
+if2, resampling, obs_loglik, ekrng). No remaining low-risk/high-reward
+optimizations found. The `.cloned()` on `f64` iterator patterns are
+cosmetic (identical codegen for Copy types). The `#[inline]` hints on
+small utility functions are unlikely to help (Rust inlines cross-crate with
+LTO, and these are intra-crate). The only real remaining work is the two
+deferred items above, both in diminishing-returns territory.
+
+---
+
 ### 2026-03-30 — Optimization 2: Rayon parallel particle propagation
 
 #### The problem
