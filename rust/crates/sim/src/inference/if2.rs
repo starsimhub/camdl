@@ -38,6 +38,10 @@ pub struct IF2Param {
     /// Bounds for logit transform.
     pub lower: f64,
     pub upper: f64,
+    /// If true, this parameter is only perturbed at t=0 (initial value
+    /// parameter). Used for S₀, E₀, I₀ etc. that set the initial state
+    /// but don't change during simulation. Matches pomp's ivp() in rw.sd.
+    pub ivp: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -234,10 +238,12 @@ pub fn run_if2(
                 t += step_dt;
             }
 
-            // Perturb parameters at observation time (per-step cooling)
+            // Perturb parameters at observation time (per-step cooling).
+            // IVP params are skipped here — they were only perturbed at t=0.
             let cooling_now = per_step_cooling.powi(global_step as i32);
             for i in 0..n {
                 for spec in if2_params {
+                    if spec.ivp { continue; } // IVP: perturbed at t=0 only
                     let current = particle_params[i][spec.index];
                     let sd = spec.transformed_sd(spec.rw_sd, current) * cooling_now;
                     let z = spec.to_transformed(current);

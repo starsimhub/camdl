@@ -96,6 +96,7 @@ pub fn cmd_if2(args: &[String]) {
     let mut flow_name: Option<String> = None;
     let mut rw_sd_str: Option<String> = None;
     let mut fixed_str: Option<String> = None;
+    let mut ivp_str: Option<String> = None;
     let mut n_chains = 1_usize;
     let mut regime: Option<String> = None;
     let mut parallel = 1_usize;
@@ -118,6 +119,7 @@ pub fn cmd_if2(args: &[String]) {
             "--flow"       => { i += 1; flow_name = Some(args[i].clone()); }
             "--rw-sd"      => { i += 1; rw_sd_str = Some(args[i].clone()); }
             "--fixed"      => { i += 1; fixed_str = Some(args[i].clone()); }
+            "--ivp"        => { i += 1; ivp_str = Some(args[i].clone()); }
             "--chains"     => { i += 1; n_chains = args[i].parse().expect("--chains needs integer"); }
             "--regime"     => { i += 1; regime = Some(args[i].clone()); }
             "--parallel"   => { i += 1; parallel = args[i].parse().expect("--parallel needs integer"); }
@@ -191,6 +193,9 @@ pub fn cmd_if2(args: &[String]) {
         .collect();
 
     // Parse --fixed "N0,mu,k"
+    let ivp_set: std::collections::HashSet<String> = ivp_str
+        .map(|s| s.split(',').map(|n| n.trim().to_string()).collect())
+        .unwrap_or_default();
     let fixed_set: std::collections::HashSet<String> = fixed_str
         .map(|s| s.split(',').map(|n| n.trim().to_string()).collect())
         .unwrap_or_default();
@@ -298,6 +303,7 @@ pub fn cmd_if2(args: &[String]) {
             transform,
             lower,
             upper,
+            ivp: ivp_set.contains(name),
         });
     }
 

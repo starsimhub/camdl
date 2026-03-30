@@ -206,7 +206,7 @@ pub fn cmd_profile(args: &[String]) {
                     _ => (Transform::Log, 0.0, f64::INFINITY),
                 },
             };
-            IF2Param { name: name.clone(), index: idx, initial: base_params[idx], rw_sd, transform, lower, upper }
+            IF2Param { name: name.clone(), index: idx, initial: base_params[idx], rw_sd, transform, lower, upper, ivp: false }
         })
         .collect();
     let if2_params = Arc::new(if2_params);
