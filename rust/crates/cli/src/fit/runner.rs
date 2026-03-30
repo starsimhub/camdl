@@ -7,6 +7,7 @@
 use crate::fit::config::FitToml;
 use crate::fit::state::FitState;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
+use rayon::prelude::*;
 use sim::{
     compiled_model::CompiledModel,
     chain_binomial::step_one,
@@ -454,18 +455,14 @@ pub fn run_chains_with_per_chain_params(
         pb
     }).collect();
 
-    let results: Vec<(usize, IF2Result)> = std::thread::scope(|s| {
-        let handles: Vec<_> = (0..config.n_chains).map(|chain_id| {
+    let results: Vec<(usize, IF2Result)> = (0..config.n_chains)
+        .into_par_iter()
+        .map(|chain_id| {
             let per_chain = per_chain_params.map(|pcp| &pcp[chain_id][..]);
-            let pb = &bars[chain_id];
-            s.spawn(move || {
-                let result = run_one_chain(chain_id, config, per_chain, Some(pb));
-                (chain_id, result)
-            })
-        }).collect();
-
-        handles.into_iter().map(|h| h.join().unwrap()).collect()
-    });
+            let result = run_one_chain(chain_id, config, per_chain, Some(&bars[chain_id]));
+            (chain_id, result)
+        })
+        .collect();
 
     // Find best chain
     let (best_chain, best_loglik) = results.iter()

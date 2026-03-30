@@ -472,12 +472,13 @@ pub fn cmd_experiment_run(args: &[String]) {
     let scenario_names: Vec<String> = scenarios.iter().map(|s| s.name.clone()).collect();
 
     let counter = Arc::new(AtomicUsize::new(0));
-    let pool = rayon::ThreadPoolBuilder::new()
-        .num_threads(if parallel > 0 { parallel } else { 1 })
-        .build()
-        .unwrap_or_else(|e| { eprintln!("error building thread pool: {}", e); std::process::exit(1); });
+    if parallel > 0 {
+        let _ = rayon::ThreadPoolBuilder::new()
+            .num_threads(parallel)
+            .build_global();
+    }
 
-    let results: Vec<Result<RunEntry, String>> = pool.install(|| {
+    let results: Vec<Result<RunEntry, String>> = {
         plans.par_iter().map(|plan| {
             if plan.decision == RunDecision::CacheHit {
                 let n = counter.fetch_add(1, Ordering::Relaxed) + 1;
@@ -536,7 +537,7 @@ pub fn cmd_experiment_run(args: &[String]) {
                 }
             }
         }).collect()
-    });
+    };
 
     let mut errors: Vec<String> = Vec::new();
     let mut completed_runs: Vec<RunEntry> = Vec::new();
@@ -670,12 +671,13 @@ fn run_design_experiment(
         let total = plans.len();
         let counter = Arc::new(AtomicUsize::new(0));
 
-        let pool = rayon::ThreadPoolBuilder::new()
-            .num_threads(if parallel > 0 { parallel } else { 1 })
-            .build()
-            .unwrap_or_else(|e| { eprintln!("error building thread pool: {}", e); std::process::exit(1); });
+        if parallel > 0 {
+            let _ = rayon::ThreadPoolBuilder::new()
+                .num_threads(parallel)
+                .build_global();
+        }
 
-        pool.install(|| {
+        {
             plans.par_iter().for_each(|plan| {
                 if plan.decision == RunDecision::CacheHit {
                     counter.fetch_add(1, Ordering::Relaxed);
@@ -727,7 +729,7 @@ fn run_design_experiment(
                     }
                 }
             });
-        });
+        }
         eprintln!("Design '{}' complete.", design_name);
     }
 }
