@@ -69,16 +69,51 @@ impl IF2Param {
             Transform::None => z,
         }
     }
+
+    /// Convert rw_sd from natural scale to transformed scale using the
+    /// delta method at the current parameter value.
+    ///
+    /// For log:   sd_transformed ≈ rw_sd / current_value
+    /// For logit: sd_transformed ≈ rw_sd / (current_value × (1 - current_value))
+    ///            (scaled to the [lower, upper] interval)
+    /// For none:  sd_transformed = rw_sd
+    ///
+    /// This matches pomp's convention: the user specifies rw.sd on the
+    /// natural scale, and the perturbation happens on the transformed scale
+    /// with the appropriate Jacobian correction.
+    fn transformed_sd(&self, natural_sd: f64, current_value: f64) -> f64 {
+        match self.transform {
+            Transform::Log => {
+                let v = current_value.max(1e-300);
+                natural_sd / v
+            }
+            Transform::Logit => {
+                let range = self.upper - self.lower;
+                let p = ((current_value - self.lower) / range).clamp(1e-10, 1.0 - 1e-10);
+                natural_sd / (range * p * (1.0 - p))
+            }
+            Transform::None => natural_sd,
+        }
+    }
 }
 
 /// IF2 configuration.
 pub struct IF2Config {
     pub n_particles: usize,
     pub n_iterations: usize,
-    /// Fraction of rw_sd retained each iteration.
-    /// After iter m: effective_sd = rw_sd × cooling^m.
-    /// Typical: 0.95 (5% shrinkage per iteration).
+    /// Cooling schedule: after `cooling_target_iters` iterations,
+    /// perturbation SD is `cooling_fraction` of initial.
+    /// Matches pomp's cooling.fraction.50 semantics when
+    /// cooling_target_iters = 50.
+    ///
+    /// Cooling factor per filtering step (observation):
+    ///   c = cooling_fraction ^ (1 / (cooling_target_iters * n_obs))
+    /// After m iterations × n_obs steps each:
+    ///   effective_sd = rw_sd × c^(m * n_obs)
     pub cooling_fraction: f64,
+    /// Number of iterations over which the cooling fraction applies.
+    /// pomp default: 50 (cooling.fraction.50).
+    pub cooling_target_iters: usize,
     pub dt: f64,
 }
 
@@ -136,10 +171,17 @@ pub fn run_if2(
     // Mutable copy of params — updated each iteration with the filter mean
     let mut current_params = base_params.to_vec();
 
+    // Compute per-filtering-step cooling factor.
+    // After cooling_target_iters × n_obs steps, SD is cooling_fraction of initial.
+    // Per-step factor: c = cooling_fraction ^ (1 / (target_iters * n_obs))
+    let n_obs = observations.len();
+    let total_target_steps = config.cooling_target_iters as f64 * n_obs as f64;
+    let per_step_cooling = config.cooling_fraction.powf(1.0 / total_target_steps);
+
     let mut iterations = Vec::with_capacity(config.n_iterations);
+    let mut global_step: u64 = 0; // total filtering steps across all iterations
 
     for iter in 0..config.n_iterations {
-        let cooling = config.cooling_fraction.powi(iter as i32);
 
         // Initialize particles: all start from model's initial state
         let (init_int, _) = model.initial_state(&current_params)?;
@@ -164,13 +206,18 @@ pub fn run_if2(
             seed.wrapping_add(0xdeadbeef).wrapping_add(iter as u64)
         );
 
-        // Initial parameter perturbation
-        for i in 0..n {
-            for spec in if2_params {
-                let z = spec.to_transformed(particle_params[i][spec.index]);
-                let perturbation = rngs[i].normal() * spec.rw_sd * cooling;
-                particle_params[i][spec.index] = spec.from_transformed(z + perturbation);
+        // Initial parameter perturbation (at t=0)
+        {
+            let cooling_now = per_step_cooling.powi(global_step as i32);
+            for i in 0..n {
+                for spec in if2_params {
+                    let current = particle_params[i][spec.index];
+                    let sd = spec.transformed_sd(spec.rw_sd, current) * cooling_now;
+                    let z = spec.to_transformed(current);
+                    particle_params[i][spec.index] = spec.from_transformed(z + rngs[i].normal() * sd);
+                }
             }
+            global_step += 1;
         }
 
         let mut log_weights = vec![0.0_f64; n];
@@ -187,14 +234,18 @@ pub fn run_if2(
                 t += step_dt;
             }
 
-            // Perturb parameters at observation time
+            // Perturb parameters at observation time (per-step cooling)
+            let cooling_now = per_step_cooling.powi(global_step as i32);
             for i in 0..n {
                 for spec in if2_params {
-                    let z = spec.to_transformed(particle_params[i][spec.index]);
-                    let perturbation = rngs[i].normal() * spec.rw_sd * cooling;
-                    particle_params[i][spec.index] = spec.from_transformed(z + perturbation);
+                    let current = particle_params[i][spec.index];
+                    let sd = spec.transformed_sd(spec.rw_sd, current) * cooling_now;
+                    let z = spec.to_transformed(current);
+                    particle_params[i][spec.index] = spec.from_transformed(z + rngs[i].normal() * sd);
                 }
             }
+
+            global_step += 1;
 
             // Weight by observation likelihood
             for i in 0..n {

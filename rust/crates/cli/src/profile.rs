@@ -228,6 +228,7 @@ pub fn cmd_profile(args: &[String]) {
                 n_particles,
                 n_iterations,
                 cooling_fraction: cooling,
+                cooling_target_iters: 50,
                 dt,
             };
 

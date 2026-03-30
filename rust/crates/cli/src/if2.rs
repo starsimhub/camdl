@@ -214,10 +214,28 @@ pub fn cmd_if2(args: &[String]) {
     eprintln!("if2: estimating {} parameters, {} fixed",
         if2_params.len(), fixed_set.len());
 
+    // Parameter scale diagnostics: warn if rw_sd / value ratios are extreme
+    for spec in &if2_params {
+        let value = params[spec.index];
+        if value.abs() < 1e-10 { continue; } // skip zero-valued params
+        let ratio = spec.rw_sd / value.abs();
+        if ratio > 0.5 {
+            eprintln!("warning: rw_sd for '{}' is {:.0}% of its value ({:.4}) — \
+                perturbations may be too large. Consider reducing --rw-sd {}={:.4}",
+                spec.name, ratio * 100.0, value, spec.name, value.abs() * 0.1);
+        }
+        if ratio < 0.001 {
+            eprintln!("warning: rw_sd for '{}' is {:.2}% of its value ({:.4}) — \
+                perturbations may be too small to explore. Consider increasing --rw-sd {}={:.4}",
+                spec.name, ratio * 100.0, value, spec.name, value.abs() * 0.05);
+        }
+    }
+
     let config = IF2Config {
         n_particles,
         n_iterations,
         cooling_fraction: cooling,
+        cooling_target_iters: 50, // matches pomp's cooling.fraction.50
         dt,
     };
 
