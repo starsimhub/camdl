@@ -1115,6 +1115,7 @@ dependencies = [
  "rand",
  "rand_chacha",
  "rand_distr",
+ "rayon",
  "serde_json",
  "thiserror",
 ]
