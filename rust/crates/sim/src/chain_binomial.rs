@@ -393,5 +393,20 @@ pub fn step_one(
         if *c < 0 { *c = 0; }
     }
 
+    // Apply interventions that fire at t + dt (within tolerance dt/2).
+    // This ensures scenario-enabled interventions (e.g., SIA campaigns)
+    // fire correctly during particle filter and IF2 runs.
+    let t_end = t + dt;
+    if !model.model.interventions.is_empty() {
+        use crate::intervention::apply_interventions_at;
+        use crate::state::{IntState as IS, RealState as RS};
+        let mut int_s = IS { counts: counts.to_vec() };
+        let mut real_s = RS::new(model.real_local_to_global.len());
+        let fired = apply_interventions_at(t_end, model, &mut int_s, &mut real_s, params, dt * 0.5)?;
+        if fired {
+            counts.copy_from_slice(&int_s.counts);
+        }
+    }
+
     Ok(())
 }

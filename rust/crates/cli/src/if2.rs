@@ -83,9 +83,9 @@ pub fn cmd_if2(args: &[String]) {
     let mut ir_path: Option<String> = None;
     let mut params_files: Vec<String> = Vec::new();
     let mut data_path: Option<String> = None;
-    let mut n_particles = 2000_usize;
-    let mut n_iterations = 100_usize;
-    let mut cooling = 0.95_f64;
+    let mut n_particles: Option<usize> = None;
+    let mut n_iterations: Option<usize> = None;
+    let mut cooling: Option<f64> = None;
     let mut dt = 1.0_f64;
     let mut seed = 1_u64;
     let mut overrides: HashMap<String, f64> = HashMap::new();
@@ -107,9 +107,9 @@ pub fn cmd_if2(args: &[String]) {
         match args[i].as_str() {
             "--params"     => { i += 1; params_files.push(args[i].clone()); }
             "--data"       => { i += 1; data_path = Some(args[i].clone()); }
-            "--particles"  => { i += 1; n_particles = args[i].parse().expect("--particles needs integer"); }
-            "--iterations" => { i += 1; n_iterations = args[i].parse().expect("--iterations needs integer"); }
-            "--cooling"    => { i += 1; cooling = args[i].parse().expect("--cooling needs number"); }
+            "--particles"  => { i += 1; n_particles = Some(args[i].parse().expect("--particles needs integer")); }
+            "--iterations" => { i += 1; n_iterations = Some(args[i].parse().expect("--iterations needs integer")); }
+            "--cooling"    => { i += 1; cooling = Some(args[i].parse().expect("--cooling needs number")); }
             "--dt"         => { i += 1; dt = args[i].parse().expect("--dt needs number"); }
             "--seed"       => { i += 1; seed = args[i].parse().expect("--seed needs integer"); }
             "--scenario"   => { i += 1; scenario_name = Some(args[i].clone()); }
@@ -141,26 +141,28 @@ pub fn cmd_if2(args: &[String]) {
         i += 1;
     }
 
-    // Apply regime defaults (can be overridden by explicit flags)
+    // Apply regime defaults — only for values the user didn't explicitly set
     if let Some(ref r) = regime {
         match r.as_str() {
             "scout" => {
                 if n_chains == 1 { n_chains = 8; }
-                if n_particles == 2000 { n_particles = 200; }
-                if n_iterations == 100 { n_iterations = 20; }
-                cooling = 1.0; // no cooling — pure exploration
+                n_particles = n_particles.or(Some(200));
+                n_iterations = n_iterations.or(Some(20));
+                cooling = cooling.or(Some(1.0)); // no cooling — pure exploration
                 if parallel == 1 { parallel = n_chains; }
             }
             "refine" => {
                 if n_chains == 1 { n_chains = 4; }
-                if n_particles == 2000 { n_particles = 1000; }
-                if n_iterations == 100 { n_iterations = 50; }
+                n_particles = n_particles.or(Some(1000));
+                n_iterations = n_iterations.or(Some(50));
+                cooling = cooling.or(Some(0.95));
                 if parallel == 1 { parallel = n_chains; }
             }
             "validate" => {
                 if n_chains == 1 { n_chains = 4; }
-                if n_particles == 2000 { n_particles = 5000; }
-                // iterations stays at 100
+                n_particles = n_particles.or(Some(5000));
+                n_iterations = n_iterations.or(Some(100));
+                cooling = cooling.or(Some(0.95));
                 if parallel == 1 { parallel = n_chains; }
             }
             other => {
@@ -169,6 +171,11 @@ pub fn cmd_if2(args: &[String]) {
             }
         }
     }
+
+    // Resolve Options to concrete values with defaults
+    let n_particles = n_particles.unwrap_or(2000);
+    let n_iterations = n_iterations.unwrap_or(100);
+    let cooling = cooling.unwrap_or(0.95);
 
     let ir_path = ir_path.unwrap_or_else(|| {
         eprintln!("usage: camdl if2 MODEL --params P.toml --data cases.tsv --rw-sd \"R0=5\" [--regime scout]");
