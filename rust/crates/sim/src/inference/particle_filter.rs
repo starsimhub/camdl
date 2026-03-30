@@ -5,6 +5,9 @@
 //! advance particles — any simulation backend works (chain-binomial,
 //! tau-leap, etc.).
 
+use rayon::prelude::*;
+
+use crate::chain_binomial::StepScratch;
 use crate::compiled_model::CompiledModel;
 use crate::ekrng::StatefulRng;
 use crate::error::SimError;
@@ -45,7 +48,9 @@ pub struct PFilterResult {
 /// Signature for a single-step function that advances particle state.
 /// This is what the ProcessSimulator trait provides, but we use a closure
 /// for flexibility (allows capturing the CompiledModel and params).
-pub type StepFn<'a> = dyn Fn(&mut ParticleState, f64, f64, &mut StatefulRng) -> Result<(), SimError> + 'a;
+/// Takes a `&mut StepScratch` to avoid per-call heap allocations.
+/// `Send + Sync` required for rayon parallel particle propagation.
+pub type StepFn<'a> = dyn Fn(&mut ParticleState, f64, f64, &mut StatefulRng, &mut StepScratch) -> Result<(), SimError> + Send + Sync + 'a;
 
 /// Signature for the observation log-likelihood (dmeasure).
 /// Takes (projected_value, observed_value) → log p(y | projected, θ).
@@ -89,6 +94,11 @@ pub fn bootstrap_filter(
         .map(|i| StatefulRng::new(seed ^ (i as u64).wrapping_mul(0x517cc1b727220a95)))
         .collect();
 
+    // Per-particle scratch buffers (allocated once, reused across all steps)
+    let mut scratches: Vec<StepScratch> = (0..n_particles)
+        .map(|_| StepScratch::new(model))
+        .collect();
+
     let mut total_loglik = 0.0;
     let mut ess_trace = Vec::with_capacity(observations.len());
     let mut ll_increments = Vec::with_capacity(observations.len());
@@ -99,14 +109,28 @@ pub fn bootstrap_filter(
     let mut resample_rng = StatefulRng::new(seed.wrapping_add(0xdeadbeef));
 
     for obs in observations {
-        // Propagate all particles from t to obs.time using sub-steps
-        while t < obs.time - 1e-10 {
-            let step_dt = dt.min(obs.time - t);
-            for (i, state) in swarm.states.iter_mut().enumerate() {
-                step_fn(state, t, step_dt, &mut rngs[i])?;
-            }
-            t += step_dt;
-        }
+        // Propagate all particles from t to obs.time.
+        // Batched: one rayon dispatch per observation interval. Each thread
+        // runs all sub-steps for its particles, keeping state in L1/L2.
+        let obs_time = obs.time;
+        let t_start = t;
+        let errors: Vec<Result<(), SimError>> = swarm.states.par_iter_mut()
+            .zip(rngs.par_iter_mut())
+            .zip(scratches.par_iter_mut())
+            .map(|((state, rng), scratch)| {
+                let mut t_local = t_start;
+                while t_local < obs_time - 1e-10 {
+                    let step_dt = dt.min(obs_time - t_local);
+                    step_fn(state, t_local, step_dt, rng, scratch)?;
+                    t_local += step_dt;
+                }
+                Ok(())
+            })
+            .collect();
+        // Check for errors from any particle
+        for r in errors { r?; }
+        // Advance shared time to match
+        while t < obs.time - 1e-10 { t += dt.min(obs.time - t); }
 
         // Compute log-weights: log p(y_k | projected_i)
         for (i, state) in swarm.states.iter().enumerate() {

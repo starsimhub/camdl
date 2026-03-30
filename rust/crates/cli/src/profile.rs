@@ -51,7 +51,7 @@ pub fn cmd_profile(args: &[String]) {
     let mut cooling = 0.95_f64;
     let mut dt = 1.0_f64;
     let mut seed = 1_u64;
-    let mut parallel = 4_usize;
+    let mut parallel = 0_usize; // 0 = rayon default (num_cpus)
     let mut overrides: HashMap<String, f64> = HashMap::new();
     let mut scenario_name: Option<String> = None;
     let mut obs_model = "negbin".to_string();
@@ -245,17 +245,19 @@ pub fn cmd_profile(args: &[String]) {
     overall_pb.set_style(overall_style);
     overall_pb.set_prefix("profile");
 
-    // ── Parallel IF2 runs ────────────────────────────────────────────────
-    let pool = rayon::ThreadPoolBuilder::new()
-        .num_threads(parallel)
-        .build().unwrap();
+    // Initialize rayon global pool (controls all parallelism: grid jobs + particles).
+    if parallel > 0 {
+        let _ = rayon::ThreadPoolBuilder::new()
+            .num_threads(parallel)
+            .build_global();
+    }
 
     // Job list: (grid_point_idx, start_idx)
     let jobs: Vec<(usize, usize)> = (0..grid_points.len())
         .flat_map(|gi| (0..n_starts).map(move |si| (gi, si)))
         .collect();
 
-    let results: Vec<(usize, Vec<f64>, f64, Vec<f64>)> = pool.install(|| {
+    let results: Vec<(usize, Vec<f64>, f64, Vec<f64>)> = {
         jobs.par_iter().map(|&(grid_idx, start_idx)| {
             let compiled = Arc::clone(&compiled);
             let observations = Arc::clone(&observations);
@@ -275,8 +277,8 @@ pub fn cmd_profile(args: &[String]) {
             };
             let job_seed = seed ^ (grid_idx as u64 * 1000 + start_idx as u64);
 
-            let step_fn = |state: &mut ParticleState, p: &[f64], t: f64, step_dt: f64, rng: &mut StatefulRng| {
-                step_one(&compiled, &mut state.counts, &mut state.flow_accumulators, p, t, step_dt, rng)
+            let step_fn = |state: &mut ParticleState, p: &[f64], t: f64, step_dt: f64, rng: &mut StatefulRng, scratch: &mut sim::chain_binomial::StepScratch| {
+                step_one(&compiled, &mut state.counts, &mut state.flow_accumulators, p, t, step_dt, rng, scratch)
             };
             let project_fn = |state: &ParticleState| -> f64 {
                 flow_indices.iter().map(|&i| state.flow_accumulators[i] as f64).sum()
@@ -307,7 +309,7 @@ pub fn cmd_profile(args: &[String]) {
                 Err(_) => (grid_idx, focal_values, f64::NEG_INFINITY, params),
             }
         }).collect()
-    });
+    };
 
     overall_pb.finish_with_message("done");
 

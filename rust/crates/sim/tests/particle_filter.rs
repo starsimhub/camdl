@@ -18,7 +18,7 @@ use ir::{
 };
 use sim::{
     compiled_model::CompiledModel,
-    chain_binomial::step_one,
+    chain_binomial::{step_one, StepScratch},
     inference::{
         obs_loglik::poisson_logpmf,
         particle_filter::{bootstrap_filter, Observation},
@@ -101,8 +101,8 @@ fn run_pf(n_particles: usize, seed: u64) -> f64 {
         })
         .collect();
 
-    let step_fn = |state: &mut ParticleState, t: f64, dt: f64, rng: &mut StatefulRng| {
-        step_one(&compiled, &mut state.counts, &mut state.flow_accumulators, &params, t, dt, rng)
+    let step_fn = |state: &mut ParticleState, t: f64, dt: f64, rng: &mut StatefulRng, scratch: &mut StepScratch| {
+        step_one(&compiled, &mut state.counts, &mut state.flow_accumulators, &params, t, dt, rng, scratch)
     };
 
     // Project: observe N directly (prevalence, not incidence)
@@ -180,8 +180,8 @@ fn test_pf_ess_reasonable() {
         })
         .collect();
 
-    let step_fn = |state: &mut ParticleState, t: f64, dt: f64, rng: &mut StatefulRng| {
-        step_one(&compiled, &mut state.counts, &mut state.flow_accumulators, &params, t, dt, rng)
+    let step_fn = |state: &mut ParticleState, t: f64, dt: f64, rng: &mut StatefulRng, scratch: &mut StepScratch| {
+        step_one(&compiled, &mut state.counts, &mut state.flow_accumulators, &params, t, dt, rng, scratch)
     };
     let project_fn = |state: &ParticleState| state.counts[0] as f64;
     let dmeasure_fn = |projected: f64, observed: f64| poisson_logpmf(observed, projected.max(0.1));

@@ -7,6 +7,7 @@
 use crate::fit::config::FitToml;
 use crate::fit::state::FitState;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
+use rayon::prelude::*;
 use sim::{
     compiled_model::CompiledModel,
     chain_binomial::step_one,
@@ -377,8 +378,8 @@ fn run_one_chain(
     let chain_seed = config.seed ^ (chain_id as u64).wrapping_mul(0x9e3779b97f4a7c15);
     let if2_params = per_chain_params.unwrap_or(&config.if2_params);
 
-    let step_fn = |state: &mut ParticleState, p: &[f64], t: f64, step_dt: f64, rng: &mut StatefulRng| {
-        step_one(&config.compiled, &mut state.counts, &mut state.flow_accumulators, p, t, step_dt, rng)
+    let step_fn = |state: &mut ParticleState, p: &[f64], t: f64, step_dt: f64, rng: &mut StatefulRng, scratch: &mut sim::chain_binomial::StepScratch| {
+        step_one(&config.compiled, &mut state.counts, &mut state.flow_accumulators, p, t, step_dt, rng, scratch)
     };
     let project_fn = |state: &ParticleState| -> f64 {
         config.flow_indices.iter().map(|&i| state.flow_accumulators[i] as f64).sum()
@@ -454,18 +455,14 @@ pub fn run_chains_with_per_chain_params(
         pb
     }).collect();
 
-    let results: Vec<(usize, IF2Result)> = std::thread::scope(|s| {
-        let handles: Vec<_> = (0..config.n_chains).map(|chain_id| {
+    let results: Vec<(usize, IF2Result)> = (0..config.n_chains)
+        .into_par_iter()
+        .map(|chain_id| {
             let per_chain = per_chain_params.map(|pcp| &pcp[chain_id][..]);
-            let pb = &bars[chain_id];
-            s.spawn(move || {
-                let result = run_one_chain(chain_id, config, per_chain, Some(pb));
-                (chain_id, result)
-            })
-        }).collect();
-
-        handles.into_iter().map(|h| h.join().unwrap()).collect()
-    });
+            let result = run_one_chain(chain_id, config, per_chain, Some(&bars[chain_id]));
+            (chain_id, result)
+        })
+        .collect();
 
     // Find best chain
     let (best_chain, best_loglik) = results.iter()

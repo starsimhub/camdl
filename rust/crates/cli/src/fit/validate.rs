@@ -199,8 +199,8 @@ fn run_pfilter_at_mle(
         .map(|o| sim::inference::particle_filter::Observation { time: o.time, value: o.value })
         .collect();
 
-    let step_fn = |state: &mut ParticleState, t: f64, step_dt: f64, rng: &mut StatefulRng| {
-        step_one(compiled, &mut state.counts, &mut state.flow_accumulators, params, t, step_dt, rng)
+    let step_fn = |state: &mut ParticleState, t: f64, step_dt: f64, rng: &mut StatefulRng, scratch: &mut sim::chain_binomial::StepScratch| {
+        step_one(compiled, &mut state.counts, &mut state.flow_accumulators, params, t, step_dt, rng, scratch)
     };
     let flow_indices = &config.flow_indices;
     let project_fn = |state: &ParticleState| -> f64 {
@@ -336,8 +336,8 @@ fn run_profiles(
                 dt: config.if2_config.dt,
             };
 
-            let step_fn = |state: &mut ParticleState, p: &[f64], t: f64, step_dt: f64, rng: &mut StatefulRng| {
-                step_one(&config.compiled, &mut state.counts, &mut state.flow_accumulators, p, t, step_dt, rng)
+            let step_fn = |state: &mut ParticleState, p: &[f64], t: f64, step_dt: f64, rng: &mut StatefulRng, scratch: &mut sim::chain_binomial::StepScratch| {
+                step_one(&config.compiled, &mut state.counts, &mut state.flow_accumulators, p, t, step_dt, rng, scratch)
             };
             let flow_indices = &config.flow_indices;
             let project_fn = |state: &ParticleState| -> f64 {

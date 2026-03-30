@@ -15,6 +15,7 @@
 //!   With --output-dir: writes per-chain traces + summary JSON.
 
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
+use rayon::prelude::*;
 use sim::{
     compiled_model::CompiledModel,
     chain_binomial::step_one,
@@ -46,8 +47,8 @@ fn run_one_chain(
 ) -> IF2Result {
     let chain_seed = base_seed ^ (chain_id as u64).wrapping_mul(0x9e3779b97f4a7c15);
 
-    let step_fn = |state: &mut ParticleState, p: &[f64], t: f64, step_dt: f64, rng: &mut StatefulRng| {
-        step_one(compiled, &mut state.counts, &mut state.flow_accumulators, p, t, step_dt, rng)
+    let step_fn = |state: &mut ParticleState, p: &[f64], t: f64, step_dt: f64, rng: &mut StatefulRng, scratch: &mut sim::chain_binomial::StepScratch| {
+        step_one(compiled, &mut state.counts, &mut state.flow_accumulators, p, t, step_dt, rng, scratch)
     };
     let project_fn = |state: &ParticleState| -> f64 {
         flow_indices.iter().map(|&i| state.flow_accumulators[i] as f64).sum()
@@ -114,7 +115,7 @@ pub fn cmd_if2(args: &[String]) {
     let mut ivp_str: Option<String> = None;
     let mut n_chains = 1_usize;
     let mut regime: Option<String> = None;
-    let mut parallel = 1_usize;
+    let mut parallel = 0_usize; // 0 = rayon default (num_cpus)
     let mut output_dir: Option<String> = None;
 
     let mut i = 0;
@@ -164,21 +165,21 @@ pub fn cmd_if2(args: &[String]) {
                 n_particles = n_particles.or(Some(200));
                 n_iterations = n_iterations.or(Some(20));
                 cooling = cooling.or(Some(1.0)); // no cooling — pure exploration
-                if parallel == 1 { parallel = n_chains; }
+                // parallel stays 0 (num_cpus default) unless user sets --parallel
             }
             "refine" => {
                 if n_chains == 1 { n_chains = 4; }
                 n_particles = n_particles.or(Some(1000));
                 n_iterations = n_iterations.or(Some(50));
                 cooling = cooling.or(Some(0.95));
-                if parallel == 1 { parallel = n_chains; }
+                // parallel stays 0 (num_cpus default) unless user sets --parallel
             }
             "validate" => {
                 if n_chains == 1 { n_chains = 4; }
                 n_particles = n_particles.or(Some(5000));
                 n_iterations = n_iterations.or(Some(100));
                 cooling = cooling.or(Some(0.95));
-                if parallel == 1 { parallel = n_chains; }
+                // parallel stays 0 (num_cpus default) unless user sets --parallel
             }
             other => {
                 eprintln!("unknown regime '{}'. Use scout, refine, or validate.", other);
@@ -398,8 +399,9 @@ pub fn cmd_if2(args: &[String]) {
     let regime_name = regime.as_deref().unwrap_or("manual");
     eprintln!("if2: {} observations, {} chains × {} particles × {} iterations, cooling={}, dt={}, seed={}",
         observations.len(), n_chains, n_particles, n_iterations, cooling, dt, seed);
-    eprintln!("if2: regime={}, estimating {} parameters, {} fixed, parallel={}",
-        regime_name, if2_params.len(), n_fixed, parallel);
+    let effective_threads = if parallel > 0 { parallel } else { rayon::current_num_threads() };
+    eprintln!("if2: regime={}, estimating {} parameters, {} fixed, threads={}",
+        regime_name, if2_params.len(), n_fixed, effective_threads);
 
     // Parameter scale diagnostics
     for spec in &if2_params {
@@ -445,39 +447,24 @@ pub fn cmd_if2(args: &[String]) {
         pb
     }).collect();
 
-    let chain_results: Vec<(usize, IF2Result)> = if parallel > 1 && n_chains > 1 {
-        std::thread::scope(|s| {
-            let handles: Vec<_> = (0..n_chains).map(|chain_id| {
-                let compiled = &*compiled;
-                let if2_params = &*if2_params;
-                let observations = &*observations;
-                let flow_indices = &*flow_indices;
-                let params = &params;
-                let config = &config;
-                let pb = &bars[chain_id];
+    // Initialize rayon global pool (controls all parallelism: chains + particles).
+    // parallel=0 means use rayon default (num_cpus).
+    if parallel > 0 {
+        let _ = rayon::ThreadPoolBuilder::new()
+            .num_threads(parallel)
+            .build_global();
+    }
 
-                let obs_model_str = obs_model.as_str();
-                s.spawn(move || {
-                    run_one_chain(chain_id, compiled, params, if2_params, observations,
-                        config, flow_indices, obs_model_str, rho_idx, k_idx, psi_idx, tol, seed,
-                        Some(pb))
-                })
-            }).collect();
-
-            handles.into_iter().enumerate().map(|(i, h)| {
-                (i, h.join().unwrap())
-            }).collect()
-        })
-    } else {
-        // Sequential
-        (0..n_chains).map(|chain_id| {
+    let chain_results: Vec<(usize, IF2Result)> = (0..n_chains)
+        .into_par_iter()
+        .map(|chain_id| {
             let result = run_one_chain(chain_id, &compiled, &params, &if2_params,
                 &observations, &config, &flow_indices, &obs_model,
                 rho_idx, k_idx, psi_idx, tol, seed,
                 Some(&bars[chain_id]));
             (chain_id, result)
-        }).collect()
-    };
+        })
+        .collect();
 
     // ── Compute Rhat across chains (last half of iterations) ─────────────
     let n_tail = (n_iterations / 2).max(1);

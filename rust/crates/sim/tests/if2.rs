@@ -14,7 +14,7 @@ use ir::{
 };
 use sim::{
     compiled_model::CompiledModel,
-    chain_binomial::step_one,
+    chain_binomial::{step_one, StepScratch},
     inference::{
         obs_loglik::negbin_logpmf,
         if2::{run_if2, IF2Config, IF2Param, Observation, Transform},
@@ -120,11 +120,12 @@ fn generate_data(compiled: &CompiledModel, params: &[f64]) -> Vec<Observation> {
     let (init, _) = compiled.initial_state(params).unwrap();
     state.counts.copy_from_slice(&init.counts);
 
+    let mut scratch = StepScratch::new(compiled);
     let mut obs = Vec::new();
     let mut t = 0.0;
     while t < 77.0 {
         for _ in 0..7 {
-            step_one(compiled, &mut state.counts, &mut state.flow_accumulators, params, t, 1.0, &mut rng).unwrap();
+            step_one(compiled, &mut state.counts, &mut state.flow_accumulators, params, t, 1.0, &mut rng, &mut scratch).unwrap();
             t += 1.0;
         }
         // Project: recovery flow (index 1)
@@ -164,8 +165,8 @@ fn test_if2_converges_from_dispersed_start() {
         dt: 1.0,
     };
 
-    let step_fn = |state: &mut ParticleState, p: &[f64], t: f64, dt: f64, rng: &mut StatefulRng| {
-        step_one(&compiled, &mut state.counts, &mut state.flow_accumulators, p, t, dt, rng)
+    let step_fn = |state: &mut ParticleState, p: &[f64], t: f64, dt: f64, rng: &mut StatefulRng, scratch: &mut StepScratch| {
+        step_one(&compiled, &mut state.counts, &mut state.flow_accumulators, p, t, dt, rng, scratch)
     };
     let project_fn = |state: &ParticleState| state.flow_accumulators[1] as f64;
     let dmeasure_fn = |proj: f64, obs: f64, p: &[f64]| {
@@ -238,8 +239,8 @@ fn test_if2_respects_bounds() {
         dt: 1.0,
     };
 
-    let step_fn = |state: &mut ParticleState, p: &[f64], t: f64, dt: f64, rng: &mut StatefulRng| {
-        step_one(&compiled, &mut state.counts, &mut state.flow_accumulators, p, t, dt, rng)
+    let step_fn = |state: &mut ParticleState, p: &[f64], t: f64, dt: f64, rng: &mut StatefulRng, scratch: &mut StepScratch| {
+        step_one(&compiled, &mut state.counts, &mut state.flow_accumulators, p, t, dt, rng, scratch)
     };
     let project_fn = |state: &ParticleState| state.flow_accumulators[1] as f64;
     let dmeasure_fn = |proj: f64, obs: f64, _p: &[f64]| negbin_logpmf(obs, proj.max(0.1), 10.0);
@@ -281,8 +282,8 @@ fn test_if2_no_cooling_explores() {
         dt: 1.0,
     };
 
-    let step_fn = |state: &mut ParticleState, p: &[f64], t: f64, dt: f64, rng: &mut StatefulRng| {
-        step_one(&compiled, &mut state.counts, &mut state.flow_accumulators, p, t, dt, rng)
+    let step_fn = |state: &mut ParticleState, p: &[f64], t: f64, dt: f64, rng: &mut StatefulRng, scratch: &mut StepScratch| {
+        step_one(&compiled, &mut state.counts, &mut state.flow_accumulators, p, t, dt, rng, scratch)
     };
     let project_fn = |state: &ParticleState| state.flow_accumulators[1] as f64;
     let dmeasure_fn = |proj: f64, obs: f64, _p: &[f64]| negbin_logpmf(obs, proj.max(0.1), 10.0);

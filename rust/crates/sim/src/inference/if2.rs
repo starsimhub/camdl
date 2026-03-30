@@ -13,12 +13,14 @@
 //! observation log-likelihood (dmeasure). This makes it compatible
 //! with any simulation backend.
 
+use rayon::prelude::*;
+
+use crate::chain_binomial::StepScratch;
 use crate::compiled_model::CompiledModel;
 use crate::ekrng::StatefulRng;
 use crate::error::SimError;
 use super::types::{ParticleState, log_sum_exp};
 use super::resampling::systematic_resample;
-use super::obs_loglik;
 
 /// One parameter's transform and perturbation spec.
 #[derive(Clone, Debug)]
@@ -169,7 +171,7 @@ pub fn run_if2(
     if2_params: &[IF2Param],
     observations: &[Observation],
     config: &IF2Config,
-    step_fn: &dyn Fn(&mut ParticleState, &[f64], f64, f64, &mut StatefulRng) -> Result<(), SimError>,
+    step_fn: &(dyn Fn(&mut ParticleState, &[f64], f64, f64, &mut StatefulRng, &mut StepScratch) -> Result<(), SimError> + Send + Sync),
     project_fn: &dyn Fn(&ParticleState) -> f64,
     dmeasure_fn: &dyn Fn(f64, f64, &[f64]) -> f64,
     seed: u64,
@@ -184,7 +186,7 @@ pub fn run_if2_with_progress(
     if2_params: &[IF2Param],
     observations: &[Observation],
     config: &IF2Config,
-    step_fn: &dyn Fn(&mut ParticleState, &[f64], f64, f64, &mut StatefulRng) -> Result<(), SimError>,
+    step_fn: &(dyn Fn(&mut ParticleState, &[f64], f64, f64, &mut StatefulRng, &mut StepScratch) -> Result<(), SimError> + Send + Sync),
     project_fn: &dyn Fn(&ParticleState) -> f64,
     dmeasure_fn: &dyn Fn(f64, f64, &[f64]) -> f64,
     seed: u64,
@@ -228,6 +230,10 @@ pub fn run_if2_with_progress(
                 seed ^ ((iter as u64) << 32) ^ (i as u64).wrapping_mul(0x517cc1b727220a95)
             ))
             .collect();
+        // Per-particle scratch buffers (allocated once per iteration, reused across steps)
+        let mut scratches: Vec<StepScratch> = (0..n)
+            .map(|_| StepScratch::new(model))
+            .collect();
         let mut resample_rng = StatefulRng::new(
             seed.wrapping_add(0xdeadbeef).wrapping_add(iter as u64)
         );
@@ -251,14 +257,26 @@ pub fn run_if2_with_progress(
         let mut t = model.model.simulation.t_start;
 
         for obs in observations {
-            // Propagate
-            while t < obs.time - 1e-10 {
-                let step_dt = config.dt.min(obs.time - t);
-                for i in 0..n {
-                    step_fn(&mut states[i], &particle_params[i], t, step_dt, &mut rngs[i])?;
-                }
-                t += step_dt;
-            }
+            // Propagate — batched parallel dispatch per observation interval.
+            let obs_time = obs.time;
+            let t_start = t;
+            let dt = config.dt;
+            let errors: Vec<Result<(), SimError>> = states.par_iter_mut()
+                .zip(particle_params.par_iter())
+                .zip(rngs.par_iter_mut())
+                .zip(scratches.par_iter_mut())
+                .map(|(((state, pp), rng), scratch)| {
+                    let mut t_local = t_start;
+                    while t_local < obs_time - 1e-10 {
+                        let step_dt = dt.min(obs_time - t_local);
+                        step_fn(state, pp, t_local, step_dt, rng, scratch)?;
+                        t_local += step_dt;
+                    }
+                    Ok(())
+                })
+                .collect();
+            for r in errors { r?; }
+            while t < obs.time - 1e-10 { t += config.dt.min(obs.time - t); }
 
             // Perturb parameters at observation time (per-step cooling).
             // IVP params are skipped here — they were only perturbed at t=0.
