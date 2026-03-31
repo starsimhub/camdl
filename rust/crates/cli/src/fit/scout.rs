@@ -63,9 +63,12 @@ pub fn run_scout(fit: &FitToml, seed: u64, force: bool) -> Result<(), String> {
     let best = &chain_results.results.iter()
         .find(|(id, _)| *id == chain_results.best_chain)
         .unwrap().1;
-    let start_values: HashMap<String, f64> = config.if2_params.iter()
-        .map(|spec| (spec.name.clone(), best.mle[spec.index]))
-        .collect();
+    // Store ALL param values (estimated from MLE + fixed from base) so
+    // fit_state is self-contained and robust to model edits between stages.
+    let start_values: HashMap<String, f64> = runner::collect_all_params(
+        &best.mle, &config.if2_params, &config.model,
+        &config.base_params, &config.compiled,
+    );
 
     // Compute initial loglik (at starting params before fitting)
     // Approximate: use worst chain's first-iteration loglik
@@ -92,7 +95,7 @@ pub fn run_scout(fit: &FitToml, seed: u64, force: bool) -> Result<(), String> {
     let param_names: Vec<String> = config.model.parameters.iter().map(|p| p.name.clone()).collect();
     runner::write_chain_outputs(
         &stage_dir, &chain_results.results, &config.if2_params,
-        &param_names, &config.base_params,
+        &param_names, &config.base_params, &config.compiled,
     )?;
     runner::write_diagnostics(&stage_dir, &chain_results.results)?;
 

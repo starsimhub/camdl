@@ -653,6 +653,7 @@ pub fn write_chain_outputs(
     if2_params: &[IF2Param],
     all_param_names: &[String],
     base_params: &[f64],
+    compiled: &CompiledModel,
 ) -> Result<(), String> {
     use std::io::Write;
 
@@ -684,22 +685,24 @@ pub fn write_chain_outputs(
         for name in all_param_names {
             let value = if let Some(spec) = if2_params.iter().find(|p| p.name == *name) {
                 result.mle[spec.index]
+            } else if let Some(&idx) = compiled.param_index.get(name.as_str()) {
+                base_params[idx]
             } else {
-                base_params.iter().enumerate()
-                    .find(|(_, _)| true) // need param_index
-                    .map_or(0.0, |(_, &v)| v)
+                0.0
             };
-            writeln!(f, "{} = {}", name, format_value(value)).unwrap();
+            writeln!(f, "{} = {}", name, format_param_value(value)).unwrap();
         }
     }
     Ok(())
 }
 
-fn format_value(v: f64) -> String {
-    if v == v.floor() && v.abs() < 1e15 {
-        format!("{:.1}", v)
-    } else if v.abs() < 1e-6 && v != 0.0 {
+/// Format a parameter value with appropriate precision.
+/// Shared by chain output and provenance output.
+pub fn format_param_value(v: f64) -> String {
+    if v.abs() < 1e-6 && v != 0.0 {
         format!("{:.8e}", v)
+    } else if v == v.floor() && v.abs() < 1e15 {
+        format!("{:.1}", v)
     } else {
         let s = format!("{:.10}", v);
         s.trim_end_matches('0').trim_end_matches('.').to_string()
@@ -719,6 +722,145 @@ pub fn write_diagnostics(dir: &str, results: &[(usize, IF2Result)]) -> Result<()
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Verify that write_chain_outputs writes correct values for BOTH
+    /// estimated and fixed parameters. Regression test for bug where
+    /// fixed params all got base_params[0] instead of their actual value.
+    #[test]
+    fn chain_output_fixed_params_correct() {
+        use std::collections::HashMap;
+        use ir::{
+            expr::{BinOpExpr, BinOpWrap, BinOp, Expr, ParamExpr, PopExpr, PopSumExpr},
+            model::{Compartment, CompartmentKind, InitialConditions, OutputConfig, OutputSchedule, SimulationConfig},
+            parameter::Parameter,
+            transition::{Transition, StoichiometryEntry, DrawMethod},
+            Model,
+        };
+
+        // SIR model: beta (estimated), gamma (fixed), N0 (fixed)
+        let model = Model {
+            name: "test".into(),
+            version: "0.3".into(),
+            time_unit: "days".into(),
+            description: None, origin: None,
+            compartments: vec![
+                Compartment { name: "S".into(), kind: CompartmentKind::Integer },
+                Compartment { name: "I".into(), kind: CompartmentKind::Integer },
+                Compartment { name: "R".into(), kind: CompartmentKind::Integer },
+            ],
+            transitions: vec![
+                Transition {
+                    name: "infection".into(),
+                    stoichiometry: vec![StoichiometryEntry("S".into(), -1), StoichiometryEntry("I".into(), 1)],
+                    rate: Expr::BinOp(BinOpWrap { bin_op: BinOpExpr {
+                        op: BinOp::Mul,
+                        left: Box::new(Expr::Param(ParamExpr { param: "beta".into() })),
+                        right: Box::new(Expr::Pop(PopExpr { pop: "I".into() })),
+                    }}),
+                    event_key: None, metadata: None, draw_method: DrawMethod::Poisson,
+                },
+                Transition {
+                    name: "recovery".into(),
+                    stoichiometry: vec![StoichiometryEntry("I".into(), -1), StoichiometryEntry("R".into(), 1)],
+                    rate: Expr::BinOp(BinOpWrap { bin_op: BinOpExpr {
+                        op: BinOp::Mul,
+                        left: Box::new(Expr::Param(ParamExpr { param: "gamma".into() })),
+                        right: Box::new(Expr::Pop(PopExpr { pop: "I".into() })),
+                    }}),
+                    event_key: None, metadata: None, draw_method: DrawMethod::Poisson,
+                },
+            ],
+            ode_equations: vec![], time_functions: vec![], tables: vec![],
+            interventions: vec![], observations: vec![],
+            parameters: vec![
+                Parameter { name: "beta".into(), value: Some(0.3), bounds: Some((0.01, 2.0)), prior: None, transform: None, initial_value: None },
+                Parameter { name: "gamma".into(), value: Some(0.1), bounds: Some((0.01, 1.0)), prior: None, transform: None, initial_value: None },
+                Parameter { name: "N0".into(), value: Some(1000.0), bounds: Some((100.0, 100000.0)), prior: None, transform: None, initial_value: None },
+            ],
+            initial_conditions: InitialConditions::Explicit({
+                let mut m = HashMap::new();
+                m.insert("S".into(), 990.0);
+                m.insert("I".into(), 10.0);
+                m
+            }),
+            data_contract: None,
+            output: OutputConfig { times: OutputSchedule::AtTimes(vec![0.0, 80.0]), format: "tsv".into(), trajectory: true, observations: false },
+            simulation: SimulationConfig { t_start: 0.0, t_end: 80.0, time_semantics: "continuous".into(), dt: Some(1.0), rng_seed: Some(42) },
+            presets: vec![], model_structure: None,
+        };
+
+        let compiled = CompiledModel::new(model).unwrap();
+        let base_params = compiled.default_params.clone();
+
+        // beta is estimated, gamma and N0 are fixed
+        let if2_params = vec![IF2Param {
+            name: "beta".into(),
+            index: compiled.param_index["beta"],
+            initial: 0.3,
+            rw_sd: 0.05,
+            transform: Transform::Log,
+            lower: 0.01,
+            upper: 2.0,
+            ivp: false,
+        }];
+
+        // Fake chain result: MLE has beta=0.5
+        let mut mle = base_params.clone();
+        mle[compiled.param_index["beta"]] = 0.5;
+
+        let results = vec![(0_usize, IF2Result {
+            iterations: vec![],
+            mle,
+            final_loglik: -100.0,
+            last_loglik: -100.0,
+        })];
+
+        let dir = std::env::temp_dir().join("camdl_test_chain_output");
+        let _ = std::fs::remove_dir_all(&dir);
+
+        let param_names: Vec<String> = vec!["beta".into(), "gamma".into(), "N0".into()];
+        write_chain_outputs(
+            dir.to_str().unwrap(), &results, &if2_params,
+            &param_names, &base_params, &compiled,
+        ).unwrap();
+
+        // Read back and verify
+        let content = std::fs::read_to_string(dir.join("chain_1/final_params.toml")).unwrap();
+        let parsed: HashMap<String, f64> = content.lines()
+            .filter(|l| !l.starts_with('#') && !l.trim().is_empty())
+            .filter_map(|l| {
+                let mut parts = l.splitn(2, '=');
+                let k = parts.next()?.trim().to_string();
+                let v: f64 = parts.next()?.trim().parse().ok()?;
+                Some((k, v))
+            })
+            .collect();
+
+        assert_eq!(parsed["beta"], 0.5, "estimated param should be MLE value");
+        assert_eq!(parsed["gamma"], 0.1, "fixed param gamma should be 0.1, not base_params[0]");
+        assert_eq!(parsed["N0"], 1000.0, "fixed param N0 should be 1000.0, not base_params[0]");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+/// Compute input hash for provenance (shared by refine and validate).
+pub fn compute_fit_input_hash(fit: &FitToml, config: &FitRunConfig, seed: u64) -> String {
+    let fit_toml_bytes = toml::to_string(fit).unwrap_or_default().into_bytes();
+    let mut data_files: Vec<(String, Vec<u8>)> = fit.data.iter().map(|(name, path)| {
+        (name.clone(), std::fs::read(path).unwrap_or_default())
+    }).collect();
+    crate::fit::provenance::compute_input_hash(
+        config.model_ir_json.as_bytes(),
+        &mut data_files,
+        &fit_toml_bytes,
+        seed,
+    )
 }
 
 /// Collect ALL parameter values (estimated + fixed) for MLE output.

@@ -55,9 +55,10 @@ pub fn run_refine(fit: &FitToml, starts_from: &str, seed: u64, force: bool) -> R
         .unwrap().1;
 
     // Start values for next stage
-    let start_values: HashMap<String, f64> = config.if2_params.iter()
-        .map(|spec| (spec.name.clone(), best.mle[spec.index]))
-        .collect();
+    let start_values: HashMap<String, f64> = runner::collect_all_params(
+        &best.mle, &config.if2_params, &config.model,
+        &config.base_params, &config.compiled,
+    );
 
     // Auto rw_sd from this stage's convergence
     let rw_sd = match runner::auto_rw_sd(&chain_results.results, &config.if2_params) {
@@ -88,7 +89,7 @@ pub fn run_refine(fit: &FitToml, starts_from: &str, seed: u64, force: bool) -> R
     let param_names: Vec<String> = config.model.parameters.iter().map(|p| p.name.clone()).collect();
     runner::write_chain_outputs(
         &stage_dir, &chain_results.results, &config.if2_params,
-        &param_names, &config.base_params,
+        &param_names, &config.base_params, &config.compiled,
     )?;
     runner::write_diagnostics(&stage_dir, &chain_results.results)?;
 
@@ -98,7 +99,7 @@ pub fn run_refine(fit: &FitToml, starts_from: &str, seed: u64, force: bool) -> R
         &config.base_params, &config.compiled,
     );
     let model_hash = hashing::model_hash(&config.model_ir_json);
-    let input_hash = compute_input_hash(fit, &config, seed);
+    let input_hash = runner::compute_fit_input_hash(fit, &config, seed);
 
     let metadata = MleMetadata {
         input_hash: input_hash.clone(),
@@ -136,18 +137,6 @@ pub fn run_refine(fit: &FitToml, starts_from: &str, seed: u64, force: bool) -> R
     Ok(())
 }
 
-fn compute_input_hash(fit: &FitToml, config: &FitRunConfig, seed: u64) -> String {
-    let fit_toml_bytes = toml::to_string(fit).unwrap_or_default().into_bytes();
-    let mut data_files: Vec<(String, Vec<u8>)> = fit.data.iter().map(|(name, path)| {
-        (name.clone(), std::fs::read(path).unwrap_or_default())
-    }).collect();
-    provenance::compute_input_hash(
-        config.model_ir_json.as_bytes(),
-        &mut data_files,
-        &fit_toml_bytes,
-        seed,
-    )
-}
 
 fn write_summary(
     dir: &str,

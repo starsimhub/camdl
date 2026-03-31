@@ -209,30 +209,35 @@ pub fn run_if2_with_progress(
     let mut iterations = Vec::with_capacity(config.n_iterations);
     let mut global_step: u64 = 0; // total filtering steps across all iterations
 
+    // Pre-allocate particle state, params, RNGs, and scratch buffers once.
+    // Re-initialized from current_params at the start of each iteration.
+    let mut states: Vec<ParticleState> = (0..n)
+        .map(|_| ParticleState::new(n_int, n_tr))
+        .collect();
+    let mut particle_params: Vec<Vec<f64>> = vec![vec![0.0; base_params.len()]; n];
+    let mut scratches: Vec<StepScratch> = (0..n)
+        .map(|_| StepScratch::new(model))
+        .collect();
+
     for iter in 0..config.n_iterations {
 
-        // Initialize particles: all start from model's initial state
+        // Re-initialize particles from model's initial state
         let (init_int, _) = model.initial_state(&current_params)?;
-        let mut states: Vec<ParticleState> = (0..n)
-            .map(|_| {
-                let mut s = ParticleState::new(n_int, n_tr);
-                s.counts.copy_from_slice(&init_int.counts);
-                s
-            })
-            .collect();
+        for s in &mut states {
+            s.counts.copy_from_slice(&init_int.counts);
+            s.reset_flows();
+        }
 
-        // Per-particle parameter vectors, initialized from current estimate
-        let mut particle_params: Vec<Vec<f64>> = vec![current_params.clone(); n];
+        // Re-initialize per-particle parameter vectors from current estimate
+        for pp in &mut particle_params {
+            pp.copy_from_slice(&current_params);
+        }
 
-        // Per-particle RNGs
+        // Per-particle RNGs (must differ per iteration for exploration)
         let mut rngs: Vec<StatefulRng> = (0..n)
             .map(|i| StatefulRng::new(
                 seed ^ ((iter as u64) << 32) ^ (i as u64).wrapping_mul(0x517cc1b727220a95)
             ))
-            .collect();
-        // Per-particle scratch buffers (allocated once per iteration, reused across steps)
-        let mut scratches: Vec<StepScratch> = (0..n)
-            .map(|_| StepScratch::new(model))
             .collect();
         let mut resample_rng = StatefulRng::new(
             seed.wrapping_add(0xdeadbeef).wrapping_add(iter as u64)

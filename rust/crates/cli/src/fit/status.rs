@@ -78,8 +78,11 @@ pub fn run_status(fit: &FitToml) -> Result<(), String> {
         if let Some(ess) = summary.get("ess_at_mle") {
             let mean = ess.get("mean").and_then(|v| v.as_f64()).unwrap_or(0.0);
             let min = ess.get("min").and_then(|v| v.as_f64()).unwrap_or(0.0);
-            let status = if min > 2500.0 { "\x1b[32m✓ filter is healthy\x1b[0m" }
-                else if min > 500.0 { "\x1b[33m~ filter is marginal\x1b[0m" }
+            // Thresholds relative to particle count (from validate summary or default 10000)
+            let n_particles = summary.get("n_particles")
+                .and_then(|v| v.as_f64()).unwrap_or(10000.0);
+            let status = if min > n_particles / 4.0 { "\x1b[32m✓ filter is healthy\x1b[0m" }
+                else if min > n_particles / 10.0 { "\x1b[33m~ filter is marginal\x1b[0m" }
                 else { "\x1b[31m✗ filter is degenerate\x1b[0m" };
             println!("  ESS at MLE: mean={:.0}, min={:.0}  {}", mean, min, status);
             println!();
@@ -110,7 +113,7 @@ pub fn run_status(fit: &FitToml) -> Result<(), String> {
                 .and_then(|v| v.as_f64());
 
             // Get CI from profiles
-            let ci = profiles.get(name.as_str());
+            let ci = profiles.get(name);
 
             let mut line = format!("    {:12} = {:<12.6} rw_sd={:<8.4}", name, value, rw);
 
@@ -203,9 +206,7 @@ fn load_summary(base_dir: &str, stage: &str) -> Option<serde_json::Value> {
         .and_then(|s| serde_json::from_str(&s).ok())
 }
 
-fn load_profiles(base_dir: &str) -> std::collections::HashMap<&str, (f64, f64)> {
-    // This would load from profile TSVs, but we need owned data
-    // For now, load from the validate summary
+fn load_profiles(base_dir: &str) -> std::collections::HashMap<String, (f64, f64)> {
     let mut profiles = std::collections::HashMap::new();
     if let Some(summary) = load_summary(base_dir, "validate") {
         if let Some(params) = summary.get("parameters").and_then(|p| p.as_array()) {
@@ -216,9 +217,7 @@ fn load_profiles(base_dir: &str) -> std::collections::HashMap<&str, (f64, f64)> 
                 ) {
                     if ci.len() == 2 {
                         if let (Some(lo), Some(hi)) = (ci[0].as_f64(), ci[1].as_f64()) {
-                            // We can't return &str here with owned data
-                            // This is a design limitation; fix by using String keys
-                            let _ = (name, lo, hi);
+                            profiles.insert(name.to_string(), (lo, hi));
                         }
                     }
                 }

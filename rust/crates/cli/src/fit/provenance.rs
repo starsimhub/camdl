@@ -76,23 +76,9 @@ pub fn write_mle_params(
     let mut pairs: Vec<(&String, &f64)> = all_params.iter().collect();
     pairs.sort_by_key(|(k, _)| k.as_str());
     for (name, value) in pairs {
-        // Use enough precision but trim trailing zeros
-        writeln!(f, "{} = {}", name, format_param(*value)).unwrap();
+        writeln!(f, "{} = {}", name, crate::fit::runner::format_param_value(*value)).unwrap();
     }
     Ok(())
-}
-
-/// Format a parameter value with appropriate precision.
-fn format_param(v: f64) -> String {
-    if v.abs() < 1e-6 && v != 0.0 {
-        format!("{:.8e}", v)
-    } else if v == v.floor() && v.abs() < 1e15 {
-        format!("{:.1}", v) // e.g., 2462500.0
-    } else {
-        // Up to 8 significant figures
-        let s = format!("{:.10}", v);
-        s.trim_end_matches('0').trim_end_matches('.').to_string()
-    }
 }
 
 /// Check cache: does the stage directory already have results with matching input hash?
