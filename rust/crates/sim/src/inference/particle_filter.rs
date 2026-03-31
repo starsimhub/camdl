@@ -94,6 +94,11 @@ pub fn bootstrap_filter(
         .map(|i| StatefulRng::new(seed ^ (i as u64).wrapping_mul(0x517cc1b727220a95)))
         .collect();
 
+    // Double-buffer for resampling (avoids clone allocation)
+    let mut states_buf: Vec<ParticleState> = (0..n_particles)
+        .map(|_| ParticleState::new(n_int, n_tr))
+        .collect();
+
     // Per-particle scratch buffers (allocated once, reused across all steps)
     let mut scratches: Vec<StepScratch> = (0..n_particles)
         .map(|_| StepScratch::new(model))
@@ -149,12 +154,13 @@ pub fn bootstrap_filter(
         let projections: Vec<f64> = swarm.states.iter().map(|s| project_fn(s)).collect();
         predictions.push(weighted_prediction_diag(&projections, &swarm.log_weights));
 
-        // Resample
+        // Resample via double-buffer (no allocation)
         let indices = systematic_resample(&swarm.log_weights, &mut resample_rng);
-        let old_states: Vec<ParticleState> = swarm.states.clone();
         for (i, &src) in indices.iter().enumerate() {
-            swarm.states[i] = old_states[src].clone();
+            states_buf[i].counts.copy_from_slice(&swarm.states[src].counts);
+            states_buf[i].flow_accumulators.copy_from_slice(&swarm.states[src].flow_accumulators);
         }
+        std::mem::swap(&mut swarm.states, &mut states_buf);
 
         // Reset flow accumulators for next observation interval
         for state in &mut swarm.states {

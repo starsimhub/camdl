@@ -15,8 +15,6 @@ const DEFAULT_COOLING: f64 = 0.95;
 
 pub fn run_refine(fit: &FitToml, starts_from: &str, seed: u64, force: bool) -> Result<(), String> {
     let stage_dir = format!("{}/refine", fit.fit.output_dir);
-    std::fs::create_dir_all(&stage_dir)
-        .map_err(|e| format!("cannot create {}: {}", stage_dir, e))?;
 
     let prior_state = FitState::load(starts_from)?;
     eprintln!("refine: starting from {} (loglik={:.1}, {} good chains)",
@@ -28,6 +26,27 @@ pub fn run_refine(fit: &FitToml, starts_from: &str, seed: u64, force: bool) -> R
         DEFAULT_CHAINS, DEFAULT_PARTICLES, DEFAULT_ITERATIONS,
         DEFAULT_COOLING, seed, false,
     )?;
+
+    // Cache check
+    let input_hash = runner::compute_fit_input_hash(fit, &config, seed);
+    if !force {
+        match provenance::check_cache(&stage_dir, &input_hash) {
+            provenance::CacheStatus::Match => {
+                eprintln!("\x1b[33mrefine skipped — results already exist for these inputs.\x1b[0m");
+                eprintln!("  output:     {}/", stage_dir);
+                eprintln!("  input hash: {}", input_hash);
+                eprintln!("  Use --force to re-run.");
+                return Ok(());
+            }
+            provenance::CacheStatus::Mismatch => {
+                eprintln!("\x1b[33mrefine — prior results exist but inputs have changed. Re-running.\x1b[0m");
+            }
+            provenance::CacheStatus::NotFound => {}
+        }
+    }
+
+    std::fs::create_dir_all(&stage_dir)
+        .map_err(|e| format!("cannot create {}: {}", stage_dir, e))?;
 
     let t0 = std::time::Instant::now();
     let chain_results = runner::run_chains(&config);

@@ -218,6 +218,11 @@ pub fn run_if2_with_progress(
     let mut scratches: Vec<StepScratch> = (0..n)
         .map(|_| StepScratch::new(model))
         .collect();
+    // Double-buffers for resampling (avoids clone allocation)
+    let mut states_buf: Vec<ParticleState> = (0..n)
+        .map(|_| ParticleState::new(n_int, n_tr))
+        .collect();
+    let mut params_buf: Vec<Vec<f64>> = vec![vec![0.0; base_params.len()]; n];
 
     for iter in 0..config.n_iterations {
 
@@ -308,14 +313,15 @@ pub fn run_if2_with_progress(
             let ll_inc = log_sum_exp(&log_weights) - (n as f64).ln();
             total_loglik += ll_inc;
 
-            // Resample states AND parameters jointly
+            // Resample states AND parameters jointly via double-buffer (no allocation)
             let indices = systematic_resample(&log_weights, &mut resample_rng);
-            let old_states = states.clone();
-            let old_params = particle_params.clone();
             for (i, &src) in indices.iter().enumerate() {
-                states[i] = old_states[src].clone();
-                particle_params[i] = old_params[src].clone();
+                states_buf[i].counts.copy_from_slice(&states[src].counts);
+                states_buf[i].flow_accumulators.copy_from_slice(&states[src].flow_accumulators);
+                params_buf[i].copy_from_slice(&particle_params[src]);
             }
+            std::mem::swap(&mut states, &mut states_buf);
+            std::mem::swap(&mut particle_params, &mut params_buf);
 
             // Reset
             for s in &mut states { s.reset_flows(); }

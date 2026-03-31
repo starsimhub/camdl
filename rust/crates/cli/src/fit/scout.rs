@@ -2,6 +2,7 @@
 
 use crate::fit::config::FitToml;
 use crate::fit::state::FitState;
+use crate::fit::provenance;
 use crate::fit::runner::{self, FitRunConfig};
 use sim::inference::if2::IF2Param;
 use std::collections::HashMap;
@@ -14,17 +15,33 @@ const DEFAULT_COOLING: f64 = 1.0; // no cooling — pure exploration
 pub fn run_scout(fit: &FitToml, seed: u64, force: bool) -> Result<(), String> {
     let stage_dir = format!("{}/scout", fit.fit.output_dir);
 
-    // TODO: cache check via input_hash once provenance is wired through
-
-    std::fs::create_dir_all(&stage_dir)
-        .map_err(|e| format!("cannot create {}: {}", stage_dir, e))?;
-
-    // Build base config (no prior state, random starts)
+    // Build config first (cheap) so we can compute input hash for cache check
     let config = FitRunConfig::build(
         fit, None,
         DEFAULT_CHAINS, DEFAULT_PARTICLES, DEFAULT_ITERATIONS,
-        DEFAULT_COOLING, seed, false, // random_starts handled per-chain below
+        DEFAULT_COOLING, seed, false,
     )?;
+
+    // Cache check
+    let input_hash = runner::compute_fit_input_hash(fit, &config, seed);
+    if !force {
+        match provenance::check_cache(&stage_dir, &input_hash) {
+            provenance::CacheStatus::Match => {
+                eprintln!("\x1b[33mscout skipped — results already exist for these inputs.\x1b[0m");
+                eprintln!("  output:     {}/", stage_dir);
+                eprintln!("  input hash: {}", input_hash);
+                eprintln!("  Use --force to re-run.");
+                return Ok(());
+            }
+            provenance::CacheStatus::Mismatch => {
+                eprintln!("\x1b[33mscout — prior results exist but inputs have changed. Re-running.\x1b[0m");
+            }
+            provenance::CacheStatus::NotFound => {}
+        }
+    }
+
+    std::fs::create_dir_all(&stage_dir)
+        .map_err(|e| format!("cannot create {}: {}", stage_dir, e))?;
 
     // Generate per-chain random starts
     let mut rng = sim::ekrng::StatefulRng::new(seed ^ 0xcafe_u64);
@@ -70,11 +87,10 @@ pub fn run_scout(fit: &FitToml, seed: u64, force: bool) -> Result<(), String> {
         &config.base_params, &config.compiled,
     );
 
-    // Compute initial loglik (at starting params before fitting)
-    // Approximate: use worst chain's first-iteration loglik
-    let initial_loglik = chain_results.results.iter()
-        .map(|(_, r)| r.iterations.first().map_or(f64::NEG_INFINITY, |it| it.log_likelihood))
-        .fold(f64::INFINITY, f64::min);
+    // Compute initial loglik: quick pfilter at starting params
+    eprintln!("\npfilter at starting params ({} particles)...", DEFAULT_PARTICLES);
+    let initial_loglik = runner::run_quick_pfilter(&config, &config.base_params, DEFAULT_PARTICLES, seed);
+    eprintln!("  initial loglik: {:.1}", initial_loglik);
 
     // Write fit_state.toml
     let state = FitState {
@@ -100,7 +116,7 @@ pub fn run_scout(fit: &FitToml, seed: u64, force: bool) -> Result<(), String> {
     runner::write_diagnostics(&stage_dir, &chain_results.results)?;
 
     // Write scout_summary.json
-    write_summary(&stage_dir, &chain_results, &config, &auto_rw_sd, n_good, initial_loglik)?;
+    write_summary(&stage_dir, &chain_results, &config, &auto_rw_sd, n_good, initial_loglik, &input_hash)?;
 
     let wall_secs = elapsed.as_secs_f64();
     let per_iter = wall_secs / (DEFAULT_CHAINS as f64 * DEFAULT_ITERATIONS as f64);
@@ -120,6 +136,7 @@ fn write_summary(
     auto_rw_sd: &HashMap<String, f64>,
     n_good: usize,
     initial_loglik: f64,
+    input_hash: &str,
 ) -> Result<(), String> {
     let summary = serde_json::json!({
         "stage": "scout",
@@ -140,6 +157,7 @@ fn write_summary(
             })
         }).collect::<Vec<_>>(),
         "next_step": if n_good >= config.n_chains / 2 { "refine" } else { "fix_model" },
+        "input_hash": input_hash,
     });
 
     let path = format!("{}/scout_summary.json", dir);

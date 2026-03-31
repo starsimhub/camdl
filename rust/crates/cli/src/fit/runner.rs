@@ -244,6 +244,51 @@ fn build_if2_params(
     Ok(params)
 }
 
+/// Run a quick pfilter at given params and return the loglik.
+/// Used by scout for initial_loglik baseline.
+pub fn run_quick_pfilter(config: &FitRunConfig, params: &[f64], n_particles: usize, seed: u64) -> f64 {
+    use sim::inference::particle_filter::{self, Observation as PfObs};
+
+    let compiled = &*config.compiled;
+    let observations: Vec<PfObs> = config.observations.iter()
+        .map(|o| PfObs { time: o.time, value: o.value })
+        .collect();
+
+    let step_fn = |state: &mut ParticleState, t: f64, step_dt: f64, rng: &mut StatefulRng, scratch: &mut sim::chain_binomial::StepScratch| {
+        step_one(compiled, &mut state.counts, &mut state.flow_accumulators, params, t, step_dt, rng, scratch)
+    };
+    let flow_indices = &config.flow_indices;
+    let project_fn = |state: &ParticleState| -> f64 {
+        flow_indices.iter().map(|&i| state.flow_accumulators[i] as f64).sum()
+    };
+    let dmeasure_fn: Box<dyn Fn(f64, f64) -> f64> = match config.obs_model {
+        ObsModelKind::NegBin => {
+            let rho = config.rho_idx.map_or(1.0, |i| params[i]);
+            let k = config.k_idx.map_or(10.0, |i| params[i]);
+            Box::new(move |proj: f64, obs: f64| {
+                sim::inference::obs_loglik::negbin_logpmf(obs, rho * proj, k)
+            })
+        }
+        ObsModelKind::DiscretizedNormal => {
+            let rho = config.rho_idx.map_or(1.0, |i| params[i]);
+            let psi = config.psi_idx.map_or(0.116, |i| params[i]);
+            let tol = config.tol;
+            Box::new(move |proj: f64, obs: f64| {
+                let mu = rho * proj;
+                sim::inference::obs_loglik::discretized_normal_logpmf_tol(obs, mu, mu * (1.0 - rho + psi * psi * mu), tol)
+            })
+        }
+    };
+
+    match particle_filter::bootstrap_filter(
+        compiled, params, &observations, n_particles, config.if2_config.dt,
+        &step_fn, &project_fn, &*dmeasure_fn, seed,
+    ) {
+        Ok(result) => result.log_likelihood,
+        Err(_) => f64::NEG_INFINITY,
+    }
+}
+
 /// Public wrapper for use by `camdl if2 --rw-sd auto`.
 pub fn auto_rw_sd_from_bounds_pub(lower: f64, upper: f64, transform: &Transform) -> f64 {
     auto_rw_sd_from_bounds(lower, upper, transform)
