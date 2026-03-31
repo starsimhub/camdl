@@ -29,6 +29,7 @@ use sim::{
     ekrng::StatefulRng,
 };
 use std::collections::HashMap;
+use std::io::Write;
 use std::sync::Arc;
 
 /// One profile point: a focal value + IF2 result.
@@ -58,6 +59,7 @@ pub fn cmd_profile(args: &[String]) {
     let mut tol = DEFAULT_TOL;
     let mut flow_name: Option<String> = None;
     let mut rw_sd_str: Option<String> = None;
+    let mut output_path: Option<String> = None;
 
     let mut i = 0;
     while i < args.len() {
@@ -83,6 +85,7 @@ pub fn cmd_profile(args: &[String]) {
             "--tol"        => { i += 1; tol = args[i].parse().expect("needs number"); }
             "--flow"       => { i += 1; flow_name = Some(args[i].clone()); }
             "--rw-sd"      => { i += 1; rw_sd_str = Some(args[i].clone()); }
+            "--output" | "-o" => { i += 1; output_path = Some(args[i].clone()); }
             "--param"      => {
                 i += 1;
                 let kv = &args[i];
@@ -323,18 +326,31 @@ pub fn cmd_profile(args: &[String]) {
     }
 
     // ── Output TSV ───────────────────────────────────────────────────────
-    for fg in &focal_grids { print!("{}\t", fg.name); }
-    print!("max_loglik");
-    for spec in if2_params.iter() { print!("\t{}", spec.name); }
-    println!();
+    let mut out: Box<dyn std::io::Write> = match &output_path {
+        Some(path) => {
+            let f = std::fs::File::create(path)
+                .unwrap_or_else(|e| { eprintln!("cannot create {}: {}", path, e); std::process::exit(1); });
+            Box::new(std::io::BufWriter::new(f))
+        }
+        None => Box::new(std::io::stdout().lock()),
+    };
+
+    for fg in &focal_grids { write!(out, "{}\t", fg.name).unwrap(); }
+    write!(out, "max_loglik").unwrap();
+    for spec in if2_params.iter() { write!(out, "\t{}", spec.name).unwrap(); }
+    writeln!(out).unwrap();
 
     let mut sorted: Vec<_> = best.into_iter().collect();
     sorted.sort_by_key(|&(idx, _)| idx);
 
     for (_, (focal_vals, loglik, mle_params)) in sorted {
-        for v in &focal_vals { print!("{:.4}\t", v); }
-        print!("{:.2}", loglik);
-        for spec in if2_params.iter() { print!("\t{:.6}", mle_params[spec.index]); }
-        println!();
+        for v in &focal_vals { write!(out, "{:.4}\t", v).unwrap(); }
+        write!(out, "{:.2}", loglik).unwrap();
+        for spec in if2_params.iter() { write!(out, "\t{:.6}", mle_params[spec.index]).unwrap(); }
+        writeln!(out).unwrap();
+    }
+
+    if let Some(ref path) = output_path {
+        eprintln!("profile written to {}", path);
     }
 }
