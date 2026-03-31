@@ -43,7 +43,15 @@ pub fn cmd_pfilter(args: &[String]) {
             "--particles" => { i += 1; n_particles = args[i].parse().expect("--particles needs an integer"); }
             "--dt"        => { i += 1; dt = args[i].parse().expect("--dt needs a number"); }
             "--seed"      => { i += 1; seed = args[i].parse().expect("--seed needs an integer"); }
-            "--trace"     => { i += 1; trace_path = Some(args[i].clone()); }
+            "--trace"     => {
+                // Accept both: --trace FILE and bare --trace (stdout)
+                if i + 1 < args.len() && !args[i + 1].starts_with("--") {
+                    i += 1;
+                    trace_path = Some(args[i].clone());
+                } else {
+                    trace_path = Some("-".to_string()); // sentinel for stdout
+                }
+            }
             "--output" | "-o" => { i += 1; output_path = Some(args[i].clone()); }
             "--scenario"  => { i += 1; scenario_name = Some(args[i].clone()); }
             "--enable"    => { i += 1; adhoc_enable.push(args[i].clone()); }
@@ -227,17 +235,26 @@ pub fn cmd_pfilter(args: &[String]) {
     });
 
     // Write trace diagnostics
+    let trace_to_stdout = trace_path.as_deref() == Some("-");
     if let Some(ref path) = trace_path {
-        let mut f = std::fs::File::create(path)
-            .unwrap_or_else(|e| { eprintln!("cannot create {}: {}", path, e); std::process::exit(1); });
-        writeln!(f, "time\tll_increment\tESS\tpred_mean\tpred_q05\tpred_q50\tpred_q95\tobserved").unwrap();
+        let mut out: Box<dyn Write> = if path == "-" {
+            Box::new(std::io::BufWriter::new(std::io::stdout().lock()))
+        } else {
+            let f = std::fs::File::create(path)
+                .unwrap_or_else(|e| { eprintln!("cannot create {}: {}", path, e); std::process::exit(1); });
+            Box::new(std::io::BufWriter::new(f))
+        };
+        writeln!(out, "time\tll_increment\tESS\tpred_mean\tpred_q05\tpred_q50\tpred_q95\tobserved").unwrap();
         for (i, obs) in observations.iter().enumerate() {
             let p = &result.predictions[i];
-            writeln!(f, "{}\t{:.4}\t{:.1}\t{:.1}\t{:.0}\t{:.0}\t{:.0}\t{:.0}",
+            writeln!(out, "{}\t{:.4}\t{:.1}\t{:.1}\t{:.0}\t{:.0}\t{:.0}\t{:.0}",
                 obs.time, result.ll_increments[i], result.ess_trace[i],
                 p.mean, p.q05, p.q50, p.q95, obs.value).unwrap();
         }
-        eprintln!("trace written to {}", path);
+        drop(out);
+        if path != "-" {
+            eprintln!("trace written to {}", path);
+        }
     }
 
     // Save final particle states
@@ -251,7 +268,7 @@ pub fn cmd_pfilter(args: &[String]) {
         }
     }
 
-    // Write loglik
+    // Write loglik (to stderr when trace occupies stdout, otherwise stdout)
     match &output_path {
         Some(path) => {
             std::fs::write(path, format!("{:.4}\n", result.log_likelihood))
@@ -259,7 +276,11 @@ pub fn cmd_pfilter(args: &[String]) {
             eprintln!("loglik written to {}", path);
         }
         None => {
-            println!("{:.4}", result.log_likelihood);
+            if trace_to_stdout {
+                eprintln!("{:.4}", result.log_likelihood);
+            } else {
+                println!("{:.4}", result.log_likelihood);
+            }
         }
     }
 }
