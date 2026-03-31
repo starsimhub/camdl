@@ -25,7 +25,8 @@ pub fn cmd_pfilter(args: &[String]) {
     let mut n_particles = 1000_usize;
     let mut dt = 1.0_f64;
     let mut seed = 1_u64;
-    let mut trace = false;
+    let mut trace_path: Option<String> = None;
+    let mut output_path: Option<String> = None;
     let mut overrides: HashMap<String, f64> = HashMap::new();
     let mut scenario_name: Option<String> = None;
     let mut adhoc_enable: Vec<String> = Vec::new();
@@ -42,7 +43,8 @@ pub fn cmd_pfilter(args: &[String]) {
             "--particles" => { i += 1; n_particles = args[i].parse().expect("--particles needs an integer"); }
             "--dt"        => { i += 1; dt = args[i].parse().expect("--dt needs a number"); }
             "--seed"      => { i += 1; seed = args[i].parse().expect("--seed needs an integer"); }
-            "--trace"     => { trace = true; }
+            "--trace"     => { i += 1; trace_path = Some(args[i].clone()); }
+            "--output" | "-o" => { i += 1; output_path = Some(args[i].clone()); }
             "--scenario"  => { i += 1; scenario_name = Some(args[i].clone()); }
             "--enable"    => { i += 1; adhoc_enable.push(args[i].clone()); }
             "--obs-model" => { i += 1; obs_model = args[i].clone(); }
@@ -224,18 +226,21 @@ pub fn cmd_pfilter(args: &[String]) {
         std::process::exit(1);
     });
 
-    // Output
-    if trace {
-        println!("time\tll_increment\tESS\tpred_mean\tpred_q05\tpred_q50\tpred_q95\tobserved");
+    // Write trace diagnostics
+    if let Some(ref path) = trace_path {
+        let mut f = std::fs::File::create(path)
+            .unwrap_or_else(|e| { eprintln!("cannot create {}: {}", path, e); std::process::exit(1); });
+        writeln!(f, "time\tll_increment\tESS\tpred_mean\tpred_q05\tpred_q50\tpred_q95\tobserved").unwrap();
         for (i, obs) in observations.iter().enumerate() {
             let p = &result.predictions[i];
-            println!("{}\t{:.4}\t{:.1}\t{:.1}\t{:.0}\t{:.0}\t{:.0}\t{:.0}",
+            writeln!(f, "{}\t{:.4}\t{:.1}\t{:.1}\t{:.0}\t{:.0}\t{:.0}\t{:.0}",
                 obs.time, result.ll_increments[i], result.ess_trace[i],
-                p.mean, p.q05, p.q50, p.q95, obs.value);
+                p.mean, p.q05, p.q50, p.q95, obs.value).unwrap();
         }
+        eprintln!("trace written to {}", path);
     }
 
-    // Save final particle states if requested
+    // Save final particle states
     if let Some(ref path) = save_final_state {
         if let Some(ref states) = result.final_states {
             write_final_states(path, states, &model).unwrap_or_else(|e| {
@@ -246,10 +251,17 @@ pub fn cmd_pfilter(args: &[String]) {
         }
     }
 
-    // Always print total log-likelihood to stdout (or stderr if trace mode)
-    let out = if trace { &mut std::io::stderr() as &mut dyn std::io::Write }
-              else { &mut std::io::stdout() as &mut dyn std::io::Write };
-    writeln!(out, "{:.4}", result.log_likelihood).ok();
+    // Write loglik
+    match &output_path {
+        Some(path) => {
+            std::fs::write(path, format!("{:.4}\n", result.log_likelihood))
+                .unwrap_or_else(|e| { eprintln!("cannot write {}: {}", path, e); std::process::exit(1); });
+            eprintln!("loglik written to {}", path);
+        }
+        None => {
+            println!("{:.4}", result.log_likelihood);
+        }
+    }
 }
 
 /// Load observation data from a TSV file.

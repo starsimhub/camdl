@@ -117,6 +117,7 @@ pub fn cmd_if2(args: &[String]) {
     let mut regime: Option<String> = None;
     let mut parallel = 0_usize; // 0 = rayon default (num_cpus)
     let mut output_dir: Option<String> = None;
+    let mut output_path: Option<String> = None;
 
     let mut i = 0;
     while i < args.len() {
@@ -140,6 +141,7 @@ pub fn cmd_if2(args: &[String]) {
             "--regime"     => { i += 1; regime = Some(args[i].clone()); }
             "--parallel"   => { i += 1; parallel = args[i].parse().expect("--parallel needs integer"); }
             "--output-dir" => { i += 1; output_dir = Some(args[i].clone()); }
+            "--output" | "-o" => { i += 1; output_path = Some(args[i].clone()); }
             "--param"      => {
                 i += 1;
                 let kv = &args[i];
@@ -520,20 +522,36 @@ pub fn cmd_if2(args: &[String]) {
         eprintln!("Loglik spread: {:.1}", spread);
     }
 
-    // ── Output: best chain traces to stdout ──────────────────────────────
-    print!("chain\titeration\tloglik");
-    for spec in if2_params.iter() {
-        print!("\t{}", spec.name);
-    }
-    println!();
-
-    for (chain_id, result) in &chain_results {
-        for iter_result in &result.iterations {
-            print!("{}\t{}\t{:.2}", chain_id + 1, iter_result.iteration, iter_result.log_likelihood);
-            for spec in if2_params.iter() {
-                print!("\t{:.6}", iter_result.param_means[spec.index]);
+    // ── Output: combined traces ────────────────────────────────────────
+    {
+        use std::io::Write as _;
+        let mut out: Box<dyn std::io::Write> = match &output_path {
+            Some(path) => {
+                let f = std::fs::File::create(path)
+                    .unwrap_or_else(|e| { eprintln!("cannot create {}: {}", path, e); std::process::exit(1); });
+                Box::new(std::io::BufWriter::new(f))
             }
-            println!();
+            None => Box::new(std::io::BufWriter::new(std::io::stdout().lock())),
+        };
+
+        write!(out, "chain\titeration\tloglik").unwrap();
+        for spec in if2_params.iter() {
+            write!(out, "\t{}", spec.name).unwrap();
+        }
+        writeln!(out).unwrap();
+
+        for (chain_id, result) in &chain_results {
+            for iter_result in &result.iterations {
+                write!(out, "{}\t{}\t{:.2}", chain_id + 1, iter_result.iteration, iter_result.log_likelihood).unwrap();
+                for spec in if2_params.iter() {
+                    write!(out, "\t{:.6}", iter_result.param_means[spec.index]).unwrap();
+                }
+                writeln!(out).unwrap();
+            }
+        }
+
+        if let Some(ref path) = output_path {
+            eprintln!("traces written to {}", path);
         }
     }
 

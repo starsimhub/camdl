@@ -83,6 +83,7 @@ pub fn cmd_eval(args: &[String]) {
     let mut t_every = 1.0_f64;
     let mut at_points: Option<Vec<f64>> = None;
     let mut overrides = std::collections::HashMap::new();
+    let mut output_path: Option<String> = None;
 
     let mut i = 0;
     while i < args.len() {
@@ -93,6 +94,7 @@ pub fn cmd_eval(args: &[String]) {
             "--to"     => { i += 1; t_to = args[i].parse().expect("--to needs a number"); }
             "--every"  => { i += 1; t_every = args[i].parse().expect("--every needs a number"); }
             "--at"     => { i += 1; at_points = Some(args[i].split(',').map(|s| s.trim().parse().expect("--at values must be numbers")).collect()); }
+            "--output" | "-o" => { i += 1; output_path = Some(args[i].clone()); }
             "--param"  => {
                 i += 1;
                 let kv = &args[i];
@@ -190,26 +192,40 @@ pub fn cmd_eval(args: &[String]) {
     let int_s = IntState::new(compiled.int_local_to_global.len());
     let real_s = RealState::new(compiled.real_local_to_global.len());
 
-    // Header
-    print!("t");
-    for (name, _) in &resolved {
-        print!("\t{}", name);
-    }
-    println!();
+    // Output
+    use std::io::Write;
+    let mut out: Box<dyn Write> = match &output_path {
+        Some(path) => {
+            let f = std::fs::File::create(path)
+                .unwrap_or_else(|e| { eprintln!("cannot create {}: {}", path, e); std::process::exit(1); });
+            Box::new(std::io::BufWriter::new(f))
+        }
+        None => Box::new(std::io::BufWriter::new(std::io::stdout().lock())),
+    };
 
-    // Evaluate
+    write!(out, "t").unwrap();
+    for (name, _) in &resolved {
+        write!(out, "\t{}", name).unwrap();
+    }
+    writeln!(out).unwrap();
+
     for &t in &times {
-        print!("{}", t);
+        write!(out, "{}", t).unwrap();
         let ctx = EvalCtx { model: &compiled, int_s: &int_s, real_s: &real_s, params: &params, t };
         for (name, expr) in &resolved {
             match eval_expr(expr, &ctx) {
-                Ok(val) => print!("\t{:.6}", val),
+                Ok(val) => write!(out, "\t{:.6}", val).unwrap(),
                 Err(e) => {
                     eprintln!("error evaluating '{}' at t={}: {:?}", name, t, e);
                     std::process::exit(1);
                 }
             }
         }
-        println!();
+        writeln!(out).unwrap();
+    }
+    drop(out);
+
+    if let Some(ref path) = output_path {
+        eprintln!("eval written to {}", path);
     }
 }

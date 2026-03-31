@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # ── OCaml ──────────────────────────────────────────
+      - uses: ocaml/setup-ocaml@v3
+        with:
+          ocaml-compiler: "5.2"
+          dune-cache: true
+
+      - name: Install OCaml dependencies
+        run: |
+          cd ocaml
+          opam install . --deps-only --with-test --yes
+
+      - name: Build OCaml
+        run: opam exec -- make build-ocaml
+
+      - name: Test OCaml
+        run: opam exec -- bash -c "cd ocaml && dune runtest"
+
+      # ── Rust ───────────────────────────────────────────
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          components: clippy
+
+      - name: Build Rust
+        run: make build-rust
+
+      - name: Clippy
+        run: cd rust && cargo clippy --all-targets -- -D warnings
+
+      - name: Rust unit tests
+        run: cd rust && cargo test
+
+      # ── Integration ────────────────────────────────────
+      - name: Update golden files
+        run: opam exec -- make update-golden
+
+      - name: Check golden files unchanged
+        run: git diff --exit-code ir/golden/ ocaml/golden/
+
+      - name: Integration tests
+        run: opam exec -- make test

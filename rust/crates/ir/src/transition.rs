@@ -20,11 +20,12 @@ pub struct TransitionMetadata {
 /// Rate wrappers (`overdispersed`, `deterministic`) are compiler-recognized
 /// forms in the DSL, not general-purpose functions. They are not composable
 /// — `overdispersed(deterministic(rate), σ²)` is meaningless and rejected.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DrawMethod {
     /// Standard Poisson draw: count ~ Poisson(rate × dt).
     /// Default for all transitions.
+    #[default]
     Poisson,
     /// Multiplicative Gamma-Poisson (He et al. 2010):
     /// G ~ Gamma(dt/σ², σ²/dt), count ~ Poisson(rate × G × dt).
@@ -34,10 +35,6 @@ pub enum DrawMethod {
     /// Used for demographic flows where Poisson noise is unphysical
     /// (e.g., constant immigration into a large population).
     Deterministic,
-}
-
-impl Default for DrawMethod {
-    fn default() -> Self { DrawMethod::Poisson }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

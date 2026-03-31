@@ -110,6 +110,7 @@ fn run_simulate(args: &[String]) {
     let mut scenario_name: Option<String> = None;
     let mut adhoc_enable: Vec<String> = Vec::new();
     let mut adhoc_disable: Vec<String> = Vec::new();
+    let mut output_path: Option<String> = None;
 
     // Collect --param-vec PREFIX=FILE entries for deferred validation after model load
     let mut set_vec_entries: Vec<(String, String)> = Vec::new();
@@ -149,6 +150,7 @@ fn run_simulate(args: &[String]) {
                 let v = parts.next().expect("--table needs NAME=FILE").to_string();
                 table_files.insert(k, v);
             }
+            "--output" | "-o" => { i += 1; output_path = Some(args[i].clone()); }
             s if s.starts_with("--") => { eprintln!("unknown flag: {}", s); usage(); }
             path => { ir_path = Some(path.to_string()); }
         }
@@ -197,7 +199,7 @@ fn run_simulate(args: &[String]) {
         }
     }
 
-    // TSV header
+    // TSV output
     let int_names: Vec<&str> = model.compartments.iter()
         .filter(|c| c.kind == ir::model::CompartmentKind::Integer)
         .map(|c| c.name.as_str()).collect();
@@ -206,18 +208,32 @@ fn run_simulate(args: &[String]) {
         .map(|c| c.name.as_str()).collect();
     let tr_names: Vec<&str> = model.transitions.iter().map(|t| t.name.as_str()).collect();
 
-    print!("t");
-    for n in &int_names  { print!("\t{}", n); }
-    for n in &real_names { print!("\t{}", n); }
-    for n in &tr_names   { print!("\tflow_{}", n); }
-    println!();
+    use std::io::Write;
+    let mut out: Box<dyn Write> = match &output_path {
+        Some(path) => {
+            let f = std::fs::File::create(path)
+                .unwrap_or_else(|e| { eprintln!("cannot create {}: {}", path, e); std::process::exit(1); });
+            Box::new(std::io::BufWriter::new(f))
+        }
+        None => Box::new(std::io::BufWriter::new(std::io::stdout().lock())),
+    };
 
-    // TSV rows
+    write!(out, "t").unwrap();
+    for n in &int_names  { write!(out, "\t{}", n).unwrap(); }
+    for n in &real_names { write!(out, "\t{}", n).unwrap(); }
+    for n in &tr_names   { write!(out, "\tflow_{}", n).unwrap(); }
+    writeln!(out).unwrap();
+
     for snap in &traj.snapshots {
-        print!("{}", snap.t);
-        for &c in &snap.int_state.counts  { print!("\t{}", c); }
-        for &v in &snap.real_state.values { print!("\t{:.4}", v); }
-        for &f in &snap.flows.counts      { print!("\t{}", f); }
-        println!();
+        write!(out, "{}", snap.t).unwrap();
+        for &c in &snap.int_state.counts  { write!(out, "\t{}", c).unwrap(); }
+        for &v in &snap.real_state.values { write!(out, "\t{:.4}", v).unwrap(); }
+        for &f in &snap.flows.counts      { write!(out, "\t{}", f).unwrap(); }
+        writeln!(out).unwrap();
+    }
+    drop(out); // flush BufWriter
+
+    if let Some(ref path) = output_path {
+        eprintln!("trajectory written to {}", path);
     }
 }

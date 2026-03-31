@@ -1,6 +1,6 @@
-/// Deserialise all golden IR files and assert no errors.
-///
-/// Run with:  cd rust && cargo test --test golden_deser
+//! Deserialise all golden IR files and assert no errors.
+//!
+//! Run with:  cd rust && cargo test --test golden_deser
 
 use std::fs;
 use std::path::Path;
