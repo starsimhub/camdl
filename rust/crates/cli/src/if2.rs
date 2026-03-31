@@ -118,6 +118,7 @@ pub fn cmd_if2(args: &[String]) {
     let mut parallel = 0_usize; // 0 = rayon default (num_cpus)
     let mut output_dir: Option<String> = None;
     let mut output_path: Option<String> = None;
+    let mut trace_path: Option<String> = None;
 
     let mut i = 0;
     while i < args.len() {
@@ -142,6 +143,7 @@ pub fn cmd_if2(args: &[String]) {
             "--parallel"   => { i += 1; parallel = args[i].parse().expect("--parallel needs integer"); }
             "--output-dir" => { i += 1; output_dir = Some(args[i].clone()); }
             "--output" | "-o" => { i += 1; output_path = Some(args[i].clone()); }
+            "--trace" => { i += 1; trace_path = Some(args[i].clone()); }
             "--param"      => {
                 i += 1;
                 let kv = &args[i];
@@ -553,6 +555,33 @@ pub fn cmd_if2(args: &[String]) {
         if let Some(ref path) = output_path {
             eprintln!("traces written to {}", path);
         }
+    }
+
+    // ── Write long-format trace with diagnostics ─────────────────────────
+    if let Some(ref path) = trace_path {
+        use std::io::Write as _;
+        let mut f = std::fs::File::create(path)
+            .unwrap_or_else(|e| { eprintln!("cannot create {}: {}", path, e); std::process::exit(1); });
+        writeln!(f, "chain\titeration\tparam\tvalue\trw_sd\tr_k\tloglik").unwrap();
+        for (chain_id, result) in &chain_results {
+            for it in &result.iterations {
+                for spec in if2_params.iter() {
+                    let r_k = it.variance_ratios.iter()
+                        .find(|(idx, _)| *idx == spec.index)
+                        .map(|(_, r)| *r)
+                        .unwrap_or(f64::NAN);
+                    let eff_rw = it.effective_rw_sd.iter()
+                        .find(|(idx, _)| *idx == spec.index)
+                        .map(|(_, r)| *r)
+                        .unwrap_or(f64::NAN);
+                    writeln!(f, "{}\t{}\t{}\t{:.6}\t{:.6}\t{:.4}\t{:.2}",
+                        chain_id + 1, it.iteration, spec.name,
+                        it.param_means[spec.index], eff_rw, r_k,
+                        it.log_likelihood).unwrap();
+                }
+            }
+        }
+        eprintln!("trace diagnostics written to {}", path);
     }
 
     // ── Final MLE from best chain ────────────────────────────────────────
