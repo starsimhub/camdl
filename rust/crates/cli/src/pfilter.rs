@@ -9,7 +9,7 @@
 
 use sim::{
     compiled_model::CompiledModel,
-    chain_binomial::{step_one, ChainBinomialProcess},
+    chain_binomial::step_one,
     inference::{
         bootstrap_filter,
         obs_loglik::negbin_logpmf,

@@ -32,12 +32,6 @@ use std::collections::HashMap;
 use std::io::Write;
 use std::sync::Arc;
 
-/// One profile point: a focal value + IF2 result.
-struct ProfilePoint {
-    focal_value: f64,
-    best_loglik: f64,
-    best_params: Vec<f64>,
-}
 
 pub fn cmd_profile(args: &[String]) {
     let mut ir_path: Option<String> = None;
@@ -191,7 +185,7 @@ pub fn cmd_profile(args: &[String]) {
     }
 
     // Build IF2 param specs (excluding all focal params)
-    let focal_idx_set: std::collections::HashSet<usize> = focal_grids.iter().map(|fg| fg.param_idx).collect();
+    let _focal_idx_set: std::collections::HashSet<usize> = focal_grids.iter().map(|fg| fg.param_idx).collect();
     let if2_params: Vec<IF2Param> = rw_sd_map.iter()
         .filter(|(name, _)| !focal_names.contains(name))
         .map(|(name, &rw_sd)| {

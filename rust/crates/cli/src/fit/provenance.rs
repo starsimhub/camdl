@@ -164,7 +164,7 @@ pub fn verify_content_hash(path: &str) -> Result<ContentVerification, String> {
 
     match declared {
         Some(ref d) if *d == computed => Ok(ContentVerification::Valid),
-        Some(d) => Ok(ContentVerification::Modified { declared: d, computed, params }),
+        Some(d) => Ok(ContentVerification::Modified { declared: d, computed }),
         None => Ok(ContentVerification::NoHash),
     }
 }
@@ -174,7 +174,6 @@ pub enum ContentVerification {
     Modified {
         declared: String,
         computed: String,
-        params: HashMap<String, f64>,
     },
     NoHash,
 }

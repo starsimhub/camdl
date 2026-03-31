@@ -80,7 +80,7 @@ pub fn cmd_fit_status(args: &[String]) {
     });
 }
 
-fn parse_fit_args(args: &[String], needs_starts_from: bool) -> (FitToml, u64, bool) {
+fn parse_fit_args(args: &[String], _needs_starts_from: bool) -> (FitToml, u64, bool) {
     let mut fit_path: Option<String> = None;
     let mut seed = 1_u64;
     let mut force = false;
