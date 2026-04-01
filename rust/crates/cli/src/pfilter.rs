@@ -32,12 +32,14 @@ pub fn cmd_pfilter(args: &[String]) {
     let mut flow_name: Option<String> = None; // --flow recovery → project that transition
     let mut obs_name: Option<String> = None; // --obs NAME → select observation block
     let mut save_final_state: Option<String> = None;
+    let mut n_replicates = 1_usize;
 
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
             "--params"    => { i += 1; params_files.push(args[i].clone()); }
             "--data"      => { i += 1; data_path = Some(args[i].clone()); }
+            "--replicates" => { i += 1; n_replicates = args[i].parse().expect("--replicates needs integer"); }
             "--particles" => { i += 1; n_particles = args[i].parse().expect("--particles needs an integer"); }
             "--dt"        => { i += 1; dt = args[i].parse().expect("--dt needs a number"); }
             "--seed"      => { i += 1; seed = args[i].parse().expect("--seed needs an integer"); }
@@ -248,6 +250,54 @@ pub fn cmd_pfilter(args: &[String]) {
         &obs_model_ir, compiled.clone(), &params,
     );
 
+    // ── Replicates mode: run N independent pfilters, output loglik summary ──
+    if n_replicates > 1 {
+        eprintln!("pfilter: {} replicates × {} particles", n_replicates, n_particles);
+        let mut logliks = Vec::with_capacity(n_replicates);
+        for rep in 0..n_replicates {
+            let rep_seed = seed + rep as u64;
+            let result = bootstrap_filter(
+                &compiled, &params, &observations, n_particles, dt,
+                &step_fn, &project_fn, &*dmeasure_fn, None, None, rep_seed,
+            ).unwrap_or_else(|e| {
+                eprintln!("pfilter replicate {} error: {:?}", rep + 1, e);
+                std::process::exit(1);
+            });
+            logliks.push(result.log_likelihood);
+            if (rep + 1) % 10 == 0 || rep + 1 == n_replicates {
+                eprint!("\r  {}/{} replicates", rep + 1, n_replicates);
+            }
+        }
+        eprintln!();
+
+        let mean_ll = logliks.iter().sum::<f64>() / n_replicates as f64;
+        let var_ll = logliks.iter().map(|&l| (l - mean_ll).powi(2)).sum::<f64>() / (n_replicates - 1) as f64;
+        let sd_ll = var_ll.sqrt();
+
+        eprintln!("loglik = {:.1} ± {:.1} ({} replicates, N={})", mean_ll, sd_ll, n_replicates, n_particles);
+
+        // Output: TSV of seed + loglik, or summary to --output
+        match &output_path {
+            Some(path) => {
+                let mut f = std::fs::File::create(path)
+                    .unwrap_or_else(|e| { eprintln!("cannot create {}: {}", path, e); std::process::exit(1); });
+                writeln!(f, "seed\tloglik").unwrap();
+                for (rep, ll) in logliks.iter().enumerate() {
+                    writeln!(f, "{}\t{:.4}", seed + rep as u64, ll).unwrap();
+                }
+                eprintln!("replicate logliks written to {}", path);
+            }
+            None => {
+                println!("seed\tloglik");
+                for (rep, ll) in logliks.iter().enumerate() {
+                    println!("{}\t{:.4}", seed + rep as u64, ll);
+                }
+            }
+        }
+        return;
+    }
+
+    // ── Single pfilter run ─────────────────────────────────────────────────
     let result = bootstrap_filter(
         &compiled, &params, &observations, n_particles, dt,
         &step_fn, &project_fn, &*dmeasure_fn,
@@ -303,7 +353,7 @@ pub fn cmd_pfilter(args: &[String]) {
         }
     }
 
-    // Write loglik (to stderr when trace occupies stdout, otherwise stdout)
+    // Write loglik
     match &output_path {
         Some(path) => {
             std::fs::write(path, format!("{:.4}\n", result.log_likelihood))

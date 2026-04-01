@@ -109,6 +109,9 @@ pub fn run_validate(fit: &FitToml, starts_from: &str, seed: u64, force: bool) ->
     // Write ESS trace
     write_ess_trace(&stage_dir, &pf_result)?;
 
+    // Write full pfilter trace (predictions + ESS + ll_increments)
+    write_pfilter_trace(&stage_dir, &pf_result, &config)?;
+
     // ── Phase 3: Profile likelihoods ─────────────────────────────────────────
     eprintln!("\nprofiling all {} estimated parameters...", config.if2_params.len());
     let profile_dir = format!("{}/profiles", stage_dir);
@@ -217,7 +220,9 @@ struct PfilterResult {
     ess_mean: f64,
     ess_min: f64,
     ess_trace: Vec<f64>,
+    ll_increments: Vec<f64>,
     obs_times: Vec<f64>,
+    predictions: Option<Vec<sim::inference::particle_filter::PredictionDiag>>,
 }
 
 fn run_pfilter_at_mle(
@@ -241,16 +246,21 @@ fn run_pfilter_at_mle(
     let dmeasure_fn = sim::inference::dmeasure::compile_dmeasure_pf(
         &config.obs_model_ir, config.compiled.clone(), params,
     );
+    let rmeasure_fn = sim::inference::dmeasure::compile_rmeasure_pf(
+        &config.obs_model_ir, config.compiled.clone(), params,
+    );
+    let obs_mean_fn = sim::inference::dmeasure::compile_obs_mean_pf(
+        &config.obs_model_ir, config.compiled.clone(), params,
+    );
 
     let result = bootstrap_filter(
         compiled, params, &observations, n_particles, config.if2_config.dt,
-        &step_fn, &project_fn, &*dmeasure_fn, None, None, seed,
+        &step_fn, &project_fn, &*dmeasure_fn,
+        Some(&*rmeasure_fn), Some(&*obs_mean_fn), seed,
     ).map_err(|e| format!("pfilter error: {:?}", e))?;
 
     let ess_mean = result.ess_trace.iter().sum::<f64>() / result.ess_trace.len() as f64;
     let ess_min = result.ess_trace.iter().cloned().fold(f64::INFINITY, f64::min);
-
-    // Estimate loglik SD via batching (split observations into 10 blocks)
     let loglik_sd = estimate_loglik_sd(&result.ll_increments);
 
     Ok(PfilterResult {
@@ -259,7 +269,9 @@ fn run_pfilter_at_mle(
         ess_mean,
         ess_min,
         ess_trace: result.ess_trace,
+        ll_increments: result.ll_increments,
         obs_times: observations.iter().map(|o| o.time).collect(),
+        predictions: result.predictions,
     })
 }
 
@@ -288,6 +300,33 @@ fn write_ess_trace(dir: &str, pf: &PfilterResult) -> Result<(), String> {
     for (t, ess) in pf.obs_times.iter().zip(&pf.ess_trace) {
         writeln!(f, "{}\t{:.1}", t, ess).unwrap();
     }
+    Ok(())
+}
+
+fn write_pfilter_trace(dir: &str, pf: &PfilterResult, config: &FitRunConfig) -> Result<(), String> {
+    use std::io::Write;
+    let path = format!("{}/pfilter_trace.tsv", dir);
+    let mut f = std::fs::File::create(&path)
+        .map_err(|e| format!("cannot write {}: {}", path, e))?;
+
+    if let Some(ref preds) = pf.predictions {
+        writeln!(f, "time\tll_increment\tESS\tobs_mean\tobs_q05\tobs_q50\tobs_q95\tstate_mean\tstate_q05\tstate_q50\tstate_q95\tobserved").unwrap();
+        for (i, t) in pf.obs_times.iter().enumerate() {
+            let p = &preds[i];
+            let obs_val = config.observations.get(i).map_or(f64::NAN, |o| o.value);
+            writeln!(f, "{}\t{:.4}\t{:.1}\t{:.1}\t{:.0}\t{:.0}\t{:.0}\t{:.1}\t{:.0}\t{:.0}\t{:.0}\t{:.0}",
+                t, pf.ll_increments[i], pf.ess_trace[i],
+                p.obs_mean, p.obs_q05, p.obs_q50, p.obs_q95,
+                p.state_mean, p.state_q05, p.state_q50, p.state_q95,
+                obs_val).unwrap();
+        }
+    } else {
+        writeln!(f, "time\tll_increment\tESS").unwrap();
+        for (i, t) in pf.obs_times.iter().enumerate() {
+            writeln!(f, "{}\t{:.4}\t{:.1}", t, pf.ll_increments[i], pf.ess_trace[i]).unwrap();
+        }
+    }
+    eprintln!("  pfilter trace written to {}", path);
     Ok(())
 }
 
