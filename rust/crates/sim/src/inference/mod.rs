@@ -16,6 +16,7 @@ pub mod resampling;
 pub mod particle_filter;
 pub mod if2;
 pub mod types;
+pub mod dmeasure;
 
 // Re-exports
 pub use types::{ParticleState, ParticleSwarm};

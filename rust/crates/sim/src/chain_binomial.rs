@@ -142,7 +142,7 @@ fn run_chain_binomial(
         // from start-of-step state before any mutations).
         enum ResolvedDraw { Poisson, Deterministic, Overdispersed(f64) }
         let draws: Vec<ResolvedDraw> = {
-            let ctx = EvalCtx { model, int_s: &int_s, real_s: &real_s, params, t };
+            let ctx = EvalCtx { model, int_s: &int_s, real_s: &real_s, params, t , projected: None };
             model.model.transitions.iter()
                 .map(|tr| match &tr.draw_method {
                     ir::transition::DrawMethod::Poisson => Ok(ResolvedDraw::Poisson),
@@ -336,7 +336,7 @@ pub fn step_one(
     // Pre-evaluate draw methods from start-of-step state
     scratch.draws.clear();
     {
-        let ctx = EvalCtx { model, int_s: &scratch.int_s, real_s: &scratch.real_s, params, t };
+        let ctx = EvalCtx { model, int_s: &scratch.int_s, real_s: &scratch.real_s, params, t , projected: None };
         for tr in &model.model.transitions {
             scratch.draws.push(match &tr.draw_method {
                 ir::transition::DrawMethod::Poisson => ResolvedDraw::Poisson,

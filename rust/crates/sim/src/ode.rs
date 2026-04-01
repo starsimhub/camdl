@@ -70,7 +70,7 @@ fn ode_derivs(
 
     // Real compartment derivatives from explicit ODE equations.
     for v in d_real.iter_mut() { *v = 0.0; }
-    let ctx = EvalCtx { model, int_s: &int_s, real_s: &real_s, params, t };
+    let ctx = EvalCtx { model, int_s: &int_s, real_s: &real_s, params, t , projected: None };
     for (eq_idx, eq) in model.model.ode_equations.iter().enumerate() {
         let local = model.ode_real_indices[eq_idx];
         d_real[local] = eval_expr(&eq.derivative, &ctx)?;

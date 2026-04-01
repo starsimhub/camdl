@@ -109,7 +109,7 @@ fn run_tau_leap(
         // σ² expressions from start-of-step state before any mutations).
         enum ResolvedDraw { Poisson, Deterministic, Overdispersed(f64) }
         let draws: Vec<ResolvedDraw> = {
-            let ctx = EvalCtx { model, int_s: &int_s, real_s: &real_s, params, t };
+            let ctx = EvalCtx { model, int_s: &int_s, real_s: &real_s, params, t , projected: None };
             model.model.transitions.iter()
                 .map(|tr| match &tr.draw_method {
                     ir::transition::DrawMethod::Poisson => Ok(ResolvedDraw::Poisson),

@@ -2,14 +2,13 @@
 
 use crate::fit::config::FitToml;
 use crate::fit::state::FitState;
-use crate::fit::runner::{self, FitRunConfig, ObsModelKind};
+use crate::fit::runner::{self, FitRunConfig};
 use crate::fit::provenance::{self, MleMetadata};
 use crate::hashing;
 use sha2::Digest;
 use sim::inference::{
     bootstrap_filter,
     if2::{IF2Config, IF2Param, run_if2},
-    obs_loglik::{negbin_logpmf, discretized_normal_logpmf_tol},
     ParticleState,
 };
 use sim::chain_binomial::step_one;
@@ -226,22 +225,9 @@ fn run_pfilter_at_mle(
     let project_fn = |state: &ParticleState| -> f64 {
         flow_indices.iter().map(|&i| state.flow_accumulators[i] as f64).sum()
     };
-    let dmeasure_fn: Box<dyn Fn(f64, f64) -> f64> = match config.obs_model {
-        ObsModelKind::NegBin => {
-            let rho = config.rho_idx.map_or(1.0, |i| params[i]);
-            let k = config.k_idx.map_or(10.0, |i| params[i]);
-            Box::new(move |proj: f64, obs: f64| negbin_logpmf(obs, rho * proj, k))
-        }
-        ObsModelKind::DiscretizedNormal => {
-            let rho = config.rho_idx.map_or(1.0, |i| params[i]);
-            let psi = config.psi_idx.map_or(0.116, |i| params[i]);
-            let tol = config.tol;
-            Box::new(move |proj: f64, obs: f64| {
-                let mu = rho * proj;
-                discretized_normal_logpmf_tol(obs, mu, mu * (1.0 - rho + psi * psi * mu), tol)
-            })
-        }
-    };
+    let dmeasure_fn = sim::inference::dmeasure::compile_dmeasure_pf(
+        &config.obs_model_ir, config.compiled.clone(), params,
+    );
 
     let result = bootstrap_filter(
         compiled, params, &observations, n_particles, config.if2_config.dt,
@@ -363,22 +349,9 @@ fn run_profiles(
             let project_fn = |state: &ParticleState| -> f64 {
                 flow_indices.iter().map(|&i| state.flow_accumulators[i] as f64).sum()
             };
-            let dmeasure_fn: Box<dyn Fn(f64, f64, &[f64]) -> f64> = match config.obs_model {
-                ObsModelKind::NegBin => Box::new(move |proj: f64, obs: f64, p: &[f64]| {
-                    let rho = config.rho_idx.map_or(1.0, |i| p[i]);
-                    let k = config.k_idx.map_or(10.0, |i| p[i]);
-                    negbin_logpmf(obs, rho * proj, k)
-                }),
-                ObsModelKind::DiscretizedNormal => {
-                    let tol = config.tol;
-                    Box::new(move |proj: f64, obs: f64, p: &[f64]| {
-                        let rho = config.rho_idx.map_or(1.0, |i| p[i]);
-                        let psi = config.psi_idx.map_or(0.116, |i| p[i]);
-                        let mu = rho * proj;
-                        discretized_normal_logpmf_tol(obs, mu, mu * (1.0 - rho + psi * psi * mu), tol)
-                    })
-                }
-            };
+            let dmeasure_fn = sim::inference::dmeasure::compile_dmeasure_if2(
+                &config.obs_model_ir, config.compiled.clone(),
+            );
 
             let chain_seed = seed ^ focal.index as u64 ^ (focal_value.to_bits());
             let result = run_if2(

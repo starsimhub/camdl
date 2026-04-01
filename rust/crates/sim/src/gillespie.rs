@@ -180,7 +180,7 @@ fn run_gillespie(
                 lambda_total = propensities.iter().sum();
             } else {
                 // Time advanced but no state change: re-evaluate time-dependent transitions
-                let ctx = EvalCtx { model, int_s: &int_s, real_s: &real_s, params, t };
+                let ctx = EvalCtx { model, int_s: &int_s, real_s: &real_s, params, t , projected: None };
                 for &tr_idx in &model.time_dep_transitions {
                     let old = propensities[tr_idx];
                     let new_p = eval_one(tr_idx, &ctx)?;
@@ -261,7 +261,7 @@ fn run_gillespie(
             // avoid evaluating the same transition twice when multiple stoich entries
             // share a dependent transition (e.g., N[p] = S[p] + E[p] + ...).
             let mut updated: Vec<usize> = Vec::with_capacity(16);
-            let ctx = EvalCtx { model, int_s: &int_s, real_s: &real_s, params, t };
+            let ctx = EvalCtx { model, int_s: &int_s, real_s: &real_s, params, t , projected: None };
 
             // Compartment-dependent transitions
             for &(local, _) in &model.transition_stoich[fired_idx] {

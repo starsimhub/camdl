@@ -67,7 +67,7 @@ fn apply_intervention(
         match action {
             Action::FractionTransfer(ft) => {
                 // Eval at current state before mutation; ctx scoped to drop before the &mut borrows.
-                let frac = eval_expr(&ft.fraction, &EvalCtx { model, int_s, real_s, params, t })?.clamp(0.0, 1.0);
+                let frac = eval_expr(&ft.fraction, &EvalCtx { model, int_s, real_s, params, t , projected: None })?.clamp(0.0, 1.0);
                 let src_global = *model.comp_index.get(ft.src.as_str())
                     .ok_or_else(|| SimError::UnknownCompartment(ft.src.clone()))?;
                 let dst_global = *model.comp_index.get(ft.dst.as_str())
@@ -91,7 +91,7 @@ fn apply_intervention(
             }
 
             Action::AbsoluteTransfer(at) => {
-                let n = eval_expr(&at.count, &EvalCtx { model, int_s, real_s, params, t })?;
+                let n = eval_expr(&at.count, &EvalCtx { model, int_s, real_s, params, t , projected: None })?;
                 let src_global = *model.comp_index.get(at.src.as_str())
                     .ok_or_else(|| SimError::UnknownCompartment(at.src.clone()))?;
                 let dst_global = *model.comp_index.get(at.dst.as_str())
@@ -115,7 +115,7 @@ fn apply_intervention(
             }
 
             Action::Set(sa) => {
-                let v = eval_expr(&sa.value, &EvalCtx { model, int_s, real_s, params, t })?;
+                let v = eval_expr(&sa.value, &EvalCtx { model, int_s, real_s, params, t , projected: None })?;
                 let global = *model.comp_index.get(sa.compartment.as_str())
                     .ok_or_else(|| SimError::UnknownCompartment(sa.compartment.clone()))?;
                 if let Some(local) = model.global_to_int[global] {

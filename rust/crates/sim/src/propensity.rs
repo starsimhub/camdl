@@ -14,6 +14,9 @@ pub struct EvalCtx<'a> {
     pub real_s: &'a RealState,
     pub params: &'a [f64],
     pub t:      f64,
+    /// Projected observation value — only set when evaluating likelihood Exprs.
+    /// `Expr::Projected` returns this value; errors if None.
+    pub projected: Option<f64>,
 }
 
 /// Evaluate a single expression. No allocations in steady state.
@@ -146,7 +149,9 @@ pub fn eval_expr(expr: &Expr, ctx: &EvalCtx<'_>) -> Result<f64, SimError> {
         }
 
         Expr::Projected(_) => {
-            Err(SimError::Validation("Projected expression is only valid in observation likelihood context".into()))
+            ctx.projected.ok_or_else(|| SimError::Validation(
+                "Projected expression used outside observation likelihood context".into()
+            ))
         }
     }
 }
@@ -225,7 +230,7 @@ pub fn eval_propensities(
     t: f64,
     out: &mut Vec<f64>,
 ) -> Result<(), SimError> {
-    let ctx = EvalCtx { model, int_s, real_s, params, t };
+    let ctx = EvalCtx { model, int_s, real_s, params, t , projected: None };
     out.clear();
     for tr in model.model.transitions.iter() {
         let p = eval_expr(&tr.rate, &ctx)?;

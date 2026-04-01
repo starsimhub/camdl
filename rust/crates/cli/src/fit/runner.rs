@@ -12,7 +12,6 @@ use sim::{
     compiled_model::CompiledModel,
     chain_binomial::step_one,
     inference::{
-        obs_loglik::{negbin_logpmf, discretized_normal_logpmf_tol, DEFAULT_TOL},
         if2::{run_if2_with_progress, IF2Config, IF2Param, IF2Result, Observation, Transform},
         ParticleState,
     },
@@ -33,17 +32,8 @@ pub struct FitRunConfig {
     pub if2_config: IF2Config,
     pub n_chains: usize,
     pub seed: u64,
-    pub obs_model: ObsModelKind,
-    pub rho_idx: Option<usize>,
-    pub k_idx: Option<usize>,
-    pub psi_idx: Option<usize>,
-    pub tol: f64,
-}
-
-#[derive(Clone)]
-pub enum ObsModelKind {
-    NegBin,
-    DiscretizedNormal,
+    /// The observation model from the IR (used to compile dmeasure).
+    pub obs_model_ir: ir::observation::ObservationModel,
 }
 
 /// Result of running multiple IF2 chains.
@@ -138,12 +128,15 @@ impl FitRunConfig {
         // Resolve flow indices from the model's observation blocks
         let flow_indices = resolve_flow_indices(&model, stream_name)?;
 
-        // Determine observation model from IR
-        let obs_model = resolve_obs_model(&model, stream_name)?;
-
-        let rho_idx = compiled.param_index.get("rho").copied();
-        let k_idx = compiled.param_index.get("k").copied();
-        let psi_idx = compiled.param_index.get("psi").copied();
+        // Get observation model from IR
+        let obs_model_ir = model.observations.iter()
+            .find(|o| o.name == *stream_name)
+            .cloned()
+            .ok_or_else(|| format!(
+                "no observation block named '{}'. Available: {}",
+                stream_name,
+                model.observations.iter().map(|o| o.name.as_str()).collect::<Vec<_>>().join(", ")
+            ))?;
 
         let config = IF2Config {
             n_particles,
@@ -164,11 +157,7 @@ impl FitRunConfig {
             if2_config: config,
             n_chains,
             seed,
-            obs_model,
-            rho_idx,
-            k_idx,
-            psi_idx,
-            tol: DEFAULT_TOL,
+            obs_model_ir,
         })
     }
 }
@@ -295,24 +284,9 @@ pub fn run_quick_pfilter(config: &FitRunConfig, params: &[f64], n_particles: usi
     let project_fn = |state: &ParticleState| -> f64 {
         flow_indices.iter().map(|&i| state.flow_accumulators[i] as f64).sum()
     };
-    let dmeasure_fn: Box<dyn Fn(f64, f64) -> f64> = match config.obs_model {
-        ObsModelKind::NegBin => {
-            let rho = config.rho_idx.map_or(1.0, |i| params[i]);
-            let k = config.k_idx.map_or(10.0, |i| params[i]);
-            Box::new(move |proj: f64, obs: f64| {
-                sim::inference::obs_loglik::negbin_logpmf(obs, rho * proj, k)
-            })
-        }
-        ObsModelKind::DiscretizedNormal => {
-            let rho = config.rho_idx.map_or(1.0, |i| params[i]);
-            let psi = config.psi_idx.map_or(0.116, |i| params[i]);
-            let tol = config.tol;
-            Box::new(move |proj: f64, obs: f64| {
-                let mu = rho * proj;
-                sim::inference::obs_loglik::discretized_normal_logpmf_tol(obs, mu, mu * (1.0 - rho + psi * psi * mu), tol)
-            })
-        }
-    };
+    let dmeasure_fn = sim::inference::dmeasure::compile_dmeasure_pf(
+        &config.obs_model_ir, config.compiled.clone(), params,
+    );
 
     match particle_filter::bootstrap_filter(
         compiled, params, &observations, n_particles, config.if2_config.dt,
@@ -428,23 +402,6 @@ fn resolve_flow_indices(model: &ir::Model, stream_name: &str) -> Result<Vec<usiz
     }
 }
 
-/// Resolve observation model kind from the IR.
-fn resolve_obs_model(model: &ir::Model, stream_name: &str) -> Result<ObsModelKind, String> {
-    if let Some(obs) = model.observations.iter().find(|o| o.name == *stream_name) {
-        match &obs.likelihood {
-            ir::observation::Likelihood::NegBinomial(_) => Ok(ObsModelKind::NegBin),
-            ir::observation::Likelihood::Normal(_) => Ok(ObsModelKind::DiscretizedNormal),
-            other => Err(format!(
-                "observation '{}' uses unsupported likelihood {:?}. Supported: neg_binomial, normal.",
-                stream_name, other
-            )),
-        }
-    } else {
-        // Default to negbin if no observation block found
-        Ok(ObsModelKind::NegBin)
-    }
-}
-
 /// Run one IF2 chain (called from thread::scope).
 fn run_one_chain(
     chain_id: usize,
@@ -461,22 +418,10 @@ fn run_one_chain(
     let project_fn = |state: &ParticleState| -> f64 {
         config.flow_indices.iter().map(|&i| state.flow_accumulators[i] as f64).sum()
     };
-    let dmeasure_fn: Box<dyn Fn(f64, f64, &[f64]) -> f64> = match config.obs_model {
-        ObsModelKind::NegBin => Box::new(move |proj: f64, obs: f64, p: &[f64]| {
-            let rho = config.rho_idx.map_or(1.0, |i| p[i]);
-            let k = config.k_idx.map_or(10.0, |i| p[i]);
-            negbin_logpmf(obs, rho * proj, k)
-        }),
-        ObsModelKind::DiscretizedNormal => {
-            let tol = config.tol;
-            Box::new(move |proj: f64, obs: f64, p: &[f64]| {
-                let rho = config.rho_idx.map_or(1.0, |i| p[i]);
-                let psi = config.psi_idx.map_or(0.116, |i| p[i]);
-                let mu = rho * proj;
-                discretized_normal_logpmf_tol(obs, mu, mu * (1.0 - rho + psi * psi * mu), tol)
-            })
-        }
-    };
+    // Compile dmeasure from the IR observation model
+    let dmeasure_fn = sim::inference::dmeasure::compile_dmeasure_if2(
+        &config.obs_model_ir, config.compiled.clone(),
+    );
 
     let progress_cb = |iter: usize, loglik: f64| {
         if let Some(bar) = pb {

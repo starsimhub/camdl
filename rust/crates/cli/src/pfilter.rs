@@ -12,7 +12,6 @@ use sim::{
     chain_binomial::step_one,
     inference::{
         bootstrap_filter,
-        obs_loglik::negbin_logpmf,
         particle_filter::Observation,
     },
 };
@@ -30,9 +29,8 @@ pub fn cmd_pfilter(args: &[String]) {
     let mut overrides: HashMap<String, f64> = HashMap::new();
     let mut scenario_name: Option<String> = None;
     let mut adhoc_enable: Vec<String> = Vec::new();
-    let mut obs_model = "negbin".to_string(); // "negbin" or "discretized_normal"
-    let mut tol = sim::inference::obs_loglik::DEFAULT_TOL;
     let mut flow_name: Option<String> = None; // --flow recovery → project that transition
+    let mut obs_name: Option<String> = None; // --obs NAME → select observation block
     let mut save_final_state: Option<String> = None;
 
     let mut i = 0;
@@ -55,8 +53,7 @@ pub fn cmd_pfilter(args: &[String]) {
             "--output" | "-o" => { i += 1; output_path = Some(args[i].clone()); }
             "--scenario"  => { i += 1; scenario_name = Some(args[i].clone()); }
             "--enable"    => { i += 1; adhoc_enable.push(args[i].clone()); }
-            "--obs-model" => { i += 1; obs_model = args[i].clone(); }
-            "--tol"       => { i += 1; tol = args[i].parse().expect("--tol needs a number"); }
+            "--obs"       => { i += 1; obs_name = Some(args[i].clone()); }
             "--flow"      => { i += 1; flow_name = Some(args[i].clone()); }
             "--save-final-state" => { i += 1; save_final_state = Some(args[i].clone()); }
             "--param"     => {
@@ -156,7 +153,7 @@ pub fn cmd_pfilter(args: &[String]) {
     // Find the observation projection: sum of flows for the specified transition(s).
     // --flow NAME: project incidence of that transition (e.g., --flow recovery).
     // Default: project all transitions with origin_kind = "transmission".
-    let flow_indices: Vec<usize> = if let Some(ref name) = flow_name {
+    let mut flow_indices: Vec<usize> = if let Some(ref name) = flow_name {
         let indices: Vec<usize> = model.transitions.iter().enumerate()
             .filter(|(_, tr)| tr.name == *name || tr.name.starts_with(&format!("{}_", name)))
             .map(|(i, _)| i)
@@ -185,12 +182,52 @@ pub fn cmd_pfilter(args: &[String]) {
         }
     };
 
-    // Get observation model parameters
-    let rho_idx = compiled.param_index.get("rho").copied();
-    let k_idx = compiled.param_index.get("k").copied();
-    let psi_idx = compiled.param_index.get("psi").copied();
+    // Find observation model from the IR
+    let obs_model_ir = if let Some(ref name) = obs_name {
+        model.observations.iter().find(|o| o.name == *name)
+            .cloned()
+            .unwrap_or_else(|| {
+                eprintln!("error: no observation block '{}'. Available: {}",
+                    name, model.observations.iter().map(|o| o.name.as_str()).collect::<Vec<_>>().join(", "));
+                std::process::exit(1);
+            })
+    } else if model.observations.len() == 1 {
+        model.observations[0].clone()
+    } else if !model.observations.is_empty() {
+        eprintln!("error: model has {} observation blocks. Use --obs NAME to select one:", model.observations.len());
+        for o in &model.observations { eprintln!("  {}", o.name); }
+        std::process::exit(1);
+    } else {
+        eprintln!("error: model has no observations block. Cannot run pfilter without an observation model.");
+        std::process::exit(1);
+    };
 
-    eprintln!("pfilter: obs_model={}", obs_model);
+    // Override flow indices from obs model projection if --flow not specified
+    if flow_name.is_none() {
+        if let ir::observation::Projection::CumulativeFlow(ref name) = obs_model_ir.projection {
+            let obs_flow_indices: Vec<usize> = model.transitions.iter().enumerate()
+                .filter(|(_, tr)| tr.name == *name || tr.name.starts_with(&format!("{}_", name)))
+                .map(|(i, _)| i)
+                .collect();
+            if !obs_flow_indices.is_empty() {
+                flow_indices = obs_flow_indices;
+                eprintln!("pfilter: projecting incidence({}) from observation model", name);
+            }
+        }
+    }
+
+    eprintln!("pfilter: obs_model={}, likelihood={}", obs_model_ir.name,
+        match &obs_model_ir.likelihood {
+            ir::observation::Likelihood::NegBinomial(_) => "neg_binomial",
+            ir::observation::Likelihood::Normal(_) => "normal",
+            ir::observation::Likelihood::Poisson(_) => "poisson",
+            ir::observation::Likelihood::Binomial(_) => "binomial",
+            ir::observation::Likelihood::BetaBinomial(_) => "beta_binomial",
+            ir::observation::Likelihood::Bernoulli(_) => "bernoulli",
+        });
+
+    // Compile dmeasure from IR observation model
+    let compiled = std::sync::Arc::new(compiled);
 
     // Run particle filter
     let step_fn = |state: &mut sim::inference::ParticleState, t: f64, step_dt: f64, rng: &mut sim::ekrng::StatefulRng, scratch: &mut sim::chain_binomial::StepScratch| -> Result<(), sim::error::SimError> {
@@ -201,30 +238,9 @@ pub fn cmd_pfilter(args: &[String]) {
         flow_indices.iter().map(|&i| state.flow_accumulators[i] as f64).sum()
     };
 
-    let dmeasure_fn: Box<dyn Fn(f64, f64) -> f64> = match obs_model.as_str() {
-        "negbin" => {
-            let rho = rho_idx.map_or(1.0, |i| params[i]);
-            let k = k_idx.map_or(10.0, |i| params[i]);
-            Box::new(move |projected: f64, observed: f64| -> f64 {
-                let mu = rho * projected;
-                negbin_logpmf(observed, mu, k)
-            })
-        }
-        "discretized_normal" => {
-            use sim::inference::obs_loglik::discretized_normal_logpmf_tol;
-            let rho = rho_idx.map_or(1.0, |i| params[i]);
-            let psi = psi_idx.map_or(0.116, |i| params[i]);
-            Box::new(move |projected: f64, observed: f64| -> f64 {
-                let mu = rho * projected;
-                let variance = mu * (1.0 - rho + psi * psi * mu);
-                discretized_normal_logpmf_tol(observed, mu, variance, tol)
-            })
-        }
-        other => {
-            eprintln!("error: unknown --obs-model '{}'. Use 'negbin' or 'discretized_normal'", other);
-            std::process::exit(1);
-        }
-    };
+    let dmeasure_fn = sim::inference::dmeasure::compile_dmeasure_pf(
+        &obs_model_ir, compiled.clone(), &params,
+    );
 
     let result = bootstrap_filter(
         &compiled, &params, &observations, n_particles, dt,

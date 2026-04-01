@@ -539,7 +539,7 @@ impl CompiledModel {
                 }
             }
             InitialConditions::Parameterized(map) => {
-                let ctx = EvalCtx { model: self, int_s: &zero_int, real_s: &zero_real, params, t: 0.0 };
+                let ctx = EvalCtx { model: self, int_s: &zero_int, real_s: &zero_real, params, t: 0.0 , projected: None };
                 for (name, expr) in map {
                     let global = self.comp_index.get(name.as_str())
                         .copied()
