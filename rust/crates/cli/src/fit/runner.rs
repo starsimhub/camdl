@@ -68,17 +68,51 @@ impl FitRunConfig {
     ) -> Result<Self, String> {
         // Load model
         let model_path = &fit.fit.model;
-        let (model, model_ir_json) = load_model(model_path)?;
+        let (mut model, model_ir_json) = load_model(model_path)?;
+
+        // Apply parameter values from fit.toml BEFORE compiling, so that
+        // parameters without model defaults get values.
+        // Priority: fit_state start_values > estimate start > fixed value > model default
+        for (name, spec) in &fit.estimate {
+            if let Some(start) = spec.start {
+                if let Some(p) = model.parameters.iter_mut().find(|p| p.name == *name) {
+                    if p.value.is_none() { p.value = Some(start); }
+                }
+            }
+        }
+        for (name, val) in &fit.fixed {
+            if let Some(v) = val.as_float().or_else(|| val.as_integer().map(|i| i as f64)) {
+                if let Some(p) = model.parameters.iter_mut().find(|p| p.name == *name) {
+                    if p.value.is_none() { p.value = Some(v); }
+                }
+            }
+        }
 
         let compiled = CompiledModel::new(model.clone())
             .map_err(|e| format!("compile error: {:?}", e))?;
         let mut base_params = compiled.default_params.clone();
 
-        // Apply start overrides from fit_state if provided
+        // Apply start overrides from fit_state if provided (overrides model defaults)
         if let Some(state) = prior_state {
             for (name, &value) in &state.start_values {
                 if let Some(&idx) = compiled.param_index.get(name.as_str()) {
                     base_params[idx] = value;
+                }
+            }
+        }
+        // Apply estimate start values to base_params (may override model defaults)
+        for (name, spec) in &fit.estimate {
+            if let Some(start) = spec.start {
+                if let Some(&idx) = compiled.param_index.get(name.as_str()) {
+                    base_params[idx] = start;
+                }
+            }
+        }
+        // Apply fixed numeric values to base_params
+        for (name, val) in &fit.fixed {
+            if let Some(v) = val.as_float().or_else(|| val.as_integer().map(|i| i as f64)) {
+                if let Some(&idx) = compiled.param_index.get(name.as_str()) {
+                    base_params[idx] = v;
                 }
             }
         }
