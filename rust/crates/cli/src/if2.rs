@@ -357,7 +357,7 @@ pub fn cmd_if2(args: &[String]) {
         let explicit_rw_sd = rw_sd_map.get(name).and_then(|v| *v);
         let rw_sd = explicit_rw_sd.unwrap_or_else(|| {
             any_auto = true;
-            crate::fit::runner::auto_rw_sd_from_bounds_pub(lower, upper, &transform)
+            crate::fit::runner::auto_rw_sd_from_value_pub(params[idx], lower, upper, &transform)
         });
 
         if2_params.push(IF2Param {

@@ -210,7 +210,7 @@ fn build_if2_params(
             .and_then(|s| s.rw_sd.get(name))
             .copied()
             .or(spec.rw_sd)
-            .unwrap_or_else(|| auto_rw_sd_from_bounds(lower, upper, &transform));
+            .unwrap_or_else(|| auto_rw_sd_from_value(base_params[idx], lower, upper, &transform));
 
         // Determine initial value
         let initial = if random_starts {
@@ -290,48 +290,46 @@ pub fn run_quick_pfilter(config: &FitRunConfig, params: &[f64], n_particles: usi
 }
 
 /// Public wrapper for use by `camdl if2 --rw-sd auto`.
-pub fn auto_rw_sd_from_bounds_pub(lower: f64, upper: f64, transform: &Transform) -> f64 {
-    auto_rw_sd_from_bounds(lower, upper, transform)
+pub fn auto_rw_sd_from_value_pub(current_value: f64, lower: f64, upper: f64, transform: &Transform) -> f64 {
+    auto_rw_sd_from_value(current_value, lower, upper, transform)
 }
 
-/// Auto-compute rw_sd from parameter bounds on the transformed scale.
+/// Auto-compute rw_sd from current value and bounds using a fixed perturbation
+/// on the transformed scale, converted to natural scale via the delta method.
 ///
-/// For each transform, compute (transformed_hi - transformed_lo) / 6
-/// then convert back to natural scale at the midpoint.
+/// Uses 0.1 on the transformed scale → ~10% perturbation for log-transformed
+/// parameters, proportional to the local logit gradient for logit-transformed.
+/// This matches how IF2Param::transformed_sd converts rw_sd internally.
 ///
-/// - Log:   rw_sd = (ln(hi) - ln(lo)) / 6, natural ≈ midpoint × transformed_sd
-/// - Logit: rw_sd = (logit(hi) - logit(lo)) / 6, natural ≈ midpoint × (1 - midpoint) × range × transformed_sd
-/// - None:  rw_sd = (hi - lo) / 6
-///
-/// The /6 factor gives perturbations that explore ~middle third of the range,
-/// appropriate for scout's broad exploration phase.
-fn auto_rw_sd_from_bounds(lower: f64, upper: f64, transform: &Transform) -> f64 {
+/// Previous implementation used `(hi - lo) / 6` which produced absurd values
+/// for wide-range parameters (e.g., S0 in [1000, 10M] → rw_sd = 19M).
+fn auto_rw_sd_from_value(current_value: f64, lower: f64, upper: f64, transform: &Transform) -> f64 {
+    const TRANSFORMED_SD: f64 = 0.1;
+
     match transform {
         Transform::Log => {
-            let lo = lower.max(1e-300);
-            let hi = if upper.is_finite() { upper } else { lo * 1000.0 };
-            let transformed_range = hi.ln() - lo.ln();
-            let transformed_sd = transformed_range / 6.0;
-            // Convert back to natural scale at geometric midpoint
-            let midpoint = (lo * hi).sqrt();
-            midpoint * transformed_sd
+            // d/dz[e^z] = e^z = current_value
+            // 0.1 on log scale → ~10% perturbation
+            current_value.abs().max(1e-10) * TRANSFORMED_SD
         }
         Transform::Logit => {
-            // Scaled logit: maps [lower, upper] to (-inf, inf)
+            // Scaled logit on [lower, upper]:
+            // d/dz = (x - lo)(hi - x) / (hi - lo)
             let range = upper - lower;
-            let lo_p = ((lower - lower) / range).max(1e-10); // → ~0
-            let hi_p = ((upper - lower) / range).min(1.0 - 1e-10); // → ~1
-            let logit_lo = (lo_p / (1.0 - lo_p)).ln();
-            let logit_hi = (hi_p / (1.0 - hi_p)).ln();
-            let transformed_sd = (logit_hi - logit_lo) / 6.0;
-            // Convert to natural scale: d/dz [lo + range/(1+e^-z)] at midpoint
-            // At z=0 (midpoint): derivative = range/4
-            range / 4.0 * transformed_sd
+            if range < 1e-10 { return current_value.abs().max(1e-10) * TRANSFORMED_SD; }
+            let x = current_value.clamp(lower + 1e-10 * range, upper - 1e-10 * range);
+            let deriv = (x - lower) * (upper - x) / range;
+            deriv * TRANSFORMED_SD
         }
         Transform::None => {
-            let lo = if lower.is_finite() { lower } else { -1e6 };
-            let hi = if upper.is_finite() { upper } else { 1e6 };
-            (hi - lo) / 6.0
+            let v = current_value.abs();
+            if v > 1e-10 {
+                v * TRANSFORMED_SD
+            } else {
+                let lo = if lower.is_finite() { lower } else { -1e6 };
+                let hi = if upper.is_finite() { upper } else { 1e6 };
+                (hi - lo) / 200.0
+            }
         }
     }
 }
