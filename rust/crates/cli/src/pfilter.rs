@@ -241,10 +241,18 @@ pub fn cmd_pfilter(args: &[String]) {
     let dmeasure_fn = sim::inference::dmeasure::compile_dmeasure_pf(
         &obs_model_ir, compiled.clone(), &params,
     );
+    let rmeasure_fn = sim::inference::dmeasure::compile_rmeasure_pf(
+        &obs_model_ir, compiled.clone(), &params,
+    );
+    let obs_mean_fn = sim::inference::dmeasure::compile_obs_mean_pf(
+        &obs_model_ir, compiled.clone(), &params,
+    );
 
     let result = bootstrap_filter(
         &compiled, &params, &observations, n_particles, dt,
-        &step_fn, &project_fn, &*dmeasure_fn, seed,
+        &step_fn, &project_fn, &*dmeasure_fn,
+        Some(&*rmeasure_fn), Some(&*obs_mean_fn),
+        seed,
     ).unwrap_or_else(|e| {
         eprintln!("pfilter error: {:?}", e);
         std::process::exit(1);
@@ -260,12 +268,14 @@ pub fn cmd_pfilter(args: &[String]) {
                 .unwrap_or_else(|e| { eprintln!("cannot create {}: {}", path, e); std::process::exit(1); });
             Box::new(std::io::BufWriter::new(f))
         };
-        writeln!(out, "time\tll_increment\tESS\tpred_mean\tpred_q05\tpred_q50\tpred_q95\tobserved").unwrap();
+        writeln!(out, "time\tll_increment\tESS\tobs_mean\tobs_q05\tobs_q50\tobs_q95\tstate_mean\tstate_q05\tstate_q50\tstate_q95\tobserved").unwrap();
         for (i, obs) in observations.iter().enumerate() {
             let p = &result.predictions[i];
-            writeln!(out, "{}\t{:.4}\t{:.1}\t{:.1}\t{:.0}\t{:.0}\t{:.0}\t{:.0}",
+            writeln!(out, "{}\t{:.4}\t{:.1}\t{:.1}\t{:.0}\t{:.0}\t{:.0}\t{:.1}\t{:.0}\t{:.0}\t{:.0}\t{:.0}",
                 obs.time, result.ll_increments[i], result.ess_trace[i],
-                p.mean, p.q05, p.q50, p.q95, obs.value).unwrap();
+                p.obs_mean, p.obs_q05, p.obs_q50, p.obs_q95,
+                p.state_mean, p.state_q05, p.state_q50, p.state_q95,
+                obs.value).unwrap();
         }
         drop(out);
         if path != "-" {

@@ -23,10 +23,17 @@ pub struct Observation {
 /// One-step-ahead prediction diagnostics at a single observation time.
 #[derive(Clone, Debug)]
 pub struct PredictionDiag {
-    pub mean: f64,
-    pub q05: f64,
-    pub q50: f64,
-    pub q95: f64,
+    /// Observation-space: E[y | projected] averaged across particles.
+    pub obs_mean: f64,
+    /// Observation-space quantiles (process + observation noise).
+    pub obs_q05: f64,
+    pub obs_q50: f64,
+    pub obs_q95: f64,
+    /// Latent state quantiles (process uncertainty only).
+    pub state_mean: f64,
+    pub state_q05: f64,
+    pub state_q50: f64,
+    pub state_q95: f64,
 }
 
 /// Result of a particle filter run.
@@ -56,6 +63,14 @@ pub type StepFn<'a> = dyn Fn(&mut ParticleState, f64, f64, &mut StatefulRng, &mu
 /// Takes (projected_value, observed_value) → log p(y | projected, θ).
 pub type DmeasureFn<'a> = dyn Fn(f64, f64) -> f64 + 'a;
 
+/// Signature for observation model sampler (rmeasure).
+/// Takes (projected_value, rng) → observation draw.
+pub type RmeasureFn<'a> = dyn Fn(f64, &mut StatefulRng) -> f64 + 'a;
+
+/// Signature for observation model mean (no sampling).
+/// Takes (projected_value) → E[y | projected, θ].
+pub type ObsMeanFn<'a> = dyn Fn(f64) -> f64 + 'a;
+
 /// Run the bootstrap particle filter.
 ///
 /// # Arguments
@@ -77,6 +92,8 @@ pub fn bootstrap_filter(
     step_fn: &StepFn,
     project_fn: &dyn Fn(&ParticleState) -> f64,
     dmeasure_fn: &DmeasureFn,
+    rmeasure_fn: Option<&RmeasureFn>,
+    obs_mean_fn: Option<&ObsMeanFn>,
     seed: u64,
 ) -> Result<PFilterResult, SimError> {
     let n_int = model.int_local_to_global.len();
@@ -137,6 +154,40 @@ pub fn bootstrap_filter(
         // Advance shared time to match
         while t < obs.time - 1e-10 { t += dt.min(obs.time - t); }
 
+        // Compute projections (before weighting — prior predictive)
+        let projections: Vec<f64> = swarm.states.iter().map(|s| project_fn(s)).collect();
+
+        // One-step-ahead prediction diagnostics (PRIOR predictive — equal weights)
+        // State quantiles: process uncertainty only
+        let equal_lw = vec![0.0_f64; n_particles]; // log(1/N) for all — equal weights
+        let state_diag = weighted_prediction_diag(&projections, &equal_lw);
+
+        // Observation-space predictions: process + observation noise
+        let obs_diag = if let (Some(rmfn), Some(omfn)) = (rmeasure_fn, obs_mean_fn) {
+            // Draw one obs sample per particle, compute quantiles
+            let obs_draws: Vec<f64> = projections.iter().enumerate()
+                .map(|(i, &proj)| rmfn(proj, &mut rngs[i]))
+                .collect();
+            let obs_q = weighted_prediction_diag(&obs_draws, &equal_lw);
+            // obs_mean: analytic mean of observation model, averaged across particles
+            let obs_mean = projections.iter().map(|&p| omfn(p)).sum::<f64>() / n_particles as f64;
+            (obs_mean, obs_q.state_q05, obs_q.state_q50, obs_q.state_q95)
+        } else {
+            // Fallback: use state quantiles (no rmeasure available)
+            (state_diag.state_mean, state_diag.state_q05, state_diag.state_q50, state_diag.state_q95)
+        };
+
+        predictions.push(PredictionDiag {
+            obs_mean: obs_diag.0,
+            obs_q05: obs_diag.1,
+            obs_q50: obs_diag.2,
+            obs_q95: obs_diag.3,
+            state_mean: state_diag.state_mean,
+            state_q05: state_diag.state_q05,
+            state_q50: state_diag.state_q50,
+            state_q95: state_diag.state_q95,
+        });
+
         // Compute log-weights: log p(y_k | projected_i)
         for (i, state) in swarm.states.iter().enumerate() {
             let projected = project_fn(state);
@@ -148,11 +199,6 @@ pub fn bootstrap_filter(
         total_loglik += ll_increment;
         ll_increments.push(ll_increment);
         ess_trace.push(swarm.ess());
-
-        // One-step-ahead prediction diagnostics (before resampling).
-        // Compute weighted quantiles of the projected quantity across particles.
-        let projections: Vec<f64> = swarm.states.iter().map(|s| project_fn(s)).collect();
-        predictions.push(weighted_prediction_diag(&projections, &swarm.log_weights));
 
         // Resample via double-buffer (no allocation)
         let indices = systematic_resample(&swarm.log_weights, &mut resample_rng);
@@ -185,7 +231,10 @@ pub fn bootstrap_filter(
 fn weighted_prediction_diag(values: &[f64], log_weights: &[f64]) -> PredictionDiag {
     let n = values.len();
     if n == 0 {
-        return PredictionDiag { mean: 0.0, q05: 0.0, q50: 0.0, q95: 0.0 };
+        return PredictionDiag {
+            obs_mean: 0.0, obs_q05: 0.0, obs_q50: 0.0, obs_q95: 0.0,
+            state_mean: 0.0, state_q05: 0.0, state_q50: 0.0, state_q95: 0.0,
+        };
     }
 
     // Normalize weights
@@ -216,9 +265,7 @@ fn weighted_prediction_diag(values: &[f64], log_weights: &[f64]) -> PredictionDi
     };
 
     PredictionDiag {
-        mean,
-        q05: quantile(0.05),
-        q50: quantile(0.50),
-        q95: quantile(0.95),
+        obs_mean: mean, obs_q05: quantile(0.05), obs_q50: quantile(0.50), obs_q95: quantile(0.95),
+        state_mean: mean, state_q05: quantile(0.05), state_q50: quantile(0.50), state_q95: quantile(0.95),
     }
 }

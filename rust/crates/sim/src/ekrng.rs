@@ -51,6 +51,9 @@ impl EkRng {
 pub struct StatefulRng(ChaCha8Rng);
 
 impl StatefulRng {
+    /// Access the underlying RNG for use with rand_distr distributions.
+    pub fn inner_mut(&mut self) -> &mut ChaCha8Rng { &mut self.0 }
+
     pub fn new(seed: u64) -> Self {
         // Use a different derivation than EkRng so seeds don't collide
         let seed_bytes = expand_u64_to_seed(seed.wrapping_add(0xdeadbeef_cafebabe));

@@ -5,10 +5,13 @@
 
 use std::sync::Arc;
 use crate::compiled_model::CompiledModel;
+use crate::ekrng::StatefulRng;
 use crate::propensity::{eval_expr, EvalCtx};
 use crate::state::{IntState, RealState};
 use crate::inference::obs_loglik::{negbin_logpmf, discretized_normal_logpmf_tol, poisson_logpmf, DEFAULT_TOL};
 use ir::observation::{Likelihood, ObservationModel};
+use rand::prelude::Distribution;
+use rand_distr::{Gamma, Normal};
 
 /// Build a dmeasure closure for IF2 (per-particle params).
 /// Takes (projected, observed, params) → log-likelihood.
@@ -94,6 +97,128 @@ fn eval_likelihood(
         Likelihood::Bernoulli(b) => {
             let p_val = eval_expr(&b.p, &ctx(projected)).unwrap_or(0.5);
             if observed > 0.5 { p_val.max(1e-300).ln() } else { (1.0 - p_val).max(1e-300).ln() }
+        }
+    }
+}
+
+// ── rmeasure: observation model sampler ─────────────────────────────────────
+
+/// Build an rmeasure closure for pfilter (fixed params).
+/// Takes (projected, rng) → observation draw.
+pub fn compile_rmeasure_pf(
+    obs_model: &ObservationModel,
+    compiled: Arc<CompiledModel>,
+    params: &[f64],
+) -> Box<dyn Fn(f64, &mut StatefulRng) -> f64> {
+    let likelihood = obs_model.likelihood.clone();
+    let params = params.to_vec();
+    let n_int = compiled.int_local_to_global.len();
+    let n_real = compiled.real_local_to_global.len();
+
+    Box::new(move |projected: f64, rng: &mut StatefulRng| {
+        let int_s = IntState::new(n_int);
+        let real_s = RealState::new(n_real);
+        sample_obs(&likelihood, projected, &params, &compiled, &int_s, &real_s, rng)
+    })
+}
+
+/// Build a function that computes the observation model MEAN (no sampling).
+/// Takes (projected) → E[y | projected, params].
+/// Used for obs_mean in prediction diagnostics.
+pub fn compile_obs_mean_pf(
+    obs_model: &ObservationModel,
+    compiled: Arc<CompiledModel>,
+    params: &[f64],
+) -> Box<dyn Fn(f64) -> f64> {
+    let likelihood = obs_model.likelihood.clone();
+    let params = params.to_vec();
+    let n_int = compiled.int_local_to_global.len();
+    let n_real = compiled.real_local_to_global.len();
+
+    Box::new(move |projected: f64| {
+        let int_s = IntState::new(n_int);
+        let real_s = RealState::new(n_real);
+        eval_obs_mean(&likelihood, projected, &params, &compiled, &int_s, &real_s)
+    })
+}
+
+/// Draw one sample from the observation model at a given projected value.
+fn sample_obs(
+    likelihood: &Likelihood,
+    projected: f64,
+    params: &[f64],
+    compiled: &CompiledModel,
+    int_s: &IntState,
+    real_s: &RealState,
+    rng: &mut StatefulRng,
+) -> f64 {
+    let ctx = |proj: f64| EvalCtx {
+        model: compiled, int_s, real_s, params, t: 0.0, projected: Some(proj),
+    };
+
+    match likelihood {
+        Likelihood::NegBinomial(nb) => {
+            let mean = eval_expr(&nb.mean, &ctx(projected)).unwrap_or(projected);
+            let k = eval_expr(&nb.dispersion, &ctx(projected)).unwrap_or(10.0);
+            if mean <= 0.0 || k <= 0.0 { return 0.0; }
+            // NegBin via Gamma-Poisson: G ~ Gamma(k, mean/k), Y ~ Poisson(G)
+            let g = Gamma::new(k, mean / k).unwrap().sample(rng.inner_mut());
+            rng.poisson(g) as f64
+        }
+        Likelihood::Normal(n) => {
+            let mean = eval_expr(&n.mean, &ctx(projected)).unwrap_or(projected);
+            let sd = eval_expr(&n.sd, &ctx(projected)).unwrap_or(1.0);
+            let draw = Normal::new(mean, sd.max(1e-10)).unwrap().sample(rng.inner_mut());
+            draw.round().max(0.0) // discretized, non-negative
+        }
+        Likelihood::Poisson(p) => {
+            let rate = eval_expr(&p.rate, &ctx(projected)).unwrap_or(projected);
+            rng.poisson(rate) as f64
+        }
+        Likelihood::Binomial(b) => {
+            let n_val = eval_expr(&b.n, &ctx(projected)).unwrap_or(projected);
+            let p_val = eval_expr(&b.p, &ctx(projected)).unwrap_or(0.5);
+            rng.binomial(n_val.round().max(0.0) as u64, p_val.clamp(0.0, 1.0)) as f64
+        }
+        Likelihood::BetaBinomial(_) => 0.0, // not yet implemented
+        Likelihood::Bernoulli(b) => {
+            let p_val = eval_expr(&b.p, &ctx(projected)).unwrap_or(0.5);
+            if rng.uniform() < p_val { 1.0 } else { 0.0 }
+        }
+    }
+}
+
+/// Compute E[y | projected, params] — the observation model mean, no sampling.
+fn eval_obs_mean(
+    likelihood: &Likelihood,
+    projected: f64,
+    params: &[f64],
+    compiled: &CompiledModel,
+    int_s: &IntState,
+    real_s: &RealState,
+) -> f64 {
+    let ctx = |proj: f64| EvalCtx {
+        model: compiled, int_s, real_s, params, t: 0.0, projected: Some(proj),
+    };
+
+    match likelihood {
+        Likelihood::NegBinomial(nb) => {
+            eval_expr(&nb.mean, &ctx(projected)).unwrap_or(projected)
+        }
+        Likelihood::Normal(n) => {
+            eval_expr(&n.mean, &ctx(projected)).unwrap_or(projected)
+        }
+        Likelihood::Poisson(p) => {
+            eval_expr(&p.rate, &ctx(projected)).unwrap_or(projected)
+        }
+        Likelihood::Binomial(b) => {
+            let n_val = eval_expr(&b.n, &ctx(projected)).unwrap_or(projected);
+            let p_val = eval_expr(&b.p, &ctx(projected)).unwrap_or(0.5);
+            n_val * p_val
+        }
+        Likelihood::BetaBinomial(_) => projected,
+        Likelihood::Bernoulli(b) => {
+            eval_expr(&b.p, &ctx(projected)).unwrap_or(0.5)
         }
     }
 }
