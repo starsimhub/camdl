@@ -45,8 +45,8 @@ pub struct PFilterResult {
     /// Log-likelihood increment at each observation time.
     pub ll_increments: Vec<f64>,
     /// One-step-ahead prediction diagnostics at each observation time.
-    /// Weighted quantiles of the projected quantity (before resampling).
-    pub predictions: Vec<PredictionDiag>,
+    /// Only populated when rmeasure_fn and obs_mean_fn are provided.
+    pub predictions: Option<Vec<PredictionDiag>>,
     /// Final particle states after the last observation (post-resampling).
     /// Only populated when `save_final_state` is true.
     pub final_states: Option<Vec<ParticleState>>,
@@ -124,7 +124,12 @@ pub fn bootstrap_filter(
     let mut total_loglik = 0.0;
     let mut ess_trace = Vec::with_capacity(observations.len());
     let mut ll_increments = Vec::with_capacity(observations.len());
-    let mut predictions = Vec::with_capacity(observations.len());
+    let has_obs_model = rmeasure_fn.is_some() && obs_mean_fn.is_some();
+    let mut predictions: Vec<PredictionDiag> = if has_obs_model {
+        Vec::with_capacity(observations.len())
+    } else {
+        Vec::new()
+    };
     let mut t = model.model.simulation.t_start;
 
     // Resampling RNG (separate from particle RNGs)
@@ -154,39 +159,30 @@ pub fn bootstrap_filter(
         // Advance shared time to match
         while t < obs.time - 1e-10 { t += dt.min(obs.time - t); }
 
-        // Compute projections (before weighting — prior predictive)
-        let projections: Vec<f64> = swarm.states.iter().map(|s| project_fn(s)).collect();
+        // Prediction diagnostics (only when rmeasure + obs_mean are provided)
+        if let (Some(rmfn), Some(omfn)) = (rmeasure_fn, obs_mean_fn) {
+            let projections: Vec<f64> = swarm.states.iter().map(|s| project_fn(s)).collect();
+            let equal_lw = vec![0.0_f64; n_particles];
 
-        // One-step-ahead prediction diagnostics (PRIOR predictive — equal weights)
-        // State quantiles: process uncertainty only
-        let equal_lw = vec![0.0_f64; n_particles]; // log(1/N) for all — equal weights
-        let state_diag = weighted_prediction_diag(&projections, &equal_lw);
+            // State quantiles: E[y|x_i] across particles (process uncertainty, obs scale)
+            let obs_means: Vec<f64> = projections.iter().map(|&p| omfn(p)).collect();
+            let state_diag = weighted_prediction_diag(&obs_means, &equal_lw);
 
-        // Observation-space predictions: process + observation noise
-        let obs_diag = if let (Some(rmfn), Some(omfn)) = (rmeasure_fn, obs_mean_fn) {
-            // Draw one obs sample per particle, compute quantiles
+            // Obs quantiles: y_i ~ p(y|x_i) draws (process + observation noise)
             let obs_draws: Vec<f64> = projections.iter().enumerate()
                 .map(|(i, &proj)| rmfn(proj, &mut rngs[i]))
                 .collect();
-            let obs_q = weighted_prediction_diag(&obs_draws, &equal_lw);
-            // obs_mean: analytic mean of observation model, averaged across particles
-            let obs_mean = projections.iter().map(|&p| omfn(p)).sum::<f64>() / n_particles as f64;
-            (obs_mean, obs_q.state_q05, obs_q.state_q50, obs_q.state_q95)
-        } else {
-            // Fallback: use state quantiles (no rmeasure available)
-            (state_diag.state_mean, state_diag.state_q05, state_diag.state_q50, state_diag.state_q95)
-        };
+            let obs_diag = weighted_prediction_diag(&obs_draws, &equal_lw);
 
-        predictions.push(PredictionDiag {
-            obs_mean: obs_diag.0,
-            obs_q05: obs_diag.1,
-            obs_q50: obs_diag.2,
-            obs_q95: obs_diag.3,
-            state_mean: state_diag.state_mean,
-            state_q05: state_diag.state_q05,
-            state_q50: state_diag.state_q50,
-            state_q95: state_diag.state_q95,
-        });
+            let obs_mean = obs_means.iter().sum::<f64>() / n_particles as f64;
+
+            predictions.push(PredictionDiag {
+                obs_mean,
+                obs_q05: obs_diag.state_q05, obs_q50: obs_diag.state_q50, obs_q95: obs_diag.state_q95,
+                state_mean: state_diag.state_mean,
+                state_q05: state_diag.state_q05, state_q50: state_diag.state_q50, state_q95: state_diag.state_q95,
+            });
+        }
 
         // Compute log-weights: log p(y_k | projected_i)
         for (i, state) in swarm.states.iter().enumerate() {
@@ -219,7 +215,7 @@ pub fn bootstrap_filter(
 
     Ok(PFilterResult {
         log_likelihood: total_loglik,
-        predictions,
+        predictions: if has_obs_model { Some(predictions) } else { None },
         ess_trace,
         ll_increments,
         final_states: Some(swarm.states),

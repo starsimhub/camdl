@@ -268,14 +268,23 @@ pub fn cmd_pfilter(args: &[String]) {
                 .unwrap_or_else(|e| { eprintln!("cannot create {}: {}", path, e); std::process::exit(1); });
             Box::new(std::io::BufWriter::new(f))
         };
-        writeln!(out, "time\tll_increment\tESS\tobs_mean\tobs_q05\tobs_q50\tobs_q95\tstate_mean\tstate_q05\tstate_q50\tstate_q95\tobserved").unwrap();
-        for (i, obs) in observations.iter().enumerate() {
-            let p = &result.predictions[i];
-            writeln!(out, "{}\t{:.4}\t{:.1}\t{:.1}\t{:.0}\t{:.0}\t{:.0}\t{:.1}\t{:.0}\t{:.0}\t{:.0}\t{:.0}",
-                obs.time, result.ll_increments[i], result.ess_trace[i],
-                p.obs_mean, p.obs_q05, p.obs_q50, p.obs_q95,
-                p.state_mean, p.state_q05, p.state_q50, p.state_q95,
-                obs.value).unwrap();
+        if let Some(ref preds) = result.predictions {
+            writeln!(out, "time\tll_increment\tESS\tobs_mean\tobs_q05\tobs_q50\tobs_q95\tstate_mean\tstate_q05\tstate_q50\tstate_q95\tobserved").unwrap();
+            for (i, obs) in observations.iter().enumerate() {
+                let p = &preds[i];
+                writeln!(out, "{}\t{:.4}\t{:.1}\t{:.1}\t{:.0}\t{:.0}\t{:.0}\t{:.1}\t{:.0}\t{:.0}\t{:.0}\t{:.0}",
+                    obs.time, result.ll_increments[i], result.ess_trace[i],
+                    p.obs_mean, p.obs_q05, p.obs_q50, p.obs_q95,
+                    p.state_mean, p.state_q05, p.state_q50, p.state_q95,
+                    obs.value).unwrap();
+            }
+        } else {
+            writeln!(out, "time\tll_increment\tESS\tobserved").unwrap();
+            for (i, obs) in observations.iter().enumerate() {
+                writeln!(out, "{}\t{:.4}\t{:.1}\t{:.0}",
+                    obs.time, result.ll_increments[i], result.ess_trace[i],
+                    obs.value).unwrap();
+            }
         }
         drop(out);
         if path != "-" {
