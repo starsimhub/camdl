@@ -7,20 +7,34 @@ use crate::fit::runner::{self, FitRunConfig};
 use sim::inference::if2::IF2Param;
 use std::collections::HashMap;
 
-const DEFAULT_CHAINS: usize = 8;
-const DEFAULT_PARTICLES: usize = 200;
-const DEFAULT_ITERATIONS: usize = 20;
-const DEFAULT_COOLING: f64 = 1.0; // no cooling — pure exploration
+const SCOUT_CHAINS: usize = 8;
+const SCOUT_PARTICLES: usize = 200;
+const SCOUT_ITERATIONS: usize = 20;
+const SCOUT_COOLING: f64 = 1.0; // no cooling — pure exploration
 
 pub fn run_scout(fit: &FitToml, seed: u64, force: bool) -> Result<(), String> {
     let stage_dir = format!("{}/scout", fit.fit.output_dir);
+    let sc = fit.scout.as_ref();
 
-    // Build config first (cheap) so we can compute input hash for cache check
-    let config = FitRunConfig::build(
+    let n_chains = sc.and_then(|s| s.chains).unwrap_or(SCOUT_CHAINS);
+    let n_particles = sc.and_then(|s| s.particles).unwrap_or(SCOUT_PARTICLES);
+    let n_iterations = sc.and_then(|s| s.iterations).unwrap_or(SCOUT_ITERATIONS);
+    let cooling = sc.and_then(|s| s.cooling).unwrap_or(SCOUT_COOLING);
+    let rw_sd_scale = sc.and_then(|s| s.rw_sd_scale).unwrap_or(1.0);
+
+    let mut config = FitRunConfig::build(
         fit, None,
-        DEFAULT_CHAINS, DEFAULT_PARTICLES, DEFAULT_ITERATIONS,
-        DEFAULT_COOLING, seed, false,
+        n_chains, n_particles, n_iterations,
+        cooling, seed, false,
     )?;
+
+    // Apply rw_sd_scale from [scout] config
+    if rw_sd_scale != 1.0 {
+        for p in &mut config.if2_params {
+            p.rw_sd *= rw_sd_scale;
+        }
+        eprintln!("scout: rw_sd scaled by {:.1}×", rw_sd_scale);
+    }
 
     // Cache check
     let input_hash = runner::compute_fit_input_hash(fit, &config, seed);
@@ -45,7 +59,7 @@ pub fn run_scout(fit: &FitToml, seed: u64, force: bool) -> Result<(), String> {
 
     // Generate per-chain random starts
     let mut rng = sim::ekrng::StatefulRng::new(seed ^ 0xcafe_u64);
-    let per_chain_params: Vec<Vec<IF2Param>> = (0..DEFAULT_CHAINS).map(|_| {
+    let per_chain_params: Vec<Vec<IF2Param>> = (0..n_chains).map(|_| {
         config.if2_params.iter().map(|spec| {
             let initial = if spec.lower.is_finite() && spec.upper.is_finite() {
                 let u = rng.uniform();
@@ -62,7 +76,7 @@ pub fn run_scout(fit: &FitToml, seed: u64, force: bool) -> Result<(), String> {
         }).collect()
     }).collect();
 
-    eprintln!("scout: {} chains with random starts", DEFAULT_CHAINS);
+    eprintln!("scout: {} chains with random starts", n_chains);
     let t0 = std::time::Instant::now();
     let chain_results = runner::run_chains_with_per_chain_params(&config, Some(&per_chain_params));
     let elapsed = t0.elapsed();
@@ -70,7 +84,7 @@ pub fn run_scout(fit: &FitToml, seed: u64, force: bool) -> Result<(), String> {
     // MAD-based auto rw_sd
     let (auto_rw_sd, n_good) = runner::auto_rw_sd(&chain_results.results, &config.if2_params)?;
 
-    eprintln!("\nauto rw_sd ({}/{} good chains):", n_good, DEFAULT_CHAINS);
+    eprintln!("\nauto rw_sd ({}/{} good chains):", n_good, n_chains);
     for spec in &config.if2_params {
         let rw = auto_rw_sd.get(&spec.name).unwrap();
         eprintln!("  {:12} rw_sd={:.4} (was {:.4})", spec.name, rw, spec.rw_sd);
@@ -88,8 +102,8 @@ pub fn run_scout(fit: &FitToml, seed: u64, force: bool) -> Result<(), String> {
     );
 
     // Compute initial loglik: quick pfilter at starting params
-    eprintln!("\npfilter at starting params ({} particles)...", DEFAULT_PARTICLES);
-    let initial_loglik = runner::run_quick_pfilter(&config, &config.base_params, DEFAULT_PARTICLES, seed);
+    eprintln!("\npfilter at starting params ({} particles)...", n_particles);
+    let initial_loglik = runner::run_quick_pfilter(&config, &config.base_params, n_particles, seed);
     eprintln!("  initial loglik: {:.1}", initial_loglik);
 
     // Write fit_state.toml
@@ -100,7 +114,7 @@ pub fn run_scout(fit: &FitToml, seed: u64, force: bool) -> Result<(), String> {
         best_loglik: chain_results.best_loglik,
         initial_loglik,
         best_chain: chain_results.best_chain,
-        n_chains: DEFAULT_CHAINS,
+        n_chains: n_chains,
         n_good_chains: Some(n_good),
         start_values,
         rw_sd: auto_rw_sd.clone(),
@@ -119,11 +133,11 @@ pub fn run_scout(fit: &FitToml, seed: u64, force: bool) -> Result<(), String> {
     write_summary(&stage_dir, &chain_results, &config, &auto_rw_sd, n_good, initial_loglik, &input_hash)?;
 
     let wall_secs = elapsed.as_secs_f64();
-    let per_iter = wall_secs / (DEFAULT_CHAINS as f64 * DEFAULT_ITERATIONS as f64);
+    let per_iter = wall_secs / (n_chains as f64 * n_iterations as f64);
     eprintln!("\nscout complete in {:.1}s ({:.2}s/chain-iteration): {}/",
         wall_secs, per_iter, stage_dir);
     eprintln!("  best loglik: {:.1} (chain {})", chain_results.best_loglik, chain_results.best_chain + 1);
-    eprintln!("  good chains: {}/{}", n_good, DEFAULT_CHAINS);
+    eprintln!("  good chains: {}/{}", n_good, n_chains);
     eprintln!("\nnext: camdl fit refine fit.toml --starts-from {}/", stage_dir);
 
     Ok(())

@@ -110,9 +110,11 @@ fn parse_fit_args(args: &[String], _needs_starts_from: bool) -> (FitToml, u64, b
         std::process::exit(1);
     });
 
-    // Generate seed from entropy if not specified
+    // Seed priority: CLI --seed > fit.toml seed > random from entropy
     let seed = if args.iter().any(|a| a == "--seed") {
         seed
+    } else if let Some(s) = fit.fit.seed {
+        s
     } else {
         use std::time::SystemTime;
         let dur = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap();

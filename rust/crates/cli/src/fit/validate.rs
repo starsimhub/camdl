@@ -15,23 +15,36 @@ use sim::chain_binomial::step_one;
 use sim::ekrng::StatefulRng;
 use std::collections::HashMap;
 
-const DEFAULT_CHAINS: usize = 4;
-const DEFAULT_PARTICLES: usize = 5000;
-const DEFAULT_ITERATIONS: usize = 100;
-const DEFAULT_COOLING: f64 = 0.95;
-const PFILTER_PARTICLES: usize = 10000;
+const VALIDATE_CHAINS: usize = 4;
+const VALIDATE_PARTICLES: usize = 5000;
+const VALIDATE_ITERATIONS: usize = 100;
+const VALIDATE_COOLING: f64 = 0.95;
+const VALIDATE_PFILTER_PARTICLES: usize = 10000;
 
 pub fn run_validate(fit: &FitToml, starts_from: &str, seed: u64, force: bool) -> Result<(), String> {
     let stage_dir = format!("{}/validate", fit.fit.output_dir);
+    let vc = fit.validate.as_ref();
+
+    let n_chains = vc.and_then(|s| s.chains).unwrap_or(VALIDATE_CHAINS);
+    let n_particles = vc.and_then(|s| s.particles).unwrap_or(VALIDATE_PARTICLES);
+    let n_iterations = vc.and_then(|s| s.iterations).unwrap_or(VALIDATE_ITERATIONS);
+    let cooling = vc.and_then(|s| s.cooling).unwrap_or(VALIDATE_COOLING);
+    let rw_sd_scale = vc.and_then(|s| s.rw_sd_scale).unwrap_or(1.0);
+    let pfilter_particles = vc.and_then(|s| s.pfilter_particles).unwrap_or(VALIDATE_PFILTER_PARTICLES);
 
     let prior_state = FitState::load(starts_from)?;
     eprintln!("validate: starting from {} (loglik={:.1})", starts_from, prior_state.best_loglik);
 
-    let config = FitRunConfig::build(
+    let mut config = FitRunConfig::build(
         fit, Some(&prior_state),
-        DEFAULT_CHAINS, DEFAULT_PARTICLES, DEFAULT_ITERATIONS,
-        DEFAULT_COOLING, seed, false,
+        n_chains, n_particles, n_iterations,
+        cooling, seed, false,
     )?;
+
+    if rw_sd_scale != 1.0 {
+        for p in &mut config.if2_params { p.rw_sd *= rw_sd_scale; }
+        eprintln!("validate: rw_sd scaled by {:.1}×", rw_sd_scale);
+    }
 
     // Cache check
     let input_hash = runner::compute_fit_input_hash(fit, &config, seed);
@@ -69,14 +82,14 @@ pub fn run_validate(fit: &FitToml, starts_from: &str, seed: u64, force: bool) ->
         .unwrap().1;
 
     // ── Phase 2: Precise pfilter at MLE ──────────────────────────────────────
-    eprintln!("\nrunning pfilter at MLE with {} particles...", PFILTER_PARTICLES);
+    eprintln!("\nrunning pfilter at MLE with {} particles...", pfilter_particles);
 
     let mut mle_params = config.base_params.clone();
     for spec in &config.if2_params {
         mle_params[spec.index] = best.mle[spec.index];
     }
 
-    let pf_result = run_pfilter_at_mle(&config, &mle_params, PFILTER_PARTICLES, seed)?;
+    let pf_result = run_pfilter_at_mle(&config, &mle_params, pfilter_particles, seed)?;
     let loglik = pf_result.loglik;
     let loglik_sd = pf_result.loglik_sd;
     let ess_mean = pf_result.ess_mean;
@@ -85,7 +98,7 @@ pub fn run_validate(fit: &FitToml, starts_from: &str, seed: u64, force: bool) ->
     eprintln!("  loglik = {:.1} ± {:.1}", loglik, loglik_sd);
     eprintln!("  ESS at MLE: mean={:.0}, min={:.0}", ess_mean, ess_min);
 
-    if ess_min < PFILTER_PARTICLES as f64 / 4.0 {
+    if ess_min < pfilter_particles as f64 / 4.0 {
         eprintln!("\n\x1b[33mwarning: low ESS at MLE (min={:.0})\x1b[0m", ess_min);
         eprintln!("  Possible causes:");
         eprintln!("    - Observation model too tight (estimate psi, or increase it)");
@@ -124,7 +137,7 @@ pub fn run_validate(fit: &FitToml, starts_from: &str, seed: u64, force: bool) ->
         best_loglik: loglik,
         initial_loglik: prior_state.best_loglik,
         best_chain: chain_results.best_chain,
-        n_chains: DEFAULT_CHAINS,
+        n_chains: n_chains,
         n_good_chains: None,
         start_values,
         rw_sd,
@@ -161,7 +174,7 @@ pub fn run_validate(fit: &FitToml, starts_from: &str, seed: u64, force: bool) ->
         best_chain: chain_results.best_chain,
         loglik,
         loglik_sd,
-        n_particles: PFILTER_PARTICLES,
+        n_particles: pfilter_particles,
         ess_at_mle: Some((ess_mean, ess_min)),
         timestamp: state.timestamp.clone(),
     };
@@ -180,7 +193,7 @@ pub fn run_validate(fit: &FitToml, starts_from: &str, seed: u64, force: bool) ->
     // pfilter_loglik.txt
     std::fs::write(
         format!("{}/pfilter_loglik.txt", stage_dir),
-        format!("{:.4} ± {:.4} (N={})\n", loglik, loglik_sd, PFILTER_PARTICLES),
+        format!("{:.4} ± {:.4} (N={})\n", loglik, loglik_sd, pfilter_particles),
     ).ok();
 
     // Summary JSON
@@ -189,7 +202,7 @@ pub fn run_validate(fit: &FitToml, starts_from: &str, seed: u64, force: bool) ->
     let total_elapsed = t0_if2.elapsed();
     eprintln!("\nvalidate complete in {:.1}s (IF2: {:.1}s): {}/",
         total_elapsed.as_secs_f64(), if2_elapsed.as_secs_f64(), stage_dir);
-    eprintln!("  loglik: {:.1} ± {:.1} (N={})", loglik, loglik_sd, PFILTER_PARTICLES);
+    eprintln!("  loglik: {:.1} ± {:.1} (N={})", loglik, loglik_sd, pfilter_particles);
     eprintln!("  ESS: mean={:.0}, min={:.0}", ess_mean, ess_min);
     eprintln!("  converged: {}", if all_converged { "yes" } else { "NO" });
     eprintln!("  profiles: {}/profiles/", stage_dir);
@@ -231,7 +244,7 @@ fn run_pfilter_at_mle(
 
     let result = bootstrap_filter(
         compiled, params, &observations, n_particles, config.if2_config.dt,
-        &step_fn, &project_fn, &*dmeasure_fn, seed,
+        &step_fn, &project_fn, &*dmeasure_fn, None, None, seed,
     ).map_err(|e| format!("pfilter error: {:?}", e))?;
 
     let ess_mean = result.ess_trace.iter().sum::<f64>() / result.ess_trace.len() as f64;

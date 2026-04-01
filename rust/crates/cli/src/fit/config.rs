@@ -11,12 +11,41 @@ pub struct FitToml {
     pub config: FitConfigSection,
     pub estimate: HashMap<String, EstimateSpec>,
     pub fixed: HashMap<String, toml::Value>,
+    /// Optional per-stage configuration. Omitted sections use defaults.
+    pub scout: Option<StageConfig>,
+    pub refine: Option<StageConfig>,
+    pub validate: Option<ValidateConfig>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct FitSection {
     pub model: String,
     pub output_dir: String,
+    /// RNG seed. CLI --seed overrides this.
+    pub seed: Option<u64>,
+}
+
+/// Per-stage configuration for scout and refine.
+#[derive(Debug, Default, Deserialize, Serialize)]
+pub struct StageConfig {
+    pub chains: Option<usize>,
+    pub particles: Option<usize>,
+    pub iterations: Option<usize>,
+    pub cooling: Option<f64>,
+    /// Multiply all rw_sd values by this factor. Default 1.0.
+    pub rw_sd_scale: Option<f64>,
+}
+
+/// Validate stage configuration (includes pfilter settings).
+#[derive(Debug, Default, Deserialize, Serialize)]
+pub struct ValidateConfig {
+    pub chains: Option<usize>,
+    pub particles: Option<usize>,
+    pub iterations: Option<usize>,
+    pub cooling: Option<f64>,
+    pub rw_sd_scale: Option<f64>,
+    /// Particle count for the final precise pfilter at the MLE.
+    pub pfilter_particles: Option<usize>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]

@@ -8,24 +8,36 @@ use crate::hashing;
 use sha2::Digest;
 use std::collections::HashMap;
 
-const DEFAULT_CHAINS: usize = 4;
-const DEFAULT_PARTICLES: usize = 1000;
-const DEFAULT_ITERATIONS: usize = 50;
-const DEFAULT_COOLING: f64 = 0.95;
+const REFINE_CHAINS: usize = 4;
+const REFINE_PARTICLES: usize = 1000;
+const REFINE_ITERATIONS: usize = 50;
+const REFINE_COOLING: f64 = 0.95;
 
 pub fn run_refine(fit: &FitToml, starts_from: &str, seed: u64, force: bool) -> Result<(), String> {
     let stage_dir = format!("{}/refine", fit.fit.output_dir);
+    let rc = fit.refine.as_ref();
+
+    let n_chains = rc.and_then(|s| s.chains).unwrap_or(REFINE_CHAINS);
+    let n_particles = rc.and_then(|s| s.particles).unwrap_or(REFINE_PARTICLES);
+    let n_iterations = rc.and_then(|s| s.iterations).unwrap_or(REFINE_ITERATIONS);
+    let cooling = rc.and_then(|s| s.cooling).unwrap_or(REFINE_COOLING);
+    let rw_sd_scale = rc.and_then(|s| s.rw_sd_scale).unwrap_or(1.0);
 
     let prior_state = FitState::load(starts_from)?;
     eprintln!("refine: starting from {} (loglik={:.1}, {} good chains)",
         starts_from, prior_state.best_loglik,
         prior_state.n_good_chains.unwrap_or(prior_state.n_chains));
 
-    let config = FitRunConfig::build(
+    let mut config = FitRunConfig::build(
         fit, Some(&prior_state),
-        DEFAULT_CHAINS, DEFAULT_PARTICLES, DEFAULT_ITERATIONS,
-        DEFAULT_COOLING, seed, false,
+        n_chains, n_particles, n_iterations,
+        cooling, seed, false,
     )?;
+
+    if rw_sd_scale != 1.0 {
+        for p in &mut config.if2_params { p.rw_sd *= rw_sd_scale; }
+        eprintln!("refine: rw_sd scaled by {:.1}×", rw_sd_scale);
+    }
 
     // Cache check
     let input_hash = runner::compute_fit_input_hash(fit, &config, seed);
@@ -97,7 +109,7 @@ pub fn run_refine(fit: &FitToml, starts_from: &str, seed: u64, force: bool) -> R
         best_loglik: chain_results.best_loglik,
         initial_loglik: prior_state.best_loglik,
         best_chain: chain_results.best_chain,
-        n_chains: DEFAULT_CHAINS,
+        n_chains: n_chains,
         n_good_chains: None,
         start_values,
         rw_sd,
@@ -134,7 +146,7 @@ pub fn run_refine(fit: &FitToml, starts_from: &str, seed: u64, force: bool) -> R
         best_chain: chain_results.best_chain,
         loglik: chain_results.best_loglik,
         loglik_sd: 0.0, // Not computed in refine
-        n_particles: DEFAULT_PARTICLES,
+        n_particles: n_particles,
         ess_at_mle: None,
         timestamp: state.timestamp.clone(),
     };
