@@ -98,12 +98,24 @@ pub fn run_scout(fit: &FitToml, seed: u64, force: bool) -> Result<(), String> {
         eprintln!();
     }
 
-    // MAD-based auto rw_sd
-    let (auto_rw_sd, n_good) = runner::auto_rw_sd(&chain_results.results, &config.if2_params)?;
+    // MAD-based auto rw_sd — never fail, always write output
+    let (auto_rw_sd, n_good) = match runner::auto_rw_sd(&chain_results.results, &config.if2_params) {
+        Ok(result) => result,
+        Err(msg) => {
+            eprintln!("\n\x1b[33mwarning: auto rw_sd failed: {}\x1b[0m", msg);
+            eprintln!("  Falling back to bounds-based rw_sd. Scout output will still be written.");
+            eprintln!("  Inspect chain traces to diagnose convergence issues.\n");
+            // Fall back to bounds-based rw_sd from the current values
+            let fallback: HashMap<String, f64> = config.if2_params.iter()
+                .map(|spec| (spec.name.clone(), spec.rw_sd))
+                .collect();
+            (fallback, 0)
+        }
+    };
 
     eprintln!("\nauto rw_sd ({}/{} good chains):", n_good, n_chains);
     for spec in &config.if2_params {
-        let rw = auto_rw_sd.get(&spec.name).unwrap();
+        let rw = auto_rw_sd.get(&spec.name).unwrap_or(&spec.rw_sd);
         eprintln!("  {:12} rw_sd={:.4} (was {:.4})", spec.name, rw, spec.rw_sd);
     }
 
