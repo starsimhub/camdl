@@ -130,13 +130,25 @@ pub struct IF2IterResult {
     pub log_likelihood: f64,
     /// Parameter means across particles at end of this iteration.
     pub param_means: Vec<f64>,
-    /// Per-parameter variance ratio r_k = Var(post-resampling) / Var(post-perturbation).
-    /// Averaged across observation times within this iteration.
-    /// r_k ≈ 1 means no selection (rw_sd too small or param unidentifiable).
-    /// r_k ≈ 0 means heavy selection (rw_sd too large, particles dying).
-    pub variance_ratios: Vec<(usize, f64)>,  // (param_index, r_k)
+    /// Per-parameter diagnostics, indexed by position in if2_params.
+    pub param_diag: Vec<ParamIterDiag>,
+}
+
+/// Per-parameter diagnostics for one IF2 iteration.
+#[derive(Clone, Debug)]
+pub struct ParamIterDiag {
+    pub param_index: usize,
+    /// Weighted-variance selection ratio, averaged across observations:
+    /// r̃_k = Σ_i w_i (θ_ik - θ̄_k^w)² / Var(θ_k post-perturbation).
+    /// Measures selection pressure from the weights directly (no resampling noise).
+    /// Near 1 = no selection. Near 0 = heavy selection.
+    pub weighted_var_ratio: f64,
+    /// Perturbation-to-cloud ratio: rw_sd_effective / sd(θ_k before perturbation).
+    /// q ≪ 1 = perturbation too timid (late cooling).
+    /// q ≫ 1 = perturbation dominates cloud (reinitializing).
+    pub q_ratio: f64,
     /// Effective rw_sd at this iteration (after cooling).
-    pub effective_rw_sd: Vec<(usize, f64)>,  // (param_index, rw_sd)
+    pub effective_rw_sd: f64,
 }
 
 /// Result of the full IF2 run.
@@ -255,10 +267,11 @@ pub fn run_if2_with_progress(
             seed.wrapping_add(0xdeadbeef).wrapping_add(iter as u64)
         );
 
-        // Variance ratio accumulators (averaged across observation times)
+        // Diagnostic accumulators (averaged across observation times)
         let n_if2_params = if2_params.len();
-        let mut rk_accum = vec![0.0_f64; n_if2_params];
-        let mut rk_count = vec![0_usize; n_if2_params];
+        let mut wvr_accum = vec![0.0_f64; n_if2_params];  // weighted variance ratio
+        let mut q_k_accum = vec![0.0_f64; n_if2_params];  // perturbation-to-cloud ratio
+        let mut diag_count = vec![0_usize; n_if2_params];
 
         // Initial parameter perturbation (at t=0)
         {
@@ -315,16 +328,57 @@ pub fn run_if2_with_progress(
 
             global_step += 1;
 
-            // Compute per-parameter variance BEFORE resampling (post-perturbation)
-            let var_pre: Vec<f64> = if2_params.iter().map(|spec| {
-                let mean = particle_params.iter().map(|pp| pp[spec.index]).sum::<f64>() / n as f64;
-                particle_params.iter().map(|pp| (pp[spec.index] - mean).powi(2)).sum::<f64>() / n as f64
-            }).collect();
-
             // Weight by observation likelihood
             for i in 0..n {
                 let projected = project_fn(&states[i]);
                 log_weights[i] = dmeasure_fn(projected, obs.value, &particle_params[i]);
+            }
+
+            // Per-parameter diagnostics (before resampling, using continuous weights):
+            //
+            // weighted_var_ratio: Var_w(θ_k) / Var(θ_k post-perturbation)
+            //   where Var_w uses normalized importance weights.
+            //   Measures selection pressure without resampling noise.
+            //
+            // q_k: rw_sd_effective / sd(θ_k before perturbation)
+            //   Perturbation-to-cloud width ratio.
+            {
+                // Normalize log-weights to proper weights for weighted variance
+                let max_lw = log_weights.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+                let weights: Vec<f64> = if max_lw.is_finite() {
+                    let raw: Vec<f64> = log_weights.iter().map(|&lw| (lw - max_lw).exp()).collect();
+                    let sum: f64 = raw.iter().sum();
+                    if sum > 0.0 { raw.iter().map(|&w| w / sum).collect() }
+                    else { vec![1.0 / n as f64; n] }
+                } else {
+                    vec![1.0 / n as f64; n]
+                };
+
+                for (pi, spec) in if2_params.iter().enumerate() {
+                    let nf = n as f64;
+
+                    // Unweighted variance (post-perturbation cloud)
+                    let mean_u = particle_params.iter().map(|pp| pp[spec.index]).sum::<f64>() / nf;
+                    let var_u = particle_params.iter()
+                        .map(|pp| (pp[spec.index] - mean_u).powi(2)).sum::<f64>() / nf;
+
+                    // Weighted variance (what the weights "want" the cloud to look like)
+                    let mean_w = particle_params.iter().zip(&weights)
+                        .map(|(pp, &w)| pp[spec.index] * w).sum::<f64>();
+                    let var_w = particle_params.iter().zip(&weights)
+                        .map(|(pp, &w)| w * (pp[spec.index] - mean_w).powi(2)).sum::<f64>();
+
+                    let wvr = if var_u > 1e-30 { var_w / var_u } else { 1.0 };
+                    wvr_accum[pi] += wvr;
+
+                    // q_k: effective perturbation / cloud width
+                    let sd_u = var_u.sqrt();
+                    let eff_sd = spec.transformed_sd(spec.rw_sd, mean_u) * cooling_now;
+                    let q = if sd_u > 1e-30 { eff_sd / sd_u } else { 0.0 };
+                    q_k_accum[pi] += q;
+
+                    diag_count[pi] += 1;
+                }
             }
 
             // Log-likelihood increment
@@ -341,15 +395,6 @@ pub fn run_if2_with_progress(
             std::mem::swap(&mut states, &mut states_buf);
             std::mem::swap(&mut particle_params, &mut params_buf);
 
-            // Compute per-parameter variance AFTER resampling
-            for (pi, spec) in if2_params.iter().enumerate() {
-                let mean = particle_params.iter().map(|pp| pp[spec.index]).sum::<f64>() / n as f64;
-                let var_post = particle_params.iter().map(|pp| (pp[spec.index] - mean).powi(2)).sum::<f64>() / n as f64;
-                let r_k = if var_pre[pi] > 1e-30 { var_post / var_pre[pi] } else { 1.0 };
-                rk_accum[pi] += r_k;
-                rk_count[pi] += 1;
-            }
-
             // Reset
             for s in &mut states { s.reset_flows(); }
             for lw in &mut log_weights { *lw = 0.0; }
@@ -364,22 +409,23 @@ pub fn run_if2_with_progress(
             param_means[spec.index] = mean;
         }
 
-        // Compute per-parameter variance ratios and effective rw_sd
+        // Per-parameter diagnostics for this iteration
         let cooling_at_iter = per_step_cooling.powi((iter as usize * observations.len()) as i32);
-        let variance_ratios: Vec<(usize, f64)> = if2_params.iter().enumerate().map(|(pi, spec)| {
-            let r_k = if rk_count[pi] > 0 { rk_accum[pi] / rk_count[pi] as f64 } else { 1.0 };
-            (spec.index, r_k)
-        }).collect();
-        let effective_rw_sd: Vec<(usize, f64)> = if2_params.iter().map(|spec| {
-            (spec.index, spec.rw_sd * cooling_at_iter)
+        let param_diag: Vec<ParamIterDiag> = if2_params.iter().enumerate().map(|(pi, spec)| {
+            let cnt = diag_count[pi].max(1) as f64;
+            ParamIterDiag {
+                param_index: spec.index,
+                weighted_var_ratio: wvr_accum[pi] / cnt,
+                q_ratio: q_k_accum[pi] / cnt,
+                effective_rw_sd: spec.rw_sd * cooling_at_iter,
+            }
         }).collect();
 
         iterations.push(IF2IterResult {
             iteration: iter,
             log_likelihood: total_loglik,
             param_means: param_means.clone(),
-            variance_ratios,
-            effective_rw_sd,
+            param_diag,
         });
 
         // Report progress

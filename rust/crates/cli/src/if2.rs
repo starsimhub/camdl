@@ -562,21 +562,17 @@ pub fn cmd_if2(args: &[String]) {
         use std::io::Write as _;
         let mut f = std::fs::File::create(path)
             .unwrap_or_else(|e| { eprintln!("cannot create {}: {}", path, e); std::process::exit(1); });
-        writeln!(f, "chain\titeration\tparam\tvalue\trw_sd\tr_k\tloglik").unwrap();
+        writeln!(f, "chain\titeration\tparam\tvalue\trw_sd_eff\twvr\tq\tloglik").unwrap();
         for (chain_id, result) in &chain_results {
             for it in &result.iterations {
-                for spec in if2_params.iter() {
-                    let r_k = it.variance_ratios.iter()
-                        .find(|(idx, _)| *idx == spec.index)
-                        .map(|(_, r)| *r)
-                        .unwrap_or(f64::NAN);
-                    let eff_rw = it.effective_rw_sd.iter()
-                        .find(|(idx, _)| *idx == spec.index)
-                        .map(|(_, r)| *r)
-                        .unwrap_or(f64::NAN);
-                    writeln!(f, "{}\t{}\t{}\t{:.6}\t{:.6}\t{:.4}\t{:.2}",
+                for (pi, spec) in if2_params.iter().enumerate() {
+                    let diag = it.param_diag.get(pi);
+                    let wvr = diag.map(|d| d.weighted_var_ratio).unwrap_or(f64::NAN);
+                    let q = diag.map(|d| d.q_ratio).unwrap_or(f64::NAN);
+                    let eff_rw = diag.map(|d| d.effective_rw_sd).unwrap_or(f64::NAN);
+                    writeln!(f, "{}\t{}\t{}\t{:.6}\t{:.6}\t{:.4}\t{:.4}\t{:.2}",
                         chain_id + 1, it.iteration, spec.name,
-                        it.param_means[spec.index], eff_rw, r_k,
+                        it.param_means[spec.index], eff_rw, wvr, q,
                         it.log_likelihood).unwrap();
                 }
             }
