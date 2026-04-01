@@ -166,10 +166,9 @@ pub fn cmd_if2(args: &[String]) {
         match r.as_str() {
             "scout" => {
                 if n_chains == 1 { n_chains = 8; }
-                n_particles = n_particles.or(Some(200));
-                n_iterations = n_iterations.or(Some(20));
-                cooling = cooling.or(Some(1.0)); // no cooling — pure exploration
-                // parallel stays 0 (num_cpus default) unless user sets --parallel
+                n_particles = n_particles.or(Some(500));
+                n_iterations = n_iterations.or(Some(30));
+                cooling = cooling.or(Some(0.5)); // mild contraction — find basins
             }
             "refine" => {
                 if n_chains == 1 { n_chains = 4; }

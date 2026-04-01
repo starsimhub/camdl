@@ -8,9 +8,10 @@ use sim::inference::if2::IF2Param;
 use std::collections::HashMap;
 
 const SCOUT_CHAINS: usize = 8;
-const SCOUT_PARTICLES: usize = 200;
-const SCOUT_ITERATIONS: usize = 20;
-const SCOUT_COOLING: f64 = 1.0; // no cooling — pure exploration
+const SCOUT_PARTICLES: usize = 500;
+const SCOUT_ITERATIONS: usize = 30;
+const SCOUT_COOLING: f64 = 0.5;  // mild contraction — find basins, don't converge
+const SCOUT_RW_SD_SCALE: f64 = 1.5; // slightly aggressive exploration
 
 pub fn run_scout(fit: &FitToml, seed: u64, force: bool) -> Result<(), String> {
     let stage_dir = format!("{}/scout", fit.fit.output_dir);
@@ -20,7 +21,7 @@ pub fn run_scout(fit: &FitToml, seed: u64, force: bool) -> Result<(), String> {
     let n_particles = sc.and_then(|s| s.particles).unwrap_or(SCOUT_PARTICLES);
     let n_iterations = sc.and_then(|s| s.iterations).unwrap_or(SCOUT_ITERATIONS);
     let cooling = sc.and_then(|s| s.cooling).unwrap_or(SCOUT_COOLING);
-    let rw_sd_scale = sc.and_then(|s| s.rw_sd_scale).unwrap_or(1.0);
+    let rw_sd_scale = sc.and_then(|s| s.rw_sd_scale).unwrap_or(SCOUT_RW_SD_SCALE);
 
     let mut config = FitRunConfig::build(
         fit, None,
@@ -76,10 +77,26 @@ pub fn run_scout(fit: &FitToml, seed: u64, force: bool) -> Result<(), String> {
         }).collect()
     }).collect();
 
-    eprintln!("scout: {} chains with random starts", n_chains);
+    eprintln!("scout: {} chains × {} particles × {} iterations, cooling={}, rw_sd×{:.1}",
+        n_chains, n_particles, n_iterations, cooling, rw_sd_scale);
     let t0 = std::time::Instant::now();
     let chain_results = runner::run_chains_with_per_chain_params(&config, Some(&per_chain_params));
     let elapsed = t0.elapsed();
+
+    // Check for degenerate filter: if best chain's loglik at early iterations is -inf,
+    // the particle count is too low for this model's dimensionality.
+    let early_check_iter = 5.min(n_iterations.saturating_sub(1));
+    let best_early_ll = chain_results.results.iter()
+        .filter_map(|(_, r)| r.iterations.get(early_check_iter).map(|it| it.log_likelihood))
+        .fold(f64::NEG_INFINITY, f64::max);
+    if !best_early_ll.is_finite() {
+        eprintln!("\n\x1b[31mscout: filter degenerate — all chains have -inf loglik at iteration {}.\x1b[0m", early_check_iter);
+        eprintln!("  The particle count ({}) is likely too low for {} estimated parameters.", n_particles, config.if2_params.len());
+        eprintln!("  Add to fit.toml:");
+        eprintln!("    [scout]");
+        eprintln!("    particles = {}", n_particles * 4);
+        eprintln!();
+    }
 
     // MAD-based auto rw_sd
     let (auto_rw_sd, n_good) = runner::auto_rw_sd(&chain_results.results, &config.if2_params)?;
