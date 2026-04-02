@@ -5,6 +5,7 @@ use std::collections::HashMap;
 
 /// Top-level fit.toml structure.
 #[derive(Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct FitToml {
     pub fit: FitSection,
     pub data: HashMap<String, String>,
@@ -18,6 +19,7 @@ pub struct FitToml {
 }
 
 #[derive(Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct FitSection {
     pub model: String,
     pub output_dir: String,
@@ -27,6 +29,7 @@ pub struct FitSection {
 
 /// Per-stage configuration for scout and refine.
 #[derive(Debug, Default, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct StageConfig {
     pub chains: Option<usize>,
     pub particles: Option<usize>,
@@ -38,6 +41,7 @@ pub struct StageConfig {
 
 /// Validate stage configuration (includes pfilter settings).
 #[derive(Debug, Default, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct ValidateConfig {
     pub chains: Option<usize>,
     pub particles: Option<usize>,
@@ -49,6 +53,7 @@ pub struct ValidateConfig {
 }
 
 #[derive(Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct FitConfigSection {
     pub backend: String,
     pub dt: f64,

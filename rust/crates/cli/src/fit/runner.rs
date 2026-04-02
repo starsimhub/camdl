@@ -585,14 +585,33 @@ pub fn run_chains_with_per_chain_params(
             logliks.iter().map(|l| format!("{:.1}", l)).collect::<Vec<_>>().join(", "));
     }
 
-    // Report Rhat
+    // Report Rhat with diagnostic warnings
     if config.n_chains > 1 {
+        let max_rhat = rhat.values().cloned().fold(0.0_f64, f64::max);
+        let logliks: Vec<f64> = results.iter().map(|(_, r)| r.final_loglik).collect();
+        let ll_spread = logliks.iter().cloned().fold(f64::NEG_INFINITY, f64::max)
+            - logliks.iter().cloned().fold(f64::INFINITY, f64::min);
+
         eprintln!("\nRhat:");
         for spec in &config.if2_params {
             if let Some(&r) = rhat.get(&spec.name) {
                 let status = if r < 1.1 { "\x1b[32m✓\x1b[0m" } else if r < 1.5 { "\x1b[33m~\x1b[0m" } else { "\x1b[31m✗\x1b[0m" };
                 eprintln!("  {:12} Rhat={:.3} {}", spec.name, r, status);
             }
+        }
+
+        // Diagnostic: high Rhat + large loglik spread → chains in different basins
+        if max_rhat > 1.5 && ll_spread > 50.0 {
+            eprintln!("\n\x1b[33mwarning: chains may have found different likelihood basins.\x1b[0m");
+            eprintln!("  Rhat max = {:.2}, loglik spread = {:.1}", max_rhat, ll_spread);
+            eprintln!("  This suggests the likelihood surface is multimodal.");
+            eprintln!("  Options:");
+            eprintln!("    - Run more chains to sample both basins");
+            eprintln!("    - Set start values near the known basin in fit.toml");
+            eprintln!("    - Narrow parameter bounds to exclude the wrong basin");
+        } else if max_rhat > 1.1 {
+            eprintln!("\n\x1b[33mwarning: not all parameters converged (max Rhat = {:.2}).\x1b[0m", max_rhat);
+            eprintln!("  Consider more iterations or particles.");
         }
     }
 
