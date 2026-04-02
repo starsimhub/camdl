@@ -18,12 +18,18 @@ impl StatefulRng {
     pub fn poisson(&mut self, lambda: f64) -> u64 {
         if lambda <= 0.0 { return 0; }
         let lambda = lambda.min(1e15);
-        Poisson::new(lambda).unwrap().sample(&mut self.0) as u64
+        match Poisson::new(lambda) {
+            Ok(p) => p.sample(&mut self.0) as u64,
+            Err(_) => lambda.round() as u64, // fallback to deterministic
+        }
     }
 
     pub fn exp(&mut self, rate: f64) -> f64 {
         if rate <= 0.0 { return f64::INFINITY; }
-        Exp::new(rate).unwrap().sample(&mut self.0)
+        match Exp::new(rate) {
+            Ok(e) => e.sample(&mut self.0),
+            Err(_) => 1.0 / rate, // fallback to mean
+        }
     }
 
     /// Multiplicative Gamma-Poisson compound (He et al. 2010).
@@ -69,7 +75,10 @@ impl StatefulRng {
     pub fn binomial(&mut self, n: u64, p: f64) -> u64 {
         if n == 0 || p <= 0.0 { return 0; }
         if p >= 1.0 { return n; }
-        Binomial::new(n, p).unwrap().sample(&mut self.0)
+        match Binomial::new(n, p.clamp(0.0, 1.0)) {
+            Ok(b) => b.sample(&mut self.0),
+            Err(_) => if p > 0.5 { n } else { 0 },
+        }
     }
 
     /// Standard normal draw N(0, 1). Used for IF2 parameter perturbations.
