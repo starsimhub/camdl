@@ -159,6 +159,27 @@ pub fn run_scout(fit: &FitToml, seed: u64, force: bool) -> Result<(), String> {
     )?;
     runner::write_diagnostics(&stage_dir, &chain_results.results)?;
 
+    // Write scout_best_params.toml — best chain's params for downstream use
+    // Named "scout_best" (not "mle") to signal these are scout-level estimates.
+    let all_params = runner::collect_all_params(
+        &best.mle, &config.if2_params, &config.model,
+        &config.base_params, &config.compiled,
+    );
+    let best_params_path = format!("{}/scout_best_params.toml", stage_dir);
+    {
+        use std::io::Write;
+        let mut f = std::fs::File::create(&best_params_path)
+            .map_err(|e| format!("cannot write {}: {}", best_params_path, e))?;
+        writeln!(f, "# Scout best-chain parameters (chain {}, loglik = {:.1})", chain_results.best_chain + 1, chain_results.best_loglik).unwrap();
+        writeln!(f, "# These are exploration-level estimates. Use camdl fit refine for convergence.").unwrap();
+        writeln!(f).unwrap();
+        let mut pairs: Vec<(&String, &f64)> = all_params.iter().collect();
+        pairs.sort_by_key(|(k, _)| k.as_str());
+        for (name, value) in pairs {
+            writeln!(f, "{} = {}", name, runner::format_param_value(*value)).unwrap();
+        }
+    }
+
     // Write scout_summary.json
     write_summary(&stage_dir, &chain_results, &config, &auto_rw_sd, n_good, initial_loglik, &input_hash)?;
 

@@ -458,42 +458,16 @@ pub fn cmd_if2(args: &[String]) {
         })
         .collect();
 
-    // ── Compute Rhat across chains (last half of iterations) ─────────────
-    let n_tail = (n_iterations / 2).max(1);
+    // ── Compute Rhat across chains ────────────────────────────────────────
+    let rhat = crate::fit::runner::compute_rhat(&chain_results, &if2_params, n_iterations);
     if n_chains > 1 {
+        let n_tail = (n_iterations / 2).max(1);
         eprintln!("\nRhat (across {} chains, last {} iterations):", n_chains, n_tail);
         for spec in if2_params.iter() {
-            // Collect per-chain means of the parameter over the tail iterations
-            let chain_means: Vec<f64> = chain_results.iter().map(|(_, r)| {
-                let tail: Vec<f64> = r.iterations.iter()
-                    .skip(n_iterations.saturating_sub(n_tail))
-                    .map(|it| it.param_means[spec.index])
-                    .collect();
-                tail.iter().sum::<f64>() / tail.len() as f64
-            }).collect();
-
-            let chain_vars: Vec<f64> = chain_results.iter().map(|(_, r)| {
-                let tail: Vec<f64> = r.iterations.iter()
-                    .skip(n_iterations.saturating_sub(n_tail))
-                    .map(|it| it.param_means[spec.index])
-                    .collect();
-                let m = tail.iter().sum::<f64>() / tail.len() as f64;
-                tail.iter().map(|&x| (x - m).powi(2)).sum::<f64>() / (tail.len() - 1).max(1) as f64
-            }).collect();
-
-            let grand_mean = chain_means.iter().sum::<f64>() / n_chains as f64;
-            let between = chain_means.iter().map(|&m| (m - grand_mean).powi(2)).sum::<f64>()
-                * n_tail as f64 / (n_chains - 1).max(1) as f64;
-            let within = chain_vars.iter().sum::<f64>() / n_chains as f64;
-            let rhat = if within > 0.0 {
-                (((n_tail as f64 - 1.0) / n_tail as f64 * within + between / n_tail as f64) / within).sqrt()
-            } else { f64::NAN };
-
-            let status = if rhat < 1.1 { "✓" } else if rhat < 1.5 { "~" } else { "✗" };
-            eprintln!("  {:12} Rhat={:.2} {} range=[{:.4}, {:.4}]",
-                spec.name, rhat, status,
-                chain_means.iter().cloned().fold(f64::INFINITY, f64::min),
-                chain_means.iter().cloned().fold(f64::NEG_INFINITY, f64::max));
+            if let Some(&r) = rhat.get(&spec.name) {
+                let status = if r < 1.1 { "✓" } else if r < 1.5 { "~" } else { "✗" };
+                eprintln!("  {:12} Rhat={:.2} {}", spec.name, r, status);
+            }
         }
     }
 
