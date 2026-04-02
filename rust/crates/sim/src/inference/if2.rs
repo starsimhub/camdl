@@ -275,7 +275,7 @@ pub fn run_if2_with_progress(
 
         // Initial parameter perturbation (at t=0)
         {
-            let cooling_now = per_step_cooling.powi(global_step as i32);
+            let cooling_now = per_step_cooling.powf(global_step as f64);
             for i in 0..n {
                 for spec in if2_params {
                     let current = particle_params[i][spec.index];
@@ -315,7 +315,7 @@ pub fn run_if2_with_progress(
 
             // Perturb parameters at observation time (per-step cooling).
             // IVP params are skipped here — they were only perturbed at t=0.
-            let cooling_now = per_step_cooling.powi(global_step as i32);
+            let cooling_now = per_step_cooling.powf(global_step as f64);
             for i in 0..n {
                 for spec in if2_params {
                     if spec.ivp { continue; } // IVP: perturbed at t=0 only
@@ -410,7 +410,7 @@ pub fn run_if2_with_progress(
         }
 
         // Per-parameter diagnostics for this iteration
-        let cooling_at_iter = per_step_cooling.powi((iter as usize * observations.len()) as i32);
+        let cooling_at_iter = per_step_cooling.powf((iter * observations.len()) as f64);
         let param_diag: Vec<ParamIterDiag> = if2_params.iter().enumerate().map(|(pi, spec)| {
             let cnt = diag_count[pi].max(1) as f64;
             ParamIterDiag {

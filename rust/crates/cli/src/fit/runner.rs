@@ -290,7 +290,7 @@ pub fn run_quick_pfilter(config: &FitRunConfig, params: &[f64], n_particles: usi
 
     match particle_filter::bootstrap_filter(
         compiled, params, &observations, n_particles, config.if2_config.dt,
-        &step_fn, &project_fn, &*dmeasure_fn, seed,
+        &step_fn, &project_fn, &*dmeasure_fn, None, None, seed,
     ) {
         Ok(result) => result.log_likelihood,
         Err(_) => f64::NEG_INFINITY,
@@ -382,23 +382,13 @@ fn resolve_flow_indices(model: &ir::Model, stream_name: &str) -> Result<Vec<usiz
             )),
         }
     } else {
-        // Fallback: try to find flows by transmission metadata
-        let indices: Vec<usize> = model.transitions.iter().enumerate()
-            .filter(|(_, tr)| tr.metadata.as_ref()
-                .and_then(|m| m.origin_kind.as_deref())
-                .map_or(false, |k| k == "transmission"))
-            .map(|(i, _)| i)
-            .collect();
-        if indices.is_empty() {
-            return Err(format!(
-                "no observation block named '{}' and no transmission transitions found.\n\
-                 Available observations: {}",
-                stream_name,
-                model.observations.iter().map(|o| o.name.as_str()).collect::<Vec<_>>().join(", ")
-            ));
-        }
-        eprintln!("warning: no observation block '{}', falling back to transmission flows", stream_name);
-        Ok(indices)
+        Err(format!(
+            "no observation block named '{}' in model.\n\
+             Available observations: {}\n\
+             The [data] key in fit.toml must match an observation block name in the model.",
+            stream_name,
+            model.observations.iter().map(|o| o.name.as_str()).collect::<Vec<_>>().join(", ")
+        ))
     }
 }
 

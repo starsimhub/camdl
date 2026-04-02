@@ -20,12 +20,10 @@ pub fn compile_dmeasure_if2(
     compiled: Arc<CompiledModel>,
 ) -> Box<dyn Fn(f64, f64, &[f64]) -> f64 + Send + Sync> {
     let likelihood = obs_model.likelihood.clone();
-    let n_int = compiled.int_local_to_global.len();
-    let n_real = compiled.real_local_to_global.len();
+    let int_s = IntState::new(compiled.int_local_to_global.len());
+    let real_s = RealState::new(compiled.real_local_to_global.len());
 
     Box::new(move |projected: f64, observed: f64, params: &[f64]| {
-        let int_s = IntState::new(n_int);
-        let real_s = RealState::new(n_real);
         eval_likelihood(&likelihood, projected, observed, params, &compiled, &int_s, &real_s)
     })
 }
@@ -39,12 +37,10 @@ pub fn compile_dmeasure_pf(
 ) -> Box<dyn Fn(f64, f64) -> f64> {
     let likelihood = obs_model.likelihood.clone();
     let params = params.to_vec();
-    let n_int = compiled.int_local_to_global.len();
-    let n_real = compiled.real_local_to_global.len();
+    let int_s = IntState::new(compiled.int_local_to_global.len());
+    let real_s = RealState::new(compiled.real_local_to_global.len());
 
     Box::new(move |projected: f64, observed: f64| {
-        let int_s = IntState::new(n_int);
-        let real_s = RealState::new(n_real);
         eval_likelihood(&likelihood, projected, observed, &params, &compiled, &int_s, &real_s)
     })
 }
@@ -112,12 +108,10 @@ pub fn compile_rmeasure_pf(
 ) -> Box<dyn Fn(f64, &mut StatefulRng) -> f64> {
     let likelihood = obs_model.likelihood.clone();
     let params = params.to_vec();
-    let n_int = compiled.int_local_to_global.len();
-    let n_real = compiled.real_local_to_global.len();
+    let int_s = IntState::new(compiled.int_local_to_global.len());
+    let real_s = RealState::new(compiled.real_local_to_global.len());
 
     Box::new(move |projected: f64, rng: &mut StatefulRng| {
-        let int_s = IntState::new(n_int);
-        let real_s = RealState::new(n_real);
         sample_obs(&likelihood, projected, &params, &compiled, &int_s, &real_s, rng)
     })
 }
@@ -132,12 +126,10 @@ pub fn compile_obs_mean_pf(
 ) -> Box<dyn Fn(f64) -> f64> {
     let likelihood = obs_model.likelihood.clone();
     let params = params.to_vec();
-    let n_int = compiled.int_local_to_global.len();
-    let n_real = compiled.real_local_to_global.len();
+    let int_s = IntState::new(compiled.int_local_to_global.len());
+    let real_s = RealState::new(compiled.real_local_to_global.len());
 
     Box::new(move |projected: f64| {
-        let int_s = IntState::new(n_int);
-        let real_s = RealState::new(n_real);
         eval_obs_mean(&likelihood, projected, &params, &compiled, &int_s, &real_s)
     })
 }

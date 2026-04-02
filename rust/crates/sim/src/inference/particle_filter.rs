@@ -111,6 +111,12 @@ pub fn bootstrap_filter(
         .map(|i| StatefulRng::new(seed ^ (i as u64).wrapping_mul(0x517cc1b727220a95)))
         .collect();
 
+    // Separate RNG streams for diagnostic draws (rmeasure).
+    // Process RNG streams must be identical whether or not predictions are computed.
+    let mut diag_rngs: Vec<StatefulRng> = (0..n_particles)
+        .map(|i| StatefulRng::new(seed ^ (i as u64).wrapping_mul(0xbaadf00dcafebabe)))
+        .collect();
+
     // Double-buffer for resampling (avoids clone allocation)
     let mut states_buf: Vec<ParticleState> = (0..n_particles)
         .map(|_| ParticleState::new(n_int, n_tr))
@@ -166,21 +172,19 @@ pub fn bootstrap_filter(
 
             // State quantiles: E[y|x_i] across particles (process uncertainty, obs scale)
             let obs_means: Vec<f64> = projections.iter().map(|&p| omfn(p)).collect();
-            let state_diag = weighted_prediction_diag(&obs_means, &equal_lw);
+            let (state_mean, state_q05, state_q50, state_q95) = weighted_quantiles(&obs_means, &equal_lw);
 
             // Obs quantiles: y_i ~ p(y|x_i) draws (process + observation noise)
             let obs_draws: Vec<f64> = projections.iter().enumerate()
-                .map(|(i, &proj)| rmfn(proj, &mut rngs[i]))
+                .map(|(i, &proj)| rmfn(proj, &mut diag_rngs[i]))
                 .collect();
-            let obs_diag = weighted_prediction_diag(&obs_draws, &equal_lw);
+            let (_, obs_q05, obs_q50, obs_q95) = weighted_quantiles(&obs_draws, &equal_lw);
 
             let obs_mean = obs_means.iter().sum::<f64>() / n_particles as f64;
 
             predictions.push(PredictionDiag {
-                obs_mean,
-                obs_q05: obs_diag.state_q05, obs_q50: obs_diag.state_q50, obs_q95: obs_diag.state_q95,
-                state_mean: state_diag.state_mean,
-                state_q05: state_diag.state_q05, state_q50: state_diag.state_q50, state_q95: state_diag.state_q95,
+                obs_mean, obs_q05, obs_q50, obs_q95,
+                state_mean, state_q05, state_q50, state_q95,
             });
         }
 
@@ -222,15 +226,12 @@ pub fn bootstrap_filter(
     })
 }
 
-/// Compute weighted mean and quantiles from log-weighted samples.
-/// Used for one-step-ahead prediction diagnostics.
-fn weighted_prediction_diag(values: &[f64], log_weights: &[f64]) -> PredictionDiag {
+/// Weighted mean and quantiles from log-weighted samples.
+/// Returns (mean, q05, q50, q95).
+fn weighted_quantiles(values: &[f64], log_weights: &[f64]) -> (f64, f64, f64, f64) {
     let n = values.len();
     if n == 0 {
-        return PredictionDiag {
-            obs_mean: 0.0, obs_q05: 0.0, obs_q50: 0.0, obs_q95: 0.0,
-            state_mean: 0.0, state_q05: 0.0, state_q50: 0.0, state_q95: 0.0,
-        };
+        return (0.0, 0.0, 0.0, 0.0);
     }
 
     // Normalize weights
@@ -260,8 +261,5 @@ fn weighted_prediction_diag(values: &[f64], log_weights: &[f64]) -> PredictionDi
         sorted.last().map_or(0.0, |&(v, _)| v)
     };
 
-    PredictionDiag {
-        obs_mean: mean, obs_q05: quantile(0.05), obs_q50: quantile(0.50), obs_q95: quantile(0.95),
-        state_mean: mean, state_q05: quantile(0.05), state_q50: quantile(0.50), state_q95: quantile(0.95),
-    }
+    (mean, quantile(0.05), quantile(0.50), quantile(0.95))
 }
