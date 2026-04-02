@@ -112,15 +112,25 @@ pub fn cmd_profile(args: &[String]) {
     struct FocalGrid { name: String, values: Vec<f64>, param_idx: usize }
     let mut focal_grids: Vec<FocalGrid> = Vec::new();
 
-    // Parse rw_sd
-    let rw_sd_map: HashMap<String, f64> = rw_sd_str.split(',')
-        .map(|kv| {
-            let mut parts = kv.trim().splitn(2, '=');
-            let k = parts.next().unwrap().to_string();
-            let v: f64 = parts.next().and_then(|s| s.parse().ok()).expect("bad rw-sd");
-            (k, v)
-        })
-        .collect();
+    // Parse rw_sd — supports "auto" and "name=value,name=auto" forms
+    let rw_sd_auto = rw_sd_str.trim() == "auto";
+    let rw_sd_map_raw: HashMap<String, Option<f64>> = if rw_sd_auto {
+        HashMap::new()
+    } else {
+        rw_sd_str.split(',')
+            .map(|kv| {
+                let mut parts = kv.trim().splitn(2, '=');
+                let k = parts.next().unwrap().to_string();
+                let v_str = parts.next().unwrap_or("auto");
+                let v: Option<f64> = if v_str == "auto" { None } else {
+                    Some(v_str.parse().unwrap_or_else(|_| {
+                        eprintln!("bad --rw-sd entry: {}", kv); std::process::exit(1);
+                    }))
+                };
+                (k, v)
+            })
+            .collect()
+    };
 
     // Load model
     let mut model: ir::Model = if ir_path.ends_with(".camdl") {
@@ -184,27 +194,33 @@ pub fn cmd_profile(args: &[String]) {
         focal_grids.push(FocalGrid { name: name.clone(), values: grid_values, param_idx: idx });
     }
 
-    // Build IF2 param specs (excluding all focal params)
-    let _focal_idx_set: std::collections::HashSet<usize> = focal_grids.iter().map(|fg| fg.param_idx).collect();
-    let if2_params: Vec<IF2Param> = rw_sd_map.iter()
-        .filter(|(name, _)| !focal_names.contains(name))
-        .map(|(name, &rw_sd)| {
-            let idx = compiled.param_index.get(name.as_str()).copied()
-                .unwrap_or_else(|| { eprintln!("rw-sd param '{}' not found", name); std::process::exit(1); });
-            let ir_param = model.parameters.iter().find(|p| p.name == *name).unwrap();
-            let (lower, upper) = ir_param.bounds.unwrap_or((0.0, f64::INFINITY));
-            let transform = if let Some(ref kind) = ir_param.param_kind {
-                match kind.as_str() {
-                    "probability" => Transform::Logit { lo: lower, hi: upper },
-                    "rate" | "positive" | "count" => Transform::Log { lo: lower, hi: upper },
-                    _ => Transform::None,
-                }
-            } else {
-                if lower >= 0.0 { Transform::Log { lo: lower, hi: upper } } else { Transform::None }
-            };
-            IF2Param { name: name.clone(), index: idx, initial: base_params[idx], rw_sd, transform, lower, upper, ivp: false }
-        })
-        .collect();
+    // Build IF2 param specs (excluding focal params)
+    // When --rw-sd auto: estimate all non-focal params with auto rw_sd
+    let param_names_to_estimate: Vec<String> = if rw_sd_auto {
+        model.parameters.iter()
+            .filter(|p| !focal_names.contains(&p.name))
+            .filter(|p| compiled.param_index.contains_key(p.name.as_str()))
+            .map(|p| p.name.clone())
+            .collect()
+    } else {
+        rw_sd_map_raw.keys()
+            .filter(|name| !focal_names.contains(*name))
+            .cloned()
+            .collect()
+    };
+
+    let if2_params: Vec<IF2Param> = param_names_to_estimate.iter().map(|name| {
+        let idx = compiled.param_index.get(name.as_str()).copied()
+            .unwrap_or_else(|| { eprintln!("rw-sd param '{}' not found", name); std::process::exit(1); });
+        let ir_param = model.parameters.iter().find(|p| p.name == *name).unwrap();
+        let (lower, upper) = ir_param.bounds.unwrap_or((0.0, f64::INFINITY));
+        let transform = crate::fit::runner::derive_transform(ir_param, None);
+        let rw_sd = rw_sd_map_raw.get(name).and_then(|v| *v)
+            .unwrap_or_else(|| crate::fit::runner::auto_rw_sd_from_value_pub(
+                base_params[idx], lower, upper, &transform
+            ));
+        IF2Param { name: name.clone(), index: idx, initial: base_params[idx], rw_sd, transform, lower, upper, ivp: false }
+    }).collect();
     let if2_params = Arc::new(if2_params);
 
     // Obs model params

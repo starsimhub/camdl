@@ -338,16 +338,7 @@ pub fn cmd_if2(args: &[String]) {
         let ir_param = model.parameters.iter().find(|p| p.name == *name).unwrap();
         let (lower, upper) = ir_param.bounds.unwrap_or((0.0, f64::INFINITY));
 
-        // Derive transform from DSL parameter type (param_kind)
-        let transform = if let Some(ref kind) = ir_param.param_kind {
-            match kind.as_str() {
-                "probability" => Transform::Logit { lo: lower, hi: upper },
-                "rate" | "positive" | "count" => Transform::Log { lo: lower, hi: upper },
-                _ => Transform::None,
-            }
-        } else {
-            if lower >= 0.0 { Transform::Log { lo: lower, hi: upper } } else { Transform::None }
-        };
+        let transform = crate::fit::runner::derive_transform(ir_param, None);
 
         // rw_sd: explicit value > auto from bounds
         let explicit_rw_sd = rw_sd_map.get(name).and_then(|v| *v);

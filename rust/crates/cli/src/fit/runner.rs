@@ -208,24 +208,7 @@ fn build_if2_params(
             .or(ir_param.bounds)
             .unwrap_or((0.0, f64::INFINITY));
 
-        // Determine transform: fit.toml override > param_kind > bounds fallback
-        let transform = if let Some(ref t) = spec.transform {
-            match t.as_str() {
-                "log" => Transform::Log { lo: lower, hi: upper },
-                "logit" => Transform::Logit { lo: lower, hi: upper },
-                "identity" | "none" => Transform::None,
-                other => return Err(format!("unknown transform '{}' for '{}'", other, name)),
-            }
-        } else if let Some(ref kind) = ir_param.param_kind {
-            match kind.as_str() {
-                "probability" => Transform::Logit { lo: lower, hi: upper },
-                "rate" | "positive" | "count" => Transform::Log { lo: lower, hi: upper },
-                _ => Transform::None,
-            }
-        } else {
-            // Fallback for IR files without param_kind
-            if lower >= 0.0 { Transform::Log { lo: lower, hi: upper } } else { Transform::None }
-        };
+        let transform = derive_transform(ir_param, spec.transform.as_deref());
 
         // Determine rw_sd: prior state > explicit fit.toml > auto from bounds
         let rw_sd = prior_state
@@ -334,6 +317,31 @@ fn print_preflight(config: &FitRunConfig) {
     eprintln!("  iter {:3}: rw_sd at {:.0}%", mid, frac.powf(mid as f64 / iters as f64) * 100.0);
     eprintln!("  iter {:3}: rw_sd at {:.0}%", iters, frac * 100.0);
     eprintln!();
+}
+
+/// Derive the transform for a parameter from its IR metadata.
+/// Priority: explicit override > param_kind > bounds fallback.
+pub fn derive_transform(
+    ir_param: &ir::parameter::Parameter,
+    transform_override: Option<&str>,
+) -> Transform {
+    let (lower, upper) = ir_param.bounds.unwrap_or((0.0, f64::INFINITY));
+    if let Some(t) = transform_override {
+        return match t {
+            "log" => Transform::Log { lo: lower, hi: upper },
+            "logit" => Transform::Logit { lo: lower, hi: upper },
+            _ => Transform::None,
+        };
+    }
+    if let Some(ref kind) = ir_param.param_kind {
+        match kind.as_str() {
+            "probability" => Transform::Logit { lo: lower, hi: upper },
+            "rate" | "positive" | "count" => Transform::Log { lo: lower, hi: upper },
+            _ => Transform::None,
+        }
+    } else {
+        if lower >= 0.0 { Transform::Log { lo: lower, hi: upper } } else { Transform::None }
+    }
 }
 
 /// Public wrapper for use by `camdl if2 --rw-sd auto`.
