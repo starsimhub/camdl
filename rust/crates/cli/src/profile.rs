@@ -53,6 +53,7 @@ pub fn cmd_profile(args: &[String]) {
     let mut tol = DEFAULT_TOL;
     let mut flow_name: Option<String> = None;
     let mut rw_sd_str: Option<String> = None;
+    let mut fixed_str: Option<String> = None;
     let mut output_path: Option<String> = None;
 
     let mut i = 0;
@@ -79,6 +80,7 @@ pub fn cmd_profile(args: &[String]) {
             "--tol"        => { i += 1; tol = args[i].parse().expect("needs number"); }
             "--flow"       => { i += 1; flow_name = Some(args[i].clone()); }
             "--rw-sd"      => { i += 1; rw_sd_str = Some(args[i].clone()); }
+            "--fixed"      => { i += 1; fixed_str = Some(args[i].clone()); }
             "--output" | "-o" => { i += 1; output_path = Some(args[i].clone()); }
             "--param"      => {
                 i += 1;
@@ -194,16 +196,28 @@ pub fn cmd_profile(args: &[String]) {
         focal_grids.push(FocalGrid { name: name.clone(), values: grid_values, param_idx: idx });
     }
 
-    // Build IF2 param specs (excluding focal params)
+    // Parse --fixed "N0,mu,rho,..."
+    let fixed_names: std::collections::HashSet<String> = fixed_str
+        .map(|s| s.split(',').map(|n| n.trim().to_string()).collect())
+        .unwrap_or_default();
+
+    // Build IF2 param specs (excluding focal + fixed params)
+    // Focal params are fixed at grid values by the profile loop.
+    // Fixed params are held constant at their --params values.
+    let exclude: std::collections::HashSet<String> = focal_names.iter()
+        .chain(fixed_names.iter())
+        .cloned()
+        .collect();
+
     let param_names_to_estimate: Vec<String> = if rw_sd_auto {
         model.parameters.iter()
-            .filter(|p| !focal_names.contains(&p.name))
+            .filter(|p| !exclude.contains(&p.name))
             .filter(|p| compiled.param_index.contains_key(p.name.as_str()))
             .map(|p| p.name.clone())
             .collect()
     } else {
         rw_sd_map_raw.keys()
-            .filter(|name| !focal_names.contains(*name))
+            .filter(|name| !exclude.contains(*name))
             .cloned()
             .collect()
     };
