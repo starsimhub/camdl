@@ -157,19 +157,73 @@ pub fn run_status(fit: &FitToml) -> Result<(), String> {
         }
     }
 
-    // Provenance check
+    // Provenance check — verify primary output files against fit_record.json manifest
+    let record_path = format!("{}/validate/fit_record.json", dir);
     let mle_path = format!("{}/validate/mle_params.toml", dir);
-    if std::path::Path::new(&mle_path).exists() {
+    if std::path::Path::new(&record_path).exists() {
+        println!();
+        println!("  Provenance:");
+
+        // Read output manifest from fit_record.json
+        if let Ok(record_str) = std::fs::read_to_string(&record_path) {
+            if let Ok(record) = serde_json::from_str::<serde_json::Value>(&record_str) {
+                if let Some(ref input_hash) = record.get("provenance").and_then(|p| p.get("input_hash")).and_then(|v| v.as_str()) {
+                    println!("    input hash: {}", input_hash);
+                }
+
+                if let Some(outputs) = record.get("outputs").and_then(|o| o.as_object()) {
+                    let validate_dir = format!("{}/validate", dir);
+                    // Verify primary outputs only (not chain-level)
+                    let primary = ["mle_params.toml", "pfilter_trace.tsv", "ess_at_mle.tsv", "fit_state.toml"];
+                    for name in &primary {
+                        if let Some(expected) = outputs.get(*name).and_then(|v| v.as_str()) {
+                            let file_path = format!("{}/{}", validate_dir, name);
+                            match provenance::file_content_hash(&file_path) {
+                                Some(actual) if actual == expected => {
+                                    println!("    {}: \x1b[32m✓\x1b[0m {}", name, expected);
+                                }
+                                Some(actual) => {
+                                    println!("    {}: \x1b[33m⚠ MODIFIED\x1b[0m (expected {}, got {})", name, expected, actual);
+                                }
+                                None => {
+                                    println!("    {}: \x1b[31m✗ DELETED\x1b[0m", name);
+                                }
+                            }
+                        }
+                    }
+
+                    // Profile files
+                    for (name, hash_val) in outputs {
+                        if name.starts_with("profiles/") {
+                            if let Some(expected) = hash_val.as_str() {
+                                let file_path = format!("{}/{}", validate_dir, name);
+                                match provenance::file_content_hash(&file_path) {
+                                    Some(actual) if actual == expected => {
+                                        println!("    {}: \x1b[32m✓\x1b[0m", name);
+                                    }
+                                    Some(_) => {
+                                        println!("    {}: \x1b[33m⚠ MODIFIED\x1b[0m", name);
+                                    }
+                                    None => {
+                                        println!("    {}: \x1b[31m✗ DELETED\x1b[0m", name);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    } else if std::path::Path::new(&mle_path).exists() {
+        // Fallback: standalone mle_params.toml content hash check
         println!();
         println!("  Provenance:");
         match provenance::verify_content_hash(&mle_path) {
             Ok(provenance::ContentVerification::Valid) => {
                 println!("    mle_params.toml: \x1b[32m✓ content hash matches\x1b[0m");
             }
-            Ok(provenance::ContentVerification::Modified { declared, computed, .. }) => {
-                println!("    mle_params.toml: \x1b[33m⚠ MODIFIED\x1b[0m");
-                println!("      Content hash mismatch: expected {}, computed {}", declared, computed);
-                println!("      This file has been hand-tuned. Inference provenance no longer applies.");
+            Ok(provenance::ContentVerification::Modified { declared, computed }) => {
+                println!("    mle_params.toml: \x1b[33m⚠ MODIFIED\x1b[0m (expected {}, got {})", declared, computed);
             }
             Ok(provenance::ContentVerification::NoHash) => {
                 println!("    mle_params.toml: \x1b[90mno provenance hash\x1b[0m");

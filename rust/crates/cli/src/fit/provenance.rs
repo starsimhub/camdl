@@ -82,39 +82,80 @@ pub fn write_mle_params(
 }
 
 /// Check cache: does the stage directory already have results with matching input hash?
+/// Reads input_hash directly from fit_state.toml — one TOML parse, one string comparison.
 pub fn check_cache(stage_dir: &str, input_hash: &str) -> CacheStatus {
-    let state_path = format!("{}/fit_state.toml", stage_dir);
-    match std::fs::read_to_string(&state_path) {
-        Ok(contents) => {
-            // Look for input hash in the fit_record.json or fit_state
-            let record_path = format!("{}/fit_record.json", stage_dir);
-            if let Ok(record) = std::fs::read_to_string(&record_path) {
-                if record.contains(input_hash) {
-                    return CacheStatus::Match;
-                }
-            }
-            // Also check summary JSON
-            for entry in std::fs::read_dir(stage_dir).into_iter().flatten() {
-                if let Ok(e) = entry {
-                    let name = e.file_name().to_string_lossy().to_string();
-                    if name.ends_with("_summary.json") {
-                        if let Ok(s) = std::fs::read_to_string(e.path()) {
-                            if s.contains(input_hash) {
-                                return CacheStatus::Match;
-                            }
-                        }
-                    }
-                }
-            }
-            // Stage dir exists but different inputs
-            if contents.contains("stage") {
-                CacheStatus::Mismatch
-            } else {
-                CacheStatus::NotFound
+    use crate::fit::state::FitState;
+    match FitState::load(stage_dir) {
+        Ok(state) => {
+            match state.input_hash {
+                Some(ref h) if h == input_hash => CacheStatus::Match,
+                Some(_) => CacheStatus::Mismatch,
+                None => CacheStatus::Mismatch, // old format without input_hash
             }
         }
         Err(_) => CacheStatus::NotFound,
     }
+}
+
+/// Hash the contents of a file (first 4 bytes of SHA256, 8 hex chars).
+pub fn file_content_hash(path: &str) -> Option<String> {
+    use sha2::Digest;
+    let bytes = std::fs::read(path).ok()?;
+    Some(hex::encode(&sha2::Sha256::digest(&bytes)[..4]))
+}
+
+/// Collect content hashes of all primary output files in a stage directory.
+/// Returns (relative_path, hash) pairs for files that exist.
+pub fn collect_output_hashes(stage_dir: &str, primary_only: bool) -> Vec<(String, String)> {
+    let mut outputs = Vec::new();
+
+    // Primary outputs (always verified by `camdl fit status`)
+    let primary_files = [
+        "mle_params.toml",
+        "fit_state.toml",
+        "pfilter_trace.tsv",
+        "ess_at_mle.tsv",
+        "pfilter_loglik.txt",
+        "fit_report.txt",
+    ];
+    for name in &primary_files {
+        let path = format!("{}/{}", stage_dir, name);
+        if let Some(hash) = file_content_hash(&path) {
+            outputs.push((name.to_string(), hash));
+        }
+    }
+
+    // Profile files
+    let profile_dir = format!("{}/profiles", stage_dir);
+    if let Ok(entries) = std::fs::read_dir(&profile_dir) {
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().to_string();
+            if name.ends_with("_profile.tsv") {
+                let path = entry.path().to_string_lossy().to_string();
+                if let Some(hash) = file_content_hash(&path) {
+                    outputs.push((format!("profiles/{}", name), hash));
+                }
+            }
+        }
+    }
+
+    if primary_only {
+        return outputs;
+    }
+
+    // Chain-level files (verified only with --audit)
+    for i in 1..=20 {
+        let chain_dir = format!("{}/chain_{}", stage_dir, i);
+        if !std::path::Path::new(&chain_dir).exists() { break; }
+        for name in &["parameter_traces.tsv", "final_params.toml"] {
+            let path = format!("{}/{}", chain_dir, name);
+            if let Some(hash) = file_content_hash(&path) {
+                outputs.push((format!("chain_{}/{}", i, name), hash));
+            }
+        }
+    }
+
+    outputs
 }
 
 pub enum CacheStatus {

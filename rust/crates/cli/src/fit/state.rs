@@ -8,6 +8,9 @@ pub struct FitState {
     pub stage: String,
     pub seed: u64,
     pub timestamp: String,
+    /// Input hash identifying the computation that produced this state.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input_hash: Option<String>,
     pub best_loglik: f64,
     pub initial_loglik: f64,
     pub best_chain: usize,

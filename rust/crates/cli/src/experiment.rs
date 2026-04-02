@@ -313,6 +313,14 @@ struct RunEntry {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+struct ParamsProvenance {
+    source: String,
+    content_hash: Option<String>,
+    input_hash: Option<String>,
+    verified: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 struct Manifest {
     model: String,
     scenarios: Vec<String>,
@@ -322,6 +330,8 @@ struct Manifest {
     output_dir: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     geo: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    params_provenance: Option<ParamsProvenance>,
     /// Completed runs. run_path is relative to runs/ and used by the web app
     /// to fetch trajectories: GET /runs/{run_path}/traj.tsv
     runs: Vec<RunEntry>,
@@ -384,7 +394,46 @@ pub fn cmd_experiment_run(args: &[String]) {
     });
     let mhash = model_hash(&ir_json);
 
+    let mut params_provenance: Option<ParamsProvenance> = None;
     let base_params: HashMap<String, f64> = if let Some(ref pf) = exp.config.params {
+        // Check provenance if the params file has a content hash header
+        let prov = match crate::fit::provenance::verify_content_hash(pf) {
+            Ok(crate::fit::provenance::ContentVerification::Valid) => {
+                eprintln!("params: {} \x1b[32m✓ provenance verified\x1b[0m", pf);
+                // Extract input_hash from comment header
+                let input_hash = std::fs::read_to_string(pf).ok()
+                    .and_then(|s| s.lines()
+                        .find(|l| l.starts_with("# Input hash:"))
+                        .and_then(|l| l.split_whitespace().nth(3))
+                        .map(|s| s.to_string()));
+                let content_hash = std::fs::read_to_string(pf).ok()
+                    .and_then(|s| s.lines()
+                        .find(|l| l.starts_with("# Content hash:"))
+                        .and_then(|l| l.split_whitespace().nth(3))
+                        .map(|s| s.to_string()));
+                Some(ParamsProvenance {
+                    source: pf.clone(),
+                    content_hash,
+                    input_hash,
+                    verified: true,
+                })
+            }
+            Ok(crate::fit::provenance::ContentVerification::Modified { declared, computed }) => {
+                eprintln!("\x1b[33mwarning: params file {} has been modified since inference produced it.\x1b[0m", pf);
+                eprintln!("  Content hash mismatch: expected {}, got {}", declared, computed);
+                Some(ParamsProvenance {
+                    source: pf.clone(),
+                    content_hash: Some(computed),
+                    input_hash: None,
+                    verified: false,
+                })
+            }
+            _ => {
+                // No provenance header — standalone params file, that's fine
+                None
+            }
+        };
+        params_provenance = prov;
         load_params_toml(pf).unwrap_or_else(|e| {
             eprintln!("error: cannot load params {}: {}", pf, e);
             std::process::exit(1);
@@ -562,6 +611,7 @@ pub fn cmd_experiment_run(args: &[String]) {
         completed,
         output_dir: output_dir.clone(),
         geo: geo_url,
+        params_provenance,
         runs: completed_runs,
     };
     let manifest_path = format!("{}/manifest.json", output_dir);

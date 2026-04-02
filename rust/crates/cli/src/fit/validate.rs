@@ -137,6 +137,7 @@ pub fn run_validate(fit: &FitToml, starts_from: &str, seed: u64, force: bool) ->
         stage: "validate".into(),
         seed,
         timestamp: crate::fit::scout::now_iso8601_pub(),
+        input_hash: Some(input_hash.clone()),
         best_loglik: loglik,
         initial_loglik: prior_state.best_loglik,
         best_chain: chain_results.best_chain,
@@ -477,6 +478,16 @@ fn write_fit_record(
     profiles: &[ProfileResult],
     all_params: &HashMap<String, f64>,
 ) -> Result<(), String> {
+    // Collect content hashes of all output files for the manifest
+    let output_hashes: serde_json::Value = {
+        let hashes = provenance::collect_output_hashes(dir, false);
+        let mut map = serde_json::Map::new();
+        for (name, hash) in hashes {
+            map.insert(name, serde_json::Value::String(hash));
+        }
+        serde_json::Value::Object(map)
+    };
+
     let record = serde_json::json!({
         "model": {
             "path": fit.fit.model,
@@ -517,6 +528,7 @@ fn write_fit_record(
             "timestamp": metadata.timestamp,
             "camdl_version": env!("CARGO_PKG_VERSION"),
         },
+        "outputs": output_hashes,
     });
 
     let path = format!("{}/fit_record.json", dir);

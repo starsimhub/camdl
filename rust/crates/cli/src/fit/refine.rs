@@ -106,6 +106,7 @@ pub fn run_refine(fit: &FitToml, starts_from: &str, seed: u64, force: bool) -> R
         stage: "refine".into(),
         seed,
         timestamp: crate::fit::scout::now_iso8601_pub(),
+        input_hash: Some(input_hash.clone()),
         best_loglik: chain_results.best_loglik,
         initial_loglik: prior_state.best_loglik,
         best_chain: chain_results.best_chain,

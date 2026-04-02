@@ -140,6 +140,7 @@ pub fn run_scout(fit: &FitToml, seed: u64, force: bool) -> Result<(), String> {
         stage: "scout".into(),
         seed,
         timestamp: now_iso8601(),
+        input_hash: Some(input_hash.clone()),
         best_loglik: chain_results.best_loglik,
         initial_loglik,
         best_chain: chain_results.best_chain,
