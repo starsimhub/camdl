@@ -80,8 +80,17 @@ impl StatefulRng {
     pub fn neg_binomial(&mut self, mean: f64, sigma_sq: f64, dt: f64) -> u64 {
         if mean <= 0.0 || sigma_sq <= 0.0 { return self.poisson(mean); }
         let shape = dt / sigma_sq;
+        // shape < 1e-6 means sigma_sq >> dt: the Gamma is degenerate
+        // (nearly all mass at zero, occasional extreme spikes).
+        // Fall back to Poisson (no multiplicative noise) rather than
+        // producing nonsense draws. IF2 will push sigma_se away from
+        // these extreme values via low likelihood.
+        if shape < 1e-6 { return self.poisson(mean); }
         let scale = sigma_sq / dt;
-        let g = Gamma::new(shape, scale).unwrap().sample(&mut self.0);
+        let g = match Gamma::new(shape, scale) {
+            Ok(g) => g.sample(&mut self.0),
+            Err(_) => 1.0, // fallback: no overdispersion
+        };
         self.poisson(mean * g)
     }
 
@@ -91,8 +100,13 @@ impl StatefulRng {
     pub fn gamma_multiplier(&mut self, sigma_sq: f64, dt: f64) -> f64 {
         if sigma_sq <= 0.0 { return 1.0; }
         let shape = dt / sigma_sq;
+        // Same degenerate guard as neg_binomial above.
+        if shape < 1e-6 { return 1.0; }
         let scale = sigma_sq / dt;
-        Gamma::new(shape, scale).unwrap().sample(&mut self.0)
+        match Gamma::new(shape, scale) {
+            Ok(g) => g.sample(&mut self.0),
+            Err(_) => 1.0, // fallback to no noise
+        }
     }
 
     /// Binomial(n, p) draw. Used by chain-binomial for exact multinomial
