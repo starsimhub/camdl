@@ -142,7 +142,7 @@ impl FitRunConfig {
             n_particles,
             n_iterations,
             cooling_fraction: cooling,
-            cooling_target_iters: 50,
+            cooling_target_iters: n_iterations,
             dt,
         };
 
@@ -210,23 +210,21 @@ fn build_if2_params(
 
         // Determine transform: fit.toml override > param_kind > bounds fallback
         let transform = if let Some(ref t) = spec.transform {
-            // Explicit override in fit.toml
             match t.as_str() {
-                "log" => Transform::Log,
-                "logit" => Transform::Logit,
+                "log" => Transform::Log { lo: lower, hi: upper },
+                "logit" => Transform::Logit { lo: lower, hi: upper },
                 "identity" | "none" => Transform::None,
                 other => return Err(format!("unknown transform '{}' for '{}'", other, name)),
             }
         } else if let Some(ref kind) = ir_param.param_kind {
-            // Derive from DSL parameter type
             match kind.as_str() {
-                "probability" => Transform::Logit,
-                "rate" | "positive" | "count" => Transform::Log,
+                "probability" => Transform::Logit { lo: lower, hi: upper },
+                "rate" | "positive" | "count" => Transform::Log { lo: lower, hi: upper },
                 _ => Transform::None,
             }
         } else {
-            // Fallback for IR files without param_kind (pre-schema-change)
-            if lower >= 0.0 { Transform::Log } else { Transform::None }
+            // Fallback for IR files without param_kind
+            if lower >= 0.0 { Transform::Log { lo: lower, hi: upper } } else { Transform::None }
         };
 
         // Determine rw_sd: prior state > explicit fit.toml > auto from bounds
@@ -303,42 +301,33 @@ pub fn auto_rw_sd_from_value_pub(current_value: f64, lower: f64, upper: f64, tra
     auto_rw_sd_from_value(current_value, lower, upper, transform)
 }
 
-/// Auto-compute rw_sd from current value and bounds using a fixed perturbation
-/// on the transformed scale, converted to natural scale via the delta method.
+/// Auto-compute rw_sd from bounds on the transformed scale.
 ///
-/// Uses 0.1 on the transformed scale → ~10% perturbation for log-transformed
-/// parameters, proportional to the local logit gradient for logit-transformed.
-/// This matches how IF2Param::transformed_sd converts rw_sd internally.
+/// Log: log_range / 20 on transformed scale, converted to natural at geometric midpoint.
+///   For sigma_se in [0.001, 5.0]: log_range = 8.5, log_sd = 0.43, meaning ~±50% per step.
+/// Logit: range / 6 on natural scale. Logit range is ~12 (-6 to 6), /6 gives ~2.0 on logit.
+/// Identity: (hi - lo) / 6.
 ///
-/// Previous implementation used `(hi - lo) / 6` which produced absurd values
-/// for wide-range parameters (e.g., S0 in [1000, 10M] → rw_sd = 19M).
+/// The /20 vs /6 asymmetry: log is unbounded (perturbations accumulate) while logit
+/// saturates at bounds. Log needs more conservative defaults.
 fn auto_rw_sd_from_value(current_value: f64, lower: f64, upper: f64, transform: &Transform) -> f64 {
-    const TRANSFORMED_SD: f64 = 0.1;
-
     match transform {
-        Transform::Log => {
-            // d/dz[e^z] = e^z = current_value
-            // 0.1 on log scale → ~10% perturbation
-            current_value.abs().max(1e-10) * TRANSFORMED_SD
+        Transform::Log { lo, hi } => {
+            let lo = lo.max(1e-300);
+            let hi_val = if hi.is_finite() { *hi } else { lo * 1000.0 };
+            let log_range = (hi_val / lo).ln();
+            let log_sd = log_range / 20.0;
+            // Convert to natural scale at geometric midpoint
+            let midpoint = (lo * hi_val).sqrt();
+            midpoint * log_sd
         }
-        Transform::Logit => {
-            // Scaled logit on [lower, upper]:
-            // d/dz = (x - lo)(hi - x) / (hi - lo)
-            let range = upper - lower;
-            if range < 1e-10 { return current_value.abs().max(1e-10) * TRANSFORMED_SD; }
-            let x = current_value.clamp(lower + 1e-10 * range, upper - 1e-10 * range);
-            let deriv = (x - lower) * (upper - x) / range;
-            deriv * TRANSFORMED_SD
+        Transform::Logit { lo, hi } => {
+            (hi - lo) / 6.0
         }
         Transform::None => {
-            let v = current_value.abs();
-            if v > 1e-10 {
-                v * TRANSFORMED_SD
-            } else {
-                let lo = if lower.is_finite() { lower } else { -1e6 };
-                let hi = if upper.is_finite() { upper } else { 1e6 };
-                (hi - lo) / 200.0
-            }
+            let lo = if lower.is_finite() { lower } else { -1e6 };
+            let hi = if upper.is_finite() { upper } else { 1e6 };
+            (hi - lo) / 6.0
         }
     }
 }
@@ -827,7 +816,7 @@ mod tests {
             index: compiled.param_index["beta"],
             initial: 0.3,
             rw_sd: 0.05,
-            transform: Transform::Log,
+            transform: Transform::Log { lo: 0.01, hi: 2.0 },
             lower: 0.01,
             upper: 2.0,
             ivp: false,

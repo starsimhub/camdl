@@ -48,17 +48,22 @@ pub struct IF2Param {
 
 #[derive(Clone, Debug)]
 pub enum Transform {
-    Log,
-    Logit,
+    /// Log transform with bounds clamping on inverse.
+    /// Correct for rates, positive quantities, counts.
+    Log { lo: f64, hi: f64 },
+    /// Scaled logit mapping [lo, hi] to (-inf, inf).
+    /// Correct for probabilities. Bounds enforced by construction.
+    Logit { lo: f64, hi: f64 },
+    /// No transform.
     None,
 }
 
 impl IF2Param {
     fn to_transformed(&self, x: f64) -> f64 {
-        match self.transform {
-            Transform::Log => x.max(1e-300).ln(),
-            Transform::Logit => {
-                let p = ((x - self.lower) / (self.upper - self.lower)).clamp(1e-10, 1.0 - 1e-10);
+        match &self.transform {
+            Transform::Log { lo, hi } => x.clamp(*lo, *hi).max(1e-300).ln(),
+            Transform::Logit { lo, hi } => {
+                let p = ((x - lo) / (hi - lo)).clamp(1e-10, 1.0 - 1e-10);
                 (p / (1.0 - p)).ln()
             }
             Transform::None => x,
@@ -66,36 +71,31 @@ impl IF2Param {
     }
 
     fn from_transformed(&self, z: f64) -> f64 {
-        match self.transform {
-            Transform::Log => z.exp(),
-            Transform::Logit => {
+        match &self.transform {
+            Transform::Log { lo, hi } => {
+                // Clamp to declared bounds — prevents NaN/panic downstream.
+                // Out-of-bounds particles get bad loglik and are resampled away.
+                z.exp().clamp(*lo, *hi)
+            }
+            Transform::Logit { lo, hi } => {
                 let p = 1.0 / (1.0 + (-z).exp());
-                self.lower + p * (self.upper - self.lower)
+                lo + p * (hi - lo)
+                // Bounds enforced by construction — no clamp needed.
             }
             Transform::None => z,
         }
     }
 
-    /// Convert rw_sd from natural scale to transformed scale using the
-    /// delta method at the current parameter value.
-    ///
-    /// For log:   sd_transformed ≈ rw_sd / current_value
-    /// For logit: sd_transformed ≈ rw_sd / (current_value × (1 - current_value))
-    ///            (scaled to the [lower, upper] interval)
-    /// For none:  sd_transformed = rw_sd
-    ///
-    /// This matches pomp's convention: the user specifies rw.sd on the
-    /// natural scale, and the perturbation happens on the transformed scale
-    /// with the appropriate Jacobian correction.
+    /// Delta method: convert natural-scale rw_sd to transformed-scale.
+    /// Matches pomp's convention: user specifies rw.sd on natural scale.
     fn transformed_sd(&self, natural_sd: f64, current_value: f64) -> f64 {
-        match self.transform {
-            Transform::Log => {
-                let v = current_value.max(1e-300);
-                natural_sd / v
+        match &self.transform {
+            Transform::Log { .. } => {
+                natural_sd / current_value.max(1e-300)
             }
-            Transform::Logit => {
-                let range = self.upper - self.lower;
-                let p = ((current_value - self.lower) / range).clamp(1e-10, 1.0 - 1e-10);
+            Transform::Logit { lo, hi } => {
+                let range = hi - lo;
+                let p = ((current_value - lo) / range).clamp(1e-10, 1.0 - 1e-10);
                 natural_sd / (range * p * (1.0 - p))
             }
             Transform::None => natural_sd,

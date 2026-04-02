@@ -341,13 +341,12 @@ pub fn cmd_if2(args: &[String]) {
         // Derive transform from DSL parameter type (param_kind)
         let transform = if let Some(ref kind) = ir_param.param_kind {
             match kind.as_str() {
-                "probability" => Transform::Logit,
-                "rate" | "positive" | "count" => Transform::Log,
+                "probability" => Transform::Logit { lo: lower, hi: upper },
+                "rate" | "positive" | "count" => Transform::Log { lo: lower, hi: upper },
                 _ => Transform::None,
             }
         } else {
-            // Fallback for IR files without param_kind
-            if lower >= 0.0 { Transform::Log } else { Transform::None }
+            if lower >= 0.0 { Transform::Log { lo: lower, hi: upper } } else { Transform::None }
         };
 
         // rw_sd: explicit value > auto from bounds
@@ -375,9 +374,9 @@ pub fn cmd_if2(args: &[String]) {
         for spec in &if2_params {
             let explicit = rw_sd_map.get(&spec.name).and_then(|v| *v);
             let source = if explicit.is_some() { "explicit" } else { "auto" };
-            let transform_name = match spec.transform {
-                Transform::Log => "log",
-                Transform::Logit => "logit",
+            let transform_name = match &spec.transform {
+                Transform::Log { .. } => "log",
+                Transform::Logit { .. } => "logit",
                 Transform::None => "none",
             };
             let bounds_str = if spec.lower.is_finite() && spec.upper.is_finite() {
@@ -425,7 +424,7 @@ pub fn cmd_if2(args: &[String]) {
         n_particles,
         n_iterations,
         cooling_fraction: cooling,
-        cooling_target_iters: 50,
+        cooling_target_iters: n_iterations,
         dt,
     };
 

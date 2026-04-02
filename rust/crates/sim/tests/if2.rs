@@ -149,11 +149,11 @@ fn test_if2_converges_from_dispersed_start() {
     let if2_params = vec![
         IF2Param {
             name: "beta".into(), index: 0, initial: 0.8,
-            rw_sd: 0.05, transform: Transform::Logit, lower: 0.01, upper: 2.0, ivp: false,
+            rw_sd: 0.05, transform: Transform::Logit { lo: 0.01, hi: 2.0 }, lower: 0.01, upper: 2.0, ivp: false,
         },
         IF2Param {
             name: "gamma".into(), index: 1, initial: 0.3,
-            rw_sd: 0.01, transform: Transform::Logit, lower: 0.01, upper: 1.0, ivp: false,
+            rw_sd: 0.01, transform: Transform::Logit { lo: 0.01, hi: 1.0 }, lower: 0.01, upper: 1.0, ivp: false,
         },
     ];
 
@@ -222,12 +222,12 @@ fn test_if2_respects_bounds() {
         IF2Param {
             name: "beta".into(), index: 0, initial: 0.3,
             rw_sd: 0.1, // aggressive — would escape without bounds
-            transform: Transform::Logit, lower: 0.1, upper: 0.5, ivp: false,
+            transform: Transform::Logit { lo: 0.1, hi: 0.5 }, lower: 0.1, upper: 0.5, ivp: false,
         },
         IF2Param {
             name: "gamma".into(), index: 1, initial: 0.1,
             rw_sd: 0.03,
-            transform: Transform::Logit, lower: 0.05, upper: 0.2, ivp: false,
+            transform: Transform::Logit { lo: 0.05, hi: 0.2 }, lower: 0.05, upper: 0.2, ivp: false,
         },
     ];
 
@@ -269,7 +269,7 @@ fn test_if2_no_cooling_explores() {
     let if2_params = vec![
         IF2Param {
             name: "beta".into(), index: 0, initial: 0.3,
-            rw_sd: 0.02, transform: Transform::Logit, lower: 0.01, upper: 2.0, ivp: false,
+            rw_sd: 0.02, transform: Transform::Logit { lo: 0.01, hi: 2.0 }, lower: 0.01, upper: 2.0, ivp: false,
         },
     ];
 

@@ -11,7 +11,7 @@ const SCOUT_CHAINS: usize = 8;
 const SCOUT_PARTICLES: usize = 500;
 const SCOUT_ITERATIONS: usize = 30;
 const SCOUT_COOLING: f64 = 0.5;  // mild contraction — find basins, don't converge
-const SCOUT_RW_SD_SCALE: f64 = 1.5; // slightly aggressive exploration
+const SCOUT_RW_SD_SCALE: f64 = 1.0; // /20 log default is already calibrated for scout
 
 pub fn run_scout(fit: &FitToml, seed: u64, force: bool) -> Result<(), String> {
     let stage_dir = format!("{}/scout", fit.fit.output_dir);

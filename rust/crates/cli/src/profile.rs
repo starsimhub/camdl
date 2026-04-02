@@ -192,16 +192,15 @@ pub fn cmd_profile(args: &[String]) {
             let idx = compiled.param_index.get(name.as_str()).copied()
                 .unwrap_or_else(|| { eprintln!("rw-sd param '{}' not found", name); std::process::exit(1); });
             let ir_param = model.parameters.iter().find(|p| p.name == *name).unwrap();
-            // Both bounds finite → scaled logit (enforces bounds).
-            // Lower bound only → log. No bounds → log.
-            let (transform, lower, upper) = match ir_param.bounds {
-                Some((lo, hi)) if lo.is_finite() && hi.is_finite() => (Transform::Logit, lo, hi),
-                Some((lo, _)) if lo >= 0.0 => (Transform::Log, lo, f64::INFINITY),
-                _ => match ir_param.transform {
-                    Some(ir::parameter::Transform::Log) => (Transform::Log, 0.0, f64::INFINITY),
-                    Some(ir::parameter::Transform::Logit) => (Transform::Logit, 0.0, 1.0),
-                    _ => (Transform::Log, 0.0, f64::INFINITY),
-                },
+            let (lower, upper) = ir_param.bounds.unwrap_or((0.0, f64::INFINITY));
+            let transform = if let Some(ref kind) = ir_param.param_kind {
+                match kind.as_str() {
+                    "probability" => Transform::Logit { lo: lower, hi: upper },
+                    "rate" | "positive" | "count" => Transform::Log { lo: lower, hi: upper },
+                    _ => Transform::None,
+                }
+            } else {
+                if lower >= 0.0 { Transform::Log { lo: lower, hi: upper } } else { Transform::None }
             };
             IF2Param { name: name.clone(), index: idx, initial: base_params[idx], rw_sd, transform, lower, upper, ivp: false }
         })
