@@ -14,7 +14,7 @@
   "transitions": [
     {
       "name": "infection",
-      "stoichiometry": [["S", -1], ["E_e1", 1]],
+      "stoichiometry": [ [ "S", -1 ], [ "E_e1", 1 ] ],
       "rate": {
         "bin_op": {
           "op": "div",
@@ -31,7 +31,7 @@
               "right": { "pop": "I" }
             }
           },
-          "right": { "pop_sum": ["S", "E_e1", "E_e2", "E_e3", "I", "R"] }
+          "right": { "pop_sum": [ "S", "E_e1", "E_e2", "E_e3", "I", "R" ] }
         }
       },
       "event_key": "infection:{firing_index}",
@@ -43,7 +43,7 @@
     },
     {
       "name": "latent_e1",
-      "stoichiometry": [["E_e1", -1], ["E_e2", 1]],
+      "stoichiometry": [ [ "E_e1", -1 ], [ "E_e2", 1 ] ],
       "rate": {
         "bin_op": {
           "op": "mul",
@@ -66,7 +66,7 @@
     },
     {
       "name": "latent_e2",
-      "stoichiometry": [["E_e2", -1], ["E_e3", 1]],
+      "stoichiometry": [ [ "E_e2", -1 ], [ "E_e3", 1 ] ],
       "rate": {
         "bin_op": {
           "op": "mul",
@@ -89,7 +89,7 @@
     },
     {
       "name": "onset",
-      "stoichiometry": [["E_e3", -1], ["I", 1]],
+      "stoichiometry": [ [ "E_e3", -1 ], [ "I", 1 ] ],
       "rate": {
         "bin_op": {
           "op": "mul",
@@ -112,7 +112,7 @@
     },
     {
       "name": "recovery",
-      "stoichiometry": [["I", -1], ["R", 1]],
+      "stoichiometry": [ [ "I", -1 ], [ "R", 1 ] ],
       "rate": {
         "bin_op": {
           "op": "mul",
@@ -137,26 +137,29 @@
     {
       "name": "beta",
       "value": null,
-      "bounds": [0.001, 2.0],
+      "bounds": [ 0.001, 2.0 ],
       "prior": null,
       "transform": null,
-      "initial_value": null
+      "initial_value": null,
+      "param_kind": "rate"
     },
     {
       "name": "sigma",
       "value": null,
-      "bounds": [0.01, 1.0],
+      "bounds": [ 0.01, 1.0 ],
       "prior": null,
       "transform": null,
-      "initial_value": null
+      "initial_value": null,
+      "param_kind": "rate"
     },
     {
       "name": "gamma",
       "value": null,
-      "bounds": [0.01, 1.0],
+      "bounds": [ 0.01, 1.0 ],
       "prior": null,
       "transform": null,
-      "initial_value": null
+      "initial_value": null,
+      "param_kind": "rate"
     }
   ],
   "initial_conditions": { "explicit": { "S": 990.0, "E_e1": 5.0, "I": 5.0 } },
@@ -194,16 +197,16 @@
   ],
   "model_structure": {
     "dimensions": [
-      { "name": "latent_stage", "values": ["e1", "e2", "e3"] }
+      { "name": "latent_stage", "values": [ "e1", "e2", "e3" ] }
     ],
     "compartment_dims": {
       "S": [],
-      "E": ["latent_stage"],
+      "E": [ "latent_stage" ],
       "I": [],
       "R": []
     },
-    "base_compartments": ["S", "E", "I", "R"],
-    "transmission_transitions": ["infection"],
-    "infectious_compartments": ["I"]
+    "base_compartments": [ "S", "E", "I", "R" ],
+    "transmission_transitions": [ "infection" ],
+    "infectious_compartments": [ "I" ]
   }
 }

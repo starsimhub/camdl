@@ -374,6 +374,7 @@ let parameter_of_json j =
     prior         = (match member_opt "prior"         j with Some `Null | None -> None | Some p -> Some (prior_dist_of_json p));
     transform     = (match member_opt "transform"     j with Some `Null | None -> None | Some t -> Some (transform_of_json  t));
     initial_value = (match member_opt "initial_value" j with Some `Null | None -> None | Some v -> Some (as_float v));
+    param_kind    = (match member_opt "param_kind"    j with Some `Null | None -> None | Some k -> Some (as_string k));
   }
 
 (* ── Initial conditions ──────────────────────────────────────────────────── *)

@@ -336,20 +336,18 @@ pub fn cmd_if2(args: &[String]) {
             .unwrap_or_else(|| { eprintln!("error: --rw-sd parameter '{}' not in model", name); std::process::exit(1); });
 
         let ir_param = model.parameters.iter().find(|p| p.name == *name).unwrap();
-        let (transform, lower, upper) = match ir_param.bounds {
-            Some((lo, hi)) if lo.is_finite() && hi.is_finite() => {
-                (Transform::Logit, lo, hi)
+        let (lower, upper) = ir_param.bounds.unwrap_or((0.0, f64::INFINITY));
+
+        // Derive transform from DSL parameter type (param_kind)
+        let transform = if let Some(ref kind) = ir_param.param_kind {
+            match kind.as_str() {
+                "probability" => Transform::Logit,
+                "rate" | "positive" | "count" => Transform::Log,
+                _ => Transform::None,
             }
-            Some((lo, _)) if lo >= 0.0 => {
-                (Transform::Log, lo, f64::INFINITY)
-            }
-            _ => {
-                match ir_param.transform {
-                    Some(ir::parameter::Transform::Log) => (Transform::Log, 0.0, f64::INFINITY),
-                    Some(ir::parameter::Transform::Logit) => (Transform::Logit, 0.0, 1.0),
-                    _ => (Transform::Log, 0.0, f64::INFINITY),
-                }
-            }
+        } else {
+            // Fallback for IR files without param_kind
+            if lower >= 0.0 { Transform::Log } else { Transform::None }
         };
 
         // rw_sd: explicit value > auto from bounds

@@ -1141,21 +1141,31 @@ let resolve_bounds ctx pbounds =
     let hi = resolve_float_expr ctx hi_e in
     Some (lo, hi)
 
+let param_kind_to_string = function
+  | PRate        -> "rate"
+  | PProbability -> "probability"
+  | PPositive    -> "positive"
+  | PCount       -> "count"
+  | PReal        -> "real"
+
 let expand_parameters ctx =
   List.concat_map (fun pd ->
     match pd with
-    | PScalar { pname; pbounds; _ } ->
+    | PScalar { pname; pbounds; pkind; _ } ->
       let bounds = resolve_bounds ctx pbounds in
+      let pk = Some (param_kind_to_string pkind) in
       [{ Ir.name          = pname;
          Ir.value         = None;
          Ir.bounds        = bounds;
          Ir.prior         = None;
          Ir.transform     = None;
          Ir.initial_value = None;
+         Ir.param_kind    = pk;
        }]
-    | PIndexed { pname; pdims = [dim]; pbounds; _ } ->
+    | PIndexed { pname; pdims = [dim]; pbounds; pkind; _ } ->
       let vals = dim_values ctx dim in
       let bounds = resolve_bounds ctx pbounds in
+      let pk = Some (param_kind_to_string pkind) in
       List.map (fun v ->
         { Ir.name          = pname ^ "_" ^ v;
           Ir.value         = None;
@@ -1163,6 +1173,7 @@ let expand_parameters ctx =
           Ir.prior         = None;
           Ir.transform     = None;
           Ir.initial_value = None;
+          Ir.param_kind    = pk;
         }
       ) vals
     | PIndexed { pname; _ } ->
@@ -1173,6 +1184,7 @@ let expand_parameters ctx =
          Ir.prior         = None;
          Ir.transform     = None;
          Ir.initial_value = None;
+         Ir.param_kind    = None;
        }]
   ) ctx.param_decls
 

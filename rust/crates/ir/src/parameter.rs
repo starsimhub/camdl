@@ -54,4 +54,8 @@ pub struct Parameter {
     pub prior:         Option<PriorDist>,
     pub transform:     Option<Transform>,
     pub initial_value: Option<f64>,
+    /// DSL parameter type: "rate", "probability", "positive", "count", "real".
+    /// Used by inference to choose the default transform (log vs logit).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub param_kind:    Option<String>,
 }

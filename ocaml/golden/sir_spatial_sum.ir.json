@@ -654,7 +654,8 @@
       "bounds": [ 0.0, 2.0 ],
       "prior": null,
       "transform": null,
-      "initial_value": null
+      "initial_value": null,
+      "param_kind": "rate"
     },
     {
       "name": "gamma",
@@ -662,7 +663,8 @@
       "bounds": [ 0.0, 1.0 ],
       "prior": null,
       "transform": null,
-      "initial_value": null
+      "initial_value": null,
+      "param_kind": "rate"
     },
     {
       "name": "rho",
@@ -670,7 +672,8 @@
       "bounds": [ 0.0, 1.0 ],
       "prior": null,
       "transform": null,
-      "initial_value": null
+      "initial_value": null,
+      "param_kind": "probability"
     }
   ],
   "initial_conditions": {

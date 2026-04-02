@@ -16,7 +16,7 @@
   "transitions": [
     {
       "name": "infection_child",
-      "stoichiometry": [["S_child", -1], ["E_child", 1]],
+      "stoichiometry": [ [ "S_child", -1 ], [ "E_child", 1 ] ],
       "rate": {
         "bin_op": {
           "op": "mul",
@@ -39,14 +39,14 @@
                       "left": {
                         "table_lookup": {
                           "table": "C_age",
-                          "indices": [{ "const": 0.0 }]
+                          "indices": [ { "const": 0.0 } ]
                         }
                       },
                       "right": { "pop": "I_child" }
                     }
                   },
                   "right": {
-                    "pop_sum": ["S_child", "E_child", "I_child", "R_child"]
+                    "pop_sum": [ "S_child", "E_child", "I_child", "R_child" ]
                   }
                 }
               },
@@ -59,14 +59,14 @@
                       "left": {
                         "table_lookup": {
                           "table": "C_age",
-                          "indices": [{ "const": 1.0 }]
+                          "indices": [ { "const": 1.0 } ]
                         }
                       },
                       "right": { "pop": "I_adult" }
                     }
                   },
                   "right": {
-                    "pop_sum": ["S_adult", "E_adult", "I_adult", "R_adult"]
+                    "pop_sum": [ "S_adult", "E_adult", "I_adult", "R_adult" ]
                   }
                 }
               }
@@ -83,7 +83,7 @@
     },
     {
       "name": "infection_adult",
-      "stoichiometry": [["S_adult", -1], ["E_adult", 1]],
+      "stoichiometry": [ [ "S_adult", -1 ], [ "E_adult", 1 ] ],
       "rate": {
         "bin_op": {
           "op": "mul",
@@ -106,14 +106,14 @@
                       "left": {
                         "table_lookup": {
                           "table": "C_age",
-                          "indices": [{ "const": 2.0 }]
+                          "indices": [ { "const": 2.0 } ]
                         }
                       },
                       "right": { "pop": "I_child" }
                     }
                   },
                   "right": {
-                    "pop_sum": ["S_child", "E_child", "I_child", "R_child"]
+                    "pop_sum": [ "S_child", "E_child", "I_child", "R_child" ]
                   }
                 }
               },
@@ -126,14 +126,14 @@
                       "left": {
                         "table_lookup": {
                           "table": "C_age",
-                          "indices": [{ "const": 3.0 }]
+                          "indices": [ { "const": 3.0 } ]
                         }
                       },
                       "right": { "pop": "I_adult" }
                     }
                   },
                   "right": {
-                    "pop_sum": ["S_adult", "E_adult", "I_adult", "R_adult"]
+                    "pop_sum": [ "S_adult", "E_adult", "I_adult", "R_adult" ]
                   }
                 }
               }
@@ -150,7 +150,7 @@
     },
     {
       "name": "progression_child",
-      "stoichiometry": [["E_child", -1], ["I_child", 1]],
+      "stoichiometry": [ [ "E_child", -1 ], [ "I_child", 1 ] ],
       "rate": {
         "bin_op": {
           "op": "mul",
@@ -167,7 +167,7 @@
     },
     {
       "name": "progression_adult",
-      "stoichiometry": [["E_adult", -1], ["I_adult", 1]],
+      "stoichiometry": [ [ "E_adult", -1 ], [ "I_adult", 1 ] ],
       "rate": {
         "bin_op": {
           "op": "mul",
@@ -184,7 +184,7 @@
     },
     {
       "name": "recovery_child",
-      "stoichiometry": [["I_child", -1], ["R_child", 1]],
+      "stoichiometry": [ [ "I_child", -1 ], [ "R_child", 1 ] ],
       "rate": {
         "bin_op": {
           "op": "mul",
@@ -201,7 +201,7 @@
     },
     {
       "name": "recovery_adult",
-      "stoichiometry": [["I_adult", -1], ["R_adult", 1]],
+      "stoichiometry": [ [ "I_adult", -1 ], [ "R_adult", 1 ] ],
       "rate": {
         "bin_op": {
           "op": "mul",
@@ -237,26 +237,29 @@
     {
       "name": "beta",
       "value": null,
-      "bounds": [0.001, 0.5],
+      "bounds": [ 0.001, 0.5 ],
       "prior": null,
       "transform": null,
-      "initial_value": null
+      "initial_value": null,
+      "param_kind": "rate"
     },
     {
       "name": "sigma",
       "value": null,
-      "bounds": [0.01, 1.0],
+      "bounds": [ 0.01, 1.0 ],
       "prior": null,
       "transform": null,
-      "initial_value": null
+      "initial_value": null,
+      "param_kind": "rate"
     },
     {
       "name": "gamma",
       "value": null,
-      "bounds": [0.01, 1.0],
+      "bounds": [ 0.01, 1.0 ],
       "prior": null,
       "transform": null,
-      "initial_value": null
+      "initial_value": null,
+      "param_kind": "rate"
     }
   ],
   "initial_conditions": {
@@ -295,15 +298,15 @@
     }
   ],
   "model_structure": {
-    "dimensions": [{ "name": "age", "values": ["child", "adult"] }],
+    "dimensions": [ { "name": "age", "values": [ "child", "adult" ] } ],
     "compartment_dims": {
-      "S": ["age"],
-      "E": ["age"],
-      "I": ["age"],
-      "R": ["age"]
+      "S": [ "age" ],
+      "E": [ "age" ],
+      "I": [ "age" ],
+      "R": [ "age" ]
     },
-    "base_compartments": ["S", "E", "I", "R"],
-    "transmission_transitions": ["infection"],
-    "infectious_compartments": ["I"]
+    "base_compartments": [ "S", "E", "I", "R" ],
+    "transmission_transitions": [ "infection" ],
+    "infectious_compartments": [ "I" ]
   }
 }

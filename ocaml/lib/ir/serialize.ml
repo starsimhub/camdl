@@ -286,6 +286,7 @@ let parameter_to_json (p : parameter) : Yojson.Safe.t =
     ("prior",         match p.prior         with None -> null | Some pr -> prior_dist_to_json pr);
     ("transform",     match p.transform     with None -> null | Some tr -> transform_to_json tr);
     ("initial_value", match p.initial_value with None -> null | Some v  -> flt v);
+    ("param_kind",    match p.param_kind    with None -> null | Some k  -> str k);
   ]
 
 (* ── Initial conditions ──────────────────────────────────────────────────── *)

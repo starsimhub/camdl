@@ -23,7 +23,7 @@
   "transitions": [
     {
       "name": "infection_age_0_5",
-      "stoichiometry": [["S_age_0_5", -1], ["I_age_0_5", 1]],
+      "stoichiometry": [ [ "S_age_0_5", -1 ], [ "I_age_0_5", 1 ] ],
       "rate": {
         "bin_op": {
           "op": "mul",
@@ -52,9 +52,7 @@
                               "left": { "pop": "I_age_0_5" },
                               "right": {
                                 "pop_sum": [
-                                  "S_age_0_5",
-                                  "I_age_0_5",
-                                  "R_age_0_5"
+                                  "S_age_0_5", "I_age_0_5", "R_age_0_5"
                                 ]
                               }
                             }
@@ -65,9 +63,7 @@
                               "left": { "pop": "I_age_5_15" },
                               "right": {
                                 "pop_sum": [
-                                  "S_age_5_15",
-                                  "I_age_5_15",
-                                  "R_age_5_15"
+                                  "S_age_5_15", "I_age_5_15", "R_age_5_15"
                                 ]
                               }
                             }
@@ -80,9 +76,7 @@
                           "left": { "pop": "I_age_15_50" },
                           "right": {
                             "pop_sum": [
-                              "S_age_15_50",
-                              "I_age_15_50",
-                              "R_age_15_50"
+                              "S_age_15_50", "I_age_15_50", "R_age_15_50"
                             ]
                           }
                         }
@@ -95,9 +89,7 @@
                       "left": { "pop": "I_age_50_65" },
                       "right": {
                         "pop_sum": [
-                          "S_age_50_65",
-                          "I_age_50_65",
-                          "R_age_50_65"
+                          "S_age_50_65", "I_age_50_65", "R_age_50_65"
                         ]
                       }
                     }
@@ -109,7 +101,7 @@
                   "op": "div",
                   "left": { "pop": "I_age_65p" },
                   "right": {
-                    "pop_sum": ["S_age_65p", "I_age_65p", "R_age_65p"]
+                    "pop_sum": [ "S_age_65p", "I_age_65p", "R_age_65p" ]
                   }
                 }
               }
@@ -126,7 +118,7 @@
     },
     {
       "name": "infection_age_5_15",
-      "stoichiometry": [["S_age_5_15", -1], ["I_age_5_15", 1]],
+      "stoichiometry": [ [ "S_age_5_15", -1 ], [ "I_age_5_15", 1 ] ],
       "rate": {
         "bin_op": {
           "op": "mul",
@@ -155,9 +147,7 @@
                               "left": { "pop": "I_age_0_5" },
                               "right": {
                                 "pop_sum": [
-                                  "S_age_0_5",
-                                  "I_age_0_5",
-                                  "R_age_0_5"
+                                  "S_age_0_5", "I_age_0_5", "R_age_0_5"
                                 ]
                               }
                             }
@@ -168,9 +158,7 @@
                               "left": { "pop": "I_age_5_15" },
                               "right": {
                                 "pop_sum": [
-                                  "S_age_5_15",
-                                  "I_age_5_15",
-                                  "R_age_5_15"
+                                  "S_age_5_15", "I_age_5_15", "R_age_5_15"
                                 ]
                               }
                             }
@@ -183,9 +171,7 @@
                           "left": { "pop": "I_age_15_50" },
                           "right": {
                             "pop_sum": [
-                              "S_age_15_50",
-                              "I_age_15_50",
-                              "R_age_15_50"
+                              "S_age_15_50", "I_age_15_50", "R_age_15_50"
                             ]
                           }
                         }
@@ -198,9 +184,7 @@
                       "left": { "pop": "I_age_50_65" },
                       "right": {
                         "pop_sum": [
-                          "S_age_50_65",
-                          "I_age_50_65",
-                          "R_age_50_65"
+                          "S_age_50_65", "I_age_50_65", "R_age_50_65"
                         ]
                       }
                     }
@@ -212,7 +196,7 @@
                   "op": "div",
                   "left": { "pop": "I_age_65p" },
                   "right": {
-                    "pop_sum": ["S_age_65p", "I_age_65p", "R_age_65p"]
+                    "pop_sum": [ "S_age_65p", "I_age_65p", "R_age_65p" ]
                   }
                 }
               }
@@ -229,7 +213,7 @@
     },
     {
       "name": "infection_age_15_50",
-      "stoichiometry": [["S_age_15_50", -1], ["I_age_15_50", 1]],
+      "stoichiometry": [ [ "S_age_15_50", -1 ], [ "I_age_15_50", 1 ] ],
       "rate": {
         "bin_op": {
           "op": "mul",
@@ -258,9 +242,7 @@
                               "left": { "pop": "I_age_0_5" },
                               "right": {
                                 "pop_sum": [
-                                  "S_age_0_5",
-                                  "I_age_0_5",
-                                  "R_age_0_5"
+                                  "S_age_0_5", "I_age_0_5", "R_age_0_5"
                                 ]
                               }
                             }
@@ -271,9 +253,7 @@
                               "left": { "pop": "I_age_5_15" },
                               "right": {
                                 "pop_sum": [
-                                  "S_age_5_15",
-                                  "I_age_5_15",
-                                  "R_age_5_15"
+                                  "S_age_5_15", "I_age_5_15", "R_age_5_15"
                                 ]
                               }
                             }
@@ -286,9 +266,7 @@
                           "left": { "pop": "I_age_15_50" },
                           "right": {
                             "pop_sum": [
-                              "S_age_15_50",
-                              "I_age_15_50",
-                              "R_age_15_50"
+                              "S_age_15_50", "I_age_15_50", "R_age_15_50"
                             ]
                           }
                         }
@@ -301,9 +279,7 @@
                       "left": { "pop": "I_age_50_65" },
                       "right": {
                         "pop_sum": [
-                          "S_age_50_65",
-                          "I_age_50_65",
-                          "R_age_50_65"
+                          "S_age_50_65", "I_age_50_65", "R_age_50_65"
                         ]
                       }
                     }
@@ -315,7 +291,7 @@
                   "op": "div",
                   "left": { "pop": "I_age_65p" },
                   "right": {
-                    "pop_sum": ["S_age_65p", "I_age_65p", "R_age_65p"]
+                    "pop_sum": [ "S_age_65p", "I_age_65p", "R_age_65p" ]
                   }
                 }
               }
@@ -332,7 +308,7 @@
     },
     {
       "name": "infection_age_50_65",
-      "stoichiometry": [["S_age_50_65", -1], ["I_age_50_65", 1]],
+      "stoichiometry": [ [ "S_age_50_65", -1 ], [ "I_age_50_65", 1 ] ],
       "rate": {
         "bin_op": {
           "op": "mul",
@@ -361,9 +337,7 @@
                               "left": { "pop": "I_age_0_5" },
                               "right": {
                                 "pop_sum": [
-                                  "S_age_0_5",
-                                  "I_age_0_5",
-                                  "R_age_0_5"
+                                  "S_age_0_5", "I_age_0_5", "R_age_0_5"
                                 ]
                               }
                             }
@@ -374,9 +348,7 @@
                               "left": { "pop": "I_age_5_15" },
                               "right": {
                                 "pop_sum": [
-                                  "S_age_5_15",
-                                  "I_age_5_15",
-                                  "R_age_5_15"
+                                  "S_age_5_15", "I_age_5_15", "R_age_5_15"
                                 ]
                               }
                             }
@@ -389,9 +361,7 @@
                           "left": { "pop": "I_age_15_50" },
                           "right": {
                             "pop_sum": [
-                              "S_age_15_50",
-                              "I_age_15_50",
-                              "R_age_15_50"
+                              "S_age_15_50", "I_age_15_50", "R_age_15_50"
                             ]
                           }
                         }
@@ -404,9 +374,7 @@
                       "left": { "pop": "I_age_50_65" },
                       "right": {
                         "pop_sum": [
-                          "S_age_50_65",
-                          "I_age_50_65",
-                          "R_age_50_65"
+                          "S_age_50_65", "I_age_50_65", "R_age_50_65"
                         ]
                       }
                     }
@@ -418,7 +386,7 @@
                   "op": "div",
                   "left": { "pop": "I_age_65p" },
                   "right": {
-                    "pop_sum": ["S_age_65p", "I_age_65p", "R_age_65p"]
+                    "pop_sum": [ "S_age_65p", "I_age_65p", "R_age_65p" ]
                   }
                 }
               }
@@ -435,7 +403,7 @@
     },
     {
       "name": "infection_age_65p",
-      "stoichiometry": [["S_age_65p", -1], ["I_age_65p", 1]],
+      "stoichiometry": [ [ "S_age_65p", -1 ], [ "I_age_65p", 1 ] ],
       "rate": {
         "bin_op": {
           "op": "mul",
@@ -464,9 +432,7 @@
                               "left": { "pop": "I_age_0_5" },
                               "right": {
                                 "pop_sum": [
-                                  "S_age_0_5",
-                                  "I_age_0_5",
-                                  "R_age_0_5"
+                                  "S_age_0_5", "I_age_0_5", "R_age_0_5"
                                 ]
                               }
                             }
@@ -477,9 +443,7 @@
                               "left": { "pop": "I_age_5_15" },
                               "right": {
                                 "pop_sum": [
-                                  "S_age_5_15",
-                                  "I_age_5_15",
-                                  "R_age_5_15"
+                                  "S_age_5_15", "I_age_5_15", "R_age_5_15"
                                 ]
                               }
                             }
@@ -492,9 +456,7 @@
                           "left": { "pop": "I_age_15_50" },
                           "right": {
                             "pop_sum": [
-                              "S_age_15_50",
-                              "I_age_15_50",
-                              "R_age_15_50"
+                              "S_age_15_50", "I_age_15_50", "R_age_15_50"
                             ]
                           }
                         }
@@ -507,9 +469,7 @@
                       "left": { "pop": "I_age_50_65" },
                       "right": {
                         "pop_sum": [
-                          "S_age_50_65",
-                          "I_age_50_65",
-                          "R_age_50_65"
+                          "S_age_50_65", "I_age_50_65", "R_age_50_65"
                         ]
                       }
                     }
@@ -521,7 +481,7 @@
                   "op": "div",
                   "left": { "pop": "I_age_65p" },
                   "right": {
-                    "pop_sum": ["S_age_65p", "I_age_65p", "R_age_65p"]
+                    "pop_sum": [ "S_age_65p", "I_age_65p", "R_age_65p" ]
                   }
                 }
               }
@@ -538,7 +498,7 @@
     },
     {
       "name": "recovery_age_0_5",
-      "stoichiometry": [["I_age_0_5", -1], ["R_age_0_5", 1]],
+      "stoichiometry": [ [ "I_age_0_5", -1 ], [ "R_age_0_5", 1 ] ],
       "rate": {
         "bin_op": {
           "op": "mul",
@@ -555,7 +515,7 @@
     },
     {
       "name": "recovery_age_5_15",
-      "stoichiometry": [["I_age_5_15", -1], ["R_age_5_15", 1]],
+      "stoichiometry": [ [ "I_age_5_15", -1 ], [ "R_age_5_15", 1 ] ],
       "rate": {
         "bin_op": {
           "op": "mul",
@@ -572,7 +532,7 @@
     },
     {
       "name": "recovery_age_15_50",
-      "stoichiometry": [["I_age_15_50", -1], ["R_age_15_50", 1]],
+      "stoichiometry": [ [ "I_age_15_50", -1 ], [ "R_age_15_50", 1 ] ],
       "rate": {
         "bin_op": {
           "op": "mul",
@@ -589,7 +549,7 @@
     },
     {
       "name": "recovery_age_50_65",
-      "stoichiometry": [["I_age_50_65", -1], ["R_age_50_65", 1]],
+      "stoichiometry": [ [ "I_age_50_65", -1 ], [ "R_age_50_65", 1 ] ],
       "rate": {
         "bin_op": {
           "op": "mul",
@@ -606,7 +566,7 @@
     },
     {
       "name": "recovery_age_65p",
-      "stoichiometry": [["I_age_65p", -1], ["R_age_65p", 1]],
+      "stoichiometry": [ [ "I_age_65p", -1 ], [ "R_age_65p", 1 ] ],
       "rate": {
         "bin_op": {
           "op": "mul",
@@ -623,7 +583,7 @@
     },
     {
       "name": "aging_S_age_0_5",
-      "stoichiometry": [["S_age_0_5", -1], ["S_age_5_15", 1]],
+      "stoichiometry": [ [ "S_age_0_5", -1 ], [ "S_age_5_15", 1 ] ],
       "rate": {
         "bin_op": {
           "op": "mul",
@@ -634,7 +594,7 @@
               "right": {
                 "table_lookup": {
                   "table": "age_dur",
-                  "indices": [{ "const": 0.0 }]
+                  "indices": [ { "const": 0.0 } ]
                 }
               }
             }
@@ -651,7 +611,7 @@
     },
     {
       "name": "aging_S_age_5_15",
-      "stoichiometry": [["S_age_5_15", -1], ["S_age_15_50", 1]],
+      "stoichiometry": [ [ "S_age_5_15", -1 ], [ "S_age_15_50", 1 ] ],
       "rate": {
         "bin_op": {
           "op": "mul",
@@ -662,7 +622,7 @@
               "right": {
                 "table_lookup": {
                   "table": "age_dur",
-                  "indices": [{ "const": 1.0 }]
+                  "indices": [ { "const": 1.0 } ]
                 }
               }
             }
@@ -679,7 +639,7 @@
     },
     {
       "name": "aging_S_age_15_50",
-      "stoichiometry": [["S_age_15_50", -1], ["S_age_50_65", 1]],
+      "stoichiometry": [ [ "S_age_15_50", -1 ], [ "S_age_50_65", 1 ] ],
       "rate": {
         "bin_op": {
           "op": "mul",
@@ -690,7 +650,7 @@
               "right": {
                 "table_lookup": {
                   "table": "age_dur",
-                  "indices": [{ "const": 2.0 }]
+                  "indices": [ { "const": 2.0 } ]
                 }
               }
             }
@@ -707,7 +667,7 @@
     },
     {
       "name": "aging_S_age_50_65",
-      "stoichiometry": [["S_age_50_65", -1], ["S_age_65p", 1]],
+      "stoichiometry": [ [ "S_age_50_65", -1 ], [ "S_age_65p", 1 ] ],
       "rate": {
         "bin_op": {
           "op": "mul",
@@ -718,7 +678,7 @@
               "right": {
                 "table_lookup": {
                   "table": "age_dur",
-                  "indices": [{ "const": 3.0 }]
+                  "indices": [ { "const": 3.0 } ]
                 }
               }
             }
@@ -735,7 +695,7 @@
     },
     {
       "name": "aging_I_age_0_5",
-      "stoichiometry": [["I_age_0_5", -1], ["I_age_5_15", 1]],
+      "stoichiometry": [ [ "I_age_0_5", -1 ], [ "I_age_5_15", 1 ] ],
       "rate": {
         "bin_op": {
           "op": "mul",
@@ -746,7 +706,7 @@
               "right": {
                 "table_lookup": {
                   "table": "age_dur",
-                  "indices": [{ "const": 0.0 }]
+                  "indices": [ { "const": 0.0 } ]
                 }
               }
             }
@@ -763,7 +723,7 @@
     },
     {
       "name": "aging_I_age_5_15",
-      "stoichiometry": [["I_age_5_15", -1], ["I_age_15_50", 1]],
+      "stoichiometry": [ [ "I_age_5_15", -1 ], [ "I_age_15_50", 1 ] ],
       "rate": {
         "bin_op": {
           "op": "mul",
@@ -774,7 +734,7 @@
               "right": {
                 "table_lookup": {
                   "table": "age_dur",
-                  "indices": [{ "const": 1.0 }]
+                  "indices": [ { "const": 1.0 } ]
                 }
               }
             }
@@ -791,7 +751,7 @@
     },
     {
       "name": "aging_I_age_15_50",
-      "stoichiometry": [["I_age_15_50", -1], ["I_age_50_65", 1]],
+      "stoichiometry": [ [ "I_age_15_50", -1 ], [ "I_age_50_65", 1 ] ],
       "rate": {
         "bin_op": {
           "op": "mul",
@@ -802,7 +762,7 @@
               "right": {
                 "table_lookup": {
                   "table": "age_dur",
-                  "indices": [{ "const": 2.0 }]
+                  "indices": [ { "const": 2.0 } ]
                 }
               }
             }
@@ -819,7 +779,7 @@
     },
     {
       "name": "aging_I_age_50_65",
-      "stoichiometry": [["I_age_50_65", -1], ["I_age_65p", 1]],
+      "stoichiometry": [ [ "I_age_50_65", -1 ], [ "I_age_65p", 1 ] ],
       "rate": {
         "bin_op": {
           "op": "mul",
@@ -830,7 +790,7 @@
               "right": {
                 "table_lookup": {
                   "table": "age_dur",
-                  "indices": [{ "const": 3.0 }]
+                  "indices": [ { "const": 3.0 } ]
                 }
               }
             }
@@ -847,7 +807,7 @@
     },
     {
       "name": "aging_R_age_0_5",
-      "stoichiometry": [["R_age_0_5", -1], ["R_age_5_15", 1]],
+      "stoichiometry": [ [ "R_age_0_5", -1 ], [ "R_age_5_15", 1 ] ],
       "rate": {
         "bin_op": {
           "op": "mul",
@@ -858,7 +818,7 @@
               "right": {
                 "table_lookup": {
                   "table": "age_dur",
-                  "indices": [{ "const": 0.0 }]
+                  "indices": [ { "const": 0.0 } ]
                 }
               }
             }
@@ -875,7 +835,7 @@
     },
     {
       "name": "aging_R_age_5_15",
-      "stoichiometry": [["R_age_5_15", -1], ["R_age_15_50", 1]],
+      "stoichiometry": [ [ "R_age_5_15", -1 ], [ "R_age_15_50", 1 ] ],
       "rate": {
         "bin_op": {
           "op": "mul",
@@ -886,7 +846,7 @@
               "right": {
                 "table_lookup": {
                   "table": "age_dur",
-                  "indices": [{ "const": 1.0 }]
+                  "indices": [ { "const": 1.0 } ]
                 }
               }
             }
@@ -903,7 +863,7 @@
     },
     {
       "name": "aging_R_age_15_50",
-      "stoichiometry": [["R_age_15_50", -1], ["R_age_50_65", 1]],
+      "stoichiometry": [ [ "R_age_15_50", -1 ], [ "R_age_50_65", 1 ] ],
       "rate": {
         "bin_op": {
           "op": "mul",
@@ -914,7 +874,7 @@
               "right": {
                 "table_lookup": {
                   "table": "age_dur",
-                  "indices": [{ "const": 2.0 }]
+                  "indices": [ { "const": 2.0 } ]
                 }
               }
             }
@@ -931,7 +891,7 @@
     },
     {
       "name": "aging_R_age_50_65",
-      "stoichiometry": [["R_age_50_65", -1], ["R_age_65p", 1]],
+      "stoichiometry": [ [ "R_age_50_65", -1 ], [ "R_age_65p", 1 ] ],
       "rate": {
         "bin_op": {
           "op": "mul",
@@ -942,7 +902,7 @@
               "right": {
                 "table_lookup": {
                   "table": "age_dur",
-                  "indices": [{ "const": 3.0 }]
+                  "indices": [ { "const": 3.0 } ]
                 }
               }
             }
@@ -959,7 +919,7 @@
     },
     {
       "name": "death_S_age_0_5",
-      "stoichiometry": [["S_age_0_5", -1]],
+      "stoichiometry": [ [ "S_age_0_5", -1 ] ],
       "rate": {
         "bin_op": {
           "op": "mul",
@@ -976,7 +936,7 @@
     },
     {
       "name": "death_S_age_5_15",
-      "stoichiometry": [["S_age_5_15", -1]],
+      "stoichiometry": [ [ "S_age_5_15", -1 ] ],
       "rate": {
         "bin_op": {
           "op": "mul",
@@ -993,7 +953,7 @@
     },
     {
       "name": "death_S_age_15_50",
-      "stoichiometry": [["S_age_15_50", -1]],
+      "stoichiometry": [ [ "S_age_15_50", -1 ] ],
       "rate": {
         "bin_op": {
           "op": "mul",
@@ -1010,7 +970,7 @@
     },
     {
       "name": "death_S_age_50_65",
-      "stoichiometry": [["S_age_50_65", -1]],
+      "stoichiometry": [ [ "S_age_50_65", -1 ] ],
       "rate": {
         "bin_op": {
           "op": "mul",
@@ -1027,7 +987,7 @@
     },
     {
       "name": "death_S_age_65p",
-      "stoichiometry": [["S_age_65p", -1]],
+      "stoichiometry": [ [ "S_age_65p", -1 ] ],
       "rate": {
         "bin_op": {
           "op": "mul",
@@ -1044,7 +1004,7 @@
     },
     {
       "name": "death_I_age_0_5",
-      "stoichiometry": [["I_age_0_5", -1]],
+      "stoichiometry": [ [ "I_age_0_5", -1 ] ],
       "rate": {
         "bin_op": {
           "op": "mul",
@@ -1061,7 +1021,7 @@
     },
     {
       "name": "death_I_age_5_15",
-      "stoichiometry": [["I_age_5_15", -1]],
+      "stoichiometry": [ [ "I_age_5_15", -1 ] ],
       "rate": {
         "bin_op": {
           "op": "mul",
@@ -1078,7 +1038,7 @@
     },
     {
       "name": "death_I_age_15_50",
-      "stoichiometry": [["I_age_15_50", -1]],
+      "stoichiometry": [ [ "I_age_15_50", -1 ] ],
       "rate": {
         "bin_op": {
           "op": "mul",
@@ -1095,7 +1055,7 @@
     },
     {
       "name": "death_I_age_50_65",
-      "stoichiometry": [["I_age_50_65", -1]],
+      "stoichiometry": [ [ "I_age_50_65", -1 ] ],
       "rate": {
         "bin_op": {
           "op": "mul",
@@ -1112,7 +1072,7 @@
     },
     {
       "name": "death_I_age_65p",
-      "stoichiometry": [["I_age_65p", -1]],
+      "stoichiometry": [ [ "I_age_65p", -1 ] ],
       "rate": {
         "bin_op": {
           "op": "mul",
@@ -1129,7 +1089,7 @@
     },
     {
       "name": "death_R_age_0_5",
-      "stoichiometry": [["R_age_0_5", -1]],
+      "stoichiometry": [ [ "R_age_0_5", -1 ] ],
       "rate": {
         "bin_op": {
           "op": "mul",
@@ -1146,7 +1106,7 @@
     },
     {
       "name": "death_R_age_5_15",
-      "stoichiometry": [["R_age_5_15", -1]],
+      "stoichiometry": [ [ "R_age_5_15", -1 ] ],
       "rate": {
         "bin_op": {
           "op": "mul",
@@ -1163,7 +1123,7 @@
     },
     {
       "name": "death_R_age_15_50",
-      "stoichiometry": [["R_age_15_50", -1]],
+      "stoichiometry": [ [ "R_age_15_50", -1 ] ],
       "rate": {
         "bin_op": {
           "op": "mul",
@@ -1180,7 +1140,7 @@
     },
     {
       "name": "death_R_age_50_65",
-      "stoichiometry": [["R_age_50_65", -1]],
+      "stoichiometry": [ [ "R_age_50_65", -1 ] ],
       "rate": {
         "bin_op": {
           "op": "mul",
@@ -1197,7 +1157,7 @@
     },
     {
       "name": "death_R_age_65p",
-      "stoichiometry": [["R_age_65p", -1]],
+      "stoichiometry": [ [ "R_age_65p", -1 ] ],
       "rate": {
         "bin_op": {
           "op": "mul",
@@ -1214,28 +1174,17 @@
     },
     {
       "name": "birth",
-      "stoichiometry": [["S_age_0_5", 1]],
+      "stoichiometry": [ [ "S_age_0_5", 1 ] ],
       "rate": {
         "bin_op": {
           "op": "mul",
           "left": { "param": "mu" },
           "right": {
             "pop_sum": [
-              "S_age_0_5",
-              "I_age_0_5",
-              "R_age_0_5",
-              "S_age_5_15",
-              "I_age_5_15",
-              "R_age_5_15",
-              "S_age_15_50",
-              "I_age_15_50",
-              "R_age_15_50",
-              "S_age_50_65",
-              "I_age_50_65",
-              "R_age_50_65",
-              "S_age_65p",
-              "I_age_65p",
-              "R_age_65p"
+              "S_age_0_5", "I_age_0_5", "R_age_0_5", "S_age_5_15",
+              "I_age_5_15", "R_age_5_15", "S_age_15_50", "I_age_15_50",
+              "R_age_15_50", "S_age_50_65", "I_age_50_65", "R_age_50_65",
+              "S_age_65p", "I_age_65p", "R_age_65p"
             ]
           }
         }
@@ -1269,26 +1218,29 @@
     {
       "name": "beta",
       "value": null,
-      "bounds": [0.001, 2.0],
+      "bounds": [ 0.001, 2.0 ],
       "prior": null,
       "transform": null,
-      "initial_value": null
+      "initial_value": null,
+      "param_kind": "rate"
     },
     {
       "name": "gamma",
       "value": null,
-      "bounds": [0.01, 1.0],
+      "bounds": [ 0.01, 1.0 ],
       "prior": null,
       "transform": null,
-      "initial_value": null
+      "initial_value": null,
+      "param_kind": "rate"
     },
     {
       "name": "mu",
       "value": null,
-      "bounds": [1e-06, 0.01],
+      "bounds": [ 1e-06, 0.01 ],
       "prior": null,
       "transform": null,
-      "initial_value": null
+      "initial_value": null,
+      "param_kind": "rate"
     }
   ],
   "initial_conditions": {
@@ -1331,17 +1283,13 @@
       {
         "name": "age",
         "values": [
-          "age_0_5",
-          "age_5_15",
-          "age_15_50",
-          "age_50_65",
-          "age_65p"
+          "age_0_5", "age_5_15", "age_15_50", "age_50_65", "age_65p"
         ]
       }
     ],
-    "compartment_dims": { "S": ["age"], "I": ["age"], "R": ["age"] },
-    "base_compartments": ["S", "I", "R"],
-    "transmission_transitions": ["infection"],
-    "infectious_compartments": ["I"]
+    "compartment_dims": { "S": [ "age" ], "I": [ "age" ], "R": [ "age" ] },
+    "base_compartments": [ "S", "I", "R" ],
+    "transmission_transitions": [ "infection" ],
+    "infectious_compartments": [ "I" ]
   }
 }

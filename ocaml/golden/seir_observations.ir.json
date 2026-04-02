@@ -12,7 +12,7 @@
   "transitions": [
     {
       "name": "infection",
-      "stoichiometry": [["S", -1], ["E", 1]],
+      "stoichiometry": [ [ "S", -1 ], [ "E", 1 ] ],
       "rate": {
         "bin_op": {
           "op": "div",
@@ -29,7 +29,7 @@
               "right": { "pop": "I" }
             }
           },
-          "right": { "pop_sum": ["S", "E", "I", "R"] }
+          "right": { "pop_sum": [ "S", "E", "I", "R" ] }
         }
       },
       "event_key": "infection:{firing_index}",
@@ -41,7 +41,7 @@
     },
     {
       "name": "progression",
-      "stoichiometry": [["E", -1], ["I", 1]],
+      "stoichiometry": [ [ "E", -1 ], [ "I", 1 ] ],
       "rate": {
         "bin_op": {
           "op": "mul",
@@ -58,7 +58,7 @@
     },
     {
       "name": "recovery",
-      "stoichiometry": [["I", -1], ["R", 1]],
+      "stoichiometry": [ [ "I", -1 ], [ "R", 1 ] ],
       "rate": {
         "bin_op": {
           "op": "mul",
@@ -111,66 +111,74 @@
     {
       "name": "beta",
       "value": null,
-      "bounds": [0.001, 0.5],
+      "bounds": [ 0.001, 0.5 ],
       "prior": null,
       "transform": null,
-      "initial_value": null
+      "initial_value": null,
+      "param_kind": "rate"
     },
     {
       "name": "sigma",
       "value": null,
-      "bounds": [0.01, 1.0],
+      "bounds": [ 0.01, 1.0 ],
       "prior": null,
       "transform": null,
-      "initial_value": null
+      "initial_value": null,
+      "param_kind": "rate"
     },
     {
       "name": "gamma",
       "value": null,
-      "bounds": [0.01, 1.0],
+      "bounds": [ 0.01, 1.0 ],
       "prior": null,
       "transform": null,
-      "initial_value": null
+      "initial_value": null,
+      "param_kind": "rate"
     },
     {
       "name": "rho",
       "value": null,
-      "bounds": [0.0, 1.0],
+      "bounds": [ 0.0, 1.0 ],
       "prior": null,
       "transform": null,
-      "initial_value": null
+      "initial_value": null,
+      "param_kind": "probability"
     },
     {
       "name": "k",
       "value": null,
-      "bounds": [0.1, 100.0],
+      "bounds": [ 0.1, 100.0 ],
       "prior": null,
       "transform": null,
-      "initial_value": null
+      "initial_value": null,
+      "param_kind": "real"
     },
     {
       "name": "p_detect",
       "value": null,
-      "bounds": [0.0, 1.0],
+      "bounds": [ 0.0, 1.0 ],
       "prior": null,
       "transform": null,
-      "initial_value": null
+      "initial_value": null,
+      "param_kind": "probability"
     },
     {
       "name": "N0",
       "value": null,
-      "bounds": [1000.0, 1000000.0],
+      "bounds": [ 1000.0, 1000000.0 ],
       "prior": null,
       "transform": null,
-      "initial_value": null
+      "initial_value": null,
+      "param_kind": "count"
     },
     {
       "name": "I0",
       "value": null,
-      "bounds": [1.0, 10000.0],
+      "bounds": [ 1.0, 10000.0 ],
       "prior": null,
       "transform": null,
-      "initial_value": null
+      "initial_value": null,
+      "param_kind": "count"
     }
   ],
   "initial_conditions": {
@@ -221,8 +229,8 @@
   "model_structure": {
     "dimensions": [],
     "compartment_dims": { "S": [], "E": [], "I": [], "R": [] },
-    "base_compartments": ["S", "E", "I", "R"],
-    "transmission_transitions": ["infection"],
-    "infectious_compartments": ["I"]
+    "base_compartments": [ "S", "E", "I", "R" ],
+    "transmission_transitions": [ "infection" ],
+    "infectious_compartments": [ "I" ]
   }
 }

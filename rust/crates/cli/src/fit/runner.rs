@@ -208,24 +208,25 @@ fn build_if2_params(
             .or(ir_param.bounds)
             .unwrap_or((0.0, f64::INFINITY));
 
-        // Determine transform
+        // Determine transform: fit.toml override > param_kind > bounds fallback
         let transform = if let Some(ref t) = spec.transform {
+            // Explicit override in fit.toml
             match t.as_str() {
                 "log" => Transform::Log,
                 "logit" => Transform::Logit,
                 "identity" | "none" => Transform::None,
                 other => return Err(format!("unknown transform '{}' for '{}'", other, name)),
             }
-        } else if lower.is_finite() && upper.is_finite() {
-            Transform::Logit
-        } else if lower >= 0.0 {
-            Transform::Log
-        } else {
-            match ir_param.transform {
-                Some(ir::parameter::Transform::Log) => Transform::Log,
-                Some(ir::parameter::Transform::Logit) => Transform::Logit,
-                _ => Transform::Log,
+        } else if let Some(ref kind) = ir_param.param_kind {
+            // Derive from DSL parameter type
+            match kind.as_str() {
+                "probability" => Transform::Logit,
+                "rate" | "positive" | "count" => Transform::Log,
+                _ => Transform::None,
             }
+        } else {
+            // Fallback for IR files without param_kind (pre-schema-change)
+            if lower >= 0.0 { Transform::Log } else { Transform::None }
         };
 
         // Determine rw_sd: prior state > explicit fit.toml > auto from bounds
@@ -790,9 +791,9 @@ mod tests {
             ode_equations: vec![], time_functions: vec![], tables: vec![],
             interventions: vec![], observations: vec![],
             parameters: vec![
-                Parameter { name: "beta".into(), value: Some(0.3), bounds: Some((0.01, 2.0)), prior: None, transform: None, initial_value: None },
-                Parameter { name: "gamma".into(), value: Some(0.1), bounds: Some((0.01, 1.0)), prior: None, transform: None, initial_value: None },
-                Parameter { name: "N0".into(), value: Some(1000.0), bounds: Some((100.0, 100000.0)), prior: None, transform: None, initial_value: None },
+                Parameter { name: "beta".into(), value: Some(0.3), bounds: Some((0.01, 2.0)), prior: None, transform: None, initial_value: None, param_kind: None },
+                Parameter { name: "gamma".into(), value: Some(0.1), bounds: Some((0.01, 1.0)), prior: None, transform: None, initial_value: None, param_kind: None },
+                Parameter { name: "N0".into(), value: Some(1000.0), bounds: Some((100.0, 100000.0)), prior: None, transform: None, initial_value: None, param_kind: None },
             ],
             initial_conditions: InitialConditions::Explicit({
                 let mut m = HashMap::new();

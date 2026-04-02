@@ -26,7 +26,7 @@
   "transitions": [
     {
       "name": "birth_H",
-      "stoichiometry": [["S_H", 1]],
+      "stoichiometry": [ [ "S_H", 1 ] ],
       "rate": { "param": "Pi_H" },
       "event_key": "birth_H:{firing_index}",
       "metadata": {
@@ -37,7 +37,7 @@
     },
     {
       "name": "death_S_H",
-      "stoichiometry": [["S_H", -1]],
+      "stoichiometry": [ [ "S_H", -1 ] ],
       "rate": {
         "bin_op": {
           "op": "mul",
@@ -54,7 +54,7 @@
     },
     {
       "name": "death_E_H",
-      "stoichiometry": [["E_H", -1]],
+      "stoichiometry": [ [ "E_H", -1 ] ],
       "rate": {
         "bin_op": {
           "op": "mul",
@@ -71,7 +71,7 @@
     },
     {
       "name": "death_I_H",
-      "stoichiometry": [["I_H", -1]],
+      "stoichiometry": [ [ "I_H", -1 ] ],
       "rate": {
         "bin_op": {
           "op": "mul",
@@ -94,7 +94,7 @@
     },
     {
       "name": "death_R_H",
-      "stoichiometry": [["R_H", -1]],
+      "stoichiometry": [ [ "R_H", -1 ] ],
       "rate": {
         "bin_op": {
           "op": "mul",
@@ -111,7 +111,7 @@
     },
     {
       "name": "infection_H",
-      "stoichiometry": [["S_H", -1], ["E_H", 1]],
+      "stoichiometry": [ [ "S_H", -1 ], [ "E_H", 1 ] ],
       "rate": {
         "bin_op": {
           "op": "mul",
@@ -125,19 +125,19 @@
                     "bin_op": {
                       "op": "mul",
                       "left": { "param": "beta_BH" },
-                      "right": { "pop_sum": ["I_B", "I_R"] }
+                      "right": { "pop_sum": [ "I_B", "I_R" ] }
                     }
                   },
                   "right": {
                     "bin_op": {
                       "op": "mul",
                       "left": { "param": "beta_AH" },
-                      "right": { "pop_sum": ["I_A", "I_r"] }
+                      "right": { "pop_sum": [ "I_A", "I_r" ] }
                     }
                   }
                 }
               },
-              "right": { "pop_sum": ["S_H", "E_H", "I_H", "R_H"] }
+              "right": { "pop_sum": [ "S_H", "E_H", "I_H", "R_H" ] }
             }
           },
           "right": { "pop": "S_H" }
@@ -152,7 +152,7 @@
     },
     {
       "name": "progression_H",
-      "stoichiometry": [["E_H", -1], ["I_H", 1]],
+      "stoichiometry": [ [ "E_H", -1 ], [ "I_H", 1 ] ],
       "rate": {
         "bin_op": {
           "op": "mul",
@@ -169,7 +169,7 @@
     },
     {
       "name": "recovery_H",
-      "stoichiometry": [["I_H", -1], ["R_H", 1]],
+      "stoichiometry": [ [ "I_H", -1 ], [ "R_H", 1 ] ],
       "rate": {
         "bin_op": {
           "op": "mul",
@@ -186,7 +186,7 @@
     },
     {
       "name": "waning_H",
-      "stoichiometry": [["R_H", -1], ["S_H", 1]],
+      "stoichiometry": [ [ "R_H", -1 ], [ "S_H", 1 ] ],
       "rate": {
         "bin_op": {
           "op": "mul",
@@ -203,7 +203,7 @@
     },
     {
       "name": "birth_L_B",
-      "stoichiometry": [["L_B", 1]],
+      "stoichiometry": [ [ "L_B", 1 ] ],
       "rate": { "param": "pi_B" },
       "event_key": "birth_L_B:{firing_index}",
       "metadata": {
@@ -214,7 +214,7 @@
     },
     {
       "name": "death_L_B",
-      "stoichiometry": [["L_B", -1]],
+      "stoichiometry": [ [ "L_B", -1 ] ],
       "rate": {
         "bin_op": {
           "op": "mul",
@@ -231,7 +231,7 @@
     },
     {
       "name": "emerge_S_B",
-      "stoichiometry": [["L_B", -1], ["S_B", 1]],
+      "stoichiometry": [ [ "L_B", -1 ], [ "S_B", 1 ] ],
       "rate": {
         "bin_op": {
           "op": "mul",
@@ -260,7 +260,7 @@
     },
     {
       "name": "emerge_S_R",
-      "stoichiometry": [["L_B", -1], ["S_R", 1]],
+      "stoichiometry": [ [ "L_B", -1 ], [ "S_R", 1 ] ],
       "rate": {
         "bin_op": {
           "op": "mul",
@@ -283,7 +283,7 @@
     },
     {
       "name": "death_S_B",
-      "stoichiometry": [["S_B", -1]],
+      "stoichiometry": [ [ "S_B", -1 ] ],
       "rate": {
         "bin_op": {
           "op": "mul",
@@ -300,7 +300,7 @@
     },
     {
       "name": "infection_B",
-      "stoichiometry": [["S_B", -1], ["E_B", 1]],
+      "stoichiometry": [ [ "S_B", -1 ], [ "E_B", 1 ] ],
       "rate": {
         "bin_op": {
           "op": "mul",
@@ -314,7 +314,7 @@
                   "right": { "pop": "I_H" }
                 }
               },
-              "right": { "pop_sum": ["S_H", "E_H", "I_H", "R_H"] }
+              "right": { "pop_sum": [ "S_H", "E_H", "I_H", "R_H" ] }
             }
           },
           "right": { "pop": "S_B" }
@@ -329,7 +329,7 @@
     },
     {
       "name": "death_E_B",
-      "stoichiometry": [["E_B", -1]],
+      "stoichiometry": [ [ "E_B", -1 ] ],
       "rate": {
         "bin_op": {
           "op": "mul",
@@ -346,7 +346,7 @@
     },
     {
       "name": "incubation_B",
-      "stoichiometry": [["E_B", -1], ["I_B", 1]],
+      "stoichiometry": [ [ "E_B", -1 ], [ "I_B", 1 ] ],
       "rate": {
         "bin_op": {
           "op": "mul",
@@ -363,7 +363,7 @@
     },
     {
       "name": "death_I_B",
-      "stoichiometry": [["I_B", -1]],
+      "stoichiometry": [ [ "I_B", -1 ] ],
       "rate": {
         "bin_op": {
           "op": "mul",
@@ -380,7 +380,7 @@
     },
     {
       "name": "biting_rest_B",
-      "stoichiometry": [["I_B", -1], ["I_R", 1]],
+      "stoichiometry": [ [ "I_B", -1 ], [ "I_R", 1 ] ],
       "rate": {
         "bin_op": {
           "op": "mul",
@@ -397,7 +397,7 @@
     },
     {
       "name": "death_S_R",
-      "stoichiometry": [["S_R", -1]],
+      "stoichiometry": [ [ "S_R", -1 ] ],
       "rate": {
         "bin_op": {
           "op": "mul",
@@ -414,7 +414,7 @@
     },
     {
       "name": "infection_R",
-      "stoichiometry": [["S_R", -1], ["E_R", 1]],
+      "stoichiometry": [ [ "S_R", -1 ], [ "E_R", 1 ] ],
       "rate": {
         "bin_op": {
           "op": "mul",
@@ -428,7 +428,7 @@
                   "right": { "pop": "I_H" }
                 }
               },
-              "right": { "pop_sum": ["S_H", "E_H", "I_H", "R_H"] }
+              "right": { "pop_sum": [ "S_H", "E_H", "I_H", "R_H" ] }
             }
           },
           "right": { "pop": "S_R" }
@@ -443,7 +443,7 @@
     },
     {
       "name": "death_E_R",
-      "stoichiometry": [["E_R", -1]],
+      "stoichiometry": [ [ "E_R", -1 ] ],
       "rate": {
         "bin_op": {
           "op": "mul",
@@ -460,7 +460,7 @@
     },
     {
       "name": "incubation_R",
-      "stoichiometry": [["E_R", -1], ["I_R", 1]],
+      "stoichiometry": [ [ "E_R", -1 ], [ "I_R", 1 ] ],
       "rate": {
         "bin_op": {
           "op": "mul",
@@ -477,7 +477,7 @@
     },
     {
       "name": "death_I_R",
-      "stoichiometry": [["I_R", -1]],
+      "stoichiometry": [ [ "I_R", -1 ] ],
       "rate": {
         "bin_op": {
           "op": "mul",
@@ -494,7 +494,7 @@
     },
     {
       "name": "rest_biting_B",
-      "stoichiometry": [["I_R", -1], ["I_B", 1]],
+      "stoichiometry": [ [ "I_R", -1 ], [ "I_B", 1 ] ],
       "rate": {
         "bin_op": {
           "op": "mul",
@@ -511,7 +511,7 @@
     },
     {
       "name": "birth_L_A",
-      "stoichiometry": [["L_A", 1]],
+      "stoichiometry": [ [ "L_A", 1 ] ],
       "rate": { "param": "pi_A" },
       "event_key": "birth_L_A:{firing_index}",
       "metadata": {
@@ -522,7 +522,7 @@
     },
     {
       "name": "death_L_A",
-      "stoichiometry": [["L_A", -1]],
+      "stoichiometry": [ [ "L_A", -1 ] ],
       "rate": {
         "bin_op": {
           "op": "mul",
@@ -539,7 +539,7 @@
     },
     {
       "name": "emerge_S_A",
-      "stoichiometry": [["L_A", -1], ["S_A", 1]],
+      "stoichiometry": [ [ "L_A", -1 ], [ "S_A", 1 ] ],
       "rate": {
         "bin_op": {
           "op": "mul",
@@ -568,7 +568,7 @@
     },
     {
       "name": "emerge_S_r",
-      "stoichiometry": [["L_A", -1], ["S_r", 1]],
+      "stoichiometry": [ [ "L_A", -1 ], [ "S_r", 1 ] ],
       "rate": {
         "bin_op": {
           "op": "mul",
@@ -591,7 +591,7 @@
     },
     {
       "name": "death_S_A",
-      "stoichiometry": [["S_A", -1]],
+      "stoichiometry": [ [ "S_A", -1 ] ],
       "rate": {
         "bin_op": {
           "op": "mul",
@@ -608,7 +608,7 @@
     },
     {
       "name": "infection_A",
-      "stoichiometry": [["S_A", -1], ["E_A", 1]],
+      "stoichiometry": [ [ "S_A", -1 ], [ "E_A", 1 ] ],
       "rate": {
         "bin_op": {
           "op": "mul",
@@ -622,7 +622,7 @@
                   "right": { "pop": "I_H" }
                 }
               },
-              "right": { "pop_sum": ["S_H", "E_H", "I_H", "R_H"] }
+              "right": { "pop_sum": [ "S_H", "E_H", "I_H", "R_H" ] }
             }
           },
           "right": { "pop": "S_A" }
@@ -637,7 +637,7 @@
     },
     {
       "name": "death_E_A",
-      "stoichiometry": [["E_A", -1]],
+      "stoichiometry": [ [ "E_A", -1 ] ],
       "rate": {
         "bin_op": {
           "op": "mul",
@@ -654,7 +654,7 @@
     },
     {
       "name": "incubation_A",
-      "stoichiometry": [["E_A", -1], ["I_A", 1]],
+      "stoichiometry": [ [ "E_A", -1 ], [ "I_A", 1 ] ],
       "rate": {
         "bin_op": {
           "op": "mul",
@@ -671,7 +671,7 @@
     },
     {
       "name": "death_I_A",
-      "stoichiometry": [["I_A", -1]],
+      "stoichiometry": [ [ "I_A", -1 ] ],
       "rate": {
         "bin_op": {
           "op": "mul",
@@ -688,7 +688,7 @@
     },
     {
       "name": "biting_rest_A",
-      "stoichiometry": [["I_A", -1], ["I_r", 1]],
+      "stoichiometry": [ [ "I_A", -1 ], [ "I_r", 1 ] ],
       "rate": {
         "bin_op": {
           "op": "mul",
@@ -705,7 +705,7 @@
     },
     {
       "name": "death_S_r",
-      "stoichiometry": [["S_r", -1]],
+      "stoichiometry": [ [ "S_r", -1 ] ],
       "rate": {
         "bin_op": {
           "op": "mul",
@@ -722,7 +722,7 @@
     },
     {
       "name": "infection_r",
-      "stoichiometry": [["S_r", -1], ["E_r", 1]],
+      "stoichiometry": [ [ "S_r", -1 ], [ "E_r", 1 ] ],
       "rate": {
         "bin_op": {
           "op": "mul",
@@ -736,7 +736,7 @@
                   "right": { "pop": "I_H" }
                 }
               },
-              "right": { "pop_sum": ["S_H", "E_H", "I_H", "R_H"] }
+              "right": { "pop_sum": [ "S_H", "E_H", "I_H", "R_H" ] }
             }
           },
           "right": { "pop": "S_r" }
@@ -751,7 +751,7 @@
     },
     {
       "name": "death_E_r",
-      "stoichiometry": [["E_r", -1]],
+      "stoichiometry": [ [ "E_r", -1 ] ],
       "rate": {
         "bin_op": {
           "op": "mul",
@@ -768,7 +768,7 @@
     },
     {
       "name": "incubation_r",
-      "stoichiometry": [["E_r", -1], ["I_r", 1]],
+      "stoichiometry": [ [ "E_r", -1 ], [ "I_r", 1 ] ],
       "rate": {
         "bin_op": {
           "op": "mul",
@@ -785,7 +785,7 @@
     },
     {
       "name": "death_I_r",
-      "stoichiometry": [["I_r", -1]],
+      "stoichiometry": [ [ "I_r", -1 ] ],
       "rate": {
         "bin_op": {
           "op": "mul",
@@ -802,7 +802,7 @@
     },
     {
       "name": "rest_biting_A",
-      "stoichiometry": [["I_r", -1], ["I_A", 1]],
+      "stoichiometry": [ [ "I_r", -1 ], [ "I_A", 1 ] ],
       "rate": {
         "bin_op": {
           "op": "mul",
@@ -827,226 +827,254 @@
     {
       "name": "Pi_H",
       "value": null,
-      "bounds": [0.01, 2000.0],
+      "bounds": [ 0.01, 2000.0 ],
       "prior": null,
       "transform": null,
-      "initial_value": null
+      "initial_value": null,
+      "param_kind": "rate"
     },
     {
       "name": "mu_H",
       "value": null,
-      "bounds": [1e-05, 0.001],
+      "bounds": [ 1e-05, 0.001 ],
       "prior": null,
       "transform": null,
-      "initial_value": null
+      "initial_value": null,
+      "param_kind": "rate"
     },
     {
       "name": "tau",
       "value": null,
-      "bounds": [0.0, 0.01],
+      "bounds": [ 0.0, 0.01 ],
       "prior": null,
       "transform": null,
-      "initial_value": null
+      "initial_value": null,
+      "param_kind": "rate"
     },
     {
       "name": "eps_H",
       "value": null,
-      "bounds": [0.01, 0.5],
+      "bounds": [ 0.01, 0.5 ],
       "prior": null,
       "transform": null,
-      "initial_value": null
+      "initial_value": null,
+      "param_kind": "rate"
     },
     {
       "name": "gamma",
       "value": null,
-      "bounds": [0.001, 0.5],
+      "bounds": [ 0.001, 0.5 ],
       "prior": null,
       "transform": null,
-      "initial_value": null
+      "initial_value": null,
+      "param_kind": "rate"
     },
     {
       "name": "omega",
       "value": null,
-      "bounds": [0.0, 0.05],
+      "bounds": [ 0.0, 0.05 ],
       "prior": null,
       "transform": null,
-      "initial_value": null
+      "initial_value": null,
+      "param_kind": "rate"
     },
     {
       "name": "beta_BH",
       "value": null,
-      "bounds": [0.0, 5.0],
+      "bounds": [ 0.0, 5.0 ],
       "prior": null,
       "transform": null,
-      "initial_value": null
+      "initial_value": null,
+      "param_kind": "rate"
     },
     {
       "name": "beta_AH",
       "value": null,
-      "bounds": [0.0, 5.0],
+      "bounds": [ 0.0, 5.0 ],
       "prior": null,
       "transform": null,
-      "initial_value": null
+      "initial_value": null,
+      "param_kind": "rate"
     },
     {
       "name": "beta_HB",
       "value": null,
-      "bounds": [0.0, 2.0],
+      "bounds": [ 0.0, 2.0 ],
       "prior": null,
       "transform": null,
-      "initial_value": null
+      "initial_value": null,
+      "param_kind": "rate"
     },
     {
       "name": "beta_HA",
       "value": null,
-      "bounds": [0.0, 2.0],
+      "bounds": [ 0.0, 2.0 ],
       "prior": null,
       "transform": null,
-      "initial_value": null
+      "initial_value": null,
+      "param_kind": "rate"
     },
     {
       "name": "mu_L",
       "value": null,
-      "bounds": [0.001, 0.5],
+      "bounds": [ 0.001, 0.5 ],
       "prior": null,
       "transform": null,
-      "initial_value": null
+      "initial_value": null,
+      "param_kind": "rate"
     },
     {
       "name": "tau_L",
       "value": null,
-      "bounds": [0.01, 0.5],
+      "bounds": [ 0.01, 0.5 ],
       "prior": null,
       "transform": null,
-      "initial_value": null
+      "initial_value": null,
+      "param_kind": "rate"
     },
     {
       "name": "pi_B",
       "value": null,
-      "bounds": [0.0, 20000.0],
+      "bounds": [ 0.0, 20000.0 ],
       "prior": null,
       "transform": null,
-      "initial_value": null
+      "initial_value": null,
+      "param_kind": "rate"
     },
     {
       "name": "phi_B",
       "value": null,
-      "bounds": [0.0, 1.0],
+      "bounds": [ 0.0, 1.0 ],
       "prior": null,
       "transform": null,
-      "initial_value": null
+      "initial_value": null,
+      "param_kind": "rate"
     },
     {
       "name": "mu_B",
       "value": null,
-      "bounds": [0.01, 0.5],
+      "bounds": [ 0.01, 0.5 ],
       "prior": null,
       "transform": null,
-      "initial_value": null
+      "initial_value": null,
+      "param_kind": "rate"
     },
     {
       "name": "mu_R",
       "value": null,
-      "bounds": [0.01, 0.5],
+      "bounds": [ 0.01, 0.5 ],
       "prior": null,
       "transform": null,
-      "initial_value": null
+      "initial_value": null,
+      "param_kind": "rate"
     },
     {
       "name": "eps_B",
       "value": null,
-      "bounds": [0.01, 0.5],
+      "bounds": [ 0.01, 0.5 ],
       "prior": null,
       "transform": null,
-      "initial_value": null
+      "initial_value": null,
+      "param_kind": "rate"
     },
     {
       "name": "eps_R",
       "value": null,
-      "bounds": [0.01, 0.5],
+      "bounds": [ 0.01, 0.5 ],
       "prior": null,
       "transform": null,
-      "initial_value": null
+      "initial_value": null,
+      "param_kind": "rate"
     },
     {
       "name": "sigma_B",
       "value": null,
-      "bounds": [0.01, 2.0],
+      "bounds": [ 0.01, 2.0 ],
       "prior": null,
       "transform": null,
-      "initial_value": null
+      "initial_value": null,
+      "param_kind": "rate"
     },
     {
       "name": "sigma_R",
       "value": null,
-      "bounds": [0.01, 2.0],
+      "bounds": [ 0.01, 2.0 ],
       "prior": null,
       "transform": null,
-      "initial_value": null
+      "initial_value": null,
+      "param_kind": "rate"
     },
     {
       "name": "pi_A",
       "value": null,
-      "bounds": [0.0, 20000.0],
+      "bounds": [ 0.0, 20000.0 ],
       "prior": null,
       "transform": null,
-      "initial_value": null
+      "initial_value": null,
+      "param_kind": "rate"
     },
     {
       "name": "phi_A",
       "value": null,
-      "bounds": [0.0, 1.0],
+      "bounds": [ 0.0, 1.0 ],
       "prior": null,
       "transform": null,
-      "initial_value": null
+      "initial_value": null,
+      "param_kind": "rate"
     },
     {
       "name": "mu_A",
       "value": null,
-      "bounds": [0.01, 0.5],
+      "bounds": [ 0.01, 0.5 ],
       "prior": null,
       "transform": null,
-      "initial_value": null
+      "initial_value": null,
+      "param_kind": "rate"
     },
     {
       "name": "mu_r",
       "value": null,
-      "bounds": [0.01, 0.5],
+      "bounds": [ 0.01, 0.5 ],
       "prior": null,
       "transform": null,
-      "initial_value": null
+      "initial_value": null,
+      "param_kind": "rate"
     },
     {
       "name": "eps_A",
       "value": null,
-      "bounds": [0.01, 0.5],
+      "bounds": [ 0.01, 0.5 ],
       "prior": null,
       "transform": null,
-      "initial_value": null
+      "initial_value": null,
+      "param_kind": "rate"
     },
     {
       "name": "eps_r",
       "value": null,
-      "bounds": [0.01, 0.5],
+      "bounds": [ 0.01, 0.5 ],
       "prior": null,
       "transform": null,
-      "initial_value": null
+      "initial_value": null,
+      "param_kind": "rate"
     },
     {
       "name": "sigma_A",
       "value": null,
-      "bounds": [0.01, 2.0],
+      "bounds": [ 0.01, 2.0 ],
       "prior": null,
       "transform": null,
-      "initial_value": null
+      "initial_value": null,
+      "param_kind": "rate"
     },
     {
       "name": "sigma_r",
       "value": null,
-      "bounds": [0.01, 2.0],
+      "bounds": [ 0.01, 2.0 ],
       "prior": null,
       "transform": null,
-      "initial_value": null
+      "initial_value": null,
+      "param_kind": "rate"
     }
   ],
   "initial_conditions": {
@@ -1178,32 +1206,13 @@
       "I_r": []
     },
     "base_compartments": [
-      "L_B",
-      "S_B",
-      "E_B",
-      "I_B",
-      "S_R",
-      "E_R",
-      "I_R",
-      "S_H",
-      "E_H",
-      "I_H",
-      "R_H",
-      "L_A",
-      "S_A",
-      "E_A",
-      "I_A",
-      "S_r",
-      "E_r",
-      "I_r"
+      "L_B", "S_B", "E_B", "I_B", "S_R", "E_R", "I_R", "S_H", "E_H", "I_H",
+      "R_H", "L_A", "S_A", "E_A", "I_A", "S_r", "E_r", "I_r"
     ],
     "transmission_transitions": [
-      "infection_H",
-      "infection_B",
-      "infection_R",
-      "infection_A",
+      "infection_H", "infection_B", "infection_R", "infection_A",
       "infection_r"
     ],
-    "infectious_compartments": ["I_A", "I_r", "I_B", "I_R", "I_H"]
+    "infectious_compartments": [ "I_A", "I_r", "I_B", "I_R", "I_H" ]
   }
 }

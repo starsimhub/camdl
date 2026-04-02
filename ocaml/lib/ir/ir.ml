@@ -190,6 +190,7 @@ type parameter = {
   prior:         prior_dist option;
   transform:     transform option;
   initial_value: float option;
+  param_kind:    string option;  (* DSL type: "rate", "probability", "positive", "count", "real" *)
 }
 
 (* ── Initial conditions ──────────────────────────────────────────────────────── *)
