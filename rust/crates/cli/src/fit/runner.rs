@@ -574,9 +574,14 @@ pub fn auto_rw_sd(
     let mut mads: Vec<f64> = Vec::new();
 
     for spec in if2_params {
+        // Filter non-finite values: chains with extreme parameter perturbations
+        // can produce NaN (from -inf loglik propagation) or inf. These are dead
+        // chains — they contributed nothing to inference. Including them in the
+        // MAD would either panic (NaN in sort) or corrupt the scale estimate
+        // (inf inflating the deviation).
         let mut values: Vec<f64> = chain_params.iter()
             .map(|p| p[spec.index])
-            .filter(|v| v.is_finite()) // exclude NaN/inf from degenerate chains
+            .filter(|v| v.is_finite())
             .collect();
         if values.len() < 2 {
             medians.push(0.0);

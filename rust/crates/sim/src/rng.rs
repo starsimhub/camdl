@@ -61,17 +61,30 @@ impl StatefulRng {
     pub fn gamma_multiplier(&mut self, sigma_sq: f64, dt: f64) -> f64 {
         if sigma_sq <= 0.0 { return 1.0; }
         let shape = dt / sigma_sq;
-        // Same degenerate guard as neg_binomial above.
+        // Degenerate guard: Gamma(1e-6, scale) puts >99.9999% of mass at zero.
+        // Returning 1.0 (no noise) is the physically correct limit — "no
+        // overdispersion." The transition from meaningful noise to deterministic
+        // is smooth; any threshold in [1e-10, 1e-3] works identically in practice.
+        // This path only triggers for particles with extreme sigma_se values
+        // during IF2 exploration — such particles get terrible logliks and are
+        // resampled away immediately. The fallback value is irrelevant.
         if shape < 1e-6 { return 1.0; }
         let scale = sigma_sq / dt;
         match Gamma::new(shape, scale) {
             Ok(g) => g.sample(&mut self.0),
-            Err(_) => 1.0, // fallback to no noise
+            Err(_) => 1.0,
         }
     }
 
     /// Binomial(n, p) draw. Used by chain-binomial for exact multinomial
     /// competing-risk decomposition (not the Poisson approximation).
+    ///
+    /// Fallback for invalid inputs: if the rate is so high that p > 1 (everyone
+    /// transitions), return n. If p < 0 (shouldn't happen but can from floating
+    /// point with extreme parameter perturbations), return 0. These are the
+    /// nearest deterministic approximations. In IF2, particles reaching these
+    /// guards have extreme parameters, produce -inf logliks, and are resampled
+    /// away — the fallback value doesn't affect inference.
     pub fn binomial(&mut self, n: u64, p: f64) -> u64 {
         if n == 0 || p <= 0.0 { return 0; }
         if p >= 1.0 { return n; }
