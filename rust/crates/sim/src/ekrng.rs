@@ -1,53 +1,8 @@
 use rand::SeedableRng;
 use rand_chacha::ChaCha8Rng;
 use rand_distr::{Distribution, Poisson, Exp, Gamma, Binomial, StandardNormal};
-use ahash::AHasher;
-use std::hash::{Hash, Hasher};
 
-/// Event-Keyed RNG. Each draw is fully determined by (seed, event_key, counter).
-/// Draws are order-independent — the EKRNG placebo invariant holds.
-///
-/// Design: hash (seed, event_key, counter) with ahash to get a u64, then seed
-/// a ChaCha8Rng from that u64. This is stateless per draw.
-pub struct EkRng {
-    seed: u64,
-}
-
-impl EkRng {
-    pub fn new(seed: u64) -> Self {
-        EkRng { seed }
-    }
-
-    fn make_rng(&self, event_key: &str, counter: u64) -> ChaCha8Rng {
-        let mut hasher = AHasher::default();
-        self.seed.hash(&mut hasher);
-        event_key.hash(&mut hasher);
-        counter.hash(&mut hasher);
-        let derived = hasher.finish();
-        // Expand 64-bit hash to 256-bit seed for ChaCha8
-        let seed_bytes = expand_u64_to_seed(derived);
-        ChaCha8Rng::from_seed(seed_bytes)
-    }
-
-    /// Draw Poisson(lambda) for a keyed event. Returns 0 for lambda ≤ 0.
-    pub fn poisson_keyed(&self, event_key: &str, counter: u64, lambda: f64) -> u64 {
-        if lambda <= 0.0 { return 0; }
-        let mut rng = self.make_rng(event_key, counter);
-        // rand_distr::Poisson panics for lambda > ~1e308; clamp to something sane
-        let lambda = lambda.min(1e15);
-        Poisson::new(lambda).unwrap().sample(&mut rng) as u64
-    }
-
-    /// Draw Exp(rate) for a keyed event. Returns f64::INFINITY for rate ≤ 0.
-    pub fn exp_keyed(&self, event_key: &str, counter: u64, rate: f64) -> f64 {
-        if rate <= 0.0 { return f64::INFINITY; }
-        let mut rng = self.make_rng(event_key, counter);
-        Exp::new(rate).unwrap().sample(&mut rng)
-    }
-}
-
-/// Stateful RNG for transitions with no event_key (backward compatibility).
-/// Separate type so callers cannot accidentally mix keyed and stateful paths.
+/// Stateful RNG wrapping ChaCha8. Deterministic given seed.
 pub struct StatefulRng(ChaCha8Rng);
 
 impl StatefulRng {
