@@ -37,11 +37,7 @@ fn run_one_chain(
     observations: &[Observation],
     config: &IF2Config,
     flow_indices: &[usize],
-    obs_model: &str,
-    rho_idx: Option<usize>,
-    k_idx: Option<usize>,
-    psi_idx: Option<usize>,
-    tol: f64,
+    dmeasure_fn: &(dyn Fn(f64, f64, &[f64]) -> f64 + Send + Sync),
     base_seed: u64,
     pb: Option<&ProgressBar>,
 ) -> IF2Result {
@@ -52,19 +48,6 @@ fn run_one_chain(
     };
     let project_fn = |state: &ParticleState| -> f64 {
         flow_indices.iter().map(|&i| state.flow_accumulators[i] as f64).sum()
-    };
-    let dmeasure_fn: Box<dyn Fn(f64, f64, &[f64]) -> f64> = match obs_model {
-        "negbin" => Box::new(move |proj: f64, obs: f64, p: &[f64]| {
-            let rho = rho_idx.map_or(1.0, |i| p[i]);
-            let k = k_idx.map_or(10.0, |i| p[i]);
-            negbin_logpmf(obs, rho * proj, k)
-        }),
-        _ => Box::new(move |proj: f64, obs: f64, p: &[f64]| {
-            let rho = rho_idx.map_or(1.0, |i| p[i]);
-            let psi = psi_idx.map_or(0.116, |i| p[i]);
-            let mu = rho * proj;
-            discretized_normal_logpmf_tol(obs, mu, mu * (1.0 - rho + psi * psi * mu), tol)
-        }),
     };
 
     // Progress callback that updates the indicatif bar
@@ -406,6 +389,39 @@ pub fn cmd_if2(args: &[String]) {
     };
 
     let compiled = Arc::new(compiled);
+
+    // Build dmeasure: prefer IR observation model, fall back to --obs-model
+    let dmeasure_fn: Box<dyn Fn(f64, f64, &[f64]) -> f64 + Send + Sync> = {
+        // Try to find observation block (first one, or by --flow name match)
+        let obs_block = model.observations.first();
+        if let Some(obs) = obs_block {
+            eprintln!("if2: using observation model '{}' from IR", obs.name);
+            sim::inference::dmeasure::compile_dmeasure_if2(obs, compiled.clone())
+        } else if obs_model != "negbin" || model.observations.is_empty() {
+            // Deprecated fallback: hardcoded --obs-model
+            eprintln!("\x1b[33mwarning: using --obs-model '{}' (deprecated). Add an observations {{}} block to your model.\x1b[0m", obs_model);
+            let rho_idx = compiled.param_index.get("rho").copied();
+            let k_idx = compiled.param_index.get("k").copied();
+            let psi_idx = compiled.param_index.get("psi").copied();
+            match obs_model.as_str() {
+                "negbin" => Box::new(move |proj: f64, obs: f64, p: &[f64]| {
+                    let rho = rho_idx.map_or(1.0, |i| p[i]);
+                    let k = k_idx.map_or(10.0, |i| p[i]);
+                    negbin_logpmf(obs, rho * proj, k)
+                }),
+                _ => Box::new(move |proj: f64, obs: f64, p: &[f64]| {
+                    let rho = rho_idx.map_or(1.0, |i| p[i]);
+                    let psi = psi_idx.map_or(0.116, |i| p[i]);
+                    let mu = rho * proj;
+                    discretized_normal_logpmf_tol(obs, mu, mu * (1.0 - rho + psi * psi * mu), tol)
+                }),
+            }
+        } else {
+            eprintln!("error: model has no observations block and --obs-model not specified");
+            std::process::exit(1);
+        }
+    };
+
     let if2_params = Arc::new(if2_params);
     let observations = Arc::new(observations);
     let flow_indices = Arc::new(flow_indices);
@@ -436,9 +452,8 @@ pub fn cmd_if2(args: &[String]) {
         .into_par_iter()
         .map(|chain_id| {
             let result = run_one_chain(chain_id, &compiled, &params, &if2_params,
-                &observations, &config, &flow_indices, &obs_model,
-                rho_idx, k_idx, psi_idx, tol, seed,
-                Some(&bars[chain_id]));
+                &observations, &config, &flow_indices, &*dmeasure_fn,
+                seed, Some(&bars[chain_id]));
             (chain_id, result)
         })
         .collect();

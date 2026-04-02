@@ -238,10 +238,32 @@ pub fn cmd_profile(args: &[String]) {
     });
     let if2_params = Arc::new(if2_params);
 
-    // Obs model params
-    let rho_idx = compiled.param_index.get("rho").copied();
-    let k_idx = compiled.param_index.get("k").copied();
-    let psi_idx = compiled.param_index.get("psi").copied();
+    // Build dmeasure: prefer IR observation model, fall back to --obs-model
+    let dmeasure_fn: Arc<dyn Fn(f64, f64, &[f64]) -> f64 + Send + Sync> = {
+        let obs_block = model.observations.first();
+        if let Some(obs) = obs_block {
+            eprintln!("profile: using observation model '{}' from IR", obs.name);
+            Arc::from(sim::inference::dmeasure::compile_dmeasure_if2(obs, compiled.clone()))
+        } else {
+            eprintln!("\x1b[33mwarning: using --obs-model '{}' (deprecated). Add an observations {{}} block to your model.\x1b[0m", obs_model);
+            let rho_idx = compiled.param_index.get("rho").copied();
+            let k_idx = compiled.param_index.get("k").copied();
+            let psi_idx = compiled.param_index.get("psi").copied();
+            match obs_model.as_str() {
+                "negbin" => Arc::new(move |proj: f64, obs: f64, p: &[f64]| {
+                    let rho = rho_idx.map_or(1.0, |i| p[i]);
+                    let k = k_idx.map_or(10.0, |i| p[i]);
+                    negbin_logpmf(obs, rho * proj, k)
+                }),
+                _ => Arc::new(move |proj: f64, obs: f64, p: &[f64]| {
+                    let rho = rho_idx.map_or(1.0, |i| p[i]);
+                    let psi = psi_idx.map_or(0.116, |i| p[i]);
+                    let mu = rho * proj;
+                    discretized_normal_logpmf_tol(obs, mu, mu * (1.0 - rho + psi * psi * mu), tol)
+                }),
+            }
+        }
+    };
 
     // Build Cartesian product of all focal grids.
     // Each job is a Vec<(param_idx, value)> for the focal params at that grid point.
@@ -290,6 +312,7 @@ pub fn cmd_profile(args: &[String]) {
             let observations = Arc::clone(&observations);
             let flow_indices = Arc::clone(&flow_indices);
             let if2_params = Arc::clone(&if2_params);
+            let dmeasure_fn = Arc::clone(&dmeasure_fn);
             let focal_values: Vec<f64> = grid_points[grid_idx].iter().map(|&(_, v)| v).collect();
 
             // Set focal parameters
@@ -300,7 +323,7 @@ pub fn cmd_profile(args: &[String]) {
 
             let config = IF2Config {
                 n_particles, n_iterations,
-                cooling_fraction: cooling, cooling_target_iters: 50, dt,
+                cooling_fraction: cooling, cooling_target_iters: n_iterations, dt,
             };
             let job_seed = seed ^ (grid_idx as u64 * 1000 + start_idx as u64);
 
@@ -310,20 +333,6 @@ pub fn cmd_profile(args: &[String]) {
             let project_fn = |state: &ParticleState| -> f64 {
                 flow_indices.iter().map(|&i| state.flow_accumulators[i] as f64).sum()
             };
-            let dmeasure_fn: Box<dyn Fn(f64, f64, &[f64]) -> f64 + Send> = match obs_model.as_str() {
-                "negbin" => Box::new(move |proj: f64, obs: f64, p: &[f64]| {
-                    let rho = rho_idx.map_or(1.0, |i| p[i]);
-                    let k = k_idx.map_or(10.0, |i| p[i]);
-                    negbin_logpmf(obs, rho * proj, k)
-                }),
-                _ => Box::new(move |proj: f64, obs: f64, p: &[f64]| {
-                    let rho = rho_idx.map_or(1.0, |i| p[i]);
-                    let psi = psi_idx.map_or(0.116, |i| p[i]);
-                    let mu = rho * proj;
-                    discretized_normal_logpmf_tol(obs, mu, mu * (1.0 - rho + psi * psi * mu), tol)
-                }),
-            };
-
             let result = run_if2(
                 &compiled, &params, &if2_params, &observations, &config,
                 &step_fn, &project_fn, &*dmeasure_fn, job_seed,
