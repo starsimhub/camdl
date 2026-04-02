@@ -50,11 +50,18 @@ pub struct IF2Param {
 pub enum Transform {
     /// Log transform with bounds clamping on inverse.
     /// Correct for rates, positive quantities, counts.
+    /// from_transformed clamps z.exp() to [lo, hi] — out-of-bounds
+    /// particles get bad loglik and are resampled away. No NaN, no panic.
+    /// This is what Stan does for lower-bounded parameters.
     Log { lo: f64, hi: f64 },
     /// Scaled logit mapping [lo, hi] to (-inf, inf).
-    /// Correct for probabilities. Bounds enforced by construction.
+    /// Correct for probabilities. Bounds enforced by construction
+    /// (logistic function output is always in (0, 1)).
+    /// Note: for narrow bounds like [0.01, 0.10], the logit-scaled
+    /// position can be extreme (|z| > 2), compressing the effective
+    /// perturbation range. The preflight diagnostic warns about this.
     Logit { lo: f64, hi: f64 },
-    /// No transform.
+    /// No transform. For "real" parameters or unknown types.
     None,
 }
 

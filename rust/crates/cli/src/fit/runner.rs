@@ -308,7 +308,15 @@ fn print_preflight(config: &FitRunConfig) {
 }
 
 /// Derive the transform for a parameter from its IR metadata.
+///
 /// Priority: explicit override > param_kind > bounds fallback.
+///
+/// The param_kind field (populated by the OCaml compiler from the DSL type)
+/// is the primary signal: probability → Logit, rate/positive/count → Log.
+/// The bounds fallback (lo >= 0 → Log) exists for IR files predating
+/// the param_kind field. The hi <= 1.0 probability-detector heuristic
+/// was deliberately removed — it caused R0 on [1, 100] to get logit
+/// instead of log, which is wrong.
 pub fn derive_transform(
     ir_param: &ir::parameter::Parameter,
     transform_override: Option<&str>,
@@ -335,8 +343,16 @@ pub fn derive_transform(
 // ── Shared IF2 parameter construction ────────────────────────────────────────
 
 /// What the caller wants to estimate for one parameter.
-/// Each CLI builds a Vec<ParamSpec> from its own flags/config.
-/// The shared function turns these into Vec<IF2Param>.
+///
+/// Each CLI (if2, profile, fit) builds a Vec<ParamSpec> from its own
+/// flags or config. The shared `build_if2_params_from_specs` turns
+/// these into Vec<IF2Param> — the format the IF2 engine consumes.
+///
+/// Design: the caller decides WHAT to estimate (the partition).
+/// The shared function decides HOW (transform, rw_sd, bounds).
+/// This separation eliminates the DRY violations that caused
+/// three bugs in one session (profile --rw-sd auto, profile missing
+/// --fixed, transform derivation divergence).
 pub struct ParamSpec {
     pub name: String,
     /// None = auto from bounds. Some(v) = explicit natural-scale rw_sd.
@@ -394,6 +410,15 @@ pub fn auto_rw_sd_from_value_pub(current_value: f64, lower: f64, upper: f64, tra
 
 /// Auto-compute rw_sd from bounds on the transformed scale.
 ///
+/// Returns a natural-scale rw_sd value. At each IF2 perturbation step,
+/// `IF2Param::transformed_sd(natural_sd, current_value)` re-converts
+/// this to the transformed scale using the delta method at the CURRENT
+/// parameter value. So the midpoint used here is just a reference point
+/// for expressing the natural-scale number — the actual perturbation
+/// adapts to the current position through transformed_sd. Any reference
+/// point (midpoint, lower bound, current value) would produce the same
+/// perturbation on the transformed scale.
+///
 /// Log: log_range / 20 on transformed scale, converted to natural at geometric midpoint.
 ///   For sigma_se in [0.001, 5.0]: log_range = 8.5, log_sd = 0.43, meaning ~±50% per step.
 /// Logit: range / 6 on natural scale. Logit range is ~12 (-6 to 6), /6 gives ~2.0 on logit.
@@ -401,6 +426,10 @@ pub fn auto_rw_sd_from_value_pub(current_value: f64, lower: f64, upper: f64, tra
 ///
 /// The /20 vs /6 asymmetry: log is unbounded (perturbations accumulate) while logit
 /// saturates at bounds. Log needs more conservative defaults.
+///
+/// This is a starting heuristic, not a solution. Scout's MAD-based
+/// calibration replaces it for refine. The modeler can override with
+/// explicit rw_sd in fit.toml or --rw-sd on the CLI.
 fn auto_rw_sd_from_value(current_value: f64, lower: f64, upper: f64, transform: &Transform) -> f64 {
     match transform {
         Transform::Log { lo, hi } => {
