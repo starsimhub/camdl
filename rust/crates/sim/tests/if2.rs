@@ -303,3 +303,83 @@ fn test_if2_no_cooling_explores() {
     assert!(spread > 0.003,
         "no-cooling beta spread={:.4} — should be wandering, not converging", spread);
 }
+
+// ── Transform tests ─────────────────────────────────────────────────────
+
+#[test]
+fn log_transform_clamps_to_bounds() {
+    let param = IF2Param {
+        name: "test".into(), index: 0, initial: 1.0, rw_sd: 0.1,
+        transform: Transform::Log { lo: 0.01, hi: 100.0 },
+        lower: 0.01, upper: 100.0, ivp: false,
+    };
+    // Extreme positive z → exp(z) → clamped to hi
+    assert_eq!(param.from_transformed(1000.0), 100.0);
+    // Extreme negative z → exp(z) → clamped to lo
+    assert_eq!(param.from_transformed(-1000.0), 0.01);
+    // Normal z → within bounds
+    let v = param.from_transformed(1.0); // e^1 ≈ 2.718
+    assert!(v > 0.01 && v < 100.0);
+}
+
+#[test]
+fn logit_transform_enforces_bounds() {
+    let param = IF2Param {
+        name: "test".into(), index: 0, initial: 0.5, rw_sd: 0.1,
+        transform: Transform::Logit { lo: 0.0, hi: 1.0 },
+        lower: 0.0, upper: 1.0, ivp: false,
+    };
+    // Any z → result in [lo, hi] (saturates at bounds for extreme z)
+    let v1 = param.from_transformed(100.0);
+    let v2 = param.from_transformed(-100.0);
+    let v3 = param.from_transformed(0.0);
+    assert!(v1 >= 0.0 && v1 <= 1.0, "logit(100) = {} not in [0,1]", v1);
+    assert!(v2 >= 0.0 && v2 <= 1.0, "logit(-100) = {} not in [0,1]", v2);
+    assert!((v3 - 0.5).abs() < 1e-10, "logit(0) should be 0.5, got {}", v3);
+    // Moderate z → strictly interior
+    let v4 = param.from_transformed(2.0);
+    assert!(v4 > 0.01 && v4 < 0.99, "logit(2) = {} should be interior", v4);
+}
+
+#[test]
+fn log_round_trip_within_bounds() {
+    let param = IF2Param {
+        name: "test".into(), index: 0, initial: 5.0, rw_sd: 0.1,
+        transform: Transform::Log { lo: 0.001, hi: 1000.0 },
+        lower: 0.001, upper: 1000.0, ivp: false,
+    };
+    for &x in &[0.001, 0.01, 1.0, 10.0, 100.0, 1000.0] {
+        let z = param.to_transformed(x);
+        let back = param.from_transformed(z);
+        assert!((back - x).abs() < 1e-10 * x, "round-trip failed: {} → {} → {}", x, z, back);
+    }
+}
+
+#[test]
+fn logit_round_trip() {
+    let param = IF2Param {
+        name: "test".into(), index: 0, initial: 0.5, rw_sd: 0.1,
+        transform: Transform::Logit { lo: 0.0, hi: 1.0 },
+        lower: 0.0, upper: 1.0, ivp: false,
+    };
+    for &x in &[0.01, 0.1, 0.3, 0.5, 0.7, 0.9, 0.99] {
+        let z = param.to_transformed(x);
+        let back = param.from_transformed(z);
+        assert!((back - x).abs() < 1e-8, "round-trip failed: {} → {} → {}", x, z, back);
+    }
+}
+
+#[test]
+fn scaled_logit_round_trip() {
+    // Logit on [0.01, 0.10] — the s0 case
+    let param = IF2Param {
+        name: "s0".into(), index: 0, initial: 0.03, rw_sd: 0.005,
+        transform: Transform::Logit { lo: 0.01, hi: 0.10 },
+        lower: 0.01, upper: 0.10, ivp: true,
+    };
+    for &x in &[0.015, 0.03, 0.05, 0.08, 0.095] {
+        let z = param.to_transformed(x);
+        let back = param.from_transformed(z);
+        assert!((back - x).abs() < 1e-8, "scaled logit round-trip: {} → {} → {}", x, z, back);
+    }
+}

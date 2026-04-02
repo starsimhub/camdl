@@ -59,7 +59,7 @@ pub enum Transform {
 }
 
 impl IF2Param {
-    fn to_transformed(&self, x: f64) -> f64 {
+    pub fn to_transformed(&self, x: f64) -> f64 {
         match &self.transform {
             Transform::Log { lo, hi } => x.clamp(*lo, *hi).max(1e-300).ln(),
             Transform::Logit { lo, hi } => {
@@ -70,7 +70,7 @@ impl IF2Param {
         }
     }
 
-    fn from_transformed(&self, z: f64) -> f64 {
+    pub fn from_transformed(&self, z: f64) -> f64 {
         match &self.transform {
             Transform::Log { lo, hi } => {
                 // Clamp to declared bounds — prevents NaN/panic downstream.

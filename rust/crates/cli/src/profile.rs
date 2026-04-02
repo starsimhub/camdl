@@ -195,7 +195,6 @@ pub fn cmd_profile(args: &[String]) {
     }
 
     // Build IF2 param specs (excluding focal params)
-    // When --rw-sd auto: estimate all non-focal params with auto rw_sd
     let param_names_to_estimate: Vec<String> = if rw_sd_auto {
         model.parameters.iter()
             .filter(|p| !focal_names.contains(&p.name))
@@ -209,18 +208,20 @@ pub fn cmd_profile(args: &[String]) {
             .collect()
     };
 
-    let if2_params: Vec<IF2Param> = param_names_to_estimate.iter().map(|name| {
-        let idx = compiled.param_index.get(name.as_str()).copied()
-            .unwrap_or_else(|| { eprintln!("rw-sd param '{}' not found", name); std::process::exit(1); });
-        let ir_param = model.parameters.iter().find(|p| p.name == *name).unwrap();
-        let (lower, upper) = ir_param.bounds.unwrap_or((0.0, f64::INFINITY));
-        let transform = crate::fit::runner::derive_transform(ir_param, None);
-        let rw_sd = rw_sd_map_raw.get(name).and_then(|v| *v)
-            .unwrap_or_else(|| crate::fit::runner::auto_rw_sd_from_value_pub(
-                base_params[idx], lower, upper, &transform
-            ));
-        IF2Param { name: name.clone(), index: idx, initial: base_params[idx], rw_sd, transform, lower, upper, ivp: false }
+    let specs: Vec<crate::fit::runner::ParamSpec> = param_names_to_estimate.iter().map(|name| {
+        crate::fit::runner::ParamSpec {
+            name: name.clone(),
+            rw_sd: rw_sd_map_raw.get(name).and_then(|v| *v),
+            transform: None,
+            ivp: false,
+        }
     }).collect();
+
+    let if2_params = crate::fit::runner::build_if2_params_from_specs(
+        &model, &compiled, &base_params, &specs,
+    ).unwrap_or_else(|e| {
+        eprintln!("error: {}", e); std::process::exit(1);
+    });
     let if2_params = Arc::new(if2_params);
 
     // Obs model params

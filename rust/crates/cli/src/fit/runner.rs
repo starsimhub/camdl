@@ -186,6 +186,8 @@ fn load_model(path: &str) -> Result<(ir::Model, String), String> {
 }
 
 /// Build IF2Param specs from fit.toml [estimate] + optional prior state overrides.
+/// Uses the shared build_if2_params_from_specs for core logic, then applies
+/// fit-specific overrides (prior state rw_sd, start values, random starts).
 fn build_if2_params(
     fit: &FitToml,
     prior_state: Option<&FitState>,
@@ -195,55 +197,41 @@ fn build_if2_params(
     random_starts: bool,
     seed: u64,
 ) -> Result<Vec<IF2Param>, String> {
-    let mut rng = StatefulRng::new(seed ^ 0xdeadbeef_u64);
-    let mut params = Vec::new();
-
-    for (name, spec) in &fit.estimate {
-        let idx = compiled.param_index.get(name.as_str()).copied()
-            .ok_or_else(|| format!("estimated parameter '{}' not in model", name))?;
-        let ir_param = model.parameters.iter().find(|p| p.name == *name).unwrap();
-
-        // Determine bounds: fit bounds override model bounds
-        let (lower, upper) = spec.bounds
-            .or(ir_param.bounds)
-            .unwrap_or((0.0, f64::INFINITY));
-
-        let transform = derive_transform(ir_param, spec.transform.as_deref());
-
-        // Determine rw_sd: prior state > explicit fit.toml > auto from bounds
+    // Build ParamSpecs from fit.toml [estimate]
+    let specs: Vec<ParamSpec> = fit.estimate.iter().map(|(name, est)| {
+        // rw_sd priority: prior state > fit.toml explicit > None (auto)
         let rw_sd = prior_state
             .and_then(|s| s.rw_sd.get(name))
             .copied()
-            .or(spec.rw_sd)
-            .unwrap_or_else(|| auto_rw_sd_from_value(base_params[idx], lower, upper, &transform));
+            .or(est.rw_sd);
+        ParamSpec {
+            name: name.clone(),
+            rw_sd,
+            transform: est.transform.clone(),
+            ivp: est.ivp,
+        }
+    }).collect();
 
-        // Determine initial value
-        let initial = if random_starts {
-            // Uniform random within bounds
-            if lower.is_finite() && upper.is_finite() {
-                let u = rng.uniform();
-                lower + u * (upper - lower)
+    let mut params = build_if2_params_from_specs(model, compiled, base_params, &specs)?;
+
+    // Fit-specific: apply start values and random starts
+    let mut rng = StatefulRng::new(seed ^ 0xdeadbeef_u64);
+    for p in &mut params {
+        if random_starts {
+            if p.lower.is_finite() && p.upper.is_finite() {
+                p.initial = p.lower + rng.uniform() * (p.upper - p.lower);
             } else {
-                // Can't do uniform on unbounded; use current value with jitter
-                let v = base_params[idx];
-                v * (1.0 + 0.2 * (rng.uniform() - 0.5))
+                p.initial *= 1.0 + 0.2 * (rng.uniform() - 0.5);
             }
         } else if let Some(ref state) = prior_state {
-            state.start_values.get(name).copied().unwrap_or(base_params[idx])
-        } else {
-            spec.start.unwrap_or(base_params[idx])
-        };
-
-        params.push(IF2Param {
-            name: name.clone(),
-            index: idx,
-            initial,
-            rw_sd,
-            transform,
-            lower,
-            upper,
-            ivp: spec.ivp,
-        });
+            if let Some(&v) = state.start_values.get(&p.name) {
+                p.initial = v;
+            }
+        } else if let Some(est) = fit.estimate.get(&p.name) {
+            if let Some(start) = est.start {
+                p.initial = start;
+            }
+        }
     }
 
     Ok(params)
@@ -342,6 +330,61 @@ pub fn derive_transform(
     } else {
         if lower >= 0.0 { Transform::Log { lo: lower, hi: upper } } else { Transform::None }
     }
+}
+
+// ── Shared IF2 parameter construction ────────────────────────────────────────
+
+/// What the caller wants to estimate for one parameter.
+/// Each CLI builds a Vec<ParamSpec> from its own flags/config.
+/// The shared function turns these into Vec<IF2Param>.
+pub struct ParamSpec {
+    pub name: String,
+    /// None = auto from bounds. Some(v) = explicit natural-scale rw_sd.
+    pub rw_sd: Option<f64>,
+    /// None = auto from param_kind. Some("log") = override.
+    pub transform: Option<String>,
+    pub ivp: bool,
+}
+
+/// Build IF2Param specs from caller-provided ParamSpecs.
+/// Pure mechanical work: look up indices, derive transforms, compute auto rw_sd.
+pub fn build_if2_params_from_specs(
+    model: &ir::Model,
+    compiled: &CompiledModel,
+    base_params: &[f64],
+    specs: &[ParamSpec],
+) -> Result<Vec<IF2Param>, String> {
+    let mut params = Vec::with_capacity(specs.len());
+
+    for spec in specs {
+        let ir_param = model.parameters.iter()
+            .find(|p| p.name == spec.name)
+            .ok_or_else(|| format!("parameter '{}' not in model", spec.name))?;
+        let idx = *compiled.param_index.get(spec.name.as_str())
+            .ok_or_else(|| format!("parameter '{}' not in compiled model", spec.name))?;
+
+        let (lo, hi) = ir_param.bounds.unwrap_or((0.0, f64::INFINITY));
+
+        // Transform: spec override > param_kind > fallback
+        let transform = derive_transform(ir_param, spec.transform.as_deref());
+
+        // rw_sd: spec explicit > auto from bounds
+        let rw_sd = spec.rw_sd
+            .unwrap_or_else(|| auto_rw_sd_from_value(base_params[idx], lo, hi, &transform));
+
+        params.push(IF2Param {
+            name: spec.name.clone(),
+            index: idx,
+            initial: base_params[idx],
+            rw_sd,
+            transform,
+            lower: lo,
+            upper: hi,
+            ivp: spec.ivp,
+        });
+    }
+
+    Ok(params)
 }
 
 /// Public wrapper for use by `camdl if2 --rw-sd auto`.

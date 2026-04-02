@@ -329,35 +329,21 @@ pub fn cmd_if2(args: &[String]) {
         rw_sd_map.keys().cloned().collect()
     };
 
-    let mut if2_params: Vec<IF2Param> = Vec::new();
-    let mut any_auto = false;
-    for name in &param_names_to_estimate {
-        let idx = compiled.param_index.get(name.as_str()).copied()
-            .unwrap_or_else(|| { eprintln!("error: --rw-sd parameter '{}' not in model", name); std::process::exit(1); });
-
-        let ir_param = model.parameters.iter().find(|p| p.name == *name).unwrap();
-        let (lower, upper) = ir_param.bounds.unwrap_or((0.0, f64::INFINITY));
-
-        let transform = crate::fit::runner::derive_transform(ir_param, None);
-
-        // rw_sd: explicit value > auto from bounds
-        let explicit_rw_sd = rw_sd_map.get(name).and_then(|v| *v);
-        let rw_sd = explicit_rw_sd.unwrap_or_else(|| {
-            any_auto = true;
-            crate::fit::runner::auto_rw_sd_from_value_pub(params[idx], lower, upper, &transform)
-        });
-
-        if2_params.push(IF2Param {
+    let specs: Vec<crate::fit::runner::ParamSpec> = param_names_to_estimate.iter().map(|name| {
+        crate::fit::runner::ParamSpec {
             name: name.clone(),
-            index: idx,
-            initial: params[idx],
-            rw_sd,
-            transform,
-            lower,
-            upper,
+            rw_sd: rw_sd_map.get(name).and_then(|v| *v),
+            transform: None,
             ivp: ivp_set.contains(name),
-        });
-    }
+        }
+    }).collect();
+    let any_auto = specs.iter().any(|s| s.rw_sd.is_none());
+
+    let if2_params = crate::fit::runner::build_if2_params_from_specs(
+        &model, &compiled, &params, &specs,
+    ).unwrap_or_else(|e| {
+        eprintln!("error: {}", e); std::process::exit(1);
+    });
 
     // Report auto rw_sd values
     if any_auto || rw_sd_auto {
