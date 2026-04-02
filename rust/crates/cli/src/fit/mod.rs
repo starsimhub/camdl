@@ -139,30 +139,8 @@ fn parse_starts_from(args: &[String]) -> String {
 }
 
 fn load_model_for_validation(fit: &FitToml) -> (ir::Model, String) {
-    let path = &fit.fit.model;
-    if path.ends_with(".camdl") {
-        let camdlc = std::env::var("CAMDLC").unwrap_or_else(|_| "camdlc".into());
-        let output = std::process::Command::new(&camdlc).arg(path).output()
-            .unwrap_or_else(|e| { eprintln!("cannot run camdlc: {}", e); std::process::exit(1); });
-        if !output.status.success() {
-            eprintln!("{}", String::from_utf8_lossy(&output.stderr));
-            std::process::exit(1);
-        }
-        let json = String::from_utf8(output.stdout).unwrap();
-        let model: ir::Model = serde_json::from_str(&json).unwrap_or_else(|e| {
-            eprintln!("parse error: {}", e);
-            std::process::exit(1);
-        });
-        (model, json)
-    } else {
-        let json = std::fs::read_to_string(path).unwrap_or_else(|e| {
-            eprintln!("cannot read {}: {}", path, e);
-            std::process::exit(1);
-        });
-        let model: ir::Model = serde_json::from_str(&json).unwrap_or_else(|e| {
-            eprintln!("parse error: {}", e);
-            std::process::exit(1);
-        });
-        (model, json)
-    }
+    crate::util::load_model(&fit.fit.model).unwrap_or_else(|e| {
+        eprintln!("error: {}", e);
+        std::process::exit(1);
+    })
 }

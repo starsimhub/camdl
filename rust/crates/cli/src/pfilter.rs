@@ -39,10 +39,10 @@ pub fn cmd_pfilter(args: &[String]) {
         match args[i].as_str() {
             "--params"    => { i += 1; params_files.push(args[i].clone()); }
             "--data"      => { i += 1; data_path = Some(args[i].clone()); }
-            "--replicates" => { i += 1; n_replicates = args[i].parse().expect("--replicates needs integer"); }
-            "--particles" => { i += 1; n_particles = args[i].parse().expect("--particles needs an integer"); }
-            "--dt"        => { i += 1; dt = args[i].parse().expect("--dt needs a number"); }
-            "--seed"      => { i += 1; seed = args[i].parse().expect("--seed needs an integer"); }
+            "--replicates" => { i += 1; n_replicates = args[i].parse().unwrap_or_else(|_| { eprintln!("error: --replicates needs integer"); std::process::exit(1); }); }
+            "--particles" => { i += 1; n_particles = args[i].parse().unwrap_or_else(|_| { eprintln!("error: --particles needs an integer"); std::process::exit(1); }); }
+            "--dt"        => { i += 1; dt = args[i].parse().unwrap_or_else(|_| { eprintln!("error: --dt needs a number"); std::process::exit(1); }); }
+            "--seed"      => { i += 1; seed = args[i].parse().unwrap_or_else(|_| { eprintln!("error: --seed needs an integer"); std::process::exit(1); }); }
             "--trace"     => {
                 // Accept both: --trace FILE and bare --trace (stdout)
                 if i + 1 < args.len() && !args[i + 1].starts_with("--") {
@@ -63,7 +63,7 @@ pub fn cmd_pfilter(args: &[String]) {
                 let kv = &args[i];
                 let mut parts = kv.splitn(2, '=');
                 let k = parts.next().unwrap().to_string();
-                let v: f64 = parts.next().and_then(|s| s.parse().ok()).expect("--param needs NAME=VALUE");
+                let v: f64 = parts.next().and_then(|s| s.parse().ok()).unwrap_or_else(|| { eprintln!("error: --param needs NAME=VALUE"); std::process::exit(1); });
                 overrides.insert(k, v);
             }
             s if s.starts_with("--") => {
@@ -86,22 +86,8 @@ pub fn cmd_pfilter(args: &[String]) {
     });
 
     // Load model (supports .camdl via camdlc)
-    let mut model: ir::Model = if ir_path.ends_with(".camdl") {
-        let camdlc = std::env::var("CAMDLC").unwrap_or_else(|_| "camdlc".into());
-        let output = std::process::Command::new(&camdlc).arg(&ir_path).output()
-            .unwrap_or_else(|e| { eprintln!("cannot run camdlc: {}", e); std::process::exit(1); });
-        if !output.status.success() {
-            eprintln!("{}", String::from_utf8_lossy(&output.stderr));
-            std::process::exit(1);
-        }
-        serde_json::from_slice(&output.stdout)
-            .unwrap_or_else(|e| { eprintln!("cannot parse camdlc output: {}", e); std::process::exit(1); })
-    } else {
-        let contents = std::fs::read_to_string(&ir_path)
-            .unwrap_or_else(|e| { eprintln!("cannot read {}: {}", ir_path, e); std::process::exit(1); });
-        serde_json::from_str(&contents)
-            .unwrap_or_else(|e| { eprintln!("cannot parse {}: {}", ir_path, e); std::process::exit(1); })
-    };
+    let (mut model, _model_json) = crate::util::load_model(&ir_path)
+        .unwrap_or_else(|e| { eprintln!("error: {}", e); std::process::exit(1); });
 
     // Apply params
     for pf in &params_files {

@@ -119,8 +119,8 @@ fn run_simulate(args: &[String]) {
     while i < args.len() {
         match args[i].as_str() {
             "--backend"  => { i += 1; backend = args[i].clone(); }
-            "--dt"       => { i += 1; dt      = args[i].parse().expect("--dt needs a number"); }
-            "--seed"     => { i += 1; seed    = args[i].parse().expect("--seed needs an integer"); }
+            "--dt"       => { i += 1; dt      = args[i].parse().unwrap_or_else(|_| { eprintln!("error: --dt needs a number"); std::process::exit(1); }); }
+            "--seed"     => { i += 1; seed    = args[i].parse().unwrap_or_else(|_| { eprintln!("error: --seed needs an integer"); std::process::exit(1); }); }
             "--params"   => { i += 1; params_files.push(args[i].clone()); }
             "--scenario" => { i += 1; scenario_name = Some(args[i].clone()); }
             "--enable"   => { i += 1; adhoc_enable.push(args[i].clone()); }
@@ -129,25 +129,25 @@ fn run_simulate(args: &[String]) {
                 i += 1;
                 let kv = &args[i];
                 let mut parts = kv.splitn(2, '=');
-                let k = parts.next().expect("--param needs NAME=VALUE").to_string();
+                let k = parts.next().unwrap_or_else(|| { eprintln!("error: --param needs NAME=VALUE"); std::process::exit(1); }).to_string();
                 let v: f64 = parts.next().and_then(|s| s.parse().ok())
-                    .expect("--param value must be a number");
+                    .unwrap_or_else(|| { eprintln!("error: --param value must be a number"); std::process::exit(1); });
                 overrides.insert(k, v);
             }
             "--param-vec" => {
                 i += 1;
                 let kv = &args[i];
                 let mut parts = kv.splitn(2, '=');
-                let prefix = parts.next().expect("--param-vec needs PREFIX=FILE").to_string();
-                let file   = parts.next().expect("--param-vec needs PREFIX=FILE").to_string();
+                let prefix = parts.next().unwrap_or_else(|| { eprintln!("error: --param-vec needs PREFIX=FILE"); std::process::exit(1); }).to_string();
+                let file   = parts.next().unwrap_or_else(|| { eprintln!("error: --param-vec needs PREFIX=FILE"); std::process::exit(1); }).to_string();
                 set_vec_entries.push((prefix, file));
             }
             "--table"   => {
                 i += 1;
                 let kv = &args[i];
                 let mut parts = kv.splitn(2, '=');
-                let k = parts.next().expect("--table needs NAME=FILE").to_string();
-                let v = parts.next().expect("--table needs NAME=FILE").to_string();
+                let k = parts.next().unwrap_or_else(|| { eprintln!("error: --table needs NAME=FILE"); std::process::exit(1); }).to_string();
+                let v = parts.next().unwrap_or_else(|| { eprintln!("error: --table needs NAME=FILE"); std::process::exit(1); }).to_string();
                 table_files.insert(k, v);
             }
             "--output" | "-o" => { i += 1; output_path = Some(args[i].clone()); }

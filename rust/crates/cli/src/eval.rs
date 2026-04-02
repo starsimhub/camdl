@@ -90,17 +90,19 @@ pub fn cmd_eval(args: &[String]) {
         match args[i].as_str() {
             "--params" => { i += 1; params_files.push(args[i].clone()); }
             "--expr"   => { i += 1; expr_names = args[i].split(',').map(|s| s.trim().to_string()).collect(); }
-            "--from"   => { i += 1; t_from = args[i].parse().expect("--from needs a number"); }
-            "--to"     => { i += 1; t_to = args[i].parse().expect("--to needs a number"); }
-            "--every"  => { i += 1; t_every = args[i].parse().expect("--every needs a number"); }
-            "--at"     => { i += 1; at_points = Some(args[i].split(',').map(|s| s.trim().parse().expect("--at values must be numbers")).collect()); }
+            "--from"   => { i += 1; t_from = args[i].parse().unwrap_or_else(|_| { eprintln!("error: --from needs a number"); std::process::exit(1); }); }
+            "--to"     => { i += 1; t_to = args[i].parse().unwrap_or_else(|_| { eprintln!("error: --to needs a number"); std::process::exit(1); }); }
+            "--every"  => { i += 1; t_every = args[i].parse().unwrap_or_else(|_| { eprintln!("error: --every needs a number"); std::process::exit(1); }); }
+            "--at"     => { i += 1; at_points = Some(args[i].split(',').map(|s| s.trim().parse().unwrap_or_else(|_| { eprintln!("error: --at values must be numbers"); std::process::exit(1); })).collect()); }
             "--output" | "-o" => { i += 1; output_path = Some(args[i].clone()); }
             "--param"  => {
                 i += 1;
                 let kv = &args[i];
                 let mut parts = kv.splitn(2, '=');
                 let k = parts.next().unwrap().to_string();
-                let v: f64 = parts.next().and_then(|s| s.parse().ok()).expect("--param needs NAME=VALUE");
+                let v: f64 = parts.next().and_then(|s| s.parse().ok()).unwrap_or_else(|| {
+                    eprintln!("error: --param needs NAME=VALUE"); std::process::exit(1);
+                });
                 overrides.insert(k, v);
             }
             s if s.starts_with("--") => {
@@ -124,24 +126,8 @@ pub fn cmd_eval(args: &[String]) {
     }
 
     // Load model: if .camdl, compile via camdlc; if .ir.json, load directly
-    let mut model: ir::Model = if ir_path.ends_with(".camdl") {
-        let camdlc = std::env::var("CAMDLC").unwrap_or_else(|_| "camdlc".into());
-        let output = std::process::Command::new(&camdlc)
-            .arg(&ir_path)
-            .output()
-            .unwrap_or_else(|e| { eprintln!("cannot run camdlc: {} (set CAMDLC env var if not on PATH)", e); std::process::exit(1); });
-        if !output.status.success() {
-            eprintln!("{}", String::from_utf8_lossy(&output.stderr));
-            std::process::exit(1);
-        }
-        serde_json::from_slice(&output.stdout)
-            .unwrap_or_else(|e| { eprintln!("cannot parse camdlc output: {}", e); std::process::exit(1); })
-    } else {
-        let contents = std::fs::read_to_string(&ir_path)
-            .unwrap_or_else(|e| { eprintln!("cannot read {}: {}", ir_path, e); std::process::exit(1); });
-        serde_json::from_str(&contents)
-            .unwrap_or_else(|e| { eprintln!("cannot parse {}: {}", ir_path, e); std::process::exit(1); })
-    };
+    let (mut model, _model_json) = crate::util::load_model(&ir_path)
+        .unwrap_or_else(|e| { eprintln!("error: {}", e); std::process::exit(1); });
 
     // Apply params files
     for pf in &params_files {

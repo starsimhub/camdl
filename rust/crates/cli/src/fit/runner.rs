@@ -58,7 +58,7 @@ impl FitRunConfig {
     ) -> Result<Self, String> {
         // Load model
         let model_path = &fit.fit.model;
-        let (mut model, model_ir_json) = load_model(model_path)?;
+        let (mut model, model_ir_json) = crate::util::load_model(model_path)?;
 
         // Apply parameter values from fit.toml BEFORE compiling, so that
         // parameters without model defaults get values.
@@ -162,28 +162,7 @@ impl FitRunConfig {
     }
 }
 
-/// Load a .camdl or .ir.json model, returning the parsed model and the raw IR JSON.
-fn load_model(path: &str) -> Result<(ir::Model, String), String> {
-    if path.ends_with(".camdl") {
-        let camdlc = std::env::var("CAMDLC").unwrap_or_else(|_| "camdlc".into());
-        let output = std::process::Command::new(&camdlc).arg(path).output()
-            .map_err(|e| format!("cannot run camdlc: {}", e))?;
-        if !output.status.success() {
-            return Err(String::from_utf8_lossy(&output.stderr).to_string());
-        }
-        let json = String::from_utf8(output.stdout)
-            .map_err(|e| format!("camdlc output not UTF-8: {}", e))?;
-        let model: ir::Model = serde_json::from_str(&json)
-            .map_err(|e| format!("parse error: {}", e))?;
-        Ok((model, json))
-    } else {
-        let json = std::fs::read_to_string(path)
-            .map_err(|e| format!("cannot read {}: {}", path, e))?;
-        let model: ir::Model = serde_json::from_str(&json)
-            .map_err(|e| format!("parse error: {}", e))?;
-        Ok((model, json))
-    }
-}
+// load_model is now in util.rs
 
 /// Build IF2Param specs from fit.toml [estimate] + optional prior state overrides.
 /// Uses the shared build_if2_params_from_specs for core logic, then applies

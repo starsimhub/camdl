@@ -78,6 +78,57 @@ pub fn resolve_ir_path(path: &str) -> Result<(String, Option<std::path::PathBuf>
     Ok((tmp.to_string_lossy().into_owned(), Some(tmp)))
 }
 
+/// Load a .camdl or .ir.json model, returning the parsed model and raw IR JSON.
+/// The JSON is needed for provenance hashing. Compiles via camdlc if needed.
+pub fn load_model(path: &str) -> Result<(ir::Model, String), String> {
+    if path.ends_with(".camdl") {
+        let camdlc = std::env::var("CAMDLC").unwrap_or_else(|_| "camdlc".into());
+        let output = std::process::Command::new(&camdlc).arg(path).output()
+            .map_err(|e| format!("cannot run camdlc: {}", e))?;
+        if !output.status.success() {
+            return Err(String::from_utf8_lossy(&output.stderr).to_string());
+        }
+        let json = String::from_utf8(output.stdout)
+            .map_err(|e| format!("camdlc output not UTF-8: {}", e))?;
+        let model: ir::Model = serde_json::from_str(&json)
+            .map_err(|e| format!("parse error: {}", e))?;
+        Ok((model, json))
+    } else {
+        let json = std::fs::read_to_string(path)
+            .map_err(|e| format!("cannot read {}: {}", path, e))?;
+        let model: ir::Model = serde_json::from_str(&json)
+            .map_err(|e| format!("parse error: {}", e))?;
+        Ok((model, json))
+    }
+}
+
+/// Resolve flow indices for a named transition (or all transmission transitions).
+/// Used by pfilter, if2, profile for --flow NAME.
+pub fn resolve_flow_indices(model: &ir::Model, flow_name: Option<&str>) -> Result<Vec<usize>, String> {
+    if let Some(name) = flow_name {
+        let indices: Vec<usize> = model.transitions.iter().enumerate()
+            .filter(|(_, tr)| tr.name == name || tr.name.starts_with(&format!("{}_", name)))
+            .map(|(i, _)| i)
+            .collect();
+        if indices.is_empty() {
+            return Err(format!("no transition named '{}'. Available: {}",
+                name, model.transitions.iter().map(|t| t.name.as_str()).collect::<Vec<_>>().join(", ")));
+        }
+        Ok(indices)
+    } else {
+        let indices: Vec<usize> = model.transitions.iter().enumerate()
+            .filter(|(_, tr)| tr.metadata.as_ref()
+                .and_then(|m| m.origin_kind.as_deref())
+                .map_or(false, |k| k == "transmission"))
+            .map(|(i, _)| i)
+            .collect();
+        if indices.is_empty() {
+            return Err("no transmission transitions found. Use --flow NAME to specify.".into());
+        }
+        Ok(indices)
+    }
+}
+
 // ─── Loader helpers ──────────────────────────────────────────────────────────
 
 /// Load a flat Vec<Expr::Const> from a CSV, TSV, or JSON file.

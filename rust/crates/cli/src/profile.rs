@@ -68,16 +68,16 @@ pub fn cmd_profile(args: &[String]) {
                 i += 1;
                 named_grids.insert(name, args[i].clone());
             }
-            "--particles"  => { i += 1; n_particles = args[i].parse().expect("needs integer"); }
-            "--iterations" => { i += 1; n_iterations = args[i].parse().expect("needs integer"); }
-            "--starts"     => { i += 1; n_starts = args[i].parse().expect("needs integer"); }
-            "--cooling"    => { i += 1; cooling = args[i].parse().expect("needs number"); }
-            "--dt"         => { i += 1; dt = args[i].parse().expect("needs number"); }
-            "--seed"       => { i += 1; seed = args[i].parse().expect("needs integer"); }
-            "--parallel"   => { i += 1; parallel = args[i].parse().expect("needs integer"); }
+            "--particles"  => { i += 1; n_particles = args[i].parse().unwrap_or_else(|_| { eprintln!("error: needs integer"); std::process::exit(1); }); }
+            "--iterations" => { i += 1; n_iterations = args[i].parse().unwrap_or_else(|_| { eprintln!("error: needs integer"); std::process::exit(1); }); }
+            "--starts"     => { i += 1; n_starts = args[i].parse().unwrap_or_else(|_| { eprintln!("error: needs integer"); std::process::exit(1); }); }
+            "--cooling"    => { i += 1; cooling = args[i].parse().unwrap_or_else(|_| { eprintln!("error: needs number"); std::process::exit(1); }); }
+            "--dt"         => { i += 1; dt = args[i].parse().unwrap_or_else(|_| { eprintln!("error: needs number"); std::process::exit(1); }); }
+            "--seed"       => { i += 1; seed = args[i].parse().unwrap_or_else(|_| { eprintln!("error: needs integer"); std::process::exit(1); }); }
+            "--parallel"   => { i += 1; parallel = args[i].parse().unwrap_or_else(|_| { eprintln!("error: needs integer"); std::process::exit(1); }); }
             "--scenario"   => { i += 1; scenario_name = Some(args[i].clone()); }
             "--obs-model"  => { i += 1; obs_model = args[i].clone(); }
-            "--tol"        => { i += 1; tol = args[i].parse().expect("needs number"); }
+            "--tol"        => { i += 1; tol = args[i].parse().unwrap_or_else(|_| { eprintln!("error: needs number"); std::process::exit(1); }); }
             "--flow"       => { i += 1; flow_name = Some(args[i].clone()); }
             "--rw-sd"      => { i += 1; rw_sd_str = Some(args[i].clone()); }
             "--fixed"      => { i += 1; fixed_str = Some(args[i].clone()); }
@@ -87,7 +87,7 @@ pub fn cmd_profile(args: &[String]) {
                 let kv = &args[i];
                 let mut parts = kv.splitn(2, '=');
                 let k = parts.next().unwrap().to_string();
-                let v: f64 = parts.next().and_then(|s| s.parse().ok()).expect("--param needs NAME=VALUE");
+                let v: f64 = parts.next().and_then(|s| s.parse().ok()).unwrap_or_else(|| { eprintln!("error: --param needs NAME=VALUE"); std::process::exit(1); });
                 overrides.insert(k, v);
             }
             s if s.starts_with("--") => {
@@ -135,18 +135,8 @@ pub fn cmd_profile(args: &[String]) {
     };
 
     // Load model
-    let mut model: ir::Model = if ir_path.ends_with(".camdl") {
-        let camdlc = std::env::var("CAMDLC").unwrap_or_else(|_| "camdlc".into());
-        let output = std::process::Command::new(&camdlc).arg(&ir_path).output()
-            .unwrap_or_else(|e| { eprintln!("cannot run camdlc: {}", e); std::process::exit(1); });
-        if !output.status.success() {
-            eprintln!("{}", String::from_utf8_lossy(&output.stderr)); std::process::exit(1);
-        }
-        serde_json::from_slice(&output.stdout).unwrap_or_else(|e| { eprintln!("{}", e); std::process::exit(1); })
-    } else {
-        let contents = std::fs::read_to_string(&ir_path).unwrap_or_else(|e| { eprintln!("{}", e); std::process::exit(1); });
-        serde_json::from_str(&contents).unwrap_or_else(|e| { eprintln!("{}", e); std::process::exit(1); })
-    };
+    let (mut model, _model_json) = crate::util::load_model(&ir_path)
+        .unwrap_or_else(|e| { eprintln!("error: {}", e); std::process::exit(1); });
 
     for pf in &params_files {
         crate::util::apply_params_file(&mut model, pf).unwrap_or_else(|e| { eprintln!("{}", e); std::process::exit(1); });
@@ -167,15 +157,8 @@ pub fn cmd_profile(args: &[String]) {
     let observations = Arc::new(observations);
 
     // Flow indices
-    let flow_indices: Vec<usize> = if let Some(ref name) = flow_name {
-        model.transitions.iter().enumerate()
-            .filter(|(_, tr)| tr.name == *name || tr.name.starts_with(&format!("{}_", name)))
-            .map(|(i, _)| i).collect()
-    } else {
-        model.transitions.iter().enumerate()
-            .filter(|(_, tr)| tr.metadata.as_ref().and_then(|m| m.origin_kind.as_deref()).map_or(false, |k| k == "transmission"))
-            .map(|(i, _)| i).collect()
-    };
+    let flow_indices = crate::util::resolve_flow_indices(&model, flow_name.as_deref())
+        .unwrap_or_else(|e| { eprintln!("error: {}", e); std::process::exit(1); });
     let flow_indices = Arc::new(flow_indices);
 
     // Build focal grids with param indices
@@ -185,13 +168,13 @@ pub fn cmd_profile(args: &[String]) {
         let grid_values = if focal_names.len() == 1 {
             // 1D: use --grid
             let gs = grid_str.as_ref().unwrap_or_else(|| { eprintln!("--grid required for 1D profile"); std::process::exit(1); });
-            gs.split(',').map(|s| s.trim().parse().expect("grid values must be numbers")).collect()
+            gs.split(',').map(|s| s.trim().parse().unwrap_or_else(|_| { eprintln!("error: grid values must be numbers"); std::process::exit(1); })).collect()
         } else {
             // 2D+: use --grid-NAME
             let gs = named_grids.get(name).unwrap_or_else(|| {
                 eprintln!("--grid-{} required for multi-focal profile", name); std::process::exit(1);
             });
-            gs.split(',').map(|s| s.trim().parse().expect("grid values must be numbers")).collect()
+            gs.split(',').map(|s| s.trim().parse().unwrap_or_else(|_| { eprintln!("error: grid values must be numbers"); std::process::exit(1); })).collect()
         };
         focal_grids.push(FocalGrid { name: name.clone(), values: grid_values, param_idx: idx });
     }
