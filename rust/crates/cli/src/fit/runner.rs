@@ -15,7 +15,7 @@ use sim::{
         if2::{run_if2_with_progress, IF2Config, IF2Param, IF2Result, Observation, Transform},
         ParticleState,
     },
-    ekrng::StatefulRng,
+    rng::StatefulRng,
 };
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -479,7 +479,7 @@ pub fn run_chains_with_per_chain_params(
 
     // Find best chain
     let (best_chain, best_loglik) = results.iter()
-        .max_by(|a, b| a.1.final_loglik.partial_cmp(&b.1.final_loglik).unwrap())
+        .max_by(|a, b| a.1.final_loglik.total_cmp(&b.1.final_loglik))
         .map(|(id, r)| (*id, r.final_loglik))
         .unwrap();
 
@@ -576,8 +576,14 @@ pub fn auto_rw_sd(
     for spec in if2_params {
         let mut values: Vec<f64> = chain_params.iter()
             .map(|p| p[spec.index])
+            .filter(|v| v.is_finite()) // exclude NaN/inf from degenerate chains
             .collect();
-        values.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        if values.len() < 2 {
+            medians.push(0.0);
+            mads.push(0.0);
+            continue;
+        }
+        values.sort_by(|a, b| a.total_cmp(b));
 
         let median = if values.len() % 2 == 0 {
             (values[values.len() / 2 - 1] + values[values.len() / 2]) / 2.0
@@ -586,7 +592,7 @@ pub fn auto_rw_sd(
         };
 
         let mut abs_devs: Vec<f64> = values.iter().map(|&v| (v - median).abs()).collect();
-        abs_devs.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        abs_devs.sort_by(|a, b| a.total_cmp(b));
         let mad = if abs_devs.len() % 2 == 0 {
             (abs_devs[abs_devs.len() / 2 - 1] + abs_devs[abs_devs.len() / 2]) / 2.0
         } else {
@@ -643,7 +649,7 @@ pub fn auto_rw_sd(
         let mut abs_devs: Vec<f64> = good_values.iter()
             .map(|&v| (v - medians[pi]).abs())
             .collect();
-        abs_devs.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        abs_devs.sort_by(|a, b| a.total_cmp(b));
         let good_mad = if abs_devs.len() % 2 == 0 {
             (abs_devs[abs_devs.len() / 2 - 1] + abs_devs[abs_devs.len() / 2]) / 2.0
         } else {

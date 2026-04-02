@@ -17,7 +17,7 @@ use rayon::prelude::*;
 
 use crate::chain_binomial::StepScratch;
 use crate::compiled_model::CompiledModel;
-use crate::ekrng::StatefulRng;
+use crate::rng::StatefulRng;
 use crate::error::SimError;
 use super::types::{ParticleState, log_sum_exp};
 use super::resampling::systematic_resample;
@@ -440,7 +440,7 @@ pub fn run_if2_with_progress(
     let last_iter = iterations.last().unwrap();
     let best_iter = iterations.iter()
         .filter(|it| it.log_likelihood.is_finite())
-        .max_by(|a, b| a.log_likelihood.partial_cmp(&b.log_likelihood).unwrap())
+        .max_by(|a, b| a.log_likelihood.total_cmp(&b.log_likelihood))
         .unwrap_or(last_iter);
 
     Ok(IF2Result {

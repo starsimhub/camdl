@@ -3,7 +3,7 @@
 //! Lower variance than multinomial resampling, O(N), standard choice
 //! for bootstrap filters (Carpenter, Clifford & Fearnhead 1999).
 
-use crate::ekrng::StatefulRng;
+use crate::rng::StatefulRng;
 
 /// Systematic resampling. Returns indices of selected particles.
 ///

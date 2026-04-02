@@ -24,7 +24,7 @@ use sim::{
         particle_filter::{bootstrap_filter, Observation},
         ParticleState,
     },
-    ekrng::StatefulRng,
+    rng::StatefulRng,
 };
 
 fn pure_death_model() -> (CompiledModel, Vec<f64>) {

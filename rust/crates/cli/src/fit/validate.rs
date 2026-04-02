@@ -12,7 +12,7 @@ use sim::inference::{
     ParticleState,
 };
 use sim::chain_binomial::step_one;
-use sim::ekrng::StatefulRng;
+use sim::rng::StatefulRng;
 use std::collections::HashMap;
 
 const VALIDATE_CHAINS: usize = 4;

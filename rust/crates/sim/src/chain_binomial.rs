@@ -1,7 +1,7 @@
 use crate::{
     compiled_model::CompiledModel,
     config::{ChainBinomialConfig, SimConfig},
-    ekrng::StatefulRng,
+    rng::StatefulRng,
     error::SimError,
     intervention::{all_intervention_times, apply_interventions_at},
     ode_integrator::rk4_step,
@@ -60,7 +60,7 @@ impl<'a> crate::inference::ProcessSimulator for ChainBinomialProcess<'a> {
         params: &[f64],
         t: f64,
         dt: f64,
-        rng: &mut crate::ekrng::StatefulRng,
+        rng: &mut crate::rng::StatefulRng,
     ) -> Result<(), crate::error::SimError> {
         // NOTE: this trait method can't use scratch buffers (signature is fixed).
         // Hot inference paths call step_one directly with scratch instead.

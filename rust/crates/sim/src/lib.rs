@@ -4,7 +4,7 @@ pub mod state;
 pub mod compiled_model;
 pub mod propensity;
 pub mod output;
-pub mod ekrng;
+pub mod rng;
 pub mod ode_integrator;
 pub mod gillespie;
 pub mod tau_leap;

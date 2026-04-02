@@ -9,7 +9,7 @@ use rayon::prelude::*;
 
 use crate::chain_binomial::StepScratch;
 use crate::compiled_model::CompiledModel;
-use crate::ekrng::StatefulRng;
+use crate::rng::StatefulRng;
 use crate::error::SimError;
 use super::types::{ParticleState, ParticleSwarm, log_sum_exp};
 use super::resampling::systematic_resample;

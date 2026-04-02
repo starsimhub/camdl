@@ -50,7 +50,7 @@ pub fn all_intervention_times(model: &CompiledModel) -> Vec<f64> {
     let mut times: Vec<f64> = model.model.interventions.iter()
         .flat_map(|iv| intervention_fire_times(&iv.schedule))
         .collect();
-    times.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    times.sort_by(|a, b| a.total_cmp(b));
     times.dedup();
     times
 }

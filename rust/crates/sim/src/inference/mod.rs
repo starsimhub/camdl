@@ -34,7 +34,7 @@ pub trait ProcessSimulator {
         params: &[f64],
         t: f64,
         dt: f64,
-        rng: &mut crate::ekrng::StatefulRng,
+        rng: &mut crate::rng::StatefulRng,
     ) -> Result<(), crate::error::SimError>;
 }
 

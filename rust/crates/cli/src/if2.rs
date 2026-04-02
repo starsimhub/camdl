@@ -24,7 +24,7 @@ use sim::{
         if2::{run_if2_with_progress, IF2Config, IF2Param, IF2Result, Observation, Transform},
         ParticleState,
     },
-    ekrng::StatefulRng,
+    rng::StatefulRng,
 };
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -508,7 +508,7 @@ pub fn cmd_if2(args: &[String]) {
 
     // ── Find best chain ──────────────────────────────────────────────────
     let best = chain_results.iter()
-        .max_by(|a, b| a.1.final_loglik.partial_cmp(&b.1.final_loglik).unwrap())
+        .max_by(|a, b| a.1.final_loglik.total_cmp(&b.1.final_loglik))
         .unwrap();
 
     eprintln!("\nBest chain: {} (loglik={:.2})", best.0 + 1, best.1.final_loglik);

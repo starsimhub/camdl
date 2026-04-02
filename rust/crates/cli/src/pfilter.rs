@@ -232,7 +232,7 @@ pub fn cmd_pfilter(args: &[String]) {
     let compiled = std::sync::Arc::new(compiled);
 
     // Run particle filter
-    let step_fn = |state: &mut sim::inference::ParticleState, t: f64, step_dt: f64, rng: &mut sim::ekrng::StatefulRng, scratch: &mut sim::chain_binomial::StepScratch| -> Result<(), sim::error::SimError> {
+    let step_fn = |state: &mut sim::inference::ParticleState, t: f64, step_dt: f64, rng: &mut sim::rng::StatefulRng, scratch: &mut sim::chain_binomial::StepScratch| -> Result<(), sim::error::SimError> {
         step_one(&compiled, &mut state.counts, &mut state.flow_accumulators, &params, t, step_dt, rng, scratch)
     };
 

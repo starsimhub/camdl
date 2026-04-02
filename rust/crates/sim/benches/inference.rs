@@ -12,7 +12,7 @@
 use criterion::{criterion_group, criterion_main, Criterion, BenchmarkId};
 use sim::chain_binomial::{step_one, StepScratch};
 use sim::compiled_model::CompiledModel;
-use sim::ekrng::StatefulRng;
+use sim::rng::StatefulRng;
 use sim::inference::obs_loglik::negbin_logpmf;
 use sim::inference::particle_filter::{bootstrap_filter, Observation};
 use sim::propensity::eval_propensities;

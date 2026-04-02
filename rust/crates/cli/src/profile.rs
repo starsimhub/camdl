@@ -26,7 +26,7 @@ use sim::{
         if2::{run_if2, IF2Config, IF2Param, Observation, Transform},
         ParticleState,
     },
-    ekrng::StatefulRng,
+    rng::StatefulRng,
 };
 use std::collections::HashMap;
 use std::io::Write;

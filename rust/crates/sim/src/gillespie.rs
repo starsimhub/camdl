@@ -1,7 +1,7 @@
 use crate::{
     compiled_model::CompiledModel,
     config::{GillespieConfig, SimConfig},
-    ekrng::StatefulRng,
+    rng::StatefulRng,
     error::SimError,
     intervention::{all_intervention_times, apply_interventions_at},
     ode_integrator::rk4_step,

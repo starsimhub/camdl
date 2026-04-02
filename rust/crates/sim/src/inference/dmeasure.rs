@@ -5,7 +5,7 @@
 
 use std::sync::Arc;
 use crate::compiled_model::CompiledModel;
-use crate::ekrng::StatefulRng;
+use crate::rng::StatefulRng;
 use crate::propensity::{eval_expr, EvalCtx};
 use crate::state::{IntState, RealState};
 use crate::inference::obs_loglik::{negbin_logpmf, discretized_normal_logpmf_tol, poisson_logpmf, DEFAULT_TOL};

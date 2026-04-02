@@ -59,7 +59,7 @@ pub fn run_scout(fit: &FitToml, seed: u64, force: bool) -> Result<(), String> {
         .map_err(|e| format!("cannot create {}: {}", stage_dir, e))?;
 
     // Generate per-chain random starts
-    let mut rng = sim::ekrng::StatefulRng::new(seed ^ 0xcafe_u64);
+    let mut rng = sim::rng::StatefulRng::new(seed ^ 0xcafe_u64);
     let per_chain_params: Vec<Vec<IF2Param>> = (0..n_chains).map(|_| {
         config.if2_params.iter().map(|spec| {
             let initial = if spec.lower.is_finite() && spec.upper.is_finite() {

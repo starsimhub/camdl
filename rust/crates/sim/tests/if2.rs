@@ -20,7 +20,7 @@ use sim::{
         if2::{run_if2, IF2Config, IF2Param, Observation, Transform},
         ParticleState,
     },
-    ekrng::StatefulRng,
+    rng::StatefulRng,
 };
 
 fn sir_model() -> (CompiledModel, Vec<f64>) {
