@@ -296,6 +296,46 @@ pub fn run_quick_pfilter(config: &FitRunConfig, params: &[f64], n_particles: usi
     }
 }
 
+/// Print preflight transform report to stderr.
+fn print_preflight(config: &FitRunConfig) {
+    eprintln!("\ntransforms:");
+    for spec in &config.if2_params {
+        let (tname, pos) = match &spec.transform {
+            Transform::Log { lo, hi } => {
+                let z = spec.initial.max(1e-300).ln();
+                (format!("log     [{}, {}]", lo, hi), format!("log({:.4}) = {:.2}", spec.initial, z))
+            }
+            Transform::Logit { lo, hi } => {
+                let p = ((spec.initial - lo) / (hi - lo)).clamp(1e-10, 1.0 - 1e-10);
+                let z = (p / (1.0 - p)).ln();
+                let compressed = z.abs() > 2.0;
+                let mark = if compressed { " \x1b[33m⚠ compressed\x1b[0m" } else { "" };
+                (format!("logit   [{}, {}]", lo, hi), format!("logit = {:.2}{}", z, mark))
+            }
+            Transform::None => {
+                ("none".into(), format!("{:.4}", spec.initial))
+            }
+        };
+        let rw_info = if spec.rw_sd > 0.0 {
+            let transformed_sd = spec.transformed_sd(spec.rw_sd, spec.initial);
+            format!("rw_sd={:.4} ({:.3}/step transformed)", spec.rw_sd, transformed_sd)
+        } else {
+            "rw_sd=auto".into()
+        };
+        eprintln!("  {:12} {}  {}  {}", spec.name, tname, pos, rw_info);
+    }
+
+    // Cooling schedule preview
+    let frac = config.if2_config.cooling_fraction;
+    let iters = config.if2_config.n_iterations;
+    let mid = iters / 2;
+    eprintln!("\ncooling: fraction={:.2} over {} iterations", frac, iters);
+    eprintln!("  iter {:3}: rw_sd at {:.0}%", 1, frac.powf(1.0 / iters as f64) * 100.0);
+    eprintln!("  iter {:3}: rw_sd at {:.0}%", mid, frac.powf(mid as f64 / iters as f64) * 100.0);
+    eprintln!("  iter {:3}: rw_sd at {:.0}%", iters, frac * 100.0);
+    eprintln!();
+}
+
 /// Public wrapper for use by `camdl if2 --rw-sd auto`.
 pub fn auto_rw_sd_from_value_pub(current_value: f64, lower: f64, upper: f64, transform: &Transform) -> f64 {
     auto_rw_sd_from_value(current_value, lower, upper, transform)
@@ -456,6 +496,9 @@ pub fn run_chains_with_per_chain_params(
         pb.set_prefix(format!("{}", chain_id + 1));
         pb
     }).collect();
+
+    // Preflight transform report
+    print_preflight(config);
 
     let results: Vec<(usize, IF2Result)> = (0..config.n_chains)
         .into_par_iter()

@@ -88,7 +88,7 @@ impl IF2Param {
 
     /// Delta method: convert natural-scale rw_sd to transformed-scale.
     /// Matches pomp's convention: user specifies rw.sd on natural scale.
-    fn transformed_sd(&self, natural_sd: f64, current_value: f64) -> f64 {
+    pub fn transformed_sd(&self, natural_sd: f64, current_value: f64) -> f64 {
         match &self.transform {
             Transform::Log { .. } => {
                 natural_sd / current_value.max(1e-300)
@@ -138,10 +138,7 @@ pub struct IF2IterResult {
 #[derive(Clone, Debug)]
 pub struct ParamIterDiag {
     pub param_index: usize,
-    /// Weighted-variance selection ratio, averaged across observations:
-    /// r̃_k = Σ_i w_i (θ_ik - θ̄_k^w)² / Var(θ_k post-perturbation).
-    /// Measures selection pressure from the weights directly (no resampling noise).
-    /// Near 1 = no selection. Near 0 = heavy selection.
+    /// Weighted-variance selection ratio, averaged across observations.
     pub weighted_var_ratio: f64,
     /// Perturbation-to-cloud ratio: rw_sd_effective / sd(θ_k before perturbation).
     /// q ≪ 1 = perturbation too timid (late cooling).
@@ -149,6 +146,9 @@ pub struct ParamIterDiag {
     pub q_ratio: f64,
     /// Effective rw_sd at this iteration (after cooling).
     pub effective_rw_sd: f64,
+    /// Fraction of particle-steps that hit the bounds clamp this iteration.
+    /// >0.1 means rw_sd is too large — particles are being pushed out of bounds.
+    pub clamp_fraction: f64,
 }
 
 /// Result of the full IF2 run.
@@ -269,19 +269,27 @@ pub fn run_if2_with_progress(
 
         // Diagnostic accumulators (averaged across observation times)
         let n_if2_params = if2_params.len();
-        let mut wvr_accum = vec![0.0_f64; n_if2_params];  // weighted variance ratio
-        let mut q_k_accum = vec![0.0_f64; n_if2_params];  // perturbation-to-cloud ratio
+        let mut wvr_accum = vec![0.0_f64; n_if2_params];
+        let mut q_k_accum = vec![0.0_f64; n_if2_params];
+        let mut clamp_counts = vec![0_usize; n_if2_params];
         let mut diag_count = vec![0_usize; n_if2_params];
 
         // Initial parameter perturbation (at t=0)
         {
             let cooling_now = per_step_cooling.powf(global_step as f64);
             for i in 0..n {
-                for spec in if2_params {
+                for (pi, spec) in if2_params.iter().enumerate() {
                     let current = particle_params[i][spec.index];
                     let sd = spec.transformed_sd(spec.rw_sd, current) * cooling_now;
                     let z = spec.to_transformed(current);
-                    particle_params[i][spec.index] = spec.from_transformed(z + rngs[i].normal() * sd);
+                    let new_val = spec.from_transformed(z + rngs[i].normal() * sd);
+                    particle_params[i][spec.index] = new_val;
+                    // Detect clamp activation (Log transform)
+                    if let Transform::Log { lo, hi } = &spec.transform {
+                        if (new_val - lo).abs() < 1e-10 || (new_val - hi).abs() < 1e-10 {
+                            clamp_counts[pi] += 1;
+                        }
+                    }
                 }
             }
             global_step += 1;
@@ -317,12 +325,18 @@ pub fn run_if2_with_progress(
             // IVP params are skipped here — they were only perturbed at t=0.
             let cooling_now = per_step_cooling.powf(global_step as f64);
             for i in 0..n {
-                for spec in if2_params {
-                    if spec.ivp { continue; } // IVP: perturbed at t=0 only
+                for (pi, spec) in if2_params.iter().enumerate() {
+                    if spec.ivp { continue; }
                     let current = particle_params[i][spec.index];
                     let sd = spec.transformed_sd(spec.rw_sd, current) * cooling_now;
                     let z = spec.to_transformed(current);
-                    particle_params[i][spec.index] = spec.from_transformed(z + rngs[i].normal() * sd);
+                    let new_val = spec.from_transformed(z + rngs[i].normal() * sd);
+                    particle_params[i][spec.index] = new_val;
+                    if let Transform::Log { lo, hi } = &spec.transform {
+                        if (new_val - lo).abs() < 1e-10 || (new_val - hi).abs() < 1e-10 {
+                            clamp_counts[pi] += 1;
+                        }
+                    }
                 }
             }
 
@@ -411,6 +425,8 @@ pub fn run_if2_with_progress(
 
         // Per-parameter diagnostics for this iteration
         let cooling_at_iter = per_step_cooling.powf((iter * observations.len()) as f64);
+        // Total perturbation attempts: n particles × (1 t=0 step + n_obs observation steps)
+        let total_perturb_steps = n * (1 + observations.len());
         let param_diag: Vec<ParamIterDiag> = if2_params.iter().enumerate().map(|(pi, spec)| {
             let cnt = diag_count[pi].max(1) as f64;
             ParamIterDiag {
@@ -418,6 +434,7 @@ pub fn run_if2_with_progress(
                 weighted_var_ratio: wvr_accum[pi] / cnt,
                 q_ratio: q_k_accum[pi] / cnt,
                 effective_rw_sd: spec.rw_sd * cooling_at_iter,
+                clamp_fraction: clamp_counts[pi] as f64 / total_perturb_steps as f64,
             }
         }).collect();
 

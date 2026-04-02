@@ -558,7 +558,7 @@ pub fn cmd_if2(args: &[String]) {
         use std::io::Write as _;
         let mut f = std::fs::File::create(path)
             .unwrap_or_else(|e| { eprintln!("cannot create {}: {}", path, e); std::process::exit(1); });
-        writeln!(f, "chain\titeration\tparam\tvalue\trw_sd_eff\twvr\tq\tloglik").unwrap();
+        writeln!(f, "chain\titeration\tparam\tvalue\trw_sd_eff\twvr\tq\tclamp\tloglik").unwrap();
         for (chain_id, result) in &chain_results {
             for it in &result.iterations {
                 for (pi, spec) in if2_params.iter().enumerate() {
@@ -566,9 +566,10 @@ pub fn cmd_if2(args: &[String]) {
                     let wvr = diag.map(|d| d.weighted_var_ratio).unwrap_or(f64::NAN);
                     let q = diag.map(|d| d.q_ratio).unwrap_or(f64::NAN);
                     let eff_rw = diag.map(|d| d.effective_rw_sd).unwrap_or(f64::NAN);
-                    writeln!(f, "{}\t{}\t{}\t{:.6}\t{:.6}\t{:.4}\t{:.4}\t{:.2}",
+                    let clamp = diag.map(|d| d.clamp_fraction).unwrap_or(0.0);
+                    writeln!(f, "{}\t{}\t{}\t{:.6}\t{:.6}\t{:.4}\t{:.4}\t{:.4}\t{:.2}",
                         chain_id + 1, it.iteration, spec.name,
-                        it.param_means[spec.index], eff_rw, wvr, q,
+                        it.param_means[spec.index], eff_rw, wvr, q, clamp,
                         it.log_likelihood).unwrap();
                 }
             }
