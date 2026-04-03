@@ -573,9 +573,60 @@ camdl fit validate fit.toml --starts-from fit/he2010/refine/
 camdl fit status   fit.toml
 ```
 
-See `docs/camdl-inference-spec.md` for the full specification: fit.toml
-format, exhaustive partition rule, provenance hashing, inter-stage handoff,
-and the connection to the experiment system.
+### Out-of-sample validation
+
+Add a `[holdout]` section to fit.toml with holdout data files:
+
+```toml
+[data]
+weekly_cases = "data/cases_train.tsv"
+
+[holdout]
+weekly_cases = "data/cases_holdout.tsv"
+```
+
+Scout and refine only see `[data]` — holdout is structurally
+unreachable during parameter estimation. Validate runs the particle
+filter on train + holdout and reports separate logliks:
+
+```
+train loglik:   -4200.3 (780 obs)
+holdout loglik: -1615.1 (316 obs)
+```
+
+Use `camdl data split` to produce train/holdout files:
+
+```bash
+camdl data split data/cases.tsv --at-time 5474
+```
+
+### Prediction quantiles
+
+The pfilter trace includes both observation-space and state-space
+prediction quantiles:
+
+- `obs_mean`, `obs_q05`, `obs_q50`, `obs_q95` — full predictive
+  distribution (process + observation noise). Data should fall inside
+  the 5-95 ribbon ~90% of the time.
+- `state_mean`, `state_q05`, `state_q50`, `state_q95` — latent state
+  quantiles mapped through the observation model mean. Process
+  uncertainty only.
+
+Both are on the observation scale (reported cases, not latent
+recoveries). The gap between the obs and state ribbons shows the
+observation model's contribution to uncertainty.
+
+### Pfilter replicates
+
+```bash
+camdl pfilter model.camdl --params mle.toml --data d.tsv \
+    --replicates 100 --output logliks.tsv
+```
+
+Runs N independent particle filters at different seeds. Reports
+`loglik = -3804.9 ± 5.2 (100 replicates, N=5000)`.
+
+See `docs/camdl-inference-spec.md` for the full specification.
 
 ### Saving final particle states
 

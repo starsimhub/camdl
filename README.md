@@ -6,8 +6,7 @@
 stochastic compartmental epidemic models. Write the math, not the code.
 
 An OCaml compiler expands `.camdl` model specifications into a flat JSON
-intermediate representation. A Rust backend simulates, fits, and analyzes
-them.
+intermediate representation. A Rust backend simulates, fits, and analyzes them.
 
 ```
 model.camdl ──→ camdlc ──→ model.ir.json
@@ -23,14 +22,14 @@ model.camdl ──→ camdlc ──→ model.ir.json
 
 ## Capabilities
 
-| Domain | What camdl does |
-|--------|----------------|
-| **Modelling** | Compartments, stratification (age, space, risk), contact matrices, Erlang staging, forcing functions, interventions, scenarios |
-| **Simulation** | Gillespie SSA, tau-leap, chain-binomial (Euler-multinomial), ODE (RK4). Extra-demographic stochasticity via `overdispersed()`. Deterministic flows via `deterministic()`. |
-| **Inference** | Bootstrap particle filter, IF2 (iterated filtering for MLE), 1D/2D profile likelihoods. Parallel chains with indicatif progress bars. Auto rw_sd from parameter bounds. |
-| **Fitting workflow** | `camdl fit scout → refine → validate` pipeline driven by `fit.toml`. MAD-based auto-calibration, exhaustive partition checking, provenance hashing. |
-| **Experiments** | Multi-scenario seed ensembles, Sobol sensitivity analysis, parameter sweeps. Content-addressable output with caching. |
-| **Decision analysis** | Value of Information (EVSI) via `camdl voi run`. |
+| Domain                | What camdl does                                                                                                                                                           |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Modelling**         | Compartments, stratification (age, space, risk), contact matrices, Erlang staging, forcing functions, interventions, scenarios                                            |
+| **Simulation**        | Gillespie SSA, tau-leap, chain-binomial (Euler-multinomial), ODE (RK4). Extra-demographic stochasticity via `overdispersed()`. Deterministic flows via `deterministic()`. |
+| **Inference**         | Bootstrap particle filter, IF2 (iterated filtering for MLE), 1D/2D profile likelihoods. Parallel chains with indicatif progress bars. Auto rw_sd from parameter bounds.   |
+| **Fitting workflow**  | `camdl fit scout → refine → validate` pipeline driven by `fit.toml`. MAD-based auto-calibration, exhaustive partition checking, provenance hashing, out-of-sample validation via `[holdout]`. |
+| **Experiments**       | Multi-scenario seed ensembles, Sobol sensitivity analysis, parameter sweeps. Content-addressable output with caching.                                                     |
+| **Decision analysis** | Value of Information (EVSI) via `camdl voi run`.                                                                                                                          |
 
 ---
 
@@ -65,8 +64,8 @@ camdl experiment analyze experiment.toml
 
 ## The camdl language
 
-A `.camdl` file defines model structure. Parameter values are supplied
-at runtime via `--param` flags or `--params file.toml`.
+A `.camdl` file defines model structure. Parameter values are supplied at
+runtime via `--param` flags or `--params file.toml`.
 
 ### SIR
 
@@ -101,8 +100,8 @@ simulate {
 
 ### Age-structured SEIR with contact matrix
 
-Stratification expands compartments and transitions at compile time.
-The IR contains only flat compartments and fully-resolved rates.
+Stratification expands compartments and transitions at compile time. The IR
+contains only flat compartments and fully-resolved rates.
 
 ```
 compartments { S, E, I, R }
@@ -153,12 +152,11 @@ observations {
 ```
 
 `overdispersed(rate, sigma)` adds extra-demographic stochasticity
-(Gamma-Poisson, He et al. 2010). `deterministic(rate)` uses rounding
-instead of Poisson draws. `t` is the current simulation time.
+(Gamma-Poisson, He et al. 2010). `deterministic(rate)` uses rounding instead of
+Poisson draws. `t` is the current simulation time.
 
-Forcing function types: `sinusoidal`, `periodic` (with range-based
-schedules `on = [7:100, 115:199]`), `piecewise`, `interpolated`
-(cubic spline or linear).
+Forcing function types: `sinusoidal`, `periodic` (with range-based schedules
+`on = [7:100, 115:199]`), `piecewise`, `interpolated` (cubic spline or linear).
 
 ### More language features
 
@@ -170,8 +168,8 @@ schedules `on = [7:100, 115:199]`), `piecewise`, `interpolated`
 - **Coupling**: `coupling(age) = C_age` for contact-matrix mixing
 - **Let bindings**: `let name[i] = expr` (inlined at use sites)
 - **Math functions**: `exp`, `log`, `sqrt`, `abs`, `floor`, `ceil`, `mod`
-- **Interventions**: `transfer(fraction=..., from=..., to=...)` with
-  `at [...]` or `every E from F to T` schedules
+- **Interventions**: `transfer(fraction=..., from=..., to=...)` with `at [...]`
+  or `every E from F to T` schedules
 - **Scenarios**: named parameter/intervention presets for comparison
 
 Full reference: [`docs/camdl-language-spec.md`](docs/camdl-language-spec.md)
@@ -185,16 +183,16 @@ camdl simulate MODEL [--backend gillespie|tau_leap|chain_binomial|ode]
     [--dt DT] [--seed N] [--params P.toml] [--param K=V] [--output FILE]
 ```
 
-| Backend | Flag | Notes |
-|---------|------|-------|
-| Gillespie SSA | `--backend gillespie` | Exact stochastic; default |
-| Tau-leap | `--backend tau_leap --dt 0.5` | Poisson approximation |
+| Backend        | Flag                                | Notes                                           |
+| -------------- | ----------------------------------- | ----------------------------------------------- |
+| Gillespie SSA  | `--backend gillespie`               | Exact stochastic; default                       |
+| Tau-leap       | `--backend tau_leap --dt 0.5`       | Poisson approximation                           |
 | Chain-binomial | `--backend chain_binomial --dt 1.0` | Euler-multinomial (multinomial competing risks) |
-| ODE (RK4) | `--backend ode --dt 0.1` | Deterministic |
+| ODE (RK4)      | `--backend ode --dt 0.1`            | Deterministic                                   |
 
 Same seed + same backend = identical trajectory (Common Random Numbers).
-`overdispersed()` requires tau-leap or chain-binomial. The backend
-capability system enforces this at dispatch time.
+`overdispersed()` requires tau-leap or chain-binomial. The backend capability
+system enforces this at dispatch time.
 
 ---
 
@@ -208,10 +206,10 @@ camdl pfilter MODEL --params P.toml --data cases.tsv \
     --flow recovery --trace diag.tsv --output ll.txt
 ```
 
-Bootstrap particle filter with systematic resampling. Reports
-log-likelihood, per-observation ESS, and one-step-ahead prediction
-quantiles. `--save-final-state particles.tsv` exports the particle
-ensemble for prediction workflows.
+Bootstrap particle filter with systematic resampling. Reports log-likelihood,
+per-observation ESS, and one-step-ahead prediction quantiles.
+`--save-final-state particles.tsv` exports the particle ensemble for prediction
+workflows.
 
 ### IF2 (iterated filtering)
 
@@ -225,10 +223,9 @@ camdl if2 MODEL --params P.toml --data cases.tsv \
     --rw-sd auto --fixed "N0,mu,k" --regime scout
 ```
 
-Multi-chain IF2 with per-chain indicatif progress bars, Rhat
-convergence diagnostics, and regime presets (scout/refine/validate).
-Auto rw_sd computes `(hi-lo)/6` on the transformed scale from
-parameter bounds.
+Multi-chain IF2 with per-chain indicatif progress bars, Rhat convergence
+diagnostics, and regime presets (scout/refine/validate). Auto rw_sd computes
+`(hi-lo)/6` on the transformed scale from parameter bounds.
 
 ### Profile likelihood
 
@@ -252,15 +249,18 @@ camdl fit validate fit.toml --starts-from refine/  # profiles + precise pfilter
 camdl fit status   fit.toml          # colored summary
 ```
 
-**Scout** discovers the likelihood basin with random starts and
-MAD-based auto rw_sd calibration. **Refine** converges from scout's
-best parameters. **Validate** runs profiles for all estimated
-parameters and a precise pfilter at the MLE for log-likelihood and
-ESS measurement.
+**Scout** discovers the likelihood basin with random starts and MAD-based auto
+rw_sd calibration. **Refine** converges from scout's best parameters.
+**Validate** runs profiles for all estimated parameters and a precise pfilter at
+the MLE for log-likelihood and ESS measurement.
 
-The final output is `mle_params.toml` — a standard params file with
-provenance hashing that feeds directly into `camdl simulate` and
-`camdl experiment run`.
+The final output is `mle_params.toml` — a standard params file with provenance
+hashing that feeds directly into `camdl simulate` and `camdl experiment run`.
+
+**Out-of-sample validation:** Add `[holdout]` to fit.toml with holdout data
+files. Scout/refine never see holdout data. Validate reports separate
+train/holdout logliks. Use `camdl data split cases.tsv --at-time 5474` to
+produce train/holdout files.
 
 Specification: [`docs/camdl-inference-spec.md`](docs/camdl-inference-spec.md)
 
@@ -275,9 +275,8 @@ camdl experiment summarize experiment.toml # aggregate trajectories
 camdl experiment analyze experiment.toml   # Sobol sensitivity indices
 ```
 
-Multi-scenario parameter sweeps with content-addressable output
-and caching. Sobol first-order and total-effect sensitivity indices
-for any output metric.
+Multi-scenario parameter sweeps with content-addressable output and caching.
+Sobol first-order and total-effect sensitivity indices for any output metric.
 
 Specification: [`docs/camdl-experiment-spec.md`](docs/camdl-experiment-spec.md)
 
@@ -287,9 +286,9 @@ Specification: [`docs/camdl-experiment-spec.md`](docs/camdl-experiment-spec.md)
 camdl voi run voi.toml
 ```
 
-Expected Value of Sample Information (EVSI) for study design
-decisions. Combines experiment outputs with decision problems,
-prior distributions, and utility functions.
+Expected Value of Sample Information (EVSI) for study design decisions. Combines
+experiment outputs with decision problems, prior distributions, and utility
+functions.
 
 Specification: [`docs/camdl-voi-spec.md`](docs/camdl-voi-spec.md)
 
@@ -343,26 +342,25 @@ make test          # all OCaml + Rust + integration tests (28 tests)
 make build         # build both languages
 ```
 
-CI runs on every push: OCaml compiler tests, Rust unit tests, clippy
-(warnings = errors), golden file regeneration + diff check, and the
-full integration suite.
+CI runs on every push: OCaml compiler tests, Rust unit tests, clippy (warnings =
+errors), golden file regeneration + diff check, and the full integration suite.
 
 ---
 
 ## Documentation
 
-| Document | Contents |
-|----------|----------|
-| [`docs/camdl-language-spec.md`](docs/camdl-language-spec.md) | Full DSL reference |
-| [`docs/camdl-data-spec.md`](docs/camdl-data-spec.md) | IR schema and data model |
-| [`docs/camdl-inference-spec.md`](docs/camdl-inference-spec.md) | Fitting workflow specification |
-| [`docs/camdl-experiment-spec.md`](docs/camdl-experiment-spec.md) | Experiment system specification |
-| [`docs/camdl-voi-spec.md`](docs/camdl-voi-spec.md) | Value of Information specification |
-| [`docs/inference.md`](docs/inference.md) | Inference guide (PF, IF2, profiles) |
-| [`docs/runtimes.md`](docs/runtimes.md) | Simulation backend details |
-| [`docs/user-features.md`](docs/user-features.md) | Feature catalog with pomp comparison |
-| [`docs/intro.md`](docs/intro.md) | DSL tutorial |
-| [`docs/debugging.md`](docs/debugging.md) | Debugging with `camdl eval` |
+| Document                                                         | Contents                             |
+| ---------------------------------------------------------------- | ------------------------------------ |
+| [`docs/camdl-language-spec.md`](docs/camdl-language-spec.md)     | Full DSL reference                   |
+| [`docs/camdl-data-spec.md`](docs/camdl-data-spec.md)             | IR schema and data model             |
+| [`docs/camdl-inference-spec.md`](docs/camdl-inference-spec.md)   | Fitting workflow specification       |
+| [`docs/camdl-experiment-spec.md`](docs/camdl-experiment-spec.md) | Experiment system specification      |
+| [`docs/camdl-voi-spec.md`](docs/camdl-voi-spec.md)               | Value of Information specification   |
+| [`docs/inference.md`](docs/inference.md)                         | Inference guide (PF, IF2, profiles)  |
+| [`docs/runtimes.md`](docs/runtimes.md)                           | Simulation backend details           |
+| [`docs/user-features.md`](docs/user-features.md)                 | Feature catalog with pomp comparison |
+| [`docs/intro.md`](docs/intro.md)                                 | DSL tutorial                         |
+| [`docs/debugging.md`](docs/debugging.md)                         | Debugging with `camdl eval`          |
 
 ---
 
@@ -394,14 +392,14 @@ benches/               Criterion benchmarks + performance lab notebook
 
 ## Architecture
 
-The **IR is fully expanded**: the OCaml compiler performs all
-stratification, coupling expansion, and let-binding inlining. The Rust
-backend sees only flat compartments, transitions, and expression ASTs.
+The **IR is fully expanded**: the OCaml compiler performs all stratification,
+coupling expansion, and let-binding inlining. The Rust backend sees only flat
+compartments, transitions, and expression ASTs.
 
 The **expression language** is pure and first-order:
 `Const | Param | Pop | PopSum | Time | BinOp | UnOp | Cond | TimeFunc | TableLookup`.
 Evaluated in bounded time at each simulation step.
 
 **Common Random Numbers**: same seed → identical trajectory. Used for
-counterfactual scenario comparisons where pre-intervention trajectories
-are byte-identical.
+counterfactual scenario comparisons where pre-intervention trajectories are
+byte-identical.

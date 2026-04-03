@@ -2166,41 +2166,73 @@ heteroscedastic variance).
 - Mixed: `--rw-sd "R0=5,sigma=auto"` — explicit where you know, auto
   where you don't.
 
-**`--regime`**: IF2 presets — `scout` (8 chains, no cooling, explore),
-`refine` (4 chains, cooling, converge), `validate` (high particles, full
-convergence).
+**`--regime`**: IF2 presets — `scout` (8 chains, 500 particles,
+cooling=0.5), `refine` (4 chains, 1000 particles, cooling=0.95),
+`validate` (4 chains, 5000 particles, cooling=0.95).
 
 **`--ivp "S0,I0"`**: Initial value parameters, perturbed only at t=0.
+
+**`--fixed "N0,mu"`**: Exclude parameters from estimation (with
+`--rw-sd auto`). Also available on `camdl profile`.
 
 ### 22.6 Fit Workflow
 
 ```bash
-# Structured three-stage fitting pipeline
 camdl fit scout    fit.toml [--seed N] [--force]
 camdl fit refine   fit.toml --starts-from scout/ [--seed N]
 camdl fit validate fit.toml --starts-from refine/ [--seed N]
 camdl fit status   fit.toml
 ```
 
-Driven by a `fit.toml` that declares which parameters to estimate,
-which to fix, and where the data lives. See `docs/camdl-inference-spec.md`
-for the full specification.
+Driven by `fit.toml` with `[estimate]`, `[fixed]`, `[data]`, and
+optional `[holdout]`, `[scout]`, `[refine]`, `[validate]` sections.
+See `docs/camdl-inference-spec.md`.
 
-### 22.7 Particle State Export
+**Pfilter replicates:**
 
 ```bash
-# Save final particle states for prediction workflows
+camdl pfilter MODEL --params P.toml --data d.tsv \
+    --replicates 100 --output logliks.tsv
+```
+
+Runs N independent particle filters, outputs `seed\tloglik` TSV.
+
+**Pfilter trace** (observation-space predictions):
+
+```bash
+camdl pfilter MODEL --params P.toml --data d.tsv --trace diag.tsv
+```
+
+Columns: `time ll_increment ESS obs_mean obs_q05 obs_q50 obs_q95
+state_mean state_q05 state_q50 state_q95 observed`. `obs_*` includes
+observation noise; `state_*` is process uncertainty only.
+
+### 22.7 Data Utilities
+
+```bash
+# Split a TSV at a time threshold for train/holdout validation
+camdl data split data/cases.tsv --at-time 5474
+# → data/cases_train.tsv, data/cases_holdout.tsv
+
+# Explicit output paths
+camdl data split data/cases.tsv --at-time 5474 \
+    --train data/train.tsv --holdout data/holdout.tsv
+```
+
+### 22.8 Particle State Export
+
+```bash
 camdl pfilter MODEL --params P.toml --data train.tsv \
     --particles 5000 --save-final-state final_particles.tsv
 ```
 
-### 22.8 Value of Information
+### 22.9 Value of Information
 
 ```bash
 camdl voi run voi.toml
 ```
 
-### 22.9 Web Server
+### 22.10 Web Server
 
 ```bash
 camdl serve [--port 8080] [DIR]

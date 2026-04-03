@@ -67,6 +67,12 @@ weekly_cases = "data/london_cases.tsv"
 # afp_cases = "data/afp_by_district.tsv"
 # es_positive = "data/es_results.tsv"
 
+# Optional: out-of-sample holdout data.
+# Keys must match [data] keys. Scout/refine never see holdout data.
+# Validate runs PF on train + holdout and reports separate logliks.
+# [holdout]
+# weekly_cases = "data/london_cases_holdout.tsv"
+
 [config]
 backend = "chain_binomial"
 dt = 1.0
@@ -483,22 +489,22 @@ and reproduce the fit:
 camdl fit scout fit.toml [--seed 1]
 ```
 
-**Defaults:** 8 chains, 200 particles, 20 iterations,
-`cooling_fraction = 1.0` (no shrinkage — pure random walk),
-random starts from parameter bounds (or fit bounds if specified),
-rw_sd from fit.toml.
+**Defaults:** 8 chains, 500 particles, 30 iterations,
+`cooling_fraction = 0.5` (mild contraction — find basins, don't
+converge), rw_sd from fit.toml or auto from bounds (`/20` for
+log, `/6` for logit).
 
-**Algorithm:** IF2 with `cooling_fraction = 1.0`. This IS a particle
-filter with permanent parameter perturbation. Parameters never
-converge — they explore. The purpose is explicitly NOT convergence;
-it's landscape discovery. The ANALYSIS of the chain endpoints (not
-the convergence of any individual chain) extracts useful information.
+**Seeded chains:** When `[estimate]` parameters have `start` values,
+chain 1 starts near those values (jittered by rw_sd). Remaining
+chains start from random positions within bounds. Controlled by
+`start_chains` in `[scout]` (default 1 when any start exists).
 
 **Writes:**
 
 ```
 fit/{name}/scout/
   chain_{1..8}/parameter_traces.tsv
+  scout_best_params.toml     ← best chain's params (all estimated + fixed)
   scout_summary.json
   fit_state.toml
   diagnostics.tsv
