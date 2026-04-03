@@ -591,6 +591,32 @@ pub fn run_chains_with_per_chain_params(
         })
         .collect();
 
+    // Evaluate true (unperturbed) loglik at selected iterations for the best chain.
+    // Every 10 iterations, run a quick PF at the filter mean params.
+    let eval_interval = 10;
+    let mut results = results;
+    {
+        let best_idx = results.iter()
+            .enumerate()
+            .max_by(|(_, a), (_, b)| a.1.final_loglik.total_cmp(&b.1.final_loglik))
+            .map(|(i, _)| i)
+            .unwrap();
+        let best_result = &mut results[best_idx].1;
+
+        eprintln!("\nevaluating true loglik (every {} iterations, best chain)...", eval_interval);
+        for it in &mut best_result.iterations {
+            if it.iteration % eval_interval == 0 || it.iteration == config.if2_config.n_iterations - 1 {
+                it.true_loglik = run_quick_pfilter(
+                    config, &it.param_means,
+                    config.if2_config.n_particles.min(500), // cap at 500 for speed
+                    config.seed + it.iteration as u64,
+                );
+                eprint!("\r  iter {}: true_ll={:.1}    ", it.iteration, it.true_loglik);
+            }
+        }
+        eprintln!();
+    }
+
     // Find best chain
     let (best_chain, best_loglik) = results.iter()
         .max_by(|a, b| a.1.final_loglik.total_cmp(&b.1.final_loglik))

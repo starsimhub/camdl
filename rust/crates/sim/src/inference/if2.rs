@@ -137,7 +137,12 @@ pub struct IF2Config {
 #[derive(Clone, Debug)]
 pub struct IF2IterResult {
     pub iteration: usize,
+    /// Perturbed-model loglik (computed during IF2 with heterogeneous particle params).
+    /// NOT the true model loglik — peaks early due to perturbation smoothing, then declines.
     pub log_likelihood: f64,
+    /// True model loglik at the filter mean params, evaluated by a clean PF with no perturbation.
+    /// Only populated when the caller evaluates it (e.g., every N iterations). NaN when not evaluated.
+    pub true_loglik: f64,
     /// Parameter means across particles at end of this iteration.
     pub param_means: Vec<f64>,
     /// Per-parameter diagnostics, indexed by position in if2_params.
@@ -455,6 +460,7 @@ pub fn run_if2_with_progress(
         iterations.push(IF2IterResult {
             iteration: iter,
             log_likelihood: total_loglik,
+            true_loglik: f64::NAN, // populated post-hoc by CLI
             param_means: param_means.clone(),
             param_diag,
         });
