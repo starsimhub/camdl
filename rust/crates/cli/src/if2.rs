@@ -292,6 +292,7 @@ pub fn cmd_if2(args: &[String]) {
             rw_sd: rw_sd_map.get(name).and_then(|v| *v),
             transform: None,
             ivp: ivp_set.contains(name),
+            start: None,
         }
     }).collect();
     let any_auto = specs.iter().any(|s| s.rw_sd.is_none());

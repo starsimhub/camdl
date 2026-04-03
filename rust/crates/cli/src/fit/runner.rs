@@ -188,6 +188,7 @@ fn build_if2_params(
             rw_sd,
             transform: est.transform.clone(),
             ivp: est.ivp,
+            start: est.start,
         }
     }).collect();
 
@@ -339,6 +340,8 @@ pub struct ParamSpec {
     /// None = auto from param_kind. Some("log") = override.
     pub transform: Option<String>,
     pub ivp: bool,
+    /// User-specified starting value. Used by scout for seeded chains.
+    pub start: Option<f64>,
 }
 
 /// Build IF2Param specs from caller-provided ParamSpecs.

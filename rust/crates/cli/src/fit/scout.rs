@@ -58,17 +58,31 @@ pub fn run_scout(fit: &FitToml, seed: u64, force: bool) -> Result<(), String> {
     std::fs::create_dir_all(&stage_dir)
         .map_err(|e| format!("cannot create {}: {}", stage_dir, e))?;
 
-    // Generate per-chain random starts
+    // Determine which chains are seeded near start values vs fully random.
+    // A chain is "seeded" if at least one parameter has a start value in [estimate].
+    let has_any_starts = fit.estimate.values().any(|est| est.start.is_some());
+    let start_chains = if has_any_starts {
+        sc.and_then(|s| s.start_chains).unwrap_or(1)
+    } else {
+        0
+    };
+    let n_random = n_chains - start_chains.min(n_chains);
+
+    // Generate per-chain starts
     let mut rng = sim::rng::StatefulRng::new(seed ^ 0xcafe_u64);
-    let per_chain_params: Vec<Vec<IF2Param>> = (0..n_chains).map(|_| {
+    let per_chain_params: Vec<Vec<IF2Param>> = (0..n_chains).map(|chain_id| {
         config.if2_params.iter().map(|spec| {
-            let initial = if spec.lower.is_finite() && spec.upper.is_finite() {
-                let u = rng.uniform();
-                spec.lower + u * (spec.upper - spec.lower)
+            let initial = if chain_id < start_chains {
+                // Seeded chain: use start value with jitter, or random if no start
+                if let Some(start) = fit.estimate.get(&spec.name).and_then(|e| e.start) {
+                    let jitter = rng.normal() * spec.rw_sd;
+                    (start + jitter).clamp(spec.lower, spec.upper)
+                } else {
+                    random_from_bounds(spec, &mut rng)
+                }
             } else {
-                // Unbounded: jitter ±50% from default
-                let v = config.base_params[spec.index];
-                v * (0.5 + rng.uniform())
+                // Fully random chain
+                random_from_bounds(spec, &mut rng)
             };
             IF2Param {
                 initial,
@@ -77,8 +91,8 @@ pub fn run_scout(fit: &FitToml, seed: u64, force: bool) -> Result<(), String> {
         }).collect()
     }).collect();
 
-    eprintln!("scout: {} chains × {} particles × {} iterations, cooling={}, rw_sd×{:.1}",
-        n_chains, n_particles, n_iterations, cooling, rw_sd_scale);
+    eprintln!("scout: {} chains ({} seeded, {} random) × {} particles × {} iterations, cooling={}, rw_sd×{:.1}",
+        n_chains, start_chains.min(n_chains), n_random, n_particles, n_iterations, cooling, rw_sd_scale);
     let t0 = std::time::Instant::now();
     let chain_results = runner::run_chains_with_per_chain_params(&config, Some(&per_chain_params));
     let elapsed = t0.elapsed();
@@ -230,6 +244,15 @@ fn write_summary(
         .map_err(|e| format!("json error: {}", e))?;
     std::fs::write(&path, contents)
         .map_err(|e| format!("cannot write {}: {}", path, e))
+}
+
+fn random_from_bounds(spec: &IF2Param, rng: &mut sim::rng::StatefulRng) -> f64 {
+    if spec.lower.is_finite() && spec.upper.is_finite() {
+        spec.lower + rng.uniform() * (spec.upper - spec.lower)
+    } else {
+        // Unbounded: jitter ±50% from default
+        spec.initial * (0.5 + rng.uniform())
+    }
 }
 
 pub fn now_iso8601_pub() -> String { now_iso8601() }

@@ -211,6 +211,7 @@ pub fn cmd_profile(args: &[String]) {
             rw_sd: rw_sd_map_raw.get(name).and_then(|v| *v),
             transform: None,
             ivp: false,
+            start: None,
         }
     }).collect();
 

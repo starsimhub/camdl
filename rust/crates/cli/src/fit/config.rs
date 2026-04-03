@@ -37,6 +37,9 @@ pub struct StageConfig {
     pub cooling: Option<f64>,
     /// Multiply all rw_sd values by this factor. Default 1.0.
     pub rw_sd_scale: Option<f64>,
+    /// Number of chains seeded near start values (rest are random).
+    /// Default 1 when any parameter has start, 0 otherwise.
+    pub start_chains: Option<usize>,
 }
 
 /// Validate stage configuration (includes pfilter settings).
