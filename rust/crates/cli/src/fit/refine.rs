@@ -24,6 +24,13 @@ pub fn run_refine(fit: &FitToml, starts_from: &str, seed: u64, force: bool) -> R
     let rw_sd_scale = rc.and_then(|s| s.rw_sd_scale).unwrap_or(1.0);
 
     let prior_state = FitState::load(starts_from)?;
+    if !prior_state.best_loglik.is_finite() {
+        return Err(format!(
+            "prior stage produced -inf loglik — cannot use as starting point.\n\
+             Re-run the prior stage with more particles or check model specification.\n\
+             Source: {}/fit_state.toml", starts_from
+        ));
+    }
     eprintln!("refine: starting from {} (loglik={:.1}, {} good chains)",
         starts_from, prior_state.best_loglik,
         prior_state.n_good_chains.unwrap_or(prior_state.n_chains));
@@ -67,7 +74,8 @@ pub fn run_refine(fit: &FitToml, starts_from: &str, seed: u64, force: bool) -> R
     // Check convergence
     let all_converged = chain_results.rhat.values().all(|&r| r < 1.1);
     let loglik_spread = {
-        let logliks: Vec<f64> = chain_results.results.iter().map(|(_, r)| r.final_loglik).collect();
+        let logliks: Vec<f64> = chain_results.results.iter()
+            .map(|(_, r)| r.final_loglik).collect();
         logliks.iter().cloned().fold(f64::NEG_INFINITY, f64::max) -
         logliks.iter().cloned().fold(f64::INFINITY, f64::min)
     };

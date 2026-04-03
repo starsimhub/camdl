@@ -33,6 +33,13 @@ pub fn run_validate(fit: &FitToml, starts_from: &str, seed: u64, force: bool) ->
     let pfilter_particles = vc.and_then(|s| s.pfilter_particles).unwrap_or(VALIDATE_PFILTER_PARTICLES);
 
     let prior_state = FitState::load(starts_from)?;
+    if !prior_state.best_loglik.is_finite() {
+        return Err(format!(
+            "prior stage produced -inf loglik — cannot use as starting point.\n\
+             Re-run the prior stage with more particles or check model specification.\n\
+             Source: {}/fit_state.toml", starts_from
+        ));
+    }
     eprintln!("validate: starting from {} (loglik={:.1})", starts_from, prior_state.best_loglik);
 
     let mut config = FitRunConfig::build(
@@ -93,7 +100,7 @@ pub fn run_validate(fit: &FitToml, starts_from: &str, seed: u64, force: bool) ->
     // and report separate logliks. Otherwise, just train.
     let (pf_result, train_ll, holdout_ll) = if let Some(ref holdout_data) = fit.holdout {
         // Load holdout observations
-        let (holdout_stream, holdout_path) = holdout_data.iter().next()
+        let (_holdout_stream, holdout_path) = holdout_data.iter().next()
             .ok_or_else(|| "empty [holdout] section".to_string())?;
 
         let holdout_obs: Vec<sim::inference::if2::Observation> =
@@ -247,19 +254,22 @@ pub fn run_validate(fit: &FitToml, starts_from: &str, seed: u64, force: bool) ->
     )?;
 
     // fit_record.json
-    write_fit_record(&stage_dir, fit, &config, &chain_results, &metadata, &profiles, &all_params)?;
+    write_fit_record(&stage_dir, fit, &config, &chain_results, &metadata, &profiles, &all_params, train_ll, holdout_ll)?;
 
     // fit_report.txt
-    write_fit_report(&stage_dir, fit, &config, &chain_results, &metadata, &profiles)?;
+    write_fit_report(&stage_dir, fit, &config, &chain_results, &metadata, &profiles, &all_params)?;
 
     // pfilter_loglik.txt
-    std::fs::write(
-        format!("{}/pfilter_loglik.txt", stage_dir),
-        format!("{:.4} ± {:.4} (N={})\n", loglik, loglik_sd, pfilter_particles),
-    ).ok();
+    let loglik_txt = if let (Some(tll), Some(hll)) = (train_ll, holdout_ll) {
+        format!("train:   {:.4}\nholdout: {:.4}\ntotal:   {:.4} ± {:.4} (N={})\n",
+            tll, hll, loglik, loglik_sd, pfilter_particles)
+    } else {
+        format!("{:.4} ± {:.4} (N={})\n", loglik, loglik_sd, pfilter_particles)
+    };
+    std::fs::write(format!("{}/pfilter_loglik.txt", stage_dir), loglik_txt).ok();
 
     // Summary JSON
-    write_summary(&stage_dir, &chain_results, &config, &metadata, &profiles)?;
+    write_summary(&stage_dir, &chain_results, &config, &metadata, &profiles, train_ll, holdout_ll)?;
 
     let total_elapsed = t0_if2.elapsed();
     eprintln!("\nvalidate complete in {:.1}s (IF2: {:.1}s): {}/",
@@ -382,7 +392,16 @@ fn write_pfilter_trace(dir: &str, pf: &PfilterResult, config: &FitRunConfig) -> 
         writeln!(f, "time\tll_increment\tESS\tobs_mean\tobs_q05\tobs_q50\tobs_q95\tstate_mean\tstate_q05\tstate_q50\tstate_q95\tobserved").unwrap();
         for (i, t) in pf.obs_times.iter().enumerate() {
             let p = &preds[i];
-            let obs_val = config.observations.get(i).map_or(f64::NAN, |o| o.value);
+            let obs_val = if i < pf.obs_times.len() {
+                // Match against obs_times to find corresponding observed value
+                // For holdout rows (time > train end), report NaN
+                let t = pf.obs_times[i];
+                config.observations.iter()
+                    .find(|o| (o.time - t).abs() < 1e-10)
+                    .map_or(f64::NAN, |o| o.value)
+            } else {
+                f64::NAN
+            };
             writeln!(f, "{}\t{:.4}\t{:.1}\t{:.1}\t{:.0}\t{:.0}\t{:.0}\t{:.1}\t{:.0}\t{:.0}\t{:.0}\t{:.0}",
                 t, pf.ll_increments[i], pf.ess_trace[i],
                 p.obs_mean, p.obs_q05, p.obs_q50, p.obs_q95,
@@ -455,8 +474,9 @@ fn run_profiles(
             let mut base = mle_params.to_vec();
             base[focal.index] = focal_value;
 
+            let profile_particles = (config.if2_config.n_particles / 5).clamp(200, 2000);
             let profile_config = IF2Config {
-                n_particles: 1000,
+                n_particles: profile_particles,
                 n_iterations: 30,
                 cooling_fraction: 0.95,
                 cooling_target_iters: 30,
@@ -546,6 +566,8 @@ fn write_fit_record(
     metadata: &MleMetadata,
     profiles: &[ProfileResult],
     all_params: &HashMap<String, f64>,
+    train_ll: Option<f64>,
+    holdout_ll: Option<f64>,
 ) -> Result<(), String> {
     // Collect content hashes of all output files for the manifest
     let output_hashes: serde_json::Value = {
@@ -577,7 +599,15 @@ fn write_fit_record(
         },
         "results": {
             "mle": all_params,
-            "loglik": metadata.loglik,
+            "loglik": if train_ll.is_some() {
+                serde_json::json!({
+                    "train": train_ll.unwrap(),
+                    "holdout": holdout_ll.unwrap(),
+                    "total": metadata.loglik,
+                })
+            } else {
+                serde_json::json!(metadata.loglik)
+            },
             "loglik_sd": metadata.loglik_sd,
             "ess_at_mle": metadata.ess_at_mle.map(|(m, n)| serde_json::json!({"mean": m, "min": n})),
             "convergence": {
@@ -612,6 +642,7 @@ fn write_fit_report(
     results: &runner::ChainResults,
     metadata: &MleMetadata,
     profiles: &[ProfileResult],
+    all_params: &HashMap<String, f64>,
 ) -> Result<(), String> {
     use std::io::Write;
     let path = format!("{}/fit_report.txt", dir);
@@ -647,7 +678,7 @@ fn write_fit_report(
     }
     writeln!(f).unwrap();
     writeln!(f, "Provenance: input_hash={}, content_hash={}",
-        metadata.input_hash, provenance::compute_content_hash(&HashMap::new())).unwrap();
+        metadata.input_hash, provenance::compute_content_hash(all_params)).unwrap();
 
     Ok(())
 }
@@ -658,12 +689,16 @@ fn write_summary(
     config: &FitRunConfig,
     metadata: &MleMetadata,
     profiles: &[ProfileResult],
+    train_ll: Option<f64>,
+    holdout_ll: Option<f64>,
 ) -> Result<(), String> {
     let summary = serde_json::json!({
         "stage": "validate",
         "n_chains": config.n_chains,
         "best_loglik": metadata.loglik,
         "loglik_sd": metadata.loglik_sd,
+        "train_loglik": train_ll,
+        "holdout_loglik": holdout_ll,
         "ess_at_mle": metadata.ess_at_mle.map(|(m, n)| serde_json::json!({"mean": m, "min": n})),
         "input_hash": metadata.input_hash,
         "converged": results.rhat.values().all(|&r| r < 1.1),

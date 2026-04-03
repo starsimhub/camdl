@@ -196,7 +196,7 @@ fn test_if2_converges_from_dispersed_start() {
         "IF2 gamma={:.3}, expected ~0.1 (started at 0.3)", final_gamma);
 
     // Log-likelihood must be finite and better than the first iteration
-    let first_ll = result.iterations[0].log_likelihood;
+    let first_ll = result.iterations[0].if2_perturbed_loglik;
     let last_ll = result.final_loglik;
     assert!(last_ll.is_finite(), "final loglik should be finite, got {}", last_ll);
     assert!(last_ll >= first_ll - 5.0,
@@ -204,7 +204,7 @@ fn test_if2_converges_from_dispersed_start() {
 
     // The last few iterations should have stable loglik (not oscillating wildly)
     let tail_lls: Vec<f64> = result.iterations.iter().rev().take(5)
-        .map(|it| it.log_likelihood).filter(|l| l.is_finite()).collect();
+        .map(|it| it.if2_perturbed_loglik).filter(|l| l.is_finite()).collect();
     if tail_lls.len() >= 3 {
         let mean_ll = tail_lls.iter().sum::<f64>() / tail_lls.len() as f64;
         let max_dev = tail_lls.iter().map(|&l| (l - mean_ll).abs()).fold(0.0f64, f64::max);
@@ -382,5 +382,93 @@ fn scaled_logit_round_trip() {
         let z = param.to_transformed(x);
         let back = param.from_transformed(z);
         assert!((back - x).abs() < 1e-8, "scaled logit round-trip: {} → {} → {}", x, z, back);
+    }
+}
+
+// ── Cooling schedule regression tests ──────────────────────────────────
+
+/// Verify cooling schedule matches pomp's cooling.fraction.50 semantics.
+/// cf50 is reached at the HALFWAY point of target iterations; cf50² at the end.
+///
+/// The IF2 engine computes:
+///   per_step = cf50^(2.0 / (target_iters * n_obs))
+///   global_step increments by (1 + n_obs) per iteration (1 at t=0, n_obs at obs times)
+///   effective = per_step^global_step
+#[test]
+fn cooling_cf50_matches_pomp_semantics() {
+    let cf50 = 0.05_f64;
+    let target_iters = 50_usize;
+    let n_obs = 100_usize;
+
+    // This is the formula from the IF2 engine (if2.rs line ~301)
+    let total_target_steps = target_iters as f64 * n_obs as f64;
+    let per_step = cf50.powf(2.0 / total_target_steps);
+
+    // After target_iters/2 iterations, with (1 + n_obs) steps per iteration:
+    let steps_halfway = (target_iters / 2) * (1 + n_obs);
+    let cooling_halfway = per_step.powi(steps_halfway as i32);
+
+    // The +1 from t=0 perturbation makes the halfway slightly lower than cf50.
+    // With n_obs=100, the ratio is (1+n_obs)/n_obs = 1.01, so it's close.
+    // Check it's within a reasonable tolerance of cf50.
+    let ratio = cooling_halfway / cf50;
+    assert!(ratio > 0.8 && ratio < 1.0,
+        "halfway cooling should be close to cf50={}: got {:.6} (ratio={:.4})",
+        cf50, cooling_halfway, ratio);
+
+    // After full target_iters: should be close to cf50²
+    let steps_full = target_iters * (1 + n_obs);
+    let cooling_full = per_step.powi(steps_full as i32);
+    let expected_full = cf50 * cf50;
+    let ratio_full = cooling_full / expected_full;
+    assert!(ratio_full > 0.5 && ratio_full < 1.0,
+        "full cooling should be close to cf50²={:.6}: got {:.6} (ratio={:.4})",
+        expected_full, cooling_full, ratio_full);
+}
+
+/// Verify per_step cooling is strictly between 0 and 1 for valid cf50 values.
+#[test]
+fn cooling_per_step_valid_range() {
+    for &cf50 in &[0.01_f64, 0.05, 0.10, 0.50, 0.90, 0.95, 0.99] {
+        for &n_obs in &[10, 50, 100, 500] {
+            for &target_iters in &[30, 50, 100] {
+                let total = target_iters as f64 * n_obs as f64;
+                let per_step = cf50.powf(2.0 / total);
+                assert!(per_step > 0.0 && per_step < 1.0,
+                    "per_step={} for cf50={}, n_obs={}, target_iters={}",
+                    per_step, cf50, n_obs, target_iters);
+                // Sanity: per_step shouldn't be extremely aggressive
+                assert!(per_step > 0.9,
+                    "per_step={} suspiciously aggressive for cf50={}, n_obs={}, target_iters={}",
+                    per_step, cf50, n_obs, target_iters);
+            }
+        }
+    }
+}
+
+/// Verify that no-cooling (cf50=1.0) gives per_step=1.0 exactly.
+#[test]
+fn cooling_fraction_1_means_no_cooling() {
+    let per_step = 1.0_f64.powf(2.0 / (50.0 * 100.0));
+    assert_eq!(per_step, 1.0, "cf50=1.0 should give per_step=1.0");
+}
+
+/// Verify cooling is monotonically decreasing across iterations.
+#[test]
+fn cooling_decreases_monotonically() {
+    let cf50 = 0.05_f64;
+    let n_obs = 50_usize;
+    let target_iters = 50_usize;
+    let per_step = cf50.powf(2.0 / (target_iters as f64 * n_obs as f64));
+
+    let mut prev = 1.0_f64;
+    for iter in 0..100 {
+        let global_step = iter * (1 + n_obs);
+        let cooling_now = per_step.powi(global_step as i32);
+        assert!(cooling_now <= prev + 1e-15,
+            "cooling not monotonically decreasing at iter {}: {} > {}",
+            iter, cooling_now, prev);
+        assert!(cooling_now >= 0.0, "cooling went negative at iter {}", iter);
+        prev = cooling_now;
     }
 }

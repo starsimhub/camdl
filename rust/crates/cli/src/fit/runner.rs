@@ -284,19 +284,30 @@ pub fn print_preflight(config: &FitRunConfig) {
     }
 
     // Cooling schedule preview
+    // The IF2 engine computes: per_step = cf50^(2.0 / (target_iters * n_obs))
+    // Each iteration has (1 + n_obs) perturbation steps (1 at t=0, n_obs at observations).
+    // After m iterations: rw_sd_fraction = per_step^(m * (1 + n_obs))
     let frac = config.if2_config.cooling_fraction;
     let iters = config.if2_config.n_iterations;
+    let target_iters = config.if2_config.cooling_target_iters;
+    let n_obs = config.observations.len();
     let mid = iters / 2;
-    // cf50 semantics: fraction reached at halfway, fraction² at end
-    eprintln!("\ncooling: cf50={:.2} over {} iterations (pomp convention)", frac, iters);
-    eprintln!("  iter {:3}: rw_sd at {:.1}%", 1, frac.powf(2.0 / iters as f64) * 100.0);
-    eprintln!("  iter {:3}: rw_sd at {:.1}% (halfway)", mid, frac.powf(2.0 * mid as f64 / iters as f64) * 100.0);
-    eprintln!("  iter {:3}: rw_sd at {:.1}%", iters, (frac * frac) * 100.0);
+
+    let total_target_steps = target_iters as f64 * n_obs as f64;
+    let per_step = frac.powf(2.0 / total_target_steps);
+    let steps_per_iter = (1 + n_obs) as f64;
+
+    let rw_at = |iter: usize| per_step.powf(iter as f64 * steps_per_iter);
+
+    eprintln!("\ncooling: cf50={:.2} over {} iterations × {} observations", frac, iters, n_obs);
+    eprintln!("  iter {:3}: rw_sd at {:.1}%", 1, rw_at(1) * 100.0);
+    eprintln!("  iter {:3}: rw_sd at {:.1}% (halfway)", mid, rw_at(mid) * 100.0);
+    eprintln!("  iter {:3}: rw_sd at {:.1}%", iters, rw_at(iters) * 100.0);
 
     // Warn if cooling exhausts well before the run ends
     // (rw_sd < 1% at 2/3 through means last third is wasted)
     let two_thirds = (iters * 2 / 3).max(1);
-    let rw_at_two_thirds = frac.powf(2.0 * two_thirds as f64 / iters as f64);
+    let rw_at_two_thirds = rw_at(two_thirds);
     if rw_at_two_thirds < 0.01 {
         eprintln!("  \x1b[33m⚠ rw_sd drops below 1% at iteration {} — last {} iterations may be wasted.\x1b[0m",
             two_thirds, iters - two_thirds);
@@ -591,28 +602,30 @@ pub fn run_chains_with_per_chain_params(
         })
         .collect();
 
-    // Evaluate true (unperturbed) loglik at selected iterations for the best chain.
-    // Every 10 iterations, run a quick PF at the filter mean params.
+    // Evaluate true (unperturbed) loglik at selected iterations for ALL chains.
+    // Every 10 iterations, run a clean PF at the filter mean params.
     let eval_interval = 10;
     let mut results = results;
     {
-        let best_idx = results.iter()
-            .enumerate()
-            .max_by(|(_, a), (_, b)| a.1.final_loglik.total_cmp(&b.1.final_loglik))
-            .map(|(i, _)| i)
-            .unwrap();
-        let best_result = &mut results[best_idx].1;
+        let n_eval_particles = config.if2_config.n_particles.min(500); // cap at 500 for speed
+        eprintln!("\nevaluating loglik (every {} iterations, all {} chains)...",
+            eval_interval, results.len());
 
-        eprintln!("\nevaluating true loglik (every {} iterations, best chain)...", eval_interval);
-        for it in &mut best_result.iterations {
-            if it.iteration % eval_interval == 0 || it.iteration == config.if2_config.n_iterations - 1 {
-                it.true_loglik = run_quick_pfilter(
-                    config, &it.param_means,
-                    config.if2_config.n_particles.min(500), // cap at 500 for speed
-                    config.seed + it.iteration as u64,
-                );
-                eprint!("\r  iter {}: true_ll={:.1}    ", it.iteration, it.true_loglik);
+        for (chain_id, result) in results.iter_mut() {
+            for it in &mut result.iterations {
+                if it.iteration % eval_interval == 0 || it.iteration == config.if2_config.n_iterations - 1 {
+                    it.loglik = run_quick_pfilter(
+                        config, &it.param_means,
+                        n_eval_particles,
+                        config.seed + *chain_id as u64 * 1000 + it.iteration as u64,
+                    );
+                }
             }
+            // Overwrite final_loglik with the true loglik
+            let true_ll = result.iterations.last()
+                .map(|it| it.loglik).unwrap_or(f64::NEG_INFINITY);
+            result.final_loglik = true_ll;
+            eprint!("\r  chain {}: ll={:.1}    ", *chain_id + 1, true_ll);
         }
         eprintln!();
     }
@@ -849,11 +862,12 @@ pub fn write_chain_outputs(
         let trace_path = format!("{}/parameter_traces.tsv", chain_dir);
         let mut f = std::fs::File::create(&trace_path)
             .map_err(|e| format!("cannot write {}: {}", trace_path, e))?;
-        write!(f, "iteration\tloglik").unwrap();
+        write!(f, "iteration\tloglik\tif2_perturbed_loglik").unwrap();
         for spec in if2_params { write!(f, "\t{}", spec.name).unwrap(); }
         writeln!(f).unwrap();
         for it in &result.iterations {
-            write!(f, "{}\t{:.2}", it.iteration, it.log_likelihood).unwrap();
+            let loglik_str = if it.loglik.is_finite() { format!("{:.2}", it.loglik) } else { "NA".into() };
+            write!(f, "{}\t{}\t{:.2}", it.iteration, loglik_str, it.if2_perturbed_loglik).unwrap();
             for spec in if2_params { write!(f, "\t{:.6}", it.param_means[spec.index]).unwrap(); }
             writeln!(f).unwrap();
         }
@@ -898,10 +912,11 @@ pub fn write_diagnostics(dir: &str, results: &[(usize, IF2Result)]) -> Result<()
     let path = format!("{}/diagnostics.tsv", dir);
     let mut f = std::fs::File::create(&path)
         .map_err(|e| format!("cannot write {}: {}", path, e))?;
-    writeln!(f, "chain\titeration\tloglik").unwrap();
+    writeln!(f, "chain\titeration\tloglik\tif2_perturbed_loglik").unwrap();
     for (chain_id, result) in results {
         for it in &result.iterations {
-            writeln!(f, "{}\t{}\t{:.2}", chain_id + 1, it.iteration, it.log_likelihood).unwrap();
+            let loglik_str = if it.loglik.is_finite() { format!("{:.2}", it.loglik) } else { "NA".into() };
+            writeln!(f, "{}\t{}\t{}\t{:.2}", chain_id + 1, it.iteration, loglik_str, it.if2_perturbed_loglik).unwrap();
         }
     }
     Ok(())

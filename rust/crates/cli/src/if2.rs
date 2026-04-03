@@ -433,6 +433,57 @@ pub fn cmd_if2(args: &[String]) {
         })
         .collect();
 
+    // ── Evaluate true loglik (clean PF) at selected iterations ─────────
+    let mut chain_results = chain_results;
+    {
+        let eval_interval = 10;
+        let n_eval_particles = n_particles.min(500);
+        let pf_observations: Vec<sim::inference::particle_filter::Observation> = observations.iter()
+            .map(|o| sim::inference::particle_filter::Observation { time: o.time, value: o.value })
+            .collect();
+
+        eprintln!("\nevaluating loglik (every {} iterations, all {} chains)...", eval_interval, n_chains);
+        for (chain_id, result) in chain_results.iter_mut() {
+            for it in &mut result.iterations {
+                if it.iteration % eval_interval == 0 || it.iteration == n_iterations - 1 {
+                    // Build params at this iteration's filter mean
+                    let eval_params = &it.param_means;
+                    let step_fn = |state: &mut ParticleState, t: f64, step_dt: f64, rng: &mut StatefulRng, scratch: &mut sim::chain_binomial::StepScratch| {
+                        step_one(&compiled, &mut state.counts, &mut state.flow_accumulators, eval_params, t, step_dt, rng, scratch)
+                    };
+                    let fi = &*flow_indices;
+                    let project_fn = |state: &ParticleState| -> f64 {
+                        fi.iter().map(|&i| state.flow_accumulators[i] as f64).sum()
+                    };
+                    // Build PF dmeasure from IR obs model (fixed params)
+                    let obs_block = model.observations.first();
+                    let pf_dmeasure: Box<dyn Fn(f64, f64) -> f64> = if let Some(obs) = obs_block {
+                        sim::inference::dmeasure::compile_dmeasure_pf(obs, compiled.clone(), eval_params)
+                    } else {
+                        // Fallback: wrap IF2 dmeasure with fixed params
+                        let p = eval_params.to_vec();
+                        let dm = &*dmeasure_fn;
+                        Box::new(move |proj: f64, obs: f64| dm(proj, obs, &p))
+                    };
+
+                    let pf_seed = seed + *chain_id as u64 * 1000 + it.iteration as u64;
+                    match sim::inference::bootstrap_filter(
+                        &compiled, eval_params, &pf_observations, n_eval_particles, dt,
+                        &step_fn, &project_fn, &*pf_dmeasure, None, None, pf_seed,
+                    ) {
+                        Ok(r) => it.loglik = r.log_likelihood,
+                        Err(_) => it.loglik = f64::NEG_INFINITY,
+                    }
+                }
+            }
+            let true_ll = result.iterations.last()
+                .map(|it| it.loglik).unwrap_or(f64::NEG_INFINITY);
+            result.final_loglik = true_ll;
+            eprint!("\r  chain {}: ll={:.1}    ", *chain_id + 1, true_ll);
+        }
+        eprintln!();
+    }
+
     // ── Compute Rhat across chains ────────────────────────────────────────
     let rhat = crate::fit::runner::compute_rhat(&chain_results, &if2_params, n_iterations);
     if n_chains > 1 {
@@ -473,7 +524,7 @@ pub fn cmd_if2(args: &[String]) {
             None => Box::new(std::io::BufWriter::new(std::io::stdout().lock())),
         };
 
-        write!(out, "chain\titeration\tloglik").unwrap();
+        write!(out, "chain\titeration\tif2_perturbed_loglik").unwrap();
         for spec in if2_params.iter() {
             write!(out, "\t{}", spec.name).unwrap();
         }
@@ -481,7 +532,7 @@ pub fn cmd_if2(args: &[String]) {
 
         for (chain_id, result) in &chain_results {
             for iter_result in &result.iterations {
-                write!(out, "{}\t{}\t{:.2}", chain_id + 1, iter_result.iteration, iter_result.log_likelihood).unwrap();
+                write!(out, "{}\t{}\t{:.2}", chain_id + 1, iter_result.iteration, iter_result.if2_perturbed_loglik).unwrap();
                 for spec in if2_params.iter() {
                     write!(out, "\t{:.6}", iter_result.param_means[spec.index]).unwrap();
                 }
@@ -499,7 +550,7 @@ pub fn cmd_if2(args: &[String]) {
         use std::io::Write as _;
         let mut f = std::fs::File::create(path)
             .unwrap_or_else(|e| { eprintln!("cannot create {}: {}", path, e); std::process::exit(1); });
-        writeln!(f, "chain\titeration\tparam\tvalue\trw_sd_eff\twvr\tq\tclamp\tloglik\ttrue_loglik").unwrap();
+        writeln!(f, "chain\titeration\tparam\tvalue\trw_sd_eff\twvr\tq\tclamp\tloglik\tif2_perturbed_loglik").unwrap();
         for (chain_id, result) in &chain_results {
             for it in &result.iterations {
                 for (pi, spec) in if2_params.iter().enumerate() {
@@ -508,12 +559,12 @@ pub fn cmd_if2(args: &[String]) {
                     let q = diag.map(|d| d.q_ratio).unwrap_or(f64::NAN);
                     let eff_rw = diag.map(|d| d.effective_rw_sd).unwrap_or(f64::NAN);
                     let clamp = diag.map(|d| d.clamp_fraction).unwrap_or(0.0);
-                    let true_ll = if it.true_loglik.is_nan() { "NA".to_string() }
-                        else { format!("{:.2}", it.true_loglik) };
-                    writeln!(f, "{}\t{}\t{}\t{:.6}\t{:.6}\t{:.4}\t{:.4}\t{:.4}\t{:.2}\t{}",
+                    let loglik_str = if it.loglik.is_nan() { "NA".to_string() }
+                        else { format!("{:.2}", it.loglik) };
+                    writeln!(f, "{}\t{}\t{}\t{:.6}\t{:.6}\t{:.4}\t{:.4}\t{:.4}\t{}\t{:.2}",
                         chain_id + 1, it.iteration, spec.name,
                         it.param_means[spec.index], eff_rw, wvr, q, clamp,
-                        it.log_likelihood, true_ll).unwrap();
+                        loglik_str, it.if2_perturbed_loglik).unwrap();
                 }
             }
         }
@@ -538,11 +589,11 @@ pub fn cmd_if2(args: &[String]) {
             let trace_path = format!("{}/parameter_traces.tsv", chain_dir);
             let mut f = std::fs::File::create(&trace_path).unwrap();
             use std::io::Write;
-            write!(f, "iteration\tloglik").unwrap();
+            write!(f, "iteration\tif2_perturbed_loglik").unwrap();
             for spec in if2_params.iter() { write!(f, "\t{}", spec.name).unwrap(); }
             writeln!(f).unwrap();
             for it in &result.iterations {
-                write!(f, "{}\t{:.2}", it.iteration, it.log_likelihood).unwrap();
+                write!(f, "{}\t{:.2}", it.iteration, it.if2_perturbed_loglik).unwrap();
                 for spec in if2_params.iter() { write!(f, "\t{:.6}", it.param_means[spec.index]).unwrap(); }
                 writeln!(f).unwrap();
             }

@@ -387,6 +387,16 @@ fn load_data_tsv(path: &str) -> Result<Vec<Observation>, String> {
         observations.push(Observation { time, value });
     }
 
+    // Validate chronological ordering (equal times OK — multi-stream observations)
+    for i in 1..observations.len() {
+        if observations[i].time < observations[i - 1].time {
+            return Err(format!(
+                "observations not in chronological order: t={} at row {} follows t={} at row {}",
+                observations[i].time, i + 2, observations[i - 1].time, i + 1
+            ));
+        }
+    }
+
     Ok(observations)
 }
 
@@ -427,4 +437,46 @@ fn write_final_states(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn write_temp_tsv(name: &str, content: &str) -> String {
+        let path = std::env::temp_dir().join(format!("camdl_test_{}.tsv", name));
+        std::fs::write(&path, content).unwrap();
+        path.to_str().unwrap().to_string()
+    }
+
+    #[test]
+    fn load_data_rejects_out_of_order() {
+        let path = write_temp_tsv("out_of_order", "time\tcases\n7\t10\n14\t20\n10\t15\n21\t30\n");
+        let result = load_data_tsv(&path);
+        assert!(result.is_err(), "should reject out-of-order times");
+        let err = result.err().unwrap();
+        assert!(err.contains("not in chronological order"), "error message: {}", err);
+        assert!(err.contains("t=10"), "should mention the offending time: {}", err);
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn load_data_accepts_equal_times() {
+        // Equal times are valid (multi-stream observations at same time point)
+        let path = write_temp_tsv("equal_times", "time\tcases\n7\t10\n7\t5\n14\t20\n");
+        let result = load_data_tsv(&path);
+        assert!(result.is_ok(), "equal times should be accepted: {:?}", result.err());
+        let obs = result.unwrap();
+        assert_eq!(obs.len(), 3);
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn load_data_accepts_sorted() {
+        let path = write_temp_tsv("sorted", "time\tcases\n7\t10\n14\t20\n21\t30\n");
+        let result = load_data_tsv(&path);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().len(), 3);
+        std::fs::remove_file(&path).ok();
+    }
 }

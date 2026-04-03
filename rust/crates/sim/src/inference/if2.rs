@@ -193,12 +193,15 @@ pub struct IF2Config {
 #[derive(Clone, Debug)]
 pub struct IF2IterResult {
     pub iteration: usize,
-    /// Perturbed-model loglik (computed during IF2 with heterogeneous particle params).
-    /// NOT the true model loglik — peaks early due to perturbation smoothing, then declines.
-    pub log_likelihood: f64,
-    /// True model loglik at the filter mean params, evaluated by a clean PF with no perturbation.
-    /// Only populated when the caller evaluates it (e.g., every N iterations). NaN when not evaluated.
-    pub true_loglik: f64,
+    /// True model log-likelihood P(data | θ̂) at the filter mean params,
+    /// evaluated by a clean PF with no perturbation.
+    /// Populated post-hoc by the caller (e.g., every N iterations). NaN when not evaluated.
+    pub loglik: f64,
+    /// IF2 perturbed-model log-likelihood (internal diagnostic only).
+    /// Computed during IF2 with heterogeneous particle params. Peaks early
+    /// due to perturbation smoothing, then declines as cooling progresses.
+    /// NOT useful for model assessment or convergence — use `loglik` instead.
+    pub if2_perturbed_loglik: f64,
     /// Parameter means across particles at end of this iteration.
     pub param_means: Vec<f64>,
     /// Per-parameter diagnostics, indexed by position in if2_params.
@@ -228,8 +231,11 @@ pub struct IF2Result {
     /// MLE estimate: param means from the best-loglik iteration.
     pub mle: Vec<f64>,
     /// Best log-likelihood across all iterations.
+    /// Initially set to the perturbed loglik by the IF2 engine.
+    /// The caller should overwrite this with the true (PF-evaluated) loglik
+    /// after populating `IF2IterResult::loglik` on the iterations.
     pub final_loglik: f64,
-    /// Last iteration's log-likelihood (for diagnostics).
+    /// Last iteration's perturbed log-likelihood (IF2 engine diagnostic).
     pub last_loglik: f64,
 }
 
@@ -530,8 +536,8 @@ pub fn run_if2_with_progress(
 
         iterations.push(IF2IterResult {
             iteration: iter,
-            log_likelihood: total_loglik,
-            true_loglik: f64::NAN, // populated post-hoc by CLI
+            loglik: f64::NAN, // populated post-hoc by CLI via clean PF
+            if2_perturbed_loglik: total_loglik,
             param_means: param_means.clone(),
             param_diag,
         });
@@ -547,14 +553,14 @@ pub fn run_if2_with_progress(
 
     let last_iter = iterations.last().unwrap();
     let best_iter = iterations.iter()
-        .filter(|it| it.log_likelihood.is_finite())
-        .max_by(|a, b| a.log_likelihood.total_cmp(&b.log_likelihood))
+        .filter(|it| it.if2_perturbed_loglik.is_finite())
+        .max_by(|a, b| a.if2_perturbed_loglik.total_cmp(&b.if2_perturbed_loglik))
         .unwrap_or(last_iter);
 
     Ok(IF2Result {
         mle: best_iter.param_means.clone(),
-        final_loglik: best_iter.log_likelihood,
-        last_loglik: last_iter.log_likelihood,
+        final_loglik: best_iter.if2_perturbed_loglik,
+        last_loglik: last_iter.if2_perturbed_loglik,
         iterations,
     })
 }

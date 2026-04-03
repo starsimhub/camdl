@@ -101,7 +101,7 @@ pub fn run_scout(fit: &FitToml, seed: u64, force: bool) -> Result<(), String> {
     // the particle count is too low for this model's dimensionality.
     let early_check_iter = 5.min(n_iterations.saturating_sub(1));
     let best_early_ll = chain_results.results.iter()
-        .filter_map(|(_, r)| r.iterations.get(early_check_iter).map(|it| it.log_likelihood))
+        .filter_map(|(_, r)| r.iterations.get(early_check_iter).map(|it| it.if2_perturbed_loglik))
         .fold(f64::NEG_INFINITY, f64::max);
     if !best_early_ll.is_finite() {
         eprintln!("\n\x1b[31mscout: filter degenerate — all chains have -inf loglik at iteration {}.\x1b[0m", early_check_iter);
