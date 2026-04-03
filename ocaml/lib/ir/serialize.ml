@@ -289,6 +289,12 @@ let parameter_to_json (p : parameter) : Yojson.Safe.t =
     ("param_kind",    match p.param_kind    with None -> null | Some k  -> str k);
   ]
 
+let parameter_group_to_json (g : parameter_group) : Yojson.Safe.t =
+  obj [
+    ("kind",    str g.kind);
+    ("members", arr (List.map str g.members));
+  ]
+
 (* ── Initial conditions ──────────────────────────────────────────────────── *)
 
 let initial_conditions_to_json (ic : initial_conditions) : Yojson.Safe.t =
@@ -381,6 +387,7 @@ let model_to_json (m : model) : Yojson.Safe.t =
     ("interventions",      arr (List.map intervention_to_json m.interventions));
     ("observations",       arr (List.map observation_model_to_json m.observations));
     ("parameters",         arr (List.map parameter_to_json m.parameters));
+    ("parameter_groups",   arr (List.map parameter_group_to_json m.parameter_groups));
     ("initial_conditions", initial_conditions_to_json m.initial_conditions);
     ("data_contract",      match m.data_contract with None -> null | Some j -> j);
     ("output",             output_config_to_json m.output);

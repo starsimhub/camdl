@@ -54,8 +54,16 @@ pub struct Parameter {
     pub prior:         Option<PriorDist>,
     pub transform:     Option<Transform>,
     pub initial_value: Option<f64>,
-    /// DSL parameter type: "rate", "probability", "positive", "count", "real".
-    /// Used by inference to choose the default transform (log vs logit).
+    /// DSL parameter type: "rate", "probability", "positive", "count", "real",
+    /// "simplex_member". Used by inference to choose the default transform.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub param_kind:    Option<String>,
+}
+
+/// A group of parameters with a joint constraint.
+/// Currently only "simplex" (softmax/barycentric, sum-to-1).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ParameterGroup {
+    pub kind: String,
+    pub members: Vec<String>,
 }

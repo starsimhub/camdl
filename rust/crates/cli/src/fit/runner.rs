@@ -142,7 +142,7 @@ impl FitRunConfig {
             n_particles,
             n_iterations,
             cooling_fraction: cooling,
-            cooling_target_iters: n_iterations,
+            cooling_target_iters: n_iterations, simplex_groups: vec![],
             dt,
         };
 
@@ -965,6 +965,7 @@ mod tests {
                 Parameter { name: "gamma".into(), value: Some(0.1), bounds: Some((0.01, 1.0)), prior: None, transform: None, initial_value: None, param_kind: None },
                 Parameter { name: "N0".into(), value: Some(1000.0), bounds: Some((100.0, 100000.0)), prior: None, transform: None, initial_value: None, param_kind: None },
             ],
+            parameter_groups: vec![],
             initial_conditions: InitialConditions::Explicit({
                 let mut m = HashMap::new();
                 m.insert("S".into(), 990.0);

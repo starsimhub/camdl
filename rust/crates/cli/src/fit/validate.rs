@@ -461,6 +461,7 @@ fn run_profiles(
                 cooling_fraction: 0.95,
                 cooling_target_iters: 30,
                 dt: config.if2_config.dt,
+                simplex_groups: vec![],
             };
 
             let step_fn = |state: &mut ParticleState, p: &[f64], t: f64, step_dt: f64, rng: &mut StatefulRng, scratch: &mut sim::chain_binomial::StepScratch| {

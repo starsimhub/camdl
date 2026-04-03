@@ -84,6 +84,7 @@ fn sir_model() -> (CompiledModel, Vec<f64>) {
             Parameter { name: "beta".into(), value: Some(0.3), bounds: Some((0.01, 2.0)), prior: None, transform: None, initial_value: None, param_kind: None },
             Parameter { name: "gamma".into(), value: Some(0.1), bounds: Some((0.01, 1.0)), prior: None, transform: None, initial_value: None, param_kind: None },
         ],
+            parameter_groups: vec![],
         initial_conditions: InitialConditions::Explicit({
             let mut m = HashMap::new();
             m.insert("S".into(), 990.0);
@@ -161,7 +162,7 @@ fn test_if2_converges_from_dispersed_start() {
         n_particles: 200,
         n_iterations: 30,
         cooling_fraction: 0.90,
-        cooling_target_iters: 50,
+        cooling_target_iters: 50, simplex_groups: vec![],
         dt: 1.0,
     };
 
@@ -235,7 +236,7 @@ fn test_if2_respects_bounds() {
         n_particles: 100,
         n_iterations: 20,
         cooling_fraction: 0.95,
-        cooling_target_iters: 50,
+        cooling_target_iters: 50, simplex_groups: vec![],
         dt: 1.0,
     };
 
@@ -278,7 +279,7 @@ fn test_if2_no_cooling_explores() {
         n_particles: 100,
         n_iterations: 15,
         cooling_fraction: 1.0,
-        cooling_target_iters: 50,
+        cooling_target_iters: 50, simplex_groups: vec![],
         dt: 1.0,
     };
 

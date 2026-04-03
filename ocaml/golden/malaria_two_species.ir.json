@@ -1077,6 +1077,7 @@
       "param_kind": "rate"
     }
   ],
+  "parameter_groups": [],
   "initial_conditions": {
     "explicit": {
       "S_H": 9990.0,

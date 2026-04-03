@@ -138,7 +138,12 @@ type parameter = {
   prior:         prior_dist option;
   transform:     transform option;
   initial_value: float option;
-  param_kind:    string option;  (* DSL type: "rate", "probability", "positive", "count", "real" *)
+  param_kind:    string option;  (* DSL type: "rate", "probability", "positive", "count", "real", "simplex_member" *)
+}
+
+type parameter_group = {
+  kind:    string;
+  members: string list;
 }
 
 type initial_conditions =
@@ -204,6 +209,7 @@ type model = {
   interventions:      intervention list;
   observations:       observation_model list;
   parameters:         parameter list;
+  parameter_groups:   parameter_group list;
   initial_conditions: initial_conditions;
   data_contract:      Yojson.Safe.t option;
   output:             output_config;

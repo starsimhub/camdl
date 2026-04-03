@@ -109,6 +109,7 @@
       "param_kind": "count"
     }
   ],
+  "parameter_groups": [],
   "initial_conditions": {
     "parameterized": {
       "S": {

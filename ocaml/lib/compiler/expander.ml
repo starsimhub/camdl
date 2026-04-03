@@ -1902,6 +1902,7 @@ let expand_detail ?(source_dir = "") (name : string) (decls : declaration list)
     Ir.interventions      = expand_interventions ctx;
     Ir.observations       = expand_observations ctx;
     Ir.parameters         = expand_parameters ctx;
+    Ir.parameter_groups   = [];  (* populated when simplex groups are declared *)
     Ir.initial_conditions = expand_init ctx;
     Ir.data_contract      = None;
     Ir.output             = expand_output ctx;

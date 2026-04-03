@@ -49,6 +49,58 @@ pub struct IF2Param {
     pub ivp: bool,
 }
 
+/// A group of parameters with a joint simplex constraint (sum to 1).
+/// Uses barycentric (log-ratio + softmax) transform, matching pomp's
+/// `parameter_trans(barycentric = ...)`. All members are perturbed
+/// jointly in log-ratio space; softmax inverse guarantees sum = 1.
+#[derive(Clone, Debug)]
+pub struct SimplexGroup {
+    /// Indices into the params array for each member.
+    pub indices: Vec<usize>,
+    /// Per-member rw_sd on the log-ratio scale.
+    pub rw_sds: Vec<f64>,
+}
+
+impl SimplexGroup {
+    /// Forward transform: fractions → log-ratios.
+    /// z_i = log(x_i / sum(x)), matching pomp's to_log_barycentric.
+    pub fn to_log_barycentric(&self, params: &[f64]) -> Vec<f64> {
+        let fracs: Vec<f64> = self.indices.iter()
+            .map(|&i| params[i].max(1e-300))
+            .collect();
+        let sum: f64 = fracs.iter().sum();
+        fracs.iter().map(|&f| (f / sum).max(1e-300).ln()).collect()
+    }
+
+    /// Inverse transform: log-ratios → fractions via softmax.
+    /// Numerically stable (max-subtraction trick). Guarantees sum = 1.
+    pub fn from_log_barycentric(z: &[f64]) -> Vec<f64> {
+        let max_z = z.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+        let exp_z: Vec<f64> = z.iter().map(|&zi| (zi - max_z).exp()).collect();
+        let sum: f64 = exp_z.iter().sum();
+        exp_z.iter().map(|&e| e / sum).collect()
+    }
+
+    /// Perturb in log-ratio space and apply softmax inverse.
+    /// Writes the new fractions directly into particle_params.
+    pub fn perturb(
+        &self,
+        particle_params: &mut [f64],
+        rng: &mut crate::rng::StatefulRng,
+        cooling_now: f64,
+    ) {
+        let log_ratios = self.to_log_barycentric(particle_params);
+        let perturbed: Vec<f64> = log_ratios.iter()
+            .zip(&self.rw_sds)
+            .map(|(&z, &sd)| z + rng.normal() * sd * cooling_now)
+            .collect();
+        let fracs = Self::from_log_barycentric(&perturbed);
+        for (j, &idx) in self.indices.iter().enumerate() {
+            particle_params[idx] = fracs[j];
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub enum Transform {
     /// Log transform with bounds clamping on inverse.
@@ -131,6 +183,10 @@ pub struct IF2Config {
     /// pomp default: 50 (cooling.fraction.50).
     pub cooling_target_iters: usize,
     pub dt: f64,
+    /// Simplex parameter groups (barycentric transform). Members are
+    /// perturbed jointly in log-ratio space with softmax inverse.
+    #[allow(dead_code)]
+    pub simplex_groups: Vec<SimplexGroup>,
 }
 
 /// Result of one IF2 iteration.
@@ -293,11 +349,25 @@ pub fn run_if2_with_progress(
         let mut clamp_counts = vec![0_usize; n_if2_params];
         let mut diag_count = vec![0_usize; n_if2_params];
 
+        // Build set of simplex member indices (perturbed jointly, skip in per-param loop)
+        let simplex_member_indices: std::collections::HashSet<usize> = config.simplex_groups.iter()
+            .flat_map(|g| g.indices.iter().copied())
+            .collect();
+
         // Initial parameter perturbation (at t=0)
         {
             let cooling_now = per_step_cooling.powf(global_step as f64);
+
+            // Simplex groups: perturb jointly in log-ratio space
+            for group in &config.simplex_groups {
+                for i in 0..n {
+                    group.perturb(&mut particle_params[i], &mut rngs[i], cooling_now);
+                }
+            }
+
             for i in 0..n {
                 for (pi, spec) in if2_params.iter().enumerate() {
+                    if simplex_member_indices.contains(&spec.index) { continue; }
                     let current = particle_params[i][spec.index];
                     let sd = spec.transformed_sd(spec.rw_sd, current) * cooling_now;
                     let z = spec.to_transformed(current);
@@ -341,11 +411,12 @@ pub fn run_if2_with_progress(
             while t < obs.time - 1e-10 { t += config.dt.min(obs.time - t); }
 
             // Perturb parameters at observation time (per-step cooling).
-            // IVP params are skipped here — they were only perturbed at t=0.
+            // IVP params and simplex members are skipped — IVP perturbed at t=0 only,
+            // simplex members perturbed jointly at t=0 only (they're always IVP).
             let cooling_now = per_step_cooling.powf(global_step as f64);
             for i in 0..n {
                 for (pi, spec) in if2_params.iter().enumerate() {
-                    if spec.ivp { continue; }
+                    if spec.ivp || simplex_member_indices.contains(&spec.index) { continue; }
                     let current = particle_params[i][spec.index];
                     let sd = spec.transformed_sd(spec.rw_sd, current) * cooling_now;
                     let z = spec.to_transformed(current);

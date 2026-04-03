@@ -377,6 +377,11 @@ let parameter_of_json j =
     param_kind    = (match member_opt "param_kind"    j with Some `Null | None -> None | Some k -> Some (as_string k));
   }
 
+let parameter_group_of_json j =
+  { kind    = as_string (member "kind" j);
+    members = List.map as_string (as_list (member "members" j));
+  }
+
 (* ── Initial conditions ──────────────────────────────────────────────────── *)
 
 let initial_conditions_of_json j =
@@ -475,6 +480,9 @@ let model_of_json (j : Yojson.Safe.t) : model =
     interventions      = List.map intervention_of_json     (as_list (member "interventions"  j));
     observations       = List.map observation_model_of_json (as_list (member "observations"  j));
     parameters         = List.map parameter_of_json        (as_list (member "parameters"     j));
+    parameter_groups   = (match member_opt "parameter_groups" j with
+      | Some `Null | None -> []
+      | Some gs -> List.map parameter_group_of_json (as_list gs));
     initial_conditions = initial_conditions_of_json (member "initial_conditions" j);
     data_contract      = (match member_opt "data_contract" j with Some `Null | None -> None | Some v -> Some v);
     output             = output_config_of_json     (member "output"     j);

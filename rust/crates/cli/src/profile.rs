@@ -307,7 +307,7 @@ pub fn cmd_profile(args: &[String]) {
 
             let config = IF2Config {
                 n_particles, n_iterations,
-                cooling_fraction: cooling, cooling_target_iters: n_iterations, dt,
+                cooling_fraction: cooling, cooling_target_iters: n_iterations, dt, simplex_groups: vec![],
             };
             let job_seed = seed ^ (grid_idx as u64 * 1000 + start_idx as u64);
 

@@ -676,6 +676,7 @@
       "param_kind": "probability"
     }
   ],
+  "parameter_groups": [],
   "initial_conditions": {
     "explicit": {
       "S_p0": 4999.0,

@@ -187,6 +187,7 @@
       "param_kind": "rate"
     }
   ],
+  "parameter_groups": [],
   "initial_conditions": { "explicit": { "S": 990.0, "E_e1": 5.0, "I": 5.0 } },
   "data_contract": null,
   "output": {

@@ -359,7 +359,7 @@ pub fn cmd_if2(args: &[String]) {
         n_particles,
         n_iterations,
         cooling_fraction: cooling,
-        cooling_target_iters: n_iterations,
+        cooling_target_iters: n_iterations, simplex_groups: vec![],
         dt,
     };
 

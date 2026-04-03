@@ -1243,6 +1243,7 @@
       "param_kind": "rate"
     }
   ],
+  "parameter_groups": [],
   "initial_conditions": {
     "explicit": { "S_age_0_5": 1000.0, "I_age_0_5": 10.0 }
   },
