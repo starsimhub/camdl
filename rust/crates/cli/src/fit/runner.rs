@@ -248,7 +248,12 @@ pub fn run_quick_pfilter(config: &FitRunConfig, params: &[f64], n_particles: usi
 }
 
 /// Print preflight transform report to stderr.
-fn print_preflight(config: &FitRunConfig) {
+/// `explicit_rw_sd` maps param names that had explicit rw_sd in fit.toml.
+pub fn print_preflight(config: &FitRunConfig) {
+    let n_auto = config.if2_params.iter()
+        .filter(|s| s.rw_sd_auto)
+        .count();
+
     eprintln!("\ntransforms:");
     for spec in &config.if2_params {
         let (tname, pos) = match &spec.transform {
@@ -267,13 +272,15 @@ fn print_preflight(config: &FitRunConfig) {
                 ("none".into(), format!("{:.4}", spec.initial))
             }
         };
-        let rw_info = if spec.rw_sd > 0.0 {
-            let transformed_sd = spec.transformed_sd(spec.rw_sd, spec.initial);
-            format!("rw_sd={:.4} ({:.3}/step transformed)", spec.rw_sd, transformed_sd)
-        } else {
-            "rw_sd=auto".into()
-        };
-        eprintln!("  {:12} {}  {}  {}", spec.name, tname, pos, rw_info);
+        let source = if spec.rw_sd_auto { "\x1b[33mauto\x1b[0m" } else { "explicit" };
+        let transformed_sd = spec.transformed_sd(spec.rw_sd, spec.initial);
+        eprintln!("  {:12} {}  {}  rw_sd={:.4} ({:.3}/step, {})",
+            spec.name, tname, pos, spec.rw_sd, transformed_sd, source);
+    }
+
+    if n_auto > 0 {
+        eprintln!("\n  \x1b[33m⚠ {}/{} parameters using auto rw_sd. Check traces and set explicit values.\x1b[0m",
+            n_auto, config.if2_params.len());
     }
 
     // Cooling schedule preview
@@ -380,6 +387,7 @@ pub fn build_if2_params_from_specs(
             lower: lo,
             upper: hi,
             ivp: spec.ivp,
+            rw_sd_auto: spec.rw_sd.is_none(),
         });
     }
 
@@ -944,7 +952,7 @@ mod tests {
             transform: Transform::Log { lo: 0.01, hi: 2.0 },
             lower: 0.01,
             upper: 2.0,
-            ivp: false,
+            ivp: false, rw_sd_auto: false,
         }];
 
         // Fake chain result: MLE has beta=0.5

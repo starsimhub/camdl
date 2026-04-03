@@ -112,27 +112,6 @@ pub fn run_scout(fit: &FitToml, seed: u64, force: bool) -> Result<(), String> {
         eprintln!();
     }
 
-    // MAD-based auto rw_sd — never fail, always write output
-    let (auto_rw_sd, n_good) = match runner::auto_rw_sd(&chain_results.results, &config.if2_params) {
-        Ok(result) => result,
-        Err(msg) => {
-            eprintln!("\n\x1b[33mwarning: auto rw_sd failed: {}\x1b[0m", msg);
-            eprintln!("  Falling back to bounds-based rw_sd. Scout output will still be written.");
-            eprintln!("  Inspect chain traces to diagnose convergence issues.\n");
-            // Fall back to bounds-based rw_sd from the current values
-            let fallback: HashMap<String, f64> = config.if2_params.iter()
-                .map(|spec| (spec.name.clone(), spec.rw_sd))
-                .collect();
-            (fallback, 0)
-        }
-    };
-
-    eprintln!("\nauto rw_sd ({}/{} good chains):", n_good, n_chains);
-    for spec in &config.if2_params {
-        let rw = auto_rw_sd.get(&spec.name).unwrap_or(&spec.rw_sd);
-        eprintln!("  {:12} rw_sd={:.4} (was {:.4})", spec.name, rw, spec.rw_sd);
-    }
-
     // Collect best chain's MLE parameters as start values
     let best = &chain_results.results.iter()
         .find(|(id, _)| *id == chain_results.best_chain)
@@ -159,9 +138,9 @@ pub fn run_scout(fit: &FitToml, seed: u64, force: bool) -> Result<(), String> {
         initial_loglik,
         best_chain: chain_results.best_chain,
         n_chains: n_chains,
-        n_good_chains: Some(n_good),
+        n_good_chains: None,
         start_values,
-        rw_sd: auto_rw_sd.clone(),
+        rw_sd: HashMap::new(), // rw_sd not propagated — refine reads from fit.toml
     };
     state.save(&stage_dir)?;
 
@@ -195,14 +174,13 @@ pub fn run_scout(fit: &FitToml, seed: u64, force: bool) -> Result<(), String> {
     }
 
     // Write scout_summary.json
-    write_summary(&stage_dir, &chain_results, &config, &auto_rw_sd, n_good, initial_loglik, &input_hash)?;
+    write_summary(&stage_dir, &chain_results, &config, initial_loglik, &input_hash)?;
 
     let wall_secs = elapsed.as_secs_f64();
     let per_iter = wall_secs / (n_chains as f64 * n_iterations as f64);
     eprintln!("\nscout complete in {:.1}s ({:.2}s/chain-iteration): {}/",
         wall_secs, per_iter, stage_dir);
     eprintln!("  best loglik: {:.1} (chain {})", chain_results.best_loglik, chain_results.best_chain + 1);
-    eprintln!("  good chains: {}/{}", n_good, n_chains);
     eprintln!("\nnext: camdl fit refine fit.toml --starts-from {}/", stage_dir);
 
     Ok(())
@@ -212,30 +190,23 @@ fn write_summary(
     dir: &str,
     results: &runner::ChainResults,
     config: &FitRunConfig,
-    auto_rw_sd: &HashMap<String, f64>,
-    n_good: usize,
     initial_loglik: f64,
     input_hash: &str,
 ) -> Result<(), String> {
     let summary = serde_json::json!({
         "stage": "scout",
-        "status": if n_good >= config.n_chains / 2 { "ok" } else { "warning" },
         "n_chains": config.n_chains,
-        "n_good_chains": n_good,
         "best_loglik": results.best_loglik,
         "best_chain": results.best_chain + 1,
         "initial_loglik": initial_loglik,
         "parameters": config.if2_params.iter().map(|spec| {
             let rhat = results.rhat.get(&spec.name).copied().unwrap_or(f64::NAN);
-            let rw = auto_rw_sd.get(&spec.name).copied().unwrap_or(0.0);
             serde_json::json!({
                 "name": spec.name,
                 "rhat": rhat,
-                "recommended_rw_sd": rw,
-                "original_rw_sd": spec.rw_sd,
+                "rw_sd": spec.rw_sd,
             })
         }).collect::<Vec<_>>(),
-        "next_step": if n_good >= config.n_chains / 2 { "refine" } else { "fix_model" },
         "input_hash": input_hash,
     });
 

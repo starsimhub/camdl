@@ -437,16 +437,17 @@ that explore roughly the middle third of the parameter range —
 appropriate for broad exploration. Available via `--rw-sd auto` on
 `camdl if2` or by omitting `rw_sd` in `fit.toml`.
 
-**Tier 2: MAD-based (from scout chains).** After scout completes,
-compute the Median Absolute Deviation of each parameter's best-loglik
-value across chains. `rw_sd = 0.5 × MAD` of good chains. MAD is
-breakdown-resistant — one outlier chain in a secondary mode doesn't
-corrupt the scale estimate. This is the `fit_state.toml [rw_sd]`
-that refine reads automatically.
+The auto default doesn't need to be precise — it just needs the
+right order of magnitude. The user should check traces after scout
+and set explicit rw_sd values for refine. The convention: `rw_sd ≈
+0.02 × value` for log-transformed parameters gives ~2% perturbation
+per step on the transformed scale.
 
-Tier 1 doesn't need to be precise — it just needs the right order
-of magnitude. Tier 2 is data-driven and produces calibrated values
-appropriate for convergent IF2.
+Refine reads rw_sd from the user's fit.toml, not from scout's
+output. No auto-calibration is propagated between stages — each
+stage uses the values the user specified (or auto from bounds if
+omitted). The `rw_sd_scale` setting in `[refine]` can multiply
+all values by a factor for tighter convergence.
 
 ### ESS-adaptive resampling
 

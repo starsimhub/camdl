@@ -40,6 +40,9 @@ pub struct IF2Param {
     /// Bounds for logit transform.
     pub lower: f64,
     pub upper: f64,
+    /// Whether rw_sd was auto-computed (for preflight reporting).
+    #[allow(dead_code)]
+    pub rw_sd_auto: bool,
     /// If true, this parameter is only perturbed at t=0 (initial value
     /// parameter). Used for S₀, E₀, I₀ etc. that set the initial state
     /// but don't change during simulation. Matches pomp's ivp() in rw.sd.

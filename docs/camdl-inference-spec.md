@@ -279,17 +279,9 @@ E0 = 140
 I0 = 118
 
 [rw_sd]
-# Auto-calibrated via MAD-based convergence-gated procedure:
-#
-# 1. Collect each chain's best-loglik parameters
-# 2. Per parameter: compute median and MAD across chains
-# 3. A chain is "good" if ALL its params are within 3×MAD of median
-# 4. If n_good < n_chains/2: ERROR — no consensus, cannot auto-calibrate
-#    If n_good < n_chains: WARNING — excluded divergent chains
-# 5. rw_sd = 0.5 × MAD of good chains (per parameter)
-#
-# MAD is breakdown-resistant: one chain in a secondary mode
-# doesn't corrupt the scale estimate.
+# rw_sd from the user's fit.toml (or auto from bounds if omitted).
+# No inter-stage auto-calibration — each stage uses the user's
+# specified values. Set explicit rw_sd after inspecting scout traces.
 R0 = 8.5
 sigma = 0.003
 gamma = 0.004
