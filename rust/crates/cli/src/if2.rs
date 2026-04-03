@@ -589,11 +589,12 @@ pub fn cmd_if2(args: &[String]) {
             let trace_path = format!("{}/parameter_traces.tsv", chain_dir);
             let mut f = std::fs::File::create(&trace_path).unwrap();
             use std::io::Write;
-            write!(f, "iteration\tif2_perturbed_loglik").unwrap();
+            write!(f, "iteration\tloglik\tif2_perturbed_loglik").unwrap();
             for spec in if2_params.iter() { write!(f, "\t{}", spec.name).unwrap(); }
             writeln!(f).unwrap();
             for it in &result.iterations {
-                write!(f, "{}\t{:.2}", it.iteration, it.if2_perturbed_loglik).unwrap();
+                let loglik_str = if it.loglik.is_finite() { format!("{:.2}", it.loglik) } else { "NA".into() };
+                write!(f, "{}\t{}\t{:.2}", it.iteration, loglik_str, it.if2_perturbed_loglik).unwrap();
                 for spec in if2_params.iter() { write!(f, "\t{:.6}", it.param_means[spec.index]).unwrap(); }
                 writeln!(f).unwrap();
             }
