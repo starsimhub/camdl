@@ -292,6 +292,17 @@ pub fn print_preflight(config: &FitRunConfig) {
     eprintln!("  iter {:3}: rw_sd at {:.1}%", 1, frac.powf(2.0 / iters as f64) * 100.0);
     eprintln!("  iter {:3}: rw_sd at {:.1}% (halfway)", mid, frac.powf(2.0 * mid as f64 / iters as f64) * 100.0);
     eprintln!("  iter {:3}: rw_sd at {:.1}%", iters, (frac * frac) * 100.0);
+
+    // Warn if cooling exhausts well before the run ends
+    // (rw_sd < 1% at 2/3 through means last third is wasted)
+    let two_thirds = (iters * 2 / 3).max(1);
+    let rw_at_two_thirds = frac.powf(2.0 * two_thirds as f64 / iters as f64);
+    if rw_at_two_thirds < 0.01 {
+        eprintln!("  \x1b[33m⚠ rw_sd drops below 1% at iteration {} — last {} iterations may be wasted.\x1b[0m",
+            two_thirds, iters - two_thirds);
+        eprintln!("    Consider fewer iterations or milder cooling (e.g., cooling = {:.2}).",
+            0.10_f64.sqrt()); // cf50 that gives 10% at end
+    }
     eprintln!();
 }
 
