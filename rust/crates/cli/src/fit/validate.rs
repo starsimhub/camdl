@@ -89,13 +89,71 @@ pub fn run_validate(fit: &FitToml, starts_from: &str, seed: u64, force: bool) ->
         mle_params[spec.index] = best.mle[spec.index];
     }
 
-    let pf_result = run_pfilter_at_mle(&config, &mle_params, pfilter_particles, seed)?;
+    // If holdout data exists, run PF on full series (train + holdout)
+    // and report separate logliks. Otherwise, just train.
+    let (pf_result, train_ll, holdout_ll) = if let Some(ref holdout_data) = fit.holdout {
+        // Load holdout observations
+        let (holdout_stream, holdout_path) = holdout_data.iter().next()
+            .ok_or_else(|| "empty [holdout] section".to_string())?;
+
+        let holdout_obs: Vec<sim::inference::if2::Observation> =
+            crate::pfilter::load_data_tsv_pub(holdout_path)?
+                .into_iter()
+                .map(|o| sim::inference::if2::Observation { time: o.time, value: o.value })
+                .collect();
+
+        let train_end = config.observations.last().map(|o| o.time).unwrap_or(0.0);
+        let holdout_min = holdout_obs.first().map(|o| o.time).unwrap_or(f64::INFINITY);
+
+        if holdout_min <= train_end {
+            return Err(format!(
+                "holdout data overlaps with training data.\n\
+                 Train max t = {}, holdout min t = {}.\n\
+                 Holdout observations must be strictly after training period.",
+                train_end, holdout_min
+            ));
+        }
+
+        // Build full observation list for the PF
+        let n_train = config.observations.len();
+        let mut full_obs: Vec<sim::inference::if2::Observation> = config.observations.iter()
+            .map(|o| sim::inference::if2::Observation { time: o.time, value: o.value })
+            .chain(holdout_obs.into_iter())
+            .collect();
+        full_obs.sort_by(|a, b| a.time.total_cmp(&b.time));
+        let n_holdout = full_obs.len() - n_train;
+
+        eprintln!("  running on full data ({} train + {} holdout observations)...",
+            config.observations.len(), n_holdout);
+
+        let pf = run_pfilter_with_obs(&config, &mle_params, &full_obs, pfilter_particles, seed)?;
+
+        // Split logliks by train/holdout boundary
+        let train_ll: f64 = pf.ll_increments.iter().zip(&pf.obs_times)
+            .filter(|(_, &t)| t <= train_end)
+            .map(|(ll, _)| ll)
+            .sum();
+        let holdout_ll: f64 = pf.ll_increments.iter().zip(&pf.obs_times)
+            .filter(|(_, &t)| t > train_end)
+            .map(|(ll, _)| ll)
+            .sum();
+
+        eprintln!("  train loglik:   {:.1} ({} obs)", train_ll, config.observations.len());
+        eprintln!("  holdout loglik: {:.1} ({} obs)",
+            holdout_ll, n_holdout);
+
+        (pf, Some(train_ll), Some(holdout_ll))
+    } else {
+        let pf = run_pfilter_at_mle(&config, &mle_params, pfilter_particles, seed)?;
+        (pf, None, None)
+    };
+
     let loglik = pf_result.loglik;
     let loglik_sd = pf_result.loglik_sd;
     let ess_mean = pf_result.ess_mean;
     let ess_min = pf_result.ess_min;
 
-    eprintln!("  loglik = {:.1} ± {:.1}", loglik, loglik_sd);
+    eprintln!("  total loglik = {:.1} ± {:.1}", loglik, loglik_sd);
     eprintln!("  ESS at MLE: mean={:.0}, min={:.0}", ess_mean, ess_min);
 
     if ess_min < pfilter_particles as f64 / 4.0 {
@@ -232,8 +290,18 @@ fn run_pfilter_at_mle(
     n_particles: usize,
     seed: u64,
 ) -> Result<PfilterResult, String> {
+    run_pfilter_with_obs(config, params, &config.observations, n_particles, seed)
+}
+
+fn run_pfilter_with_obs(
+    config: &FitRunConfig,
+    params: &[f64],
+    obs: &[sim::inference::if2::Observation],
+    n_particles: usize,
+    seed: u64,
+) -> Result<PfilterResult, String> {
     let compiled = &*config.compiled;
-    let observations: Vec<sim::inference::particle_filter::Observation> = config.observations.iter()
+    let observations: Vec<sim::inference::particle_filter::Observation> = obs.iter()
         .map(|o| sim::inference::particle_filter::Observation { time: o.time, value: o.value })
         .collect();
 

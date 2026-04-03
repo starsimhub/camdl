@@ -9,6 +9,10 @@ use std::collections::HashMap;
 pub struct FitToml {
     pub fit: FitSection,
     pub data: HashMap<String, String>,
+    /// Holdout data for out-of-sample validation. Keys must match [data] keys.
+    /// Scout/refine never see holdout data. Validate runs PF on train + holdout
+    /// and reports separate logliks.
+    pub holdout: Option<HashMap<String, String>>,
     pub config: FitConfigSection,
     pub estimate: HashMap<String, EstimateSpec>,
     pub fixed: HashMap<String, toml::Value>,
@@ -79,6 +83,20 @@ impl FitToml {
             .map_err(|e| format!("cannot read {}: {}", path, e))?;
         let fit: FitToml = toml::from_str(&contents)
             .map_err(|e| format!("parse error in {}: {}", path, e))?;
+
+        // Validate holdout keys match data keys
+        if let Some(ref holdout) = fit.holdout {
+            for key in holdout.keys() {
+                if !fit.data.contains_key(key) {
+                    return Err(format!(
+                        "[holdout] key '{}' does not match any [data] key.\n\
+                         Available data streams: {}",
+                        key, fit.data.keys().cloned().collect::<Vec<_>>().join(", ")
+                    ));
+                }
+            }
+        }
+
         Ok(fit)
     }
 

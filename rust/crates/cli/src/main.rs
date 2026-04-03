@@ -10,6 +10,7 @@ mod eval;
 mod pfilter;
 mod if2;
 mod profile;
+mod data;
 mod fit;
 
 use sim::{write_diagnostics_tsv, warn_zero_firings};
@@ -79,6 +80,15 @@ fn main() {
                 Some("status")   => fit::cmd_fit_status(&all_args[2..]),
                 _ => {
                     eprintln!("usage: camdl fit <scout|refine|validate|status> FIT.toml");
+                    std::process::exit(1);
+                }
+            }
+        }
+        "data" => {
+            match all_args.get(1).map(|s| s.as_str()) {
+                Some("split") => data::cmd_data_split(&all_args[2..]),
+                _ => {
+                    eprintln!("usage: camdl data split FILE --at-time T [--train OUT] [--holdout OUT]");
                     std::process::exit(1);
                 }
             }
