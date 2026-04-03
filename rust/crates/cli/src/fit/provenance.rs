@@ -3,7 +3,7 @@
 use sha2::{Sha256, Digest};
 use std::collections::HashMap;
 
-const TOOL_VERSION: &str = env!("CARGO_PKG_VERSION");
+use crate::version;
 
 /// Input hash: identifies the computation (model + data + config + seed + version).
 pub fn compute_input_hash(
@@ -28,7 +28,7 @@ pub fn compute_input_hash(
     h.update(b"\x00seed\x00");
     h.update(seed.to_le_bytes());
     h.update(b"\x00version\x00");
-    h.update(TOOL_VERSION.as_bytes());
+    h.update(version::VERSION_SHORT.as_bytes());
     hex::encode(&h.finalize()[..4]) // 8 hex chars
 }
 
@@ -69,7 +69,7 @@ pub fn write_mle_params(
         writeln!(f, "# ESS at MLE: mean={:.0}, min={:.0}", ess_mean, ess_min).unwrap();
     }
     writeln!(f, "# Timestamp: {}", metadata.timestamp).unwrap();
-    writeln!(f, "# camdl version: {}", TOOL_VERSION).unwrap();
+    writeln!(f, "# camdl version: {}", version::VERSION_SHORT).unwrap();
     writeln!(f).unwrap();
 
     // Write params in sorted order for deterministic output

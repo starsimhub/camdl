@@ -3,6 +3,7 @@
 use crate::fit::config::FitToml;
 use crate::fit::state::FitState;
 use crate::fit::provenance;
+use crate::version;
 
 pub fn run_status(fit: &FitToml) -> Result<(), String> {
     let dir = &fit.fit.output_dir;
@@ -20,6 +21,7 @@ pub fn run_status(fit: &FitToml) -> Result<(), String> {
             let n_good = state.n_good_chains.unwrap_or(state.n_chains);
             println!("  scout:     \x1b[32m✓\x1b[0m complete ({} chains, best loglik {:.1}, {}/{} good)",
                 state.n_chains, state.best_loglik, n_good, state.n_chains);
+            print_stale_warning(state, "scout");
         }
         None => println!("  scout:     \x1b[90m○ not started\x1b[0m"),
     }
@@ -36,6 +38,7 @@ pub fn run_status(fit: &FitToml) -> Result<(), String> {
             let rhat_str = if converged { "Rhat < 1.05" } else { "Rhat > 1.1" };
             println!("  refine:    {} complete ({} chains, {}, loglik {:.1})",
                 symbol, state.n_chains, rhat_str, state.best_loglik);
+            print_stale_warning(state, "refine");
         }
         None => {
             if scout_state.is_some() {
@@ -61,6 +64,7 @@ pub fn run_status(fit: &FitToml) -> Result<(), String> {
             let ess_str = ess.map_or("".into(), |e| format!(", ESS min={:.0}", e));
             println!("  validate:  \x1b[32m✓\x1b[0m complete (loglik {:.1} ± {:.1}{})",
                 state.best_loglik, loglik_sd, ess_str);
+            print_stale_warning(state, "validate");
         }
         None => {
             if refine_state.is_some() {
@@ -258,6 +262,19 @@ fn load_summary(base_dir: &str, stage: &str) -> Option<serde_json::Value> {
     let path = format!("{}/{}/{}_summary.json", base_dir, stage, stage);
     std::fs::read_to_string(&path).ok()
         .and_then(|s| serde_json::from_str(&s).ok())
+}
+
+fn print_stale_warning(state: &FitState, stage: &str) {
+    match &state.camdl_version {
+        Some(v) if v != version::VERSION_SHORT => {
+            println!("             \x1b[33m⚠ stale — produced by {}, current is {}\x1b[0m",
+                v, version::VERSION_SHORT);
+        }
+        None => {
+            println!("             \x1b[90m(no version recorded for {})\x1b[0m", stage);
+        }
+        _ => {} // matches current version
+    }
 }
 
 fn load_profiles(base_dir: &str) -> std::collections::HashMap<String, (f64, f64)> {

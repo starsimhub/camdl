@@ -1,7 +1,7 @@
 use sha2::{Sha256, Digest};
 use std::collections::HashMap;
 
-const TOOL_VERSION: &str = env!("CARGO_PKG_VERSION");
+use crate::version;
 
 /// Structural hash of the IR: only fields that affect simulation semantics.
 /// Ignores t_end, output config, labels, and other non-structural fields.
@@ -45,7 +45,7 @@ pub fn sim_hash(model_hash: &str, params_canonical: &str, backend: &str, dt: f64
     h.update(b"\x00");
     h.update(dt.to_bits().to_le_bytes());
     h.update(b"\x00");
-    h.update(TOOL_VERSION.as_bytes());
+    h.update(version::VERSION_SHORT.as_bytes());
     hex::encode(h.finalize())
 }
 

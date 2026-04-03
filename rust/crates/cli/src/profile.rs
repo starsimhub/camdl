@@ -352,6 +352,7 @@ pub fn cmd_profile(args: &[String]) {
         None => Box::new(std::io::stdout().lock()),
     };
 
+    writeln!(out, "# {}", crate::version::VERSION).unwrap();
     for fg in &focal_grids { write!(out, "{}\t", fg.name).unwrap(); }
     write!(out, "max_loglik").unwrap();
     for spec in if2_params.iter() { write!(out, "\t{}", spec.name).unwrap(); }

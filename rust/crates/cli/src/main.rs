@@ -12,6 +12,7 @@ mod if2;
 mod profile;
 mod data;
 mod fit;
+pub mod version;
 
 use sim::{write_diagnostics_tsv, warn_zero_firings};
 use std::collections::HashMap;
@@ -36,6 +37,12 @@ fn usage() -> ! {
 fn main() {
     let all_args: Vec<String> = std::env::args().skip(1).collect();
     if all_args.is_empty() { usage(); }
+
+    // --version / -V anywhere in args
+    if all_args.iter().any(|a| a == "--version" || a == "-V") {
+        println!("{}", version::VERSION);
+        return;
+    }
 
     // Dispatch on first argument
     match all_args[0].as_str() {
@@ -228,6 +235,7 @@ fn run_simulate(args: &[String]) {
         None => Box::new(std::io::BufWriter::new(std::io::stdout().lock())),
     };
 
+    writeln!(out, "# {}", version::VERSION).unwrap();
     write!(out, "t").unwrap();
     for n in &int_names  { write!(out, "\t{}", n).unwrap(); }
     for n in &real_names { write!(out, "\t{}", n).unwrap(); }

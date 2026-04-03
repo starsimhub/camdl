@@ -862,6 +862,7 @@ pub fn write_chain_outputs(
         let trace_path = format!("{}/parameter_traces.tsv", chain_dir);
         let mut f = std::fs::File::create(&trace_path)
             .map_err(|e| format!("cannot write {}: {}", trace_path, e))?;
+        writeln!(f, "# {}", crate::version::VERSION).unwrap();
         write!(f, "iteration\tloglik\tif2_perturbed_loglik").unwrap();
         for spec in if2_params { write!(f, "\t{}", spec.name).unwrap(); }
         writeln!(f).unwrap();
@@ -876,6 +877,7 @@ pub fn write_chain_outputs(
         let toml_path = format!("{}/final_params.toml", chain_dir);
         let mut f = std::fs::File::create(&toml_path)
             .map_err(|e| format!("cannot write {}: {}", toml_path, e))?;
+        writeln!(f, "# {}", crate::version::VERSION).unwrap();
         writeln!(f, "# Chain {} final parameters", chain_id + 1).unwrap();
         writeln!(f, "# loglik = {:.2}", result.final_loglik).unwrap();
         writeln!(f).unwrap();
@@ -912,6 +914,7 @@ pub fn write_diagnostics(dir: &str, results: &[(usize, IF2Result)]) -> Result<()
     let path = format!("{}/diagnostics.tsv", dir);
     let mut f = std::fs::File::create(&path)
         .map_err(|e| format!("cannot write {}: {}", path, e))?;
+    writeln!(f, "# {}", crate::version::VERSION).unwrap();
     writeln!(f, "chain\titeration\tloglik\tif2_perturbed_loglik").unwrap();
     for (chain_id, result) in results {
         for it in &result.iterations {

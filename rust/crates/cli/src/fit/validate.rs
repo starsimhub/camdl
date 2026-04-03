@@ -203,6 +203,7 @@ pub fn run_validate(fit: &FitToml, starts_from: &str, seed: u64, force: bool) ->
         seed,
         timestamp: crate::fit::scout::now_iso8601_pub(),
         input_hash: Some(input_hash.clone()),
+        camdl_version: Some(crate::version::VERSION_SHORT.into()),
         best_loglik: loglik,
         initial_loglik: prior_state.best_loglik,
         best_chain: chain_results.best_chain,
@@ -375,6 +376,7 @@ fn write_ess_trace(dir: &str, pf: &PfilterResult) -> Result<(), String> {
     let path = format!("{}/ess_at_mle.tsv", dir);
     let mut f = std::fs::File::create(&path)
         .map_err(|e| format!("cannot write {}: {}", path, e))?;
+    writeln!(f, "# {}", crate::version::VERSION).unwrap();
     writeln!(f, "time\tESS").unwrap();
     for (t, ess) in pf.obs_times.iter().zip(&pf.ess_trace) {
         writeln!(f, "{}\t{:.1}", t, ess).unwrap();
@@ -388,6 +390,7 @@ fn write_pfilter_trace(dir: &str, pf: &PfilterResult, config: &FitRunConfig) -> 
     let mut f = std::fs::File::create(&path)
         .map_err(|e| format!("cannot write {}: {}", path, e))?;
 
+    writeln!(f, "# {}", crate::version::VERSION).unwrap();
     if let Some(ref preds) = pf.predictions {
         writeln!(f, "time\tll_increment\tESS\tobs_mean\tobs_q05\tobs_q50\tobs_q95\tstate_mean\tstate_q05\tstate_q50\tstate_q95\tobserved").unwrap();
         for (i, t) in pf.obs_times.iter().enumerate() {
@@ -625,7 +628,7 @@ fn write_fit_record(
             "input_hash": metadata.input_hash,
             "content_hash": provenance::compute_content_hash(all_params),
             "timestamp": metadata.timestamp,
-            "camdl_version": env!("CARGO_PKG_VERSION"),
+            "camdl_version": crate::version::VERSION_SHORT,
         },
         "outputs": output_hashes,
     });
