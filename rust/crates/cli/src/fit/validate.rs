@@ -18,7 +18,7 @@ use std::collections::HashMap;
 const VALIDATE_CHAINS: usize = 4;
 const VALIDATE_PARTICLES: usize = 5000;
 const VALIDATE_ITERATIONS: usize = 100;
-const VALIDATE_COOLING: f64 = 0.95;
+const VALIDATE_COOLING: f64 = 0.05; // cf50: 5% at halfway, 0.25% at end
 const VALIDATE_PFILTER_PARTICLES: usize = 10000;
 
 pub fn run_validate(fit: &FitToml, starts_from: &str, seed: u64, force: bool) -> Result<(), String> {

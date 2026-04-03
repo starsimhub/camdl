@@ -11,7 +11,7 @@ use std::collections::HashMap;
 const REFINE_CHAINS: usize = 4;
 const REFINE_PARTICLES: usize = 1000;
 const REFINE_ITERATIONS: usize = 50;
-const REFINE_COOLING: f64 = 0.95;
+const REFINE_COOLING: f64 = 0.05; // cf50: 5% at halfway, 0.25% at end — converge to MLE
 
 pub fn run_refine(fit: &FitToml, starts_from: &str, seed: u64, force: bool) -> Result<(), String> {
     let stage_dir = format!("{}/refine", fit.fit.output_dir);

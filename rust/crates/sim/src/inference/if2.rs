@@ -226,11 +226,15 @@ pub fn run_if2_with_progress(
     let mut current_params = base_params.to_vec();
 
     // Compute per-filtering-step cooling factor.
-    // After cooling_target_iters × n_obs steps, SD is cooling_fraction of initial.
-    // Per-step factor: c = cooling_fraction ^ (1 / (target_iters * n_obs))
+    // Matches pomp's cooling.fraction.50 semantics: the fraction is reached
+    // at the HALFWAY point of the target iterations. After the full run,
+    // rw_sd = cooling_fraction² × initial.
+    //
+    // Per-step factor: c = cooling_fraction ^ (2 / (target_iters × n_obs))
+    // The "2" makes the fraction apply at the midpoint, not the endpoint.
     let n_obs = observations.len();
     let total_target_steps = config.cooling_target_iters as f64 * n_obs as f64;
-    let per_step_cooling = config.cooling_fraction.powf(1.0 / total_target_steps);
+    let per_step_cooling = config.cooling_fraction.powf(2.0 / total_target_steps);
 
     let mut iterations = Vec::with_capacity(config.n_iterations);
     let mut global_step: u64 = 0; // total filtering steps across all iterations

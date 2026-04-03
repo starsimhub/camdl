@@ -280,10 +280,11 @@ fn print_preflight(config: &FitRunConfig) {
     let frac = config.if2_config.cooling_fraction;
     let iters = config.if2_config.n_iterations;
     let mid = iters / 2;
-    eprintln!("\ncooling: fraction={:.2} over {} iterations", frac, iters);
-    eprintln!("  iter {:3}: rw_sd at {:.0}%", 1, frac.powf(1.0 / iters as f64) * 100.0);
-    eprintln!("  iter {:3}: rw_sd at {:.0}%", mid, frac.powf(mid as f64 / iters as f64) * 100.0);
-    eprintln!("  iter {:3}: rw_sd at {:.0}%", iters, frac * 100.0);
+    // cf50 semantics: fraction reached at halfway, fraction² at end
+    eprintln!("\ncooling: cf50={:.2} over {} iterations (pomp convention)", frac, iters);
+    eprintln!("  iter {:3}: rw_sd at {:.1}%", 1, frac.powf(2.0 / iters as f64) * 100.0);
+    eprintln!("  iter {:3}: rw_sd at {:.1}% (halfway)", mid, frac.powf(2.0 * mid as f64 / iters as f64) * 100.0);
+    eprintln!("  iter {:3}: rw_sd at {:.1}%", iters, (frac * frac) * 100.0);
     eprintln!();
 }
 

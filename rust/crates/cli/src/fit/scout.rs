@@ -10,7 +10,7 @@ use std::collections::HashMap;
 const SCOUT_CHAINS: usize = 8;
 const SCOUT_PARTICLES: usize = 500;
 const SCOUT_ITERATIONS: usize = 30;
-const SCOUT_COOLING: f64 = 0.5;  // mild contraction — find basins, don't converge
+const SCOUT_COOLING: f64 = 0.70; // cf50: 70% at halfway, 49% at end — find basins
 const SCOUT_RW_SD_SCALE: f64 = 1.0; // /20 log default is already calibrated for scout
 
 pub fn run_scout(fit: &FitToml, seed: u64, force: bool) -> Result<(), String> {

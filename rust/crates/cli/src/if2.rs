@@ -151,20 +151,20 @@ pub fn cmd_if2(args: &[String]) {
                 if n_chains == 1 { n_chains = 8; }
                 n_particles = n_particles.or(Some(500));
                 n_iterations = n_iterations.or(Some(30));
-                cooling = cooling.or(Some(0.5)); // mild contraction — find basins
+                cooling = cooling.or(Some(0.70)); // cf50: 70% at halfway — find basins
             }
             "refine" => {
                 if n_chains == 1 { n_chains = 4; }
                 n_particles = n_particles.or(Some(1000));
                 n_iterations = n_iterations.or(Some(50));
-                cooling = cooling.or(Some(0.95));
+                cooling = cooling.or(Some(0.05));
                 // parallel stays 0 (num_cpus default) unless user sets --parallel
             }
             "validate" => {
                 if n_chains == 1 { n_chains = 4; }
                 n_particles = n_particles.or(Some(5000));
                 n_iterations = n_iterations.or(Some(100));
-                cooling = cooling.or(Some(0.95));
+                cooling = cooling.or(Some(0.05));
                 // parallel stays 0 (num_cpus default) unless user sets --parallel
             }
             other => {
