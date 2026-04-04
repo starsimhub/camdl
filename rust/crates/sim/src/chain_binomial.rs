@@ -178,11 +178,11 @@ fn run_chain_binomial(
         let mut pending_deltas: Vec<(usize, i64)> = Vec::new();
         let mut handled = vec![false; n_transitions];
 
-        // Multinomial draws for transitions sharing a source compartment.
-        // Sequential conditional binomial decomposition:
-        //   count_1 ~ Binom(n_remaining, p_1 / (1 - 0))
-        //   count_2 ~ Binom(n_remaining - count_1, p_2 / (1 - p_1))
-        // Exact for the multinomial. Guarantees Σ counts ≤ n_src.
+        // Euler-multinomial draws for transitions sharing a source compartment.
+        // Matches pomp's reulermultinom:
+        //   1. Compute effective per-capita rates (with gamma noise if overdispersed)
+        //   2. Draw total exits from Binom(n_src, 1-exp(-sum_rates * dt))
+        //   3. Split total exits proportional to rates
         for &(src_local, ref group) in &model.source_groups {
             let n_src = int_s.counts[src_local].max(0);
             if n_src == 0 {
@@ -190,7 +190,8 @@ fn run_chain_binomial(
                 continue;
             }
 
-            let mut probs: Vec<(usize, f64)> = Vec::with_capacity(group.len());
+            let mut rates: Vec<(usize, f64)> = Vec::with_capacity(group.len());
+            let mut total_rate = 0.0_f64;
             for &tr_idx in group {
                 let rate = propensities[tr_idx];
                 if rate <= 0.0 {
@@ -200,8 +201,6 @@ fn run_chain_binomial(
                 let per_capita = rate / n_src as f64;
                 match &draws[tr_idx] {
                     ResolvedDraw::Deterministic => {
-                        // Deterministic inflows handled separately below
-                        // (shouldn't appear in source groups, but guard anyway)
                         handled[tr_idx] = true;
                         continue;
                     }
@@ -212,29 +211,31 @@ fn run_chain_binomial(
                         per_capita * rng.gamma_multiplier(*sigma_sq, dt),
                     _ => per_capita,
                 };
-                let p = 1.0 - (-effective * dt).exp();
-                probs.push((tr_idx, p.clamp(0.0, 1.0)));
+                total_rate += effective;
+                rates.push((tr_idx, effective));
             }
 
-            let mut n_remaining = n_src as u64;
-            let mut p_consumed = 0.0_f64;
+            if total_rate <= 0.0 || rates.is_empty() { continue; }
 
-            for &(tr_idx, p_i) in &probs {
-                if n_remaining == 0 {
-                    handled[tr_idx] = true;
-                    continue;
-                }
-                let p_budget = 1.0 - p_consumed;
-                if p_budget <= 0.0 {
-                    handled[tr_idx] = true;
-                    continue;
-                }
-                let cond_p = (p_i / p_budget).clamp(0.0, 1.0);
-                let count = rng.binomial(n_remaining, cond_p);
-                n_remaining -= count;
-                p_consumed += p_i;
+            // Step 1: draw total exits
+            let p_total = (1.0 - (-total_rate * dt).exp()).clamp(0.0, 1.0);
+            let mut n_events = rng.binomial(n_src as u64, p_total);
 
-                // Buffer the stoichiometry deltas — do NOT apply to int_s yet.
+            // Step 2: split proportional to rates
+            let n_competing = rates.len();
+            let mut rate_remaining = total_rate;
+            for (k, &(tr_idx, eff_rate)) in rates.iter().enumerate() {
+                let count = if k == n_competing - 1 {
+                    n_events
+                } else if n_events > 0 && rate_remaining > 0.0 {
+                    let p_split = (eff_rate / rate_remaining).clamp(0.0, 1.0);
+                    let c = rng.binomial(n_events, p_split);
+                    n_events -= c;
+                    rate_remaining -= eff_rate;
+                    c
+                } else {
+                    0
+                };
                 for &(local, delta) in &model.transition_stoich[tr_idx] {
                     pending_deltas.push((local, delta * count as i64));
                 }
@@ -351,7 +352,18 @@ pub fn step_one(
     scratch.pending_deltas.clear();
     scratch.handled.fill(false);
 
-    // Multinomial draws for transitions sharing a source compartment
+    // Euler-multinomial draws for transitions sharing a source compartment.
+    //
+    // Matches pomp's reulermultinom exactly:
+    //   1. Compute effective per-capita rates (with gamma noise if overdispersed)
+    //   2. Draw TOTAL exits from Binom(n_src, 1-exp(-sum_rates * dt))
+    //   3. Split total exits across transitions proportional to their rates
+    //
+    // This is NOT equivalent to sequential conditional binomials with
+    // individual probabilities p_i = 1-exp(-r_i*dt), because
+    // Σ(1-exp(-r_i*dt)) > 1-exp(-Σr_i*dt) (subadditivity of 1-exp).
+    // The old algorithm systematically over-counted total exits, causing
+    // particle trajectories to drift and ESS to degrade over long runs.
     for &(src_local, ref group) in &model.source_groups {
         let n_src = counts[src_local].max(0);
         if n_src == 0 {
@@ -359,7 +371,9 @@ pub fn step_one(
             continue;
         }
 
-        scratch.probs.clear();
+        // Step 1: compute effective per-capita rates
+        scratch.probs.clear(); // reuse as (tr_idx, effective_rate) pairs
+        let mut total_rate = 0.0_f64;
         for &tr_idx in group {
             let rate = scratch.propensities[tr_idx];
             if rate <= 0.0 { scratch.handled[tr_idx] = true; continue; }
@@ -373,20 +387,33 @@ pub fn step_one(
                     per_capita * rng.gamma_multiplier(*sigma_sq, dt),
                 _ => per_capita,
             };
-            let p = 1.0 - (-effective * dt).exp();
-            scratch.probs.push((tr_idx, p.clamp(0.0, 1.0)));
+            total_rate += effective;
+            scratch.probs.push((tr_idx, effective));
         }
 
-        let mut n_remaining = n_src as u64;
-        let mut p_consumed = 0.0_f64;
-        for &(tr_idx, p_i) in &scratch.probs {
-            if n_remaining == 0 || (1.0 - p_consumed) <= 0.0 {
-                scratch.handled[tr_idx] = true; continue;
-            }
-            let cond_p = (p_i / (1.0 - p_consumed)).clamp(0.0, 1.0);
-            let count = rng.binomial(n_remaining, cond_p);
-            n_remaining -= count;
-            p_consumed += p_i;
+        if total_rate <= 0.0 || scratch.probs.is_empty() { continue; }
+
+        // Step 2: draw total exits (pomp's first rbinom)
+        let p_total = (1.0 - (-total_rate * dt).exp()).clamp(0.0, 1.0);
+        let mut n_events = rng.binomial(n_src as u64, p_total);
+
+        // Step 3: split total exits proportional to rates (pomp's inner loop)
+        let n_competing = scratch.probs.len();
+        let mut rate_remaining = total_rate;
+        for (k, &(tr_idx, eff_rate)) in scratch.probs.iter().enumerate() {
+            let count = if k == n_competing - 1 {
+                // Last category gets the remainder (avoids rounding drift)
+                n_events
+            } else if n_events > 0 && rate_remaining > 0.0 {
+                // pomp: if (rate[k] > p) p = rate[k]; trans[k] = rbinom(size, rate[k]/p)
+                let p_split = (eff_rate / rate_remaining).clamp(0.0, 1.0);
+                let c = rng.binomial(n_events, p_split);
+                n_events -= c;
+                rate_remaining -= eff_rate;
+                c
+            } else {
+                0
+            };
             for &(local, delta) in &model.transition_stoich[tr_idx] {
                 scratch.pending_deltas.push((local, delta * count as i64));
             }
