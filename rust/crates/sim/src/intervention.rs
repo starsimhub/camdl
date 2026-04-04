@@ -44,6 +44,9 @@ pub fn apply_interventions_at(
 ) -> Result<bool, SimError> {
     let mut any_fired = false;
     for iv in &model.model.interventions {
+        // always_active events are processed atomically with transitions
+        // in inject_event_deltas(). Skip them here.
+        if iv.always_active { continue; }
         for fire_t in intervention_fire_times(&iv.schedule) {
             if (fire_t - t).abs() <= tolerance {
                 apply_intervention(iv, model, int_s, real_s, params, t)?;
@@ -53,6 +56,83 @@ pub fn apply_interventions_at(
         }
     }
     Ok(any_fired)
+}
+
+/// Inject always_active event actions as deltas into `pending_deltas`.
+///
+/// All action types are expressed as deltas from the snapshot state:
+///   Add(n)        → (+n, target)
+///   Transfer(f)   → (-delta, src), (+delta, dst) where delta = floor(src * f)
+///   Set(v)        → (v - old, target) where old is from snapshot
+///
+/// Called from both `step_one` and `run_chain_binomial` to ensure events
+/// are applied atomically with transitions, matching pomp's ordering.
+pub fn inject_event_deltas(
+    model: &CompiledModel,
+    snapshot: &IntState,
+    real_s: &RealState,
+    params: &[f64],
+    t: f64,
+    dt: f64,
+    pending_deltas: &mut Vec<(usize, i64)>,
+) -> Result<(), SimError> {
+    let t_end = t + dt;
+    let ctx = EvalCtx {
+        model, int_s: snapshot, real_s, params, t: t_end, projected: None,
+    };
+    for iv in &model.model.interventions {
+        if !iv.always_active { continue; }
+        let fires = intervention_fire_times(&iv.schedule);
+        if !fires.iter().any(|&ft| (ft - t_end).abs() <= dt * 0.5) { continue; }
+        for action in &iv.actions {
+            match action {
+                Action::Add(aa) => {
+                    let n = eval_expr(&aa.count, &ctx)?.round() as i64;
+                    if let Some(&global) = model.comp_index.get(aa.compartment.as_str()) {
+                        if let Some(local) = model.global_to_int[global] {
+                            pending_deltas.push((local, n));
+                        }
+                    }
+                }
+                Action::FractionTransfer(ft) => {
+                    let frac = eval_expr(&ft.fraction, &ctx)?.clamp(0.0, 1.0);
+                    if let (Some(&sg), Some(&dg)) = (
+                        model.comp_index.get(ft.src.as_str()),
+                        model.comp_index.get(ft.dst.as_str()),
+                    ) {
+                        if let (Some(sl), Some(dl)) = (model.global_to_int[sg], model.global_to_int[dg]) {
+                            let delta = (snapshot.counts[sl] as f64 * frac).floor() as i64;
+                            pending_deltas.push((sl, -delta));
+                            pending_deltas.push((dl, delta));
+                        }
+                    }
+                }
+                Action::AbsoluteTransfer(at) => {
+                    let n = eval_expr(&at.count, &ctx)?.round() as i64;
+                    if let (Some(&sg), Some(&dg)) = (
+                        model.comp_index.get(at.src.as_str()),
+                        model.comp_index.get(at.dst.as_str()),
+                    ) {
+                        if let (Some(sl), Some(dl)) = (model.global_to_int[sg], model.global_to_int[dg]) {
+                            let transfer = n.min(snapshot.counts[sl]);
+                            pending_deltas.push((sl, -transfer));
+                            pending_deltas.push((dl, transfer));
+                        }
+                    }
+                }
+                Action::Set(sa) => {
+                    let new_val = eval_expr(&sa.value, &ctx)?.round() as i64;
+                    if let Some(&global) = model.comp_index.get(sa.compartment.as_str()) {
+                        if let Some(local) = model.global_to_int[global] {
+                            let old_val = snapshot.counts[local];
+                            pending_deltas.push((local, new_val - old_val));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Collect sorted, deduplicated intervention times.

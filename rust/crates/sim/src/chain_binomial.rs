@@ -259,8 +259,12 @@ fn run_chain_binomial(
             current_flows.add(i, count);
         }
 
-        // Apply all deltas simultaneously — the state transitions atomically
-        // from start-of-step to end-of-step with no intermediate visibility.
+        // Inject always_active event deltas (evaluated from snapshot)
+        crate::intervention::inject_event_deltas(
+            model, &int_s, &real_s, params, t, dt, &mut pending_deltas,
+        )?;
+
+        // Apply all deltas simultaneously — transitions + events atomically.
         for (local, delta) in pending_deltas {
             int_s.counts[local] += delta;
         }
@@ -457,7 +461,13 @@ pub fn step_one(
         flows[i] += count;
     }
 
-    // Apply all deltas atomically
+    // Inject always_active event deltas (evaluated from snapshot, applied atomically)
+    crate::intervention::inject_event_deltas(
+        model, &scratch.int_s, &scratch.real_s, params, t, dt,
+        &mut scratch.pending_deltas,
+    )?;
+
+    // Apply all deltas atomically (transitions + events)
     for &(local, delta) in &scratch.pending_deltas {
         counts[local] += delta;
     }
