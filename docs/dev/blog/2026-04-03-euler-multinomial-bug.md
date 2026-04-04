@@ -424,10 +424,48 @@ events {
 
 No `mod()`. No comparison chain. No `* 365.25` magnitude hack. No
 window width to get wrong. The cohort is what it is: a scheduled
-addition of people to S. The engine fires it once per period on the
-timestep nearest to day 251, using `|t - target| < 0.5 * dt`. The
-timing logic lives in the framework, tested once, not reimplemented by
-every modeler.
+addition of people to S.
+
+Result: camdl loglik = **-5817 +/- 7** vs pomp = **-5813**. Gap: **4
+nats**. The tools match.
+
+### One more bug on the way: floating-point fire times
+
+The first implementation of `events {}` used a tolerance window to
+match fire times: `|t - target| < 0.5 * dt`. This is the same approach
+pomp uses (`fabs(t - floor(t) - 251/365) < 0.5*dt`). It produced a
+new 600-nat gap — the third manifestation of the same bug class.
+
+With `period = 365.25` and `at_day = 258`, the fire time for year 3 is
+`258 + 2 * 365.25 = 988.5`. With `dt = 1`, both timestep 988 and 989
+are within 0.5 of the target. Double fire. Changing `<=` to `<` made
+988.5 fire zero times. No tolerance value works when the target lands
+exactly on the boundary.
+
+The fix: eliminate floating-point fire-time comparison entirely. At
+model initialization, snap every fire time to the nearest integer
+timestep and store the result in a `HashSet<i64>`. At runtime, the
+check is an integer lookup — no tolerance, no edge cases:
+
+```
+target 988.5 → round to step 989 → HashSet {258, 623, 989, 1354, ...}
+step 988: not in set → no fire
+step 989: in set → fire
+step 990: not in set → no fire
+```
+
+The `HashSet` also deduplicates automatically. If two targets round to
+the same step, the set contains it once. And the engine can detect
+collisions at model init — "event 'cohort_entry' has duplicate fire at
+step 988" — catching period/dt incompatibilities before simulation
+starts.
+
+Three iterations of the same bug class, each deeper than the last:
+`mod(t, 365.25)` drift, tolerance double-fire, and the fundamental
+insight that floating-point time comparison is the wrong tool for
+discrete event scheduling.
+
+### The design lesson
 
 The distinction between `transitions` and `events` is simple:
 transitions are continuous processes that run every substep; events are
@@ -435,4 +473,4 @@ discrete actions that fire at scheduled times. If you find yourself
 writing a `* 365.25` scaling factor or a `mod(t, period)` flag in a
 rate expression, you probably want an event.
 
-(Full proposal: `events-block.md` in the camdl repo.)
+(Full proposal: `docs/dev/proposals/2026-04-04-events-block.md`.)
