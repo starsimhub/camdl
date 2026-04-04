@@ -296,6 +296,13 @@ pub struct CompiledModel {
     /// Balance constraint: one compartment is overwritten at each substep
     /// to satisfy a population conservation expression.
     pub balance: Option<ResolvedBalance>,
+
+    /// Precomputed fire steps for each intervention/event, snapped to
+    /// the integer timestep grid. Key = intervention index, value = set
+    /// of step numbers where the event fires. Eliminates floating-point
+    /// tolerance issues (double-fires, zero-fires) by rounding fire times
+    /// to the nearest integer step at model init.
+    pub fire_steps: Vec<std::collections::HashSet<i64>>,
 }
 
 /// Pre-resolved balance constraint.
@@ -491,6 +498,18 @@ impl CompiledModel {
             time_func_cache.push(CompiledTimeFunc { kind });
         }
 
+        // Precompute fire steps (integer grid) for all interventions/events
+        let fire_steps: Vec<std::collections::HashSet<i64>> = {
+            use crate::intervention::intervention_fire_times;
+            let dt = model.simulation.dt.unwrap_or(1.0);
+            model.interventions.iter().map(|iv| {
+                let times = intervention_fire_times(&iv.schedule);
+                times.iter()
+                    .map(|&ft| (ft / dt).round() as i64)
+                    .collect()
+            }).collect()
+        };
+
         // Resolve balance constraint before model is moved into Arc
         let balance = if let Some(ref bs) = model.balance {
             let global = *comp_index.get(bs.target.as_str())
@@ -525,6 +544,7 @@ impl CompiledModel {
             comp_to_transitions,
             time_dep_transitions,
             balance,
+            fire_steps,
         })
     }
 

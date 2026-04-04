@@ -42,17 +42,14 @@ pub fn apply_interventions_at(
     params: &[f64],
     tolerance: f64,
 ) -> Result<bool, SimError> {
+    let dt = model.model.simulation.dt.unwrap_or(1.0);
+    let current_step = (t / dt).round() as i64;
     let mut any_fired = false;
-    for iv in &model.model.interventions {
-        // always_active events are processed atomically with transitions
-        // in inject_event_deltas(). Skip them here.
+    for (iv_idx, iv) in model.model.interventions.iter().enumerate() {
         if iv.always_active { continue; }
-        for fire_t in intervention_fire_times(&iv.schedule) {
-            if (fire_t - t).abs() <= tolerance {
-                apply_intervention(iv, model, int_s, real_s, params, t)?;
-                any_fired = true;
-                break;
-            }
+        if model.fire_steps[iv_idx].contains(&current_step) {
+            apply_intervention(iv, model, int_s, real_s, params, t)?;
+            any_fired = true;
         }
     }
     Ok(any_fired)
@@ -80,10 +77,10 @@ pub fn inject_event_deltas(
     let ctx = EvalCtx {
         model, int_s: snapshot, real_s, params, t: t_end, projected: None,
     };
-    for iv in &model.model.interventions {
+    let current_step = (t_end / dt).round() as i64;
+    for (iv_idx, iv) in model.model.interventions.iter().enumerate() {
         if !iv.always_active { continue; }
-        let fires = intervention_fire_times(&iv.schedule);
-        if !fires.iter().any(|&ft| (ft - t_end).abs() <= dt * 0.5) { continue; }
+        if !model.fire_steps[iv_idx].contains(&current_step) { continue; }
         for action in &iv.actions {
             match action {
                 Action::Add(aa) => {
