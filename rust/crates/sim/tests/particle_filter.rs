@@ -80,7 +80,7 @@ fn pure_death_model() -> (CompiledModel, Vec<f64>) {
             rng_seed: Some(42),
         },
         presets: vec![],
-        model_structure: None,
+        model_structure: None, balance: None,
     };
 
     let compiled = CompiledModel::new(model).unwrap();

@@ -195,6 +195,11 @@ type model_structure = {
   infectious_compartments : string list;
 }
 
+type balance_spec = {
+  balance_target: string;
+  balance_expr:   expr;
+}
+
 type model = {
   name:               string;
   version:            string;
@@ -216,4 +221,5 @@ type model = {
   simulation:         simulation_config;
   presets:            preset list;
   model_structure:    model_structure option;
+  balance:            balance_spec option;
 }

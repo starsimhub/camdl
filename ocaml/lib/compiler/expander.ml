@@ -1909,6 +1909,7 @@ let expand_detail ?(source_dir = "") (name : string) (decls : declaration list)
     Ir.simulation         = expand_simulate ctx;
     Ir.presets            = expand_scenarios ctx;
     Ir.model_structure    = Some ms;
+    Ir.balance            = None;  (* TODO: parse balance block from DSL *)
   } in
   let summary = {
     base_compartment_count     = List.length ctx.comp_decls;

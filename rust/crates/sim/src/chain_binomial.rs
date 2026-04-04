@@ -265,14 +265,18 @@ fn run_chain_binomial(
             int_s.counts[local] += delta;
         }
 
-        let clamped = int_s.clamp_nonneg();
-        if clamped > 0 {
-            log::warn!("chain-binomial: clamped {} negative compartments at t={}", clamped, t);
+        // Clamp non-negative (skip balance target)
+        if let Some(ref bal) = model.balance {
+            for (i, c) in int_s.counts.iter_mut().enumerate() {
+                if i == bal.local_int_idx { continue; }
+                if *c < 0 { *c = 0; }
+            }
+        } else {
+            let clamped = int_s.clamp_nonneg();
+            if clamped > 0 {
+                log::warn!("chain-binomial: clamped {} negative compartments at t={}", clamped, t);
+            }
         }
-        debug_assert!(
-            int_s.counts.iter().all(|&v| v >= 0),
-            "non-negativity violated after chain-binomial step at t={}", t
-        );
 
         t += dt;
 
@@ -280,6 +284,15 @@ fn run_chain_binomial(
         if iv_times.get(iv_idx).copied().is_some_and(|iv| (iv - t).abs() < cfg.dt * 0.5) {
             apply_interventions_at(t, model, &mut int_s, &mut real_s, params, cfg.dt * 0.5)?;
             while iv_idx < iv_times.len() && iv_times[iv_idx] <= t + cfg.dt * 0.5 { iv_idx += 1; }
+        }
+
+        // Apply balance constraint
+        if let Some(ref bal) = model.balance {
+            let ctx = EvalCtx {
+                model, int_s: &int_s, real_s: &real_s, params, t, projected: None,
+            };
+            let val = eval_expr(&bal.expr, &ctx)?;
+            int_s.counts[bal.local_int_idx] = val.round() as i64;
         }
 
         // Output
@@ -442,16 +455,23 @@ pub fn step_one(
         counts[local] += delta;
     }
 
-    // Clamp
-    for c in counts.iter_mut() {
-        if *c < 0 { *c = 0; }
+    // Clamp non-negative (skip balance target — it may legitimately go negative
+    // when the constraint expression yields a negative value, signaling a broken
+    // model that the particle filter should penalize via bad trajectories).
+    if let Some(ref bal) = model.balance {
+        for (i, c) in counts.iter_mut().enumerate() {
+            if i == bal.local_int_idx { continue; }
+            if *c < 0 { *c = 0; }
+        }
+    } else {
+        for c in counts.iter_mut() {
+            if *c < 0 { *c = 0; }
+        }
     }
 
     // Apply interventions that fire at t + dt (within tolerance dt/2).
     if !model.model.interventions.is_empty() {
         let t_end = t + dt;
-        // Reuse scratch IntState — copy current counts in, apply interventions,
-        // copy back out if any fired.
         scratch.int_s.counts.copy_from_slice(counts);
         let fired = apply_interventions_at(
             t_end, model, &mut scratch.int_s, &mut scratch.real_s, params, dt * 0.5,
@@ -459,6 +479,24 @@ pub fn step_one(
         if fired {
             counts.copy_from_slice(&scratch.int_s.counts);
         }
+    }
+
+    // Apply balance constraint: overwrite target compartment so the population
+    // budget holds. All other compartments are finalized at this point.
+    if let Some(ref bal) = model.balance {
+        scratch.int_s.counts.copy_from_slice(counts);
+        let t_end = t + dt;
+        let ctx = EvalCtx {
+            model, int_s: &scratch.int_s, real_s: &scratch.real_s,
+            params, t: t_end, projected: None,
+        };
+        let val = eval_expr(&bal.expr, &ctx)?;
+        let bal_count = val.round() as i64;
+        if bal_count < 0 {
+            log::warn!("balance compartment went negative ({}) at t={:.1} — \
+                        model may be inconsistent at these parameters", bal_count, t_end);
+        }
+        counts[bal.local_int_idx] = bal_count;
     }
 
     Ok(())

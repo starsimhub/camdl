@@ -104,7 +104,7 @@ fn sir_model() -> (CompiledModel, Vec<f64>) {
             dt: Some(1.0), rng_seed: Some(42),
         },
         presets: vec![],
-        model_structure: None,
+        model_structure: None, balance: None,
     };
 
     let compiled = CompiledModel::new(model).unwrap();

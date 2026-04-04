@@ -394,7 +394,13 @@ let model_to_json (m : model) : Yojson.Safe.t =
     ("simulation",         simulation_config_to_json m.simulation);
     ("scenarios",          arr (List.map preset_to_json m.presets));
     ("model_structure",    match m.model_structure with None -> null | Some ms -> model_structure_to_json ms);
-  ])
+  ] @ (match m.balance with
+       | None -> []
+       | Some bs -> [("balance", obj [
+           ("target", str bs.balance_target);
+           ("expr",   expr_to_json bs.balance_expr);
+         ])])
+  )
 
 let model_to_string (m : model) : string =
   Yojson.Safe.pretty_to_string (model_to_json m)

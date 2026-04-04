@@ -50,7 +50,7 @@ fn model_with_periodic(period: f64, values: Vec<f64>) -> CompiledModel {
             dt: None, rng_seed: Some(42),
         },
         presets: vec![],
-        model_structure: None,
+        model_structure: None, balance: None,
     };
     CompiledModel::new(model).unwrap()
 }

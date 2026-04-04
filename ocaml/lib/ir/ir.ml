@@ -259,6 +259,13 @@ type model_structure = {
   infectious_compartments : string list; (* base names of source_compartment in transmission transitions *)
 }
 
+(* ── Balance constraint ──────────────────────────────────────────────────────── *)
+
+type balance_spec = {
+  balance_target: string;
+  balance_expr:   expr;
+}
+
 (* ── Top-level model ─────────────────────────────────────────────────────────── *)
 
 type model = {
@@ -282,4 +289,5 @@ type model = {
   simulation:         simulation_config;
   presets:            preset list;
   model_structure:    model_structure option;
+  balance:            balance_spec option;
 }

@@ -493,6 +493,12 @@ let model_of_json (j : Yojson.Safe.t) : model =
     model_structure    = (match member_opt "model_structure" j with
       | None -> None
       | Some v -> opt_null model_structure_of_json v);
+    balance            = (match member_opt "balance" j with
+      | None -> None
+      | Some v -> Some {
+          balance_target = member "target" v |> as_string;
+          balance_expr   = member "expr"   v |> expr_of_json;
+        });
   }
 
 let model_of_string (s : string) : (model, string) result =

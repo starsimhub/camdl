@@ -110,6 +110,21 @@ pub struct ModelStructure {
     pub infectious_compartments:  Vec<String>,
 }
 
+// ── Balance constraint ───────────────────────────────────────────────────────
+
+/// A balance constraint forces one compartment to absorb demographic residuals.
+/// After all transitions and interventions, the target compartment is overwritten
+/// with the value of the expression (typically `pop(t) - S - E - I`).
+///
+/// This matches pomp's `R = nearbyint(pop) - S - E - I` pattern for models
+/// where the population trajectory is externally specified and the demographic
+/// rates don't exactly reproduce it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BalanceSpec {
+    pub target: String,
+    pub expr: Expr,
+}
+
 // ── Top-level model ───────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -139,4 +154,6 @@ pub struct Model {
     pub presets:            Vec<Preset>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model_structure:    Option<ModelStructure>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub balance:            Option<BalanceSpec>,
 }

@@ -160,7 +160,7 @@ fn birth_death_model(birth_rate: f64, death_rate: f64) -> Model {
             rng_seed: Some(42),
         },
         presets: vec![],
-        model_structure: None,
+        model_structure: None, balance: None,
     }
 }
 
@@ -285,7 +285,7 @@ fn test_overdispersion_variance_tau_leap() {
             rng_seed: Some(42),
         },
         presets: vec![],
-        model_structure: None,
+        model_structure: None, balance: None,
     };
 
     let compiled = CompiledModel::new(model).unwrap();
@@ -374,7 +374,7 @@ fn test_fraction_transfer_edge_cases() {
                 time_semantics: "continuous".into(), dt: None, rng_seed: Some(42),
             },
             presets: vec![],
-            model_structure: None,
+            model_structure: None, balance: None,
         };
         let compiled = CompiledModel::new(model).unwrap();
         let params = compiled.default_params.clone();

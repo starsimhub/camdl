@@ -990,7 +990,7 @@ mod tests {
             data_contract: None,
             output: OutputConfig { times: OutputSchedule::AtTimes(vec![0.0, 80.0]), format: "tsv".into(), trajectory: true, observations: false },
             simulation: SimulationConfig { t_start: 0.0, t_end: 80.0, time_semantics: "continuous".into(), dt: Some(1.0), rng_seed: Some(42) },
-            presets: vec![], model_structure: None,
+            presets: vec![], model_structure: None, balance: None,
         };
 
         let compiled = CompiledModel::new(model).unwrap();

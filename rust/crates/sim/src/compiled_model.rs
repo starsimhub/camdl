@@ -289,6 +289,19 @@ pub struct CompiledModel {
     /// of transition indices that draw from it. Transitions with no source
     /// (inflows) are not included — they use Poisson draws directly.
     pub source_groups: Vec<(usize, Vec<usize>)>,
+
+    /// Balance constraint: one compartment is overwritten at each substep
+    /// to satisfy a population conservation expression.
+    pub balance: Option<ResolvedBalance>,
+}
+
+/// Pre-resolved balance constraint.
+#[derive(Debug, Clone)]
+pub struct ResolvedBalance {
+    /// Local integer compartment index of the target (e.g., R).
+    pub local_int_idx: usize,
+    /// Expression to evaluate (e.g., pop(t) - S - E - I).
+    pub expr: ir::expr::Expr,
 }
 
 impl CompiledModel {
@@ -473,6 +486,19 @@ impl CompiledModel {
             time_func_cache.push(CompiledTimeFunc { kind });
         }
 
+        // Resolve balance constraint before model is moved into Arc
+        let balance = if let Some(ref bs) = model.balance {
+            let global = *comp_index.get(bs.target.as_str())
+                .ok_or_else(|| SimError::UnknownCompartment(bs.target.clone()))?;
+            let local = global_to_int[global]
+                .ok_or_else(|| SimError::Validation(
+                    format!("balance target '{}' must be an integer compartment", bs.target)
+                ))?;
+            Some(ResolvedBalance { local_int_idx: local, expr: bs.expr.clone() })
+        } else {
+            None
+        };
+
         Ok(CompiledModel {
             model: Arc::new(model),
             comp_index,
@@ -493,6 +519,7 @@ impl CompiledModel {
             source_groups,
             comp_to_transitions,
             time_dep_transitions,
+            balance,
         })
     }
 

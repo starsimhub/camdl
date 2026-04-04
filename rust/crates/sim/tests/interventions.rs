@@ -54,7 +54,7 @@ fn minimal_model_with_interventions(
             rng_seed: Some(42),
         },
         presets: vec![],
-        model_structure: None,
+        model_structure: None, balance: None,
     }
 }
 
