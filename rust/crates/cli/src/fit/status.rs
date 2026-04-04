@@ -14,6 +14,7 @@ pub fn run_status(fit: &FitToml) -> Result<(), String> {
     let scout_state = check_stage(dir, "scout");
     let refine_state = check_stage(dir, "refine");
     let validate_state = check_stage(dir, "validate");
+    let pmmh_state = check_stage(dir, "pmmh");
 
     // Scout
     match &scout_state {
@@ -71,6 +72,29 @@ pub fn run_status(fit: &FitToml) -> Result<(), String> {
                 println!("  validate:  \x1b[90m○ not started\x1b[0m");
             } else {
                 println!("  validate:  \x1b[90m— waiting for refine\x1b[0m");
+            }
+        }
+    }
+
+    // PMMH
+    match &pmmh_state {
+        Some(state) => {
+            let summary = load_summary(dir, "pmmh");
+            let acc_rate = summary.as_ref()
+                .and_then(|s| s.get("acceptance_rate"))
+                .and_then(|v| v.as_array())
+                .map(|arr| {
+                    let rates: Vec<f64> = arr.iter().filter_map(|v| v.as_f64()).collect();
+                    rates.iter().sum::<f64>() / rates.len() as f64
+                });
+            let acc_str = acc_rate.map_or("".into(), |r| format!(", accept={:.0}%", r * 100.0));
+            println!("  pmmh:      \x1b[32m✓\x1b[0m complete ({} chains, loglik {:.1}{})",
+                state.n_chains, state.best_loglik, acc_str);
+            print_stale_warning(state, "pmmh");
+        }
+        None => {
+            if validate_state.is_some() {
+                println!("  pmmh:      \x1b[90m○ not started (optional — posterior sampling)\x1b[0m");
             }
         }
     }

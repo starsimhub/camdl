@@ -86,9 +86,13 @@ pub fn inject_event_deltas(
                 Action::Add(aa) => {
                     let raw = eval_expr(&aa.count, &ctx)?;
                     let n = raw.round() as i64;
-                    if std::env::var("CAMDL_TRACE_STEPS").map_or(false, |v| v == "1") {
-                        eprintln!("EVENT '{}' at t={:.1}: add {} += {} (raw={:.2})",
-                            iv.name, t_end, aa.compartment, n, raw);
+                    {
+                        use std::sync::OnceLock;
+                        static TRACE: OnceLock<bool> = OnceLock::new();
+                        if *TRACE.get_or_init(|| std::env::var("CAMDL_TRACE_STEPS").map_or(false, |v| v == "1")) {
+                            eprintln!("EVENT '{}' at t={:.1}: add {} += {} (raw={:.2})",
+                                iv.name, t_end, aa.compartment, n, raw);
+                        }
                     }
                     if let Some(&global) = model.comp_index.get(aa.compartment.as_str()) {
                         if let Some(local) = model.global_to_int[global] {

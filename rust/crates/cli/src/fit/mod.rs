@@ -4,6 +4,7 @@
 //!   camdl fit scout    fit.toml [--seed N] [--force]
 //!   camdl fit refine   fit.toml --starts-from scout/ [--seed N] [--force]
 //!   camdl fit validate fit.toml --starts-from refine/ [--seed N] [--force]
+//!   camdl fit pmmh     fit.toml [--starts-from validate/] [--seed N] [--force] [--check-variance]
 //!   camdl fit status   fit.toml
 
 pub mod config;

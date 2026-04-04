@@ -185,7 +185,6 @@ pub struct IF2Config {
     pub dt: f64,
     /// Simplex parameter groups (barycentric transform). Members are
     /// perturbed jointly in log-ratio space with softmax inverse.
-    #[allow(dead_code)]
     pub simplex_groups: Vec<SimplexGroup>,
 }
 
