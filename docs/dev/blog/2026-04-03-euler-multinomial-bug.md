@@ -354,5 +354,85 @@ the narrative. Find the bug.
 write and hard to catch. The number 365.25 is correct everywhere else in
 the model. Using it in a pulse-gating expression is natural but wrong
 with integer dt. The compiler should detect `mod(t, non_integer_period)`
-in boolean conditions and warn. Better yet: provide a first-class
-`pulse {}` block that handles once-per-period semantics correctly.
+in boolean conditions and warn. Better yet: provide the right abstraction
+so the modeler never writes the arithmetic in the first place.
+
+## The language fix: `events {}`
+
+The root cause wasn't bad arithmetic. It was a missing abstraction. The
+modeler wanted to say "inject cohort births once per year on day 251."
+The DSL made them say:
+
+```camdl
+# Compute day of year (drifts 0.25 days/year with integer dt)
+let day_of_year = mod(t, 365.25)
+
+# Build a 0/1 flag for the cohort day (2-day window to catch the pulse)
+let is_cohort_day = (day_of_year > 250.0) * (day_of_year < 252.0)
+
+transitions {
+  # Continuous births + cohort pulse crammed into one rate expression
+  birth : --> S @ deterministic(
+    (1.0 - cohort) * daily_births
+    + is_cohort_day * cohort * daily_births * 365.25
+  )
+}
+```
+
+Five operations (modular arithmetic, comparison chain, 0/1 flag,
+magnitude scaling, addition into a rate) to express one concept. Every
+operation is a place for a bug. The drifting `mod`, the window width,
+the `* 365.25` dimensional hack — all consequences of implementing a
+domain concept in general-purpose arithmetic.
+
+The deeper problem: the cohort pulse is an **amount** (20,000 people),
+not a **rate** (people/time). Expressing it as a momentary rate spike
+through the transition system is a dimensional hack. It gets the right
+answer on paper (`20000 births/day * 1 day = 20000 births`) but it
+forces the modeler to manage timing logic that the engine should own.
+
+pomp handles this correctly. The cohort in pomp's C snippet is:
+
+```c
+if (fabs(t - floor(t) - 251.0/365.0) < 0.5*dt)
+    br = cohort*birthrate/dt + (1-cohort)*birthrate;
+else
+    br = (1-cohort)*birthrate;
+```
+
+The timing logic (`fabs(...) < 0.5*dt`) guarantees exactly one fire per
+year regardless of dt. But it's buried in procedural code — the modeler
+has to understand the `0.5*dt` tolerance trick and get the time
+conversion right. A different kind of fragility.
+
+camdl's fix is an `events {}` block — a first-class DSL primitive for
+scheduled discrete state modifications:
+
+```camdl
+transitions {
+  # Continuous births only. Clean, no pulse hack.
+  birth : --> S @ deterministic((1.0 - cohort) * daily_births)
+}
+
+events {
+  # Cohort: children enter school once per year on day 251.
+  # The engine handles timing. Fires exactly once per period.
+  cohort_entry : add(S, cohort * birthrate(t) * pop(t))
+    every 365.25 'days at_day 251
+}
+```
+
+No `mod()`. No comparison chain. No `* 365.25` magnitude hack. No
+window width to get wrong. The cohort is what it is: a scheduled
+addition of people to S. The engine fires it once per period on the
+timestep nearest to day 251, using `|t - target| < 0.5 * dt`. The
+timing logic lives in the framework, tested once, not reimplemented by
+every modeler.
+
+The distinction between `transitions` and `events` is simple:
+transitions are continuous processes that run every substep; events are
+discrete actions that fire at scheduled times. If you find yourself
+writing a `* 365.25` scaling factor or a `mod(t, period)` flag in a
+rate expression, you probably want an event.
+
+(Full proposal: `events-block.md` in the camdl repo.)
