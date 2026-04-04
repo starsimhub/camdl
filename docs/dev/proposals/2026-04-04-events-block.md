@@ -1,8 +1,8 @@
 # Proposal: `events {}` block and action type taxonomy
 
-**Status:** Proposal
+**Status:** Implemented
 **Date:** 2026-04-04
-**Implemented:** _(pending)_
+**Implemented:** commit `c43cc8a`, 2026-04-04
 **Motivation:** The He et al. 2000-nat loglik gap was caused by a
 cohort pulse implemented as a rate spike via `mod(t, 365.25)` arithmetic
 in a transition. The DSL lacked a primitive for scheduled discrete state
