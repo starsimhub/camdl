@@ -136,10 +136,12 @@ type obs_decl = {
 type action_decl =
   | ATransfer of (string * expr) list      (* kwargs: fraction=, count=, from=, to= *)
   | ASet      of string * index_item list * expr
+  | AAdd      of string * index_item list * expr   (* compartment, indices, count expr *)
 
 type schedule_decl =
   | SAtTimes of expr list
   | SRecurring of expr * expr * expr    (* every, from, until *)
+  | SEveryAtDay of expr * expr          (* period, at_day *)
 
 type intervention_decl = {
   ivname    : string;
@@ -217,6 +219,7 @@ type declaration =
   | DTransitions  of transition_decl list
   | DObservations of obs_decl list
   | DInterventions of intervention_decl list
+  | DEvents        of intervention_decl list
   | DODE          of ode_decl list
   | DOutput       of output_decl
   | DSimulate     of simulate_decl

@@ -23,6 +23,7 @@ type context = {
   mutable table_decls     : table_decl list;
   mutable scenario_decls  : scenario_decl list;
   mutable balance_decl    : balance_decl option;
+  mutable event_decls     : intervention_decl list;
   mutable diags           : Diagnostics.t;  (* collected errors/warnings *)
   mutable source_dir      : string;         (* directory of the source file *)
   mutable expanded_comp_cache : string list option;
@@ -52,6 +53,7 @@ let empty_context ?(source_dir = "") () = {
   table_decls          = [];
   scenario_decls       = [];
   balance_decl         = None;
+  event_decls          = [];
   diags                = Diagnostics.create ();
   source_dir;
   expanded_comp_cache  = None;
@@ -360,6 +362,7 @@ let collect_declarations ctx decls =
     | DTimepoints _      -> ()
     | DScenarios ss      -> ctx.scenario_decls <- ctx.scenario_decls @ ss
     | DBalance bd        -> ctx.balance_decl <- Some bd
+    | DEvents evs        -> ctx.event_decls <- ctx.event_decls @ evs
   ) decls;
   ctx.orig_transitions <- ctx.transitions
 
@@ -1588,7 +1591,15 @@ let expand_time_functions ctx : Ir.time_function list =
     end
   ) ctx.func_decls
 
-let expand_interventions ctx =
+let expand_scheduled_actions ctx decls ~always_active =
+  let t_start = match ctx.simulate with
+    | None    -> 0.0
+    | Some sd -> resolve_float_expr ctx sd.sim_from
+  in
+  let t_end = match ctx.simulate with
+    | None    -> 100.0
+    | Some sd -> resolve_float_expr ctx sd.sim_to
+  in
   List.concat_map (fun iv ->
     let base_name = if iv.ivindices = [] then None else Some iv.ivname in
     let combos = cartesian_product iv.ivindices ctx in
@@ -1606,9 +1617,6 @@ let expand_interventions ctx =
       in
       let schedule = match iv.ivschedule with
         | SAtTimes exprs ->
-          (* Pass env so index variables (e.g. p in sia[p in patch]) are
-             substituted before evaluation. Table lookups like sia_day[p, 0]
-             resolve to concrete float constants at expansion time. *)
           Ir.AtTimes (List.map (fun e ->
             let ir = normalize_expr (resolve_expr ctx env e) in
             match ir with Ir.Const f -> f | _ -> 0.0
@@ -1617,7 +1625,11 @@ let expand_interventions ctx =
           let period = resolve_float_expr ctx every in
           let start  = resolve_float_expr ctx from_  in
           let end_   = resolve_float_expr ctx until in
-          Ir.Recurring { Ir.start; Ir.period; Ir.end_ }
+          Ir.Recurring { Ir.start; Ir.period; Ir.end_; Ir.at_day = None }
+        | SEveryAtDay (every, day) ->
+          let period = resolve_float_expr ctx every in
+          let at_day = resolve_float_expr ctx day in
+          Ir.Recurring { Ir.start = t_start; Ir.period; Ir.end_ = t_end; Ir.at_day = Some at_day }
       in
       let actions = match iv.ivaction with
         | ATransfer kwargs ->
@@ -1642,10 +1654,20 @@ let expand_interventions ctx =
           let concrete = if idx_vals = [] then comp
             else String.concat "_" (comp :: idx_vals) in
           [Ir.Set { Ir.compartment = concrete; Ir.value = resolve_expr ctx env expr }]
+        | AAdd (comp, idxs, expr) ->
+          let idx_vals = List.map (index_item_to_str env) idxs in
+          let concrete = if idx_vals = [] then comp
+            else String.concat "_" (comp :: idx_vals) in
+          [Ir.AddAction { Ir.add_compartment = concrete; Ir.add_count = resolve_expr ctx env expr }]
       in
-      Some { Ir.name = iv_name; Ir.base_name; Ir.schedule; Ir.actions }
+      Some { Ir.name = iv_name; Ir.base_name; Ir.schedule; Ir.actions;
+             Ir.always_active = always_active }
     ) combos
-  ) ctx.interv_decls
+  ) decls
+
+let expand_interventions ctx =
+  expand_scheduled_actions ctx ctx.interv_decls ~always_active:false
+  @ expand_scheduled_actions ctx ctx.event_decls ~always_active:true
 
 (* ── Observation model expansion ─────────────────────────────────────────── *)
 

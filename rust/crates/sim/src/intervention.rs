@@ -10,12 +10,22 @@ use ir::intervention::{Action, Intervention, InterventionSchedule, RecurringSche
 pub fn intervention_fire_times(sched: &InterventionSchedule) -> Vec<f64> {
     match sched {
         InterventionSchedule::AtTimes(times) => times.clone(),
-        InterventionSchedule::Recurring(RecurringSchedule { start, period, end }) => {
+        InterventionSchedule::Recurring(rs) => {
             let mut times = Vec::new();
-            let mut t = *start;
-            while t <= end + period * 1e-9 {
-                times.push(t);
-                t += period;
+            if let Some(at_day) = rs.at_day {
+                // Fire at at_day + k*period, for smallest k where target >= start
+                let k0 = ((rs.start - at_day) / rs.period).ceil().max(0.0) as u64;
+                let mut t = at_day + k0 as f64 * rs.period;
+                while t <= rs.end + rs.period * 1e-9 {
+                    times.push(t);
+                    t += rs.period;
+                }
+            } else {
+                let mut t = rs.start;
+                while t <= rs.end + rs.period * 1e-9 {
+                    times.push(t);
+                    t += rs.period;
+                }
             }
             times
         }
@@ -122,6 +132,22 @@ fn apply_intervention(
                     int_s.counts[local] = v.round() as i64;
                 } else if let Some(local) = model.global_to_real[global] {
                     real_s.values[local] = v;
+                }
+            }
+
+            Action::Add(aa) => {
+                let n = eval_expr(&aa.count, &EvalCtx { model, int_s, real_s, params, t , projected: None })?;
+                let count = n.round() as i64;
+                if count < 0 {
+                    log::warn!("event '{}' adding negative count ({}) to '{}'",
+                        iv.name, count, aa.compartment);
+                }
+                let global = *model.comp_index.get(aa.compartment.as_str())
+                    .ok_or_else(|| SimError::UnknownCompartment(aa.compartment.clone()))?;
+                if let Some(local) = model.global_to_int[global] {
+                    int_s.counts[local] += count;
+                } else if let Some(local) = model.global_to_real[global] {
+                    real_s.values[local] += n;
                 }
             }
         }

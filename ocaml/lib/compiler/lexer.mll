@@ -97,6 +97,9 @@
     "null",          NULL;
     "transfer",      TRANSFER;
     "balance",       BALANCE;
+    "events",        EVENTS;
+    "add",           ADD;
+    "at_day",        AT_DAY;
     "likelihood",    LIKELIHOOD;
     "origin",        ORIGIN;
   ]

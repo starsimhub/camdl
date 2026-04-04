@@ -230,6 +230,8 @@ let intervention_schedule_of_json j =
         start  = as_float (member "start"  v);
         period = as_float (member "period" v);
         end_   = as_float (member "end"    v);
+        at_day = (match member_opt "at_day" v with
+                  | Some n -> Some (as_float n) | None -> None);
       }
     | "external" -> External (as_string v)
     | k -> fail "unknown intervention_schedule '%s'" k
@@ -257,17 +259,25 @@ let action_of_json j =
         compartment = as_string (member "compartment" v);
         value       = expr_of_json (member "value" v);
       }
+    | "add" ->
+      AddAction {
+        add_compartment = as_string (member "compartment" v);
+        add_count       = expr_of_json (member "count" v);
+      }
     | k -> fail "unknown action '%s'" k
   )
   | _ -> fail "action must be a single-key object"
 
 let intervention_of_json j =
-  { name      = as_string (member "name" j);
-    base_name = (match member_opt "base_name" j with
-                 | Some (`String s) -> Some s
-                 | _ -> None);
-    schedule  = intervention_schedule_of_json (member "schedule" j);
-    actions   = List.map action_of_json (as_list (member "actions" j));
+  { name          = as_string (member "name" j);
+    base_name     = (match member_opt "base_name" j with
+                     | Some (`String s) -> Some s
+                     | _ -> None);
+    schedule      = intervention_schedule_of_json (member "schedule" j);
+    actions       = List.map action_of_json (as_list (member "actions" j));
+    always_active = (match member_opt "always_active" j with
+                     | Some (`Bool b) -> b
+                     | _ -> false);
   }
 
 (* ── Observation model ───────────────────────────────────────────────────── *)

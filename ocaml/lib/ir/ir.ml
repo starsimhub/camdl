@@ -100,7 +100,7 @@ type table = {
 
 (* ── Interventions ───────────────────────────────────────────────────────────── *)
 
-type recurring_schedule = { start: float; period: float; end_: float }
+type recurring_schedule = { start: float; period: float; end_: float; at_day: float option }
 
 type intervention_schedule =
   | AtTimes   of float list
@@ -110,17 +110,20 @@ type intervention_schedule =
 type fraction_transfer = { src: string; dst: string; fraction: expr }
 type absolute_transfer = { src: string; dst: string; count: expr }
 type set_action        = { compartment: string; value: expr }
+type add_action        = { add_compartment: string; add_count: expr }
 
 type action =
   | FractionTransfer of fraction_transfer
   | AbsoluteTransfer of absolute_transfer
   | Set              of set_action
+  | AddAction        of add_action
 
 type intervention = {
-  name:      string;
-  base_name: string option;
-  schedule:  intervention_schedule;
-  actions:   action list;
+  name:          string;
+  base_name:     string option;
+  schedule:      intervention_schedule;
+  actions:       action list;
+  always_active: bool;
 }
 
 (* ── Observation model ───────────────────────────────────────────────────────── *)

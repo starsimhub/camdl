@@ -67,7 +67,7 @@ fn test_fraction_transfer_uses_floor_not_round() {
         name: "test_iv".into(),
         base_name: None,
         schedule: InterventionSchedule::AtTimes(vec![30.0]),
-        actions: vec![
+        always_active: false, actions: vec![
             Action::FractionTransfer(FractionTransfer {
                 src: "S".into(),
                 dst: "V".into(),
@@ -99,7 +99,7 @@ fn test_fraction_transfer_floor_larger() {
         name: "test_iv".into(),
         base_name: None,
         schedule: InterventionSchedule::AtTimes(vec![30.0]),
-        actions: vec![
+        always_active: false, actions: vec![
             Action::FractionTransfer(FractionTransfer {
                 src: "S".into(),
                 dst: "V".into(),

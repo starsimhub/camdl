@@ -158,11 +158,12 @@ let intervention_schedule_to_json (s : intervention_schedule) : Yojson.Safe.t =
   | AtTimes ts ->
     obj [("at_times", arr (List.map flt ts))]
   | Recurring r ->
-    obj [("recurring", obj [
-      ("start",  flt r.start);
-      ("period", flt r.period);
-      ("end",    flt r.end_);
-    ])]
+    obj [("recurring", obj (
+      [("start",  flt r.start);
+       ("period", flt r.period);
+       ("end",    flt r.end_)]
+      @ (match r.at_day with None -> [] | Some d -> [("at_day", flt d)])
+    ))]
   | External name ->
     obj [("external", str name)]
 
@@ -185,6 +186,11 @@ let action_to_json (a : action) : Yojson.Safe.t =
       ("compartment", str sa.compartment);
       ("value",       expr_to_json sa.value);
     ])]
+  | AddAction aa ->
+    obj [("add", obj [
+      ("compartment", str aa.add_compartment);
+      ("count",       expr_to_json aa.add_count);
+    ])]
 
 let intervention_to_json (iv : intervention) : Yojson.Safe.t =
   obj (
@@ -192,6 +198,7 @@ let intervention_to_json (iv : intervention) : Yojson.Safe.t =
     @ (match iv.base_name with None -> [] | Some s -> [("base_name", str s)])
     @ [ ("schedule", intervention_schedule_to_json iv.schedule);
         ("actions",  arr (List.map action_to_json iv.actions)); ]
+    @ (if iv.always_active then [("always_active", `Bool true)] else [])
   )
 
 (* ── Observation model ───────────────────────────────────────────────────── *)

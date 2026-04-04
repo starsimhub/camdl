@@ -340,7 +340,7 @@ fn test_fraction_transfer_edge_cases() {
             name: "vacc".into(),
             base_name: None,
             schedule: InterventionSchedule::AtTimes(vec![1.0]),
-            actions: vec![Action::FractionTransfer(FractionTransfer {
+            always_active: false, actions: vec![Action::FractionTransfer(FractionTransfer {
                 src: "S".into(), dst: "V".into(),
                 fraction: Expr::Const(ConstExpr { value: frac }),
             })],

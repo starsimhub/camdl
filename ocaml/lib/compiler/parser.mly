@@ -33,7 +33,7 @@
 %token TRANSITIONS OBSERVATIONS INTERVENTIONS ODE OUTPUT SIMULATE
 %token INIT TIMEPOINTS SCENARIOS STRATIFY LET FROM TO WHERE SUM
 %token CONSECUTIVE IN BY DIMENSIONS ONLY REAL INTEGER RATE PROBABILITY POSITIVE COUNT
-%token AND OR NOT IF THEN ELSE EVERY AT_KW FORMAT DESCRIPTION TAG NULL TRANSFER LIKELIHOOD ORIGIN BALANCE
+%token AND OR NOT IF THEN ELSE EVERY AT_KW FORMAT DESCRIPTION TAG NULL TRANSFER LIKELIHOOD ORIGIN BALANCE EVENTS ADD AT_DAY
 
 %token EOF
 
@@ -81,6 +81,8 @@ declaration:
       { DObservations obs }
   | INTERVENTIONS LBRACE ivs = intervention_list RBRACE
       { DInterventions ivs }
+  | EVENTS LBRACE evs = intervention_list RBRACE
+      { DEvents evs }
   | ODE LBRACE odes = ode_list RBRACE
       { DODE odes }
   | OUTPUT LBRACE od = output_body RBRACE
@@ -319,6 +321,12 @@ intervention_decl:
         { ivname = name; ivindices = ibs; ivaction = !action; ivschedule = !sched; ivguard = guard } }
   | name = IDENT ibs = index_bindings_opt COLON TRANSFER LPAREN kwargs = separated_list(COMMA, transfer_kwarg) RPAREN AT_KW LBRACKET ts = separated_list(COMMA, expr) RBRACKET guard = where_clause_opt
       { { ivname = name; ivindices = ibs; ivaction = ATransfer kwargs; ivschedule = SAtTimes ts; ivguard = guard } }
+  (* add(COMP, EXPR) at [...] *)
+  | name = IDENT ibs = index_bindings_opt COLON ADD LPAREN comp = IDENT COMMA count = expr RPAREN AT_KW LBRACKET ts = separated_list(COMMA, expr) RBRACKET guard = where_clause_opt
+      { { ivname = name; ivindices = ibs; ivaction = AAdd (comp, [], count); ivschedule = SAtTimes ts; ivguard = guard } }
+  (* add(COMP, EXPR) every PERIOD at_day DAY *)
+  | name = IDENT ibs = index_bindings_opt COLON ADD LPAREN comp = IDENT COMMA count = expr RPAREN EVERY period = expr AT_DAY day = expr guard = where_clause_opt
+      { { ivname = name; ivindices = ibs; ivaction = AAdd (comp, [], count); ivschedule = SEveryAtDay (period, day); ivguard = guard } }
 
 transfer_kwarg:
   | k = IDENT EQ e = expr { (k, e) }
