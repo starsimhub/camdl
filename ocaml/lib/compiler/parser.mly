@@ -33,7 +33,7 @@
 %token TRANSITIONS OBSERVATIONS INTERVENTIONS ODE OUTPUT SIMULATE
 %token INIT TIMEPOINTS SCENARIOS STRATIFY LET FROM TO WHERE SUM
 %token CONSECUTIVE IN BY DIMENSIONS ONLY REAL INTEGER RATE PROBABILITY POSITIVE COUNT
-%token AND OR NOT IF THEN ELSE EVERY AT_KW FORMAT DESCRIPTION TAG NULL TRANSFER LIKELIHOOD ORIGIN
+%token AND OR NOT IF THEN ELSE EVERY AT_KW FORMAT DESCRIPTION TAG NULL TRANSFER LIKELIHOOD ORIGIN BALANCE
 
 %token EOF
 
@@ -97,6 +97,8 @@ declaration:
       { DLet { lname = name; lindices = ibs; lshape = shape; lbody = body } }
   | SCENARIOS LBRACE ss = list(scenario_block) RBRACE
       { DScenarios ss }
+  | BALANCE LBRACE target = IDENT EQ e = expr RBRACE
+      { DBalance { bcomp = target; bexpr = e } }
 
 (* ── Unit literals ──────────────────────────────────────────────────────── *)
 

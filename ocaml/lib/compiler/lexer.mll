@@ -96,6 +96,7 @@
     "tag",           TAG;
     "null",          NULL;
     "transfer",      TRANSFER;
+    "balance",       BALANCE;
     "likelihood",    LIKELIHOOD;
     "origin",        ORIGIN;
   ]

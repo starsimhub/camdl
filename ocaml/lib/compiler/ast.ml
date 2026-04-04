@@ -203,6 +203,8 @@ type dimensions_entry = {
   desrc  : dim_source;
 }
 
+type balance_decl = { bcomp: string; bexpr: expr }
+
 type declaration =
   | DTimeUnit    of unit_lit
   | DDescription of string
@@ -223,3 +225,4 @@ type declaration =
   | DStratify     of stratify_decl
   | DLet          of let_binding
   | DScenarios    of scenario_decl list
+  | DBalance      of balance_decl

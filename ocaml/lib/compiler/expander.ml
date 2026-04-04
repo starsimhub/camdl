@@ -22,6 +22,7 @@ type context = {
   mutable output_decl     : output_decl option;
   mutable table_decls     : table_decl list;
   mutable scenario_decls  : scenario_decl list;
+  mutable balance_decl    : balance_decl option;
   mutable diags           : Diagnostics.t;  (* collected errors/warnings *)
   mutable source_dir      : string;         (* directory of the source file *)
   mutable expanded_comp_cache : string list option;
@@ -50,6 +51,7 @@ let empty_context ?(source_dir = "") () = {
   output_decl      = None;
   table_decls          = [];
   scenario_decls       = [];
+  balance_decl         = None;
   diags                = Diagnostics.create ();
   source_dir;
   expanded_comp_cache  = None;
@@ -357,6 +359,7 @@ let collect_declarations ctx decls =
     | DTables tds        -> ctx.table_decls <- ctx.table_decls @ tds
     | DTimepoints _      -> ()
     | DScenarios ss      -> ctx.scenario_decls <- ctx.scenario_decls @ ss
+    | DBalance bd        -> ctx.balance_decl <- Some bd
   ) decls;
   ctx.orig_transitions <- ctx.transitions
 
@@ -1909,7 +1912,12 @@ let expand_detail ?(source_dir = "") (name : string) (decls : declaration list)
     Ir.simulation         = expand_simulate ctx;
     Ir.presets            = expand_scenarios ctx;
     Ir.model_structure    = Some ms;
-    Ir.balance            = None;  (* TODO: parse balance block from DSL *)
+    Ir.balance            = (match ctx.balance_decl with
+      | None -> None
+      | Some bd -> Some {
+          Ir.balance_target = bd.bcomp;
+          Ir.balance_expr   = resolve_expr ctx [] bd.bexpr;
+        });
   } in
   let summary = {
     base_compartment_count     = List.length ctx.comp_decls;
