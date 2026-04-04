@@ -322,6 +322,13 @@ fn run_chain_binomial(
     Ok(traj)
 }
 
+/// Check if step tracing is enabled via CAMDL_TRACE_STEPS=1.
+fn trace_enabled() -> bool {
+    use std::sync::OnceLock;
+    static ENABLED: OnceLock<bool> = OnceLock::new();
+    *ENABLED.get_or_init(|| std::env::var("CAMDL_TRACE_STEPS").map_or(false, |v| v == "1"))
+}
+
 /// Advance integer compartment state by one chain-binomial step.
 ///
 /// This is the core Euler-multinomial step, extracted for use by the
@@ -453,6 +460,31 @@ pub fn step_one(
     // Apply all deltas atomically
     for &(local, delta) in &scratch.pending_deltas {
         counts[local] += delta;
+    }
+
+    // Per-substep trace (CAMDL_TRACE_STEPS=1)
+    if trace_enabled() {
+        // Header on first call
+        use std::sync::OnceLock;
+        static HEADER: OnceLock<bool> = OnceLock::new();
+        if *HEADER.get_or_init(|| {
+            eprint!("t");
+            for c in &model.model.compartments { eprint!("\t{}", c.name); }
+            for tr in &model.model.transitions { eprint!("\tflow_{}", tr.name); }
+            eprint!("\ttotal_pop");
+            for (i, tr) in model.model.transitions.iter().enumerate() {
+                eprint!("\trate_{}", tr.name);
+            }
+            eprintln!();
+            true
+        }) {}
+        eprint!("{:.1}", t + dt);
+        for &c in counts.iter() { eprint!("\t{}", c); }
+        for &f in flows.iter() { eprint!("\t{}", f); }
+        let total: i64 = counts.iter().sum();
+        eprint!("\t{}", total);
+        for &p in scratch.propensities.iter() { eprint!("\t{:.4}", p); }
+        eprintln!();
     }
 
     // Clamp non-negative (skip balance target — it may legitimately go negative
