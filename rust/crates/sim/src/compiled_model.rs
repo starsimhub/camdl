@@ -11,6 +11,9 @@ pub enum CompiledTimeFuncKind {
     Sinusoidal { amplitude: f64, period: f64, phase: f64, baseline: f64 },
     Piecewise   { breakpoints: Vec<f64>, values: Vec<f64> },
     Interpolated { times: Vec<f64>, values: Vec<f64> },
+    /// Piecewise constant: value holds until the next grid point.
+    /// Matches pomp's `covariate_table(order = "constant")`.
+    Constant { times: Vec<f64>, values: Vec<f64> },
     CubicSpline(CubicSpline),
     Periodic    { period: f64, values: Vec<f64> },
 }
@@ -473,6 +476,8 @@ impl CompiledModel {
                             CompiledTimeFuncKind::CubicSpline(CubicSpline::new(&ts, &vs)),
                         ir::time_func::InterpMethod::Linear =>
                             CompiledTimeFuncKind::Interpolated { times: ts, values: vs },
+                        ir::time_func::InterpMethod::Constant =>
+                            CompiledTimeFuncKind::Constant { times: ts, values: vs },
                     }
                 }
                 TimeFuncKind::Periodic(p) => {

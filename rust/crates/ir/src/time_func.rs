@@ -26,6 +26,7 @@ pub struct Interpolated {
 #[serde(rename_all = "snake_case")]
 pub enum InterpMethod {
     Linear,
+    Constant,
     Spline,
 }
 

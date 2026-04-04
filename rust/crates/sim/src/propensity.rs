@@ -208,6 +208,18 @@ pub fn eval_time_func(kind: &CompiledTimeFuncKind, t: f64) -> f64 {
             }
             *values.last().unwrap()
         }
+        CompiledTimeFuncKind::Constant { times, values } => {
+            // Piecewise constant: return value at the largest grid point <= t.
+            // Matches pomp's covariate_table(order = "constant").
+            if times.is_empty() || values.is_empty() { return 0.0; }
+            if t <= times[0] { return values[0]; }
+            if t >= *times.last().unwrap() { return *values.last().unwrap(); }
+            // Binary search for the last grid point <= t
+            match times.binary_search_by(|x| x.partial_cmp(&t).unwrap()) {
+                Ok(i) => values[i],
+                Err(i) => values[i - 1], // i is insertion point; i-1 is last point <= t
+            }
+        }
         CompiledTimeFuncKind::CubicSpline(spline) => spline.eval(t),
         CompiledTimeFuncKind::Periodic { period, values } => {
             if values.is_empty() || *period <= 0.0 { return 0.0; }
