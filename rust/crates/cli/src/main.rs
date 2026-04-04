@@ -85,8 +85,9 @@ fn main() {
                 Some("refine")   => fit::cmd_fit_refine(&all_args[2..]),
                 Some("validate") => fit::cmd_fit_validate(&all_args[2..]),
                 Some("status")   => fit::cmd_fit_status(&all_args[2..]),
+                Some("pmmh")     => fit::cmd_fit_pmmh(&all_args[2..]),
                 _ => {
-                    eprintln!("usage: camdl fit <scout|refine|validate|status> FIT.toml");
+                    eprintln!("usage: camdl fit <scout|refine|validate|pmmh|status> FIT.toml");
                     std::process::exit(1);
                 }
             }

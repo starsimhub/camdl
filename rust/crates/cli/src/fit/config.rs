@@ -20,6 +20,8 @@ pub struct FitToml {
     pub scout: Option<StageConfig>,
     pub refine: Option<StageConfig>,
     pub validate: Option<ValidateConfig>,
+    /// PMMH posterior sampling configuration.
+    pub pmmh: Option<PMMHSampleConfig>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -75,6 +77,22 @@ pub struct EstimateSpec {
     pub start: Option<f64>,
     pub transform: Option<String>,
     pub bounds: Option<(f64, f64)>,
+}
+
+/// PMMH posterior sampling configuration.
+#[derive(Debug, Default, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct PMMHSampleConfig {
+    pub chains: Option<usize>,
+    pub steps: Option<usize>,
+    pub particles: Option<usize>,
+    pub burn_in: Option<usize>,
+    pub thin: Option<usize>,
+    pub adapt: Option<bool>,
+    pub adapt_start: Option<usize>,
+    /// Directory containing fit_state.toml from a prior IF2 run.
+    /// Used to seed proposal covariance from scout chain spread.
+    pub proposal_from: Option<String>,
 }
 
 impl FitToml {

@@ -17,6 +17,7 @@ pub mod particle_filter;
 pub mod if2;
 pub mod types;
 pub mod dmeasure;
+pub mod pmmh;
 
 // Re-exports
 pub use types::{ParticleState, ParticleSwarm};

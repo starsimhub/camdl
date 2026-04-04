@@ -14,6 +14,7 @@ pub mod scout;
 pub mod refine;
 pub mod validate;
 pub mod status;
+pub mod pmmh;
 
 use config::FitToml;
 
@@ -72,6 +73,28 @@ pub fn cmd_fit_validate(args: &[String]) {
     });
 }
 
+pub fn cmd_fit_pmmh(args: &[String]) {
+    let (fit, seed, force) = parse_fit_args(args, false);
+    let starts_from = parse_optional_starts_from(args);
+    let check_variance = args.iter().any(|a| a == "--check-variance");
+
+    let (model, _) = load_model_for_validation(&fit);
+    let model_params: Vec<String> = model.parameters.iter().map(|p| p.name.clone()).collect();
+    fit.validate_partition(&model_params).unwrap_or_else(|e| {
+        eprintln!("error: {}", e);
+        std::process::exit(1);
+    });
+    fit.validate_bounds(&model).unwrap_or_else(|e| {
+        eprintln!("error: {}", e);
+        std::process::exit(1);
+    });
+
+    pmmh::run_pmmh_cli(&fit, starts_from.as_deref(), seed, force, check_variance).unwrap_or_else(|e| {
+        eprintln!("error: {}", e);
+        std::process::exit(1);
+    });
+}
+
 pub fn cmd_fit_status(args: &[String]) {
     let (fit, _, _) = parse_fit_args(args, false);
     status::run_status(&fit).unwrap_or_else(|e| {
@@ -90,7 +113,8 @@ fn parse_fit_args(args: &[String], _needs_starts_from: bool) -> (FitToml, u64, b
         match args[i].as_str() {
             "--seed" => { i += 1; seed = args[i].parse().expect("--seed needs integer"); }
             "--force" => { force = true; }
-            "--starts-from" => { i += 1; } // consumed by parse_starts_from
+            "--starts-from" => { i += 1; } // consumed by parse_starts_from / parse_optional_starts_from
+            "--check-variance" => {} // consumed by cmd_fit_pmmh
             s if s.starts_with("--") => {
                 eprintln!("unknown flag: {}", s);
                 std::process::exit(1);
@@ -101,7 +125,7 @@ fn parse_fit_args(args: &[String], _needs_starts_from: bool) -> (FitToml, u64, b
     }
 
     let fit_path = fit_path.unwrap_or_else(|| {
-        eprintln!("usage: camdl fit <scout|refine|validate|status> FIT.toml");
+        eprintln!("usage: camdl fit <scout|refine|validate|pmmh|status> FIT.toml");
         std::process::exit(1);
     });
 
@@ -122,6 +146,18 @@ fn parse_fit_args(args: &[String], _needs_starts_from: bool) -> (FitToml, u64, b
     };
 
     (fit, seed, force)
+}
+
+fn parse_optional_starts_from(args: &[String]) -> Option<String> {
+    for (i, arg) in args.iter().enumerate() {
+        if arg == "--starts-from" {
+            return Some(args.get(i + 1).cloned().unwrap_or_else(|| {
+                eprintln!("--starts-from requires a directory path");
+                std::process::exit(1);
+            }));
+        }
+    }
+    None
 }
 
 fn parse_starts_from(args: &[String]) -> String {
