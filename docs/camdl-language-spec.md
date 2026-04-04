@@ -1508,6 +1508,86 @@ camdl simulate model.camdl --enable sia_round_1 --seed 42
 
 ---
 
+## 14.5 Events
+
+Events are always-active scheduled state modifications. They share the
+same action grammar and scheduling as interventions but fire
+unconditionally — they cannot be disabled via scenarios.
+
+Use events for structural demographic processes (cohort entry, seasonal
+migration, importation seeding). Use interventions for policy choices
+(SIA campaigns, school closures).
+
+```
+events {
+  cohort_entry : add(S, cohort * birthrate(t) * pop(t))
+    every 365.25 'days at_day 251
+
+  importation : add(I, 10) at [30]
+}
+```
+
+Events support the same features as interventions: indexed events,
+`where` guards, recurring schedules, and all action types.
+
+### 14.6 The `add` Action
+
+```
+add(COMPARTMENT, EXPR)
+```
+
+Adds `round(EXPR)` individuals to COMPARTMENT. Accepts negative values
+(outflow). If the result makes the compartment negative, a warning is
+emitted but the simulation continues — in a particle filter, the
+particle gets a bad trajectory and is resampled away.
+
+### 14.7 The `at_day` Schedule
+
+For events and interventions that recur on a specific day within each
+period:
+
+```
+NAME : ACTION every PERIOD at_day DAY
+```
+
+`at_day` is the absolute phase within the period, measured from `t = 0`.
+Fire times are `at_day + k * period` for the smallest `k` where
+`target >= t_start`. The engine fires on the single timestep where
+`|t - target| < 0.5 * dt`, guaranteeing exactly one fire per period
+regardless of `dt` or fractional-period drift.
+
+Example: `every 365.25 'days at_day 251` fires on day 251 of each year.
+If simulation starts at `t = 100`, the first fire is at `t = 251` (not
+`t = 351`).
+
+This replaces manual `mod(t, period)` arithmetic, which silently
+double-fires when `dt` does not evenly divide the period.
+
+---
+
+## 14.8 Balance Constraint
+
+Forces one compartment to satisfy a population conservation constraint
+at every substep. After all transitions, clamps, events, and
+interventions apply, the target compartment is overwritten:
+
+```
+balance {
+  R = pop(t) - S - E - I
+}
+```
+
+This matches pomp's `R = nearbyint(pop) - S - E - I` pattern for models
+where the population trajectory is externally specified and the birth/death
+rates don't exactly reproduce it. The balance target is excluded from
+the non-negativity clamp — a negative value signals a broken model.
+
+Events that inject people without a source (e.g., `add(S, 20000)`) will
+increase the compartment total. The balance compartment absorbs this by
+decreasing to maintain the constraint.
+
+---
+
 ## 15. Timepoints and Reserved Identifiers
 
 > **Partially implemented.** The `timepoints { }` block is parsed but the
