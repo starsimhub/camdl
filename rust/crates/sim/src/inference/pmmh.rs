@@ -67,6 +67,10 @@ pub struct PMMHConfig {
     pub thin: usize,
     /// Discard first `burn_in` steps from output.
     pub burn_in: usize,
+    /// Crank-Nicolson correlation for correlated pseudo-marginal.
+    /// None = vanilla PMMH (independent PF evaluations).
+    /// Some(0.99) = CPM with ρ=0.99 (recommended).
+    pub rho: Option<f64>,
 }
 
 // ── Output types ───────────────────────────────────────────────────
@@ -260,12 +264,18 @@ fn log_jacobian(param: &IF2Param, transformed: f64) -> f64 {
 /// Built in the CLI layer from `run_quick_pfilter`. Takes `(full_params, pf_seed) → log L̂`.
 ///
 /// `on_step` optional progress callback: `(step, loglik, accepted)`.
+/// Correlated PF evaluator for CPM-MCMC.
+/// Takes (params, randoms) → (loglik, randoms_used).
+pub type CorrelatedEvalFn<'a> = dyn Fn(&[f64], &super::correlated_pf::PFRandomState)
+    -> f64 + 'a;
+
 pub fn run_pmmh(
     if2_params: &[IF2Param],
     priors: &[Prior],
     base_params: &[f64],
     config: &PMMHConfig,
     eval_loglik: &dyn Fn(&[f64], u64) -> f64,
+    eval_loglik_correlated: Option<&CorrelatedEvalFn>,
     seed: u64,
     on_step: Option<&dyn Fn(usize, f64, bool)>,
 ) -> PMMHResult {
@@ -281,8 +291,22 @@ pub fn run_pmmh(
         .map(|p| p.to_transformed(current_params[p.index]))
         .collect();
 
+    // CPM random state (if correlated mode)
+    use super::correlated_pf::PFRandomState;
+    let n_obs_approx = 1096; // will be overridden by actual obs count
+    let steps_per_obs = 7; // typical for weekly data with dt=1
+    let mut current_randoms: Option<PFRandomState> = config.rho.map(|_| {
+        PFRandomState::draw_fresh(config.n_particles, n_obs_approx, steps_per_obs, &mut rng)
+    });
+
     // Initial PF evaluation
-    let mut current_ll = eval_loglik(&current_params, seed.wrapping_add(0));
+    let mut current_ll = if let (Some(ref randoms), Some(eval_corr)) =
+        (&current_randoms, &eval_loglik_correlated)
+    {
+        eval_corr(&current_params, randoms)
+    } else {
+        eval_loglik(&current_params, seed.wrapping_add(0))
+    };
     let mut current_log_prior: f64 = if2_params.iter().zip(priors.iter())
         .zip(current_transformed.iter())
         .map(|((p, prior), &z)| prior.log_density(current_params[p.index], z))
@@ -338,9 +362,20 @@ pub fn run_pmmh(
             .map(|((p, prior), &z)| prior.log_density(proposed_params[p.index], z))
             .sum();
 
-        // PF seed varies per step to avoid correlated pseudo-marginal artifact
-        let pf_seed = seed.wrapping_add(step as u64 + 1);
-        let proposed_ll = eval_loglik(&proposed_params, pf_seed);
+        // Evaluate PF: correlated or independent
+        let proposed_randoms: Option<PFRandomState>;
+        let proposed_ll;
+        if let (Some(rho), Some(ref cur_rand), Some(eval_corr)) =
+            (config.rho, &current_randoms, &eval_loglik_correlated)
+        {
+            let pr = cur_rand.correlate(rho, &mut rng);
+            proposed_ll = eval_corr(&proposed_params, &pr);
+            proposed_randoms = Some(pr);
+        } else {
+            let pf_seed = seed.wrapping_add(step as u64 + 1);
+            proposed_ll = eval_loglik(&proposed_params, pf_seed);
+            proposed_randoms = None;
+        };
 
         // Jacobian correction
         let proposed_log_jacobian: f64 = if2_params.iter()
@@ -360,6 +395,9 @@ pub fn run_pmmh(
             current_ll = proposed_ll;
             current_log_prior = proposed_log_prior;
             current_log_jacobian = proposed_log_jacobian;
+            if proposed_randoms.is_some() {
+                current_randoms = proposed_randoms;
+            }
             n_accepted += 1;
 
             let log_posterior = current_ll + current_log_prior;

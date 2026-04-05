@@ -24,6 +24,10 @@ pub struct StepScratch {
     pending_deltas: Vec<(usize, i64)>,
     handled: Vec<bool>,
     probs: Vec<(usize, f64)>,
+    /// When set, overrides the next `gamma_multiplier()` call in `step_one`.
+    /// Used by correlated pseudo-marginal MCMC to inject pre-drawn Gamma
+    /// noise for correlation across MCMC steps.
+    pub gamma_override: Option<f64>,
 }
 
 /// How event counts are drawn — resolved from the IR at step start.
@@ -42,6 +46,7 @@ impl StepScratch {
             draws: Vec::with_capacity(n_tr),
             pending_deltas: Vec::with_capacity(n_tr * 2),
             handled: vec![false; n_tr],
+            gamma_override: None,
             probs: Vec::with_capacity(n_tr),
         }
     }
@@ -407,8 +412,11 @@ pub fn step_one(
                 _ => {}
             }
             let effective = match &scratch.draws[tr_idx] {
-                ResolvedDraw::Overdispersed(sigma_sq) =>
-                    per_capita * rng.gamma_multiplier(*sigma_sq, dt),
+                ResolvedDraw::Overdispersed(sigma_sq) => {
+                    let g = scratch.gamma_override.take()
+                        .unwrap_or_else(|| rng.gamma_multiplier(*sigma_sq, dt));
+                    per_capita * g
+                }
                 _ => per_capita,
             };
             total_rate += effective;

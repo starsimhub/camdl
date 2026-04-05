@@ -146,12 +146,48 @@ pub fn run_pmmh_cli(
                 adapt_start,
                 thin,
                 burn_in,
+                rho: pc.and_then(|c| c.rho),
             };
 
             // Build the loglik evaluator closure for this chain
             let eval_loglik = |params: &[f64], pf_seed: u64| -> f64 {
                 runner::run_quick_pfilter(&config, params, n_particles, pf_seed)
             };
+
+            // Correlated PF evaluator (when rho is set)
+            let eval_correlated: Option<Box<dyn Fn(&[f64], &sim::inference::correlated_pf::PFRandomState) -> f64>> =
+                if pmmh_config.rho.is_some() {
+                    let compiled = config.compiled.clone();
+                    let obs_model = config.obs_model_ir.clone();
+                    let flow_idx = config.flow_indices.clone();
+                    let obs: Vec<sim::inference::particle_filter::Observation> = config.observations.iter()
+                        .map(|o| sim::inference::particle_filter::Observation { time: o.time, value: o.value })
+                        .collect();
+                    Some(Box::new(move |params: &[f64], randoms: &sim::inference::correlated_pf::PFRandomState| -> f64 {
+                        let step_fn = |state: &mut sim::inference::ParticleState, t: f64, step_dt: f64, rng: &mut sim::rng::StatefulRng, scratch: &mut sim::chain_binomial::StepScratch| {
+                            sim::chain_binomial::step_one(&compiled, &mut state.counts, &mut state.flow_accumulators, params, t, step_dt, rng, scratch)
+                        };
+                        let fi = &flow_idx;
+                        let project_fn = |state: &sim::inference::ParticleState| -> f64 {
+                            fi.iter().map(|&i| state.flow_accumulators[i] as f64).sum()
+                        };
+                        let dmeasure = sim::inference::dmeasure::compile_dmeasure_pf(
+                            &obs_model, compiled.clone(), params,
+                        );
+                        match sim::inference::correlated_pf::bootstrap_filter_correlated(
+                            &compiled, params, &obs, n_particles, dt,
+                            &step_fn, &project_fn, &*dmeasure, randoms, chain_seed,
+                        ) {
+                            Ok(r) => r.log_likelihood,
+                            Err(_) => f64::NEG_INFINITY,
+                        }
+                    }))
+                } else {
+                    None
+                };
+
+            let eval_corr_ref: Option<&dyn Fn(&[f64], &sim::inference::correlated_pf::PFRandomState) -> f64> =
+                eval_correlated.as_deref();
 
             let bar = &bars[chain_id];
             let accepted_count = AtomicUsize::new(0);
@@ -170,7 +206,7 @@ pub fn run_pmmh_cli(
 
             let result = run_pmmh(
                 &config.if2_params, &priors, &config.base_params,
-                &pmmh_config, &eval_loglik, chain_seed, Some(&progress_cb),
+                &pmmh_config, &eval_loglik, eval_corr_ref, chain_seed, Some(&progress_cb),
             );
 
             bar.finish_with_message(format!(

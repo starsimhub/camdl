@@ -93,6 +93,9 @@ pub struct PMMHSampleConfig {
     /// Directory containing fit_state.toml from a prior IF2 run.
     /// Used to seed proposal covariance from scout chain spread.
     pub proposal_from: Option<String>,
+    /// Crank-Nicolson correlation for correlated pseudo-marginal MCMC.
+    /// Default: 0.99. Set to None or 0.0 for vanilla (independent) PMMH.
+    pub rho: Option<f64>,
 }
 
 impl FitToml {
