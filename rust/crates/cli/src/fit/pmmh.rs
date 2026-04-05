@@ -146,7 +146,7 @@ pub fn run_pmmh_cli(
                 adapt_start,
                 thin,
                 burn_in,
-                rho: pc.and_then(|c| c.rho),
+                rho: sc.and_then(|c| c.rho),
             };
 
             // Build the loglik evaluator closure for this chain
@@ -191,15 +191,60 @@ pub fn run_pmmh_cli(
 
             let bar = &bars[chain_id];
             let accepted_count = AtomicUsize::new(0);
-            let progress_cb = |step: usize, loglik: f64, accepted: bool| {
+            let is_tty = std::io::IsTerminal::is_terminal(&std::io::stderr());
+            let chain_start = std::time::Instant::now();
+
+            // Streaming trace: open file, write header, flush per-step
+            let chain_dir = format!("{}/pmmh/chain_{}", fit.fit.output_dir, chain_id + 1);
+            let _ = std::fs::create_dir_all(&chain_dir);
+            let trace_path = format!("{}/trace.tsv", chain_dir);
+            let trace_file = std::sync::Mutex::new({
+                use std::io::Write;
+                let mut f = std::io::BufWriter::new(
+                    std::fs::File::create(&trace_path).unwrap()
+                );
+                write!(f, "step\tlog_likelihood\tlog_posterior\taccepted").unwrap();
+                for spec in &config.if2_params { write!(f, "\t{}", spec.name).unwrap(); }
+                writeln!(f).unwrap();
+                f
+            });
+
+            let param_names: Vec<String> = config.if2_params.iter()
+                .map(|s| s.name.clone()).collect();
+
+            let progress_cb = |step: usize, loglik: f64, accepted: bool, params: &[f64]| {
                 if accepted { accepted_count.fetch_add(1, Ordering::Relaxed); }
+                let acc = accepted_count.load(Ordering::Relaxed) as f64 / (step + 1) as f64;
+
+                // Stream trace row to disk
+                {
+                    use std::io::Write;
+                    if let Ok(mut f) = trace_file.lock() {
+                        write!(f, "{}\t{:.2}\t{:.2}\t{}",
+                            step, loglik, loglik, if accepted { 1 } else { 0 }).unwrap();
+                        for spec in &config.if2_params {
+                            write!(f, "\t{:.6}", params[spec.index]).unwrap();
+                        }
+                        writeln!(f).unwrap();
+                        if step % 50 == 0 { f.flush().ok(); }
+                    }
+                }
+
+                // Progress display
                 if step % 100 == 0 || step == n_steps - 1 {
-                    bar.set_position(step as u64 + 1);
-                    let acc = accepted_count.load(Ordering::Relaxed) as f64 / (step + 1) as f64;
-                    if loglik.is_finite() {
-                        bar.set_message(format!("ll={:.1} acc={:.0}%", loglik, acc * 100.0));
+                    if is_tty {
+                        bar.set_position(step as u64 + 1);
+                        if loglik.is_finite() {
+                            bar.set_message(format!("ll={:.1} acc={:.0}%", loglik, acc * 100.0));
+                        } else {
+                            bar.set_message(format!("ll=-inf acc={:.0}%", acc * 100.0));
+                        }
                     } else {
-                        bar.set_message(format!("ll=-inf acc={:.0}%", acc * 100.0));
+                        let elapsed = chain_start.elapsed().as_secs();
+                        eprintln!("[pmmh] chain {}: {}/{} ({:.0}%) acc={:.0}% ll={:.1} elapsed={}s",
+                            chain_id + 1, step, n_steps,
+                            step as f64 / n_steps as f64 * 100.0,
+                            acc * 100.0, loglik, elapsed);
                     }
                 }
             };

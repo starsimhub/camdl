@@ -277,7 +277,7 @@ pub fn run_pmmh(
     eval_loglik: &dyn Fn(&[f64], u64) -> f64,
     eval_loglik_correlated: Option<&CorrelatedEvalFn>,
     seed: u64,
-    on_step: Option<&dyn Fn(usize, f64, bool)>,
+    on_step: Option<&dyn Fn(usize, f64, bool, &[f64])>,
 ) -> PMMHResult {
     let d = if2_params.len();
     assert_eq!(d, priors.len(), "priors must match if2_params length");
@@ -426,7 +426,7 @@ pub fn run_pmmh(
         }
 
         if let Some(cb) = on_step {
-            cb(step, current_ll, accepted);
+            cb(step, current_ll, accepted, &current_params);
         }
     }
 
