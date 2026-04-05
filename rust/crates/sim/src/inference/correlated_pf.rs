@@ -29,6 +29,16 @@ pub struct PFRandomState {
     /// Resampling draws: one normal per observation.
     /// Transformed to Uniform(0,1) via Phi(·) for systematic resampling.
     pub resample_noise: Vec<f64>,
+
+    /// Binomial total-exit draws per source group per substep per particle.
+    /// binomial_noise[obs_idx][particle * steps_per_obs * n_groups + step * n_groups + group]
+    /// Transformed to binomial counts via normal approximation (large np)
+    /// or inverse CDF (small np). This is the dominant variance source
+    /// that the broken to_bits() seeding failed to correlate.
+    pub binomial_noise: Vec<Vec<f64>>,
+
+    /// Number of source groups (for indexing into binomial_noise).
+    pub n_source_groups: usize,
 }
 
 impl PFRandomState {
@@ -37,6 +47,7 @@ impl PFRandomState {
         n_particles: usize,
         n_obs: usize,
         steps_per_obs: usize,
+        n_source_groups: usize,
         rng: &mut StatefulRng,
     ) -> Self {
         let gamma_noise = (0..n_obs)
@@ -47,7 +58,12 @@ impl PFRandomState {
         let resample_noise = (0..n_obs)
             .map(|_| rng.normal())
             .collect();
-        PFRandomState { gamma_noise, resample_noise }
+        let binomial_noise = (0..n_obs)
+            .map(|_| (0..n_particles * steps_per_obs * n_source_groups)
+                .map(|_| rng.normal())
+                .collect())
+            .collect();
+        PFRandomState { gamma_noise, resample_noise, binomial_noise, n_source_groups }
     }
 
     /// Crank-Nicolson update: u' = ρu + √(1-ρ²)z, z ~ N(0,1).
@@ -62,8 +78,57 @@ impl PFRandomState {
         let resample_noise = self.resample_noise.iter()
             .map(|&x| rho * x + scale * rng.normal())
             .collect();
-        PFRandomState { gamma_noise, resample_noise }
+        let binomial_noise = self.binomial_noise.iter()
+            .map(|row| row.iter()
+                .map(|&x| rho * x + scale * rng.normal())
+                .collect())
+            .collect();
+        PFRandomState { gamma_noise, resample_noise, binomial_noise,
+                        n_source_groups: self.n_source_groups }
     }
+}
+
+/// Transform a standard normal to a binomial draw via normal approximation
+/// (large np) or inverse CDF (small np).
+///
+/// For large np (>20): Binom(n,p) ≈ Normal(np, np(1-p)), so
+///   count = round(np + sqrt(np(1-p)) * z)
+/// Nearly continuous in z → excellent Crank-Nicolson correlation.
+///
+/// For small np: use Φ(z) as a uniform, then walk the binomial CDF.
+/// Step function in z → partial correlation, but these draws contribute
+/// negligible variance to the total log-likelihood.
+fn correlated_binomial(z: f64, n: u64, p: f64) -> u64 {
+    if n == 0 || p <= 0.0 { return 0; }
+    if p >= 1.0 { return n; }
+    let np = n as f64 * p;
+    let nq = n as f64 * (1.0 - p);
+    if np > 20.0 && nq > 20.0 {
+        // Normal approximation (exact for large np)
+        let sd = (np * (1.0 - p)).sqrt();
+        let x = (np + sd * z).round().clamp(0.0, n as f64);
+        x as u64
+    } else {
+        // Small np: inverse CDF via uniform
+        let u = phi(z).clamp(1e-15, 1.0 - 1e-15);
+        binomial_quantile(n, p, u)
+    }
+}
+
+/// Inverse binomial CDF: find smallest k such that P(X <= k) >= u.
+pub fn binomial_quantile(n: u64, p: f64, u: f64) -> u64 {
+    // Walk the CDF from 0. For small np this is fast (< 50 iterations).
+    let mut cdf = 0.0;
+    let q = 1.0 - p;
+    let mut binom_prob = q.powi(n as i32); // P(X=0) = (1-p)^n
+    for k in 0..=n {
+        cdf += binom_prob;
+        if cdf >= u { return k; }
+        // P(X=k+1) = P(X=k) * (n-k)/(k+1) * p/(1-p)
+        binom_prob *= (n - k) as f64 / (k + 1) as f64 * p / q;
+        if binom_prob < 1e-300 { break; } // underflow guard
+    }
+    n // fallback
 }
 
 /// Transform a standard normal to a Gamma(shape, scale) draw via inverse CDF.
@@ -80,7 +145,7 @@ fn normal_to_gamma(z: f64, shape: f64, scale: f64) -> f64 {
 }
 
 /// Standard normal CDF (same as obs_loglik::normal_cdf).
-fn phi(x: f64) -> f64 {
+pub fn phi(x: f64) -> f64 {
     let z = x / std::f64::consts::SQRT_2;
     let t = 1.0 / (1.0 + 0.3275911 * z.abs());
     let poly = t * (0.254829592
@@ -179,30 +244,36 @@ pub fn bootstrap_filter_correlated(
         let obs_time = obs.time;
         let t_start = t;
 
-        // Propagate particles with pre-drawn Gamma noise (parallel)
+        // Propagate particles with pre-drawn correlated noise (parallel)
         let gamma_row = &randoms.gamma_noise[obs_idx];
+        let binom_row = &randoms.binomial_noise[obs_idx];
+        let n_groups = randoms.n_source_groups;
         let errors: Vec<Result<(), SimError>> = swarm.states.par_iter_mut()
             .zip(rngs.par_iter_mut())
             .zip(scratches.par_iter_mut())
             .enumerate()
             .map(|(i, ((state, rng), scratch))| {
-                // Seed particle RNG from correlated gamma noise for partial
-                // binomial correlation: same gamma draw → same RNG seed →
-                // correlated binomial sequence
-                let noise_base = gamma_row.get(i * steps_per_obs)
-                    .map(|&z| z.to_bits()).unwrap_or(0);
-                *rng = StatefulRng::new(seed ^ noise_base ^ (obs_idx as u64 * 0x9e3779b9));
-
                 let mut t_local = t_start;
                 let mut substep = 0;
                 while t_local < obs_time - 1e-10 {
                     let step_dt = dt.min(obs_time - t_local);
 
+                    // Inject pre-drawn Gamma multiplier
                     let noise_idx = i * steps_per_obs + substep;
                     if noise_idx < gamma_row.len() {
                         let z = gamma_row[noise_idx];
                         let g = normal_to_gamma(z, gamma_shape, gamma_scale);
                         scratch.gamma_override = Some(g);
+                    }
+
+                    // Inject pre-drawn binomial z-values per source group.
+                    // step_one converts z → count after computing (n, p).
+                    scratch.binomial_z_values.clear();
+                    for group in 0..n_groups {
+                        let binom_idx = i * steps_per_obs * n_groups + substep * n_groups + group;
+                        if binom_idx < binom_row.len() {
+                            scratch.binomial_z_values.push(binom_row[binom_idx]);
+                        }
                     }
 
                     step_fn(state, t_local, step_dt, rng, scratch)?;

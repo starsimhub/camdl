@@ -147,6 +147,8 @@ pub fn run_pmmh_cli(
                 thin,
                 burn_in,
                 rho: sc.and_then(|c| c.rho),
+                n_source_groups: config.compiled.source_groups.len(),
+                n_obs: config.observations.len(),
             };
 
             // Build the loglik evaluator closure for this chain

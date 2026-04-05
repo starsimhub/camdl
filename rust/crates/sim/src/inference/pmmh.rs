@@ -71,6 +71,11 @@ pub struct PMMHConfig {
     /// None = vanilla PMMH (independent PF evaluations).
     /// Some(0.99) = CPM with ρ=0.99 (recommended).
     pub rho: Option<f64>,
+    /// Number of source groups in the model (for sizing binomial noise).
+    /// Set by the CLI from model.source_groups.len().
+    pub n_source_groups: usize,
+    /// Number of observations (for sizing PFRandomState).
+    pub n_obs: usize,
 }
 
 // ── Output types ───────────────────────────────────────────────────
@@ -293,10 +298,12 @@ pub fn run_pmmh(
 
     // CPM random state (if correlated mode)
     use super::correlated_pf::PFRandomState;
-    let n_obs_approx = 1096; // will be overridden by actual obs count
-    let steps_per_obs = 7; // typical for weekly data with dt=1
+    let steps_per_obs = (config.dt.recip() * 7.0).round() as usize; // 7 for weekly obs, dt=1
     let mut current_randoms: Option<PFRandomState> = config.rho.map(|_| {
-        PFRandomState::draw_fresh(config.n_particles, n_obs_approx, steps_per_obs, &mut rng)
+        PFRandomState::draw_fresh(
+            config.n_particles, config.n_obs, steps_per_obs,
+            config.n_source_groups, &mut rng,
+        )
     });
 
     // Initial PF evaluation

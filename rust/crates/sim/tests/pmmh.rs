@@ -163,7 +163,7 @@ fn test_pmmh_posterior_covers_truth() {
         adapt: true,
         adapt_start: 200,
         thin: 1,
-        burn_in: 500, rho: None,
+        burn_in: 500, rho: None, n_source_groups: 0, n_obs: 0,
     };
 
     let result = run_pmmh(&if2_params, &priors, &base_params, &config, &eval_loglik, None, 42, None);
@@ -207,7 +207,7 @@ fn test_pmmh_determinism() {
         adapt: false,
         adapt_start: 50,
         thin: 1,
-        burn_in: 0, rho: None,
+        burn_in: 0, rho: None, n_source_groups: 0, n_obs: 0,
     };
 
     let r1 = run_pmmh(&if2_params, &priors, &base_params, &config, &eval_loglik, None, 42, None);
@@ -240,7 +240,7 @@ fn test_pmmh_acceptance_rate() {
         adapt: true,
         adapt_start: 200,
         thin: 1,
-        burn_in: 0, rho: None,
+        burn_in: 0, rho: None, n_source_groups: 0, n_obs: 0,
     };
 
     let result = run_pmmh(&if2_params, &priors, &base_params, &config, &eval_loglik, None, 42, None);
@@ -270,7 +270,7 @@ fn test_pmmh_flat_prior_finds_near_mle() {
         adapt: true,
         adapt_start: 200,
         thin: 1,
-        burn_in: 500, rho: None,
+        burn_in: 500, rho: None, n_source_groups: 0, n_obs: 0,
     };
 
     let result = run_pmmh(&if2_params, &priors, &base_params, &config, &eval_loglik, None, 42, None);
@@ -301,7 +301,7 @@ fn test_pmmh_adaptive_improves_acceptance() {
         adapt: true,
         adapt_start: 200,
         thin: 1,
-        burn_in: 0, rho: None,
+        burn_in: 0, rho: None, n_source_groups: 0, n_obs: 0,
     };
 
     let result = run_pmmh(&if2_params, &priors, &base_params, &config, &eval_loglik, None, 42, None);
@@ -360,7 +360,7 @@ fn test_pmmh_different_seeds_differ() {
         adapt: false,
         adapt_start: 50,
         thin: 1,
-        burn_in: 0, rho: None,
+        burn_in: 0, rho: None, n_source_groups: 0, n_obs: 0,
     };
 
     let r1 = run_pmmh(&if2_params, &priors, &base_params, &config, &eval_loglik, None, 1, None);

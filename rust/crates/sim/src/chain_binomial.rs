@@ -28,6 +28,12 @@ pub struct StepScratch {
     /// Used by correlated pseudo-marginal MCMC to inject pre-drawn Gamma
     /// noise for correlation across MCMC steps.
     pub gamma_override: Option<f64>,
+    /// When non-empty, provides standard normal z-values for the total-exit
+    /// binomial draw in each source group. `step_one` transforms z to a
+    /// binomial count via normal approximation (large np) or inverse CDF
+    /// (small np). Consumed in source-group order.
+    /// Used by CPM-MCMC for correlated binomial draws.
+    pub binomial_z_values: Vec<f64>,
 }
 
 /// How event counts are drawn — resolved from the IR at step start.
@@ -47,6 +53,7 @@ impl StepScratch {
             pending_deltas: Vec::with_capacity(n_tr * 2),
             handled: vec![false; n_tr],
             gamma_override: None,
+            binomial_z_values: Vec::new(),
             probs: Vec::with_capacity(n_tr),
         }
     }
@@ -427,7 +434,25 @@ pub fn step_one(
 
         // Step 2: draw total exits (pomp's first rbinom)
         let p_total = (1.0 - (-total_rate * dt).exp()).clamp(0.0, 1.0);
-        let mut n_events = rng.binomial(n_src as u64, p_total);
+        let mut n_events = if !scratch.binomial_z_values.is_empty() {
+            // CPM: use pre-drawn z-value for correlated binomial
+            let z = scratch.binomial_z_values.remove(0);
+            let n = n_src as u64;
+            let np = n as f64 * p_total;
+            let nq = n as f64 * (1.0 - p_total);
+            if np > 20.0 && nq > 20.0 {
+                let sd = (np * (1.0 - p_total)).sqrt();
+                (np + sd * z).round().clamp(0.0, n as f64) as u64
+            } else if np > 0.0 {
+                // Small np: inverse CDF via Phi(z)
+                let u = crate::inference::correlated_pf::phi(z).clamp(1e-15, 1.0 - 1e-15);
+                crate::inference::correlated_pf::binomial_quantile(n, p_total, u)
+            } else {
+                0
+            }
+        } else {
+            rng.binomial(n_src as u64, p_total)
+        };
 
         // Step 3: split total exits proportional to rates (pomp's inner loop)
         let n_competing = scratch.probs.len();
