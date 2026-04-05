@@ -7,12 +7,12 @@
 //!
 //! Reference: Deligiannidis, Doucet & Pitt (2018), JRSSB.
 
+use rayon::prelude::*;
 use crate::chain_binomial::StepScratch;
 use crate::compiled_model::CompiledModel;
 use crate::rng::StatefulRng;
 use crate::error::SimError;
 use super::types::{ParticleState, ParticleSwarm, log_sum_exp};
-use super::resampling::systematic_resample;
 use super::particle_filter::{StepFn, DmeasureFn, Observation, PFilterResult};
 
 /// Pre-drawn random state for one PF evaluation.
@@ -179,30 +179,40 @@ pub fn bootstrap_filter_correlated(
         let obs_time = obs.time;
         let t_start = t;
 
-        // Propagate particles with pre-drawn Gamma noise
-        for (i, ((state, rng), scratch)) in swarm.states.iter_mut()
-            .zip(rngs.iter_mut())
-            .zip(scratches.iter_mut())
+        // Propagate particles with pre-drawn Gamma noise (parallel)
+        let gamma_row = &randoms.gamma_noise[obs_idx];
+        let errors: Vec<Result<(), SimError>> = swarm.states.par_iter_mut()
+            .zip(rngs.par_iter_mut())
+            .zip(scratches.par_iter_mut())
             .enumerate()
-        {
-            let mut t_local = t_start;
-            let mut substep = 0;
-            while t_local < obs_time - 1e-10 {
-                let step_dt = dt.min(obs_time - t_local);
+            .map(|(i, ((state, rng), scratch))| {
+                // Seed particle RNG from correlated gamma noise for partial
+                // binomial correlation: same gamma draw → same RNG seed →
+                // correlated binomial sequence
+                let noise_base = gamma_row.get(i * steps_per_obs)
+                    .map(|&z| z.to_bits()).unwrap_or(0);
+                *rng = StatefulRng::new(seed ^ noise_base ^ (obs_idx as u64 * 0x9e3779b9));
 
-                // Inject pre-drawn Gamma multiplier from correlated randoms
-                let noise_idx = i * steps_per_obs + substep;
-                if noise_idx < randoms.gamma_noise[obs_idx].len() {
-                    let z = randoms.gamma_noise[obs_idx][noise_idx];
-                    let g = normal_to_gamma(z, gamma_shape, gamma_scale);
-                    scratch.gamma_override = Some(g);
+                let mut t_local = t_start;
+                let mut substep = 0;
+                while t_local < obs_time - 1e-10 {
+                    let step_dt = dt.min(obs_time - t_local);
+
+                    let noise_idx = i * steps_per_obs + substep;
+                    if noise_idx < gamma_row.len() {
+                        let z = gamma_row[noise_idx];
+                        let g = normal_to_gamma(z, gamma_shape, gamma_scale);
+                        scratch.gamma_override = Some(g);
+                    }
+
+                    step_fn(state, t_local, step_dt, rng, scratch)?;
+                    t_local += step_dt;
+                    substep += 1;
                 }
-
-                step_fn(state, t_local, step_dt, rng, scratch)?;
-                t_local += step_dt;
-                substep += 1;
-            }
-        }
+                Ok(())
+            })
+            .collect();
+        for r in errors { r?; }
         while t < obs.time - 1e-10 { t += dt.min(obs.time - t); }
 
         // Compute log-weights
