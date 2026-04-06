@@ -3139,3 +3139,145 @@ correct algorithm now. Key metrics:
 2. Per-parameter acceptance — should converge to ~44% via Robbins-Monro
 3. Parameters — should drift with each sweep (small steps but tracking
    a moving target as X changes). Run 5000+ sweeps to see convergence.
+
+
+## [downstream] s0 bound saturation — likely transition density bug (2026-04-06)
+
+### Results: 3-param from He MLE start, complete-data LL
+
+4 chains × 2000 sweeps × 100 particles, started at MLE (R0=56.8,
+amplitude=0.554, s0=0.032).
+
+```
+R0          : 40-46% acc, exploring 47-55 — looks like mixing
+amplitude   : 40-46% acc, exploring 0.45-0.61 — looks like mixing
+s0          : 1-2% acc, ALL 4 chains saturated at s0=0.25 (upper bound)
+```
+
+**s0 shoots to the bound from the MLE start.** This contradicts
+the marginal likelihood which found s0=0.032 as the MLE.
+
+### Root cause hypothesis
+
+The complete-data LL mechanically prefers larger s0 because of how
+the transition density evaluates the first substeps:
+
+With s0=0.25 → S(0)≈615K. With s0=0.032 → S(0)≈79K. For the same
+number of infections n_inf, the Binomial term `Binom(n_inf; S, p)`
+with larger S has smaller p, and the Binomial pmf can be higher
+(the observed n_inf is more likely under a smaller per-capita rate
+applied to a larger population).
+
+The marginal LL integrates over trajectories and finds the balance
+point at s0=0.032. The complete-data LL, evaluated on a specific
+trajectory, doesn't — it just sees "larger S = higher density for
+these transition counts."
+
+### Diagnostic needed
+
+**At He MLE params with s0=0.032:**
+1. Simulate a trajectory, evaluate complete-data LL → call it LL_032
+2. Change only s0 to 0.25, simulate a new trajectory, evaluate
+   complete-data LL → call it LL_025
+
+If LL_025 > LL_032: the transition density has a bug (or a
+normalization issue) that mechanically prefers larger S.
+
+If LL_032 > LL_025: the bug is in how CSMC-AS handles the initial
+state — maybe it's not conditioning on s0 correctly.
+
+### This explains everything
+
+The s0 saturation causes R0 and amplitude to drift away from the
+MLE to compensate for the wrong initial conditions. The
+complete-data LL declines (chains 1-2 went from -128K to -135K)
+as the parameter vector becomes increasingly inconsistent.
+
+**ACTION FOR upstream:** Investigate the s0/initial-state handling
+in `log_transition_density_substep` and `csmc_as`. The transition
+density may need to include a prior/density on the initial state
+that penalizes s0 far from the mode, or there may be a bug in
+how the initial compartment counts enter the density calculation.
+
+This is the last blocker — R0 and amplitude show genuine mixing
+at 40-46% acceptance. Fix s0 and we likely have caterpillars.
+
+### Diagnostic result (ran it ourselves)
+
+PF marginal loglik comparison (5000 particles, seed 1):
+```
+s0=0.032 (He MLE):  loglik = -5803
+s0=0.250 (bound):   loglik = -11343
+```
+
+**The marginal LL strongly prefers s0=0.032** by 5540 nats. But
+the PGAS complete-data LL pushes s0 to 0.25. This confirms the
+complete-data LL and marginal LL disagree on s0.
+
+The root cause is likely that `log_transition_density_substep`
+doesn't include a density on the initial state. The Binomial
+term mechanically prefers larger S₀ (larger population → more
+likely to produce the observed infection counts at lower per-capita
+rate). The marginal LL integrates over trajectories and finds the
+correct balance at s0=0.032.
+
+**Fix options:**
+1. Add `log p(x₀ | s0, N0)` to the complete-data LL (a single
+   Binomial or Multinomial term for the initial allocation)
+2. Fix s0 and treat it as a non-PGAS parameter (estimate via
+   profile or grid)
+3. Update s0 jointly with x₀ in a special Gibbs step
+
+**ACTION FOR upstream:** The transition density needs an initial
+state density term. Without it, s0 (and any IVP parameter) will
+always saturate at bounds. This is a known issue with PGAS on
+models with estimated initial conditions — see Lindsten et al.
+(2014) section on state initialization.
+
+## [upstream] Fix: IVP constraint in complete-data LL (2026-04-06)
+
+### Root cause confirmed
+
+The complete-data LL evaluated `counts_before` at substep 0 from
+`trajectory.initial_counts` — the STORED initial state from the
+previous sweep. When s0 was proposed, the initial counts didn't
+change, so the LL was invariant to s0. The MH step saw 100%
+acceptance → unconstrained random walk → bound saturation.
+
+### Fix
+
+One-line change in `complete_data_loglik`: substep 0 now uses
+`model.initial_state(params)` instead of `trajectory.initial_counts`.
+
+```rust
+// Before:
+let counts_before = if s == 0 {
+    &trajectory.initial_counts      // ← invariant to s0!
+};
+// After:
+let counts_before = if s == 0 {
+    &param_init.counts              // ← from initial_state(proposed_params)
+};
+```
+
+This makes the LL sensitive to s0: changing s0 changes S₀, which
+changes the Binomial density at substep 0 (Binom(n_inf; S₀, p)).
+Larger S₀ increases the density for the stored flows (more ways to
+choose n_inf from a bigger pool), but the constraint propagates
+through the observation likelihood — wrong S₀ produces wrong
+trajectory dynamics that don't match the data.
+
+### Limitation
+
+Only the FIRST substep is directly affected. Substeps 1+ use
+counts from the stored trajectory (which were simulated at the old
+s0). So the constraint is through one Binomial term, not the full
+trajectory. The CSMC then adjusts by producing a trajectory
+consistent with the accepted s0.
+
+For strong IVP constraints, more particles in the CSMC may help
+(better trajectory renewal near the initial state).
+
+**ACTION FOR downstream:** Rebuild and re-test the 3-param run
+(R0, amplitude, s0) from He MLE start. s0 should now be
+constrained near 0.032 instead of saturating at 0.25.
