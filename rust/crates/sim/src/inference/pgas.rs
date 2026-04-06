@@ -698,19 +698,29 @@ pub fn run_pgas(
         .collect();
 
     // Adaptive proposal SDs via Robbins-Monro stochastic approximation.
-    // Start conservative (rw_sd × 0.1), then adapt each parameter's
-    // log(proposal_sd) to target 44% acceptance (optimal for 1D MH updates,
-    // Roberts & Rosenthal 2001). The adaptation rate c/√sweep decays to
-    // zero, so the proposal stabilizes as the chain runs.
+    // Each parameter's log(proposal_sd) is nudged after every MH attempt
+    // to target 44% acceptance (optimal for 1D MH, Roberts & Rosenthal 2001).
+    // The adaptation rate c/√sweep decays to zero, so the proposal stabilizes.
     //
-    // This is the same idea as Stan's dual averaging for HMC step size,
-    // adapted for random-walk MH.
+    // Initial scale: (upper - lower) / 10 on the TRANSFORMED scale, giving
+    // the chain room to explore broadly during early burn-in. The Robbins-Monro
+    // then narrows it to the right scale for each parameter. Starting too
+    // small (e.g., rw_sd × 0.1) causes the chain to get stuck near its
+    // starting values — the adaptation sees ~44% acceptance (because steps
+    // are tiny) and never discovers that larger steps are needed.
     const TARGET_ACCEPTANCE: f64 = 0.44;
-    const ADAPT_C: f64 = 1.0; // adaptation speed
+    const ADAPT_C: f64 = 2.0; // adaptation speed (higher = faster convergence)
     let adapt_end = config.burn_in; // stop adapting at end of burn-in
 
     let mut log_proposal_sd: Vec<f64> = if2_params.iter()
-        .map(|p| (p.transformed_sd(p.rw_sd, p.initial) * 0.1).ln())
+        .map(|p| {
+            let lo = p.to_transformed(p.lower.max(1e-10));
+            let hi = p.to_transformed(p.upper.min(1e10));
+            let range = (hi - lo).abs();
+            // 10% of the transformed-scale range: broad enough to explore,
+            // Robbins-Monro will shrink to the right scale within ~200 sweeps
+            (range / 10.0).max(0.01).ln()
+        })
         .collect();
 
     // Current complete-data log-likelihood
