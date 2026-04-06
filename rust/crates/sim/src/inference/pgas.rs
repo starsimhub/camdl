@@ -473,6 +473,13 @@ pub fn csmc_as(
         .map(|_| vec![0u64; n_tr])
         .collect();
 
+    // Store initial counts per particle BEFORE propagation (for traceback).
+    // Needed because free particles have stochastic initial states (Binom draw)
+    // that differ from the deterministic initial_state(params).
+    let initial_counts_per_particle: Vec<Vec<i64>> = counts.iter()
+        .map(|c| c.clone())
+        .collect();
+
     // History for traceback
     let mut history_counts: Vec<Vec<Vec<i64>>> = Vec::with_capacity(n_substeps);
     let mut history_flows: Vec<Vec<Vec<u64>>> = Vec::with_capacity(n_substeps);
@@ -692,13 +699,9 @@ pub fn csmc_as(
 
     let trajectory_renewal = 1.0 - n_from_ref as f64 / n_substeps as f64;
 
-    // Initial counts: the ancestor at step 0 determines whose initial state we use
-    let initial_counts = if particle == j_ref {
-        reference.initial_counts.clone()
-    } else {
-        let (init_int, _) = model.initial_state(params)?;
-        init_int.counts
-    };
+    // Initial counts: use the stored per-particle initial state (which
+    // includes stochastic Binom draws for IVP compartments).
+    let initial_counts = initial_counts_per_particle[particle].clone();
 
     let diag = CSMCDiagnostics {
         trajectory_renewal,
@@ -737,6 +740,27 @@ fn transform_deriv(param: &IF2Param, z: f64) -> f64 {
             (hi - lo) * p * (1.0 - p) // θ = lo + (hi-lo)*σ(z), dθ/dz = (hi-lo)*σ(z)*(1-σ(z))
         }
         Transform::None => 1.0,
+    }
+}
+
+/// Prior log-density AND its gradient on the z (unconstrained) scale.
+/// Each variant handles its own chain rule — the caller just sums.
+fn prior_log_density_and_grad_z(
+    prior: &Prior, param: &IF2Param, theta: f64, z: f64,
+) -> (f64, f64) {
+    match prior {
+        Prior::Flat => (0.0, 0.0),
+        Prior::Normal { mean, sd } => {
+            let lp = -0.5 * ((theta - mean) / sd).powi(2) - sd.ln();
+            let dlp_dtheta = -(theta - mean) / (sd * sd);
+            let dlp_dz = dlp_dtheta * transform_deriv(param, z);
+            (lp, dlp_dz)
+        }
+        Prior::TransformedNormal { mean, sd } => {
+            let lp = -0.5 * ((z - mean) / sd).powi(2) - sd.ln();
+            let dlp_dz = -(z - mean) / (sd * sd);
+            (lp, dlp_dz)
+        }
     }
 }
 
@@ -899,20 +923,21 @@ pub fn run_pgas(
         // MH-within-Gibbs (1D random walk, one-at-a-time).
         if has_gradients {
             // NUTS: propose all parameters jointly using gradients.
-            // The target is log π(z | X, y) = complete_data_loglik(θ(z), X, y) + log_prior(z) + log_jacobian(z)
-            // where z is the transformed (unconstrained) parameter vector.
+            // The closure evaluates the FULL target on z scale. Each component
+            // (LL, prior, Jacobian) returns its own (value, d/dz) pair — no
+            // cross-scale gradient mixing, no manual chain rule at the call site.
             let param_names: Vec<String> = if2_params.iter().map(|p| p.name.clone()).collect();
             let param_model_indices: Vec<usize> = if2_params.iter().map(|p| p.index).collect();
 
             let log_prob_and_grad = |z: &[f64]| -> (f64, Vec<f64>) {
-                // Transform z → natural scale
+                // Transform z → θ (natural scale)
                 let mut params = current_params.clone();
                 for (i, spec) in if2_params.iter().enumerate() {
                     params[spec.index] = spec.from_transformed(z[i]);
                 }
 
-                // Complete-data LL + gradient
-                let (ll, mut ll_grad) = match super::pgas_grad::complete_data_loglik_grad(
+                // LL + gradient in NATURAL scale (d/dθ)
+                let (ll, ll_grad_theta) = match super::pgas_grad::complete_data_loglik_grad(
                     model, &trajectory, &params, observations,
                     config.dt, dmeasure_fn, flow_indices, &ivp_mappings,
                     &param_names, &param_model_indices,
@@ -921,35 +946,30 @@ pub fn run_pgas(
                     Err(_) => return (f64::NEG_INFINITY, vec![0.0; d]),
                 };
 
-                // Add prior + Jacobian (and their gradients)
+                // Assemble full target on z scale: each component produces (value, d/dz)
                 let mut log_p = ll;
+                let mut grad_z = vec![0.0; d];
+
                 for i in 0..d {
-                    let natural = params[if2_params[i].index];
-                    log_p += priors[i].log_density(natural, z[i]);
+                    let theta = params[if2_params[i].index];
+                    let dtheta_dz = transform_deriv(&if2_params[i], z[i]);
+
+                    // LL: chain rule θ → z
+                    grad_z[i] += ll_grad_theta[i] * dtheta_dz;
+
+                    // Prior: (value, d/dz) — each variant handles its own scale
+                    let (prior_val, prior_grad_z) = prior_log_density_and_grad_z(
+                        &priors[i], &if2_params[i], theta, z[i],
+                    );
+                    log_p += prior_val;
+                    grad_z[i] += prior_grad_z;
+
+                    // Jacobian: (value, d/dz) — already on z scale
                     log_p += log_jacobian(&if2_params[i], z[i]);
-
-                    // Prior gradient (on transformed scale)
-                    match &priors[i] {
-                        Prior::Flat => {},
-                        Prior::Normal { mean, sd } => {
-                            // d/dz log N(θ(z); μ, σ) needs chain rule through transform
-                            // For simplicity, use the transformed-scale gradient
-                            ll_grad[i] += -(natural - mean) / (sd * sd)
-                                * transform_deriv(&if2_params[i], z[i]);
-                        }
-                        Prior::TransformedNormal { mean, sd } => {
-                            ll_grad[i] += -(z[i] - mean) / (sd * sd);
-                        }
-                    }
-
-                    // Jacobian gradient
-                    ll_grad[i] += jacobian_grad(&if2_params[i], z[i]);
-
-                    // Chain rule: ll_grad is d(ll)/dθ, need d(ll)/dz = d(ll)/dθ * dθ/dz
-                    ll_grad[i] *= transform_deriv(&if2_params[i], z[i]);
+                    grad_z[i] += jacobian_grad(&if2_params[i], z[i]);
                 }
 
-                (log_p, ll_grad)
+                (log_p, grad_z)
             };
 
             let (init_log_p, init_grad) = log_prob_and_grad(&current_transformed);
@@ -978,10 +998,9 @@ pub fn run_pgas(
                 for t in &mut total_accepted { *t += 1; }
             }
 
-            // Dual averaging: adapt step size during burn-in
+            // Dual averaging with mean acceptance probability (not binary)
             if sweep < adapt_end {
-                let accept_prob = if result.accepted { 0.8 } else { 0.0 };
-                nuts_step_size = nuts_dual_avg.update(accept_prob);
+                nuts_step_size = nuts_dual_avg.update(result.mean_accept_prob);
             } else if sweep == adapt_end {
                 nuts_step_size = nuts_dual_avg.final_step_size();
                 eprintln!("  NUTS step size adapted: {:.6}", nuts_step_size);
