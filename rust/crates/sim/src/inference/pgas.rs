@@ -138,36 +138,20 @@ pub fn log_transition_density_substep(
     let mut propensities = vec![0.0; n_tr];
     eval_propensities(model, &int_s, &real_s, params, t, &mut propensities)?;
 
-    // Pre-evaluate draw methods (same as step_one lines 374-385)
     let ctx = EvalCtx {
         model, int_s: &int_s, real_s: &real_s, params, t, projected: None,
     };
-    let mut overdispersions: Vec<Option<f64>> = Vec::with_capacity(n_tr);
-    let mut is_deterministic = vec![false; n_tr];
-    for tr in &model.model.transitions {
-        match &tr.draw_method {
-            ir::transition::DrawMethod::Overdispersed(expr) => {
-                overdispersions.push(Some(eval_expr(expr, &ctx)?));
-            }
-            ir::transition::DrawMethod::Deterministic => {
-                overdispersions.push(None);
-                is_deterministic[overdispersions.len() - 1] = true;
-            }
-            _ => { overdispersions.push(None); }
-        }
-    }
-    // Fix: is_deterministic should be indexed by transition, not by overdispersions index
+
+    // Per-transition: is it deterministic? What's its sigma_sq?
     let mut is_determ = vec![false; n_tr];
-    for (i, tr) in model.model.transitions.iter().enumerate() {
-        if matches!(tr.draw_method, ir::transition::DrawMethod::Deterministic) {
-            is_determ[i] = true;
-        }
-    }
-    // Re-evaluate overdispersion properly indexed by transition
     let mut sigma_sq_by_tr: Vec<Option<f64>> = vec![None; n_tr];
     for (i, tr) in model.model.transitions.iter().enumerate() {
-        if let ir::transition::DrawMethod::Overdispersed(expr) = &tr.draw_method {
-            sigma_sq_by_tr[i] = Some(eval_expr(expr, &ctx)?);
+        match &tr.draw_method {
+            ir::transition::DrawMethod::Deterministic => { is_determ[i] = true; }
+            ir::transition::DrawMethod::Overdispersed(expr) => {
+                sigma_sq_by_tr[i] = Some(eval_expr(expr, &ctx)?);
+            }
+            _ => {}
         }
     }
 

@@ -34,6 +34,8 @@ pub struct StepScratch {
     /// (small np). Consumed in source-group order.
     /// Used by CPM-MCMC for correlated binomial draws.
     pub binomial_z_values: Vec<f64>,
+    /// Current index into binomial_z_values. Incremented as z-values are consumed.
+    pub binomial_z_idx: usize,
     /// Gamma multipliers actually used during step_one, in source-group order.
     /// Populated by step_one for each overdispersed source group encountered.
     /// Used by PGAS to record the gamma drawn at each substep for transition
@@ -59,6 +61,7 @@ impl StepScratch {
             handled: vec![false; n_tr],
             gamma_override: None,
             binomial_z_values: Vec::new(),
+            binomial_z_idx: 0,
             gamma_used: Vec::new(),
             probs: Vec::with_capacity(n_tr),
         }
@@ -441,9 +444,10 @@ pub fn step_one(
 
         // Step 2: draw total exits (pomp's first rbinom)
         let p_total = (1.0 - (-total_rate * dt).exp()).clamp(0.0, 1.0);
-        let mut n_events = if !scratch.binomial_z_values.is_empty() {
+        let mut n_events = if scratch.binomial_z_idx < scratch.binomial_z_values.len() {
             // CPM: use pre-drawn z-value for correlated binomial
-            let z = scratch.binomial_z_values.remove(0);
+            let z = scratch.binomial_z_values[scratch.binomial_z_idx];
+            scratch.binomial_z_idx += 1;
             let n = n_src as u64;
             let np = n as f64 * p_total;
             let nq = n as f64 * (1.0 - p_total);

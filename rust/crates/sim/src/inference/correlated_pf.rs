@@ -269,6 +269,7 @@ pub fn bootstrap_filter_correlated(
                     // Inject pre-drawn binomial z-values per source group.
                     // step_one converts z → count after computing (n, p).
                     scratch.binomial_z_values.clear();
+                    scratch.binomial_z_idx = 0;
                     for group in 0..n_groups {
                         let binom_idx = i * steps_per_obs * n_groups + substep * n_groups + group;
                         if binom_idx < binom_row.len() {
