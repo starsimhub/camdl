@@ -53,6 +53,8 @@ pub fn run_pmmh_cli(
         seed, false,
     )?;
 
+    let dt = config.if2_config.dt;
+
     // Build proposal SDs
     let proposal_sd = build_proposal_sd(&config, sc, starts_from)?;
 
@@ -92,7 +94,7 @@ pub fn run_pmmh_cli(
             eprintln!("\nCPM correlation check (rho={}, 50 correlated pairs)...", rho);
             let n_source_groups = config.compiled.source_groups.len();
             let n_obs = config.observations.len();
-            let steps_per_obs = (1.0 / dt * 7.0).round() as usize;
+            let steps_per_obs = (1.0_f64 / dt * 7.0).round() as usize;
             let mut corr_rng = sim::rng::StatefulRng::new(seed + 999);
 
             let compiled = config.compiled.clone();
