@@ -101,6 +101,7 @@ pub fn cmd_fit_pmmh(args: &[String]) {
 pub fn cmd_fit_pgas(args: &[String]) {
     let (fit, seed, force) = parse_fit_args(args, false);
     let starts_from = parse_optional_starts_from(args);
+    let no_nuts = args.iter().any(|a| a == "--no-nuts");
 
     let (model, _) = load_model_for_validation(&fit);
     let model_params: Vec<String> = model.parameters.iter().map(|p| p.name.clone()).collect();
@@ -113,7 +114,7 @@ pub fn cmd_fit_pgas(args: &[String]) {
         std::process::exit(1);
     });
 
-    pgas::run_pgas_cli(&fit, starts_from.as_deref(), seed, force).unwrap_or_else(|e| {
+    pgas::run_pgas_cli(&fit, starts_from.as_deref(), seed, force, !no_nuts).unwrap_or_else(|e| {
         eprintln!("error: {}", e);
         std::process::exit(1);
     });
@@ -139,6 +140,7 @@ fn parse_fit_args(args: &[String], _needs_starts_from: bool) -> (FitToml, u64, b
             "--force" => { force = true; }
             "--starts-from" => { i += 1; } // consumed by parse_starts_from / parse_optional_starts_from
             "--check-variance" => {} // consumed by cmd_fit_pmmh
+            "--no-nuts" => {} // consumed by cmd_fit_pgas
             s if s.starts_with("--") => {
                 eprintln!("unknown flag: {}", s);
                 std::process::exit(1);

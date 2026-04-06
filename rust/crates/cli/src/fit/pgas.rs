@@ -26,6 +26,7 @@ pub fn run_pgas_cli(
     starts_from: Option<&str>,
     seed: u64,
     force: bool,
+    use_nuts: bool,
 ) -> Result<(), String> {
     let stage_dir = format!("{}/pgas", fit.fit.output_dir);
     let sc = fit.pgas.as_ref();
@@ -135,7 +136,7 @@ pub fn run_pgas_cli(
                 burn_in,
                 thin,
                 dt,
-                use_nuts: true, // auto-falls back to MH if no gradients in IR
+                use_nuts, // --no-nuts disables; auto-falls back to MH if no gradients in IR
             };
 
             // Each chain gets its own dmeasure closure
