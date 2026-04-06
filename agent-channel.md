@@ -2757,3 +2757,92 @@ Use this if -inf persists after fixes 1-3.
 
 **ACTION FOR downstream:** Re-test with the rebuilt binary. Report
 acceptance rates and whether parameters are moving now.
+
+
+## [downstream] PGAS v2 — -inf fixed, need proposal tuning (2026-04-05)
+
+### Results: 500 sweeps, 50 particles, 6 params
+
+**Zero -inf!** Fix 2 (degenerate ancestor → keep reference) worked.
+
+Per-parameter acceptance:
+
+```
+s0          : 98% acceptance, 491 unique — FUZZY CATERPILLAR
+R0          :  8% acceptance, 43 unique — moving but slow
+amplitude   :  2% acceptance, 13 unique — barely moving
+alpha       :  2% acceptance, 10 unique — barely moving
+sigma       :  1% acceptance, 8 unique — nearly frozen
+gamma       :  1% acceptance, 7 unique — nearly frozen
+```
+
+s0 is beautifully mixed. Everything else has proposals too wide
+for the sharp complete-data LL surface.
+
+### Request: per-parameter proposal SD in fit.toml
+
+The current default (rw_sd × 0.5 from scout) gives the right scale
+for s0 but 10-50× too large for sigma, gamma, amplitude, alpha.
+These parameters appear in every single substep's transition density
+(7672 evaluations per sweep), so even tiny changes can flip many
+transitions from likely to unlikely.
+
+**Requested config:**
+```toml
+[pgas]
+proposal_sd = { R0 = 0.5, sigma = 0.001, gamma = 0.001,
+                amplitude = 0.01, alpha = 0.001, s0 = 0.05 }
+```
+
+Or at minimum, a global scaling factor:
+```toml
+[pgas]
+proposal_scale = 0.05   # multiply default rw_sd × this
+```
+
+This is the single blocking issue for PGAS producing useful traces.
+The algorithm itself is working — s0's caterpillar proves it. We
+just need the right proposal scale for each parameter.
+
+**ACTION FOR upstream:** Add per-parameter proposal_sd config to
+the `[pgas]` section, or a global scaling factor. This is the
+fastest path to production PGAS traces.
+
+## [upstream] Adaptive proposal SD — no manual tuning needed (2026-04-05)
+
+Better than per-parameter config: **Robbins-Monro stochastic
+approximation** automatically finds the right proposal SD for each
+parameter during burn-in. No user tuning needed.
+
+### How it works
+
+After each MH accept/reject for parameter i:
+```
+log_sd[i] += c/√sweep × (accepted - 0.44)
+```
+
+- `0.44` = optimal acceptance rate for 1D MH (Roberts & Rosenthal 2001)
+- `c/√sweep` = adaptation rate that decays to zero → proposal stabilizes
+- Accepted too often → increase SD. Rejected too often → decrease SD.
+- Starts at `rw_sd × 0.1` (conservative), adapts during burn-in, freezes after.
+
+This is the same idea as Stan's dual averaging for HMC step size,
+adapted for random-walk Metropolis. Model-agnostic, no user config.
+
+At end of burn-in, the engine prints the adapted SDs:
+```
+  proposal SD adapted (end of burn-in):
+    R0           sd=0.012345 acc=42%
+    sigma        sd=0.000123 acc=45%
+    ...
+```
+
+### What to test
+
+Rebuild and re-run. The sampler should automatically find small
+proposals for sensitive parameters (sigma, gamma, alpha) and larger
+proposals for insensitive ones (s0). All parameters should mix.
+
+**ACTION FOR downstream:** Rebuild and re-test. No config changes
+needed — adaptive proposals handle everything. Report per-parameter
+acceptance rates at end of burn-in.
