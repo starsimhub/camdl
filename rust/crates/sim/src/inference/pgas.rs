@@ -273,16 +273,10 @@ pub fn complete_data_loglik(
     // Cumulative flows since last observation (for projection)
     let mut cum_flows = vec![0u64; n_tr];
 
-    // Use initial_state(params) for substep 0, NOT trajectory.initial_counts.
-    // This ensures that IVP parameters (like s0) affect the complete-data LL.
-    // Without this, s0 is unconstrained (the stored initial_counts don't change
-    // when s0 is proposed, so the LL is invariant → random walk to bound).
-    let (param_init, _) = model.initial_state(params)?;
-
     for s in 0..n_substeps {
         let t = t_start + s as f64 * dt;
         let counts_before = if s == 0 {
-            &param_init.counts
+            &trajectory.initial_counts
         } else {
             &trajectory.substeps[s - 1].counts
         };
@@ -756,6 +750,31 @@ pub fn run_pgas(
         })
         .collect();
 
+    // Detect IVP parameters: parameters that only affect initial_state,
+    // not propensities. These cannot be updated via the θ|X MH step
+    // (the complete-data LL is invariant to them). Instead, they are
+    // back-solved from the trajectory's initial state after each CSMC sweep.
+    let ivp_mask: Vec<bool> = if2_params.iter().map(|spec| {
+        let mut perturbed = current_params.clone();
+        let delta = (spec.upper - spec.lower).min(1.0) * 0.01;
+        perturbed[spec.index] += delta;
+        // Check if LL changes when we perturb this param (trajectory fixed)
+        let ll_base = complete_data_loglik(
+            model, &trajectory, &current_params, observations,
+            config.dt, dmeasure_fn, flow_indices,
+        ).unwrap_or(f64::NEG_INFINITY);
+        let ll_pert = complete_data_loglik(
+            model, &trajectory, &perturbed, observations,
+            config.dt, dmeasure_fn, flow_indices,
+        ).unwrap_or(f64::NEG_INFINITY);
+        let is_ivp = (ll_pert - ll_base).abs() < 1e-10;
+        if is_ivp {
+            eprintln!("  {} detected as IVP (initial-value parameter) — \
+                       back-solved from trajectory, not estimated via MH", spec.name);
+        }
+        is_ivp
+    }).collect();
+
     // Initial complete-data log-likelihood
     let mut current_ll = complete_data_loglik(
         model, &trajectory, &current_params, observations,
@@ -782,6 +801,7 @@ pub fn run_pgas(
         // the mode each sweep by updating X. The Gibbs alternation provides
         // mixing — each θ step tracks the shifting mode.
         for i in 0..d {
+            if ivp_mask[i] { continue; } // IVPs back-solved after CSMC, not MH
             let spec = &if2_params[i];
             let z_old = current_transformed[i];
             let z_new = z_old + proposal_sd[i] * rng.normal();
@@ -834,6 +854,46 @@ pub fn run_pgas(
             csmc_seed,
         )?;
         trajectory = new_trajectory;
+
+        // ── Step 3: Back-solve IVP parameters from the trajectory ──
+        // Parameters that only affect the initial state (not propensities)
+        // cannot be updated via the θ|X MH step — the complete-data LL is
+        // invariant to them. Instead, we infer them from the trajectory's
+        // initial state after CSMC. This is the standard PGAS treatment
+        // of deterministic initial conditions (Lindsten et al. 2014).
+        {
+            let traj_init = &trajectory.initial_counts;
+            for (i, spec) in if2_params.iter().enumerate() {
+                if ivp_mask[i] {
+                    // Back-solve: find the param value that produces this initial state.
+                    // For IVP params, initial_state(θ) is typically count = round(N * param).
+                    // So param ≈ count / N, where N = sum of initial compartment counts.
+                    let total: f64 = traj_init.iter().sum::<i64>() as f64;
+                    if total > 0.0 {
+                        // Find which compartment this IVP controls by perturbing
+                        let old_val = current_params[spec.index];
+                        let (init_old, _) = model.initial_state(&current_params)?;
+                        let mut perturbed = current_params.clone();
+                        let delta = (spec.upper - spec.lower) * 0.01;
+                        perturbed[spec.index] = (old_val + delta).min(spec.upper);
+                        let (init_new, _) = model.initial_state(&perturbed)?;
+
+                        // Find the compartment that changed
+                        for (c, (&old_c, &new_c)) in init_old.counts.iter()
+                            .zip(init_new.counts.iter()).enumerate()
+                        {
+                            if old_c != new_c {
+                                let new_val = traj_init[c] as f64 / total;
+                                let clamped = new_val.clamp(spec.lower, spec.upper);
+                                current_params[spec.index] = clamped;
+                                current_transformed[i] = spec.to_transformed(clamped);
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
 
         // Recompute complete-data LL with the new trajectory
         // (the CSMC changed X, so log p(y,X|θ) changes even at the same θ)
