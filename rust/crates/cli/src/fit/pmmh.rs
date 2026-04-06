@@ -31,6 +31,12 @@ pub fn run_pmmh_cli(
     force: bool,
     check_variance: bool,
 ) -> Result<(), String> {
+    eprintln!("\x1b[33m⚠ PMMH is experimental. For models with T > 500 observations,\x1b[0m");
+    eprintln!("\x1b[33m  acceptance rates may be too low for reliable posterior sampling.\x1b[0m");
+    eprintln!("\x1b[33m  Correlated pseudo-marginal (rho config) helps but has limits\x1b[0m");
+    eprintln!("\x1b[33m  on discrete-state models. PGAS is planned for production use.\x1b[0m");
+    eprintln!();
+
     let stage_dir = format!("{}/pmmh", fit.fit.output_dir);
     let sc = fit.pmmh.as_ref();
 
