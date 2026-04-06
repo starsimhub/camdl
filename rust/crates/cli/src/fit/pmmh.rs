@@ -87,6 +87,81 @@ pub fn run_pmmh_cli(
     }
 
     if check_variance {
+        // Also run correlation check if rho is set
+        if let Some(rho) = sc.and_then(|c| c.rho) {
+            eprintln!("\nCPM correlation check (rho={}, 50 correlated pairs)...", rho);
+            let n_source_groups = config.compiled.source_groups.len();
+            let n_obs = config.observations.len();
+            let steps_per_obs = (1.0 / dt * 7.0).round() as usize;
+            let mut corr_rng = sim::rng::StatefulRng::new(seed + 999);
+
+            let compiled = config.compiled.clone();
+            let obs_model = config.obs_model_ir.clone();
+            let flow_idx = config.flow_indices.clone();
+            let obs: Vec<sim::inference::particle_filter::Observation> = config.observations.iter()
+                .map(|o| sim::inference::particle_filter::Observation { time: o.time, value: o.value })
+                .collect();
+
+            let eval_corr = |params: &[f64], randoms: &sim::inference::correlated_pf::PFRandomState| -> f64 {
+                let step_fn = |state: &mut sim::inference::ParticleState, t: f64, step_dt: f64, rng: &mut sim::rng::StatefulRng, scratch: &mut sim::chain_binomial::StepScratch| {
+                    sim::chain_binomial::step_one(&compiled, &mut state.counts, &mut state.flow_accumulators, params, t, step_dt, rng, scratch)
+                };
+                let fi = &flow_idx;
+                let project_fn = |state: &sim::inference::ParticleState| -> f64 {
+                    fi.iter().map(|&i| state.flow_accumulators[i] as f64).sum()
+                };
+                let dmeasure = sim::inference::dmeasure::compile_dmeasure_pf(
+                    &obs_model, compiled.clone(), params,
+                );
+                match sim::inference::correlated_pf::bootstrap_filter_correlated(
+                    &compiled, params, &obs, n_particles, dt,
+                    &step_fn, &project_fn, &*dmeasure, randoms, seed,
+                ) {
+                    Ok(r) => r.log_likelihood,
+                    Err(_) => f64::NEG_INFINITY,
+                }
+            };
+
+            let mut ll_a = Vec::new();
+            let mut ll_b = Vec::new();
+            for i in 0..50 {
+                let u = sim::inference::correlated_pf::PFRandomState::draw_fresh(
+                    n_particles, n_obs, steps_per_obs, n_source_groups, &mut corr_rng,
+                );
+                let u_prime = u.correlate(rho, &mut corr_rng);
+                let la = eval_corr(&base, &u);
+                let lb = eval_corr(&base, &u_prime);
+                ll_a.push(la);
+                ll_b.push(lb);
+                eprint!("\r  pair {}/50: Δ={:.2}    ", i + 1, (la - lb).abs());
+            }
+            eprintln!();
+
+            // Compute correlation
+            let n = ll_a.len() as f64;
+            let mean_a = ll_a.iter().sum::<f64>() / n;
+            let mean_b = ll_b.iter().sum::<f64>() / n;
+            let var_a = ll_a.iter().map(|&x| (x - mean_a).powi(2)).sum::<f64>() / (n - 1.0);
+            let var_b = ll_b.iter().map(|&x| (x - mean_b).powi(2)).sum::<f64>() / (n - 1.0);
+            let cov = ll_a.iter().zip(&ll_b).map(|(&a, &b)| (a - mean_a) * (b - mean_b)).sum::<f64>() / (n - 1.0);
+            let rho_eff = if var_a > 0.0 && var_b > 0.0 { cov / (var_a.sqrt() * var_b.sqrt()) } else { 0.0 };
+
+            let diffs: Vec<f64> = ll_a.iter().zip(&ll_b).map(|(&a, &b)| a - b).collect();
+            let diff_mean = diffs.iter().sum::<f64>() / n;
+            let diff_sd = (diffs.iter().map(|&d| (d - diff_mean).powi(2)).sum::<f64>() / (n - 1.0)).sqrt();
+
+            eprintln!("  ρ_eff = {:.3}", rho_eff);
+            eprintln!("  sd(individual) = {:.2}", var_a.sqrt());
+            eprintln!("  sd(difference) = {:.2}", diff_sd);
+            if rho_eff > 0.95 {
+                eprintln!("  \x1b[32m✓ CPM correlation excellent — mixing issue is proposal tuning\x1b[0m");
+            } else if rho_eff > 0.8 {
+                eprintln!("  \x1b[33m~ CPM correlation moderate — binomial correlation partial\x1b[0m");
+            } else {
+                eprintln!("  \x1b[31m✗ CPM correlation low — check binomial z-value injection\x1b[0m");
+            }
+        }
+
         eprintln!("\n--check-variance: stopping here (no MCMC run).");
         return Ok(());
     }
