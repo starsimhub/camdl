@@ -24,10 +24,10 @@ model.camdl ──→ camdlc ──→ model.ir.json
 
 | Domain                | What camdl does                                                                                                                                                           |
 | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Modelling**         | Compartments, stratification (age, space, risk), contact matrices, Erlang staging, forcing functions, interventions, scenarios                                            |
+| **Modelling**         | Compartments, stratification (age, space, risk), contact matrices, Erlang staging, forcing functions, interventions, events, balance constraints, scenarios                |
 | **Simulation**        | Gillespie SSA, tau-leap, chain-binomial (Euler-multinomial), ODE (RK4). Extra-demographic stochasticity via `overdispersed()`. Deterministic flows via `deterministic()`. |
-| **Inference**         | Bootstrap particle filter, IF2 (iterated filtering for MLE), 1D/2D profile likelihoods. Parallel chains with indicatif progress bars. Auto rw_sd from parameter bounds.   |
-| **Fitting workflow**  | `camdl fit scout → refine → validate` pipeline driven by `fit.toml`. MAD-based auto-calibration, exhaustive partition checking, provenance hashing, out-of-sample validation via `[holdout]`. |
+| **Inference**         | IF2 (MLE), PGAS with NUTS (Bayesian posterior), bootstrap particle filter, 1D/2D profiles. Source-to-source autodiff: compiler emits gradient expressions, enabling HMC. |
+| **Fitting workflow**  | `camdl fit scout → refine → validate → pgas` pipeline driven by `fit.toml`. IF2 finds the MLE, PGAS characterizes the posterior with exact complete-data likelihood + NUTS gradient proposals. Parallel chains, random starts, R-hat/ESS diagnostics, posterior trajectory output. |
 | **Experiments**       | Multi-scenario seed ensembles, Sobol sensitivity analysis, parameter sweeps. Content-addressable output with caching.                                                     |
 | **Decision analysis** | Value of Information (EVSI) via `camdl voi run`.                                                                                                                          |
 
@@ -243,19 +243,30 @@ Parallel 1D and 2D profile likelihoods with indicatif progress bars.
 The structured fitting pipeline, driven by `fit.toml`:
 
 ```bash
-camdl fit scout    fit.toml          # 8 chains, random starts, auto rw_sd
-camdl fit refine   fit.toml --starts-from scout/   # convergent IF2
-camdl fit validate fit.toml --starts-from refine/  # profiles + precise pfilter
-camdl fit status   fit.toml          # colored summary
+# MLE via IF2
+camdl fit scout    fit.toml                          # random starts, landscape discovery
+camdl fit refine   fit.toml --starts-from scout/     # convergent IF2 from best scouts
+camdl fit validate fit.toml --starts-from refine/    # profiles + precise pfilter at MLE
+
+# Bayesian posterior via PGAS
+camdl fit pgas     fit.toml --starts-from validate/  # Gibbs sampler with NUTS proposals
+camdl fit pgas     fit.toml                          # random starts (no prior stage)
+camdl fit pgas     fit.toml --no-nuts                # fall back to MH-within-Gibbs
+
+camdl fit status   fit.toml                          # colored summary of all stages
 ```
 
-**Scout** discovers the likelihood basin with random starts and MAD-based auto
-rw_sd calibration. **Refine** converges from scout's best parameters.
-**Validate** runs profiles for all estimated parameters and a precise pfilter at
-the MLE for log-likelihood and ESS measurement.
+**Scout → Refine → Validate** finds the MLE via IF2 (iterated filtering).
+**PGAS** (Particle Gibbs with Ancestor Sampling) characterizes the Bayesian
+posterior. Each Gibbs sweep alternates exact parameter updates (complete-data
+log-likelihood, no PF noise) with CSMC-AS trajectory updates. NUTS
+(No-U-Turn Sampler) proposes parameters jointly using analytical gradients
+from the compiler's source-to-source autodiff.
 
-The final output is `mle_params.toml` — a standard params file with provenance
-hashing that feeds directly into `camdl simulate` and `camdl experiment run`.
+PGAS features: parallel chains with random starts, Robbins-Monro adaptive
+proposals, diagonal mass matrix adaptation, R-hat/ESS convergence
+diagnostics, per-sweep trajectory renewal tracking, posterior trajectory
+output (`n_trajectories` in fit.toml).
 
 **Out-of-sample validation:** Add `[holdout]` to fit.toml with holdout data
 files. Scout/refine never see holdout data. Validate reports separate
@@ -356,7 +367,7 @@ errors), golden file regeneration + diff check, and the full integration suite.
 | [`docs/camdl-inference-spec.md`](docs/camdl-inference-spec.md)   | Fitting workflow specification       |
 | [`docs/camdl-experiment-spec.md`](docs/camdl-experiment-spec.md) | Experiment system specification      |
 | [`docs/camdl-voi-spec.md`](docs/camdl-voi-spec.md)               | Value of Information specification   |
-| [`docs/inference.md`](docs/inference.md)                         | Inference guide (PF, IF2, profiles)  |
+| [`docs/inference.md`](docs/inference.md)                         | Inference guide (PF, IF2, PGAS, NUTS)|
 | [`docs/runtimes.md`](docs/runtimes.md)                           | Simulation backend details           |
 | [`docs/user-features.md`](docs/user-features.md)                 | Feature catalog with pomp comparison |
 | [`docs/intro.md`](docs/intro.md)                                 | DSL tutorial                         |
@@ -377,7 +388,7 @@ ocaml/
 rust/
   crates/ir/           IR types + serde
   crates/sim/          Simulation backends + propensity evaluator
-                       + inference (PF, IF2, resampling, obs_loglik)
+                       + inference (PF, IF2, PGAS, NUTS, PMMH, obs_loglik)
   crates/observe/      Observation model (likelihood sampling/scoring)
   crates/io/           TSV read/write
   crates/cli/          CLI: simulate, pfilter, if2, profile, fit,

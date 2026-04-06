@@ -117,21 +117,44 @@ Pre-intervention trajectories are byte-identical for `enable`/`disable`
 scenarios. For `set`/`scale` scenarios that modify propensities from t=0,
 trajectories are correlated but not identical.
 
-`rust/crates/sim/src/ekrng.rs` implements an event-keyed RNG (`EkRng`) for
-potential future use (ABM support, conditional SMC). It is not wired into any
-simulation backend — `StatefulRng` (seeded ChaCha8) is used exclusively. The
-`event_key` field in the IR is populated by the compiler but ignored at runtime.
+The `event_key` field in the IR is populated by the compiler but ignored
+at runtime.
 
 ### Implementation phases
 
-| Phase | Status                        | Scope                                                      |
-| ----- | ----------------------------- | ---------------------------------------------------------- |
-| v0.1  | Current target                | Forward simulation + synthetic data generation             |
-| v0.2  | Designed, not yet implemented | Inference (PMCMC/IF2), real data input, priors             |
-| v0.3  | Design sketch only            | Hierarchical priors, reporting pipelines, spatial coupling |
+| Phase | Status    | Scope                                                      |
+| ----- | --------- | ---------------------------------------------------------- |
+| v0.1  | Complete  | Forward simulation + synthetic data generation             |
+| v0.2  | Complete  | Inference: IF2 (MLE), PGAS+NUTS (Bayesian), particle filter, priors, real data input |
+| v0.3  | In design | Hierarchical priors, reporting pipelines, spatial coupling |
 
-v0.2/v0.3 fields are present in the schema as nullable so the serialization
-format never breaks between phases.
+### Inference algorithms
+
+The inference stack lives in `rust/crates/sim/src/inference/`:
+
+- `if2.rs` — Iterated filtering for maximum likelihood estimation
+- `pgas.rs` — Particle Gibbs with Ancestor Sampling (production Bayesian method)
+- `pgas_grad.rs` — Gradient evaluation for PGAS (uses compiler-emitted `rate_grad`)
+- `nuts.rs` — No-U-Turn Sampler for gradient-based parameter proposals within PGAS
+- `pmmh.rs` — Particle Marginal Metropolis-Hastings (experimental, gated)
+- `particle_filter.rs` — Bootstrap particle filter
+- `dmeasure.rs` — Observation likelihood compilation
+- `obs_loglik.rs` — Distribution log-PMFs + analytical gradients (incl. digamma)
+
+The OCaml compiler (`ocaml/lib/ir/autodiff.ml`) performs source-to-source
+symbolic differentiation of rate expressions, emitting `rate_grad` fields
+in the IR. The Rust backend evaluates these derivative expressions via
+`eval_expr` — no runtime autodiff, no finite differences.
+
+### DSL features for inference
+
+- `events {}` — Scheduled discrete state modifications (cohort entry,
+  importation). Sister construct to `interventions {}` but fires every
+  substep. Uses `add()`, `transfer()`, `set()` actions.
+- `balance {}` — Population conservation constraint. Applied last in each
+  substep after transitions and events.
+- `ivp: true` — Parameter type for initial value parameters (s0, e0).
+  PGAS draws stochastic initial states via Binomial(N, param).
 
 ### Backend capabilities
 

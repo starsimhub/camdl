@@ -1,7 +1,7 @@
 # Inference in camdl
 
-How the particle filter, IF2, and profile likelihoods work, what the
-diagnostics mean, and where camdl can improve on existing tools.
+How the particle filter, IF2, PGAS, and NUTS work, what the
+diagnostics mean, and how the inference pipeline fits together.
 
 ---
 
@@ -418,65 +418,94 @@ independently.
 
 ---
 
-## Where camdl can improve on pomp
+## PGAS (Particle Gibbs with Ancestor Sampling)
 
-The particle filter and IF2 in camdl match pomp's semantics
-(Euler-multinomial transitions, bootstrap resampling, parameter
-perturbation with cooling). Several improvements are possible:
+IF2 finds the MLE. PGAS characterizes the full posterior — credible
+intervals, parameter correlations, posterior trajectory samples.
 
-### Auto rw_sd
+### How it works
 
-pomp requires explicit `rw.sd(R0=5, sigma=0.01, ...)` for every
-parameter — the #1 usability complaint. camdl provides two tiers
-of automatic rw_sd:
+PGAS is a Gibbs sampler alternating two steps per sweep:
 
-**Tier 1: Bounds-based (for scout / quick tests).** For each
-estimated parameter with bounds `[lo, hi]`, compute
-`(hi - lo) / 6` on the transformed scale. This gives perturbations
-that explore roughly the middle third of the parameter range —
-appropriate for broad exploration. Available via `--rw-sd auto` on
-`camdl if2` or by omitting `rw_sd` in `fit.toml`.
+**Step 1: θ | X, y (parameter update).** With the full latent
+trajectory X known, the complete-data log-likelihood is exact:
 
-The auto default doesn't need to be precise — it just needs the
-right order of magnitude. The user should check traces after scout
-and set explicit rw_sd values for refine. The convention: `rw_sd ≈
-0.02 × value` for log-transformed parameters gives ~2% perturbation
-per step on the transformed scale.
+$$\log p(y, X \mid \theta) = \sum_s \log p(x_{s+1} \mid x_s, \theta) + \sum_t \log p(y_t \mid x_t, \theta)$$
 
-Refine reads rw_sd from the user's fit.toml, not from scout's
-output. No auto-calibration is propagated between stages — each
-stage uses the values the user specified (or auto from bounds if
-omitted). The `rw_sd_scale` setting in `[refine]` can multiply
-all values by a factor for tighter convergence.
+No particle filter, no estimation noise. The transition density at
+each substep is a product of Binomial log-PMFs mirroring the
+Euler-multinomial decomposition in the simulation. Parameters are
+proposed via NUTS (gradient-based) or one-at-a-time MH.
 
-### ESS-adaptive resampling
+**Step 2: X | θ, y (trajectory update).** CSMC-AS (Conditional SMC
+with Ancestor Sampling) produces a new trajectory sample from
+$p(X \mid \theta, y)$. One particle slot is clamped to the reference
+trajectory; ancestor sampling at each substep reconnects the
+reference to the free-particle cloud via the transition density.
+Trajectory renewal (fraction of the traceback from non-reference
+particles) measures CSMC health — near 0% means path degeneracy,
+above 50% means healthy mixing.
 
-The filter currently resamples at every observation. When ESS is
-high (the observation is uninformative), resampling destroys
-particle diversity for no benefit. **Adaptive resampling** — only
-resample when ESS drops below $N/2$ — preserves diversity during
-uninformative periods and is standard in the SMC literature. pomp's
-pfilter does not implement this.
+### NUTS gradient proposals
 
-### Alive particle filter
+The complete-data log-likelihood is differentiable with respect to
+parameters: the Binomial log-PMF depends on rates via
+$p = 1 - \exp(-\text{rate} \cdot dt)$, and the rates are
+differentiable expressions from the model.
 
-When ESS drops sharply (e.g., at an epidemic peak), most particles
-are useless and the likelihood estimate degrades. The **alive
-particle filter** (Del Moral & Murray 2015) addresses this: when a
-particle receives near-zero weight, split a high-weight particle and
-perturb the copy slightly. This maintains the effective sample size
-at a target level at the cost of more computation at difficult
-observations.
+The OCaml compiler performs source-to-source symbolic differentiation
+of rate expressions (`autodiff.ml`), emitting `rate_grad` fields in
+the IR JSON. The Rust backend evaluates these derivative expressions
+via the same `eval_expr` interpreter — no runtime autodiff, no finite
+differences.
 
-### Gradient-based optimization
+NUTS (No-U-Turn Sampler, Hoffman & Gelman 2014) uses these gradients
+to propose all parameters jointly via Hamiltonian dynamics. A two-phase
+warmup adapts both the step size (dual averaging) and the diagonal mass
+matrix (empirical variance from burn-in). The mass matrix rescales each
+parameter by its posterior variance, so NUTS takes appropriately-sized
+steps in every direction.
 
-IF2 is a zero-order optimizer — it estimates the likelihood gradient
-from the resampling signal, not from an actual derivative. With
-automatic differentiation through the resampling step (Corenflos et
-al. 2021, differentiable particle filters), true gradients of the
-log-likelihood become available. This enables L-BFGS convergence in
-~20 iterations instead of IF2's ~100. Research frontier — not
-implemented in any epi toolbox.
+### Running PGAS
+
+```bash
+# From IF2 starting point
+camdl fit pgas fit.toml --starts-from validate/
+
+# From random starts (overdispersed initialization)
+camdl fit pgas fit.toml --seed 42
+
+# Force MH-within-Gibbs instead of NUTS
+camdl fit pgas fit.toml --no-nuts
+```
+
+Configuration in `fit.toml`:
+
+```toml
+[pgas]
+chains = 4
+sweeps = 10000
+particles = 100
+burn_in = 2000
+thin = 5
+n_trajectories = 200   # posterior trajectory samples per chain
+```
+
+Output per chain: `trace.tsv` (parameters + log-likelihood per sweep),
+`trajectories/trajectory_NNNNNN.tsv` (posterior latent state draws).
+
+### IVP parameters (s0, e0)
+
+Parameters that determine the initial state (like the initial
+susceptible fraction s0) require special treatment. The complete-data
+log-likelihood is invariant to them because the trajectory's initial
+state is stored, not recomputed.
+
+PGAS handles IVPs by making the initial state stochastic: each CSMC
+particle draws $S_0 \sim \text{Binomial}(N_0, s_0)$ independently,
+giving the CSMC diverse initial states to select among. A Binomial
+density term is added to the complete-data LL to constrain s0 via the
+MH ratio. IVP parameters are auto-detected at startup.
 
 ---
 
@@ -547,7 +576,8 @@ fit.toml + model.camdl + data.tsv
     │
     ├── camdl fit scout fit.toml          → scout/fit_state.toml
     ├── camdl fit refine fit.toml         → refine/mle_params.toml
-    └── camdl fit validate fit.toml       → validate/mle_params.toml
+    ├── camdl fit validate fit.toml       → validate/mle_params.toml
+    └── camdl fit pgas fit.toml           → pgas/chain_N/trace.tsv + trajectories/
 ```
 
 **Scout** (8 chains, 200 particles, no cooling): random starts across the
