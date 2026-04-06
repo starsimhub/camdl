@@ -681,14 +681,13 @@ fn log_jacobian(param: &IF2Param, z: f64) -> f64 {
 /// Run the PGAS Gibbs sampler.
 ///
 /// Alternates between:
-/// 1. θ | y — MH updates using PF marginal log-likelihood (smooth surface)
+/// 1. θ | X, y — MH updates using exact complete-data log-likelihood
 /// 2. X | θ, y — CSMC-AS to refresh the latent trajectory
 ///
-/// Step 1 uses a particle filter to estimate log p(y|θ), NOT the complete-data
-/// log p(y,X|θ). This gives a smooth likelihood surface that allows large
-/// proposals. The PF variance is handled by the pseudo-marginal property
-/// (Andrieu & Roberts 2009). Step 2 then produces a trajectory sample
-/// conditioned on the accepted θ.
+/// Step 1 evaluates the exact log p(y,X|θ) — no PF, no estimation noise.
+/// The surface is sharp (46K transition terms), so proposals are small, but
+/// the CSMC-AS in Step 2 shifts the mode by renewing the trajectory X. The
+/// Gibbs alternation provides mixing: small θ steps track the shifting mode.
 pub fn run_pgas(
     model: &CompiledModel,
     if2_params: &[IF2Param],
@@ -751,32 +750,12 @@ pub fn run_pgas(
         })
         .collect();
 
-    // Helper: run a PF at given params and return marginal log-likelihood.
-    // This is the smooth surface we use for parameter updates.
-    let n_pf = config.n_particles; // same particle count for PF and CSMC
-    let run_pf = |params: &[f64], pf_seed: u64| -> f64 {
-        let step_fn = |state: &mut crate::inference::types::ParticleState,
-                       t: f64, step_dt: f64,
-                       rng: &mut StatefulRng,
-                       scratch: &mut StepScratch| {
-            step_one(model, &mut state.counts, &mut state.flow_accumulators,
-                     params, t, step_dt, rng, scratch)
-        };
-        let project_fn = |state: &crate::inference::types::ParticleState| -> f64 {
-            flow_indices.iter().map(|&i| state.flow_accumulators[i] as f64).sum()
-        };
-        match crate::inference::particle_filter::bootstrap_filter(
-            model, params, observations, n_pf, config.dt,
-            &step_fn, &project_fn, dmeasure_fn, None, None, pf_seed,
-        ) {
-            Ok(r) => r.log_likelihood,
-            Err(_) => f64::NEG_INFINITY,
-        }
-    };
-
-    // Initial PF loglik at starting params (pseudo-marginal baseline)
-    let mut current_ll = run_pf(&current_params, seed.wrapping_add(0));
-    eprintln!("  initial PF loglik: {:.1} ({} particles)", current_ll, n_pf);
+    // Initial complete-data log-likelihood
+    let mut current_ll = complete_data_loglik(
+        model, &trajectory, &current_params, observations,
+        config.dt, dmeasure_fn, flow_indices,
+    )?;
+    eprintln!("  initial complete-data ll: {:.1}", current_ll);
 
     let mut sweeps = Vec::new();
     let mut total_accepted = vec![0usize; d];
@@ -789,9 +768,13 @@ pub fn run_pgas(
             .map(|&ls| ls.exp())
             .collect();
 
-        // ── Step 1: Update θ | y via PF marginal likelihood ──
-        // One-at-a-time MH with pseudo-marginal PF loglik (smooth surface).
-        // Each proposal requires one PF evaluation (~0.1s with 100 particles).
+        // ── Step 1: Update θ | X, y (EXACT, no PF) ──
+        // With the full trajectory X known, the complete-data log-likelihood
+        // is exact: Σ_t dmeasure(y_t, x_t) + Σ_s log_transition_density(x_s).
+        // No particle filter, no estimation noise, no variance scaling with T.
+        // The surface is sharp (46K terms), but the CSMC-AS in Step 2 shifts
+        // the mode each sweep by updating X. The Gibbs alternation provides
+        // mixing — each θ step tracks the shifting mode.
         for i in 0..d {
             let spec = &if2_params[i];
             let z_old = current_transformed[i];
@@ -801,9 +784,11 @@ pub fn run_pgas(
             let mut proposed_params = current_params.clone();
             proposed_params[spec.index] = theta_new;
 
-            // PF marginal loglik at proposed params
-            let pf_seed = seed.wrapping_add(sweep as u64 * d as u64 + i as u64 + 1);
-            let proposed_ll = run_pf(&proposed_params, pf_seed);
+            // Exact complete-data LL at proposed params (trajectory is FIXED)
+            let proposed_ll = complete_data_loglik(
+                model, &trajectory, &proposed_params, observations,
+                config.dt, dmeasure_fn, flow_indices,
+            )?;
 
             let proposed_log_prior_i = priors[i].log_density(theta_new, z_new);
             let current_log_prior_i = priors[i].log_density(
@@ -843,6 +828,13 @@ pub fn run_pgas(
             csmc_seed,
         )?;
         trajectory = new_trajectory;
+
+        // Recompute complete-data LL with the new trajectory
+        // (the CSMC changed X, so log p(y,X|θ) changes even at the same θ)
+        current_ll = complete_data_loglik(
+            model, &trajectory, &current_params, observations,
+            config.dt, dmeasure_fn, flow_indices,
+        )?;
 
         // Log adapted proposal SDs at end of burn-in
         if sweep + 1 == adapt_end {
