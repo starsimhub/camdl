@@ -34,7 +34,7 @@ pub fn log_transition_density_grad(
     t: f64,
     dt: f64,
     param_names: &[String],
-    param_indices: &[usize],
+    _param_indices: &[usize],
 ) -> Result<(f64, Vec<f64>), SimError> {
     let d = param_names.len();
     let n_int = model.int_local_to_global.len();

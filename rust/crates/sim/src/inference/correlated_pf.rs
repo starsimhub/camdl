@@ -98,6 +98,7 @@ impl PFRandomState {
 /// For small np: use Φ(z) as a uniform, then walk the binomial CDF.
 /// Step function in z → partial correlation, but these draws contribute
 /// negligible variance to the total log-likelihood.
+#[allow(dead_code)]
 fn correlated_binomial(z: f64, n: u64, p: f64) -> u64 {
     if n == 0 || p <= 0.0 { return 0; }
     if p >= 1.0 { return n; }
@@ -315,7 +316,7 @@ pub fn bootstrap_filter_correlated(
             .collect();
 
         // Systematic resample with sorted weights and correlated uniform
-        let mut resample_rng = StatefulRng::new(
+        let _resample_rng = StatefulRng::new(
             seed.wrapping_add(0xdeadbeef).wrapping_add(obs_idx as u64)
         );
         // Override the uniform in systematic_resample — we need a custom version

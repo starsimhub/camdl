@@ -1012,10 +1012,7 @@ pub fn run_pgas(
                 for (i, spec) in if2_params.iter().enumerate() {
                     current_params[spec.index] = spec.from_transformed(current_transformed[i]);
                 }
-                current_ll = complete_data_loglik(
-                    model, &trajectory, &current_params, observations,
-                    config.dt, dmeasure_fn, flow_indices, &ivp_mappings,
-                )?;
+                // current_ll is recomputed after CSMC (trajectory changes)
                 for a in &mut accepted { *a = true; }
                 for t in &mut total_accepted { *t += 1; }
             }

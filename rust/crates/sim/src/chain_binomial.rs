@@ -526,7 +526,7 @@ pub fn step_one(
             for c in &model.model.compartments { eprint!("\t{}", c.name); }
             for tr in &model.model.transitions { eprint!("\tflow_{}", tr.name); }
             eprint!("\ttotal_pop");
-            for (i, tr) in model.model.transitions.iter().enumerate() {
+            for (_i, tr) in model.model.transitions.iter().enumerate() {
                 eprint!("\trate_{}", tr.name);
             }
             eprintln!();

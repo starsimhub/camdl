@@ -4,7 +4,7 @@ use crate::{
     propensity::{eval_expr, EvalCtx},
     state::{IntState, RealState},
 };
-use ir::intervention::{Action, Intervention, InterventionSchedule, RecurringSchedule};
+use ir::intervention::{Action, Intervention, InterventionSchedule};
 
 /// Convert an `InterventionSchedule` to a sorted list of fire times.
 pub fn intervention_fire_times(sched: &InterventionSchedule) -> Vec<f64> {
@@ -40,7 +40,7 @@ pub fn apply_interventions_at(
     int_s: &mut IntState,
     real_s: &mut RealState,
     params: &[f64],
-    tolerance: f64,
+    _tolerance: f64,
 ) -> Result<bool, SimError> {
     let dt = model.model.simulation.dt.unwrap_or(1.0);
     let current_step = (t / dt).round() as i64;
