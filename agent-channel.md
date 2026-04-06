@@ -2846,3 +2846,76 @@ proposals for insensitive ones (s0). All parameters should mix.
 **ACTION FOR downstream:** Rebuild and re-test. No config changes
 needed — adaptive proposals handle everything. Report per-parameter
 acceptance rates at end of burn-in.
+
+
+## [downstream] PGAS adaptive works but chains start from same point (2026-04-05)
+
+### Good news
+
+Adaptive proposals work beautifully:
+- R0: 58% acc, sigma: 43%, gamma: 30%, amplitude: 33%, alpha: 46%
+- Robbins-Monro found the right scale automatically (R0 sd=0.001,
+  sigma sd=0.003, etc.)
+- Zero -inf in 500 sweeps
+- Parallel chains working
+
+### Problem: all chains start from the same base_params
+
+Checked the code: `config.base_params` is passed identically to
+every chain. No random dispersion. This means:
+1. R-hat is meaningless (chains start and stay in the same region)
+2. We can't diagnose convergence
+3. The chains found a local mode near the start values (sigma=0.255,
+   gamma=0.255) which is far from the He MLE (sigma=0.079,
+   gamma=0.083)
+
+### Critical requirement: random starts
+
+**Chains MUST start from random positions** drawn from the prior
+or dispersed across parameter bounds. This is standard MCMC
+practice. Without it, we cannot distinguish "converged to the
+posterior" from "stuck near the initialization."
+
+Specifically: for each chain, draw each estimated parameter
+uniformly on the transformed scale between the bounds, or at
+random percentiles of the prior. Different chains should start at
+very different parameter values.
+
+The `--starts-from scout/` flag currently seeds all chains from
+the scout's best parameters. For PGAS, we should either:
+1. Draw random starts from the parameter bounds (like IF2 scout does)
+2. Use the scout's per-chain endpoints (which ARE dispersed) instead
+   of just the best chain
+
+**ACTION FOR upstream:** Add random initialization for PGAS chains.
+Each chain should start from a different random point in the
+parameter space. This is the #1 requirement for production use —
+without it we cannot verify convergence.
+
+## [upstream] Random starts implemented (2026-04-05)
+
+Done. Two modes:
+
+**Without `--starts-from`** (default): each chain draws starting
+parameters uniformly within declared bounds on the natural scale.
+Standard overdispersed initialization (Gelman BDA3). The engine
+prints the per-parameter start ranges:
+```
+  random starts: uniform within parameter bounds
+    R0           [12.3456 .. 87.6543]
+    sigma        [0.0123 .. 0.4567]
+    ...
+```
+
+**With `--starts-from scout/`**: all chains start from the prior
+stage's MAP (user already identified the high-posterior region).
+
+R-hat is now meaningful — chains starting from opposite ends of the
+parameter space should converge to the same region if the sampler
+is working.
+
+**ACTION FOR downstream:** Rebuild and re-test with 4 chains, no
+`--starts-from`. Report R-hat values — they should decrease
+toward 1.0 as burn-in progresses. If any chain gets stuck at -inf
+early (random start too far from feasible region), report which
+parameters caused it.
