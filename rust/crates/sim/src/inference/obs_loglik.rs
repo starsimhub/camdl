@@ -36,6 +36,98 @@ pub fn lgamma(x: f64) -> f64 {
     0.5 * (2.0 * PI).ln() + (t.ln() * (x + 0.5)) - t + sum.ln()
 }
 
+/// Digamma function ψ(x) = d/dx ln Γ(x).
+///
+/// Asymptotic expansion for x > 6, recurrence ψ(x+1) = ψ(x) + 1/x
+/// for smaller x. Accurate to ~14 digits.
+pub fn digamma(mut x: f64) -> f64 {
+    if x <= 0.0 && x == x.floor() {
+        return f64::NAN;
+    }
+    if x < 0.0 {
+        return digamma(1.0 - x) - PI / (PI * x).tan();
+    }
+    let mut result = 0.0;
+    while x < 6.0 {
+        result -= 1.0 / x;
+        x += 1.0;
+    }
+    let x2 = 1.0 / (x * x);
+    result + x.ln() - 0.5 / x
+        - x2 * (1.0/12.0 - x2 * (1.0/120.0 - x2 * (1.0/252.0
+        - x2 * (1.0/240.0 - x2 * 1.0/132.0))))
+}
+
+/// Log-density of Gamma(x; shape, scale).
+///
+/// log p(x | a, b) = (a-1)·ln(x) - x/b - a·ln(b) - lgamma(a)
+pub fn log_gamma_density(x: f64, shape: f64, scale: f64) -> f64 {
+    if x <= 0.0 || shape <= 0.0 || scale <= 0.0 {
+        return f64::NEG_INFINITY;
+    }
+    (shape - 1.0) * x.ln() - x / scale - shape * scale.ln() - lgamma(shape)
+}
+
+/// Gradient of negbin_logpmf w.r.t. (mu, k).
+///
+/// d/d(mu) = y/mu - (y+k)/(mu+k)
+/// d/d(k) = ψ(y+k) - ψ(k) + ln(k/(k+mu)) + 1 - (y+k)/(k+mu)
+pub fn negbin_logpmf_grad(y: f64, mu: f64, k: f64) -> (f64, f64) {
+    if mu <= 0.0 || k <= 0.0 { return (0.0, 0.0); }
+    let y = y.round().max(0.0);
+    let d_mu = y / mu - (y + k) / (mu + k);
+    let d_k = digamma(y + k) - digamma(k)
+            + (k / (k + mu)).ln() + 1.0 - (y + k) / (k + mu);
+    (d_mu, d_k)
+}
+
+/// Gradient of normal_logpdf w.r.t. (mu, sigma).
+pub fn normal_logpdf_grad(y: f64, mu: f64, sigma: f64) -> (f64, f64) {
+    if sigma <= 0.0 { return (0.0, 0.0); }
+    let d_mu = (y - mu) / (sigma * sigma);
+    let d_sigma = ((y - mu).powi(2) - sigma * sigma)
+                / (sigma * sigma * sigma);
+    (d_mu, d_sigma)
+}
+
+/// Gradient of discretized_normal_logpmf w.r.t. (mean, variance).
+pub fn discretized_normal_logpmf_grad(
+    y: f64, mu: f64, variance: f64, tol: f64,
+) -> (f64, f64) {
+    let sigma = variance.sqrt().max(1e-10);
+    let y = y.round().max(0.0);
+    let z_hi = (y + 0.5 - mu) / sigma;
+    let z_lo = (y - 0.5 - mu) / sigma;
+    let phi_hi = normal_cdf(z_hi);
+    let phi_lo = if y <= 0.5 { 0.0 } else { normal_cdf(z_lo) };
+    let prob = (phi_hi - phi_lo).max(tol);
+
+    let npdf = |z: f64| (-0.5 * z * z).exp() / (2.0 * PI).sqrt();
+
+    let dp_dmu = if y <= 0.5 {
+        -npdf(z_hi) / sigma
+    } else {
+        (npdf(z_lo) - npdf(z_hi)) / sigma
+    };
+    let d_mu = dp_dmu / prob;
+
+    // dz/d(var) = -z / (2·var), so dΦ(z)/d(var) = -φ(z)·z / (2·var)
+    let dp_dvar = if y <= 0.5 {
+        -npdf(z_hi) * z_hi / (2.0 * variance)
+    } else {
+        (-npdf(z_hi) * z_hi + npdf(z_lo) * z_lo) / (2.0 * variance)
+    };
+    let d_var = dp_dvar / prob;
+
+    (d_mu, d_var)
+}
+
+/// Gradient of poisson_logpmf w.r.t. rate.
+pub fn poisson_logpmf_grad(k: f64, lambda: f64) -> f64 {
+    if lambda <= 0.0 { return 0.0; }
+    k / lambda - 1.0
+}
+
 /// Negative binomial log-PMF.
 ///
 /// Parameterization: mean = mu, size = k (dispersion parameter).
@@ -275,5 +367,78 @@ mod tests {
         assert_eq!(binom_logpmf(11, 10, 0.5), f64::NEG_INFINITY);
         // Binom(0, 0, p) = 1 for any p (within floating point tolerance)
         assert!((binom_logpmf(0, 0, 0.5)).abs() < 1e-14);
+    }
+
+    #[test]
+    fn test_digamma_known_values() {
+        assert!((digamma(1.0) - (-0.5772156649)).abs() < 1e-9);
+        assert!((digamma(2.0) - 0.4227843351).abs() < 1e-9);
+        assert!((digamma(0.5) - (-1.9635100260)).abs() < 1e-9);
+        assert!((digamma(10.0) - 2.2517525890).abs() < 1e-8);
+    }
+
+    #[test]
+    fn test_digamma_recurrence() {
+        for x in [0.5, 1.0, 2.5, 7.3, 15.0] {
+            let lhs = digamma(x + 1.0);
+            let rhs = digamma(x) + 1.0 / x;
+            assert!((lhs - rhs).abs() < 1e-10,
+                "recurrence failed at x={}: {} vs {}", x, lhs, rhs);
+        }
+    }
+
+    #[test]
+    fn test_log_gamma_density() {
+        // Gamma(shape=2, scale=3): p(3|2,3) = 3*exp(-1)/9 = exp(-1)/3
+        let ld = log_gamma_density(3.0, 2.0, 3.0);
+        let expected = (-1.0_f64).exp() / 3.0;
+        assert!((ld.exp() - expected).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_negbin_grad_vs_fd() {
+        let (y, mu, k) = (5.0, 10.0, 3.0);
+        let eps = 1e-6;
+        let (d_mu, d_k) = negbin_logpmf_grad(y, mu, k);
+        let fd_mu = (negbin_logpmf(y, mu + eps, k) - negbin_logpmf(y, mu - eps, k)) / (2.0 * eps);
+        let fd_k = (negbin_logpmf(y, mu, k + eps) - negbin_logpmf(y, mu, k - eps)) / (2.0 * eps);
+        assert!((d_mu - fd_mu).abs() < 1e-5, "d_mu: {} vs fd {}", d_mu, fd_mu);
+        assert!((d_k - fd_k).abs() < 1e-5, "d_k: {} vs fd {}", d_k, fd_k);
+    }
+
+    #[test]
+    fn test_normal_grad_vs_fd() {
+        let (y, mu, sigma) = (3.5, 2.0, 1.5);
+        let eps = 1e-6;
+        let (d_mu, d_sigma) = normal_logpdf_grad(y, mu, sigma);
+        let fd_mu = (normal_logpdf(y, mu + eps, sigma) - normal_logpdf(y, mu - eps, sigma)) / (2.0 * eps);
+        let fd_sigma = (normal_logpdf(y, mu, sigma + eps) - normal_logpdf(y, mu, sigma - eps)) / (2.0 * eps);
+        assert!((d_mu - fd_mu).abs() < 1e-5);
+        assert!((d_sigma - fd_sigma).abs() < 1e-5);
+    }
+
+    #[test]
+    fn test_discretized_normal_grad_vs_fd() {
+        let (y, mu, var) = (15.0, 12.0, 25.0);
+        let eps = 1e-5;
+        let tol = 1e-17;
+        let (d_mu, d_var) = discretized_normal_logpmf_grad(y, mu, var, tol);
+        let fd_mu = (discretized_normal_logpmf_tol(y, mu + eps, var, tol)
+                   - discretized_normal_logpmf_tol(y, mu - eps, var, tol)) / (2.0 * eps);
+        let fd_var = (discretized_normal_logpmf_tol(y, mu, var + eps, tol)
+                    - discretized_normal_logpmf_tol(y, mu, var - eps, tol)) / (2.0 * eps);
+        assert!((d_mu - fd_mu).abs() / fd_mu.abs().max(1e-10) < 1e-3,
+            "d_mu: {} vs fd {}", d_mu, fd_mu);
+        assert!((d_var - fd_var).abs() / fd_var.abs().max(1e-10) < 1e-3,
+            "d_var: {} vs fd {}", d_var, fd_var);
+    }
+
+    #[test]
+    fn test_poisson_grad_vs_fd() {
+        let (k, lambda) = (7.0, 5.0);
+        let eps = 1e-6;
+        let d = poisson_logpmf_grad(k, lambda);
+        let fd = (poisson_logpmf(k, lambda + eps) - poisson_logpmf(k, lambda - eps)) / (2.0 * eps);
+        assert!((d - fd).abs() < 1e-5);
     }
 }

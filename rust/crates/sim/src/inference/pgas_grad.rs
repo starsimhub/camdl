@@ -12,7 +12,7 @@
 
 use crate::compiled_model::CompiledModel;
 use crate::error::SimError;
-use crate::propensity::{eval_propensities, eval_expr, EvalCtx};
+use crate::propensity::{eval_propensities, eval_expr, eval_expr_deriv, EvalCtx};
 use crate::state::{IntState, RealState};
 use crate::inference::obs_loglik::binom_logpmf;
 use crate::inference::pgas::{PGASTrajectory, IVPMapping};
@@ -192,6 +192,77 @@ pub fn log_transition_density_grad(
     Ok((log_p, grad))
 }
 
+/// Log-density of gamma multipliers AND gradient w.r.t. estimated params.
+///
+/// For each overdispersed source group, evaluates
+/// log Gamma(g; dt/σ², σ²/dt) and its gradient through σ².
+fn log_gamma_density_grad_substep(
+    model: &CompiledModel,
+    counts_before: &[i64],
+    gammas: &[f64],
+    params: &[f64],
+    t: f64,
+    dt: f64,
+    param_indices: &[usize],
+) -> Result<(f64, Vec<f64>), SimError> {
+    use crate::inference::obs_loglik::{log_gamma_density, digamma};
+
+    let d = param_indices.len();
+    let n_int = model.int_local_to_global.len();
+    let mut int_s = IntState::new(n_int);
+    int_s.counts.copy_from_slice(counts_before);
+    let real_s = RealState::new(model.real_local_to_global.len());
+    let ctx = EvalCtx {
+        model, int_s: &int_s, real_s: &real_s, params, t, projected: None,
+    };
+
+    let mut log_p = 0.0;
+    let mut grad = vec![0.0; d];
+    let mut gamma_idx = 0;
+
+    for &(_, ref group) in &model.source_groups {
+        let mut sigma_sq_expr: Option<&ir::expr::Expr> = None;
+        let mut sigma_sq = 1.0;
+
+        for &tr_idx in group {
+            if let ir::transition::DrawMethod::Overdispersed(ref expr)
+                = model.model.transitions[tr_idx].draw_method
+            {
+                sigma_sq = eval_expr(expr, &ctx).unwrap_or(1.0);
+                sigma_sq_expr = Some(expr);
+                break;
+            }
+        }
+        if let Some(expr) = sigma_sq_expr {
+            if gamma_idx < gammas.len() {
+                let g = gammas[gamma_idx];
+                if g > 0.0 && sigma_sq > 0.0 {
+                    let shape = dt / sigma_sq;
+                    let scale = sigma_sq / dt;
+                    log_p += log_gamma_density(g, shape, scale);
+
+                    // d(log Gamma)/d(shape) = ln(g) - ln(scale) - ψ(shape)
+                    let dlg_dshape = g.ln() - scale.ln() - digamma(shape);
+                    // d(log Gamma)/d(scale) = g/scale² - shape/scale
+                    let dlg_dscale = g / (scale * scale) - shape / scale;
+                    // d(shape)/d(σ²) = -dt/σ⁴, d(scale)/d(σ²) = 1/dt
+                    let dshape_dsq = -dt / (sigma_sq * sigma_sq);
+                    let dscale_dsq = 1.0 / dt;
+                    let dlg_dsq = dlg_dshape * dshape_dsq + dlg_dscale * dscale_dsq;
+
+                    // Chain rule through σ² expression
+                    for i in 0..d {
+                        let d_sq = eval_expr_deriv(expr, param_indices[i], &ctx);
+                        grad[i] += dlg_dsq * d_sq;
+                    }
+                }
+                gamma_idx += 1;
+            }
+        }
+    }
+    Ok((log_p, grad))
+}
+
 /// Gradient of the complete-data log-likelihood over all substeps.
 ///
 /// Returns (log_p, grad) summed over transition densities + observation densities.
@@ -258,6 +329,15 @@ pub fn complete_data_loglik_grad(
         }
         log_p += td;
         for i in 0..d { grad[i] += td_grad[i]; }
+
+        // Gamma multiplier density gradient (for sigma_se estimation)
+        if !rec.gammas.is_empty() {
+            let (gd, gd_grad) = log_gamma_density_grad_substep(
+                model, counts_before, &rec.gammas, params, t, dt, param_indices,
+            )?;
+            log_p += gd;
+            for i in 0..d { grad[i] += gd_grad[i]; }
+        }
 
         // Accumulate flows
         for (i, &f) in rec.flows.iter().enumerate() {

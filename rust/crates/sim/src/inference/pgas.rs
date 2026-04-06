@@ -316,6 +316,37 @@ pub fn complete_data_loglik(
         }
         log_p += td;
 
+        // Gamma multiplier density (for sigma_se estimation)
+        if !rec.gammas.is_empty() {
+            let n_int = model.int_local_to_global.len();
+            let mut int_s = IntState::new(n_int);
+            int_s.counts.copy_from_slice(counts_before);
+            let real_s = RealState::new(model.real_local_to_global.len());
+            let ctx = EvalCtx {
+                model, int_s: &int_s, real_s: &real_s, params, t, projected: None,
+            };
+            let mut gamma_idx = 0;
+            for &(_, ref group) in &model.source_groups {
+                for &tr_idx in group {
+                    if let ir::transition::DrawMethod::Overdispersed(ref expr)
+                        = model.model.transitions[tr_idx].draw_method
+                    {
+                        if gamma_idx < rec.gammas.len() {
+                            let g = rec.gammas[gamma_idx];
+                            let sigma_sq = eval_expr(expr, &ctx).unwrap_or(1.0);
+                            if g > 0.0 && sigma_sq > 0.0 {
+                                let shape = dt / sigma_sq;
+                                let scale = sigma_sq / dt;
+                                log_p += crate::inference::obs_loglik::log_gamma_density(g, shape, scale);
+                            }
+                            gamma_idx += 1;
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+
         // Accumulate flows
         for (i, &f) in rec.flows.iter().enumerate() {
             cum_flows[i] += f;

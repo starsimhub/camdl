@@ -156,6 +156,70 @@ pub fn eval_expr(expr: &Expr, ctx: &EvalCtx<'_>) -> Result<f64, SimError> {
     }
 }
 
+/// Forward-mode AD: evaluate d(expr)/d(param at index `wrt`).
+///
+/// Walks the Expr tree applying standard differentiation rules.
+/// Pop, PopSum, Time, TimeFunc, TableLookup, Projected have zero derivative
+/// (they don't depend on params given fixed state X).
+pub fn eval_expr_deriv(expr: &Expr, wrt: usize, ctx: &EvalCtx<'_>) -> f64 {
+    match expr {
+        Expr::Param(p) => {
+            let idx = ctx.model.param_index
+                .get(p.param.as_str()).copied().unwrap_or(usize::MAX);
+            if idx == wrt { 1.0 } else { 0.0 }
+        }
+        Expr::Const(_) | Expr::Pop(_) | Expr::PopSum(_)
+        | Expr::Time(_) | Expr::Projected(_)
+        | Expr::TimeFunc(_) | Expr::TableLookup(_) => 0.0,
+
+        Expr::BinOp(w) => {
+            let a = eval_expr(&w.bin_op.left, ctx).unwrap_or(0.0);
+            let b = eval_expr(&w.bin_op.right, ctx).unwrap_or(0.0);
+            let da = eval_expr_deriv(&w.bin_op.left, wrt, ctx);
+            let db = eval_expr_deriv(&w.bin_op.right, wrt, ctx);
+            match w.bin_op.op {
+                BinOp::Add => da + db,
+                BinOp::Sub => da - db,
+                BinOp::Mul => da * b + a * db,
+                BinOp::Div => {
+                    if b == 0.0 { 0.0 }
+                    else { (da * b - a * db) / (b * b) }
+                }
+                BinOp::Pow => {
+                    if a <= 0.0 { 0.0 }
+                    else {
+                        let val = a.powf(b);
+                        val * (b * da / a + a.ln() * db)
+                    }
+                }
+                _ => 0.0, // Mod, comparisons: not differentiable
+            }
+        }
+
+        Expr::UnOp(w) => {
+            let a = eval_expr(&w.un_op.arg, ctx).unwrap_or(0.0);
+            let da = eval_expr_deriv(&w.un_op.arg, wrt, ctx);
+            match w.un_op.op {
+                UnOp::Exp => a.exp() * da,
+                UnOp::Log => if a > 0.0 { da / a } else { 0.0 },
+                UnOp::Neg => -da,
+                UnOp::Sqrt => if a > 0.0 { da / (2.0 * a.sqrt()) } else { 0.0 },
+                UnOp::Abs => da * a.signum(),
+                _ => 0.0, // Floor, Ceil
+            }
+        }
+
+        Expr::Cond(w) => {
+            let pred = eval_expr(&w.cond.pred, ctx).unwrap_or(0.0);
+            if pred > 0.0 {
+                eval_expr_deriv(&w.cond.then, wrt, ctx)
+            } else {
+                eval_expr_deriv(&w.cond.else_, wrt, ctx)
+            }
+        }
+    }
+}
+
 /// Perform a table lookup using the table's OobPolicy and pre-evaluated cached values.
 fn table_lookup(table: &ir::table::Table, cached: &[f64], idx: i64) -> Result<f64, SimError> {
     use ir::table::OobPolicy;
