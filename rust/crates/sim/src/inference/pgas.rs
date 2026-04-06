@@ -697,13 +697,20 @@ pub fn run_pgas(
         .map(|p| p.to_transformed(current_params[p.index]))
         .collect();
 
-    // Proposal SDs (on transformed scale)
-    // PGAS needs MUCH smaller proposals than PMMH. With exact complete-data
-    // likelihood, even small parameter changes can make individual substep
-    // transitions impossible (→ -inf). Start conservative; the user can
-    // tune via the [pgas] section.
-    let proposal_sd: Vec<f64> = if2_params.iter()
-        .map(|p| p.transformed_sd(p.rw_sd, p.initial) * 0.5)
+    // Adaptive proposal SDs via Robbins-Monro stochastic approximation.
+    // Start conservative (rw_sd × 0.1), then adapt each parameter's
+    // log(proposal_sd) to target 44% acceptance (optimal for 1D MH updates,
+    // Roberts & Rosenthal 2001). The adaptation rate c/√sweep decays to
+    // zero, so the proposal stabilizes as the chain runs.
+    //
+    // This is the same idea as Stan's dual averaging for HMC step size,
+    // adapted for random-walk MH.
+    const TARGET_ACCEPTANCE: f64 = 0.44;
+    const ADAPT_C: f64 = 1.0; // adaptation speed
+    let adapt_end = config.burn_in; // stop adapting at end of burn-in
+
+    let mut log_proposal_sd: Vec<f64> = if2_params.iter()
+        .map(|p| (p.transformed_sd(p.rw_sd, p.initial) * 0.1).ln())
         .collect();
 
     // Current complete-data log-likelihood
@@ -717,6 +724,11 @@ pub fn run_pgas(
 
     for sweep in 0..config.n_sweeps {
         let mut accepted = vec![false; d];
+
+        // Current proposal SDs (from adaptive log scale)
+        let proposal_sd: Vec<f64> = log_proposal_sd.iter()
+            .map(|&ls| ls.exp())
+            .collect();
 
         // ── Step 1: Update θ | X, y ──
         // One-at-a-time MH updates (Gibbs-within-Gibbs)
@@ -755,6 +767,15 @@ pub fn run_pgas(
                 accepted[i] = true;
                 total_accepted[i] += 1;
             }
+
+            // Robbins-Monro: adapt proposal SD during burn-in
+            if sweep < adapt_end {
+                let gamma = ADAPT_C / (1.0 + sweep as f64).sqrt();
+                let acc_indicator = if accepted[i] { 1.0 } else { 0.0 };
+                log_proposal_sd[i] += gamma * (acc_indicator - TARGET_ACCEPTANCE);
+                // Clamp to prevent extreme values
+                log_proposal_sd[i] = log_proposal_sd[i].clamp(-20.0, 5.0);
+            }
         }
 
         // ── Step 2: Update X | θ, y via CSMC-AS ──
@@ -791,6 +812,16 @@ pub fn run_pgas(
                 current_ll = fallback_ll;
             }
             // If even the fallback is -inf, keep the old trajectory
+        }
+
+        // Log adapted proposal SDs at end of burn-in
+        if sweep + 1 == adapt_end {
+            eprintln!("  proposal SD adapted (end of burn-in):");
+            for (i, spec) in if2_params.iter().enumerate() {
+                let acc_rate = total_accepted[i] as f64 / (sweep + 1) as f64;
+                eprintln!("    {:12} sd={:.6} acc={:.0}%",
+                    spec.name, log_proposal_sd[i].exp(), acc_rate * 100.0);
+            }
         }
 
         let sweep_result = PGASSweep {
