@@ -205,11 +205,6 @@ pub fn bootstrap_filter_correlated(
     let mut ll_increments = Vec::with_capacity(observations.len());
     let mut t = model.model.simulation.t_start;
 
-    // Track which original particle identity each current slot descends from.
-    // After resampling, particle_identity[i] = ancestor's original index.
-    // z-values are indexed by this identity, not by current slot position.
-    let mut particle_identity: Vec<usize> = (0..n_particles).collect();
-
     // Compute steps per observation interval
     let obs_dt = if observations.len() > 1 {
         observations[1].time - observations[0].time
@@ -249,37 +244,33 @@ pub fn bootstrap_filter_correlated(
         let obs_time = obs.time;
         let t_start = t;
 
-        // Propagate particles with pre-drawn correlated noise (parallel).
-        // z-values are indexed by particle_identity (original particle index),
-        // NOT by current slot position. This ensures that after resampling,
-        // a particle's z-values follow its ancestor through the lineage.
+        // Propagate particles with pre-drawn correlated noise (parallel)
         let gamma_row = &randoms.gamma_noise[obs_idx];
         let binom_row = &randoms.binomial_noise[obs_idx];
         let n_groups = randoms.n_source_groups;
-        let identities = &particle_identity;
         let errors: Vec<Result<(), SimError>> = swarm.states.par_iter_mut()
             .zip(rngs.par_iter_mut())
             .zip(scratches.par_iter_mut())
             .enumerate()
             .map(|(i, ((state, rng), scratch))| {
-                let pid = identities[i]; // original particle identity
                 let mut t_local = t_start;
                 let mut substep = 0;
                 while t_local < obs_time - 1e-10 {
                     let step_dt = dt.min(obs_time - t_local);
 
-                    // Inject pre-drawn Gamma multiplier (indexed by identity)
-                    let noise_idx = pid * steps_per_obs + substep;
+                    // Inject pre-drawn Gamma multiplier
+                    let noise_idx = i * steps_per_obs + substep;
                     if noise_idx < gamma_row.len() {
                         let z = gamma_row[noise_idx];
                         let g = normal_to_gamma(z, gamma_shape, gamma_scale);
                         scratch.gamma_override = Some(g);
                     }
 
-                    // Inject pre-drawn binomial z-values per source group
+                    // Inject pre-drawn binomial z-values per source group.
+                    // step_one converts z → count after computing (n, p).
                     scratch.binomial_z_values.clear();
                     for group in 0..n_groups {
-                        let binom_idx = pid * steps_per_obs * n_groups + substep * n_groups + group;
+                        let binom_idx = i * steps_per_obs * n_groups + substep * n_groups + group;
                         if binom_idx < binom_row.len() {
                             scratch.binomial_z_values.push(binom_row[binom_idx]);
                         }
@@ -329,17 +320,13 @@ pub fn bootstrap_filter_correlated(
         // Override the uniform in systematic_resample — we need a custom version
         let indices = sorted_systematic_resample(&sorted_weights, base_uniform);
 
-        // Map sorted indices back to original particle indices and update identity
-        let mut new_identity = vec![0usize; n_particles];
+        // Map sorted indices back to original particle indices
         for (i, &sorted_idx) in indices.iter().enumerate() {
             let orig_idx = sort_order[sorted_idx];
             states_buf[i].counts.copy_from_slice(&swarm.states[orig_idx].counts);
             states_buf[i].flow_accumulators.copy_from_slice(&swarm.states[orig_idx].flow_accumulators);
-            // Particle i now descends from whatever particle orig_idx was
-            new_identity[i] = particle_identity[orig_idx];
         }
         std::mem::swap(&mut swarm.states, &mut states_buf);
-        particle_identity = new_identity;
 
         // Reset flow accumulators
         for state in &mut swarm.states {
