@@ -128,5 +128,13 @@ let () =
                ) m.Ir.parameters
            }
          in
+         (* Autodiff pass: differentiate transition rates w.r.t. all parameters *)
+         let m =
+           let param_names = List.map (fun (p : Ir.parameter) -> p.name) m.Ir.parameters in
+           { m with Ir.transitions =
+               List.map (fun (t : Ir.transition) ->
+                 { t with Ir.rate_grad = Autodiff.differentiate_rate t.rate param_names }
+               ) m.Ir.transitions }
+         in
          print_string (Serialize.model_to_string m);
          print_newline ())

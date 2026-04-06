@@ -37,7 +37,38 @@
         "source_compartment": "S",
         "dest_compartment": "I"
       },
-      "draw_method": { "overdispersed": { "param": "sigma_se" } }
+      "draw_method": { "overdispersed": { "param": "sigma_se" } },
+      "rate_grad": {
+        "beta": {
+          "bin_op": {
+            "op": "div",
+            "left": {
+              "bin_op": {
+                "op": "mul",
+                "left": {
+                  "bin_op": {
+                    "op": "mul",
+                    "left": { "pop": "S" },
+                    "right": { "pop": "I" }
+                  }
+                },
+                "right": { "pop_sum": [ "S", "I", "R" ] }
+              }
+            },
+            "right": {
+              "bin_op": {
+                "op": "mul",
+                "left": { "pop_sum": [ "S", "I", "R" ] },
+                "right": { "pop_sum": [ "S", "I", "R" ] }
+              }
+            }
+          }
+        },
+        "gamma": { "const": 0.0 },
+        "sigma_se": { "const": 0.0 },
+        "N0": { "const": 0.0 },
+        "I0": { "const": 0.0 }
+      }
     },
     {
       "name": "recovery",
@@ -54,6 +85,13 @@
         "origin_kind": "intrinsic",
         "source_compartment": "I",
         "dest_compartment": "R"
+      },
+      "rate_grad": {
+        "beta": { "const": 0.0 },
+        "gamma": { "pop": "I" },
+        "sigma_se": { "const": 0.0 },
+        "N0": { "const": 0.0 },
+        "I0": { "const": 0.0 }
       }
     }
   ],

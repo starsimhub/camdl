@@ -42,6 +42,35 @@
         "origin_kind": "transmission",
         "source_compartment": "S_north",
         "dest_compartment": "I_north"
+      },
+      "rate_grad": {
+        "beta": {
+          "bin_op": {
+            "op": "div",
+            "left": {
+              "bin_op": {
+                "op": "mul",
+                "left": {
+                  "bin_op": {
+                    "op": "mul",
+                    "left": { "pop": "S_north" },
+                    "right": { "pop": "I_north" }
+                  }
+                },
+                "right": { "pop_sum": [ "S_north", "I_north", "R_north" ] }
+              }
+            },
+            "right": {
+              "bin_op": {
+                "op": "mul",
+                "left": { "pop_sum": [ "S_north", "I_north", "R_north" ] },
+                "right": { "pop_sum": [ "S_north", "I_north", "R_north" ] }
+              }
+            }
+          }
+        },
+        "gamma": { "const": 0.0 },
+        "I0": { "const": 0.0 }
       }
     },
     {
@@ -71,6 +100,35 @@
         "origin_kind": "transmission",
         "source_compartment": "S_south",
         "dest_compartment": "I_south"
+      },
+      "rate_grad": {
+        "beta": {
+          "bin_op": {
+            "op": "div",
+            "left": {
+              "bin_op": {
+                "op": "mul",
+                "left": {
+                  "bin_op": {
+                    "op": "mul",
+                    "left": { "pop": "S_south" },
+                    "right": { "pop": "I_south" }
+                  }
+                },
+                "right": { "pop_sum": [ "S_south", "I_south", "R_south" ] }
+              }
+            },
+            "right": {
+              "bin_op": {
+                "op": "mul",
+                "left": { "pop_sum": [ "S_south", "I_south", "R_south" ] },
+                "right": { "pop_sum": [ "S_south", "I_south", "R_south" ] }
+              }
+            }
+          }
+        },
+        "gamma": { "const": 0.0 },
+        "I0": { "const": 0.0 }
       }
     },
     {
@@ -100,6 +158,35 @@
         "origin_kind": "transmission",
         "source_compartment": "S_east",
         "dest_compartment": "I_east"
+      },
+      "rate_grad": {
+        "beta": {
+          "bin_op": {
+            "op": "div",
+            "left": {
+              "bin_op": {
+                "op": "mul",
+                "left": {
+                  "bin_op": {
+                    "op": "mul",
+                    "left": { "pop": "S_east" },
+                    "right": { "pop": "I_east" }
+                  }
+                },
+                "right": { "pop_sum": [ "S_east", "I_east", "R_east" ] }
+              }
+            },
+            "right": {
+              "bin_op": {
+                "op": "mul",
+                "left": { "pop_sum": [ "S_east", "I_east", "R_east" ] },
+                "right": { "pop_sum": [ "S_east", "I_east", "R_east" ] }
+              }
+            }
+          }
+        },
+        "gamma": { "const": 0.0 },
+        "I0": { "const": 0.0 }
       }
     },
     {
@@ -117,6 +204,11 @@
         "origin_kind": "intrinsic",
         "source_compartment": "I_north",
         "dest_compartment": "R_north"
+      },
+      "rate_grad": {
+        "beta": { "const": 0.0 },
+        "gamma": { "pop": "I_north" },
+        "I0": { "const": 0.0 }
       }
     },
     {
@@ -134,6 +226,11 @@
         "origin_kind": "intrinsic",
         "source_compartment": "I_south",
         "dest_compartment": "R_south"
+      },
+      "rate_grad": {
+        "beta": { "const": 0.0 },
+        "gamma": { "pop": "I_south" },
+        "I0": { "const": 0.0 }
       }
     },
     {
@@ -151,6 +248,11 @@
         "origin_kind": "intrinsic",
         "source_compartment": "I_east",
         "dest_compartment": "R_east"
+      },
+      "rate_grad": {
+        "beta": { "const": 0.0 },
+        "gamma": { "pop": "I_east" },
+        "I0": { "const": 0.0 }
       }
     }
   ],

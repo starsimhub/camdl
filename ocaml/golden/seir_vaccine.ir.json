@@ -38,6 +38,39 @@
         "origin_kind": "transmission",
         "source_compartment": "S",
         "dest_compartment": "E"
+      },
+      "rate_grad": {
+        "beta": {
+          "bin_op": {
+            "op": "div",
+            "left": {
+              "bin_op": {
+                "op": "mul",
+                "left": {
+                  "bin_op": {
+                    "op": "mul",
+                    "left": { "pop": "S" },
+                    "right": { "pop": "I" }
+                  }
+                },
+                "right": { "pop_sum": [ "S", "E", "I", "R", "V" ] }
+              }
+            },
+            "right": {
+              "bin_op": {
+                "op": "mul",
+                "left": { "pop_sum": [ "S", "E", "I", "R", "V" ] },
+                "right": { "pop_sum": [ "S", "E", "I", "R", "V" ] }
+              }
+            }
+          }
+        },
+        "sigma": { "const": 0.0 },
+        "gamma": { "const": 0.0 },
+        "omega": { "const": 0.0 },
+        "vacc_frac": { "const": 0.0 },
+        "N0": { "const": 0.0 },
+        "I0": { "const": 0.0 }
       }
     },
     {
@@ -55,6 +88,15 @@
         "origin_kind": "intrinsic",
         "source_compartment": "E",
         "dest_compartment": "I"
+      },
+      "rate_grad": {
+        "beta": { "const": 0.0 },
+        "sigma": { "pop": "E" },
+        "gamma": { "const": 0.0 },
+        "omega": { "const": 0.0 },
+        "vacc_frac": { "const": 0.0 },
+        "N0": { "const": 0.0 },
+        "I0": { "const": 0.0 }
       }
     },
     {
@@ -72,6 +114,15 @@
         "origin_kind": "intrinsic",
         "source_compartment": "I",
         "dest_compartment": "R"
+      },
+      "rate_grad": {
+        "beta": { "const": 0.0 },
+        "sigma": { "const": 0.0 },
+        "gamma": { "pop": "I" },
+        "omega": { "const": 0.0 },
+        "vacc_frac": { "const": 0.0 },
+        "N0": { "const": 0.0 },
+        "I0": { "const": 0.0 }
       }
     },
     {
@@ -89,6 +140,15 @@
         "origin_kind": "intrinsic",
         "source_compartment": "V",
         "dest_compartment": "S"
+      },
+      "rate_grad": {
+        "beta": { "const": 0.0 },
+        "sigma": { "const": 0.0 },
+        "gamma": { "const": 0.0 },
+        "omega": { "pop": "V" },
+        "vacc_frac": { "const": 0.0 },
+        "N0": { "const": 0.0 },
+        "I0": { "const": 0.0 }
       }
     }
   ],

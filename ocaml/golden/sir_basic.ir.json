@@ -36,6 +36,24 @@
         "origin_kind": "transmission",
         "source_compartment": "S",
         "dest_compartment": "I"
+      },
+      "rate_grad": {
+        "beta": {
+          "bin_op": {
+            "op": "mul",
+            "left": { "pop": "S" },
+            "right": {
+              "bin_op": {
+                "op": "div",
+                "left": { "pop": "I" },
+                "right": { "pop_sum": [ "S", "I", "R" ] }
+              }
+            }
+          }
+        },
+        "gamma": { "const": 0.0 },
+        "N0": { "const": 0.0 },
+        "I0": { "const": 0.0 }
       }
     },
     {
@@ -53,6 +71,12 @@
         "origin_kind": "intrinsic",
         "source_compartment": "I",
         "dest_compartment": "R"
+      },
+      "rate_grad": {
+        "beta": { "const": 0.0 },
+        "gamma": { "pop": "I" },
+        "N0": { "const": 0.0 },
+        "I0": { "const": 0.0 }
       }
     }
   ],

@@ -86,6 +86,71 @@
         "origin_kind": "transmission",
         "source_compartment": "S_under5",
         "dest_compartment": "E_under5"
+      },
+      "rate_grad": {
+        "beta": {
+          "bin_op": {
+            "op": "mul",
+            "left": { "pop": "S_under5" },
+            "right": {
+              "bin_op": {
+                "op": "add",
+                "left": {
+                  "bin_op": {
+                    "op": "div",
+                    "left": {
+                      "bin_op": {
+                        "op": "mul",
+                        "left": {
+                          "table_lookup": {
+                            "table": "C_age",
+                            "indices": [ { "const": 0.0 } ]
+                          }
+                        },
+                        "right": { "pop": "I_under5" }
+                      }
+                    },
+                    "right": {
+                      "pop_sum": [
+                        "S_under5", "E_under5", "I_under5", "R_under5",
+                        "V_under5"
+                      ]
+                    }
+                  }
+                },
+                "right": {
+                  "bin_op": {
+                    "op": "div",
+                    "left": {
+                      "bin_op": {
+                        "op": "mul",
+                        "left": {
+                          "table_lookup": {
+                            "table": "C_age",
+                            "indices": [ { "const": 1.0 } ]
+                          }
+                        },
+                        "right": { "pop": "I_over5" }
+                      }
+                    },
+                    "right": {
+                      "pop_sum": [
+                        "S_over5", "E_over5", "I_over5", "R_over5", "V_over5"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "sigma": { "const": 0.0 },
+        "gamma": { "const": 0.0 },
+        "omega": { "const": 0.0 },
+        "vacc_frac": { "const": 0.0 },
+        "N0_under5": { "const": 0.0 },
+        "N0_over5": { "const": 0.0 },
+        "I0": { "const": 0.0 }
       }
     },
     {
@@ -158,6 +223,71 @@
         "origin_kind": "transmission",
         "source_compartment": "S_over5",
         "dest_compartment": "E_over5"
+      },
+      "rate_grad": {
+        "beta": {
+          "bin_op": {
+            "op": "mul",
+            "left": { "pop": "S_over5" },
+            "right": {
+              "bin_op": {
+                "op": "add",
+                "left": {
+                  "bin_op": {
+                    "op": "div",
+                    "left": {
+                      "bin_op": {
+                        "op": "mul",
+                        "left": {
+                          "table_lookup": {
+                            "table": "C_age",
+                            "indices": [ { "const": 2.0 } ]
+                          }
+                        },
+                        "right": { "pop": "I_under5" }
+                      }
+                    },
+                    "right": {
+                      "pop_sum": [
+                        "S_under5", "E_under5", "I_under5", "R_under5",
+                        "V_under5"
+                      ]
+                    }
+                  }
+                },
+                "right": {
+                  "bin_op": {
+                    "op": "div",
+                    "left": {
+                      "bin_op": {
+                        "op": "mul",
+                        "left": {
+                          "table_lookup": {
+                            "table": "C_age",
+                            "indices": [ { "const": 3.0 } ]
+                          }
+                        },
+                        "right": { "pop": "I_over5" }
+                      }
+                    },
+                    "right": {
+                      "pop_sum": [
+                        "S_over5", "E_over5", "I_over5", "R_over5", "V_over5"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "sigma": { "const": 0.0 },
+        "gamma": { "const": 0.0 },
+        "omega": { "const": 0.0 },
+        "vacc_frac": { "const": 0.0 },
+        "N0_under5": { "const": 0.0 },
+        "N0_over5": { "const": 0.0 },
+        "I0": { "const": 0.0 }
       }
     },
     {
@@ -175,6 +305,16 @@
         "origin_kind": "intrinsic",
         "source_compartment": "E_under5",
         "dest_compartment": "I_under5"
+      },
+      "rate_grad": {
+        "beta": { "const": 0.0 },
+        "sigma": { "pop": "E_under5" },
+        "gamma": { "const": 0.0 },
+        "omega": { "const": 0.0 },
+        "vacc_frac": { "const": 0.0 },
+        "N0_under5": { "const": 0.0 },
+        "N0_over5": { "const": 0.0 },
+        "I0": { "const": 0.0 }
       }
     },
     {
@@ -192,6 +332,16 @@
         "origin_kind": "intrinsic",
         "source_compartment": "E_over5",
         "dest_compartment": "I_over5"
+      },
+      "rate_grad": {
+        "beta": { "const": 0.0 },
+        "sigma": { "pop": "E_over5" },
+        "gamma": { "const": 0.0 },
+        "omega": { "const": 0.0 },
+        "vacc_frac": { "const": 0.0 },
+        "N0_under5": { "const": 0.0 },
+        "N0_over5": { "const": 0.0 },
+        "I0": { "const": 0.0 }
       }
     },
     {
@@ -209,6 +359,16 @@
         "origin_kind": "intrinsic",
         "source_compartment": "I_under5",
         "dest_compartment": "R_under5"
+      },
+      "rate_grad": {
+        "beta": { "const": 0.0 },
+        "sigma": { "const": 0.0 },
+        "gamma": { "pop": "I_under5" },
+        "omega": { "const": 0.0 },
+        "vacc_frac": { "const": 0.0 },
+        "N0_under5": { "const": 0.0 },
+        "N0_over5": { "const": 0.0 },
+        "I0": { "const": 0.0 }
       }
     },
     {
@@ -226,6 +386,16 @@
         "origin_kind": "intrinsic",
         "source_compartment": "I_over5",
         "dest_compartment": "R_over5"
+      },
+      "rate_grad": {
+        "beta": { "const": 0.0 },
+        "sigma": { "const": 0.0 },
+        "gamma": { "pop": "I_over5" },
+        "omega": { "const": 0.0 },
+        "vacc_frac": { "const": 0.0 },
+        "N0_under5": { "const": 0.0 },
+        "N0_over5": { "const": 0.0 },
+        "I0": { "const": 0.0 }
       }
     },
     {
@@ -243,6 +413,16 @@
         "origin_kind": "intrinsic",
         "source_compartment": "V_under5",
         "dest_compartment": "S_under5"
+      },
+      "rate_grad": {
+        "beta": { "const": 0.0 },
+        "sigma": { "const": 0.0 },
+        "gamma": { "const": 0.0 },
+        "omega": { "pop": "V_under5" },
+        "vacc_frac": { "const": 0.0 },
+        "N0_under5": { "const": 0.0 },
+        "N0_over5": { "const": 0.0 },
+        "I0": { "const": 0.0 }
       }
     },
     {
@@ -260,6 +440,16 @@
         "origin_kind": "intrinsic",
         "source_compartment": "V_over5",
         "dest_compartment": "S_over5"
+      },
+      "rate_grad": {
+        "beta": { "const": 0.0 },
+        "sigma": { "const": 0.0 },
+        "gamma": { "const": 0.0 },
+        "omega": { "pop": "V_over5" },
+        "vacc_frac": { "const": 0.0 },
+        "N0_under5": { "const": 0.0 },
+        "N0_over5": { "const": 0.0 },
+        "I0": { "const": 0.0 }
       }
     }
   ],

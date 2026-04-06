@@ -45,6 +45,108 @@
         "origin_kind": "transmission",
         "source_compartment": "S_urban",
         "dest_compartment": "I_urban"
+      },
+      "rate_grad": {
+        "gamma": {
+          "bin_op": {
+            "op": "div",
+            "left": {
+              "bin_op": {
+                "op": "mul",
+                "left": {
+                  "bin_op": {
+                    "op": "mul",
+                    "left": {
+                      "bin_op": {
+                        "op": "mul",
+                        "left": { "param": "R0_urban" },
+                        "right": { "pop": "S_urban" }
+                      }
+                    },
+                    "right": { "pop": "I_urban" }
+                  }
+                },
+                "right": { "param": "N_urban" }
+              }
+            },
+            "right": {
+              "bin_op": {
+                "op": "mul",
+                "left": { "param": "N_urban" },
+                "right": { "param": "N_urban" }
+              }
+            }
+          }
+        },
+        "N_urban": {
+          "bin_op": {
+            "op": "div",
+            "left": {
+              "un_op": {
+                "op": "neg",
+                "arg": {
+                  "bin_op": {
+                    "op": "mul",
+                    "left": {
+                      "bin_op": {
+                        "op": "mul",
+                        "left": {
+                          "bin_op": {
+                            "op": "mul",
+                            "left": { "param": "R0_urban" },
+                            "right": { "param": "gamma" }
+                          }
+                        },
+                        "right": { "pop": "S_urban" }
+                      }
+                    },
+                    "right": { "pop": "I_urban" }
+                  }
+                }
+              }
+            },
+            "right": {
+              "bin_op": {
+                "op": "mul",
+                "left": { "param": "N_urban" },
+                "right": { "param": "N_urban" }
+              }
+            }
+          }
+        },
+        "N_rural": { "const": 0.0 },
+        "R0_urban": {
+          "bin_op": {
+            "op": "div",
+            "left": {
+              "bin_op": {
+                "op": "mul",
+                "left": {
+                  "bin_op": {
+                    "op": "mul",
+                    "left": {
+                      "bin_op": {
+                        "op": "mul",
+                        "left": { "param": "gamma" },
+                        "right": { "pop": "S_urban" }
+                      }
+                    },
+                    "right": { "pop": "I_urban" }
+                  }
+                },
+                "right": { "param": "N_urban" }
+              }
+            },
+            "right": {
+              "bin_op": {
+                "op": "mul",
+                "left": { "param": "N_urban" },
+                "right": { "param": "N_urban" }
+              }
+            }
+          }
+        },
+        "R0_rural": { "const": 0.0 }
       }
     },
     {
@@ -80,6 +182,108 @@
         "origin_kind": "transmission",
         "source_compartment": "S_rural",
         "dest_compartment": "I_rural"
+      },
+      "rate_grad": {
+        "gamma": {
+          "bin_op": {
+            "op": "div",
+            "left": {
+              "bin_op": {
+                "op": "mul",
+                "left": {
+                  "bin_op": {
+                    "op": "mul",
+                    "left": {
+                      "bin_op": {
+                        "op": "mul",
+                        "left": { "param": "R0_rural" },
+                        "right": { "pop": "S_rural" }
+                      }
+                    },
+                    "right": { "pop": "I_rural" }
+                  }
+                },
+                "right": { "param": "N_rural" }
+              }
+            },
+            "right": {
+              "bin_op": {
+                "op": "mul",
+                "left": { "param": "N_rural" },
+                "right": { "param": "N_rural" }
+              }
+            }
+          }
+        },
+        "N_urban": { "const": 0.0 },
+        "N_rural": {
+          "bin_op": {
+            "op": "div",
+            "left": {
+              "un_op": {
+                "op": "neg",
+                "arg": {
+                  "bin_op": {
+                    "op": "mul",
+                    "left": {
+                      "bin_op": {
+                        "op": "mul",
+                        "left": {
+                          "bin_op": {
+                            "op": "mul",
+                            "left": { "param": "R0_rural" },
+                            "right": { "param": "gamma" }
+                          }
+                        },
+                        "right": { "pop": "S_rural" }
+                      }
+                    },
+                    "right": { "pop": "I_rural" }
+                  }
+                }
+              }
+            },
+            "right": {
+              "bin_op": {
+                "op": "mul",
+                "left": { "param": "N_rural" },
+                "right": { "param": "N_rural" }
+              }
+            }
+          }
+        },
+        "R0_urban": { "const": 0.0 },
+        "R0_rural": {
+          "bin_op": {
+            "op": "div",
+            "left": {
+              "bin_op": {
+                "op": "mul",
+                "left": {
+                  "bin_op": {
+                    "op": "mul",
+                    "left": {
+                      "bin_op": {
+                        "op": "mul",
+                        "left": { "param": "gamma" },
+                        "right": { "pop": "S_rural" }
+                      }
+                    },
+                    "right": { "pop": "I_rural" }
+                  }
+                },
+                "right": { "param": "N_rural" }
+              }
+            },
+            "right": {
+              "bin_op": {
+                "op": "mul",
+                "left": { "param": "N_rural" },
+                "right": { "param": "N_rural" }
+              }
+            }
+          }
+        }
       }
     },
     {
@@ -97,6 +301,13 @@
         "origin_kind": "intrinsic",
         "source_compartment": "I_urban",
         "dest_compartment": "R_urban"
+      },
+      "rate_grad": {
+        "gamma": { "pop": "I_urban" },
+        "N_urban": { "const": 0.0 },
+        "N_rural": { "const": 0.0 },
+        "R0_urban": { "const": 0.0 },
+        "R0_rural": { "const": 0.0 }
       }
     },
     {
@@ -114,6 +325,13 @@
         "origin_kind": "intrinsic",
         "source_compartment": "I_rural",
         "dest_compartment": "R_rural"
+      },
+      "rate_grad": {
+        "gamma": { "pop": "I_rural" },
+        "N_urban": { "const": 0.0 },
+        "N_rural": { "const": 0.0 },
+        "R0_urban": { "const": 0.0 },
+        "R0_rural": { "const": 0.0 }
       }
     }
   ],

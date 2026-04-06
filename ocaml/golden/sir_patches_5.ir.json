@@ -54,6 +54,80 @@
         "origin_kind": "transmission",
         "source_compartment": "S_p0",
         "dest_compartment": "I_p0"
+      },
+      "rate_grad": {
+        "gamma": {
+          "bin_op": {
+            "op": "div",
+            "left": {
+              "bin_op": {
+                "op": "mul",
+                "left": {
+                  "bin_op": {
+                    "op": "mul",
+                    "left": {
+                      "bin_op": {
+                        "op": "mul",
+                        "left": { "param": "R0_p0" },
+                        "right": { "pop": "S_p0" }
+                      }
+                    },
+                    "right": { "pop": "I_p0" }
+                  }
+                },
+                "right": { "pop_sum": [ "S_p0", "I_p0", "R_p0" ] }
+              }
+            },
+            "right": {
+              "bin_op": {
+                "op": "mul",
+                "left": { "pop_sum": [ "S_p0", "I_p0", "R_p0" ] },
+                "right": { "pop_sum": [ "S_p0", "I_p0", "R_p0" ] }
+              }
+            }
+          }
+        },
+        "N0_p0": { "const": 0.0 },
+        "N0_p1": { "const": 0.0 },
+        "N0_p2": { "const": 0.0 },
+        "N0_p3": { "const": 0.0 },
+        "N0_p4": { "const": 0.0 },
+        "R0_p0": {
+          "bin_op": {
+            "op": "div",
+            "left": {
+              "bin_op": {
+                "op": "mul",
+                "left": {
+                  "bin_op": {
+                    "op": "mul",
+                    "left": {
+                      "bin_op": {
+                        "op": "mul",
+                        "left": { "param": "gamma" },
+                        "right": { "pop": "S_p0" }
+                      }
+                    },
+                    "right": { "pop": "I_p0" }
+                  }
+                },
+                "right": { "pop_sum": [ "S_p0", "I_p0", "R_p0" ] }
+              }
+            },
+            "right": {
+              "bin_op": {
+                "op": "mul",
+                "left": { "pop_sum": [ "S_p0", "I_p0", "R_p0" ] },
+                "right": { "pop_sum": [ "S_p0", "I_p0", "R_p0" ] }
+              }
+            }
+          }
+        },
+        "R0_p1": { "const": 0.0 },
+        "R0_p2": { "const": 0.0 },
+        "R0_p3": { "const": 0.0 },
+        "R0_p4": { "const": 0.0 },
+        "I0": { "const": 0.0 }
       }
     },
     {
@@ -89,6 +163,80 @@
         "origin_kind": "transmission",
         "source_compartment": "S_p1",
         "dest_compartment": "I_p1"
+      },
+      "rate_grad": {
+        "gamma": {
+          "bin_op": {
+            "op": "div",
+            "left": {
+              "bin_op": {
+                "op": "mul",
+                "left": {
+                  "bin_op": {
+                    "op": "mul",
+                    "left": {
+                      "bin_op": {
+                        "op": "mul",
+                        "left": { "param": "R0_p1" },
+                        "right": { "pop": "S_p1" }
+                      }
+                    },
+                    "right": { "pop": "I_p1" }
+                  }
+                },
+                "right": { "pop_sum": [ "S_p1", "I_p1", "R_p1" ] }
+              }
+            },
+            "right": {
+              "bin_op": {
+                "op": "mul",
+                "left": { "pop_sum": [ "S_p1", "I_p1", "R_p1" ] },
+                "right": { "pop_sum": [ "S_p1", "I_p1", "R_p1" ] }
+              }
+            }
+          }
+        },
+        "N0_p0": { "const": 0.0 },
+        "N0_p1": { "const": 0.0 },
+        "N0_p2": { "const": 0.0 },
+        "N0_p3": { "const": 0.0 },
+        "N0_p4": { "const": 0.0 },
+        "R0_p0": { "const": 0.0 },
+        "R0_p1": {
+          "bin_op": {
+            "op": "div",
+            "left": {
+              "bin_op": {
+                "op": "mul",
+                "left": {
+                  "bin_op": {
+                    "op": "mul",
+                    "left": {
+                      "bin_op": {
+                        "op": "mul",
+                        "left": { "param": "gamma" },
+                        "right": { "pop": "S_p1" }
+                      }
+                    },
+                    "right": { "pop": "I_p1" }
+                  }
+                },
+                "right": { "pop_sum": [ "S_p1", "I_p1", "R_p1" ] }
+              }
+            },
+            "right": {
+              "bin_op": {
+                "op": "mul",
+                "left": { "pop_sum": [ "S_p1", "I_p1", "R_p1" ] },
+                "right": { "pop_sum": [ "S_p1", "I_p1", "R_p1" ] }
+              }
+            }
+          }
+        },
+        "R0_p2": { "const": 0.0 },
+        "R0_p3": { "const": 0.0 },
+        "R0_p4": { "const": 0.0 },
+        "I0": { "const": 0.0 }
       }
     },
     {
@@ -124,6 +272,80 @@
         "origin_kind": "transmission",
         "source_compartment": "S_p2",
         "dest_compartment": "I_p2"
+      },
+      "rate_grad": {
+        "gamma": {
+          "bin_op": {
+            "op": "div",
+            "left": {
+              "bin_op": {
+                "op": "mul",
+                "left": {
+                  "bin_op": {
+                    "op": "mul",
+                    "left": {
+                      "bin_op": {
+                        "op": "mul",
+                        "left": { "param": "R0_p2" },
+                        "right": { "pop": "S_p2" }
+                      }
+                    },
+                    "right": { "pop": "I_p2" }
+                  }
+                },
+                "right": { "pop_sum": [ "S_p2", "I_p2", "R_p2" ] }
+              }
+            },
+            "right": {
+              "bin_op": {
+                "op": "mul",
+                "left": { "pop_sum": [ "S_p2", "I_p2", "R_p2" ] },
+                "right": { "pop_sum": [ "S_p2", "I_p2", "R_p2" ] }
+              }
+            }
+          }
+        },
+        "N0_p0": { "const": 0.0 },
+        "N0_p1": { "const": 0.0 },
+        "N0_p2": { "const": 0.0 },
+        "N0_p3": { "const": 0.0 },
+        "N0_p4": { "const": 0.0 },
+        "R0_p0": { "const": 0.0 },
+        "R0_p1": { "const": 0.0 },
+        "R0_p2": {
+          "bin_op": {
+            "op": "div",
+            "left": {
+              "bin_op": {
+                "op": "mul",
+                "left": {
+                  "bin_op": {
+                    "op": "mul",
+                    "left": {
+                      "bin_op": {
+                        "op": "mul",
+                        "left": { "param": "gamma" },
+                        "right": { "pop": "S_p2" }
+                      }
+                    },
+                    "right": { "pop": "I_p2" }
+                  }
+                },
+                "right": { "pop_sum": [ "S_p2", "I_p2", "R_p2" ] }
+              }
+            },
+            "right": {
+              "bin_op": {
+                "op": "mul",
+                "left": { "pop_sum": [ "S_p2", "I_p2", "R_p2" ] },
+                "right": { "pop_sum": [ "S_p2", "I_p2", "R_p2" ] }
+              }
+            }
+          }
+        },
+        "R0_p3": { "const": 0.0 },
+        "R0_p4": { "const": 0.0 },
+        "I0": { "const": 0.0 }
       }
     },
     {
@@ -159,6 +381,80 @@
         "origin_kind": "transmission",
         "source_compartment": "S_p3",
         "dest_compartment": "I_p3"
+      },
+      "rate_grad": {
+        "gamma": {
+          "bin_op": {
+            "op": "div",
+            "left": {
+              "bin_op": {
+                "op": "mul",
+                "left": {
+                  "bin_op": {
+                    "op": "mul",
+                    "left": {
+                      "bin_op": {
+                        "op": "mul",
+                        "left": { "param": "R0_p3" },
+                        "right": { "pop": "S_p3" }
+                      }
+                    },
+                    "right": { "pop": "I_p3" }
+                  }
+                },
+                "right": { "pop_sum": [ "S_p3", "I_p3", "R_p3" ] }
+              }
+            },
+            "right": {
+              "bin_op": {
+                "op": "mul",
+                "left": { "pop_sum": [ "S_p3", "I_p3", "R_p3" ] },
+                "right": { "pop_sum": [ "S_p3", "I_p3", "R_p3" ] }
+              }
+            }
+          }
+        },
+        "N0_p0": { "const": 0.0 },
+        "N0_p1": { "const": 0.0 },
+        "N0_p2": { "const": 0.0 },
+        "N0_p3": { "const": 0.0 },
+        "N0_p4": { "const": 0.0 },
+        "R0_p0": { "const": 0.0 },
+        "R0_p1": { "const": 0.0 },
+        "R0_p2": { "const": 0.0 },
+        "R0_p3": {
+          "bin_op": {
+            "op": "div",
+            "left": {
+              "bin_op": {
+                "op": "mul",
+                "left": {
+                  "bin_op": {
+                    "op": "mul",
+                    "left": {
+                      "bin_op": {
+                        "op": "mul",
+                        "left": { "param": "gamma" },
+                        "right": { "pop": "S_p3" }
+                      }
+                    },
+                    "right": { "pop": "I_p3" }
+                  }
+                },
+                "right": { "pop_sum": [ "S_p3", "I_p3", "R_p3" ] }
+              }
+            },
+            "right": {
+              "bin_op": {
+                "op": "mul",
+                "left": { "pop_sum": [ "S_p3", "I_p3", "R_p3" ] },
+                "right": { "pop_sum": [ "S_p3", "I_p3", "R_p3" ] }
+              }
+            }
+          }
+        },
+        "R0_p4": { "const": 0.0 },
+        "I0": { "const": 0.0 }
       }
     },
     {
@@ -194,6 +490,80 @@
         "origin_kind": "transmission",
         "source_compartment": "S_p4",
         "dest_compartment": "I_p4"
+      },
+      "rate_grad": {
+        "gamma": {
+          "bin_op": {
+            "op": "div",
+            "left": {
+              "bin_op": {
+                "op": "mul",
+                "left": {
+                  "bin_op": {
+                    "op": "mul",
+                    "left": {
+                      "bin_op": {
+                        "op": "mul",
+                        "left": { "param": "R0_p4" },
+                        "right": { "pop": "S_p4" }
+                      }
+                    },
+                    "right": { "pop": "I_p4" }
+                  }
+                },
+                "right": { "pop_sum": [ "S_p4", "I_p4", "R_p4" ] }
+              }
+            },
+            "right": {
+              "bin_op": {
+                "op": "mul",
+                "left": { "pop_sum": [ "S_p4", "I_p4", "R_p4" ] },
+                "right": { "pop_sum": [ "S_p4", "I_p4", "R_p4" ] }
+              }
+            }
+          }
+        },
+        "N0_p0": { "const": 0.0 },
+        "N0_p1": { "const": 0.0 },
+        "N0_p2": { "const": 0.0 },
+        "N0_p3": { "const": 0.0 },
+        "N0_p4": { "const": 0.0 },
+        "R0_p0": { "const": 0.0 },
+        "R0_p1": { "const": 0.0 },
+        "R0_p2": { "const": 0.0 },
+        "R0_p3": { "const": 0.0 },
+        "R0_p4": {
+          "bin_op": {
+            "op": "div",
+            "left": {
+              "bin_op": {
+                "op": "mul",
+                "left": {
+                  "bin_op": {
+                    "op": "mul",
+                    "left": {
+                      "bin_op": {
+                        "op": "mul",
+                        "left": { "param": "gamma" },
+                        "right": { "pop": "S_p4" }
+                      }
+                    },
+                    "right": { "pop": "I_p4" }
+                  }
+                },
+                "right": { "pop_sum": [ "S_p4", "I_p4", "R_p4" ] }
+              }
+            },
+            "right": {
+              "bin_op": {
+                "op": "mul",
+                "left": { "pop_sum": [ "S_p4", "I_p4", "R_p4" ] },
+                "right": { "pop_sum": [ "S_p4", "I_p4", "R_p4" ] }
+              }
+            }
+          }
+        },
+        "I0": { "const": 0.0 }
       }
     },
     {
@@ -211,6 +581,20 @@
         "origin_kind": "intrinsic",
         "source_compartment": "I_p0",
         "dest_compartment": "R_p0"
+      },
+      "rate_grad": {
+        "gamma": { "pop": "I_p0" },
+        "N0_p0": { "const": 0.0 },
+        "N0_p1": { "const": 0.0 },
+        "N0_p2": { "const": 0.0 },
+        "N0_p3": { "const": 0.0 },
+        "N0_p4": { "const": 0.0 },
+        "R0_p0": { "const": 0.0 },
+        "R0_p1": { "const": 0.0 },
+        "R0_p2": { "const": 0.0 },
+        "R0_p3": { "const": 0.0 },
+        "R0_p4": { "const": 0.0 },
+        "I0": { "const": 0.0 }
       }
     },
     {
@@ -228,6 +612,20 @@
         "origin_kind": "intrinsic",
         "source_compartment": "I_p1",
         "dest_compartment": "R_p1"
+      },
+      "rate_grad": {
+        "gamma": { "pop": "I_p1" },
+        "N0_p0": { "const": 0.0 },
+        "N0_p1": { "const": 0.0 },
+        "N0_p2": { "const": 0.0 },
+        "N0_p3": { "const": 0.0 },
+        "N0_p4": { "const": 0.0 },
+        "R0_p0": { "const": 0.0 },
+        "R0_p1": { "const": 0.0 },
+        "R0_p2": { "const": 0.0 },
+        "R0_p3": { "const": 0.0 },
+        "R0_p4": { "const": 0.0 },
+        "I0": { "const": 0.0 }
       }
     },
     {
@@ -245,6 +643,20 @@
         "origin_kind": "intrinsic",
         "source_compartment": "I_p2",
         "dest_compartment": "R_p2"
+      },
+      "rate_grad": {
+        "gamma": { "pop": "I_p2" },
+        "N0_p0": { "const": 0.0 },
+        "N0_p1": { "const": 0.0 },
+        "N0_p2": { "const": 0.0 },
+        "N0_p3": { "const": 0.0 },
+        "N0_p4": { "const": 0.0 },
+        "R0_p0": { "const": 0.0 },
+        "R0_p1": { "const": 0.0 },
+        "R0_p2": { "const": 0.0 },
+        "R0_p3": { "const": 0.0 },
+        "R0_p4": { "const": 0.0 },
+        "I0": { "const": 0.0 }
       }
     },
     {
@@ -262,6 +674,20 @@
         "origin_kind": "intrinsic",
         "source_compartment": "I_p3",
         "dest_compartment": "R_p3"
+      },
+      "rate_grad": {
+        "gamma": { "pop": "I_p3" },
+        "N0_p0": { "const": 0.0 },
+        "N0_p1": { "const": 0.0 },
+        "N0_p2": { "const": 0.0 },
+        "N0_p3": { "const": 0.0 },
+        "N0_p4": { "const": 0.0 },
+        "R0_p0": { "const": 0.0 },
+        "R0_p1": { "const": 0.0 },
+        "R0_p2": { "const": 0.0 },
+        "R0_p3": { "const": 0.0 },
+        "R0_p4": { "const": 0.0 },
+        "I0": { "const": 0.0 }
       }
     },
     {
@@ -279,6 +705,20 @@
         "origin_kind": "intrinsic",
         "source_compartment": "I_p4",
         "dest_compartment": "R_p4"
+      },
+      "rate_grad": {
+        "gamma": { "pop": "I_p4" },
+        "N0_p0": { "const": 0.0 },
+        "N0_p1": { "const": 0.0 },
+        "N0_p2": { "const": 0.0 },
+        "N0_p3": { "const": 0.0 },
+        "N0_p4": { "const": 0.0 },
+        "R0_p0": { "const": 0.0 },
+        "R0_p1": { "const": 0.0 },
+        "R0_p2": { "const": 0.0 },
+        "R0_p3": { "const": 0.0 },
+        "R0_p4": { "const": 0.0 },
+        "I0": { "const": 0.0 }
       }
     }
   ],

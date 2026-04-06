@@ -39,6 +39,43 @@
         "origin_kind": "transmission",
         "source_compartment": "S",
         "dest_compartment": "E_e1"
+      },
+      "rate_grad": {
+        "beta": {
+          "bin_op": {
+            "op": "div",
+            "left": {
+              "bin_op": {
+                "op": "mul",
+                "left": {
+                  "bin_op": {
+                    "op": "mul",
+                    "left": { "pop": "S" },
+                    "right": { "pop": "I" }
+                  }
+                },
+                "right": {
+                  "pop_sum": [ "S", "E_e1", "E_e2", "E_e3", "I", "R" ]
+                }
+              }
+            },
+            "right": {
+              "bin_op": {
+                "op": "mul",
+                "left": {
+                  "pop_sum": [ "S", "E_e1", "E_e2", "E_e3", "I", "R" ]
+                },
+                "right": {
+                  "pop_sum": [ "S", "E_e1", "E_e2", "E_e3", "I", "R" ]
+                }
+              }
+            }
+          }
+        },
+        "gamma": { "const": 0.0 },
+        "sigma_e1": { "const": 0.0 },
+        "sigma_e2": { "const": 0.0 },
+        "sigma_e3": { "const": 0.0 }
       }
     },
     {
@@ -61,6 +98,13 @@
         "origin_kind": "intrinsic",
         "source_compartment": "E_e1",
         "dest_compartment": "E_e2"
+      },
+      "rate_grad": {
+        "beta": { "const": 0.0 },
+        "gamma": { "const": 0.0 },
+        "sigma_e1": { "const": 0.0 },
+        "sigma_e2": { "const": 0.0 },
+        "sigma_e3": { "const": 0.0 }
       }
     },
     {
@@ -83,6 +127,13 @@
         "origin_kind": "intrinsic",
         "source_compartment": "E_e2",
         "dest_compartment": "E_e3"
+      },
+      "rate_grad": {
+        "beta": { "const": 0.0 },
+        "gamma": { "const": 0.0 },
+        "sigma_e1": { "const": 0.0 },
+        "sigma_e2": { "const": 0.0 },
+        "sigma_e3": { "const": 0.0 }
       }
     },
     {
@@ -105,6 +156,13 @@
         "origin_kind": "intrinsic",
         "source_compartment": "E_e3",
         "dest_compartment": "I"
+      },
+      "rate_grad": {
+        "beta": { "const": 0.0 },
+        "gamma": { "const": 0.0 },
+        "sigma_e1": { "const": 0.0 },
+        "sigma_e2": { "const": 0.0 },
+        "sigma_e3": { "const": 0.0 }
       }
     },
     {
@@ -122,6 +180,13 @@
         "origin_kind": "intrinsic",
         "source_compartment": "I",
         "dest_compartment": "R"
+      },
+      "rate_grad": {
+        "beta": { "const": 0.0 },
+        "gamma": { "pop": "I" },
+        "sigma_e1": { "const": 0.0 },
+        "sigma_e2": { "const": 0.0 },
+        "sigma_e3": { "const": 0.0 }
       }
     }
   ],

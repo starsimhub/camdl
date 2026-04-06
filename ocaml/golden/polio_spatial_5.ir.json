@@ -68,6 +68,108 @@
         "origin_kind": "transmission",
         "source_compartment": "S_north",
         "dest_compartment": "E_north"
+      },
+      "rate_grad": {
+        "sigma": { "const": 0.0 },
+        "gamma": {
+          "bin_op": {
+            "op": "div",
+            "left": {
+              "bin_op": {
+                "op": "mul",
+                "left": {
+                  "bin_op": {
+                    "op": "mul",
+                    "left": {
+                      "bin_op": {
+                        "op": "mul",
+                        "left": { "param": "R0_north" },
+                        "right": { "pop": "S_north" }
+                      }
+                    },
+                    "right": { "pop": "I_north" }
+                  }
+                },
+                "right": {
+                  "pop_sum": [
+                    "S_north", "E_north", "I_north", "R_north", "V_north"
+                  ]
+                }
+              }
+            },
+            "right": {
+              "bin_op": {
+                "op": "mul",
+                "left": {
+                  "pop_sum": [
+                    "S_north", "E_north", "I_north", "R_north", "V_north"
+                  ]
+                },
+                "right": {
+                  "pop_sum": [
+                    "S_north", "E_north", "I_north", "R_north", "V_north"
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "omega": { "const": 0.0 },
+        "kappa": { "const": 0.0 },
+        "vacc_frac": { "const": 0.0 },
+        "R0_north": {
+          "bin_op": {
+            "op": "div",
+            "left": {
+              "bin_op": {
+                "op": "mul",
+                "left": {
+                  "bin_op": {
+                    "op": "mul",
+                    "left": {
+                      "bin_op": {
+                        "op": "mul",
+                        "left": { "param": "gamma" },
+                        "right": { "pop": "S_north" }
+                      }
+                    },
+                    "right": { "pop": "I_north" }
+                  }
+                },
+                "right": {
+                  "pop_sum": [
+                    "S_north", "E_north", "I_north", "R_north", "V_north"
+                  ]
+                }
+              }
+            },
+            "right": {
+              "bin_op": {
+                "op": "mul",
+                "left": {
+                  "pop_sum": [
+                    "S_north", "E_north", "I_north", "R_north", "V_north"
+                  ]
+                },
+                "right": {
+                  "pop_sum": [
+                    "S_north", "E_north", "I_north", "R_north", "V_north"
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "R0_south": { "const": 0.0 },
+        "R0_east": { "const": 0.0 },
+        "R0_west": { "const": 0.0 },
+        "R0_center": { "const": 0.0 },
+        "N0_north": { "const": 0.0 },
+        "N0_south": { "const": 0.0 },
+        "N0_east": { "const": 0.0 },
+        "N0_west": { "const": 0.0 },
+        "N0_center": { "const": 0.0 },
+        "I0": { "const": 0.0 }
       }
     },
     {
@@ -107,6 +209,108 @@
         "origin_kind": "transmission",
         "source_compartment": "S_south",
         "dest_compartment": "E_south"
+      },
+      "rate_grad": {
+        "sigma": { "const": 0.0 },
+        "gamma": {
+          "bin_op": {
+            "op": "div",
+            "left": {
+              "bin_op": {
+                "op": "mul",
+                "left": {
+                  "bin_op": {
+                    "op": "mul",
+                    "left": {
+                      "bin_op": {
+                        "op": "mul",
+                        "left": { "param": "R0_south" },
+                        "right": { "pop": "S_south" }
+                      }
+                    },
+                    "right": { "pop": "I_south" }
+                  }
+                },
+                "right": {
+                  "pop_sum": [
+                    "S_south", "E_south", "I_south", "R_south", "V_south"
+                  ]
+                }
+              }
+            },
+            "right": {
+              "bin_op": {
+                "op": "mul",
+                "left": {
+                  "pop_sum": [
+                    "S_south", "E_south", "I_south", "R_south", "V_south"
+                  ]
+                },
+                "right": {
+                  "pop_sum": [
+                    "S_south", "E_south", "I_south", "R_south", "V_south"
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "omega": { "const": 0.0 },
+        "kappa": { "const": 0.0 },
+        "vacc_frac": { "const": 0.0 },
+        "R0_north": { "const": 0.0 },
+        "R0_south": {
+          "bin_op": {
+            "op": "div",
+            "left": {
+              "bin_op": {
+                "op": "mul",
+                "left": {
+                  "bin_op": {
+                    "op": "mul",
+                    "left": {
+                      "bin_op": {
+                        "op": "mul",
+                        "left": { "param": "gamma" },
+                        "right": { "pop": "S_south" }
+                      }
+                    },
+                    "right": { "pop": "I_south" }
+                  }
+                },
+                "right": {
+                  "pop_sum": [
+                    "S_south", "E_south", "I_south", "R_south", "V_south"
+                  ]
+                }
+              }
+            },
+            "right": {
+              "bin_op": {
+                "op": "mul",
+                "left": {
+                  "pop_sum": [
+                    "S_south", "E_south", "I_south", "R_south", "V_south"
+                  ]
+                },
+                "right": {
+                  "pop_sum": [
+                    "S_south", "E_south", "I_south", "R_south", "V_south"
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "R0_east": { "const": 0.0 },
+        "R0_west": { "const": 0.0 },
+        "R0_center": { "const": 0.0 },
+        "N0_north": { "const": 0.0 },
+        "N0_south": { "const": 0.0 },
+        "N0_east": { "const": 0.0 },
+        "N0_west": { "const": 0.0 },
+        "N0_center": { "const": 0.0 },
+        "I0": { "const": 0.0 }
       }
     },
     {
@@ -144,6 +348,108 @@
         "origin_kind": "transmission",
         "source_compartment": "S_east",
         "dest_compartment": "E_east"
+      },
+      "rate_grad": {
+        "sigma": { "const": 0.0 },
+        "gamma": {
+          "bin_op": {
+            "op": "div",
+            "left": {
+              "bin_op": {
+                "op": "mul",
+                "left": {
+                  "bin_op": {
+                    "op": "mul",
+                    "left": {
+                      "bin_op": {
+                        "op": "mul",
+                        "left": { "param": "R0_east" },
+                        "right": { "pop": "S_east" }
+                      }
+                    },
+                    "right": { "pop": "I_east" }
+                  }
+                },
+                "right": {
+                  "pop_sum": [
+                    "S_east", "E_east", "I_east", "R_east", "V_east"
+                  ]
+                }
+              }
+            },
+            "right": {
+              "bin_op": {
+                "op": "mul",
+                "left": {
+                  "pop_sum": [
+                    "S_east", "E_east", "I_east", "R_east", "V_east"
+                  ]
+                },
+                "right": {
+                  "pop_sum": [
+                    "S_east", "E_east", "I_east", "R_east", "V_east"
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "omega": { "const": 0.0 },
+        "kappa": { "const": 0.0 },
+        "vacc_frac": { "const": 0.0 },
+        "R0_north": { "const": 0.0 },
+        "R0_south": { "const": 0.0 },
+        "R0_east": {
+          "bin_op": {
+            "op": "div",
+            "left": {
+              "bin_op": {
+                "op": "mul",
+                "left": {
+                  "bin_op": {
+                    "op": "mul",
+                    "left": {
+                      "bin_op": {
+                        "op": "mul",
+                        "left": { "param": "gamma" },
+                        "right": { "pop": "S_east" }
+                      }
+                    },
+                    "right": { "pop": "I_east" }
+                  }
+                },
+                "right": {
+                  "pop_sum": [
+                    "S_east", "E_east", "I_east", "R_east", "V_east"
+                  ]
+                }
+              }
+            },
+            "right": {
+              "bin_op": {
+                "op": "mul",
+                "left": {
+                  "pop_sum": [
+                    "S_east", "E_east", "I_east", "R_east", "V_east"
+                  ]
+                },
+                "right": {
+                  "pop_sum": [
+                    "S_east", "E_east", "I_east", "R_east", "V_east"
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "R0_west": { "const": 0.0 },
+        "R0_center": { "const": 0.0 },
+        "N0_north": { "const": 0.0 },
+        "N0_south": { "const": 0.0 },
+        "N0_east": { "const": 0.0 },
+        "N0_west": { "const": 0.0 },
+        "N0_center": { "const": 0.0 },
+        "I0": { "const": 0.0 }
       }
     },
     {
@@ -181,6 +487,108 @@
         "origin_kind": "transmission",
         "source_compartment": "S_west",
         "dest_compartment": "E_west"
+      },
+      "rate_grad": {
+        "sigma": { "const": 0.0 },
+        "gamma": {
+          "bin_op": {
+            "op": "div",
+            "left": {
+              "bin_op": {
+                "op": "mul",
+                "left": {
+                  "bin_op": {
+                    "op": "mul",
+                    "left": {
+                      "bin_op": {
+                        "op": "mul",
+                        "left": { "param": "R0_west" },
+                        "right": { "pop": "S_west" }
+                      }
+                    },
+                    "right": { "pop": "I_west" }
+                  }
+                },
+                "right": {
+                  "pop_sum": [
+                    "S_west", "E_west", "I_west", "R_west", "V_west"
+                  ]
+                }
+              }
+            },
+            "right": {
+              "bin_op": {
+                "op": "mul",
+                "left": {
+                  "pop_sum": [
+                    "S_west", "E_west", "I_west", "R_west", "V_west"
+                  ]
+                },
+                "right": {
+                  "pop_sum": [
+                    "S_west", "E_west", "I_west", "R_west", "V_west"
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "omega": { "const": 0.0 },
+        "kappa": { "const": 0.0 },
+        "vacc_frac": { "const": 0.0 },
+        "R0_north": { "const": 0.0 },
+        "R0_south": { "const": 0.0 },
+        "R0_east": { "const": 0.0 },
+        "R0_west": {
+          "bin_op": {
+            "op": "div",
+            "left": {
+              "bin_op": {
+                "op": "mul",
+                "left": {
+                  "bin_op": {
+                    "op": "mul",
+                    "left": {
+                      "bin_op": {
+                        "op": "mul",
+                        "left": { "param": "gamma" },
+                        "right": { "pop": "S_west" }
+                      }
+                    },
+                    "right": { "pop": "I_west" }
+                  }
+                },
+                "right": {
+                  "pop_sum": [
+                    "S_west", "E_west", "I_west", "R_west", "V_west"
+                  ]
+                }
+              }
+            },
+            "right": {
+              "bin_op": {
+                "op": "mul",
+                "left": {
+                  "pop_sum": [
+                    "S_west", "E_west", "I_west", "R_west", "V_west"
+                  ]
+                },
+                "right": {
+                  "pop_sum": [
+                    "S_west", "E_west", "I_west", "R_west", "V_west"
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "R0_center": { "const": 0.0 },
+        "N0_north": { "const": 0.0 },
+        "N0_south": { "const": 0.0 },
+        "N0_east": { "const": 0.0 },
+        "N0_west": { "const": 0.0 },
+        "N0_center": { "const": 0.0 },
+        "I0": { "const": 0.0 }
       }
     },
     {
@@ -220,6 +628,114 @@
         "origin_kind": "transmission",
         "source_compartment": "S_center",
         "dest_compartment": "E_center"
+      },
+      "rate_grad": {
+        "sigma": { "const": 0.0 },
+        "gamma": {
+          "bin_op": {
+            "op": "div",
+            "left": {
+              "bin_op": {
+                "op": "mul",
+                "left": {
+                  "bin_op": {
+                    "op": "mul",
+                    "left": {
+                      "bin_op": {
+                        "op": "mul",
+                        "left": { "param": "R0_center" },
+                        "right": { "pop": "S_center" }
+                      }
+                    },
+                    "right": { "pop": "I_center" }
+                  }
+                },
+                "right": {
+                  "pop_sum": [
+                    "S_center", "E_center", "I_center", "R_center",
+                    "V_center"
+                  ]
+                }
+              }
+            },
+            "right": {
+              "bin_op": {
+                "op": "mul",
+                "left": {
+                  "pop_sum": [
+                    "S_center", "E_center", "I_center", "R_center",
+                    "V_center"
+                  ]
+                },
+                "right": {
+                  "pop_sum": [
+                    "S_center", "E_center", "I_center", "R_center",
+                    "V_center"
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "omega": { "const": 0.0 },
+        "kappa": { "const": 0.0 },
+        "vacc_frac": { "const": 0.0 },
+        "R0_north": { "const": 0.0 },
+        "R0_south": { "const": 0.0 },
+        "R0_east": { "const": 0.0 },
+        "R0_west": { "const": 0.0 },
+        "R0_center": {
+          "bin_op": {
+            "op": "div",
+            "left": {
+              "bin_op": {
+                "op": "mul",
+                "left": {
+                  "bin_op": {
+                    "op": "mul",
+                    "left": {
+                      "bin_op": {
+                        "op": "mul",
+                        "left": { "param": "gamma" },
+                        "right": { "pop": "S_center" }
+                      }
+                    },
+                    "right": { "pop": "I_center" }
+                  }
+                },
+                "right": {
+                  "pop_sum": [
+                    "S_center", "E_center", "I_center", "R_center",
+                    "V_center"
+                  ]
+                }
+              }
+            },
+            "right": {
+              "bin_op": {
+                "op": "mul",
+                "left": {
+                  "pop_sum": [
+                    "S_center", "E_center", "I_center", "R_center",
+                    "V_center"
+                  ]
+                },
+                "right": {
+                  "pop_sum": [
+                    "S_center", "E_center", "I_center", "R_center",
+                    "V_center"
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "N0_north": { "const": 0.0 },
+        "N0_south": { "const": 0.0 },
+        "N0_east": { "const": 0.0 },
+        "N0_west": { "const": 0.0 },
+        "N0_center": { "const": 0.0 },
+        "I0": { "const": 0.0 }
       }
     },
     {
@@ -264,6 +780,71 @@
         "origin_kind": "transmission",
         "source_compartment": "S_north",
         "dest_compartment": "E_north"
+      },
+      "rate_grad": {
+        "sigma": { "const": 0.0 },
+        "gamma": { "const": 0.0 },
+        "omega": { "const": 0.0 },
+        "kappa": {
+          "bin_op": {
+            "op": "div",
+            "left": {
+              "bin_op": {
+                "op": "mul",
+                "left": {
+                  "bin_op": {
+                    "op": "mul",
+                    "left": {
+                      "bin_op": {
+                        "op": "mul",
+                        "left": {
+                          "table_lookup": {
+                            "table": "W_patch",
+                            "indices": [ { "const": 1.0 } ]
+                          }
+                        },
+                        "right": { "pop": "S_north" }
+                      }
+                    },
+                    "right": { "pop": "I_south" }
+                  }
+                },
+                "right": {
+                  "pop_sum": [
+                    "S_south", "E_south", "I_south", "R_south", "V_south"
+                  ]
+                }
+              }
+            },
+            "right": {
+              "bin_op": {
+                "op": "mul",
+                "left": {
+                  "pop_sum": [
+                    "S_south", "E_south", "I_south", "R_south", "V_south"
+                  ]
+                },
+                "right": {
+                  "pop_sum": [
+                    "S_south", "E_south", "I_south", "R_south", "V_south"
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "vacc_frac": { "const": 0.0 },
+        "R0_north": { "const": 0.0 },
+        "R0_south": { "const": 0.0 },
+        "R0_east": { "const": 0.0 },
+        "R0_west": { "const": 0.0 },
+        "R0_center": { "const": 0.0 },
+        "N0_north": { "const": 0.0 },
+        "N0_south": { "const": 0.0 },
+        "N0_east": { "const": 0.0 },
+        "N0_west": { "const": 0.0 },
+        "N0_center": { "const": 0.0 },
+        "I0": { "const": 0.0 }
       }
     },
     {
@@ -306,6 +887,71 @@
         "origin_kind": "transmission",
         "source_compartment": "S_north",
         "dest_compartment": "E_north"
+      },
+      "rate_grad": {
+        "sigma": { "const": 0.0 },
+        "gamma": { "const": 0.0 },
+        "omega": { "const": 0.0 },
+        "kappa": {
+          "bin_op": {
+            "op": "div",
+            "left": {
+              "bin_op": {
+                "op": "mul",
+                "left": {
+                  "bin_op": {
+                    "op": "mul",
+                    "left": {
+                      "bin_op": {
+                        "op": "mul",
+                        "left": {
+                          "table_lookup": {
+                            "table": "W_patch",
+                            "indices": [ { "const": 2.0 } ]
+                          }
+                        },
+                        "right": { "pop": "S_north" }
+                      }
+                    },
+                    "right": { "pop": "I_east" }
+                  }
+                },
+                "right": {
+                  "pop_sum": [
+                    "S_east", "E_east", "I_east", "R_east", "V_east"
+                  ]
+                }
+              }
+            },
+            "right": {
+              "bin_op": {
+                "op": "mul",
+                "left": {
+                  "pop_sum": [
+                    "S_east", "E_east", "I_east", "R_east", "V_east"
+                  ]
+                },
+                "right": {
+                  "pop_sum": [
+                    "S_east", "E_east", "I_east", "R_east", "V_east"
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "vacc_frac": { "const": 0.0 },
+        "R0_north": { "const": 0.0 },
+        "R0_south": { "const": 0.0 },
+        "R0_east": { "const": 0.0 },
+        "R0_west": { "const": 0.0 },
+        "R0_center": { "const": 0.0 },
+        "N0_north": { "const": 0.0 },
+        "N0_south": { "const": 0.0 },
+        "N0_east": { "const": 0.0 },
+        "N0_west": { "const": 0.0 },
+        "N0_center": { "const": 0.0 },
+        "I0": { "const": 0.0 }
       }
     },
     {
@@ -348,6 +994,71 @@
         "origin_kind": "transmission",
         "source_compartment": "S_north",
         "dest_compartment": "E_north"
+      },
+      "rate_grad": {
+        "sigma": { "const": 0.0 },
+        "gamma": { "const": 0.0 },
+        "omega": { "const": 0.0 },
+        "kappa": {
+          "bin_op": {
+            "op": "div",
+            "left": {
+              "bin_op": {
+                "op": "mul",
+                "left": {
+                  "bin_op": {
+                    "op": "mul",
+                    "left": {
+                      "bin_op": {
+                        "op": "mul",
+                        "left": {
+                          "table_lookup": {
+                            "table": "W_patch",
+                            "indices": [ { "const": 3.0 } ]
+                          }
+                        },
+                        "right": { "pop": "S_north" }
+                      }
+                    },
+                    "right": { "pop": "I_west" }
+                  }
+                },
+                "right": {
+                  "pop_sum": [
+                    "S_west", "E_west", "I_west", "R_west", "V_west"
+                  ]
+                }
+              }
+            },
+            "right": {
+              "bin_op": {
+                "op": "mul",
+                "left": {
+                  "pop_sum": [
+                    "S_west", "E_west", "I_west", "R_west", "V_west"
+                  ]
+                },
+                "right": {
+                  "pop_sum": [
+                    "S_west", "E_west", "I_west", "R_west", "V_west"
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "vacc_frac": { "const": 0.0 },
+        "R0_north": { "const": 0.0 },
+        "R0_south": { "const": 0.0 },
+        "R0_east": { "const": 0.0 },
+        "R0_west": { "const": 0.0 },
+        "R0_center": { "const": 0.0 },
+        "N0_north": { "const": 0.0 },
+        "N0_south": { "const": 0.0 },
+        "N0_east": { "const": 0.0 },
+        "N0_west": { "const": 0.0 },
+        "N0_center": { "const": 0.0 },
+        "I0": { "const": 0.0 }
       }
     },
     {
@@ -392,6 +1103,74 @@
         "origin_kind": "transmission",
         "source_compartment": "S_north",
         "dest_compartment": "E_north"
+      },
+      "rate_grad": {
+        "sigma": { "const": 0.0 },
+        "gamma": { "const": 0.0 },
+        "omega": { "const": 0.0 },
+        "kappa": {
+          "bin_op": {
+            "op": "div",
+            "left": {
+              "bin_op": {
+                "op": "mul",
+                "left": {
+                  "bin_op": {
+                    "op": "mul",
+                    "left": {
+                      "bin_op": {
+                        "op": "mul",
+                        "left": {
+                          "table_lookup": {
+                            "table": "W_patch",
+                            "indices": [ { "const": 4.0 } ]
+                          }
+                        },
+                        "right": { "pop": "S_north" }
+                      }
+                    },
+                    "right": { "pop": "I_center" }
+                  }
+                },
+                "right": {
+                  "pop_sum": [
+                    "S_center", "E_center", "I_center", "R_center",
+                    "V_center"
+                  ]
+                }
+              }
+            },
+            "right": {
+              "bin_op": {
+                "op": "mul",
+                "left": {
+                  "pop_sum": [
+                    "S_center", "E_center", "I_center", "R_center",
+                    "V_center"
+                  ]
+                },
+                "right": {
+                  "pop_sum": [
+                    "S_center", "E_center", "I_center", "R_center",
+                    "V_center"
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "vacc_frac": { "const": 0.0 },
+        "R0_north": { "const": 0.0 },
+        "R0_south": { "const": 0.0 },
+        "R0_east": { "const": 0.0 },
+        "R0_west": { "const": 0.0 },
+        "R0_center": { "const": 0.0 },
+        "N0_north": { "const": 0.0 },
+        "N0_south": { "const": 0.0 },
+        "N0_east": { "const": 0.0 },
+        "N0_west": { "const": 0.0 },
+        "N0_center": { "const": 0.0 },
+        "I0": { "const": 0.0 }
       }
     },
     {
@@ -436,6 +1215,71 @@
         "origin_kind": "transmission",
         "source_compartment": "S_south",
         "dest_compartment": "E_south"
+      },
+      "rate_grad": {
+        "sigma": { "const": 0.0 },
+        "gamma": { "const": 0.0 },
+        "omega": { "const": 0.0 },
+        "kappa": {
+          "bin_op": {
+            "op": "div",
+            "left": {
+              "bin_op": {
+                "op": "mul",
+                "left": {
+                  "bin_op": {
+                    "op": "mul",
+                    "left": {
+                      "bin_op": {
+                        "op": "mul",
+                        "left": {
+                          "table_lookup": {
+                            "table": "W_patch",
+                            "indices": [ { "const": 5.0 } ]
+                          }
+                        },
+                        "right": { "pop": "S_south" }
+                      }
+                    },
+                    "right": { "pop": "I_north" }
+                  }
+                },
+                "right": {
+                  "pop_sum": [
+                    "S_north", "E_north", "I_north", "R_north", "V_north"
+                  ]
+                }
+              }
+            },
+            "right": {
+              "bin_op": {
+                "op": "mul",
+                "left": {
+                  "pop_sum": [
+                    "S_north", "E_north", "I_north", "R_north", "V_north"
+                  ]
+                },
+                "right": {
+                  "pop_sum": [
+                    "S_north", "E_north", "I_north", "R_north", "V_north"
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "vacc_frac": { "const": 0.0 },
+        "R0_north": { "const": 0.0 },
+        "R0_south": { "const": 0.0 },
+        "R0_east": { "const": 0.0 },
+        "R0_west": { "const": 0.0 },
+        "R0_center": { "const": 0.0 },
+        "N0_north": { "const": 0.0 },
+        "N0_south": { "const": 0.0 },
+        "N0_east": { "const": 0.0 },
+        "N0_west": { "const": 0.0 },
+        "N0_center": { "const": 0.0 },
+        "I0": { "const": 0.0 }
       }
     },
     {
@@ -478,6 +1322,71 @@
         "origin_kind": "transmission",
         "source_compartment": "S_south",
         "dest_compartment": "E_south"
+      },
+      "rate_grad": {
+        "sigma": { "const": 0.0 },
+        "gamma": { "const": 0.0 },
+        "omega": { "const": 0.0 },
+        "kappa": {
+          "bin_op": {
+            "op": "div",
+            "left": {
+              "bin_op": {
+                "op": "mul",
+                "left": {
+                  "bin_op": {
+                    "op": "mul",
+                    "left": {
+                      "bin_op": {
+                        "op": "mul",
+                        "left": {
+                          "table_lookup": {
+                            "table": "W_patch",
+                            "indices": [ { "const": 7.0 } ]
+                          }
+                        },
+                        "right": { "pop": "S_south" }
+                      }
+                    },
+                    "right": { "pop": "I_east" }
+                  }
+                },
+                "right": {
+                  "pop_sum": [
+                    "S_east", "E_east", "I_east", "R_east", "V_east"
+                  ]
+                }
+              }
+            },
+            "right": {
+              "bin_op": {
+                "op": "mul",
+                "left": {
+                  "pop_sum": [
+                    "S_east", "E_east", "I_east", "R_east", "V_east"
+                  ]
+                },
+                "right": {
+                  "pop_sum": [
+                    "S_east", "E_east", "I_east", "R_east", "V_east"
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "vacc_frac": { "const": 0.0 },
+        "R0_north": { "const": 0.0 },
+        "R0_south": { "const": 0.0 },
+        "R0_east": { "const": 0.0 },
+        "R0_west": { "const": 0.0 },
+        "R0_center": { "const": 0.0 },
+        "N0_north": { "const": 0.0 },
+        "N0_south": { "const": 0.0 },
+        "N0_east": { "const": 0.0 },
+        "N0_west": { "const": 0.0 },
+        "N0_center": { "const": 0.0 },
+        "I0": { "const": 0.0 }
       }
     },
     {
@@ -520,6 +1429,71 @@
         "origin_kind": "transmission",
         "source_compartment": "S_south",
         "dest_compartment": "E_south"
+      },
+      "rate_grad": {
+        "sigma": { "const": 0.0 },
+        "gamma": { "const": 0.0 },
+        "omega": { "const": 0.0 },
+        "kappa": {
+          "bin_op": {
+            "op": "div",
+            "left": {
+              "bin_op": {
+                "op": "mul",
+                "left": {
+                  "bin_op": {
+                    "op": "mul",
+                    "left": {
+                      "bin_op": {
+                        "op": "mul",
+                        "left": {
+                          "table_lookup": {
+                            "table": "W_patch",
+                            "indices": [ { "const": 8.0 } ]
+                          }
+                        },
+                        "right": { "pop": "S_south" }
+                      }
+                    },
+                    "right": { "pop": "I_west" }
+                  }
+                },
+                "right": {
+                  "pop_sum": [
+                    "S_west", "E_west", "I_west", "R_west", "V_west"
+                  ]
+                }
+              }
+            },
+            "right": {
+              "bin_op": {
+                "op": "mul",
+                "left": {
+                  "pop_sum": [
+                    "S_west", "E_west", "I_west", "R_west", "V_west"
+                  ]
+                },
+                "right": {
+                  "pop_sum": [
+                    "S_west", "E_west", "I_west", "R_west", "V_west"
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "vacc_frac": { "const": 0.0 },
+        "R0_north": { "const": 0.0 },
+        "R0_south": { "const": 0.0 },
+        "R0_east": { "const": 0.0 },
+        "R0_west": { "const": 0.0 },
+        "R0_center": { "const": 0.0 },
+        "N0_north": { "const": 0.0 },
+        "N0_south": { "const": 0.0 },
+        "N0_east": { "const": 0.0 },
+        "N0_west": { "const": 0.0 },
+        "N0_center": { "const": 0.0 },
+        "I0": { "const": 0.0 }
       }
     },
     {
@@ -564,6 +1538,74 @@
         "origin_kind": "transmission",
         "source_compartment": "S_south",
         "dest_compartment": "E_south"
+      },
+      "rate_grad": {
+        "sigma": { "const": 0.0 },
+        "gamma": { "const": 0.0 },
+        "omega": { "const": 0.0 },
+        "kappa": {
+          "bin_op": {
+            "op": "div",
+            "left": {
+              "bin_op": {
+                "op": "mul",
+                "left": {
+                  "bin_op": {
+                    "op": "mul",
+                    "left": {
+                      "bin_op": {
+                        "op": "mul",
+                        "left": {
+                          "table_lookup": {
+                            "table": "W_patch",
+                            "indices": [ { "const": 9.0 } ]
+                          }
+                        },
+                        "right": { "pop": "S_south" }
+                      }
+                    },
+                    "right": { "pop": "I_center" }
+                  }
+                },
+                "right": {
+                  "pop_sum": [
+                    "S_center", "E_center", "I_center", "R_center",
+                    "V_center"
+                  ]
+                }
+              }
+            },
+            "right": {
+              "bin_op": {
+                "op": "mul",
+                "left": {
+                  "pop_sum": [
+                    "S_center", "E_center", "I_center", "R_center",
+                    "V_center"
+                  ]
+                },
+                "right": {
+                  "pop_sum": [
+                    "S_center", "E_center", "I_center", "R_center",
+                    "V_center"
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "vacc_frac": { "const": 0.0 },
+        "R0_north": { "const": 0.0 },
+        "R0_south": { "const": 0.0 },
+        "R0_east": { "const": 0.0 },
+        "R0_west": { "const": 0.0 },
+        "R0_center": { "const": 0.0 },
+        "N0_north": { "const": 0.0 },
+        "N0_south": { "const": 0.0 },
+        "N0_east": { "const": 0.0 },
+        "N0_west": { "const": 0.0 },
+        "N0_center": { "const": 0.0 },
+        "I0": { "const": 0.0 }
       }
     },
     {
@@ -608,6 +1650,71 @@
         "origin_kind": "transmission",
         "source_compartment": "S_east",
         "dest_compartment": "E_east"
+      },
+      "rate_grad": {
+        "sigma": { "const": 0.0 },
+        "gamma": { "const": 0.0 },
+        "omega": { "const": 0.0 },
+        "kappa": {
+          "bin_op": {
+            "op": "div",
+            "left": {
+              "bin_op": {
+                "op": "mul",
+                "left": {
+                  "bin_op": {
+                    "op": "mul",
+                    "left": {
+                      "bin_op": {
+                        "op": "mul",
+                        "left": {
+                          "table_lookup": {
+                            "table": "W_patch",
+                            "indices": [ { "const": 10.0 } ]
+                          }
+                        },
+                        "right": { "pop": "S_east" }
+                      }
+                    },
+                    "right": { "pop": "I_north" }
+                  }
+                },
+                "right": {
+                  "pop_sum": [
+                    "S_north", "E_north", "I_north", "R_north", "V_north"
+                  ]
+                }
+              }
+            },
+            "right": {
+              "bin_op": {
+                "op": "mul",
+                "left": {
+                  "pop_sum": [
+                    "S_north", "E_north", "I_north", "R_north", "V_north"
+                  ]
+                },
+                "right": {
+                  "pop_sum": [
+                    "S_north", "E_north", "I_north", "R_north", "V_north"
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "vacc_frac": { "const": 0.0 },
+        "R0_north": { "const": 0.0 },
+        "R0_south": { "const": 0.0 },
+        "R0_east": { "const": 0.0 },
+        "R0_west": { "const": 0.0 },
+        "R0_center": { "const": 0.0 },
+        "N0_north": { "const": 0.0 },
+        "N0_south": { "const": 0.0 },
+        "N0_east": { "const": 0.0 },
+        "N0_west": { "const": 0.0 },
+        "N0_center": { "const": 0.0 },
+        "I0": { "const": 0.0 }
       }
     },
     {
@@ -652,6 +1759,71 @@
         "origin_kind": "transmission",
         "source_compartment": "S_east",
         "dest_compartment": "E_east"
+      },
+      "rate_grad": {
+        "sigma": { "const": 0.0 },
+        "gamma": { "const": 0.0 },
+        "omega": { "const": 0.0 },
+        "kappa": {
+          "bin_op": {
+            "op": "div",
+            "left": {
+              "bin_op": {
+                "op": "mul",
+                "left": {
+                  "bin_op": {
+                    "op": "mul",
+                    "left": {
+                      "bin_op": {
+                        "op": "mul",
+                        "left": {
+                          "table_lookup": {
+                            "table": "W_patch",
+                            "indices": [ { "const": 11.0 } ]
+                          }
+                        },
+                        "right": { "pop": "S_east" }
+                      }
+                    },
+                    "right": { "pop": "I_south" }
+                  }
+                },
+                "right": {
+                  "pop_sum": [
+                    "S_south", "E_south", "I_south", "R_south", "V_south"
+                  ]
+                }
+              }
+            },
+            "right": {
+              "bin_op": {
+                "op": "mul",
+                "left": {
+                  "pop_sum": [
+                    "S_south", "E_south", "I_south", "R_south", "V_south"
+                  ]
+                },
+                "right": {
+                  "pop_sum": [
+                    "S_south", "E_south", "I_south", "R_south", "V_south"
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "vacc_frac": { "const": 0.0 },
+        "R0_north": { "const": 0.0 },
+        "R0_south": { "const": 0.0 },
+        "R0_east": { "const": 0.0 },
+        "R0_west": { "const": 0.0 },
+        "R0_center": { "const": 0.0 },
+        "N0_north": { "const": 0.0 },
+        "N0_south": { "const": 0.0 },
+        "N0_east": { "const": 0.0 },
+        "N0_west": { "const": 0.0 },
+        "N0_center": { "const": 0.0 },
+        "I0": { "const": 0.0 }
       }
     },
     {
@@ -694,6 +1866,71 @@
         "origin_kind": "transmission",
         "source_compartment": "S_east",
         "dest_compartment": "E_east"
+      },
+      "rate_grad": {
+        "sigma": { "const": 0.0 },
+        "gamma": { "const": 0.0 },
+        "omega": { "const": 0.0 },
+        "kappa": {
+          "bin_op": {
+            "op": "div",
+            "left": {
+              "bin_op": {
+                "op": "mul",
+                "left": {
+                  "bin_op": {
+                    "op": "mul",
+                    "left": {
+                      "bin_op": {
+                        "op": "mul",
+                        "left": {
+                          "table_lookup": {
+                            "table": "W_patch",
+                            "indices": [ { "const": 13.0 } ]
+                          }
+                        },
+                        "right": { "pop": "S_east" }
+                      }
+                    },
+                    "right": { "pop": "I_west" }
+                  }
+                },
+                "right": {
+                  "pop_sum": [
+                    "S_west", "E_west", "I_west", "R_west", "V_west"
+                  ]
+                }
+              }
+            },
+            "right": {
+              "bin_op": {
+                "op": "mul",
+                "left": {
+                  "pop_sum": [
+                    "S_west", "E_west", "I_west", "R_west", "V_west"
+                  ]
+                },
+                "right": {
+                  "pop_sum": [
+                    "S_west", "E_west", "I_west", "R_west", "V_west"
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "vacc_frac": { "const": 0.0 },
+        "R0_north": { "const": 0.0 },
+        "R0_south": { "const": 0.0 },
+        "R0_east": { "const": 0.0 },
+        "R0_west": { "const": 0.0 },
+        "R0_center": { "const": 0.0 },
+        "N0_north": { "const": 0.0 },
+        "N0_south": { "const": 0.0 },
+        "N0_east": { "const": 0.0 },
+        "N0_west": { "const": 0.0 },
+        "N0_center": { "const": 0.0 },
+        "I0": { "const": 0.0 }
       }
     },
     {
@@ -738,6 +1975,74 @@
         "origin_kind": "transmission",
         "source_compartment": "S_east",
         "dest_compartment": "E_east"
+      },
+      "rate_grad": {
+        "sigma": { "const": 0.0 },
+        "gamma": { "const": 0.0 },
+        "omega": { "const": 0.0 },
+        "kappa": {
+          "bin_op": {
+            "op": "div",
+            "left": {
+              "bin_op": {
+                "op": "mul",
+                "left": {
+                  "bin_op": {
+                    "op": "mul",
+                    "left": {
+                      "bin_op": {
+                        "op": "mul",
+                        "left": {
+                          "table_lookup": {
+                            "table": "W_patch",
+                            "indices": [ { "const": 14.0 } ]
+                          }
+                        },
+                        "right": { "pop": "S_east" }
+                      }
+                    },
+                    "right": { "pop": "I_center" }
+                  }
+                },
+                "right": {
+                  "pop_sum": [
+                    "S_center", "E_center", "I_center", "R_center",
+                    "V_center"
+                  ]
+                }
+              }
+            },
+            "right": {
+              "bin_op": {
+                "op": "mul",
+                "left": {
+                  "pop_sum": [
+                    "S_center", "E_center", "I_center", "R_center",
+                    "V_center"
+                  ]
+                },
+                "right": {
+                  "pop_sum": [
+                    "S_center", "E_center", "I_center", "R_center",
+                    "V_center"
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "vacc_frac": { "const": 0.0 },
+        "R0_north": { "const": 0.0 },
+        "R0_south": { "const": 0.0 },
+        "R0_east": { "const": 0.0 },
+        "R0_west": { "const": 0.0 },
+        "R0_center": { "const": 0.0 },
+        "N0_north": { "const": 0.0 },
+        "N0_south": { "const": 0.0 },
+        "N0_east": { "const": 0.0 },
+        "N0_west": { "const": 0.0 },
+        "N0_center": { "const": 0.0 },
+        "I0": { "const": 0.0 }
       }
     },
     {
@@ -782,6 +2087,71 @@
         "origin_kind": "transmission",
         "source_compartment": "S_west",
         "dest_compartment": "E_west"
+      },
+      "rate_grad": {
+        "sigma": { "const": 0.0 },
+        "gamma": { "const": 0.0 },
+        "omega": { "const": 0.0 },
+        "kappa": {
+          "bin_op": {
+            "op": "div",
+            "left": {
+              "bin_op": {
+                "op": "mul",
+                "left": {
+                  "bin_op": {
+                    "op": "mul",
+                    "left": {
+                      "bin_op": {
+                        "op": "mul",
+                        "left": {
+                          "table_lookup": {
+                            "table": "W_patch",
+                            "indices": [ { "const": 15.0 } ]
+                          }
+                        },
+                        "right": { "pop": "S_west" }
+                      }
+                    },
+                    "right": { "pop": "I_north" }
+                  }
+                },
+                "right": {
+                  "pop_sum": [
+                    "S_north", "E_north", "I_north", "R_north", "V_north"
+                  ]
+                }
+              }
+            },
+            "right": {
+              "bin_op": {
+                "op": "mul",
+                "left": {
+                  "pop_sum": [
+                    "S_north", "E_north", "I_north", "R_north", "V_north"
+                  ]
+                },
+                "right": {
+                  "pop_sum": [
+                    "S_north", "E_north", "I_north", "R_north", "V_north"
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "vacc_frac": { "const": 0.0 },
+        "R0_north": { "const": 0.0 },
+        "R0_south": { "const": 0.0 },
+        "R0_east": { "const": 0.0 },
+        "R0_west": { "const": 0.0 },
+        "R0_center": { "const": 0.0 },
+        "N0_north": { "const": 0.0 },
+        "N0_south": { "const": 0.0 },
+        "N0_east": { "const": 0.0 },
+        "N0_west": { "const": 0.0 },
+        "N0_center": { "const": 0.0 },
+        "I0": { "const": 0.0 }
       }
     },
     {
@@ -826,6 +2196,71 @@
         "origin_kind": "transmission",
         "source_compartment": "S_west",
         "dest_compartment": "E_west"
+      },
+      "rate_grad": {
+        "sigma": { "const": 0.0 },
+        "gamma": { "const": 0.0 },
+        "omega": { "const": 0.0 },
+        "kappa": {
+          "bin_op": {
+            "op": "div",
+            "left": {
+              "bin_op": {
+                "op": "mul",
+                "left": {
+                  "bin_op": {
+                    "op": "mul",
+                    "left": {
+                      "bin_op": {
+                        "op": "mul",
+                        "left": {
+                          "table_lookup": {
+                            "table": "W_patch",
+                            "indices": [ { "const": 16.0 } ]
+                          }
+                        },
+                        "right": { "pop": "S_west" }
+                      }
+                    },
+                    "right": { "pop": "I_south" }
+                  }
+                },
+                "right": {
+                  "pop_sum": [
+                    "S_south", "E_south", "I_south", "R_south", "V_south"
+                  ]
+                }
+              }
+            },
+            "right": {
+              "bin_op": {
+                "op": "mul",
+                "left": {
+                  "pop_sum": [
+                    "S_south", "E_south", "I_south", "R_south", "V_south"
+                  ]
+                },
+                "right": {
+                  "pop_sum": [
+                    "S_south", "E_south", "I_south", "R_south", "V_south"
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "vacc_frac": { "const": 0.0 },
+        "R0_north": { "const": 0.0 },
+        "R0_south": { "const": 0.0 },
+        "R0_east": { "const": 0.0 },
+        "R0_west": { "const": 0.0 },
+        "R0_center": { "const": 0.0 },
+        "N0_north": { "const": 0.0 },
+        "N0_south": { "const": 0.0 },
+        "N0_east": { "const": 0.0 },
+        "N0_west": { "const": 0.0 },
+        "N0_center": { "const": 0.0 },
+        "I0": { "const": 0.0 }
       }
     },
     {
@@ -868,6 +2303,71 @@
         "origin_kind": "transmission",
         "source_compartment": "S_west",
         "dest_compartment": "E_west"
+      },
+      "rate_grad": {
+        "sigma": { "const": 0.0 },
+        "gamma": { "const": 0.0 },
+        "omega": { "const": 0.0 },
+        "kappa": {
+          "bin_op": {
+            "op": "div",
+            "left": {
+              "bin_op": {
+                "op": "mul",
+                "left": {
+                  "bin_op": {
+                    "op": "mul",
+                    "left": {
+                      "bin_op": {
+                        "op": "mul",
+                        "left": {
+                          "table_lookup": {
+                            "table": "W_patch",
+                            "indices": [ { "const": 17.0 } ]
+                          }
+                        },
+                        "right": { "pop": "S_west" }
+                      }
+                    },
+                    "right": { "pop": "I_east" }
+                  }
+                },
+                "right": {
+                  "pop_sum": [
+                    "S_east", "E_east", "I_east", "R_east", "V_east"
+                  ]
+                }
+              }
+            },
+            "right": {
+              "bin_op": {
+                "op": "mul",
+                "left": {
+                  "pop_sum": [
+                    "S_east", "E_east", "I_east", "R_east", "V_east"
+                  ]
+                },
+                "right": {
+                  "pop_sum": [
+                    "S_east", "E_east", "I_east", "R_east", "V_east"
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "vacc_frac": { "const": 0.0 },
+        "R0_north": { "const": 0.0 },
+        "R0_south": { "const": 0.0 },
+        "R0_east": { "const": 0.0 },
+        "R0_west": { "const": 0.0 },
+        "R0_center": { "const": 0.0 },
+        "N0_north": { "const": 0.0 },
+        "N0_south": { "const": 0.0 },
+        "N0_east": { "const": 0.0 },
+        "N0_west": { "const": 0.0 },
+        "N0_center": { "const": 0.0 },
+        "I0": { "const": 0.0 }
       }
     },
     {
@@ -912,6 +2412,74 @@
         "origin_kind": "transmission",
         "source_compartment": "S_west",
         "dest_compartment": "E_west"
+      },
+      "rate_grad": {
+        "sigma": { "const": 0.0 },
+        "gamma": { "const": 0.0 },
+        "omega": { "const": 0.0 },
+        "kappa": {
+          "bin_op": {
+            "op": "div",
+            "left": {
+              "bin_op": {
+                "op": "mul",
+                "left": {
+                  "bin_op": {
+                    "op": "mul",
+                    "left": {
+                      "bin_op": {
+                        "op": "mul",
+                        "left": {
+                          "table_lookup": {
+                            "table": "W_patch",
+                            "indices": [ { "const": 19.0 } ]
+                          }
+                        },
+                        "right": { "pop": "S_west" }
+                      }
+                    },
+                    "right": { "pop": "I_center" }
+                  }
+                },
+                "right": {
+                  "pop_sum": [
+                    "S_center", "E_center", "I_center", "R_center",
+                    "V_center"
+                  ]
+                }
+              }
+            },
+            "right": {
+              "bin_op": {
+                "op": "mul",
+                "left": {
+                  "pop_sum": [
+                    "S_center", "E_center", "I_center", "R_center",
+                    "V_center"
+                  ]
+                },
+                "right": {
+                  "pop_sum": [
+                    "S_center", "E_center", "I_center", "R_center",
+                    "V_center"
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "vacc_frac": { "const": 0.0 },
+        "R0_north": { "const": 0.0 },
+        "R0_south": { "const": 0.0 },
+        "R0_east": { "const": 0.0 },
+        "R0_west": { "const": 0.0 },
+        "R0_center": { "const": 0.0 },
+        "N0_north": { "const": 0.0 },
+        "N0_south": { "const": 0.0 },
+        "N0_east": { "const": 0.0 },
+        "N0_west": { "const": 0.0 },
+        "N0_center": { "const": 0.0 },
+        "I0": { "const": 0.0 }
       }
     },
     {
@@ -956,6 +2524,71 @@
         "origin_kind": "transmission",
         "source_compartment": "S_center",
         "dest_compartment": "E_center"
+      },
+      "rate_grad": {
+        "sigma": { "const": 0.0 },
+        "gamma": { "const": 0.0 },
+        "omega": { "const": 0.0 },
+        "kappa": {
+          "bin_op": {
+            "op": "div",
+            "left": {
+              "bin_op": {
+                "op": "mul",
+                "left": {
+                  "bin_op": {
+                    "op": "mul",
+                    "left": {
+                      "bin_op": {
+                        "op": "mul",
+                        "left": {
+                          "table_lookup": {
+                            "table": "W_patch",
+                            "indices": [ { "const": 20.0 } ]
+                          }
+                        },
+                        "right": { "pop": "S_center" }
+                      }
+                    },
+                    "right": { "pop": "I_north" }
+                  }
+                },
+                "right": {
+                  "pop_sum": [
+                    "S_north", "E_north", "I_north", "R_north", "V_north"
+                  ]
+                }
+              }
+            },
+            "right": {
+              "bin_op": {
+                "op": "mul",
+                "left": {
+                  "pop_sum": [
+                    "S_north", "E_north", "I_north", "R_north", "V_north"
+                  ]
+                },
+                "right": {
+                  "pop_sum": [
+                    "S_north", "E_north", "I_north", "R_north", "V_north"
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "vacc_frac": { "const": 0.0 },
+        "R0_north": { "const": 0.0 },
+        "R0_south": { "const": 0.0 },
+        "R0_east": { "const": 0.0 },
+        "R0_west": { "const": 0.0 },
+        "R0_center": { "const": 0.0 },
+        "N0_north": { "const": 0.0 },
+        "N0_south": { "const": 0.0 },
+        "N0_east": { "const": 0.0 },
+        "N0_west": { "const": 0.0 },
+        "N0_center": { "const": 0.0 },
+        "I0": { "const": 0.0 }
       }
     },
     {
@@ -1000,6 +2633,71 @@
         "origin_kind": "transmission",
         "source_compartment": "S_center",
         "dest_compartment": "E_center"
+      },
+      "rate_grad": {
+        "sigma": { "const": 0.0 },
+        "gamma": { "const": 0.0 },
+        "omega": { "const": 0.0 },
+        "kappa": {
+          "bin_op": {
+            "op": "div",
+            "left": {
+              "bin_op": {
+                "op": "mul",
+                "left": {
+                  "bin_op": {
+                    "op": "mul",
+                    "left": {
+                      "bin_op": {
+                        "op": "mul",
+                        "left": {
+                          "table_lookup": {
+                            "table": "W_patch",
+                            "indices": [ { "const": 21.0 } ]
+                          }
+                        },
+                        "right": { "pop": "S_center" }
+                      }
+                    },
+                    "right": { "pop": "I_south" }
+                  }
+                },
+                "right": {
+                  "pop_sum": [
+                    "S_south", "E_south", "I_south", "R_south", "V_south"
+                  ]
+                }
+              }
+            },
+            "right": {
+              "bin_op": {
+                "op": "mul",
+                "left": {
+                  "pop_sum": [
+                    "S_south", "E_south", "I_south", "R_south", "V_south"
+                  ]
+                },
+                "right": {
+                  "pop_sum": [
+                    "S_south", "E_south", "I_south", "R_south", "V_south"
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "vacc_frac": { "const": 0.0 },
+        "R0_north": { "const": 0.0 },
+        "R0_south": { "const": 0.0 },
+        "R0_east": { "const": 0.0 },
+        "R0_west": { "const": 0.0 },
+        "R0_center": { "const": 0.0 },
+        "N0_north": { "const": 0.0 },
+        "N0_south": { "const": 0.0 },
+        "N0_east": { "const": 0.0 },
+        "N0_west": { "const": 0.0 },
+        "N0_center": { "const": 0.0 },
+        "I0": { "const": 0.0 }
       }
     },
     {
@@ -1042,6 +2740,71 @@
         "origin_kind": "transmission",
         "source_compartment": "S_center",
         "dest_compartment": "E_center"
+      },
+      "rate_grad": {
+        "sigma": { "const": 0.0 },
+        "gamma": { "const": 0.0 },
+        "omega": { "const": 0.0 },
+        "kappa": {
+          "bin_op": {
+            "op": "div",
+            "left": {
+              "bin_op": {
+                "op": "mul",
+                "left": {
+                  "bin_op": {
+                    "op": "mul",
+                    "left": {
+                      "bin_op": {
+                        "op": "mul",
+                        "left": {
+                          "table_lookup": {
+                            "table": "W_patch",
+                            "indices": [ { "const": 22.0 } ]
+                          }
+                        },
+                        "right": { "pop": "S_center" }
+                      }
+                    },
+                    "right": { "pop": "I_east" }
+                  }
+                },
+                "right": {
+                  "pop_sum": [
+                    "S_east", "E_east", "I_east", "R_east", "V_east"
+                  ]
+                }
+              }
+            },
+            "right": {
+              "bin_op": {
+                "op": "mul",
+                "left": {
+                  "pop_sum": [
+                    "S_east", "E_east", "I_east", "R_east", "V_east"
+                  ]
+                },
+                "right": {
+                  "pop_sum": [
+                    "S_east", "E_east", "I_east", "R_east", "V_east"
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "vacc_frac": { "const": 0.0 },
+        "R0_north": { "const": 0.0 },
+        "R0_south": { "const": 0.0 },
+        "R0_east": { "const": 0.0 },
+        "R0_west": { "const": 0.0 },
+        "R0_center": { "const": 0.0 },
+        "N0_north": { "const": 0.0 },
+        "N0_south": { "const": 0.0 },
+        "N0_east": { "const": 0.0 },
+        "N0_west": { "const": 0.0 },
+        "N0_center": { "const": 0.0 },
+        "I0": { "const": 0.0 }
       }
     },
     {
@@ -1084,6 +2847,71 @@
         "origin_kind": "transmission",
         "source_compartment": "S_center",
         "dest_compartment": "E_center"
+      },
+      "rate_grad": {
+        "sigma": { "const": 0.0 },
+        "gamma": { "const": 0.0 },
+        "omega": { "const": 0.0 },
+        "kappa": {
+          "bin_op": {
+            "op": "div",
+            "left": {
+              "bin_op": {
+                "op": "mul",
+                "left": {
+                  "bin_op": {
+                    "op": "mul",
+                    "left": {
+                      "bin_op": {
+                        "op": "mul",
+                        "left": {
+                          "table_lookup": {
+                            "table": "W_patch",
+                            "indices": [ { "const": 23.0 } ]
+                          }
+                        },
+                        "right": { "pop": "S_center" }
+                      }
+                    },
+                    "right": { "pop": "I_west" }
+                  }
+                },
+                "right": {
+                  "pop_sum": [
+                    "S_west", "E_west", "I_west", "R_west", "V_west"
+                  ]
+                }
+              }
+            },
+            "right": {
+              "bin_op": {
+                "op": "mul",
+                "left": {
+                  "pop_sum": [
+                    "S_west", "E_west", "I_west", "R_west", "V_west"
+                  ]
+                },
+                "right": {
+                  "pop_sum": [
+                    "S_west", "E_west", "I_west", "R_west", "V_west"
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "vacc_frac": { "const": 0.0 },
+        "R0_north": { "const": 0.0 },
+        "R0_south": { "const": 0.0 },
+        "R0_east": { "const": 0.0 },
+        "R0_west": { "const": 0.0 },
+        "R0_center": { "const": 0.0 },
+        "N0_north": { "const": 0.0 },
+        "N0_south": { "const": 0.0 },
+        "N0_east": { "const": 0.0 },
+        "N0_west": { "const": 0.0 },
+        "N0_center": { "const": 0.0 },
+        "I0": { "const": 0.0 }
       }
     },
     {
@@ -1101,6 +2929,24 @@
         "origin_kind": "intrinsic",
         "source_compartment": "E_north",
         "dest_compartment": "I_north"
+      },
+      "rate_grad": {
+        "sigma": { "pop": "E_north" },
+        "gamma": { "const": 0.0 },
+        "omega": { "const": 0.0 },
+        "kappa": { "const": 0.0 },
+        "vacc_frac": { "const": 0.0 },
+        "R0_north": { "const": 0.0 },
+        "R0_south": { "const": 0.0 },
+        "R0_east": { "const": 0.0 },
+        "R0_west": { "const": 0.0 },
+        "R0_center": { "const": 0.0 },
+        "N0_north": { "const": 0.0 },
+        "N0_south": { "const": 0.0 },
+        "N0_east": { "const": 0.0 },
+        "N0_west": { "const": 0.0 },
+        "N0_center": { "const": 0.0 },
+        "I0": { "const": 0.0 }
       }
     },
     {
@@ -1118,6 +2964,24 @@
         "origin_kind": "intrinsic",
         "source_compartment": "E_south",
         "dest_compartment": "I_south"
+      },
+      "rate_grad": {
+        "sigma": { "pop": "E_south" },
+        "gamma": { "const": 0.0 },
+        "omega": { "const": 0.0 },
+        "kappa": { "const": 0.0 },
+        "vacc_frac": { "const": 0.0 },
+        "R0_north": { "const": 0.0 },
+        "R0_south": { "const": 0.0 },
+        "R0_east": { "const": 0.0 },
+        "R0_west": { "const": 0.0 },
+        "R0_center": { "const": 0.0 },
+        "N0_north": { "const": 0.0 },
+        "N0_south": { "const": 0.0 },
+        "N0_east": { "const": 0.0 },
+        "N0_west": { "const": 0.0 },
+        "N0_center": { "const": 0.0 },
+        "I0": { "const": 0.0 }
       }
     },
     {
@@ -1135,6 +2999,24 @@
         "origin_kind": "intrinsic",
         "source_compartment": "E_east",
         "dest_compartment": "I_east"
+      },
+      "rate_grad": {
+        "sigma": { "pop": "E_east" },
+        "gamma": { "const": 0.0 },
+        "omega": { "const": 0.0 },
+        "kappa": { "const": 0.0 },
+        "vacc_frac": { "const": 0.0 },
+        "R0_north": { "const": 0.0 },
+        "R0_south": { "const": 0.0 },
+        "R0_east": { "const": 0.0 },
+        "R0_west": { "const": 0.0 },
+        "R0_center": { "const": 0.0 },
+        "N0_north": { "const": 0.0 },
+        "N0_south": { "const": 0.0 },
+        "N0_east": { "const": 0.0 },
+        "N0_west": { "const": 0.0 },
+        "N0_center": { "const": 0.0 },
+        "I0": { "const": 0.0 }
       }
     },
     {
@@ -1152,6 +3034,24 @@
         "origin_kind": "intrinsic",
         "source_compartment": "E_west",
         "dest_compartment": "I_west"
+      },
+      "rate_grad": {
+        "sigma": { "pop": "E_west" },
+        "gamma": { "const": 0.0 },
+        "omega": { "const": 0.0 },
+        "kappa": { "const": 0.0 },
+        "vacc_frac": { "const": 0.0 },
+        "R0_north": { "const": 0.0 },
+        "R0_south": { "const": 0.0 },
+        "R0_east": { "const": 0.0 },
+        "R0_west": { "const": 0.0 },
+        "R0_center": { "const": 0.0 },
+        "N0_north": { "const": 0.0 },
+        "N0_south": { "const": 0.0 },
+        "N0_east": { "const": 0.0 },
+        "N0_west": { "const": 0.0 },
+        "N0_center": { "const": 0.0 },
+        "I0": { "const": 0.0 }
       }
     },
     {
@@ -1169,6 +3069,24 @@
         "origin_kind": "intrinsic",
         "source_compartment": "E_center",
         "dest_compartment": "I_center"
+      },
+      "rate_grad": {
+        "sigma": { "pop": "E_center" },
+        "gamma": { "const": 0.0 },
+        "omega": { "const": 0.0 },
+        "kappa": { "const": 0.0 },
+        "vacc_frac": { "const": 0.0 },
+        "R0_north": { "const": 0.0 },
+        "R0_south": { "const": 0.0 },
+        "R0_east": { "const": 0.0 },
+        "R0_west": { "const": 0.0 },
+        "R0_center": { "const": 0.0 },
+        "N0_north": { "const": 0.0 },
+        "N0_south": { "const": 0.0 },
+        "N0_east": { "const": 0.0 },
+        "N0_west": { "const": 0.0 },
+        "N0_center": { "const": 0.0 },
+        "I0": { "const": 0.0 }
       }
     },
     {
@@ -1186,6 +3104,24 @@
         "origin_kind": "intrinsic",
         "source_compartment": "I_north",
         "dest_compartment": "R_north"
+      },
+      "rate_grad": {
+        "sigma": { "const": 0.0 },
+        "gamma": { "pop": "I_north" },
+        "omega": { "const": 0.0 },
+        "kappa": { "const": 0.0 },
+        "vacc_frac": { "const": 0.0 },
+        "R0_north": { "const": 0.0 },
+        "R0_south": { "const": 0.0 },
+        "R0_east": { "const": 0.0 },
+        "R0_west": { "const": 0.0 },
+        "R0_center": { "const": 0.0 },
+        "N0_north": { "const": 0.0 },
+        "N0_south": { "const": 0.0 },
+        "N0_east": { "const": 0.0 },
+        "N0_west": { "const": 0.0 },
+        "N0_center": { "const": 0.0 },
+        "I0": { "const": 0.0 }
       }
     },
     {
@@ -1203,6 +3139,24 @@
         "origin_kind": "intrinsic",
         "source_compartment": "I_south",
         "dest_compartment": "R_south"
+      },
+      "rate_grad": {
+        "sigma": { "const": 0.0 },
+        "gamma": { "pop": "I_south" },
+        "omega": { "const": 0.0 },
+        "kappa": { "const": 0.0 },
+        "vacc_frac": { "const": 0.0 },
+        "R0_north": { "const": 0.0 },
+        "R0_south": { "const": 0.0 },
+        "R0_east": { "const": 0.0 },
+        "R0_west": { "const": 0.0 },
+        "R0_center": { "const": 0.0 },
+        "N0_north": { "const": 0.0 },
+        "N0_south": { "const": 0.0 },
+        "N0_east": { "const": 0.0 },
+        "N0_west": { "const": 0.0 },
+        "N0_center": { "const": 0.0 },
+        "I0": { "const": 0.0 }
       }
     },
     {
@@ -1220,6 +3174,24 @@
         "origin_kind": "intrinsic",
         "source_compartment": "I_east",
         "dest_compartment": "R_east"
+      },
+      "rate_grad": {
+        "sigma": { "const": 0.0 },
+        "gamma": { "pop": "I_east" },
+        "omega": { "const": 0.0 },
+        "kappa": { "const": 0.0 },
+        "vacc_frac": { "const": 0.0 },
+        "R0_north": { "const": 0.0 },
+        "R0_south": { "const": 0.0 },
+        "R0_east": { "const": 0.0 },
+        "R0_west": { "const": 0.0 },
+        "R0_center": { "const": 0.0 },
+        "N0_north": { "const": 0.0 },
+        "N0_south": { "const": 0.0 },
+        "N0_east": { "const": 0.0 },
+        "N0_west": { "const": 0.0 },
+        "N0_center": { "const": 0.0 },
+        "I0": { "const": 0.0 }
       }
     },
     {
@@ -1237,6 +3209,24 @@
         "origin_kind": "intrinsic",
         "source_compartment": "I_west",
         "dest_compartment": "R_west"
+      },
+      "rate_grad": {
+        "sigma": { "const": 0.0 },
+        "gamma": { "pop": "I_west" },
+        "omega": { "const": 0.0 },
+        "kappa": { "const": 0.0 },
+        "vacc_frac": { "const": 0.0 },
+        "R0_north": { "const": 0.0 },
+        "R0_south": { "const": 0.0 },
+        "R0_east": { "const": 0.0 },
+        "R0_west": { "const": 0.0 },
+        "R0_center": { "const": 0.0 },
+        "N0_north": { "const": 0.0 },
+        "N0_south": { "const": 0.0 },
+        "N0_east": { "const": 0.0 },
+        "N0_west": { "const": 0.0 },
+        "N0_center": { "const": 0.0 },
+        "I0": { "const": 0.0 }
       }
     },
     {
@@ -1254,6 +3244,24 @@
         "origin_kind": "intrinsic",
         "source_compartment": "I_center",
         "dest_compartment": "R_center"
+      },
+      "rate_grad": {
+        "sigma": { "const": 0.0 },
+        "gamma": { "pop": "I_center" },
+        "omega": { "const": 0.0 },
+        "kappa": { "const": 0.0 },
+        "vacc_frac": { "const": 0.0 },
+        "R0_north": { "const": 0.0 },
+        "R0_south": { "const": 0.0 },
+        "R0_east": { "const": 0.0 },
+        "R0_west": { "const": 0.0 },
+        "R0_center": { "const": 0.0 },
+        "N0_north": { "const": 0.0 },
+        "N0_south": { "const": 0.0 },
+        "N0_east": { "const": 0.0 },
+        "N0_west": { "const": 0.0 },
+        "N0_center": { "const": 0.0 },
+        "I0": { "const": 0.0 }
       }
     },
     {
@@ -1271,6 +3279,24 @@
         "origin_kind": "intrinsic",
         "source_compartment": "V_north",
         "dest_compartment": "S_north"
+      },
+      "rate_grad": {
+        "sigma": { "const": 0.0 },
+        "gamma": { "const": 0.0 },
+        "omega": { "pop": "V_north" },
+        "kappa": { "const": 0.0 },
+        "vacc_frac": { "const": 0.0 },
+        "R0_north": { "const": 0.0 },
+        "R0_south": { "const": 0.0 },
+        "R0_east": { "const": 0.0 },
+        "R0_west": { "const": 0.0 },
+        "R0_center": { "const": 0.0 },
+        "N0_north": { "const": 0.0 },
+        "N0_south": { "const": 0.0 },
+        "N0_east": { "const": 0.0 },
+        "N0_west": { "const": 0.0 },
+        "N0_center": { "const": 0.0 },
+        "I0": { "const": 0.0 }
       }
     },
     {
@@ -1288,6 +3314,24 @@
         "origin_kind": "intrinsic",
         "source_compartment": "V_south",
         "dest_compartment": "S_south"
+      },
+      "rate_grad": {
+        "sigma": { "const": 0.0 },
+        "gamma": { "const": 0.0 },
+        "omega": { "pop": "V_south" },
+        "kappa": { "const": 0.0 },
+        "vacc_frac": { "const": 0.0 },
+        "R0_north": { "const": 0.0 },
+        "R0_south": { "const": 0.0 },
+        "R0_east": { "const": 0.0 },
+        "R0_west": { "const": 0.0 },
+        "R0_center": { "const": 0.0 },
+        "N0_north": { "const": 0.0 },
+        "N0_south": { "const": 0.0 },
+        "N0_east": { "const": 0.0 },
+        "N0_west": { "const": 0.0 },
+        "N0_center": { "const": 0.0 },
+        "I0": { "const": 0.0 }
       }
     },
     {
@@ -1305,6 +3349,24 @@
         "origin_kind": "intrinsic",
         "source_compartment": "V_east",
         "dest_compartment": "S_east"
+      },
+      "rate_grad": {
+        "sigma": { "const": 0.0 },
+        "gamma": { "const": 0.0 },
+        "omega": { "pop": "V_east" },
+        "kappa": { "const": 0.0 },
+        "vacc_frac": { "const": 0.0 },
+        "R0_north": { "const": 0.0 },
+        "R0_south": { "const": 0.0 },
+        "R0_east": { "const": 0.0 },
+        "R0_west": { "const": 0.0 },
+        "R0_center": { "const": 0.0 },
+        "N0_north": { "const": 0.0 },
+        "N0_south": { "const": 0.0 },
+        "N0_east": { "const": 0.0 },
+        "N0_west": { "const": 0.0 },
+        "N0_center": { "const": 0.0 },
+        "I0": { "const": 0.0 }
       }
     },
     {
@@ -1322,6 +3384,24 @@
         "origin_kind": "intrinsic",
         "source_compartment": "V_west",
         "dest_compartment": "S_west"
+      },
+      "rate_grad": {
+        "sigma": { "const": 0.0 },
+        "gamma": { "const": 0.0 },
+        "omega": { "pop": "V_west" },
+        "kappa": { "const": 0.0 },
+        "vacc_frac": { "const": 0.0 },
+        "R0_north": { "const": 0.0 },
+        "R0_south": { "const": 0.0 },
+        "R0_east": { "const": 0.0 },
+        "R0_west": { "const": 0.0 },
+        "R0_center": { "const": 0.0 },
+        "N0_north": { "const": 0.0 },
+        "N0_south": { "const": 0.0 },
+        "N0_east": { "const": 0.0 },
+        "N0_west": { "const": 0.0 },
+        "N0_center": { "const": 0.0 },
+        "I0": { "const": 0.0 }
       }
     },
     {
@@ -1339,6 +3419,24 @@
         "origin_kind": "intrinsic",
         "source_compartment": "V_center",
         "dest_compartment": "S_center"
+      },
+      "rate_grad": {
+        "sigma": { "const": 0.0 },
+        "gamma": { "const": 0.0 },
+        "omega": { "pop": "V_center" },
+        "kappa": { "const": 0.0 },
+        "vacc_frac": { "const": 0.0 },
+        "R0_north": { "const": 0.0 },
+        "R0_south": { "const": 0.0 },
+        "R0_east": { "const": 0.0 },
+        "R0_west": { "const": 0.0 },
+        "R0_center": { "const": 0.0 },
+        "N0_north": { "const": 0.0 },
+        "N0_south": { "const": 0.0 },
+        "N0_east": { "const": 0.0 },
+        "N0_west": { "const": 0.0 },
+        "N0_center": { "const": 0.0 },
+        "I0": { "const": 0.0 }
       }
     }
   ],

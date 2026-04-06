@@ -43,6 +43,16 @@
         "origin_kind": "transmission",
         "source_compartment": "S_urban",
         "dest_compartment": "E_urban"
+      },
+      "rate_grad": {
+        "sigma": { "const": 0.0 },
+        "gamma": { "const": 0.0 },
+        "baseline": { "const": 0.0 },
+        "amp_urban": { "const": 0.0 },
+        "amp_rural": { "const": 0.0 },
+        "N0_urban": { "const": 0.0 },
+        "N0_rural": { "const": 0.0 },
+        "I0": { "const": 0.0 }
       }
     },
     {
@@ -74,6 +84,16 @@
         "origin_kind": "transmission",
         "source_compartment": "S_rural",
         "dest_compartment": "E_rural"
+      },
+      "rate_grad": {
+        "sigma": { "const": 0.0 },
+        "gamma": { "const": 0.0 },
+        "baseline": { "const": 0.0 },
+        "amp_urban": { "const": 0.0 },
+        "amp_rural": { "const": 0.0 },
+        "N0_urban": { "const": 0.0 },
+        "N0_rural": { "const": 0.0 },
+        "I0": { "const": 0.0 }
       }
     },
     {
@@ -91,6 +111,16 @@
         "origin_kind": "intrinsic",
         "source_compartment": "E_urban",
         "dest_compartment": "I_urban"
+      },
+      "rate_grad": {
+        "sigma": { "pop": "E_urban" },
+        "gamma": { "const": 0.0 },
+        "baseline": { "const": 0.0 },
+        "amp_urban": { "const": 0.0 },
+        "amp_rural": { "const": 0.0 },
+        "N0_urban": { "const": 0.0 },
+        "N0_rural": { "const": 0.0 },
+        "I0": { "const": 0.0 }
       }
     },
     {
@@ -108,6 +138,16 @@
         "origin_kind": "intrinsic",
         "source_compartment": "E_rural",
         "dest_compartment": "I_rural"
+      },
+      "rate_grad": {
+        "sigma": { "pop": "E_rural" },
+        "gamma": { "const": 0.0 },
+        "baseline": { "const": 0.0 },
+        "amp_urban": { "const": 0.0 },
+        "amp_rural": { "const": 0.0 },
+        "N0_urban": { "const": 0.0 },
+        "N0_rural": { "const": 0.0 },
+        "I0": { "const": 0.0 }
       }
     },
     {
@@ -125,6 +165,16 @@
         "origin_kind": "intrinsic",
         "source_compartment": "I_urban",
         "dest_compartment": "R_urban"
+      },
+      "rate_grad": {
+        "sigma": { "const": 0.0 },
+        "gamma": { "pop": "I_urban" },
+        "baseline": { "const": 0.0 },
+        "amp_urban": { "const": 0.0 },
+        "amp_rural": { "const": 0.0 },
+        "N0_urban": { "const": 0.0 },
+        "N0_rural": { "const": 0.0 },
+        "I0": { "const": 0.0 }
       }
     },
     {
@@ -142,6 +192,16 @@
         "origin_kind": "intrinsic",
         "source_compartment": "I_rural",
         "dest_compartment": "R_rural"
+      },
+      "rate_grad": {
+        "sigma": { "const": 0.0 },
+        "gamma": { "pop": "I_rural" },
+        "baseline": { "const": 0.0 },
+        "amp_urban": { "const": 0.0 },
+        "amp_rural": { "const": 0.0 },
+        "N0_urban": { "const": 0.0 },
+        "N0_rural": { "const": 0.0 },
+        "I0": { "const": 0.0 }
       }
     }
   ],

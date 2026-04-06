@@ -114,6 +114,89 @@
         "origin_kind": "transmission",
         "source_compartment": "S_age_0_5",
         "dest_compartment": "I_age_0_5"
+      },
+      "rate_grad": {
+        "beta": {
+          "bin_op": {
+            "op": "mul",
+            "left": { "pop": "S_age_0_5" },
+            "right": {
+              "bin_op": {
+                "op": "add",
+                "left": {
+                  "bin_op": {
+                    "op": "add",
+                    "left": {
+                      "bin_op": {
+                        "op": "add",
+                        "left": {
+                          "bin_op": {
+                            "op": "add",
+                            "left": {
+                              "bin_op": {
+                                "op": "div",
+                                "left": { "pop": "I_age_0_5" },
+                                "right": {
+                                  "pop_sum": [
+                                    "S_age_0_5", "I_age_0_5", "R_age_0_5"
+                                  ]
+                                }
+                              }
+                            },
+                            "right": {
+                              "bin_op": {
+                                "op": "div",
+                                "left": { "pop": "I_age_5_15" },
+                                "right": {
+                                  "pop_sum": [
+                                    "S_age_5_15", "I_age_5_15", "R_age_5_15"
+                                  ]
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "right": {
+                          "bin_op": {
+                            "op": "div",
+                            "left": { "pop": "I_age_15_50" },
+                            "right": {
+                              "pop_sum": [
+                                "S_age_15_50", "I_age_15_50", "R_age_15_50"
+                              ]
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "right": {
+                      "bin_op": {
+                        "op": "div",
+                        "left": { "pop": "I_age_50_65" },
+                        "right": {
+                          "pop_sum": [
+                            "S_age_50_65", "I_age_50_65", "R_age_50_65"
+                          ]
+                        }
+                      }
+                    }
+                  }
+                },
+                "right": {
+                  "bin_op": {
+                    "op": "div",
+                    "left": { "pop": "I_age_65p" },
+                    "right": {
+                      "pop_sum": [ "S_age_65p", "I_age_65p", "R_age_65p" ]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "gamma": { "const": 0.0 },
+        "mu": { "const": 0.0 }
       }
     },
     {
@@ -209,6 +292,89 @@
         "origin_kind": "transmission",
         "source_compartment": "S_age_5_15",
         "dest_compartment": "I_age_5_15"
+      },
+      "rate_grad": {
+        "beta": {
+          "bin_op": {
+            "op": "mul",
+            "left": { "pop": "S_age_5_15" },
+            "right": {
+              "bin_op": {
+                "op": "add",
+                "left": {
+                  "bin_op": {
+                    "op": "add",
+                    "left": {
+                      "bin_op": {
+                        "op": "add",
+                        "left": {
+                          "bin_op": {
+                            "op": "add",
+                            "left": {
+                              "bin_op": {
+                                "op": "div",
+                                "left": { "pop": "I_age_0_5" },
+                                "right": {
+                                  "pop_sum": [
+                                    "S_age_0_5", "I_age_0_5", "R_age_0_5"
+                                  ]
+                                }
+                              }
+                            },
+                            "right": {
+                              "bin_op": {
+                                "op": "div",
+                                "left": { "pop": "I_age_5_15" },
+                                "right": {
+                                  "pop_sum": [
+                                    "S_age_5_15", "I_age_5_15", "R_age_5_15"
+                                  ]
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "right": {
+                          "bin_op": {
+                            "op": "div",
+                            "left": { "pop": "I_age_15_50" },
+                            "right": {
+                              "pop_sum": [
+                                "S_age_15_50", "I_age_15_50", "R_age_15_50"
+                              ]
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "right": {
+                      "bin_op": {
+                        "op": "div",
+                        "left": { "pop": "I_age_50_65" },
+                        "right": {
+                          "pop_sum": [
+                            "S_age_50_65", "I_age_50_65", "R_age_50_65"
+                          ]
+                        }
+                      }
+                    }
+                  }
+                },
+                "right": {
+                  "bin_op": {
+                    "op": "div",
+                    "left": { "pop": "I_age_65p" },
+                    "right": {
+                      "pop_sum": [ "S_age_65p", "I_age_65p", "R_age_65p" ]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "gamma": { "const": 0.0 },
+        "mu": { "const": 0.0 }
       }
     },
     {
@@ -304,6 +470,89 @@
         "origin_kind": "transmission",
         "source_compartment": "S_age_15_50",
         "dest_compartment": "I_age_15_50"
+      },
+      "rate_grad": {
+        "beta": {
+          "bin_op": {
+            "op": "mul",
+            "left": { "pop": "S_age_15_50" },
+            "right": {
+              "bin_op": {
+                "op": "add",
+                "left": {
+                  "bin_op": {
+                    "op": "add",
+                    "left": {
+                      "bin_op": {
+                        "op": "add",
+                        "left": {
+                          "bin_op": {
+                            "op": "add",
+                            "left": {
+                              "bin_op": {
+                                "op": "div",
+                                "left": { "pop": "I_age_0_5" },
+                                "right": {
+                                  "pop_sum": [
+                                    "S_age_0_5", "I_age_0_5", "R_age_0_5"
+                                  ]
+                                }
+                              }
+                            },
+                            "right": {
+                              "bin_op": {
+                                "op": "div",
+                                "left": { "pop": "I_age_5_15" },
+                                "right": {
+                                  "pop_sum": [
+                                    "S_age_5_15", "I_age_5_15", "R_age_5_15"
+                                  ]
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "right": {
+                          "bin_op": {
+                            "op": "div",
+                            "left": { "pop": "I_age_15_50" },
+                            "right": {
+                              "pop_sum": [
+                                "S_age_15_50", "I_age_15_50", "R_age_15_50"
+                              ]
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "right": {
+                      "bin_op": {
+                        "op": "div",
+                        "left": { "pop": "I_age_50_65" },
+                        "right": {
+                          "pop_sum": [
+                            "S_age_50_65", "I_age_50_65", "R_age_50_65"
+                          ]
+                        }
+                      }
+                    }
+                  }
+                },
+                "right": {
+                  "bin_op": {
+                    "op": "div",
+                    "left": { "pop": "I_age_65p" },
+                    "right": {
+                      "pop_sum": [ "S_age_65p", "I_age_65p", "R_age_65p" ]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "gamma": { "const": 0.0 },
+        "mu": { "const": 0.0 }
       }
     },
     {
@@ -399,6 +648,89 @@
         "origin_kind": "transmission",
         "source_compartment": "S_age_50_65",
         "dest_compartment": "I_age_50_65"
+      },
+      "rate_grad": {
+        "beta": {
+          "bin_op": {
+            "op": "mul",
+            "left": { "pop": "S_age_50_65" },
+            "right": {
+              "bin_op": {
+                "op": "add",
+                "left": {
+                  "bin_op": {
+                    "op": "add",
+                    "left": {
+                      "bin_op": {
+                        "op": "add",
+                        "left": {
+                          "bin_op": {
+                            "op": "add",
+                            "left": {
+                              "bin_op": {
+                                "op": "div",
+                                "left": { "pop": "I_age_0_5" },
+                                "right": {
+                                  "pop_sum": [
+                                    "S_age_0_5", "I_age_0_5", "R_age_0_5"
+                                  ]
+                                }
+                              }
+                            },
+                            "right": {
+                              "bin_op": {
+                                "op": "div",
+                                "left": { "pop": "I_age_5_15" },
+                                "right": {
+                                  "pop_sum": [
+                                    "S_age_5_15", "I_age_5_15", "R_age_5_15"
+                                  ]
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "right": {
+                          "bin_op": {
+                            "op": "div",
+                            "left": { "pop": "I_age_15_50" },
+                            "right": {
+                              "pop_sum": [
+                                "S_age_15_50", "I_age_15_50", "R_age_15_50"
+                              ]
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "right": {
+                      "bin_op": {
+                        "op": "div",
+                        "left": { "pop": "I_age_50_65" },
+                        "right": {
+                          "pop_sum": [
+                            "S_age_50_65", "I_age_50_65", "R_age_50_65"
+                          ]
+                        }
+                      }
+                    }
+                  }
+                },
+                "right": {
+                  "bin_op": {
+                    "op": "div",
+                    "left": { "pop": "I_age_65p" },
+                    "right": {
+                      "pop_sum": [ "S_age_65p", "I_age_65p", "R_age_65p" ]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "gamma": { "const": 0.0 },
+        "mu": { "const": 0.0 }
       }
     },
     {
@@ -494,6 +826,89 @@
         "origin_kind": "transmission",
         "source_compartment": "S_age_65p",
         "dest_compartment": "I_age_65p"
+      },
+      "rate_grad": {
+        "beta": {
+          "bin_op": {
+            "op": "mul",
+            "left": { "pop": "S_age_65p" },
+            "right": {
+              "bin_op": {
+                "op": "add",
+                "left": {
+                  "bin_op": {
+                    "op": "add",
+                    "left": {
+                      "bin_op": {
+                        "op": "add",
+                        "left": {
+                          "bin_op": {
+                            "op": "add",
+                            "left": {
+                              "bin_op": {
+                                "op": "div",
+                                "left": { "pop": "I_age_0_5" },
+                                "right": {
+                                  "pop_sum": [
+                                    "S_age_0_5", "I_age_0_5", "R_age_0_5"
+                                  ]
+                                }
+                              }
+                            },
+                            "right": {
+                              "bin_op": {
+                                "op": "div",
+                                "left": { "pop": "I_age_5_15" },
+                                "right": {
+                                  "pop_sum": [
+                                    "S_age_5_15", "I_age_5_15", "R_age_5_15"
+                                  ]
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "right": {
+                          "bin_op": {
+                            "op": "div",
+                            "left": { "pop": "I_age_15_50" },
+                            "right": {
+                              "pop_sum": [
+                                "S_age_15_50", "I_age_15_50", "R_age_15_50"
+                              ]
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "right": {
+                      "bin_op": {
+                        "op": "div",
+                        "left": { "pop": "I_age_50_65" },
+                        "right": {
+                          "pop_sum": [
+                            "S_age_50_65", "I_age_50_65", "R_age_50_65"
+                          ]
+                        }
+                      }
+                    }
+                  }
+                },
+                "right": {
+                  "bin_op": {
+                    "op": "div",
+                    "left": { "pop": "I_age_65p" },
+                    "right": {
+                      "pop_sum": [ "S_age_65p", "I_age_65p", "R_age_65p" ]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "gamma": { "const": 0.0 },
+        "mu": { "const": 0.0 }
       }
     },
     {
@@ -511,6 +926,11 @@
         "origin_kind": "intrinsic",
         "source_compartment": "I_age_0_5",
         "dest_compartment": "R_age_0_5"
+      },
+      "rate_grad": {
+        "beta": { "const": 0.0 },
+        "gamma": { "pop": "I_age_0_5" },
+        "mu": { "const": 0.0 }
       }
     },
     {
@@ -528,6 +948,11 @@
         "origin_kind": "intrinsic",
         "source_compartment": "I_age_5_15",
         "dest_compartment": "R_age_5_15"
+      },
+      "rate_grad": {
+        "beta": { "const": 0.0 },
+        "gamma": { "pop": "I_age_5_15" },
+        "mu": { "const": 0.0 }
       }
     },
     {
@@ -545,6 +970,11 @@
         "origin_kind": "intrinsic",
         "source_compartment": "I_age_15_50",
         "dest_compartment": "R_age_15_50"
+      },
+      "rate_grad": {
+        "beta": { "const": 0.0 },
+        "gamma": { "pop": "I_age_15_50" },
+        "mu": { "const": 0.0 }
       }
     },
     {
@@ -562,6 +992,11 @@
         "origin_kind": "intrinsic",
         "source_compartment": "I_age_50_65",
         "dest_compartment": "R_age_50_65"
+      },
+      "rate_grad": {
+        "beta": { "const": 0.0 },
+        "gamma": { "pop": "I_age_50_65" },
+        "mu": { "const": 0.0 }
       }
     },
     {
@@ -579,6 +1014,11 @@
         "origin_kind": "intrinsic",
         "source_compartment": "I_age_65p",
         "dest_compartment": "R_age_65p"
+      },
+      "rate_grad": {
+        "beta": { "const": 0.0 },
+        "gamma": { "pop": "I_age_65p" },
+        "mu": { "const": 0.0 }
       }
     },
     {
@@ -607,6 +1047,11 @@
         "origin_kind": "intrinsic",
         "source_compartment": "S_age_0_5",
         "dest_compartment": "S_age_5_15"
+      },
+      "rate_grad": {
+        "beta": { "const": 0.0 },
+        "gamma": { "const": 0.0 },
+        "mu": { "const": 0.0 }
       }
     },
     {
@@ -635,6 +1080,11 @@
         "origin_kind": "intrinsic",
         "source_compartment": "S_age_5_15",
         "dest_compartment": "S_age_15_50"
+      },
+      "rate_grad": {
+        "beta": { "const": 0.0 },
+        "gamma": { "const": 0.0 },
+        "mu": { "const": 0.0 }
       }
     },
     {
@@ -663,6 +1113,11 @@
         "origin_kind": "intrinsic",
         "source_compartment": "S_age_15_50",
         "dest_compartment": "S_age_50_65"
+      },
+      "rate_grad": {
+        "beta": { "const": 0.0 },
+        "gamma": { "const": 0.0 },
+        "mu": { "const": 0.0 }
       }
     },
     {
@@ -691,6 +1146,11 @@
         "origin_kind": "intrinsic",
         "source_compartment": "S_age_50_65",
         "dest_compartment": "S_age_65p"
+      },
+      "rate_grad": {
+        "beta": { "const": 0.0 },
+        "gamma": { "const": 0.0 },
+        "mu": { "const": 0.0 }
       }
     },
     {
@@ -719,6 +1179,11 @@
         "origin_kind": "intrinsic",
         "source_compartment": "I_age_0_5",
         "dest_compartment": "I_age_5_15"
+      },
+      "rate_grad": {
+        "beta": { "const": 0.0 },
+        "gamma": { "const": 0.0 },
+        "mu": { "const": 0.0 }
       }
     },
     {
@@ -747,6 +1212,11 @@
         "origin_kind": "intrinsic",
         "source_compartment": "I_age_5_15",
         "dest_compartment": "I_age_15_50"
+      },
+      "rate_grad": {
+        "beta": { "const": 0.0 },
+        "gamma": { "const": 0.0 },
+        "mu": { "const": 0.0 }
       }
     },
     {
@@ -775,6 +1245,11 @@
         "origin_kind": "intrinsic",
         "source_compartment": "I_age_15_50",
         "dest_compartment": "I_age_50_65"
+      },
+      "rate_grad": {
+        "beta": { "const": 0.0 },
+        "gamma": { "const": 0.0 },
+        "mu": { "const": 0.0 }
       }
     },
     {
@@ -803,6 +1278,11 @@
         "origin_kind": "intrinsic",
         "source_compartment": "I_age_50_65",
         "dest_compartment": "I_age_65p"
+      },
+      "rate_grad": {
+        "beta": { "const": 0.0 },
+        "gamma": { "const": 0.0 },
+        "mu": { "const": 0.0 }
       }
     },
     {
@@ -831,6 +1311,11 @@
         "origin_kind": "intrinsic",
         "source_compartment": "R_age_0_5",
         "dest_compartment": "R_age_5_15"
+      },
+      "rate_grad": {
+        "beta": { "const": 0.0 },
+        "gamma": { "const": 0.0 },
+        "mu": { "const": 0.0 }
       }
     },
     {
@@ -859,6 +1344,11 @@
         "origin_kind": "intrinsic",
         "source_compartment": "R_age_5_15",
         "dest_compartment": "R_age_15_50"
+      },
+      "rate_grad": {
+        "beta": { "const": 0.0 },
+        "gamma": { "const": 0.0 },
+        "mu": { "const": 0.0 }
       }
     },
     {
@@ -887,6 +1377,11 @@
         "origin_kind": "intrinsic",
         "source_compartment": "R_age_15_50",
         "dest_compartment": "R_age_50_65"
+      },
+      "rate_grad": {
+        "beta": { "const": 0.0 },
+        "gamma": { "const": 0.0 },
+        "mu": { "const": 0.0 }
       }
     },
     {
@@ -915,6 +1410,11 @@
         "origin_kind": "intrinsic",
         "source_compartment": "R_age_50_65",
         "dest_compartment": "R_age_65p"
+      },
+      "rate_grad": {
+        "beta": { "const": 0.0 },
+        "gamma": { "const": 0.0 },
+        "mu": { "const": 0.0 }
       }
     },
     {
@@ -932,6 +1432,11 @@
         "origin_kind": "outflow",
         "source_compartment": "S_age_0_5",
         "dest_compartment": null
+      },
+      "rate_grad": {
+        "beta": { "const": 0.0 },
+        "gamma": { "const": 0.0 },
+        "mu": { "pop": "S_age_0_5" }
       }
     },
     {
@@ -949,6 +1454,11 @@
         "origin_kind": "outflow",
         "source_compartment": "S_age_5_15",
         "dest_compartment": null
+      },
+      "rate_grad": {
+        "beta": { "const": 0.0 },
+        "gamma": { "const": 0.0 },
+        "mu": { "pop": "S_age_5_15" }
       }
     },
     {
@@ -966,6 +1476,11 @@
         "origin_kind": "outflow",
         "source_compartment": "S_age_15_50",
         "dest_compartment": null
+      },
+      "rate_grad": {
+        "beta": { "const": 0.0 },
+        "gamma": { "const": 0.0 },
+        "mu": { "pop": "S_age_15_50" }
       }
     },
     {
@@ -983,6 +1498,11 @@
         "origin_kind": "outflow",
         "source_compartment": "S_age_50_65",
         "dest_compartment": null
+      },
+      "rate_grad": {
+        "beta": { "const": 0.0 },
+        "gamma": { "const": 0.0 },
+        "mu": { "pop": "S_age_50_65" }
       }
     },
     {
@@ -1000,6 +1520,11 @@
         "origin_kind": "outflow",
         "source_compartment": "S_age_65p",
         "dest_compartment": null
+      },
+      "rate_grad": {
+        "beta": { "const": 0.0 },
+        "gamma": { "const": 0.0 },
+        "mu": { "pop": "S_age_65p" }
       }
     },
     {
@@ -1017,6 +1542,11 @@
         "origin_kind": "outflow",
         "source_compartment": "I_age_0_5",
         "dest_compartment": null
+      },
+      "rate_grad": {
+        "beta": { "const": 0.0 },
+        "gamma": { "const": 0.0 },
+        "mu": { "pop": "I_age_0_5" }
       }
     },
     {
@@ -1034,6 +1564,11 @@
         "origin_kind": "outflow",
         "source_compartment": "I_age_5_15",
         "dest_compartment": null
+      },
+      "rate_grad": {
+        "beta": { "const": 0.0 },
+        "gamma": { "const": 0.0 },
+        "mu": { "pop": "I_age_5_15" }
       }
     },
     {
@@ -1051,6 +1586,11 @@
         "origin_kind": "outflow",
         "source_compartment": "I_age_15_50",
         "dest_compartment": null
+      },
+      "rate_grad": {
+        "beta": { "const": 0.0 },
+        "gamma": { "const": 0.0 },
+        "mu": { "pop": "I_age_15_50" }
       }
     },
     {
@@ -1068,6 +1608,11 @@
         "origin_kind": "outflow",
         "source_compartment": "I_age_50_65",
         "dest_compartment": null
+      },
+      "rate_grad": {
+        "beta": { "const": 0.0 },
+        "gamma": { "const": 0.0 },
+        "mu": { "pop": "I_age_50_65" }
       }
     },
     {
@@ -1085,6 +1630,11 @@
         "origin_kind": "outflow",
         "source_compartment": "I_age_65p",
         "dest_compartment": null
+      },
+      "rate_grad": {
+        "beta": { "const": 0.0 },
+        "gamma": { "const": 0.0 },
+        "mu": { "pop": "I_age_65p" }
       }
     },
     {
@@ -1102,6 +1652,11 @@
         "origin_kind": "outflow",
         "source_compartment": "R_age_0_5",
         "dest_compartment": null
+      },
+      "rate_grad": {
+        "beta": { "const": 0.0 },
+        "gamma": { "const": 0.0 },
+        "mu": { "pop": "R_age_0_5" }
       }
     },
     {
@@ -1119,6 +1674,11 @@
         "origin_kind": "outflow",
         "source_compartment": "R_age_5_15",
         "dest_compartment": null
+      },
+      "rate_grad": {
+        "beta": { "const": 0.0 },
+        "gamma": { "const": 0.0 },
+        "mu": { "pop": "R_age_5_15" }
       }
     },
     {
@@ -1136,6 +1696,11 @@
         "origin_kind": "outflow",
         "source_compartment": "R_age_15_50",
         "dest_compartment": null
+      },
+      "rate_grad": {
+        "beta": { "const": 0.0 },
+        "gamma": { "const": 0.0 },
+        "mu": { "pop": "R_age_15_50" }
       }
     },
     {
@@ -1153,6 +1718,11 @@
         "origin_kind": "outflow",
         "source_compartment": "R_age_50_65",
         "dest_compartment": null
+      },
+      "rate_grad": {
+        "beta": { "const": 0.0 },
+        "gamma": { "const": 0.0 },
+        "mu": { "pop": "R_age_50_65" }
       }
     },
     {
@@ -1170,6 +1740,11 @@
         "origin_kind": "outflow",
         "source_compartment": "R_age_65p",
         "dest_compartment": null
+      },
+      "rate_grad": {
+        "beta": { "const": 0.0 },
+        "gamma": { "const": 0.0 },
+        "mu": { "pop": "R_age_65p" }
       }
     },
     {
@@ -1194,6 +1769,18 @@
         "origin_kind": "inflow",
         "source_compartment": null,
         "dest_compartment": "S_age_0_5"
+      },
+      "rate_grad": {
+        "beta": { "const": 0.0 },
+        "gamma": { "const": 0.0 },
+        "mu": {
+          "pop_sum": [
+            "S_age_0_5", "I_age_0_5", "R_age_0_5", "S_age_5_15",
+            "I_age_5_15", "R_age_5_15", "S_age_15_50", "I_age_15_50",
+            "R_age_15_50", "S_age_50_65", "I_age_50_65", "R_age_50_65",
+            "S_age_65p", "I_age_65p", "R_age_65p"
+          ]
+        }
       }
     }
   ],

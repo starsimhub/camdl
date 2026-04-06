@@ -73,6 +73,60 @@
         "origin_kind": "transmission",
         "source_compartment": "S_young",
         "dest_compartment": "I_young"
+      },
+      "rate_grad": {
+        "beta": {
+          "bin_op": {
+            "op": "mul",
+            "left": { "pop": "S_young" },
+            "right": {
+              "bin_op": {
+                "op": "add",
+                "left": {
+                  "bin_op": {
+                    "op": "div",
+                    "left": {
+                      "bin_op": {
+                        "op": "mul",
+                        "left": {
+                          "table_lookup": {
+                            "table": "C_age",
+                            "indices": [ { "const": 0.0 } ]
+                          }
+                        },
+                        "right": { "pop": "I_young" }
+                      }
+                    },
+                    "right": {
+                      "pop_sum": [ "S_young", "I_young", "R_young" ]
+                    }
+                  }
+                },
+                "right": {
+                  "bin_op": {
+                    "op": "div",
+                    "left": {
+                      "bin_op": {
+                        "op": "mul",
+                        "left": {
+                          "table_lookup": {
+                            "table": "C_age",
+                            "indices": [ { "const": 1.0 } ]
+                          }
+                        },
+                        "right": { "pop": "I_old" }
+                      }
+                    },
+                    "right": { "pop_sum": [ "S_old", "I_old", "R_old" ] }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "gamma": { "const": 0.0 },
+        "N0": { "const": 0.0 },
+        "I0": { "const": 0.0 }
       }
     },
     {
@@ -136,6 +190,60 @@
         "origin_kind": "transmission",
         "source_compartment": "S_old",
         "dest_compartment": "I_old"
+      },
+      "rate_grad": {
+        "beta": {
+          "bin_op": {
+            "op": "mul",
+            "left": { "pop": "S_old" },
+            "right": {
+              "bin_op": {
+                "op": "add",
+                "left": {
+                  "bin_op": {
+                    "op": "div",
+                    "left": {
+                      "bin_op": {
+                        "op": "mul",
+                        "left": {
+                          "table_lookup": {
+                            "table": "C_age",
+                            "indices": [ { "const": 2.0 } ]
+                          }
+                        },
+                        "right": { "pop": "I_young" }
+                      }
+                    },
+                    "right": {
+                      "pop_sum": [ "S_young", "I_young", "R_young" ]
+                    }
+                  }
+                },
+                "right": {
+                  "bin_op": {
+                    "op": "div",
+                    "left": {
+                      "bin_op": {
+                        "op": "mul",
+                        "left": {
+                          "table_lookup": {
+                            "table": "C_age",
+                            "indices": [ { "const": 3.0 } ]
+                          }
+                        },
+                        "right": { "pop": "I_old" }
+                      }
+                    },
+                    "right": { "pop_sum": [ "S_old", "I_old", "R_old" ] }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "gamma": { "const": 0.0 },
+        "N0": { "const": 0.0 },
+        "I0": { "const": 0.0 }
       }
     },
     {
@@ -153,6 +261,12 @@
         "origin_kind": "intrinsic",
         "source_compartment": "I_young",
         "dest_compartment": "R_young"
+      },
+      "rate_grad": {
+        "beta": { "const": 0.0 },
+        "gamma": { "pop": "I_young" },
+        "N0": { "const": 0.0 },
+        "I0": { "const": 0.0 }
       }
     },
     {
@@ -170,6 +284,12 @@
         "origin_kind": "intrinsic",
         "source_compartment": "I_old",
         "dest_compartment": "R_old"
+      },
+      "rate_grad": {
+        "beta": { "const": 0.0 },
+        "gamma": { "pop": "I_old" },
+        "N0": { "const": 0.0 },
+        "I0": { "const": 0.0 }
       }
     }
   ],
