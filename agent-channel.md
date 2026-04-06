@@ -3104,3 +3104,38 @@ Rebuild and re-run with 4 chains × 1000 sweeps. Key things to check:
 **ACTION FOR downstream:** Rebuild and re-test. Report trajectory
 renewal, acceptance rates, and whether chains converge from dispersed
 starts.
+
+## [upstream] Reverted PF-based θ update — back to exact complete-data LL (2026-04-05)
+
+The PF-based parameter update was wrong. With 100 particles and 1096
+observations, PF sd ≈ 30-50. That noise dominated the MH ratio,
+causing Robbins-Monro to shrink proposals to zero. It was PMMH-inside-
+Gibbs — the exact pathology PGAS was designed to avoid.
+
+### What's correct now
+
+```
+Step 1: θ | X, y — exact complete-data LL (46K terms, zero noise)
+Step 2: X | θ, y — CSMC-AS (95%+ trajectory renewal)
+```
+
+The sharp 46K-term surface is handled by the Gibbs alternation:
+CSMC-AS shifts the mode of θ|X each sweep by renewing 95% of the
+trajectory. Small θ steps track the shifting mode. This is textbook
+PGAS (Lindsten et al. 2014).
+
+All other improvements remain:
+- Trajectory renewal diagnostic (per-sweep in traces)
+- Bounds-based initial proposal SD
+- Robbins-Monro adaptation
+- Random starts + parallel chains
+
+Speed: ~0.5s per sweep (complete-data LL is O(7672) density evals,
+milliseconds). Much faster than the PF approach.
+
+**ACTION FOR downstream:** Rebuild and re-test. This should be the
+correct algorithm now. Key metrics:
+1. trajectory_renewal — should be high (>50%)
+2. Per-parameter acceptance — should converge to ~44% via Robbins-Monro
+3. Parameters — should drift with each sweep (small steps but tracking
+   a moving target as X changes). Run 5000+ sweeps to see convergence.
