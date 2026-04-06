@@ -1017,11 +1017,18 @@ pub fn run_pgas(
                 for t in &mut total_accepted { *t += 1; }
             }
 
-            // Dual averaging + mass matrix adaptation during burn-in
-            if sweep < adapt_end {
+            // Two-phase adaptation (matching Stan's warmup schedule):
+            //   Phase 1 (sweeps 0..mass_adapt_end): adapt step size with identity
+            //     mass matrix + collect Welford statistics for mass matrix.
+            //   Phase 2 (sweeps mass_adapt_end..adapt_end): re-adapt step size
+            //     WITH the estimated mass matrix. This is critical — the optimal
+            //     step size changes when the mass matrix changes.
+            let mass_adapt_end = (adapt_end as f64 * 0.7) as usize;
+
+            if sweep < mass_adapt_end {
+                // Phase 1: step size adaptation + Welford collection
                 nuts_step_size = nuts_dual_avg.update(result.mean_accept_prob);
 
-                // Welford online variance: accumulate z-scale samples
                 welford_n += 1.0;
                 for i in 0..d {
                     let delta = current_transformed[i] - welford_mean[i];
@@ -1029,30 +1036,29 @@ pub fn run_pgas(
                     let delta2 = current_transformed[i] - welford_mean[i];
                     welford_m2[i] += delta * delta2;
                 }
-            } else if sweep == adapt_end {
-                nuts_step_size = nuts_dual_avg.final_step_size();
-
-                // Compute diagonal mass matrix from burn-in samples
+            } else if sweep == mass_adapt_end {
+                // Compute mass matrix, reset dual averaging for phase 2
                 if welford_n > 10.0 {
                     for i in 0..d {
                         let var = welford_m2[i] / (welford_n - 1.0);
                         nuts_mass_matrix_inv[i] = var.max(1e-10);
                     }
-                    eprintln!("  NUTS adapted (end of burn-in):");
-                    eprintln!("    step_size: {:.6}", nuts_step_size);
+                    eprintln!("  mass matrix estimated (sweep {}):", sweep);
                     for (i, spec) in if2_params.iter().enumerate() {
-                        eprintln!("    {:12} mass_inv={:.6} (sd={:.6})",
-                            spec.name, nuts_mass_matrix_inv[i],
+                        eprintln!("    {:12} sd={:.6}", spec.name,
                             nuts_mass_matrix_inv[i].sqrt());
                     }
-                } else {
-                    eprintln!("  NUTS step size adapted: {:.6} (mass matrix: identity, too few samples)",
-                        nuts_step_size);
                 }
-
-                // Re-initialize dual averaging with new mass matrix
-                // (step size may need to change when mass matrix changes)
+                // Reset dual averaging — step size must be re-tuned for new mass matrix
+                nuts_step_size = 0.1; // re-start from moderate guess
                 nuts_dual_avg = super::nuts::DualAveraging::new(nuts_step_size, 0.80);
+            } else if sweep < adapt_end {
+                // Phase 2: re-adapt step size WITH the mass matrix
+                nuts_step_size = nuts_dual_avg.update(result.mean_accept_prob);
+            } else if sweep == adapt_end {
+                nuts_step_size = nuts_dual_avg.final_step_size();
+                eprintln!("  NUTS fully adapted (sweep {}):", sweep);
+                eprintln!("    final step_size: {:.6}", nuts_step_size);
             }
         } else {
             // MH-within-Gibbs: one-at-a-time random walk proposals
