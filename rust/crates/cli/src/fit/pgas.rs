@@ -72,113 +72,116 @@ pub fn run_pgas_cli(
     eprintln!("  estimated output: {} posterior samples per chain",
         (n_sweeps.saturating_sub(burn_in)) / thin);
 
-    let t0 = std::time::Instant::now();
-
-    // Run chains sequentially (each chain is already expensive;
-    // internal CSMC could be parallelized later)
-    let mut all_results: Vec<(usize, Vec<PGASSweep>, Vec<f64>)> = Vec::new();
-
+    // Pre-create chain directories (must happen before parallel spawn)
     for chain_id in 0..n_chains {
-        let chain_seed = seed ^ (chain_id as u64).wrapping_mul(0x9e3779b97f4a7c15);
         let chain_dir = format!("{}/chain_{}", stage_dir, chain_id + 1);
-        let _ = std::fs::create_dir_all(&chain_dir);
+        std::fs::create_dir_all(&chain_dir)
+            .map_err(|e| format!("cannot create {}: {}", chain_dir, e))?;
+    }
 
-        let pgas_config = PGASConfig {
-            n_particles,
-            n_sweeps,
-            burn_in,
-            thin,
-            dt,
-        };
+    let t0 = std::time::Instant::now();
+    let is_tty = std::io::IsTerminal::is_terminal(&std::io::stderr());
 
-        // Compile dmeasure for this chain
-        let compiled = &*config.compiled;
-        let dmeasure_fn = sim::inference::dmeasure::compile_dmeasure_pf(
-            &config.obs_model_ir, config.compiled.clone(), &config.base_params,
-        );
+    // Run chains in parallel (each chain is independent: own seed, own
+    // trajectory, own RNG). Same pattern as PMMH.
+    use rayon::prelude::*;
+    let all_results: Vec<Result<(usize, Vec<PGASSweep>, Vec<f64>), String>> = (0..n_chains)
+        .into_par_iter()
+        .map(|chain_id| {
+            let chain_seed = seed ^ (chain_id as u64).wrapping_mul(0x9e3779b97f4a7c15);
+            let chain_dir = format!("{}/chain_{}", stage_dir, chain_id + 1);
 
-        let observations: Vec<sim::inference::particle_filter::Observation> =
-            config.observations.iter()
-                .map(|o| sim::inference::particle_filter::Observation {
-                    time: o.time, value: o.value,
-                })
-                .collect();
+            let pgas_config = PGASConfig {
+                n_particles,
+                n_sweeps,
+                burn_in,
+                thin,
+                dt,
+            };
 
-        // Streaming trace file
-        let trace_path = format!("{}/trace.tsv", chain_dir);
-        let trace_file = std::sync::Mutex::new({
-            use std::io::Write;
-            let mut f = std::io::BufWriter::new(
-                std::fs::File::create(&trace_path).unwrap()
+            // Each chain gets its own dmeasure closure
+            let compiled = &*config.compiled;
+            let dmeasure_fn = sim::inference::dmeasure::compile_dmeasure_pf(
+                &config.obs_model_ir, config.compiled.clone(), &config.base_params,
             );
-            write!(f, "sweep\tlog_complete_data_ll").unwrap();
-            for spec in &config.if2_params { write!(f, "\t{}", spec.name).unwrap(); }
-            writeln!(f).unwrap();
-            f
-        });
 
-        let chain_start = std::time::Instant::now();
-        let is_tty = std::io::IsTerminal::is_terminal(&std::io::stderr());
+            let observations: Vec<sim::inference::particle_filter::Observation> =
+                config.observations.iter()
+                    .map(|o| sim::inference::particle_filter::Observation {
+                        time: o.time, value: o.value,
+                    })
+                    .collect();
 
-        let progress_cb = |sweep: usize, result: &PGASSweep, _traj: &PGASTrajectory| {
-            // Stream trace row
-            {
+            // Streaming trace file
+            let trace_path = format!("{}/trace.tsv", chain_dir);
+            let trace_file = std::sync::Mutex::new({
                 use std::io::Write;
-                if let Ok(mut f) = trace_file.lock() {
-                    write!(f, "{}\t{:.4}", sweep, result.log_complete_data_ll).unwrap();
-                    for spec in &config.if2_params {
-                        write!(f, "\t{:.6}", result.params[spec.index]).unwrap();
-                    }
-                    writeln!(f).unwrap();
-                    if sweep % 50 == 0 { f.flush().ok(); }
-                }
-            }
+                let mut f = std::io::BufWriter::new(
+                    std::fs::File::create(&trace_path).unwrap()
+                );
+                write!(f, "sweep\tlog_complete_data_ll").unwrap();
+                for spec in &config.if2_params { write!(f, "\t{}", spec.name).unwrap(); }
+                writeln!(f).unwrap();
+                f
+            });
 
-            // Progress
-            if sweep % 100 == 0 || sweep == n_sweeps - 1 {
-                let elapsed = chain_start.elapsed().as_secs();
-                let n_acc: usize = result.accepted.iter().filter(|&&a| a).count();
-                if is_tty {
-                    eprint!("\r  chain {}: {}/{} ll={:.1} acc={}/{} elapsed={}s    ",
-                        chain_id + 1, sweep + 1, n_sweeps,
-                        result.log_complete_data_ll,
-                        n_acc, result.accepted.len(), elapsed);
-                } else {
-                    eprintln!("[pgas] chain {}: {}/{} ({:.0}%) ll={:.1} elapsed={}s",
+            let chain_start = std::time::Instant::now();
+
+            let progress_cb = |sweep: usize, result: &PGASSweep, _traj: &PGASTrajectory| {
+                // Stream trace row
+                {
+                    use std::io::Write;
+                    if let Ok(mut f) = trace_file.lock() {
+                        write!(f, "{}\t{:.4}", sweep, result.log_complete_data_ll).unwrap();
+                        for spec in &config.if2_params {
+                            write!(f, "\t{:.6}", result.params[spec.index]).unwrap();
+                        }
+                        writeln!(f).unwrap();
+                        if sweep % 50 == 0 { f.flush().ok(); }
+                    }
+                }
+
+                // Progress (non-TTY only for parallel — TTY would interleave)
+                if sweep % 500 == 0 || sweep == n_sweeps - 1 {
+                    let elapsed = chain_start.elapsed().as_secs();
+                    let n_acc: usize = result.accepted.iter().filter(|&&a| a).count();
+                    eprintln!("[pgas] chain {}: {}/{} ({:.0}%) ll={:.1} acc={}/{} elapsed={}s",
                         chain_id + 1, sweep + 1, n_sweeps,
                         (sweep + 1) as f64 / n_sweeps as f64 * 100.0,
-                        result.log_complete_data_ll, elapsed);
+                        result.log_complete_data_ll,
+                        n_acc, result.accepted.len(), elapsed);
                 }
-            }
-        };
+            };
 
-        eprintln!("  chain {} starting...", chain_id + 1);
+            let result = run_pgas(
+                compiled,
+                &config.if2_params,
+                &priors,
+                &config.base_params,
+                &pgas_config,
+                &observations,
+                &*dmeasure_fn,
+                &config.flow_indices,
+                chain_seed,
+                Some(&progress_cb),
+            ).map_err(|e| format!("pgas chain {} error: {}", chain_id + 1, e))?;
 
-        let result = run_pgas(
-            compiled,
-            &config.if2_params,
-            &priors,
-            &config.base_params,
-            &pgas_config,
-            &observations,
-            &*dmeasure_fn,
-            &config.flow_indices,
-            chain_seed,
-            Some(&progress_cb),
-        ).map_err(|e| format!("pgas chain {} error: {}", chain_id + 1, e))?;
+            let chain_elapsed = chain_start.elapsed();
+            eprintln!("  chain {} done: {:.1}s, acceptance: [{}]",
+                chain_id + 1,
+                chain_elapsed.as_secs_f64(),
+                config.if2_params.iter().zip(&result.acceptance_rates)
+                    .map(|(p, &r)| format!("{}={:.0}%", p.name, r * 100.0))
+                    .collect::<Vec<_>>().join(", "));
 
-        if is_tty { eprintln!(); }
+            Ok((chain_id, result.sweeps, result.acceptance_rates))
+        })
+        .collect();
 
-        let chain_elapsed = chain_start.elapsed();
-        eprintln!("  chain {} done: {:.1}s, acceptance: [{}]",
-            chain_id + 1,
-            chain_elapsed.as_secs_f64(),
-            config.if2_params.iter().zip(&result.acceptance_rates)
-                .map(|(p, &r)| format!("{}={:.0}%", p.name, r * 100.0))
-                .collect::<Vec<_>>().join(", "));
-
-        all_results.push((chain_id, result.sweeps, result.acceptance_rates));
-    }
+    // Unwrap results (propagate first error)
+    let all_results: Vec<(usize, Vec<PGASSweep>, Vec<f64>)> = all_results
+        .into_iter()
+        .collect::<Result<Vec<_>, String>>()?;
 
     let elapsed = t0.elapsed();
 
