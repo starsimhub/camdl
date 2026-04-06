@@ -920,6 +920,13 @@ pub fn run_pgas(
     // NUTS state (only used when has_gradients)
     let mut nuts_step_size = 0.1; // initial guess, adapted via dual averaging
     let mut nuts_dual_avg = super::nuts::DualAveraging::new(nuts_step_size, 0.80);
+    let mut nuts_mass_matrix_inv = vec![1.0; d]; // identity initially, adapted at end of burn-in
+
+    // Collect z-scale samples during burn-in for mass matrix adaptation.
+    // Welford online algorithm: accumulate mean and M2 for each parameter.
+    let mut welford_n = 0.0_f64;
+    let mut welford_mean = vec![0.0; d];
+    let mut welford_m2 = vec![0.0; d];
 
     let mut sweeps = Vec::new();
     let mut total_accepted = vec![0usize; d];
@@ -992,7 +999,7 @@ pub fn run_pgas(
             let nuts_config = super::nuts::NUTSConfig {
                 max_tree_depth: 10,
                 step_size: nuts_step_size,
-                mass_matrix_inv: vec![1.0; d],
+                mass_matrix_inv: nuts_mass_matrix_inv.clone(),
             };
 
             let result = super::nuts::nuts_step(
@@ -1013,12 +1020,42 @@ pub fn run_pgas(
                 for t in &mut total_accepted { *t += 1; }
             }
 
-            // Dual averaging with mean acceptance probability (not binary)
+            // Dual averaging + mass matrix adaptation during burn-in
             if sweep < adapt_end {
                 nuts_step_size = nuts_dual_avg.update(result.mean_accept_prob);
+
+                // Welford online variance: accumulate z-scale samples
+                welford_n += 1.0;
+                for i in 0..d {
+                    let delta = current_transformed[i] - welford_mean[i];
+                    welford_mean[i] += delta / welford_n;
+                    let delta2 = current_transformed[i] - welford_mean[i];
+                    welford_m2[i] += delta * delta2;
+                }
             } else if sweep == adapt_end {
                 nuts_step_size = nuts_dual_avg.final_step_size();
-                eprintln!("  NUTS step size adapted: {:.6}", nuts_step_size);
+
+                // Compute diagonal mass matrix from burn-in samples
+                if welford_n > 10.0 {
+                    for i in 0..d {
+                        let var = welford_m2[i] / (welford_n - 1.0);
+                        nuts_mass_matrix_inv[i] = var.max(1e-10);
+                    }
+                    eprintln!("  NUTS adapted (end of burn-in):");
+                    eprintln!("    step_size: {:.6}", nuts_step_size);
+                    for (i, spec) in if2_params.iter().enumerate() {
+                        eprintln!("    {:12} mass_inv={:.6} (sd={:.6})",
+                            spec.name, nuts_mass_matrix_inv[i],
+                            nuts_mass_matrix_inv[i].sqrt());
+                    }
+                } else {
+                    eprintln!("  NUTS step size adapted: {:.6} (mass matrix: identity, too few samples)",
+                        nuts_step_size);
+                }
+
+                // Re-initialize dual averaging with new mass matrix
+                // (step size may need to change when mass matrix changes)
+                nuts_dual_avg = super::nuts::DualAveraging::new(nuts_step_size, 0.80);
             }
         } else {
             // MH-within-Gibbs: one-at-a-time random walk proposals
