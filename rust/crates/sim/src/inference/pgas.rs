@@ -58,6 +58,19 @@ pub struct PGASTrajectory {
     pub substeps: Vec<SubstepRecord>,
 }
 
+/// Mapping from an IVP parameter to the compartment it controls.
+/// Used to make the initial state stochastic in CSMC-AS and to add
+/// the initial state density to the complete-data LL.
+#[derive(Clone, Debug)]
+pub struct IVPMapping {
+    /// Index into if2_params / priors vectors.
+    pub param_idx: usize,
+    /// Index into the model's param vector (if2_params[param_idx].index).
+    pub model_param_idx: usize,
+    /// Which compartment this IVP controls (local int index).
+    pub compartment_idx: usize,
+}
+
 /// Diagnostics from one CSMC-AS sweep.
 #[derive(Clone, Debug)]
 pub struct CSMCDiagnostics {
@@ -247,8 +260,12 @@ pub fn log_transition_density_substep(
 /// Complete-data log-likelihood: sum of transition densities + observation
 /// densities over the full trajectory.
 ///
-/// log p(y, X | θ) = Σ_s log p(x_s | x_{s-1}, θ, g_s)
+/// log p(y, X | θ) = log p(x₀ | θ)
+///                 + Σ_s log p(x_s | x_{s-1}, θ, g_s)
 ///                 + Σ_k log p(y_k | project(x_{obs_k}), θ)
+///
+/// The initial state density log p(x₀ | θ) is included for IVP parameters
+/// (e.g., S₀ ~ Binom(N₀, s0)). Without it, IVPs are invisible to the MH step.
 pub fn complete_data_loglik(
     model: &CompiledModel,
     trajectory: &PGASTrajectory,
@@ -257,11 +274,23 @@ pub fn complete_data_loglik(
     dt: f64,
     dmeasure_fn: &DmeasureFn,
     flow_indices: &[usize],
+    ivp_mappings: &[IVPMapping],
 ) -> Result<f64, SimError> {
     let t_start = model.model.simulation.t_start;
     let n_substeps = trajectory.substeps.len();
     let n_tr = model.model.transitions.len();
     let mut log_p = 0.0;
+
+    // Initial state density: log p(x₀ | θ) for IVP-controlled compartments.
+    // S₀ ~ Binom(N₀, s0) → log Binom(S₀; N₀, s0) constrains s0.
+    if !ivp_mappings.is_empty() {
+        let total_pop: i64 = trajectory.initial_counts.iter().sum();
+        for ivp in ivp_mappings {
+            let count = trajectory.initial_counts[ivp.compartment_idx] as u64;
+            let frac = params[ivp.model_param_idx].clamp(1e-10, 1.0 - 1e-10);
+            log_p += binom_logpmf(count, total_pop as u64, frac);
+        }
+    }
 
     // Precompute observation substep indices
     let mut obs_at_substep = std::collections::HashMap::new();
@@ -376,6 +405,7 @@ pub fn csmc_as(
     dt: f64,
     dmeasure_fn: &DmeasureFn,
     flow_indices: &[usize],
+    ivp_mappings: &[IVPMapping],
     seed: u64,
 ) -> Result<(PGASTrajectory, CSMCDiagnostics), SimError> {
     let t_start = model.model.simulation.t_start;
@@ -390,16 +420,38 @@ pub fn csmc_as(
         if s > 0 { obs_at_substep.insert(s - 1, obs_idx); }
     }
 
-    // Initialize particles
+    // Initialize particles with stochastic initial states for IVP compartments.
+    // Each free particle draws S₀ ~ Binom(N₀, s0) independently, giving the
+    // CSMC diverse initial states to select among. This is what enables
+    // posterior sampling of IVP parameters like s0.
     let (init_int, _) = model.initial_state(params)?;
+    let total_pop = init_int.counts.iter().sum::<i64>();
 
-    // Current particle states: counts[j] and flows[j]
+    // Per-particle RNGs (needed early for stochastic init)
+    let mut rngs: Vec<StatefulRng> = (0..n_particles)
+        .map(|i| StatefulRng::new(seed ^ (i as u64).wrapping_mul(0x517cc1b727220a95)))
+        .collect();
+
     let mut counts: Vec<Vec<i64>> = (0..n_particles)
         .map(|j| {
             if j == j_ref {
                 reference.initial_counts.clone()
             } else {
-                init_int.counts.clone()
+                let mut c = init_int.counts.clone();
+                // Draw stochastic initial state for IVP compartments
+                for ivp in ivp_mappings {
+                    let frac = params[ivp.model_param_idx].clamp(1e-10, 1.0 - 1e-10);
+                    c[ivp.compartment_idx] = rngs[j].binomial(total_pop as u64, frac) as i64;
+                }
+                // Reapply balance constraint if present
+                if let Some(ref bal) = model.balance {
+                    let bal_val: i64 = total_pop - c.iter().enumerate()
+                        .filter(|&(i, _)| i != bal.local_int_idx)
+                        .map(|(_, &v)| v)
+                        .sum::<i64>();
+                    c[bal.local_int_idx] = bal_val;
+                }
+                c
             }
         })
         .collect();
@@ -426,10 +478,7 @@ pub fn csmc_as(
     // Weights (log-space)
     let mut log_weights = vec![0.0f64; n_particles];
 
-    // Per-particle RNGs
-    let mut rngs: Vec<StatefulRng> = (0..n_particles)
-        .map(|i| StatefulRng::new(seed ^ (i as u64).wrapping_mul(0x517cc1b727220a95)))
-        .collect();
+    // Resampling RNG (particle RNGs already created above for stochastic init)
     let mut resample_rng = StatefulRng::new(seed.wrapping_add(0xdeadbeef));
 
     // Per-particle scratch buffers
@@ -750,35 +799,45 @@ pub fn run_pgas(
         })
         .collect();
 
-    // Detect IVP parameters: parameters that only affect initial_state,
-    // not propensities. These cannot be updated via the θ|X MH step
-    // (the complete-data LL is invariant to them). Instead, they are
-    // back-solved from the trajectory's initial state after each CSMC sweep.
-    let ivp_mask: Vec<bool> = if2_params.iter().map(|spec| {
-        let mut perturbed = current_params.clone();
-        let delta = (spec.upper - spec.lower).min(1.0) * 0.01;
-        perturbed[spec.index] += delta;
-        // Check if LL changes when we perturb this param (trajectory fixed)
-        let ll_base = complete_data_loglik(
-            model, &trajectory, &current_params, observations,
-            config.dt, dmeasure_fn, flow_indices,
-        ).unwrap_or(f64::NEG_INFINITY);
-        let ll_pert = complete_data_loglik(
-            model, &trajectory, &perturbed, observations,
-            config.dt, dmeasure_fn, flow_indices,
-        ).unwrap_or(f64::NEG_INFINITY);
-        let is_ivp = (ll_pert - ll_base).abs() < 1e-10;
-        if is_ivp {
-            eprintln!("  {} detected as IVP (initial-value parameter) — \
-                       back-solved from trajectory, not estimated via MH", spec.name);
+    // Detect IVP parameters: parameters that affect initial_state but not
+    // propensities. These get stochastic initial states in CSMC and a
+    // Binomial density term in the complete-data LL, enabling posterior
+    // sampling through the Gibbs structure.
+    let ivp_mappings: Vec<IVPMapping> = {
+        let (init_base, _) = model.initial_state(&current_params)?;
+        let mut mappings = Vec::new();
+        for (i, spec) in if2_params.iter().enumerate() {
+            let mut perturbed = current_params.clone();
+            let delta = (spec.upper - spec.lower).min(1.0) * 0.01;
+            perturbed[spec.index] = (perturbed[spec.index] + delta).min(spec.upper);
+            let (init_pert, _) = model.initial_state(&perturbed)?;
+            // Find which compartment changed
+            for (c, (&base_c, &pert_c)) in init_base.counts.iter()
+                .zip(init_pert.counts.iter()).enumerate()
+            {
+                // Skip balance compartment (it changes as a consequence)
+                if model.balance.as_ref().map_or(false, |b| b.local_int_idx == c) {
+                    continue;
+                }
+                if base_c != pert_c {
+                    eprintln!("  {} detected as IVP → compartment {} \
+                              (stochastic init, Binom density in LL)", spec.name, c);
+                    mappings.push(IVPMapping {
+                        param_idx: i,
+                        model_param_idx: spec.index,
+                        compartment_idx: c,
+                    });
+                    break;
+                }
+            }
         }
-        is_ivp
-    }).collect();
+        mappings
+    };
 
-    // Initial complete-data log-likelihood
+    // Initial complete-data log-likelihood (now includes initial state density)
     let mut current_ll = complete_data_loglik(
         model, &trajectory, &current_params, observations,
-        config.dt, dmeasure_fn, flow_indices,
+        config.dt, dmeasure_fn, flow_indices, &ivp_mappings,
     )?;
     eprintln!("  initial complete-data ll: {:.1}", current_ll);
 
@@ -801,7 +860,6 @@ pub fn run_pgas(
         // the mode each sweep by updating X. The Gibbs alternation provides
         // mixing — each θ step tracks the shifting mode.
         for i in 0..d {
-            if ivp_mask[i] { continue; } // IVPs back-solved after CSMC, not MH
             let spec = &if2_params[i];
             let z_old = current_transformed[i];
             let z_new = z_old + proposal_sd[i] * rng.normal();
@@ -813,7 +871,7 @@ pub fn run_pgas(
             // Exact complete-data LL at proposed params (trajectory is FIXED)
             let proposed_ll = complete_data_loglik(
                 model, &trajectory, &proposed_params, observations,
-                config.dt, dmeasure_fn, flow_indices,
+                config.dt, dmeasure_fn, flow_indices, &ivp_mappings,
             )?;
 
             let proposed_log_prior_i = priors[i].log_density(theta_new, z_new);
@@ -851,55 +909,15 @@ pub fn run_pgas(
         let (new_trajectory, csmc_diag) = csmc_as(
             model, &current_params, observations, &trajectory,
             config.n_particles, config.dt, dmeasure_fn, flow_indices,
-            csmc_seed,
+            &ivp_mappings, csmc_seed,
         )?;
         trajectory = new_trajectory;
-
-        // ── Step 3: Back-solve IVP parameters from the trajectory ──
-        // Parameters that only affect the initial state (not propensities)
-        // cannot be updated via the θ|X MH step — the complete-data LL is
-        // invariant to them. Instead, we infer them from the trajectory's
-        // initial state after CSMC. This is the standard PGAS treatment
-        // of deterministic initial conditions (Lindsten et al. 2014).
-        {
-            let traj_init = &trajectory.initial_counts;
-            for (i, spec) in if2_params.iter().enumerate() {
-                if ivp_mask[i] {
-                    // Back-solve: find the param value that produces this initial state.
-                    // For IVP params, initial_state(θ) is typically count = round(N * param).
-                    // So param ≈ count / N, where N = sum of initial compartment counts.
-                    let total: f64 = traj_init.iter().sum::<i64>() as f64;
-                    if total > 0.0 {
-                        // Find which compartment this IVP controls by perturbing
-                        let old_val = current_params[spec.index];
-                        let (init_old, _) = model.initial_state(&current_params)?;
-                        let mut perturbed = current_params.clone();
-                        let delta = (spec.upper - spec.lower) * 0.01;
-                        perturbed[spec.index] = (old_val + delta).min(spec.upper);
-                        let (init_new, _) = model.initial_state(&perturbed)?;
-
-                        // Find the compartment that changed
-                        for (c, (&old_c, &new_c)) in init_old.counts.iter()
-                            .zip(init_new.counts.iter()).enumerate()
-                        {
-                            if old_c != new_c {
-                                let new_val = traj_init[c] as f64 / total;
-                                let clamped = new_val.clamp(spec.lower, spec.upper);
-                                current_params[spec.index] = clamped;
-                                current_transformed[i] = spec.to_transformed(clamped);
-                                break;
-                            }
-                        }
-                    }
-                }
-            }
-        }
 
         // Recompute complete-data LL with the new trajectory
         // (the CSMC changed X, so log p(y,X|θ) changes even at the same θ)
         current_ll = complete_data_loglik(
             model, &trajectory, &current_params, observations,
-            config.dt, dmeasure_fn, flow_indices,
+            config.dt, dmeasure_fn, flow_indices, &ivp_mappings,
         )?;
 
         // Log adapted proposal SDs at end of burn-in
