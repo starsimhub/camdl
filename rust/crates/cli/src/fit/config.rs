@@ -111,6 +111,10 @@ pub struct PGASSampleConfig {
     pub thin: Option<usize>,
     /// Directory containing fit_state.toml from a prior stage.
     pub starts_from: Option<String>,
+    /// Number of posterior trajectory samples to save per chain.
+    /// Evenly spaced across post-burn-in sweeps. Default: 200.
+    /// Set to 0 to disable trajectory output.
+    pub n_trajectories: Option<usize>,
 }
 
 impl FitToml {

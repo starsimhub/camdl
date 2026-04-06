@@ -36,6 +36,7 @@ pub fn run_pgas_cli(
     let n_particles = sc.and_then(|s| s.particles).unwrap_or(DEFAULT_PARTICLES);
     let burn_in = sc.and_then(|s| s.burn_in).unwrap_or(DEFAULT_BURN_IN);
     let thin = sc.and_then(|s| s.thin).unwrap_or(DEFAULT_THIN);
+    let n_trajectories = sc.and_then(|s| s.n_trajectories).unwrap_or(200);
 
     if !force {
         let state_path = format!("{}/fit_state.toml", stage_dir);
@@ -167,7 +168,27 @@ pub fn run_pgas_cli(
 
             let chain_start = std::time::Instant::now();
 
-            let progress_cb = |sweep: usize, result: &PGASSweep, _traj: &PGASTrajectory| {
+            // Trajectory save stride: evenly space n_trajectories across post-burn-in
+            let n_post_burnin = n_sweeps.saturating_sub(burn_in);
+            let traj_stride = if n_trajectories > 0 && n_post_burnin > 0 {
+                (n_post_burnin / n_trajectories).max(1)
+            } else {
+                usize::MAX // disabled
+            };
+            let traj_dir = format!("{}/trajectories", chain_dir);
+            if n_trajectories > 0 {
+                let _ = std::fs::create_dir_all(&traj_dir);
+            }
+
+            // Compartment names for trajectory header
+            let comp_names: Vec<String> = config.compiled.model.compartments.iter()
+                .map(|c| c.name.clone()).collect();
+            let flow_names: Vec<String> = config.compiled.model.transitions.iter()
+                .map(|t| format!("flow_{}", t.name)).collect();
+            let traj_dt = config.if2_config.dt;
+            let traj_t_start = config.compiled.model.simulation.t_start;
+
+            let progress_cb = |sweep: usize, result: &PGASSweep, traj: &PGASTrajectory| {
                 // Stream trace row
                 {
                     use std::io::Write;
@@ -180,6 +201,27 @@ pub fn run_pgas_cli(
                         }
                         writeln!(f).unwrap();
                         if sweep % 50 == 0 { f.flush().ok(); }
+                    }
+                }
+
+                // Save posterior trajectory sample
+                if sweep >= burn_in && (sweep - burn_in) % traj_stride == 0 {
+                    use std::io::Write;
+                    let path = format!("{}/trajectory_{:06}.tsv", traj_dir, sweep);
+                    if let Ok(mut f) = std::fs::File::create(&path) {
+                        // Header
+                        write!(f, "t").unwrap();
+                        for c in &comp_names { write!(f, "\t{}", c).unwrap(); }
+                        for fl in &flow_names { write!(f, "\t{}", fl).unwrap(); }
+                        writeln!(f).unwrap();
+                        // Rows: one per substep
+                        for (s, rec) in traj.substeps.iter().enumerate() {
+                            let t = traj_t_start + (s + 1) as f64 * traj_dt;
+                            write!(f, "{:.1}", t).unwrap();
+                            for &c in &rec.counts { write!(f, "\t{}", c).unwrap(); }
+                            for &fl in &rec.flows { write!(f, "\t{}", fl).unwrap(); }
+                            writeln!(f).unwrap();
+                        }
                     }
                 }
 
