@@ -19,6 +19,7 @@ pub mod types;
 pub mod dmeasure;
 pub mod pmmh;
 pub mod correlated_pf;
+pub mod pgas;
 
 // Re-exports
 pub use types::{ParticleState, ParticleSwarm};

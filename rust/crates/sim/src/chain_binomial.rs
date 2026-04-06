@@ -34,6 +34,11 @@ pub struct StepScratch {
     /// (small np). Consumed in source-group order.
     /// Used by CPM-MCMC for correlated binomial draws.
     pub binomial_z_values: Vec<f64>,
+    /// Gamma multipliers actually used during step_one, in source-group order.
+    /// Populated by step_one for each overdispersed source group encountered.
+    /// Used by PGAS to record the gamma drawn at each substep for transition
+    /// density evaluation. Cleared before each step_one call by the caller.
+    pub gamma_used: Vec<f64>,
 }
 
 /// How event counts are drawn — resolved from the IR at step start.
@@ -54,6 +59,7 @@ impl StepScratch {
             handled: vec![false; n_tr],
             gamma_override: None,
             binomial_z_values: Vec::new(),
+            gamma_used: Vec::new(),
             probs: Vec::with_capacity(n_tr),
         }
     }
@@ -339,7 +345,7 @@ fn run_chain_binomial(
 }
 
 /// Check if step tracing is enabled via CAMDL_TRACE_STEPS=1.
-fn trace_enabled() -> bool {
+pub fn trace_enabled() -> bool {
     use std::sync::OnceLock;
     static ENABLED: OnceLock<bool> = OnceLock::new();
     *ENABLED.get_or_init(|| std::env::var("CAMDL_TRACE_STEPS").map_or(false, |v| v == "1"))
@@ -422,6 +428,7 @@ pub fn step_one(
                 ResolvedDraw::Overdispersed(sigma_sq) => {
                     let g = scratch.gamma_override.take()
                         .unwrap_or_else(|| rng.gamma_multiplier(*sigma_sq, dt));
+                    scratch.gamma_used.push(g);
                     per_capita * g
                 }
                 _ => per_capita,

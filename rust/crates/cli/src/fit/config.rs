@@ -22,6 +22,8 @@ pub struct FitToml {
     pub validate: Option<ValidateConfig>,
     /// PMMH posterior sampling configuration.
     pub pmmh: Option<PMMHSampleConfig>,
+    /// PGAS posterior sampling configuration.
+    pub pgas: Option<PGASSampleConfig>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -96,6 +98,19 @@ pub struct PMMHSampleConfig {
     /// Crank-Nicolson correlation for correlated pseudo-marginal MCMC.
     /// Default: 0.99. Set to None or 0.0 for vanilla (independent) PMMH.
     pub rho: Option<f64>,
+}
+
+/// PGAS (Particle Gibbs with Ancestor Sampling) configuration.
+#[derive(Debug, Default, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct PGASSampleConfig {
+    pub chains: Option<usize>,
+    pub sweeps: Option<usize>,
+    pub particles: Option<usize>,
+    pub burn_in: Option<usize>,
+    pub thin: Option<usize>,
+    /// Directory containing fit_state.toml from a prior stage.
+    pub starts_from: Option<String>,
 }
 
 impl FitToml {

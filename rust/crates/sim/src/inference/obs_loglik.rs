@@ -133,6 +133,20 @@ pub fn discretized_normal_logpmf_tol(y: f64, mean: f64, variance: f64, tol: f64)
     prob.ln()
 }
 
+/// Binomial log-PMF: log P(X = k) where X ~ Binom(n, p).
+///
+/// log p(k | n, p) = lgamma(n+1) - lgamma(k+1) - lgamma(n-k+1)
+///                  + k·log(p) + (n-k)·log(1-p)
+///
+/// Used by PGAS for transition density evaluation.
+pub fn binom_logpmf(k: u64, n: u64, p: f64) -> f64 {
+    if k > n { return f64::NEG_INFINITY; }
+    if p <= 0.0 { return if k == 0 { 0.0 } else { f64::NEG_INFINITY }; }
+    if p >= 1.0 { return if k == n { 0.0 } else { f64::NEG_INFINITY }; }
+    lgamma(n as f64 + 1.0) - lgamma(k as f64 + 1.0) - lgamma((n - k) as f64 + 1.0)
+        + k as f64 * p.ln() + (n - k) as f64 * (1.0 - p).ln()
+}
+
 /// Poisson log-PMF.
 ///
 /// log p(y | lambda) = y·log(lambda) - lambda - lgamma(y+1)
@@ -242,5 +256,24 @@ mod tests {
         // Should not panic or return NaN
         let ll = discretized_normal_logpmf(5.0, 5.0, 0.0);
         assert!(ll.is_finite());
+    }
+
+    #[test]
+    fn test_binom_logpmf_known() {
+        // Binom(5, 10, 0.3): lgamma-based = -2.2738
+        let ll = binom_logpmf(5, 10, 0.3);
+        assert!((ll - (-2.2738)).abs() < 1e-3,
+            "binom_logpmf(5, 10, 0.3) = {}, expected -2.274", ll);
+    }
+
+    #[test]
+    fn test_binom_logpmf_boundaries() {
+        assert_eq!(binom_logpmf(0, 10, 0.0), 0.0);
+        assert_eq!(binom_logpmf(5, 10, 0.0), f64::NEG_INFINITY);
+        assert_eq!(binom_logpmf(10, 10, 1.0), 0.0);
+        assert_eq!(binom_logpmf(5, 10, 1.0), f64::NEG_INFINITY);
+        assert_eq!(binom_logpmf(11, 10, 0.5), f64::NEG_INFINITY);
+        // Binom(0, 0, p) = 1 for any p (within floating point tolerance)
+        assert!((binom_logpmf(0, 0, 0.5)).abs() < 1e-14);
     }
 }

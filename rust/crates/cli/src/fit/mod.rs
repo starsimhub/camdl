@@ -5,6 +5,7 @@
 //!   camdl fit refine   fit.toml --starts-from scout/ [--seed N] [--force]
 //!   camdl fit validate fit.toml --starts-from refine/ [--seed N] [--force]
 //!   camdl fit pmmh     fit.toml [--starts-from validate/] [--seed N] [--force] [--check-variance]
+//!   camdl fit pgas     fit.toml [--starts-from validate/] [--seed N] [--force]
 //!   camdl fit status   fit.toml
 
 pub mod config;
@@ -16,6 +17,7 @@ pub mod refine;
 pub mod validate;
 pub mod status;
 pub mod pmmh;
+pub mod pgas;
 
 use config::FitToml;
 
@@ -96,6 +98,27 @@ pub fn cmd_fit_pmmh(args: &[String]) {
     });
 }
 
+pub fn cmd_fit_pgas(args: &[String]) {
+    let (fit, seed, force) = parse_fit_args(args, false);
+    let starts_from = parse_optional_starts_from(args);
+
+    let (model, _) = load_model_for_validation(&fit);
+    let model_params: Vec<String> = model.parameters.iter().map(|p| p.name.clone()).collect();
+    fit.validate_partition(&model_params).unwrap_or_else(|e| {
+        eprintln!("error: {}", e);
+        std::process::exit(1);
+    });
+    fit.validate_bounds(&model).unwrap_or_else(|e| {
+        eprintln!("error: {}", e);
+        std::process::exit(1);
+    });
+
+    pgas::run_pgas_cli(&fit, starts_from.as_deref(), seed, force).unwrap_or_else(|e| {
+        eprintln!("error: {}", e);
+        std::process::exit(1);
+    });
+}
+
 pub fn cmd_fit_status(args: &[String]) {
     let (fit, _, _) = parse_fit_args(args, false);
     status::run_status(&fit).unwrap_or_else(|e| {
@@ -126,7 +149,7 @@ fn parse_fit_args(args: &[String], _needs_starts_from: bool) -> (FitToml, u64, b
     }
 
     let fit_path = fit_path.unwrap_or_else(|| {
-        eprintln!("usage: camdl fit <scout|refine|validate|pmmh|status> FIT.toml");
+        eprintln!("usage: camdl fit <scout|refine|validate|pmmh|pgas|status> FIT.toml");
         std::process::exit(1);
     });
 
