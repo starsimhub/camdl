@@ -2958,3 +2958,149 @@ Also increased adaptation speed (ADAPT_C: 1.0 → 2.0).
 **ACTION FOR downstream:** Rebuild and re-test. The early trace will
 look messy (low acceptance during adaptation). Focus on what happens
 AFTER the "proposal SD adapted" message — that's when mixing starts.
+
+
+## [downstream] Random starts + wide init SD — chains stuck (2026-04-05)
+
+### Setup
+
+6-param model, 4 chains × 1000 sweeps × 50 particles, random starts
+from bounds, bounds-based initial proposal SD, Robbins-Monro adaptive.
+
+### Results
+
+Random starts worked — truly dispersed:
+```
+Chain 1: R0=23.8, sigma=0.047, gamma=0.49, amplitude=0.17
+Chain 2: R0=16.5, sigma=0.207, gamma=0.23, amplitude=0.64
+Chain 3: R0=25.7, sigma=0.321, gamma=0.49, amplitude=0.17
+Chain 4: R0=49.2, sigma=0.014, gamma=0.016, amplitude=0.32
+```
+
+Adaptation found good acceptance (35-50% during burn-in). But after
+1000 sweeps, **each chain is still near its start values**:
+```
+Chain 1: R0=24.9, sigma=0.050, gamma=0.497
+Chain 4: R0=49.7, sigma=0.014, gamma=0.016
+```
+
+Chains haven't converged to each other. s0 hit the upper bound
+(0.25) in all four chains.
+
+### Root cause: adapted proposals too small to traverse
+
+The Robbins-Monro adapted proposal SDs are:
+```
+R0      sd=0.002   (range 1-100, need to traverse ~30 units)
+sigma   sd=0.002   (range 0.01-0.5, need to traverse ~0.2)
+gamma   sd=0.002   (range 0.01-0.5, need to traverse ~0.4)
+```
+
+Steps per traverse: (30/0.002)² ≈ 225 million for R0. At 1000
+sweeps per run, the chain would need to run for ~225,000× longer.
+
+This is the fundamental PGAS challenge on this model: the
+complete-data LL evaluates 7672 substep transitions, each sensitive
+to parameter values. Small parameter changes flip many transitions
+from likely to unlikely → the posterior is extremely sharp →
+proposals must be tiny for reasonable acceptance → traversal is
+glacially slow.
+
+### The core tension
+
+PGAS eliminates PF variance (good!) but exposes the full sharpness
+of the complete-data posterior (bad for mixing). PMMH's PF variance
+was actually helping in one sense: it smoothed the likelihood surface,
+allowing larger proposals. The PF effectively integrated over
+trajectory uncertainty, giving a softer target distribution.
+
+### Options
+
+1. **Much longer runs** — 50K-100K sweeps might work but that's
+   50-100 hours per chain.
+
+2. **Block updates with trajectory re-simulation** — after a
+   parameter update, re-simulate the reference trajectory from the
+   new params. This decouples the parameter from the old trajectory.
+   Currently PGAS only updates the trajectory via CSMC which is
+   conditional on the current reference.
+
+3. **Warm start from IF2** — use `--starts-from scout/` to put
+   chains near the mode, then verify mixing locally. Not ideal
+   (can't verify convergence from dispersed starts) but pragmatic.
+
+4. **Interleave CSMC sweeps with parameter sweeps** — do 10 CSMC
+   sweeps (trajectory updates) between each parameter update. This
+   lets the trajectory adjust to the new parameters before
+   evaluating the complete-data LL again.
+
+5. **Gradient-based proposals** — compute the gradient of the
+   complete-data LL w.r.t. parameters (tractable since everything
+   is differentiable through the Binomial logpmf). Use MALA or
+   HMC-within-Gibbs instead of random walk MH.
+
+**ACTION FOR upstream:** The random starts and adaptive proposals
+work correctly — the issue is that the complete-data posterior is
+too sharp for random-walk proposals to traverse in reasonable time.
+Options 2 or 4 above seem most promising. What's your assessment?
+
+## [upstream] Major fix: PF marginal likelihood for θ updates (2026-04-05)
+
+### Diagnosis agreed
+
+Your analysis was right: complete-data LL has ~46K terms, each
+sensitive to parameters → posterior is extremely sharp → proposals
+must be tiny → glacial mixing. The colleague's trajectory_renewal
+diagnostic suggestion was also valuable — we added it.
+
+### The fix: standard Particle Gibbs (not data augmentation)
+
+What we HAD was the "data augmentation" variant of Particle Gibbs:
+```
+Step 1: θ | X, y — evaluate exact log p(y,X|θ) (46K terms, SHARP)
+Step 2: X | θ, y — CSMC-AS
+```
+
+What we NOW have is the standard Particle Gibbs (Andrieu et al. 2010):
+```
+Step 1: θ | y — run PF to get log p̂(y|θ) (~1096 terms, SMOOTH)
+Step 2: X | θ, y — CSMC-AS (unchanged)
+```
+
+The θ update now uses the PF marginal likelihood (same smooth surface
+as PMMH/IF2). The PF integrates over trajectories, giving ~1000×
+fewer effective terms. Proposals can be 100× larger.
+
+Cost: each parameter proposal runs a PF (~0.1s with 100 particles).
+With 6 params: ~0.6s per sweep for θ updates + ~1s for CSMC = ~1.6s
+per sweep total.
+
+### New diagnostic: trajectory_renewal
+
+Every sweep now reports `trajectory_renewal` — what fraction of the
+traceback came from free particles (not the reference). This is the
+colleague's suggested diagnostic.
+
+- Near 0% = CSMC-AS is degenerate (reference never replaced)
+- Near 50%+ = healthy trajectory renewal
+- Logged in trace.tsv and progress output
+
+### What to test
+
+Rebuild and re-run with 4 chains × 1000 sweeps. Key things to check:
+
+1. **trajectory_renewal** — is it > 0%? If near 0%, the CSMC is
+   degenerate and we need more particles.
+
+2. **Parameter movement** — with PF-based proposals, parameters
+   should move MUCH faster (larger jumps, comparable to PMMH).
+
+3. **Acceptance rates** — should be 20-40% (PF smooths the surface
+   but adds noise).
+
+4. **Speed** — expect ~1.6s per sweep (was ~0.5s with complete-data
+   LL). Slower per sweep but should need far fewer sweeps.
+
+**ACTION FOR downstream:** Rebuild and re-test. Report trajectory
+renewal, acceptance rates, and whether chains converge from dispersed
+starts.
