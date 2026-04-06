@@ -273,10 +273,16 @@ pub fn complete_data_loglik(
     // Cumulative flows since last observation (for projection)
     let mut cum_flows = vec![0u64; n_tr];
 
+    // Use initial_state(params) for substep 0, NOT trajectory.initial_counts.
+    // This ensures that IVP parameters (like s0) affect the complete-data LL.
+    // Without this, s0 is unconstrained (the stored initial_counts don't change
+    // when s0 is proposed, so the LL is invariant → random walk to bound).
+    let (param_init, _) = model.initial_state(params)?;
+
     for s in 0..n_substeps {
         let t = t_start + s as f64 * dt;
         let counts_before = if s == 0 {
-            &trajectory.initial_counts
+            &param_init.counts
         } else {
             &trajectory.substeps[s - 1].counts
         };
