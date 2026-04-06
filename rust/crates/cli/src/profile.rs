@@ -23,7 +23,7 @@ use sim::{
     chain_binomial::step_one,
     inference::{
         obs_loglik::{negbin_logpmf, discretized_normal_logpmf_tol, DEFAULT_TOL},
-        if2::{run_if2, IF2Config, IF2Param, Observation, Transform},
+        if2::{run_if2, IF2Config, Observation},
         ParticleState,
     },
     rng::StatefulRng,

@@ -1,0 +1,6 @@
+# Match CI settings: all warnings are errors.
+# The CI action (actions-rust-lang/setup-rust-toolchain) sets
+# RUSTFLAGS="-D warnings" automatically. This config ensures
+# local builds catch the same issues.
+[build]
+rustflags = ["-D", "warnings"]

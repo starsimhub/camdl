@@ -371,6 +371,7 @@ pub struct ParamSpec {
     pub transform: Option<String>,
     pub ivp: bool,
     /// User-specified starting value. Used by scout for seeded chains.
+    #[allow(dead_code)]
     pub start: Option<f64>,
 }
 
@@ -417,6 +418,7 @@ pub fn build_if2_params_from_specs(
 }
 
 /// Public wrapper for use by `camdl if2 --rw-sd auto`.
+#[allow(dead_code)]
 pub fn auto_rw_sd_from_value_pub(current_value: f64, lower: f64, upper: f64, transform: &Transform) -> f64 {
     auto_rw_sd_from_value(current_value, lower, upper, transform)
 }
@@ -443,7 +445,7 @@ pub fn auto_rw_sd_from_value_pub(current_value: f64, lower: f64, upper: f64, tra
 /// This is a starting heuristic, not a solution. Scout's MAD-based
 /// calibration replaces it for refine. The modeler can override with
 /// explicit rw_sd in fit.toml or --rw-sd on the CLI.
-fn auto_rw_sd_from_value(current_value: f64, lower: f64, upper: f64, transform: &Transform) -> f64 {
+fn auto_rw_sd_from_value(_current_value: f64, lower: f64, upper: f64, transform: &Transform) -> f64 {
     match transform {
         Transform::Log { lo, hi } => {
             let lo = lo.max(1e-300);

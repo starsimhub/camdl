@@ -294,7 +294,7 @@ pub fn run_pmmh_cli(
                 f
             });
 
-            let param_names: Vec<String> = config.if2_params.iter()
+            let _param_names: Vec<String> = config.if2_params.iter()
                 .map(|s| s.name.clone()).collect();
 
             let progress_cb = |step: usize, loglik: f64, accepted: bool, params: &[f64]| {

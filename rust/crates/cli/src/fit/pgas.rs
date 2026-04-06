@@ -120,7 +120,7 @@ pub fn run_pgas_cli(
     }
 
     let t0 = std::time::Instant::now();
-    let is_tty = std::io::IsTerminal::is_terminal(&std::io::stderr());
+    let _is_tty = std::io::IsTerminal::is_terminal(&std::io::stderr());
 
     // Run chains in parallel (each chain is independent: own seed, own
     // trajectory, own RNG). Same pattern as PMMH.

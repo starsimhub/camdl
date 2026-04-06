@@ -325,9 +325,12 @@ pub fn cmd_if2(args: &[String]) {
         }
     }
 
-    // Observation model parameters
+    // Observation model parameters (used by deprecated --obs-model fallback closures)
+    #[allow(unused_variables)]
     let rho_idx = compiled.param_index.get("rho").copied();
+    #[allow(unused_variables)]
     let k_idx = compiled.param_index.get("k").copied();
+    #[allow(unused_variables)]
     let psi_idx = compiled.param_index.get("psi").copied();
 
     let n_fixed = model.parameters.len() - if2_params.len();
@@ -375,9 +378,9 @@ pub fn cmd_if2(args: &[String]) {
         } else if obs_model != "negbin" || model.observations.is_empty() {
             // Deprecated fallback: hardcoded --obs-model
             eprintln!("\x1b[33mwarning: using --obs-model '{}' (deprecated). Add an observations {{}} block to your model.\x1b[0m", obs_model);
-            let rho_idx = compiled.param_index.get("rho").copied();
-            let k_idx = compiled.param_index.get("k").copied();
-            let psi_idx = compiled.param_index.get("psi").copied();
+            let _rho_idx = compiled.param_index.get("rho").copied();
+            let _k_idx = compiled.param_index.get("k").copied();
+            let _psi_idx = compiled.param_index.get("psi").copied();
             match obs_model.as_str() {
                 "negbin" => Box::new(move |proj: f64, obs: f64, p: &[f64]| {
                     let rho = rho_idx.map_or(1.0, |i| p[i]);
