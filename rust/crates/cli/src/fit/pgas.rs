@@ -135,6 +135,7 @@ pub fn run_pgas_cli(
                 burn_in,
                 thin,
                 dt,
+                use_nuts: true, // auto-falls back to MH if no gradients in IR
             };
 
             // Each chain gets its own dmeasure closure

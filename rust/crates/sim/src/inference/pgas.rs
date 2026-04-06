@@ -34,6 +34,10 @@ pub struct PGASConfig {
     pub burn_in: usize,
     pub thin: usize,
     pub dt: f64,
+    /// Use NUTS (gradient-based) for the θ|X step instead of MH-within-Gibbs.
+    /// Requires rate_grad expressions in the IR (compiled with autodiff).
+    /// Falls back to MH if gradients are not available.
+    pub use_nuts: bool,
 }
 
 /// Per-substep record: minimal information for transition density
@@ -723,6 +727,32 @@ fn log_jacobian(param: &IF2Param, z: f64) -> f64 {
     }
 }
 
+/// Derivative of the transform θ(z) w.r.t. z.
+/// dθ/dz for chain rule: d(f(θ))/dz = d(f)/dθ × dθ/dz.
+fn transform_deriv(param: &IF2Param, z: f64) -> f64 {
+    match &param.transform {
+        Transform::Log { .. } => z.exp(), // θ = exp(z), dθ/dz = exp(z)
+        Transform::Logit { lo, hi } => {
+            let p = 1.0 / (1.0 + (-z).exp());
+            (hi - lo) * p * (1.0 - p) // θ = lo + (hi-lo)*σ(z), dθ/dz = (hi-lo)*σ(z)*(1-σ(z))
+        }
+        Transform::None => 1.0,
+    }
+}
+
+/// Derivative of log|Jacobian| w.r.t. z.
+/// d/dz log|dθ/dz|.
+fn jacobian_grad(param: &IF2Param, z: f64) -> f64 {
+    match &param.transform {
+        Transform::Log { .. } => 1.0, // d/dz z = 1
+        Transform::Logit { .. } => {
+            let p = 1.0 / (1.0 + (-z).exp());
+            1.0 - 2.0 * p // d/dz log(p*(1-p)) = (1 - 2p)
+        }
+        Transform::None => 0.0,
+    }
+}
+
 // ═══════════════════════════════════════════════════════════════════
 // Main PGAS loop
 // ═══════════════════════════════════════════════════════════════════
@@ -841,63 +871,162 @@ pub fn run_pgas(
     )?;
     eprintln!("  initial complete-data ll: {:.1}", current_ll);
 
+    // Check if gradients are available (compiler emitted rate_grad)
+    let has_gradients = config.use_nuts && model.model.transitions.iter()
+        .any(|t| !t.rate_grad.is_empty());
+    if has_gradients {
+        eprintln!("  NUTS enabled (gradient expressions found in IR)");
+    }
+
+    // NUTS state (only used when has_gradients)
+    let mut nuts_step_size = 0.1; // initial guess, adapted via dual averaging
+    let mut nuts_dual_avg = super::nuts::DualAveraging::new(nuts_step_size, 0.80);
+
     let mut sweeps = Vec::new();
     let mut total_accepted = vec![0usize; d];
 
     for sweep in 0..config.n_sweeps {
         let mut accepted = vec![false; d];
 
-        // Current proposal SDs (from adaptive log scale)
+        // Current proposal SDs (from adaptive log scale, MH only)
         let proposal_sd: Vec<f64> = log_proposal_sd.iter()
             .map(|&ls| ls.exp())
             .collect();
 
-        // ── Step 1: Update θ | X, y (EXACT, no PF) ──
-        // With the full trajectory X known, the complete-data log-likelihood
-        // is exact: Σ_t dmeasure(y_t, x_t) + Σ_s log_transition_density(x_s).
-        // No particle filter, no estimation noise, no variance scaling with T.
-        // The surface is sharp (46K terms), but the CSMC-AS in Step 2 shifts
-        // the mode each sweep by updating X. The Gibbs alternation provides
-        // mixing — each θ step tracks the shifting mode.
-        for i in 0..d {
-            let spec = &if2_params[i];
-            let z_old = current_transformed[i];
-            let z_new = z_old + proposal_sd[i] * rng.normal();
-            let theta_new = spec.from_transformed(z_new);
+        // ── Step 1: Update θ | X, y ──
+        // The complete-data log-likelihood is exact (no PF noise).
+        // Two strategies: NUTS (gradient-based, joint proposal) or
+        // MH-within-Gibbs (1D random walk, one-at-a-time).
+        if has_gradients {
+            // NUTS: propose all parameters jointly using gradients.
+            // The target is log π(z | X, y) = complete_data_loglik(θ(z), X, y) + log_prior(z) + log_jacobian(z)
+            // where z is the transformed (unconstrained) parameter vector.
+            let param_names: Vec<String> = if2_params.iter().map(|p| p.name.clone()).collect();
+            let param_model_indices: Vec<usize> = if2_params.iter().map(|p| p.index).collect();
 
-            let mut proposed_params = current_params.clone();
-            proposed_params[spec.index] = theta_new;
+            let log_prob_and_grad = |z: &[f64]| -> (f64, Vec<f64>) {
+                // Transform z → natural scale
+                let mut params = current_params.clone();
+                for (i, spec) in if2_params.iter().enumerate() {
+                    params[spec.index] = spec.from_transformed(z[i]);
+                }
 
-            // Exact complete-data LL at proposed params (trajectory is FIXED)
-            let proposed_ll = complete_data_loglik(
-                model, &trajectory, &proposed_params, observations,
-                config.dt, dmeasure_fn, flow_indices, &ivp_mappings,
-            )?;
+                // Complete-data LL + gradient
+                let (ll, mut ll_grad) = match super::pgas_grad::complete_data_loglik_grad(
+                    model, &trajectory, &params, observations,
+                    config.dt, dmeasure_fn, flow_indices, &ivp_mappings,
+                    &param_names, &param_model_indices,
+                ) {
+                    Ok(r) => r,
+                    Err(_) => return (f64::NEG_INFINITY, vec![0.0; d]),
+                };
 
-            let proposed_log_prior_i = priors[i].log_density(theta_new, z_new);
-            let current_log_prior_i = priors[i].log_density(
-                current_params[spec.index], z_old,
+                // Add prior + Jacobian (and their gradients)
+                let mut log_p = ll;
+                for i in 0..d {
+                    let natural = params[if2_params[i].index];
+                    log_p += priors[i].log_density(natural, z[i]);
+                    log_p += log_jacobian(&if2_params[i], z[i]);
+
+                    // Prior gradient (on transformed scale)
+                    match &priors[i] {
+                        Prior::Flat => {},
+                        Prior::Normal { mean, sd } => {
+                            // d/dz log N(θ(z); μ, σ) needs chain rule through transform
+                            // For simplicity, use the transformed-scale gradient
+                            ll_grad[i] += -(natural - mean) / (sd * sd)
+                                * transform_deriv(&if2_params[i], z[i]);
+                        }
+                        Prior::TransformedNormal { mean, sd } => {
+                            ll_grad[i] += -(z[i] - mean) / (sd * sd);
+                        }
+                    }
+
+                    // Jacobian gradient
+                    ll_grad[i] += jacobian_grad(&if2_params[i], z[i]);
+
+                    // Chain rule: ll_grad is d(ll)/dθ, need d(ll)/dz = d(ll)/dθ * dθ/dz
+                    ll_grad[i] *= transform_deriv(&if2_params[i], z[i]);
+                }
+
+                (log_p, ll_grad)
+            };
+
+            let (init_log_p, init_grad) = log_prob_and_grad(&current_transformed);
+
+            let nuts_config = super::nuts::NUTSConfig {
+                max_tree_depth: 10,
+                step_size: nuts_step_size,
+                mass_matrix_inv: vec![1.0; d],
+            };
+
+            let result = super::nuts::nuts_step(
+                &current_transformed, init_log_p, &init_grad,
+                &nuts_config, &log_prob_and_grad, &mut rng,
             );
-            let proposed_log_jac_i = log_jacobian(spec, z_new);
-            let current_log_jac_i = log_jacobian(spec, z_old);
 
-            let log_alpha = (proposed_ll + proposed_log_prior_i + proposed_log_jac_i)
-                          - (current_ll + current_log_prior_i + current_log_jac_i);
-
-            if log_alpha.is_finite() && rng.uniform().ln() < log_alpha {
-                current_params[spec.index] = theta_new;
-                current_transformed[i] = z_new;
-                current_ll = proposed_ll;
-                accepted[i] = true;
-                total_accepted[i] += 1;
+            if result.accepted {
+                current_transformed.copy_from_slice(&result.params);
+                for (i, spec) in if2_params.iter().enumerate() {
+                    current_params[spec.index] = spec.from_transformed(current_transformed[i]);
+                }
+                current_ll = complete_data_loglik(
+                    model, &trajectory, &current_params, observations,
+                    config.dt, dmeasure_fn, flow_indices, &ivp_mappings,
+                )?;
+                for a in &mut accepted { *a = true; }
+                for t in &mut total_accepted { *t += 1; }
             }
 
-            // Robbins-Monro: adapt proposal SD during burn-in
+            // Dual averaging: adapt step size during burn-in
             if sweep < adapt_end {
-                let gamma = ADAPT_C / (1.0 + sweep as f64).sqrt();
-                let acc_indicator = if accepted[i] { 1.0 } else { 0.0 };
-                log_proposal_sd[i] += gamma * (acc_indicator - TARGET_ACCEPTANCE);
-                log_proposal_sd[i] = log_proposal_sd[i].clamp(-20.0, 5.0);
+                let accept_prob = if result.accepted { 0.8 } else { 0.0 };
+                nuts_step_size = nuts_dual_avg.update(accept_prob);
+            } else if sweep == adapt_end {
+                nuts_step_size = nuts_dual_avg.final_step_size();
+                eprintln!("  NUTS step size adapted: {:.6}", nuts_step_size);
+            }
+        } else {
+            // MH-within-Gibbs: one-at-a-time random walk proposals
+            for i in 0..d {
+                let spec = &if2_params[i];
+                let z_old = current_transformed[i];
+                let z_new = z_old + proposal_sd[i] * rng.normal();
+                let theta_new = spec.from_transformed(z_new);
+
+                let mut proposed_params = current_params.clone();
+                proposed_params[spec.index] = theta_new;
+
+                let proposed_ll = complete_data_loglik(
+                    model, &trajectory, &proposed_params, observations,
+                    config.dt, dmeasure_fn, flow_indices, &ivp_mappings,
+                )?;
+
+                let proposed_log_prior_i = priors[i].log_density(theta_new, z_new);
+                let current_log_prior_i = priors[i].log_density(
+                    current_params[spec.index], z_old,
+                );
+                let proposed_log_jac_i = log_jacobian(spec, z_new);
+                let current_log_jac_i = log_jacobian(spec, z_old);
+
+                let log_alpha = (proposed_ll + proposed_log_prior_i + proposed_log_jac_i)
+                              - (current_ll + current_log_prior_i + current_log_jac_i);
+
+                if log_alpha.is_finite() && rng.uniform().ln() < log_alpha {
+                    current_params[spec.index] = theta_new;
+                    current_transformed[i] = z_new;
+                    current_ll = proposed_ll;
+                    accepted[i] = true;
+                    total_accepted[i] += 1;
+                }
+
+                // Robbins-Monro: adapt proposal SD during burn-in
+                if sweep < adapt_end {
+                    let gamma_rm = ADAPT_C / (1.0 + sweep as f64).sqrt();
+                    let acc_indicator = if accepted[i] { 1.0 } else { 0.0 };
+                    log_proposal_sd[i] += gamma_rm * (acc_indicator - TARGET_ACCEPTANCE);
+                    log_proposal_sd[i] = log_proposal_sd[i].clamp(-20.0, 5.0);
+                }
             }
         }
 
