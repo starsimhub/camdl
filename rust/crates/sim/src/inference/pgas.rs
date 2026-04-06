@@ -58,12 +58,27 @@ pub struct PGASTrajectory {
     pub substeps: Vec<SubstepRecord>,
 }
 
+/// Diagnostics from one CSMC-AS sweep.
+#[derive(Clone, Debug)]
+pub struct CSMCDiagnostics {
+    /// Fraction of traceback substeps from non-reference particles.
+    /// Near 0% = path degeneracy (reference never replaced, CSMC broken).
+    /// Near 50%+ = healthy trajectory renewal.
+    pub trajectory_renewal: f64,
+    /// Number of substeps where all ancestor weights were -inf.
+    pub n_degenerate: usize,
+    /// Total substeps.
+    pub n_substeps: usize,
+}
+
 /// Result of one Gibbs sweep.
 #[derive(Clone)]
 pub struct PGASSweep {
     pub params: Vec<f64>,
     pub log_complete_data_ll: f64,
     pub accepted: Vec<bool>,
+    pub csmc_diag: CSMCDiagnostics,
+    pub proposal_sds: Vec<f64>,
 }
 
 /// Full PGAS result.
@@ -351,7 +366,7 @@ pub fn simulate_reference(
 /// Run one CSMC-AS sweep: draw X' ~ p(X | θ, y) conditioned on
 /// the reference trajectory.
 ///
-/// Returns a new trajectory sampled from the conditional posterior.
+/// Returns a new trajectory + diagnostics.
 pub fn csmc_as(
     model: &CompiledModel,
     params: &[f64],
@@ -362,7 +377,7 @@ pub fn csmc_as(
     dmeasure_fn: &DmeasureFn,
     flow_indices: &[usize],
     seed: u64,
-) -> Result<PGASTrajectory, SimError> {
+) -> Result<(PGASTrajectory, CSMCDiagnostics), SimError> {
     let t_start = model.model.simulation.t_start;
     let n_substeps = reference.substeps.len();
     let n_tr = model.model.transitions.len();
@@ -607,10 +622,12 @@ pub fn csmc_as(
         }
     };
 
-    // Trace back through ancestry
+    // Trace back through ancestry and compute trajectory renewal
     let mut trajectory_substeps = Vec::with_capacity(n_substeps);
     let mut particle = k;
+    let mut n_from_ref = 0usize;
     for s in (0..n_substeps).rev() {
+        if particle == j_ref { n_from_ref += 1; }
         trajectory_substeps.push(SubstepRecord {
             counts: history_counts[s][particle].clone(),
             flows: history_flows[s][particle].clone(),
@@ -620,21 +637,26 @@ pub fn csmc_as(
     }
     trajectory_substeps.reverse();
 
+    let trajectory_renewal = 1.0 - n_from_ref as f64 / n_substeps as f64;
+
     // Initial counts: the ancestor at step 0 determines whose initial state we use
-    let init_particle = ancestors[0][k];
-    let _ = init_particle; // initial counts came from init_state(params) or reference
     let initial_counts = if particle == j_ref {
         reference.initial_counts.clone()
     } else {
-        // All free particles had same initial state
         let (init_int, _) = model.initial_state(params)?;
         init_int.counts
     };
 
-    Ok(PGASTrajectory {
+    let diag = CSMCDiagnostics {
+        trajectory_renewal,
+        n_degenerate,
+        n_substeps,
+    };
+
+    Ok((PGASTrajectory {
         initial_counts,
         substeps: trajectory_substeps,
-    })
+    }, diag))
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -659,8 +681,14 @@ fn log_jacobian(param: &IF2Param, z: f64) -> f64 {
 /// Run the PGAS Gibbs sampler.
 ///
 /// Alternates between:
-/// 1. θ | X, y — MH updates using exact complete-data log-likelihood
+/// 1. θ | y — MH updates using PF marginal log-likelihood (smooth surface)
 /// 2. X | θ, y — CSMC-AS to refresh the latent trajectory
+///
+/// Step 1 uses a particle filter to estimate log p(y|θ), NOT the complete-data
+/// log p(y,X|θ). This gives a smooth likelihood surface that allows large
+/// proposals. The PF variance is handled by the pseudo-marginal property
+/// (Andrieu & Roberts 2009). Step 2 then produces a trajectory sample
+/// conditioned on the accepted θ.
 pub fn run_pgas(
     model: &CompiledModel,
     if2_params: &[IF2Param],
@@ -723,11 +751,32 @@ pub fn run_pgas(
         })
         .collect();
 
-    // Current complete-data log-likelihood
-    let mut current_ll = complete_data_loglik(
-        model, &trajectory, &current_params, observations,
-        config.dt, dmeasure_fn, flow_indices,
-    )?;
+    // Helper: run a PF at given params and return marginal log-likelihood.
+    // This is the smooth surface we use for parameter updates.
+    let n_pf = config.n_particles; // same particle count for PF and CSMC
+    let run_pf = |params: &[f64], pf_seed: u64| -> f64 {
+        let step_fn = |state: &mut crate::inference::types::ParticleState,
+                       t: f64, step_dt: f64,
+                       rng: &mut StatefulRng,
+                       scratch: &mut StepScratch| {
+            step_one(model, &mut state.counts, &mut state.flow_accumulators,
+                     params, t, step_dt, rng, scratch)
+        };
+        let project_fn = |state: &crate::inference::types::ParticleState| -> f64 {
+            flow_indices.iter().map(|&i| state.flow_accumulators[i] as f64).sum()
+        };
+        match crate::inference::particle_filter::bootstrap_filter(
+            model, params, observations, n_pf, config.dt,
+            &step_fn, &project_fn, dmeasure_fn, None, None, pf_seed,
+        ) {
+            Ok(r) => r.log_likelihood,
+            Err(_) => f64::NEG_INFINITY,
+        }
+    };
+
+    // Initial PF loglik at starting params (pseudo-marginal baseline)
+    let mut current_ll = run_pf(&current_params, seed.wrapping_add(0));
+    eprintln!("  initial PF loglik: {:.1} ({} particles)", current_ll, n_pf);
 
     let mut sweeps = Vec::new();
     let mut total_accepted = vec![0usize; d];
@@ -740,26 +789,22 @@ pub fn run_pgas(
             .map(|&ls| ls.exp())
             .collect();
 
-        // ── Step 1: Update θ | X, y ──
-        // One-at-a-time MH updates (Gibbs-within-Gibbs)
+        // ── Step 1: Update θ | y via PF marginal likelihood ──
+        // One-at-a-time MH with pseudo-marginal PF loglik (smooth surface).
+        // Each proposal requires one PF evaluation (~0.1s with 100 particles).
         for i in 0..d {
             let spec = &if2_params[i];
             let z_old = current_transformed[i];
             let z_new = z_old + proposal_sd[i] * rng.normal();
             let theta_new = spec.from_transformed(z_new);
 
-            // Build proposed param vector
             let mut proposed_params = current_params.clone();
             proposed_params[spec.index] = theta_new;
 
-            // Evaluate complete-data LL at proposed params
-            // The trajectory is FIXED — only the density changes
-            let proposed_ll = complete_data_loglik(
-                model, &trajectory, &proposed_params, observations,
-                config.dt, dmeasure_fn, flow_indices,
-            )?;
+            // PF marginal loglik at proposed params
+            let pf_seed = seed.wrapping_add(sweep as u64 * d as u64 + i as u64 + 1);
+            let proposed_ll = run_pf(&proposed_params, pf_seed);
 
-            // Prior at proposed value
             let proposed_log_prior_i = priors[i].log_density(theta_new, z_new);
             let current_log_prior_i = priors[i].log_density(
                 current_params[spec.index], z_old,
@@ -783,46 +828,21 @@ pub fn run_pgas(
                 let gamma = ADAPT_C / (1.0 + sweep as f64).sqrt();
                 let acc_indicator = if accepted[i] { 1.0 } else { 0.0 };
                 log_proposal_sd[i] += gamma * (acc_indicator - TARGET_ACCEPTANCE);
-                // Clamp to prevent extreme values
                 log_proposal_sd[i] = log_proposal_sd[i].clamp(-20.0, 5.0);
             }
         }
 
         // ── Step 2: Update X | θ, y via CSMC-AS ──
+        // The trajectory update is independent of the PF loglik used in step 1.
+        // CSMC-AS conditions on the reference trajectory and produces a new
+        // trajectory sample from p(X | θ, y).
         let csmc_seed = seed ^ ((sweep as u64 + 1).wrapping_mul(0x9e3779b97f4a7c15));
-        let new_trajectory = csmc_as(
+        let (new_trajectory, csmc_diag) = csmc_as(
             model, &current_params, observations, &trajectory,
             config.n_particles, config.dt, dmeasure_fn, flow_indices,
             csmc_seed,
         )?;
-
-        // Recompute complete-data LL with new trajectory
-        let new_ll = complete_data_loglik(
-            model, &new_trajectory, &current_params, observations,
-            config.dt, dmeasure_fn, flow_indices,
-        )?;
-
-        if new_ll.is_finite() {
-            trajectory = new_trajectory;
-            current_ll = new_ll;
-        } else {
-            // CSMC produced an invalid trajectory (splice-point inconsistency).
-            // Fall back: re-simulate a fresh trajectory at current params.
-            // This loses the CSMC mixing benefit for this sweep but prevents
-            // the sampler from getting stuck on -inf.
-            let fallback = simulate_reference(
-                model, &current_params, t_end, config.dt, &mut rng,
-            )?;
-            let fallback_ll = complete_data_loglik(
-                model, &fallback, &current_params, observations,
-                config.dt, dmeasure_fn, flow_indices,
-            )?;
-            if fallback_ll.is_finite() {
-                trajectory = fallback;
-                current_ll = fallback_ll;
-            }
-            // If even the fallback is -inf, keep the old trajectory
-        }
+        trajectory = new_trajectory;
 
         // Log adapted proposal SDs at end of burn-in
         if sweep + 1 == adapt_end {
@@ -832,12 +852,15 @@ pub fn run_pgas(
                 eprintln!("    {:12} sd={:.6} acc={:.0}%",
                     spec.name, log_proposal_sd[i].exp(), acc_rate * 100.0);
             }
+            eprintln!("  trajectory renewal: {:.1}%", csmc_diag.trajectory_renewal * 100.0);
         }
 
         let sweep_result = PGASSweep {
             params: current_params.clone(),
             log_complete_data_ll: current_ll,
             accepted,
+            csmc_diag: csmc_diag.clone(),
+            proposal_sds: proposal_sd.clone(),
         };
 
         if let Some(cb) = on_sweep {

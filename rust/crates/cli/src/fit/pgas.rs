@@ -157,7 +157,7 @@ pub fn run_pgas_cli(
                 let mut f = std::io::BufWriter::new(
                     std::fs::File::create(&trace_path).unwrap()
                 );
-                write!(f, "sweep\tlog_complete_data_ll").unwrap();
+                write!(f, "sweep\tlog_likelihood\ttrajectory_renewal").unwrap();
                 for spec in &config.if2_params { write!(f, "\t{}", spec.name).unwrap(); }
                 writeln!(f).unwrap();
                 f
@@ -170,7 +170,9 @@ pub fn run_pgas_cli(
                 {
                     use std::io::Write;
                     if let Ok(mut f) = trace_file.lock() {
-                        write!(f, "{}\t{:.4}", sweep, result.log_complete_data_ll).unwrap();
+                        write!(f, "{}\t{:.4}\t{:.4}",
+                            sweep, result.log_complete_data_ll,
+                            result.csmc_diag.trajectory_renewal).unwrap();
                         for spec in &config.if2_params {
                             write!(f, "\t{:.6}", result.params[spec.index]).unwrap();
                         }
@@ -183,11 +185,12 @@ pub fn run_pgas_cli(
                 if sweep % 500 == 0 || sweep == n_sweeps - 1 {
                     let elapsed = chain_start.elapsed().as_secs();
                     let n_acc: usize = result.accepted.iter().filter(|&&a| a).count();
-                    eprintln!("[pgas] chain {}: {}/{} ({:.0}%) ll={:.1} acc={}/{} elapsed={}s",
+                    eprintln!("[pgas] chain {}: {}/{} ({:.0}%) ll={:.1} acc={}/{} renewal={:.0}% elapsed={}s",
                         chain_id + 1, sweep + 1, n_sweeps,
                         (sweep + 1) as f64 / n_sweeps as f64 * 100.0,
                         result.log_complete_data_ll,
-                        n_acc, result.accepted.len(), elapsed);
+                        n_acc, result.accepted.len(),
+                        result.csmc_diag.trajectory_renewal * 100.0, elapsed);
                 }
             };
 
