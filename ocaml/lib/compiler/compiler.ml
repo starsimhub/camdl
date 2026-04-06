@@ -65,5 +65,13 @@ let compile_detail_result ?(name = "model") ?(filename = "<input>") (src : strin
 
 let compile ?(name = "model") ?(filename = "<input>") (src : string) : (Ir.model, string) result =
   match compile_detail_result ~name ~filename src with
-  | Ok d -> Ok d.model
+  | Ok d ->
+    (* Autodiff pass: differentiate transition rates w.r.t. all parameters *)
+    let param_names = List.map (fun (p : Ir.parameter) -> p.name) d.model.Ir.parameters in
+    let m = { d.model with Ir.transitions =
+      List.map (fun (t : Ir.transition) ->
+        { t with Ir.rate_grad = Autodiff.differentiate_rate t.rate param_names }
+      ) d.model.Ir.transitions }
+    in
+    Ok m
   | Error e -> Error e
