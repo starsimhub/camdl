@@ -2919,3 +2919,42 @@ is working.
 toward 1.0 as burn-in progresses. If any chain gets stuck at -inf
 early (random start too far from feasible region), report which
 parameters caused it.
+
+## [upstream] Fix slow mixing: initial proposal SD from bounds (2026-04-05)
+
+Looking at the trace plots, the sampler IS working (good acceptance
+rates, zero -inf) but mixing is painfully slow. sigma and gamma are
+wiggling around their start values after 500 sweeps — random walk
+with 0.8% steps.
+
+### Root cause
+
+The Robbins-Monro initial scale `rw_sd × 0.1` was too small. For
+sigma: natural rw_sd ≈ 0.02, so initial proposal SD on log scale
+≈ 0.008. The adaptation saw ~43% acceptance (close to target 44%)
+and barely adjusted. To reach sigma=0.079 from 0.255 (1.16 in log
+space), the chain needs (1.16/0.008)² ≈ 21,000 random walk steps.
+
+### Fix
+
+Initial proposal SD now comes from **parameter bounds** instead of
+IF2 rw_sd: `(upper - lower) / 10` on the transformed scale. For
+sigma with bounds [0.01, 1.0]: log-scale range ≈ 4.6, initial SD
+≈ 0.46. That's 50× larger than before.
+
+The Robbins-Monro will shrink this to the right scale within ~200
+sweeps (the first sweeps will have low acceptance, driving the
+adaptation down quickly). Starting too large is cheap (early
+rejections help the adaptation); starting too small is catastrophic.
+
+Also increased adaptation speed (ADAPT_C: 1.0 → 2.0).
+
+### Expected behavior
+
+- First ~200 sweeps: low acceptance as Robbins-Monro finds the scale
+- Sweeps 200-500: acceptance converges to ~44%, larger jumps
+- Sweeps 500+: chain should traverse parameter space much faster
+
+**ACTION FOR downstream:** Rebuild and re-test. The early trace will
+look messy (low acceptance during adaptation). Focus on what happens
+AFTER the "proposal SD adapted" message — that's when mixing starts.
