@@ -3315,6 +3315,38 @@ This is standard PGAS theory: with deterministic initial conditions,
 IVP parameters are functions of the latent state X, not free
 parameters in the Gibbs update.
 
+**ACTION FOR downstream:** ~~Rebuild and re-test. s0 should now be
+reported as an IVP at startup~~ **SUPERSEDED** — the back-solve
+approach just froze s0 (see below).
+
+## [upstream] Stochastic initial states for true s0 estimation (2026-04-06)
+
+The back-solve approach (0bee31e) was equivalent to freezing s0 —
+all free particles had the same deterministic x₀, so the CSMC never
+selected a different initial state. s0 never changed.
+
+### Correct fix: stochastic initial conditions
+
+Following Lindsten et al. (2014) for "static parameters that enter
+through the initial distribution":
+
+1. **Auto-detect IVP parameters** at startup (perturb param, check
+   if initial_state changes, skipping balance compartment).
+
+2. **Stochastic CSMC initialization:** each free particle draws
+   `S₀ ~ Binomial(N₀, s0)` independently. Different particles get
+   different initial states → CSMC has diversity to select among.
+
+3. **Initial state density in complete-data LL:** add
+   `log Binom(S₀; N₀, s0)`. Now s0 affects the MH ratio — it's
+   constrained to values consistent with the trajectory's S₀.
+
+4. **s0 participates in MH normally.** No skip, no back-solve.
+
+The Gibbs cycle works naturally: MH proposes s0', the Binom density
+constrains it, CSMC draws trajectories with diverse S₀ values, the
+selected trajectory determines the next sweep's S₀.
+
 **ACTION FOR downstream:** Rebuild and re-test. s0 should now be
-reported as an IVP at startup and updated automatically after each
-CSMC sweep. It should NOT saturate at bounds.
+estimated properly (not frozen, not saturating at bounds). The
+startup should report `s0 detected as IVP → compartment N`.
