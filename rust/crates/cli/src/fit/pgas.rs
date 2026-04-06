@@ -67,8 +67,46 @@ pub fn run_pgas_cli(
         .map(|_| Prior::Flat)
         .collect();
 
+    // Generate per-chain starting parameters.
+    // Without --starts-from: random uniform on the natural scale within declared
+    // bounds (overdispersed initialization, standard MCMC practice).
+    // With --starts-from: use prior stage's start_values for all chains (user
+    // has already identified the high-posterior region via IF2).
+    let has_starts = prior_state.is_some();
+    let chain_starts: Vec<Vec<f64>> = {
+        let mut init_rng = sim::rng::StatefulRng::new(seed ^ 0xbeef_cafe);
+        (0..n_chains).map(|_| {
+            let mut params = config.base_params.clone();
+            if !has_starts {
+                // Random uniform within bounds on natural scale
+                for spec in &config.if2_params {
+                    let lo = spec.lower;
+                    let hi = spec.upper;
+                    if lo.is_finite() && hi.is_finite() {
+                        params[spec.index] = lo + init_rng.uniform() * (hi - lo);
+                    } else {
+                        // Unbounded: jitter ±50% around initial value
+                        params[spec.index] *= 1.0 + (init_rng.uniform() - 0.5);
+                    }
+                }
+            }
+            params
+        }).collect()
+    };
+
     eprintln!("\npgas: {} chains × {} sweeps × {} particles, burn_in={}, thin={}",
         n_chains, n_sweeps, n_particles, burn_in, thin);
+    if has_starts {
+        eprintln!("  starting all chains from prior stage (--starts-from)");
+    } else {
+        eprintln!("  random starts: uniform within parameter bounds");
+        for spec in &config.if2_params {
+            let vals: Vec<f64> = chain_starts.iter().map(|p| p[spec.index]).collect();
+            eprintln!("    {:12} [{:.4} .. {:.4}]", spec.name,
+                vals.iter().cloned().fold(f64::INFINITY, f64::min),
+                vals.iter().cloned().fold(f64::NEG_INFINITY, f64::max));
+        }
+    }
     eprintln!("  estimated output: {} posterior samples per chain",
         (n_sweeps.saturating_sub(burn_in)) / thin);
 
@@ -157,7 +195,7 @@ pub fn run_pgas_cli(
                 compiled,
                 &config.if2_params,
                 &priors,
-                &config.base_params,
+                &chain_starts[chain_id],
                 &pgas_config,
                 &observations,
                 &*dmeasure_fn,
