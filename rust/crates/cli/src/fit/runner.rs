@@ -964,6 +964,7 @@ mod tests {
                         right: Box::new(Expr::Pop(PopExpr { pop: "I".into() })),
                     }}),
                     event_key: None, metadata: None, draw_method: DrawMethod::Poisson,
+                    rate_grad: Default::default(),
                 },
                 Transition {
                     name: "recovery".into(),
@@ -974,6 +975,7 @@ mod tests {
                         right: Box::new(Expr::Pop(PopExpr { pop: "I".into() })),
                     }}),
                     event_key: None, metadata: None, draw_method: DrawMethod::Poisson,
+                    rate_grad: Default::default(),
                 },
             ],
             ode_equations: vec![], time_functions: vec![], tables: vec![],

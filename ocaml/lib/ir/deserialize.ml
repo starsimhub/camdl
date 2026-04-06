@@ -153,6 +153,11 @@ let transition_of_json j =
     draw_method  = (match member_opt "draw_method" j with
                     | None | Some `Null -> Ir.DrawPoisson
                     | Some dm -> draw_method_of_json dm);
+    rate_grad    = (match member_opt "rate_grad" j with
+                    | None | Some `Null -> []
+                    | Some (`Assoc pairs) ->
+                      List.map (fun (name, expr_j) -> (name, expr_of_json expr_j)) pairs
+                    | Some _ -> []);
   }
 
 (* ── ODE equation ────────────────────────────────────────────────────────── *)

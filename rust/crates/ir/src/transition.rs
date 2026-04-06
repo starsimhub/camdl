@@ -47,6 +47,11 @@ pub struct Transition {
     /// How event counts are drawn. Defaults to Poisson.
     #[serde(default, skip_serializing_if = "is_poisson")]
     pub draw_method:    DrawMethod,
+    /// ∂rate/∂param for each estimated parameter. Populated by the OCaml
+    /// compiler's autodiff pass. Empty if not computed (backward compatible).
+    /// Maps parameter name → derivative expression.
+    #[serde(default, skip_serializing_if = "std::collections::HashMap::is_empty")]
+    pub rate_grad:      std::collections::HashMap<String, Expr>,
 }
 
 fn is_poisson(m: &DrawMethod) -> bool {

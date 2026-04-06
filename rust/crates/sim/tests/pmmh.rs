@@ -53,7 +53,7 @@ fn pure_death_model() -> (CompiledModel, Vec<f64>) {
                 }),
                 event_key: None,
                 metadata: None,
-                draw_method: DrawMethod::Poisson,
+                draw_method: DrawMethod::Poisson, rate_grad: Default::default(),
             },
         ],
         ode_equations: vec![],

@@ -57,6 +57,7 @@ type transition = {
   event_key:       string option;
   metadata:        transition_metadata option;
   draw_method:     draw_method;
+  rate_grad:       (string * expr) list;  (** ∂rate/∂param for each estimated param. Empty if not computed. *)
 }
 
 (* ── ODE equation ────────────────────────────────────────────────────────────── *)

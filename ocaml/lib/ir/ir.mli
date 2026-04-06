@@ -43,6 +43,7 @@ type transition = {
   event_key:       string option;
   metadata:        transition_metadata option;
   draw_method:     draw_method;
+  rate_grad:       (string * expr) list;
 }
 
 type ode_equation = { compartment: string; derivative: expr }

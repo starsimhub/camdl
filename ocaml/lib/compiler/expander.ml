@@ -1122,6 +1122,7 @@ let expand_transitions_counted ctx =
             Ir.dest_compartment   = dst_name;
           };
           Ir.draw_method     = draw_method;
+          Ir.rate_grad       = [];  (* populated later by autodiff pass *)
         }
       end
     ) combos

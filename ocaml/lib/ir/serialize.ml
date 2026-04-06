@@ -97,6 +97,9 @@ let transition_to_json (t : transition) : Yojson.Safe.t =
     @ (match t.draw_method with
        | DrawPoisson -> []
        | dm          -> [("draw_method", draw_method_to_json dm)])
+    @ (match t.rate_grad with
+       | [] -> []
+       | grads -> [("rate_grad", obj (List.map (fun (p, e) -> (p, expr_to_json e)) grads))])
   )
 
 (* ── ODE equation ────────────────────────────────────────────────────────── *)
