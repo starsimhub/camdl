@@ -3278,6 +3278,43 @@ consistent with the accepted s0.
 For strong IVP constraints, more particles in the CSMC may help
 (better trajectory renewal near the initial state).
 
-**ACTION FOR downstream:** Rebuild and re-test the 3-param run
-(R0, amplitude, s0) from He MLE start. s0 should now be
-constrained near 0.032 instead of saturating at 0.25.
+**ACTION FOR downstream:** ~~Rebuild and re-test the 3-param run~~
+**SUPERSEDED** — the initial_state(params) fix was mathematically
+wrong, see below.
+
+## [upstream] Corrected IVP fix — previous was wrong (2026-04-06)
+
+**The previous fix (using initial_state(params) at substep 0) was
+mathematically incorrect.** It evaluated transition density at substep
+0 using proposed initial counts but stored flows (drawn from the OLD
+initial counts). The Binomial density Binom(n_inf; S₀_new, p)
+mechanically increases with larger S₀_new (more ways to choose n_inf
+from a bigger pool at the same per-capita rate), which would push s0
+UPWARD — the opposite of what we want.
+
+### Correct fix: detect, skip, back-solve
+
+The proper PGAS treatment of deterministic initial conditions:
+
+1. **Detect IVP parameters** at startup by checking if perturbing
+   them changes the complete-data LL. If not (LL invariant), the
+   parameter only affects initial_state(), not propensities.
+   Output: `s0 detected as IVP — back-solved from trajectory`
+
+2. **Skip IVPs in the MH step.** The complete-data LL is invariant
+   to them, so MH can't estimate them. (This was the original bug:
+   MH saw 100% acceptance → unconstrained random walk.)
+
+3. **After each CSMC sweep, back-solve IVPs** from the trajectory's
+   initial state: `s0 = S₀ / N(t_start)`. The CSMC free particles
+   start from initial_state(θ), and the selected trajectory
+   determines the new x₀. The IVP parameter is a deterministic
+   function of the sampled trajectory.
+
+This is standard PGAS theory: with deterministic initial conditions,
+IVP parameters are functions of the latent state X, not free
+parameters in the Gibbs update.
+
+**ACTION FOR downstream:** Rebuild and re-test. s0 should now be
+reported as an IVP at startup and updated automatically after each
+CSMC sweep. It should NOT saturate at bounds.
