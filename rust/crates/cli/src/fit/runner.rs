@@ -38,8 +38,6 @@ pub struct FitRunConfig {
     /// Canonical observation times (shared across all streams).
     pub observations: Vec<Observation>,
     /// Per-stream data. For single-stream models, len() == 1.
-    /// Multi-stream callers use this for joint obs loglik construction.
-    #[allow(dead_code)]
     pub streams: Vec<ObsStream>,
     /// Flow indices for the FIRST stream (backward compat convenience).
     pub flow_indices: Vec<usize>,
