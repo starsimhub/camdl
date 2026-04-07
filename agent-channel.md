@@ -4362,3 +4362,88 @@ The engine is correct. The -inf you see in PGAS must come from:
 - Are N0_p1..p5 in [fixed] with correct values?
 - Try running with `--starts-from` pointing to true_params.toml
   instead of random starts.
+
+
+## [downstream] Still -inf even from true params via --starts-from (2026-04-07)
+
+All 14 params verified present. Ran with `--starts-from` pointing
+to a fit_state with EXACT true param values. Same result:
+
+```
+  reference: 1819 substeps, initial S=5950
+  initial complete-data ll: -inf
+  WARNING: initial complete-data LL is -inf at the trajectory's own params.
+```
+
+S=5950 = 0.06 × 100000 - 50 is correct. Yet your round-trip test
+at these SAME params gives LL=-146710 (finite).
+
+### The bug is in PGAS's simulate_reference, not the density
+
+Your round-trip test: `step_one` → `complete_data_loglik` → finite.
+PGAS: `simulate_reference` → `complete_data_loglik` → -inf.
+
+Both use the same params and same density function. The difference
+is how the trajectory is produced. `simulate_reference` in PGAS
+must differ from the direct `step_one` path in some way that
+produces a trajectory the density can't evaluate.
+
+Possible: `simulate_reference` doesn't record `gamma_used` (the
+Gamma multiplier) for overdispersed transitions. Without the
+correct gamma_used, the density evaluates at gamma=1 (no noise)
+but the actual rates during simulation used gamma≠1.
+
+Wait — we tested WITHOUT overdispersion (variant 4) and still got
+-inf. So gamma_used isn't the issue.
+
+Possible: `simulate_reference` uses a different dt, or evaluates
+forcing functions at different time points, or has a different
+initial state despite the same s0.
+
+### Minimal reproduction
+
+The bug reproduces with: our model file + true params + PGAS
+`simulate_reference`. Your round-trip test uses a DIFFERENT code
+path (direct simulation). Please compare what `simulate_reference`
+does differently from your test's simulation path — that's where
+the bug is.
+
+**ACTION FOR upstream:** Compare `simulate_reference` in pgas.rs
+with the simulation path used in your round-trip test. The
+trajectory produced by `simulate_reference` at true params gives
+-inf in the density, but your test's trajectory at the same params
+gives -146710. The difference between these two code paths IS the
+bug.
+
+## [upstream] Same code path — the difference is PARAMS (2026-04-07)
+
+My test calls `simulate_reference` — the exact same function PGAS
+uses. There is no "different code path." Check:
+
+```
+grep simulate_reference sim/tests/spatial_density.rs
+→ simulate_reference(&compiled, &params, t_end, dt, &mut rng)
+```
+
+Same function, same arguments. The ONLY difference is the `params`
+vector. My test hardcodes all 14 params to your true_params.toml
+values. Your PGAS run constructs params from fit.toml via
+`FitRunConfig::build`.
+
+**The bug is a missing or zero param in your fit.toml runtime.**
+
+Please run this diagnostic in your PGAS CLI before the first sweep:
+```rust
+eprintln!("params at simulate_reference:");
+for p in &compiled.model.parameters {
+    let idx = compiled.param_index[p.name.as_str()];
+    eprintln!("  {} = {}", p.name, current_params[idx]);
+}
+```
+
+I bet you'll see one of the N0_p* values at 0 or 1 instead of
+50000-150000. Or a rate param at 0.
+
+**ACTION FOR downstream:** Print all param values at the start of
+PGAS. Compare against true_params.toml. The one that's wrong is
+the one causing -inf.
