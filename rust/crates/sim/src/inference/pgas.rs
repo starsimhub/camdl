@@ -905,6 +905,24 @@ pub fn run_pgas(
             .map(|p| p.to_transformed(current_params[p.index]))
             .collect();
         start_sweep = 0;
+
+        // Sanity check: the trajectory must have finite density at its own params
+        // (before IVP mapping, which adds initial state density)
+        let sanity_ll = complete_data_loglik(
+            model, &trajectory, &current_params, observations,
+            config.dt, obs_streams, &[],  // empty IVP mappings
+        )?;
+        if !sanity_ll.is_finite() {
+            eprintln!("  BUG: simulate_reference trajectory has -inf density at own params.");
+            eprintln!("  params used:");
+            for p in &model.model.parameters {
+                if let Some(&idx) = model.param_index.get(p.name.as_str()) {
+                    eprintln!("    {} = {}", p.name, current_params[idx]);
+                }
+            }
+        } else {
+            eprintln!("  simulate_reference LL sanity check: {:.1} (finite ✓)", sanity_ll);
+        }
     }
 
     // Adaptive proposal SDs via Robbins-Monro stochastic approximation.
