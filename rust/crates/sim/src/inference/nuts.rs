@@ -8,6 +8,7 @@
 //! The target density is the complete-data log-posterior:
 //!   log π(θ | X, y) = complete_data_loglik(θ, X, y) + log_prior(θ)
 
+use serde::{Serialize, Deserialize};
 use crate::rng::StatefulRng;
 
 /// Mass matrix for HMC/NUTS. Controls how momentum translates into movement.
@@ -18,7 +19,7 @@ use crate::rng::StatefulRng;
 /// Dense: full covariance matrix via Cholesky decomposition. Handles both
 ///   scale differences AND correlations (e.g., R0-amplitude ridge with r=0.94).
 ///   NUTS proposes along the ridge instead of zigzagging across it.
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub enum MassMatrix {
     /// Diagonal: M_inv[i] = Var(z_i). Identity when all 1.0.
     Diagonal(Vec<f64>),

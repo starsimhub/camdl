@@ -11,6 +11,8 @@
 //! via CSMC-AS, which conditions on a reference trajectory and uses
 //! ancestor sampling to maintain diversity.
 
+use serde::{Serialize, Deserialize};
+
 use crate::chain_binomial::{StepScratch, step_one};
 use crate::compiled_model::CompiledModel;
 use crate::rng::StatefulRng;
@@ -46,7 +48,7 @@ pub struct PGASConfig {
 
 /// Per-substep record: minimal information for transition density
 /// evaluation and trajectory reconstruction.
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct SubstepRecord {
     /// Compartment counts AFTER this substep.
     pub counts: Vec<i64>,
@@ -58,7 +60,7 @@ pub struct SubstepRecord {
 }
 
 /// Full trajectory stored at substep resolution.
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct PGASTrajectory {
     /// Compartment counts at simulation start (before any substep).
     pub initial_counts: Vec<i64>,
@@ -69,7 +71,7 @@ pub struct PGASTrajectory {
 /// Mapping from an IVP parameter to the compartment it controls.
 /// Used to make the initial state stochastic in CSMC-AS and to add
 /// the initial state density to the complete-data LL.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct IVPMapping {
     /// Index into if2_params / priors vectors.
     pub param_idx: usize,
@@ -80,7 +82,7 @@ pub struct IVPMapping {
 }
 
 /// Diagnostics from one CSMC-AS sweep.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CSMCDiagnostics {
     /// Fraction of traceback substeps from non-reference particles.
     /// Near 0% = path degeneracy (reference never replaced, CSMC broken).
@@ -93,7 +95,7 @@ pub struct CSMCDiagnostics {
 }
 
 /// Result of one Gibbs sweep.
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct PGASSweep {
     pub params: Vec<f64>,
     pub log_complete_data_ll: f64,
@@ -107,6 +109,35 @@ pub struct PGASResult {
     pub sweeps: Vec<PGASSweep>,
     pub final_trajectory: PGASTrajectory,
     pub acceptance_rates: Vec<f64>,
+    /// Resume state for chain continuation. Populated at end of every run.
+    pub resume_state: ChainResumeState,
+}
+
+/// Serializable chain state for `--resume`. Saved to `chain_N/resume_state.bin`
+/// via bincode at end of every PGAS run, enabling continuation without
+/// re-doing burn-in or mass matrix adaptation.
+#[derive(Clone, Serialize, Deserialize)]
+pub struct ChainResumeState {
+    /// Config hash — only resume if the statistical problem matches.
+    pub config_hash: String,
+    /// Number of sweeps completed (resume starts from here).
+    pub completed_sweeps: usize,
+    /// Current parameter values (natural scale).
+    pub params: Vec<f64>,
+    /// Current transformed parameters (z-scale for NUTS).
+    pub transformed: Vec<f64>,
+    /// Reference trajectory from the last CSMC sweep.
+    pub trajectory: PGASTrajectory,
+    /// Adapted mass matrix (NUTS).
+    pub mass_matrix: super::nuts::MassMatrix,
+    /// Adapted step size (NUTS).
+    pub nuts_step_size: f64,
+    /// Adapted proposal SDs on log scale (MH-within-Gibbs).
+    pub log_proposal_sd: Vec<f64>,
+    /// Running acceptance counts per parameter.
+    pub total_accepted: Vec<usize>,
+    /// Current complete-data log-likelihood.
+    pub current_ll: f64,
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -833,6 +864,8 @@ pub fn run_pgas(
     flow_indices: &[usize],
     seed: u64,
     on_sweep: Option<&dyn Fn(usize, &PGASSweep, &PGASTrajectory)>,
+    resume_from: Option<ChainResumeState>,
+    config_hash: String,
 ) -> Result<PGASResult, SimError> {
     let d = if2_params.len();
     assert_eq!(d, priors.len(), "priors must match if2_params length");
@@ -844,19 +877,36 @@ pub fn run_pgas(
         |o| o.time,
     );
 
-    // Initialize: forward simulation to get the first reference trajectory
-    eprintln!("  initializing reference trajectory...");
-    let mut trajectory = simulate_reference(
-        model, &current_params, t_end, config.dt, &mut rng,
-    )?;
-    eprintln!("  reference: {} substeps, initial S={}",
-        trajectory.substeps.len(),
-        trajectory.initial_counts.get(0).copied().unwrap_or(0));
+    // Resume or fresh start
+    let start_sweep;
+    let mut trajectory;
+    let mut current_transformed: Vec<f64>;
 
-    // Current transformed parameters
-    let mut current_transformed: Vec<f64> = if2_params.iter()
-        .map(|p| p.to_transformed(current_params[p.index]))
-        .collect();
+    // Extract resume adaptation state (consumed separately from trajectory/params)
+    let resume_nuts = resume_from.as_ref().map(|s| (
+        s.mass_matrix.clone(), s.nuts_step_size,
+        s.log_proposal_sd.clone(), s.total_accepted.clone(), s.current_ll,
+    ));
+
+    if let Some(state) = resume_from {
+        eprintln!("  resuming from sweep {}...", state.completed_sweeps);
+        current_params.copy_from_slice(&state.params);
+        current_transformed = state.transformed;
+        trajectory = state.trajectory;
+        start_sweep = state.completed_sweeps;
+    } else {
+        eprintln!("  initializing reference trajectory...");
+        trajectory = simulate_reference(
+            model, &current_params, t_end, config.dt, &mut rng,
+        )?;
+        eprintln!("  reference: {} substeps, initial S={}",
+            trajectory.substeps.len(),
+            trajectory.initial_counts.get(0).copied().unwrap_or(0));
+        current_transformed = if2_params.iter()
+            .map(|p| p.to_transformed(current_params[p.index]))
+            .collect();
+        start_sweep = 0;
+    }
 
     // Adaptive proposal SDs via Robbins-Monro stochastic approximation.
     // Each parameter's log(proposal_sd) is nudged after every MH attempt
@@ -873,7 +923,7 @@ pub fn run_pgas(
     const ADAPT_C: f64 = 2.0; // adaptation speed (higher = faster convergence)
     let adapt_end = config.burn_in; // stop adapting at end of burn-in
 
-    let mut log_proposal_sd: Vec<f64> = if2_params.iter()
+    let log_proposal_sd: Vec<f64> = if2_params.iter()
         .map(|p| {
             let lo = p.to_transformed(p.lower.max(1e-10));
             let hi = p.to_transformed(p.upper.min(1e10));
@@ -933,22 +983,30 @@ pub fn run_pgas(
         eprintln!("  NUTS enabled (gradient expressions found in IR)");
     }
 
-    // NUTS state (only used when has_gradients)
-    let mut nuts_step_size = 0.1; // initial guess, adapted via dual averaging
+    // NUTS state — restored from resume or initialized fresh
+    let (mut nuts_mass, mut nuts_step_size, log_proposal_sd_restored,
+         mut total_accepted, current_ll_restored) = if let Some((mass, ss, lpsd, ta, ll)) = resume_nuts {
+        (mass, ss, lpsd, ta, Some(ll))
+    } else {
+        (super::nuts::MassMatrix::identity(d), 0.1, log_proposal_sd, vec![0usize; d], None)
+    };
+    let mut log_proposal_sd = log_proposal_sd_restored;
     let mut nuts_dual_avg = super::nuts::DualAveraging::new(nuts_step_size, 0.80);
-    let mut nuts_mass = super::nuts::MassMatrix::identity(d);
 
     // Collect z-scale samples during burn-in for mass matrix adaptation.
-    // Online covariance: accumulate mean and cross-products for dense mass matrix.
     let mut welford_n = 0.0_f64;
     let mut welford_mean = vec![0.0; d];
-    let mut welford_m2 = vec![0.0; d];          // diagonal variances
-    let mut welford_cov = vec![0.0; d * d];     // full covariance (for dense mode)
+    let mut welford_m2 = vec![0.0; d];
+    let mut welford_cov = vec![0.0; d * d];
 
     let mut sweeps = Vec::new();
-    let mut total_accepted = vec![0usize; d];
 
-    for sweep in 0..config.n_sweeps {
+    // Override current_ll if we have a resumed value
+    if let Some(ll) = current_ll_restored {
+        current_ll = ll;
+    }
+
+    for sweep in start_sweep..config.n_sweeps {
         let mut accepted = vec![false; d];
 
         // Current proposal SDs (from adaptive log scale, MH only)
@@ -1209,9 +1267,23 @@ pub fn run_pgas(
         .map(|&n| n as f64 / config.n_sweeps as f64)
         .collect();
 
+    let resume_state = ChainResumeState {
+        config_hash,
+        completed_sweeps: config.n_sweeps,
+        params: current_params,
+        transformed: current_transformed,
+        trajectory: trajectory.clone(),
+        mass_matrix: nuts_mass,
+        nuts_step_size,
+        log_proposal_sd,
+        total_accepted: total_accepted.clone(),
+        current_ll,
+    };
+
     Ok(PGASResult {
         sweeps,
         final_trajectory: trajectory,
         acceptance_rates,
+        resume_state,
     })
 }

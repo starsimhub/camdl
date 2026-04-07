@@ -9,6 +9,7 @@ path = "src/main.rs"
 
 [dependencies]
 axum = "0.7"
+bincode = "1"
 csv = "1"
 hex = "0.4"
 indicatif = "0.17"

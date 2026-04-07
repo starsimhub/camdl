@@ -285,7 +285,15 @@ pub fn run_pgas_cli(
                 &config.flow_indices,
                 chain_seed,
                 Some(&progress_cb),
+                None, // resume_from — TODO: load from resume_state.bin when --resume
+                String::new(), // config_hash — TODO: compute from fit.toml
             ).map_err(|e| format!("pgas chain {} error: {}", chain_id + 1, e))?;
+
+            // Save resume state for future --resume
+            let resume_path = format!("{}/resume_state.bin", chain_dir);
+            if let Ok(encoded) = bincode::serialize(&result.resume_state) {
+                let _ = std::fs::write(&resume_path, encoded);
+            }
 
             let chain_elapsed = chain_start.elapsed();
             eprintln!("  chain {} done: {:.1}s, acceptance: [{}]",
