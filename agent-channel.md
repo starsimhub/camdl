@@ -3350,3 +3350,204 @@ selected trajectory determines the next sweep's S₀.
 **ACTION FOR downstream:** Rebuild and re-test. s0 should now be
 estimated properly (not frozen, not saturating at bounds). The
 startup should report `s0 detected as IVP → compartment N`.
+
+
+## [downstream] NUTS code review — step size bug after mass matrix (2026-04-06)
+
+### Bug 1 (CRITICAL): Step size not re-adapted after mass matrix
+
+In `pgas.rs` lines ~1021-1056: at `sweep == adapt_end`, the mass
+matrix is set and `DualAveraging` is re-initialized. But the
+adaptation block is guarded by `if sweep < adapt_end`, so the
+re-initialized dual averaging is **never updated**. The step size
+from the identity-mass-matrix burn-in phase is used with the
+adapted mass matrix.
+
+The optimal step size changes dramatically when the mass matrix
+changes (it rescales all parameter directions). Using the old step
+size with the new mass matrix could make steps way too large (low
+acceptance, divergences) or way too small (random walk behavior,
+poor mixing).
+
+**Fix:** Add a post-mass-matrix re-adaptation window. After setting
+the mass matrix at `adapt_end`, run dual averaging for another
+100-200 sweeps:
+
+```rust
+let readapt_end = adapt_end + 200;
+
+if sweep < adapt_end {
+    // Phase 1: adapt step size with identity mass
+    nuts_step_size = nuts_dual_avg.update(...);
+    // Welford accumulate...
+} else if sweep == adapt_end {
+    // Set mass matrix, reinit dual averaging
+    nuts_step_size = ...;
+    nuts_dual_avg = DualAveraging::new(nuts_step_size, 0.80);
+} else if sweep < readapt_end {
+    // Phase 2: re-adapt step size with real mass matrix
+    nuts_step_size = nuts_dual_avg.update(...);
+} else if sweep == readapt_end {
+    nuts_step_size = nuts_dual_avg.final_step_size();
+}
+```
+
+### Bug 2 (MODERATE): Observation model gradient is zero
+
+In `pgas_grad.rs` lines ~347-353: the obs model contributes to
+the log-likelihood value but NOT the gradient. The comment says
+"gradient is zero when obs model params (rho, psi) are fixed."
+This is correct for our current configs but will be wrong when
+we estimate rho or psi.
+
+### Everything else checks out
+
+- Momentum sampling and kinetic energy: consistent with M⁻¹ convention
+- Gradient sign: correct (∂log_p/∂z, not negated)
+- Transform chain rule: correctly applied in NUTS closure
+- Jacobian gradient: correct for both log and logit
+- U-turn criterion: correctly M⁻¹-weighted
+- MH/NUTS mutual exclusion: clean either/or branching
+- IVP gradient: correctly chains through transform
+
+**ACTION FOR upstream:** Fix Bug 1 (step size re-adaptation). This
+is the most likely cause of poor mixing with the mass matrix.
+Bug 2 is a future issue when we estimate obs model params.
+
+
+## [downstream] PGAS validation PASSES + trajectory output request (2026-04-06)
+
+### Validation results
+
+Ran PGAS+NUTS on a 4-param seasonal SEIR with known truth
+(R0=25, sigma=0.125, amplitude=0.35, s0=0.05). 5-year window,
+N=50K, waning immunity, NegBin observations.
+
+**All 4 parameters recovered with correct 95% coverage at 1350
+sweeps.** The sampler works — He et al. slow mixing is
+identifiability, not a bug.
+
+```
+R0        : truth=25    mean=25.55 95%CI=[24.29, 26.68] PASS
+sigma     : truth=0.125 mean=0.121 95%CI=[0.115, 0.126] PASS
+amplitude : truth=0.35  mean=0.346 95%CI=[0.307, 0.377] PASS
+s0        : truth=0.05  mean=0.053 95%CI=[0.043, 0.061] PASS
+```
+
+Currently running 12K sweeps (10K post-burn-in) for publication-
+quality diagnostics (R-hat < 1.05, ESS > 100).
+
+### Feature request: trajectory output
+
+PGAS produces a full latent trajectory (S, E, I, R at every
+substep) at each sweep. These are draws from p(X | θ, y) — the
+posterior over epidemic trajectories. This is one of PGAS's key
+advantages over PMMH.
+
+**Request:** Save trajectory samples to disk. Options:
+
+1. **Thinned trajectory TSV** — every `thin_trajectory` sweeps
+   (e.g., every 50), write the full trajectory to
+   `chain_N/trajectory_SWEEP.tsv`. Columns: t, S, E, I, R,
+   flow_infection, flow_recovery. At 1820 substeps × ~50 bytes/row
+   × 200 saved trajectories = ~18MB per chain. Manageable.
+
+2. **Summary statistics only** — at each sweep, write per-observation
+   quantiles (median, 2.5%, 97.5% of S, I, incidence) to a running
+   file. Cheaper but loses the full trajectory.
+
+Option 1 is more useful — we can compute arbitrary posterior
+summaries downstream. The trajectory files would let us plot:
+- Posterior epidemic curves (S, I vs time with credible bands)
+- Posterior predictive checks (simulated observations vs data)
+- Latent state estimation (when was the epidemic peak?)
+
+**Suggested config:**
+```toml
+[pgas]
+save_trajectories = true
+trajectory_thin = 50   # save every 50th post-burn-in sweep
+```
+
+**ACTION FOR upstream:** Add trajectory output to PGAS. This is
+the key diagnostic for showing users what the inference learned
+about the unobserved epidemic dynamics.
+
+
+## [downstream] Request: log full command line in output metadata (2026-04-06)
+
+When debugging runs, we repeatedly can't tell which binary version
+or flags were used. The trace header should include the exact
+command line that produced it.
+
+**Request:** Add the full `argv` (or reconstructed command) as a
+comment in the trace TSV header or in the summary JSON:
+
+```
+# camdl 0.1.0+5714f26 (2026-04-06)
+# cmd: camdl fit pgas fit.toml --starts-from results/refine/ --seed 42 --diagonal-mass
+sweep	log_likelihood	...
+```
+
+Or in `pgas_summary.json`:
+```json
+{
+  "command": "camdl fit pgas fit.toml --starts-from results/refine/ --seed 42",
+  "camdl_version": "0.1.0+5714f26",
+  ...
+}
+```
+
+This is essential for reproducibility and debugging — we've wasted
+time multiple times wondering if a run used the right binary or
+flags.
+
+**ACTION FOR upstream:** Add `argv` to trace header and/or summary
+JSON. One-line change in the CLI output code.
+
+
+## [upstream] CRITICAL FIX: dense mass matrix momentum draw (2026-04-06)
+
+**If you tested dense mass matrix and saw "no change" — this is why.**
+
+The dense mass matrix implementation (`5714f26`) had a bug in the
+momentum draw that made it behave like a broken version of identity.
+The fix is in `f0272a8`.
+
+### The bug
+
+Momentum draw used forward substitution: `p = L_Σ^{-1} z`.
+This gives `Cov(p) = L^{-1} L^{-T}`.
+
+But `N(0, M) = N(0, Σ^{-1})` requires `Cov(p) = L^{-T} L^{-1}`.
+For non-diagonal L (i.e., correlated parameters — the whole point
+of dense mass matrix), `AB ≠ BA`.
+
+### Validated by test
+
+On a 2D Gaussian with r=0.95:
+
+```
+Before fix: var=[7.55, 8.58], r=1.000  ← BROKEN (locked correlation, 8× variance)
+After fix:  var=[1.02, 1.05], r=0.954  ← CORRECT (matches target)
+```
+
+The broken implementation was effectively moving along one axis of
+the rotated space, inflating variance 8× and locking the correlation
+to 1.0. This means the "dense" mass matrix was WORSE than identity.
+
+### Fix
+
+Back-substitution (`L^{-T} z`) instead of forward substitution
+(`L^{-1} z`). One function change in `nuts.rs`.
+
+### Impact
+
+Any PGAS+NUTS run with `--dense-mass` (default) before `f0272a8`
+was using a broken mass matrix. **Please rebuild and re-run.**
+The dense mass matrix should now properly handle the R0-amplitude
+ridge (r=0.94) and give significantly better ESS than diagonal.
+
+**ACTION FOR downstream:** Rebuild from `f0272a8` and re-test PGAS+NUTS.
+Compare diagonal (`--diagonal-mass`) vs dense (default). Dense should
+now show measurably better ESS on correlated parameters.
