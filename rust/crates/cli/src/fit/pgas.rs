@@ -11,7 +11,7 @@ use crate::fit::scout::now_iso8601_pub;
 use sim::inference::{
     if2::IF2Param,
     pmmh::{Prior, mcmc_ess},
-    pgas::{PGASConfig, run_pgas, PGASSweep, PGASTrajectory},
+    pgas::{PGASConfig, ChainResumeState, run_pgas, PGASSweep, PGASTrajectory},
 };
 use std::collections::HashMap;
 
@@ -28,6 +28,7 @@ pub fn run_pgas_cli(
     force: bool,
     use_nuts: bool,
     dense_mass: bool,
+    resume: bool,
 ) -> Result<(), String> {
     let stage_dir = format!("{}/pgas", fit.fit.output_dir);
     let sc = fit.pgas.as_ref();
@@ -103,6 +104,42 @@ pub fn run_pgas_cli(
             }
         }
     }
+
+    // Compute config hash — identifies the statistical problem.
+    // Changes to model/data/priors/bounds/particles/dt invalidate resume state.
+    let config_hash = compute_config_hash(fit, &config);
+
+    // Load resume states if --resume
+    let resume_states: Vec<Option<ChainResumeState>> = if resume {
+        (0..n_chains).map(|chain_id| {
+            let path = format!("{}/chain_{}/resume_state.bin", stage_dir, chain_id + 1);
+            match std::fs::read(&path) {
+                Ok(data) => match bincode::deserialize::<ChainResumeState>(&data) {
+                    Ok(state) => {
+                        if state.config_hash != config_hash {
+                            eprintln!("error: config hash mismatch for chain {} — \
+                                model/data/priors have changed since the original run. \
+                                Cannot resume. Re-run from scratch or use --force.",
+                                chain_id + 1);
+                            std::process::exit(1);
+                        }
+                        eprintln!("  chain {}: resuming from sweep {}", chain_id + 1, state.completed_sweeps);
+                        Some(state)
+                    }
+                    Err(e) => {
+                        eprintln!("warning: cannot deserialize {}: {}. Starting fresh.", path, e);
+                        None
+                    }
+                }
+                Err(_) => {
+                    eprintln!("warning: no resume state for chain {}. Starting fresh.", chain_id + 1);
+                    None
+                }
+            }
+        }).collect()
+    } else {
+        vec![None; n_chains]
+    };
 
     // Generate per-chain starting parameters.
     // Without --starts-from: random uniform on the natural scale within declared
@@ -189,17 +226,25 @@ pub fn run_pgas_cli(
                     })
                     .collect();
 
-            // Streaming trace file
+            // Streaming trace file — append when resuming, create when fresh
             let trace_path = format!("{}/trace.tsv", chain_dir);
+            let is_resuming = resume_states[chain_id].is_some();
             let trace_file = std::sync::Mutex::new({
                 use std::io::Write;
-                let mut f = std::io::BufWriter::new(
-                    std::fs::File::create(&trace_path).unwrap()
-                );
-                write!(f, "sweep\tlog_likelihood\ttrajectory_renewal").unwrap();
-                for spec in &config.if2_params { write!(f, "\t{}", spec.name).unwrap(); }
-                writeln!(f).unwrap();
-                f
+                if is_resuming && std::path::Path::new(&trace_path).exists() {
+                    // Append mode — header already exists
+                    std::io::BufWriter::new(
+                        std::fs::OpenOptions::new().append(true).open(&trace_path).unwrap()
+                    )
+                } else {
+                    let mut f = std::io::BufWriter::new(
+                        std::fs::File::create(&trace_path).unwrap()
+                    );
+                    write!(f, "sweep\tlog_likelihood\ttrajectory_renewal").unwrap();
+                    for spec in &config.if2_params { write!(f, "\t{}", spec.name).unwrap(); }
+                    writeln!(f).unwrap();
+                    f
+                }
             });
 
             let chain_start = std::time::Instant::now();
@@ -285,8 +330,8 @@ pub fn run_pgas_cli(
                 &config.flow_indices,
                 chain_seed,
                 Some(&progress_cb),
-                None, // resume_from — TODO: load from resume_state.bin when --resume
-                String::new(), // config_hash — TODO: compute from fit.toml
+                resume_states[chain_id].clone(),
+                config_hash.clone(),
             ).map_err(|e| format!("pgas chain {} error: {}", chain_id + 1, e))?;
 
             // Save resume state for future --resume
@@ -517,4 +562,51 @@ fn eval_prior_arg(s: &str) -> Option<f64> {
         return Some(v.ln());
     }
     None
+}
+
+/// Compute a config hash that identifies the statistical problem.
+/// Changes to any of these fields invalidate a resume state.
+/// Fields NOT included (safe to change on resume): sweeps, burn_in, thin,
+/// n_trajectories, use_nuts, dense_mass.
+fn compute_config_hash(fit: &FitToml, config: &FitRunConfig) -> String {
+    use sha2::{Sha256, Digest};
+
+    let mut h = Sha256::new();
+
+    // Model structure
+    h.update(config.model_ir_json.as_bytes());
+
+    // Data file contents (not paths — content determines the problem)
+    let mut data_entries: Vec<_> = fit.data.iter().collect();
+    data_entries.sort_by_key(|(k, _)| k.as_str());
+    for (name, path) in &data_entries {
+        h.update(name.as_bytes());
+        h.update(b"\x00");
+        if let Ok(contents) = std::fs::read(path) {
+            h.update(&contents);
+        }
+        h.update(b"\x00");
+    }
+
+    // Estimate specs (sorted by name for determinism)
+    let mut est_entries: Vec<_> = fit.estimate.iter().collect();
+    est_entries.sort_by_key(|(k, _)| k.as_str());
+    for (name, spec) in &est_entries {
+        h.update(name.as_bytes());
+        h.update(format!("{:?}{:?}{:?}{:?}",
+            spec.bounds, spec.prior, spec.transform, spec.ivp).as_bytes());
+    }
+
+    // Fixed parameter values
+    let mut fixed_entries: Vec<_> = fit.fixed.iter().collect();
+    fixed_entries.sort_by_key(|(k, _)| k.as_str());
+    for (name, val) in &fixed_entries {
+        h.update(format!("{}={}", name, val).as_bytes());
+    }
+
+    // n_particles and dt
+    h.update(config.if2_config.n_particles.to_le_bytes());
+    h.update(config.if2_config.dt.to_bits().to_le_bytes());
+
+    hex::encode(h.finalize())
 }

@@ -103,6 +103,7 @@ pub fn cmd_fit_pgas(args: &[String]) {
     let starts_from = parse_optional_starts_from(args);
     let no_nuts = args.iter().any(|a| a == "--no-nuts");
     let diagonal_mass = args.iter().any(|a| a == "--diagonal-mass");
+    let resume = args.iter().any(|a| a == "--resume");
 
     let (model, _) = load_model_for_validation(&fit);
     let model_params: Vec<String> = model.parameters.iter().map(|p| p.name.clone()).collect();
@@ -115,7 +116,7 @@ pub fn cmd_fit_pgas(args: &[String]) {
         std::process::exit(1);
     });
 
-    pgas::run_pgas_cli(&fit, starts_from.as_deref(), seed, force, !no_nuts, !diagonal_mass).unwrap_or_else(|e| {
+    pgas::run_pgas_cli(&fit, starts_from.as_deref(), seed, force, !no_nuts, !diagonal_mass, resume).unwrap_or_else(|e| {
         eprintln!("error: {}", e);
         std::process::exit(1);
     });
@@ -143,6 +144,7 @@ fn parse_fit_args(args: &[String], _needs_starts_from: bool) -> (FitToml, u64, b
             "--check-variance" => {} // consumed by cmd_fit_pmmh
             "--no-nuts" => {} // consumed by cmd_fit_pgas
             "--diagonal-mass" => {} // consumed by cmd_fit_pgas
+            "--resume" => {} // consumed by cmd_fit_pgas
             s if s.starts_with("--") => {
                 eprintln!("unknown flag: {}", s);
                 std::process::exit(1);
