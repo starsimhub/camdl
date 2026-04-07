@@ -10,9 +10,9 @@ use ir::{
 };
 use sim::{
     compiled_model::CompiledModel,
-    config::{GillespieConfig, TauLeapConfig, ChainBinomialConfig, SimConfig},
+    config::{GillespieConfig, TauLeapConfig, SimConfig},
     simulate::Simulate,
-    GillespieSim, TauLeapSim, ChainBinomialSim,
+    GillespieSim, TauLeapSim,
 };
 
 fn load_golden(name: &str) -> ir::Model {
@@ -104,6 +104,7 @@ fn test_two_state_equilibrium() {
 
 // ── Birth-death stationary distribution ─────────────────────────────────
 
+#[allow(dead_code)]
 fn birth_death_model(birth_rate: f64, death_rate: f64) -> Model {
     Model {
         name: "birth_death_test".into(),

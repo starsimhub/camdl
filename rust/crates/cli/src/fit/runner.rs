@@ -938,7 +938,7 @@ mod tests {
     fn chain_output_fixed_params_correct() {
         use std::collections::HashMap;
         use ir::{
-            expr::{BinOpExpr, BinOpWrap, BinOp, Expr, ParamExpr, PopExpr, PopSumExpr},
+            expr::{BinOpExpr, BinOpWrap, BinOp, Expr, ParamExpr, PopExpr},
             model::{Compartment, CompartmentKind, InitialConditions, OutputConfig, OutputSchedule, SimulationConfig},
             parameter::Parameter,
             transition::{Transition, StoichiometryEntry, DrawMethod},

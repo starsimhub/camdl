@@ -10,7 +10,7 @@
 
 use std::collections::HashMap;
 use ir::{
-    expr::{BinOpExpr, BinOpWrap, BinOp, ConstExpr, Expr, ParamExpr, PopExpr},
+    expr::{BinOpExpr, BinOpWrap, BinOp, Expr, ParamExpr, PopExpr},
     model::{Compartment, CompartmentKind, InitialConditions, OutputConfig, OutputSchedule, SimulationConfig},
     parameter::Parameter,
     transition::{Transition, StoichiometryEntry, DrawMethod},

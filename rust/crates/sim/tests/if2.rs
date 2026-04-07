@@ -6,7 +6,7 @@
 
 use std::collections::HashMap;
 use ir::{
-    expr::{BinOpExpr, BinOpWrap, BinOp, ConstExpr, Expr, ParamExpr, PopExpr, PopSumExpr},
+    expr::{BinOpExpr, BinOpWrap, BinOp, Expr, ParamExpr, PopExpr, PopSumExpr},
     model::{Compartment, CompartmentKind, InitialConditions, OutputConfig, OutputSchedule, SimulationConfig},
     parameter::Parameter,
     transition::{Transition, StoichiometryEntry, DrawMethod},
@@ -170,7 +170,7 @@ fn test_if2_converges_from_dispersed_start() {
         step_one(&compiled, &mut state.counts, &mut state.flow_accumulators, p, t, dt, rng, scratch)
     };
     let project_fn = |state: &ParticleState| state.flow_accumulators[1] as f64;
-    let dmeasure_fn = |proj: f64, obs: f64, p: &[f64]| {
+    let dmeasure_fn = |proj: f64, obs: f64, _p: &[f64]| {
         negbin_logpmf(obs, proj.max(0.1), 10.0)
     };
 

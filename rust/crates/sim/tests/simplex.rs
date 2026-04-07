@@ -273,13 +273,12 @@ fn perturb_different_rw_sds() {
         rw_sds: vec![1.0, 0.01, 0.01], // first member moves a lot
     };
     let start = vec![1.0/3.0, 1.0/3.0, 1.0/3.0];
-    let mut params = start.clone();
     let mut rng = rng();
 
     let mut total_movement = vec![0.0; 3];
     let n_reps = 100;
     for _ in 0..n_reps {
-        params = start.clone();
+        let mut params = start.clone();
         group.perturb(&mut params, &mut rng, 1.0);
         for i in 0..3 {
             total_movement[i] += (params[i] - start[i]).abs();
