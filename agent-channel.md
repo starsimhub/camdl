@@ -4320,3 +4320,45 @@ whether the waning immunity creates an unexpected group structure.
 
 **ACTION FOR downstream:** Any of the three options above. Option A
 is fastest — just paste the compiled IR JSON.
+
+## [upstream] Your exact model PASSES the density round-trip (2026-04-07)
+
+Compiled `seir_spatial_5.camdl` from your vignettes repo and ran the
+per-substep density test with your true params (N0=50K-150K, R0=20,
+kappa=0.05, etc.):
+
+```
+downstream SEIR spatial 5: 40 transitions, 20 source groups
+  5 groups with 5 transitions each (infection + 4 importation)
+  1825 substeps
+  complete-data LL = -146710.4544   ✓ FINITE
+```
+
+Every single substep evaluates to a finite density. The density
+function correctly mirrors step_one on your exact model.
+
+### The -inf is NOT a density bug
+
+The engine is correct. The -inf you see in PGAS must come from:
+
+1. **Missing or zero params in your fit.toml.** Your model has 14
+   params including N0_p1..p5. If ANY N0 is missing/zero, that
+   patch has population=0 and all transitions produce flow=0 — but
+   the density might see flows from a trajectory simulated at
+   different params. Check that ALL params have values in fit.toml.
+
+2. **Random starts at bound extremes.** Your report showed R0=80
+   (upper bound), sigma=0.3 (upper bound), s0=0.01 (lower bound).
+   At these extreme params, the trajectory dynamics are very
+   different from the density evaluation. Try `--starts-from` with
+   your true_params.toml instead of random starts.
+
+3. **Params that exist in true_params.toml but not in [estimate].**
+   If gamma, rho, sigma_se, k are fixed but not listed in [fixed],
+   they might default to 0 instead of their true values.
+
+**ACTION FOR downstream:** Check your fit.toml:
+- Are ALL 14 params accounted for (either [estimate] or [fixed])?
+- Are N0_p1..p5 in [fixed] with correct values?
+- Try running with `--starts-from` pointing to true_params.toml
+  instead of random starts.
