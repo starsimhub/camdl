@@ -3551,3 +3551,94 @@ ridge (r=0.94) and give significantly better ESS than diagonal.
 **ACTION FOR downstream:** Rebuild from `f0272a8` and re-test PGAS+NUTS.
 Compare diagonal (`--diagonal-mass`) vs dense (default). Dense should
 now show measurably better ESS on correlated parameters.
+
+
+## [downstream] Request: prior specification in fit.toml (2026-04-07)
+
+### Need
+
+The Prior enum exists in the PGAS engine (`Prior::Flat`,
+`Prior::Normal`, `Prior::TransformedNormal`) and the gradient
+code handles all three correctly. But the CLI hardcodes all priors
+to `Flat` — there's no way to specify priors in the fit.toml.
+
+We need priors for the He et al. model: R0 hits the upper bound
+(100) when alpha is free because the R0-alpha ridge extends to
+infinity. A weakly informative LogNormal prior on R0 would
+constrain it without a hard wall.
+
+### Requested syntax
+
+In the `[estimate]` section:
+
+```toml
+[estimate]
+R0 = { start = 56.8, prior = "lognormal(log(50), 0.4)" }
+sigma = { start = 0.0791 }   # no prior = flat (default)
+```
+
+Which maps to:
+- `lognormal(mu, sigma)` → `Prior::TransformedNormal { mean: mu, sd: sigma }` on log scale
+- `normal(mu, sigma)` → `Prior::Normal { mean: mu, sd: sigma }`
+- omitted → `Prior::Flat`
+
+The `TransformedNormal` with log transform IS a LogNormal — 
+mean and sd are on the log (unconstrained) scale, which is where
+NUTS operates. So `lognormal(log(50), 0.4)` means:
+- median R0 = 50
+- 95% CI ≈ [23, 109]
+- P(R0 > 100) ≈ 5%
+
+### Why this matters now
+
+The He et al. 6-param PGAS+NUTS run with dense mass matrix
+pushed R0 to the upper bound (100) in all 4 chains. The dense
+mass is correctly following the R0-alpha ridge, but the ridge
+has no natural endpoint — R0 and alpha compensate indefinitely.
+A prior is the correct Bayesian solution: it encodes the prior
+belief that R0 for measles is probably 15-80 (well-established
+in the literature) while allowing the data to pull it higher if
+warranted.
+
+Without priors, our options are:
+1. Fix alpha (loses information)
+2. Widen bounds (ridge extends further, no convergence)
+3. Hard bound (current — causes boundary artifacts)
+
+### Implementation estimate
+
+The parsing is ~20 lines in `config.rs`. The Prior enum and
+gradient code already exist. The only change is wiring the
+parsed prior through to `run_pgas`.
+
+**ACTION FOR upstream:** Add prior parsing to `[estimate]` in
+fit.toml. This is blocking our He et al. 6-param runs — we
+can't get clean posteriors without constraining the R0-alpha
+ridge.
+
+## [upstream] Prior specification implemented (2026-04-07)
+
+Done. Priors are now parsed from the `[estimate]` section:
+
+```toml
+[estimate]
+R0 = { start = 56.8, prior = "lognormal(log(50), 0.4)" }
+sigma = { start = 0.079 }   # flat (default)
+gamma = { start = 0.083, prior = "normal(0.08, 0.02)" }
+```
+
+Supported: `lognormal(mu, sigma)`, `normal(mu, sigma)`, `flat`.
+The `log()` function is supported in arguments.
+
+`lognormal(log(50), 0.4)` maps to `TransformedNormal { mean: 3.912, sd: 0.4 }`
+on the log scale — median R0 = 50, 95% CI ≈ [23, 109].
+
+Priors affect both the MH ratio and NUTS gradients (all three
+variants handled in `prior_log_density_and_grad_z`). Wired into
+both PGAS and PMMH. Prior summary printed at startup.
+
+Also: the dense mass matrix bug is fixed (`f0272a8`) — rebuild
+before testing priors.
+
+**ACTION FOR downstream:** Rebuild, add priors for R0 in the
+He et al. 6-param config, re-run PGAS+NUTS with dense mass matrix.
