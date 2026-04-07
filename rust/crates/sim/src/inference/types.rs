@@ -64,6 +64,53 @@ impl ParticleSwarm {
     }
 }
 
+/// One observation stream: how to project from state, what data to compare to,
+/// and how to evaluate the likelihood.
+///
+/// The joint observation weight at obs_idx is:
+///   Σ_stream obs_loglik_fn(project(stream, state), observations[obs_idx])
+///
+/// This is the SINGLE shared type used by PF, PGAS, CSMC, and gradient evaluation.
+/// All observation accumulation goes through `joint_obs_weight` — no inline
+/// projection+likelihood code paths.
+pub struct ObsStreamSpec {
+    /// Indices into flow_accumulators for this stream's projection.
+    pub flow_indices: Vec<usize>,
+    /// Observation log-likelihood: (projected, observed) → loglik.
+    pub obs_loglik_fn: Box<dyn Fn(f64, f64) -> f64 + Send + Sync>,
+    /// Observed values indexed by observation time index.
+    pub observations: Vec<f64>,
+}
+
+/// Joint observation weight across all streams at one observation time.
+///
+/// Called by PF (from ParticleState), PGAS (from cumulative flows),
+/// and gradient evaluation. ONE function, ONE code path, audited ONCE.
+pub fn joint_obs_weight(
+    streams: &[ObsStreamSpec],
+    cum_flows: &[u64],
+    obs_idx: usize,
+) -> f64 {
+    streams.iter().map(|s| {
+        let projected: f64 = s.flow_indices.iter()
+            .map(|&i| cum_flows[i] as f64).sum();
+        (s.obs_loglik_fn)(projected, s.observations[obs_idx])
+    }).sum()
+}
+
+/// Joint observation weight from a ParticleState (convenience for PF).
+pub fn joint_obs_weight_particle(
+    streams: &[ObsStreamSpec],
+    state: &ParticleState,
+    obs_idx: usize,
+) -> f64 {
+    streams.iter().map(|s| {
+        let projected: f64 = s.flow_indices.iter()
+            .map(|&i| state.flow_accumulators[i] as f64).sum();
+        (s.obs_loglik_fn)(projected, s.observations[obs_idx])
+    }).sum()
+}
+
 /// Numerically stable log-sum-exp.
 pub fn log_sum_exp(log_values: &[f64]) -> f64 {
     let max = log_values.iter().cloned().fold(f64::NEG_INFINITY, f64::max);

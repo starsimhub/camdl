@@ -213,11 +213,17 @@ pub fn run_pgas_cli(
                 dense_mass, // --diagonal-mass to disable
             };
 
-            // Each chain gets its own obs_loglik closure
+            // Build per-stream observation specs
             let compiled = &*config.compiled;
-            let obs_loglik_fn = sim::inference::obs_model::compile_obs_loglik_pf(
-                &config.obs_model_ir, config.compiled.clone(), &config.base_params,
-            );
+            let obs_stream_specs: Vec<sim::inference::ObsStreamSpec> = config.streams.iter()
+                .map(|s| sim::inference::ObsStreamSpec {
+                    flow_indices: s.flow_indices.clone(),
+                    obs_loglik_fn: sim::inference::obs_model::compile_obs_loglik_pf(
+                        &s.obs_model_ir, config.compiled.clone(), &config.base_params,
+                    ),
+                    observations: s.data.iter().map(|o| o.value).collect(),
+                })
+                .collect();
 
             let observations: Vec<sim::inference::particle_filter::Observation> =
                 config.observations.iter()
@@ -326,8 +332,7 @@ pub fn run_pgas_cli(
                 &chain_starts[chain_id],
                 &pgas_config,
                 &observations,
-                &*obs_loglik_fn,
-                &config.flow_indices,
+                &obs_stream_specs,
                 chain_seed,
                 Some(&progress_cb),
                 resume_states[chain_id].clone(),

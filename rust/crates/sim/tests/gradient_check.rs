@@ -60,15 +60,14 @@ fn test_gradient_vs_finite_differences_sir() {
     let trajectory = simulate_reference(&compiled, &params, t_end, dt, &mut rng).unwrap();
 
     let observations: Vec<Observation> = vec![];
-    let flow_indices: Vec<usize> = vec![];
     let ivp_mappings: Vec<IVPMapping> = vec![];
 
-    let obs_loglik_fn = |_: f64, _: f64| -> f64 { 0.0 };
+    let obs_streams: Vec<sim::inference::ObsStreamSpec> = vec![];
 
     // Analytical gradient
     let (ll, grad) = complete_data_loglik_grad(
         &compiled, &trajectory, &params, &observations, dt,
-        &obs_loglik_fn, &flow_indices, &ivp_mappings,
+        &obs_streams, &ivp_mappings,
         &param_names, &param_indices,
     ).unwrap();
 
@@ -86,11 +85,11 @@ fn test_gradient_vs_finite_differences_sir() {
 
         let ll_plus = complete_data_loglik(
             &compiled, &trajectory, &p_plus, &observations, dt,
-            &obs_loglik_fn, &flow_indices, &ivp_mappings,
+            &obs_streams, &ivp_mappings,
         ).unwrap();
         let ll_minus = complete_data_loglik(
             &compiled, &trajectory, &p_minus, &observations, dt,
-            &obs_loglik_fn, &flow_indices, &ivp_mappings,
+            &obs_streams, &ivp_mappings,
         ).unwrap();
 
         let fd = (ll_plus - ll_minus) / (2.0 * eps);
@@ -145,9 +144,8 @@ fn test_nuts_target_gradient_on_z_scale() {
     let trajectory = simulate_reference(&compiled, &[0.4, 0.1, 1000.0, 10.0], t_end, dt, &mut rng).unwrap();
 
     let observations: Vec<Observation> = vec![];
-    let flow_indices: Vec<usize> = vec![];
     let ivp_mappings: Vec<IVPMapping> = vec![];
-    let obs_loglik_fn = |_: f64, _: f64| -> f64 { 0.0 };
+    let obs_streams: Vec<sim::inference::ObsStreamSpec> = vec![];
 
     // Build IF2Params with Log transforms (like real inference)
     let if2_params: Vec<IF2Param> = compiled.model.parameters.iter().enumerate()
@@ -184,7 +182,7 @@ fn test_nuts_target_gradient_on_z_scale() {
 
         let (ll, ll_grad_theta) = sim::inference::pgas_grad::complete_data_loglik_grad(
             &compiled, &trajectory, &params, &observations, dt,
-            &obs_loglik_fn, &flow_indices, &ivp_mappings,
+            &obs_streams, &ivp_mappings,
             &param_names, &param_indices,
         ).unwrap_or((f64::NEG_INFINITY, vec![0.0; d]));
 

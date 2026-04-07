@@ -16,7 +16,7 @@ use crate::propensity::{eval_propensities, eval_expr, eval_expr_deriv, EvalCtx};
 use crate::state::{IntState, RealState};
 use crate::inference::obs_loglik::binom_logpmf;
 use crate::inference::pgas::{PGASTrajectory, IVPMapping};
-use crate::inference::particle_filter::{Observation, ObsLoglikFn};
+use crate::inference::particle_filter::Observation;
 
 /// Evaluate log transition density AND its gradient w.r.t. estimated parameters
 /// for a single substep.
@@ -273,8 +273,8 @@ pub fn complete_data_loglik_grad(
     params: &[f64],
     observations: &[Observation],
     dt: f64,
-    obs_loglik_fn: &ObsLoglikFn,
-    flow_indices: &[usize],
+    obs_streams: &[super::types::ObsStreamSpec],
+    
     ivp_mappings: &[IVPMapping],
     param_names: &[String],
     param_indices: &[usize],
@@ -346,9 +346,7 @@ pub fn complete_data_loglik_grad(
 
         // Observation density (gradient is zero when obs params are fixed)
         if let Some(&obs_idx) = obs_at_substep.get(&s) {
-            let projected: f64 = flow_indices.iter()
-                .map(|&i| cum_flows[i] as f64).sum();
-            log_p += obs_loglik_fn(projected, observations[obs_idx].value);
+            log_p += super::types::joint_obs_weight(obs_streams, &cum_flows, obs_idx);
             for f in &mut cum_flows { *f = 0; }
         }
     }

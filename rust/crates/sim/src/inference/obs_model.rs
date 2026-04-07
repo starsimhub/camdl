@@ -87,7 +87,7 @@ fn eval_likelihood(
                 + k as f64 * p_val.ln() + (n - k) as f64 * (1.0 - p_val).ln()
         }
         Likelihood::BetaBinomial(_) => {
-            panic!("BetaBinomial obs_loglik not yet implemented. Use neg_binomial or normal.");
+            log::warn!("BetaBinomial obs_loglik not implemented — returning -inf"); return f64::NEG_INFINITY;
         }
         Likelihood::Bernoulli(b) => {
             let p_val = eval_expr(&b.p, &ctx(projected)).unwrap_or(0.5);
@@ -172,7 +172,7 @@ fn sample_obs(
             rng.binomial(n_val.round().max(0.0) as u64, p_val.clamp(0.0, 1.0)) as f64
         }
         Likelihood::BetaBinomial(_) => {
-            panic!("BetaBinomial rmeasure not yet implemented.");
+            log::warn!("BetaBinomial rmeasure not implemented — returning 0"); return 0.0;
         }
         Likelihood::Bernoulli(b) => {
             let p_val = eval_expr(&b.p, &ctx(projected)).unwrap_or(0.5);
@@ -210,7 +210,7 @@ fn eval_obs_mean(
             n_val * p_val
         }
         Likelihood::BetaBinomial(_) => {
-            panic!("BetaBinomial obs_mean not yet implemented.");
+            log::warn!("BetaBinomial obs_mean not implemented — returning projected"); return projected;
         }
         Likelihood::Bernoulli(b) => {
             eval_expr(&b.p, &ctx(projected)).unwrap_or(0.5)

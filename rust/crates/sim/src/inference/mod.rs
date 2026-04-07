@@ -24,7 +24,7 @@ pub mod pgas_grad;
 pub mod nuts;
 
 // Re-exports
-pub use types::{ParticleState, ParticleSwarm};
+pub use types::{ParticleState, ParticleSwarm, ObsStreamSpec, joint_obs_weight, joint_obs_weight_particle};
 pub use obs_loglik::{negbin_logpmf, normal_logpdf, discretized_normal_logpmf, normal_cdf};
 pub use particle_filter::bootstrap_filter;
 

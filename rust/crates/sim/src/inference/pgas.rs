@@ -18,7 +18,7 @@ use crate::compiled_model::CompiledModel;
 use crate::rng::StatefulRng;
 use crate::error::SimError;
 use crate::inference::obs_loglik::{poisson_logpmf, binom_logpmf};
-use crate::inference::particle_filter::{Observation, ObsLoglikFn};
+use crate::inference::particle_filter::Observation;
 use crate::inference::resampling::systematic_resample;
 use crate::inference::pmmh::Prior;
 use crate::inference::if2::{IF2Param, Transform};
@@ -295,8 +295,7 @@ pub fn complete_data_loglik(
     params: &[f64],
     observations: &[Observation],
     dt: f64,
-    obs_loglik_fn: &ObsLoglikFn,
-    flow_indices: &[usize],
+    obs_streams: &[super::types::ObsStreamSpec],
     ivp_mappings: &[IVPMapping],
 ) -> Result<f64, SimError> {
     let t_start = model.model.simulation.t_start;
@@ -387,12 +386,9 @@ pub fn complete_data_loglik(
             cum_flows[i] += f;
         }
 
-        // Observation density at observation times
+        // Observation density — joint across all streams
         if let Some(&obs_idx) = obs_at_substep.get(&s) {
-            let projected: f64 = flow_indices.iter()
-                .map(|&i| cum_flows[i] as f64).sum();
-            log_p += obs_loglik_fn(projected, observations[obs_idx].value);
-            // Reset cumulative flows
+            log_p += super::types::joint_obs_weight(obs_streams, &cum_flows, obs_idx);
             for f in &mut cum_flows { *f = 0; }
         }
     }
@@ -457,8 +453,7 @@ pub fn csmc_as(
     reference: &PGASTrajectory,
     n_particles: usize,
     dt: f64,
-    obs_loglik_fn: &ObsLoglikFn,
-    flow_indices: &[usize],
+    obs_streams: &[super::types::ObsStreamSpec],
     ivp_mappings: &[IVPMapping],
     seed: u64,
 ) -> Result<(PGASTrajectory, CSMCDiagnostics), SimError> {
@@ -676,15 +671,12 @@ pub fn csmc_as(
             }
         }
 
-        // ── 5. Compute weights ──
+        // ── 5. Compute weights — joint across all streams ──
         if let Some(&obs_idx) = obs_at_substep.get(&s) {
-            let obs_value = observations[obs_idx].value;
             for j in 0..n_particles {
-                let projected: f64 = flow_indices.iter()
-                    .map(|&i| cum_flows[j][i] as f64).sum();
-                log_weights[j] = obs_loglik_fn(projected, obs_value);
+                log_weights[j] = super::types::joint_obs_weight(
+                    obs_streams, &cum_flows[j], obs_idx);
             }
-            // Reset cumulative flows
             for j in 0..n_particles {
                 for f in &mut cum_flows[j] { *f = 0; }
             }
@@ -860,8 +852,7 @@ pub fn run_pgas(
     base_params: &[f64],
     config: &PGASConfig,
     observations: &[Observation],
-    obs_loglik_fn: &ObsLoglikFn,
-    flow_indices: &[usize],
+    obs_streams: &[super::types::ObsStreamSpec],
     seed: u64,
     on_sweep: Option<&dyn Fn(usize, &PGASSweep, &PGASTrajectory)>,
     resume_from: Option<ChainResumeState>,
@@ -972,7 +963,7 @@ pub fn run_pgas(
     // Initial complete-data log-likelihood (now includes initial state density)
     let mut current_ll = complete_data_loglik(
         model, &trajectory, &current_params, observations,
-        config.dt, obs_loglik_fn, flow_indices, &ivp_mappings,
+        config.dt, obs_streams, &ivp_mappings,
     )?;
     eprintln!("  initial complete-data ll: {:.1}", current_ll);
 
@@ -1006,6 +997,11 @@ pub fn run_pgas(
         current_ll = ll;
     }
 
+    if start_sweep >= config.n_sweeps {
+        eprintln!("  warning: chain already completed {} sweeps (requested {}). \
+                   Increase sweeps in fit.toml to continue.", start_sweep, config.n_sweeps);
+    }
+
     for sweep in start_sweep..config.n_sweeps {
         let mut accepted = vec![false; d];
 
@@ -1036,7 +1032,7 @@ pub fn run_pgas(
                 // LL + gradient in NATURAL scale (d/dθ)
                 let (ll, ll_grad_theta) = match super::pgas_grad::complete_data_loglik_grad(
                     model, &trajectory, &params, observations,
-                    config.dt, obs_loglik_fn, flow_indices, &ivp_mappings,
+                    config.dt, obs_streams, &ivp_mappings,
                     &param_names, &param_model_indices,
                 ) {
                     Ok(r) => r,
@@ -1184,7 +1180,7 @@ pub fn run_pgas(
 
                 let proposed_ll = complete_data_loglik(
                     model, &trajectory, &proposed_params, observations,
-                    config.dt, obs_loglik_fn, flow_indices, &ivp_mappings,
+                    config.dt, obs_streams, &ivp_mappings,
                 )?;
 
                 let proposed_log_prior_i = priors[i].log_density(theta_new, z_new);
@@ -1222,7 +1218,7 @@ pub fn run_pgas(
         let csmc_seed = seed ^ ((sweep as u64 + 1).wrapping_mul(0x9e3779b97f4a7c15));
         let (new_trajectory, csmc_diag) = csmc_as(
             model, &current_params, observations, &trajectory,
-            config.n_particles, config.dt, obs_loglik_fn, flow_indices,
+            config.n_particles, config.dt, obs_streams,
             &ivp_mappings, csmc_seed,
         )?;
         trajectory = new_trajectory;
@@ -1231,7 +1227,7 @@ pub fn run_pgas(
         // (the CSMC changed X, so log p(y,X|θ) changes even at the same θ)
         current_ll = complete_data_loglik(
             model, &trajectory, &current_params, observations,
-            config.dt, obs_loglik_fn, flow_indices, &ivp_mappings,
+            config.dt, obs_streams, &ivp_mappings,
         )?;
 
         // Log adapted proposal SDs at end of burn-in
