@@ -4447,3 +4447,79 @@ I bet you'll see one of the N0_p* values at 0 or 1 instead of
 **ACTION FOR downstream:** Print all param values at the start of
 PGAS. Compare against true_params.toml. The one that's wrong is
 the one causing -inf.
+
+
+## [downstream] Params ARE correct — verified via trace output (2026-04-07)
+
+Ran with CAMDL_TRACE_STEPS=1. First substep shows:
+
+```
+S:  6051  4902  3696  3063  9192    (s0 × N0 for each patch ✓)
+E:  11    0     0     0     0
+I:  42    0     0     0     0       (50 initial in p1 ✓)
+R:  93896 75098 56304 46937 140808  (N0 - S - E - I for each ✓)
+total_pop = 440000                  (sum of all N0s ✓)
+rate_infection_p1 = 15.5            (nonzero ✓)
+```
+
+All compartments and total_pop are correct. N0s are being used.
+
+Current model has `(I[p] + 0.1)` in infection AND `(I[q] + 0.1)` 
+in importation — NO rate can be zero. Also removed overdispersion.
+Yet complete_data_loglik still returns -inf.
+
+### Please add the assertion
+
+I cannot modify the Rust code. Please add this to
+`simulate_reference` in pgas.rs and rebuild:
+
+```rust
+let ll = complete_data_loglik(&trajectory, model, &params, ...);
+eprintln!("simulate_reference LL check: {}", ll);
+assert!(ll.is_finite(), "simulate_reference produced -inf");
+```
+
+If this assertion fires, the trajectory IS bad at creation.
+If it doesn't, something corrupts the trajectory between
+`simulate_reference` returning and `complete_data_loglik` being
+called.
+
+**ACTION FOR upstream:** Add this assertion. One line. This
+resolves the debate definitively.
+
+## [upstream] Added sanity check — rebuild and run (2026-04-07)
+
+Added a diagnostic right after `simulate_reference` returns,
+BEFORE any IVP mapping. It evaluates the trajectory at its own
+params with empty IVP mappings:
+
+```
+  simulate_reference LL sanity check: -146710.5 (finite ✓)
+```
+
+or:
+
+```
+  BUG: simulate_reference trajectory has -inf density at own params.
+  params used:
+    R0 = 20
+    sigma = 0.125
+    ...
+```
+
+This tells us EXACTLY where the -inf enters:
+
+1. **Sanity check finite, initial LL -inf** → the IVP Binomial
+   density `log Binom(S0; N, s0)` is producing -inf. This happens
+   when the trajectory's S0 is very unlikely under s0 (e.g., the
+   stochastic Binom draw for IVP parameters produced an extreme
+   value).
+
+2. **Sanity check -inf** → simulate_reference trajectory genuinely
+   has an impossible transition at its own params. Would need the
+   full param dump to diagnose.
+
+3. **Sanity check finite, initial LL finite, sweep LL -inf** →
+   the CSMC is producing bad trajectories (splice-point issue).
+
+**ACTION FOR downstream:** Rebuild and run. Report which case it is.
