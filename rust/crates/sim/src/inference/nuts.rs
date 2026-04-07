@@ -22,16 +22,15 @@ use crate::rng::StatefulRng;
 pub enum MassMatrix {
     /// Diagonal: M_inv[i] = Var(z_i). Identity when all 1.0.
     Diagonal(Vec<f64>),
-    /// Dense: L is the lower Cholesky factor of M (NOT M_inv).
-    /// M = L L^T. L_inv is precomputed for kinetic energy and leapfrog.
+    /// Dense: stores L_cov = Cholesky(Σ) where Σ = M^{-1} = empirical covariance.
+    /// Following Stan's convention:
+    ///   M^{-1} p = Σ p = L_cov (L_cov^T p)
+    ///   p ~ N(0, M): solve L_cov p = z (forward substitution), z ~ N(0,I)
+    ///   kinetic = 0.5 * ||L_cov^T p||^2
     Dense {
         dim: usize,
-        /// Lower Cholesky factor of M (row-major, dim×dim).
-        /// Used for momentum draw: p = L * z, z ~ N(0,I).
-        l: Vec<f64>,
-        /// Lower Cholesky factor of M^{-1} (row-major, dim×dim).
-        /// Used for kinetic energy and leapfrog: M^{-1} p.
-        l_inv: Vec<f64>,
+        /// Lower Cholesky factor of Σ (the covariance = M^{-1}), row-major.
+        l_cov: Vec<f64>,
     },
 }
 
@@ -45,61 +44,57 @@ impl MassMatrix {
     }
 
     /// Build a dense mass matrix from an empirical covariance matrix (row-major).
-    /// Computes Cholesky of cov (= M_inv), then inverts to get L for momentum draws.
+    /// Stores L_cov = Cholesky(Σ) where Σ = covariance = M^{-1}.
     pub fn dense_from_covariance(cov: &[f64], d: usize) -> Self {
         assert_eq!(cov.len(), d * d);
-        // Regularize: cov + eps*I
         let mut reg = cov.to_vec();
         for i in 0..d {
-            reg[i * d + i] += 1e-6;
+            reg[i * d + i] += 1e-6; // regularize for numerical stability
         }
-        // Cholesky of cov → L_inv (since cov = M^{-1})
-        let l_inv = cholesky_lower(&reg, d);
-        // Invert L_inv to get L (Cholesky of M)
-        let l = invert_lower_triangular(&l_inv, d);
-        MassMatrix::Dense { dim: d, l, l_inv }
+        let l_cov = cholesky_lower(&reg, d);
+        MassMatrix::Dense { dim: d, l_cov }
     }
 
-    /// Draw momentum: p ~ N(0, M).
-    /// Diagonal: p_i = z_i / sqrt(M_inv_i)
-    /// Dense: p = L * z where z ~ N(0,I)
+    /// Draw momentum: p ~ N(0, M) = N(0, Σ^{-1}).
+    /// Diagonal: p_i = z_i / sqrt(Σ_ii) where z ~ N(0,I)
+    /// Dense: p = L_cov^{-T} z where z ~ N(0,I)
+    ///   Cov(p) = L_cov^{-T} (L_cov^{-T})^T = L_cov^{-T} L_cov^{-1} = Σ^{-1} = M. ✓
     pub fn draw_momentum(&self, rng: &mut StatefulRng) -> Vec<f64> {
         match self {
             MassMatrix::Diagonal(m_inv) => {
                 m_inv.iter().map(|&mi| rng.normal() / mi.sqrt()).collect()
             }
-            MassMatrix::Dense { dim, l, .. } => {
+            MassMatrix::Dense { dim, l_cov } => {
                 let d = *dim;
                 let z: Vec<f64> = (0..d).map(|_| rng.normal()).collect();
-                matvec_lower(l, &z, d)
+                // Solve L_cov^T p = z (back substitution) → p = L_cov^{-T} z
+                solve_upper_triangular_from_lower(l_cov, &z, d)
             }
         }
     }
 
-    /// Kinetic energy: 0.5 * p^T M^{-1} p
+    /// Kinetic energy: 0.5 * p^T M^{-1} p = 0.5 * p^T Σ p = 0.5 * ||L_cov^T p||^2
     pub fn kinetic_energy(&self, p: &[f64]) -> f64 {
         match self {
             MassMatrix::Diagonal(m_inv) => {
                 p.iter().zip(m_inv).map(|(&pi, &mi)| pi * pi * mi).sum::<f64>() * 0.5
             }
-            MassMatrix::Dense { dim, l_inv, .. } => {
-                // M^{-1} p = L_inv^T L_inv p, so ||L_inv p||^2 / 2
-                let v = matvec_lower(l_inv, p, *dim);
+            MassMatrix::Dense { dim, l_cov } => {
+                let v = matvec_lower_transpose(l_cov, p, *dim);
                 v.iter().map(|&vi| vi * vi).sum::<f64>() * 0.5
             }
         }
     }
 
-    /// M^{-1} * p (for leapfrog position update and U-turn check)
+    /// M^{-1} * p = Σ * p = L_cov (L_cov^T p)
     pub fn m_inv_times(&self, p: &[f64]) -> Vec<f64> {
         match self {
             MassMatrix::Diagonal(m_inv) => {
                 p.iter().zip(m_inv).map(|(&pi, &mi)| pi * mi).collect()
             }
-            MassMatrix::Dense { dim, l_inv, .. } => {
-                // M^{-1} p = L_inv^T (L_inv p)
-                let v = matvec_lower(l_inv, p, *dim);
-                matvec_lower_transpose(l_inv, &v, *dim)
+            MassMatrix::Dense { dim, l_cov } => {
+                let v = matvec_lower_transpose(l_cov, p, *dim);
+                matvec_lower(l_cov, &v, *dim)
             }
         }
     }
@@ -127,6 +122,33 @@ fn matvec_lower_transpose(l: &[f64], x: &[f64], d: usize) -> Vec<f64> {
     y
 }
 
+/// Solve L x = b where L is lower triangular (forward substitution).
+#[allow(dead_code)]
+fn solve_lower_triangular(l: &[f64], b: &[f64], d: usize) -> Vec<f64> {
+    let mut x = vec![0.0; d];
+    for i in 0..d {
+        let mut sum = b[i];
+        for j in 0..i {
+            sum -= l[i * d + j] * x[j];
+        }
+        x[i] = sum / l[i * d + i];
+    }
+    x
+}
+
+/// Solve L^T x = b where L is lower triangular (back substitution on the transpose).
+fn solve_upper_triangular_from_lower(l: &[f64], b: &[f64], d: usize) -> Vec<f64> {
+    let mut x = vec![0.0; d];
+    for i in (0..d).rev() {
+        let mut sum = b[i];
+        for j in (i + 1)..d {
+            sum -= l[j * d + i] * x[j]; // L^T[i][j] = L[j][i]
+        }
+        x[i] = sum / l[i * d + i];
+    }
+    x
+}
+
 /// Cholesky decomposition: A = L L^T. Returns L (lower triangular, row-major).
 fn cholesky_lower(a: &[f64], d: usize) -> Vec<f64> {
     let mut l = vec![0.0; d * d];
@@ -147,21 +169,6 @@ fn cholesky_lower(a: &[f64], d: usize) -> Vec<f64> {
     l
 }
 
-/// Invert a lower triangular matrix (row-major). Returns L^{-1}.
-fn invert_lower_triangular(l: &[f64], d: usize) -> Vec<f64> {
-    let mut inv = vec![0.0; d * d];
-    for i in 0..d {
-        inv[i * d + i] = 1.0 / l[i * d + i];
-        for j in (0..i).rev() {
-            let mut sum = 0.0;
-            for k in (j + 1)..=i {
-                sum += l[i * d + k] * inv[k * d + j];
-            }
-            inv[i * d + j] = -sum / l[i * d + i];
-        }
-    }
-    inv
-}
 
 /// Configuration for the NUTS sampler.
 pub struct NUTSConfig {

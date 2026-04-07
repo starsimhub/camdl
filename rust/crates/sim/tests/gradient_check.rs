@@ -336,3 +336,83 @@ fn test_nuts_invariance_gaussian() {
     assert!((mean[1] - true_mean[1]).abs() < 0.3,
         "NUTS mean[1]={:.3}, expected {:.1}", mean[1], true_mean[1]);
 }
+
+/// Test dense mass matrix on a highly correlated 2D Gaussian (r=0.95).
+/// With identity mass matrix, NUTS zigzags. With the true covariance as
+/// mass matrix, NUTS should follow the ridge and give much higher ESS.
+#[test]
+fn test_nuts_dense_mass_matrix_correlated() {
+    use sim::inference::nuts::{NUTSConfig, nuts_step, DualAveraging, MassMatrix};
+
+    let true_mean = [0.0, 0.0];
+    // Covariance: [[1.0, 0.95], [0.95, 1.0]] — correlation r=0.95
+    let cov = [1.0, 0.95, 0.95, 1.0];
+    // Precision = inv(cov) ≈ [[10.256, -9.744], [-9.744, 10.256]]
+    let det = 1.0 * 1.0 - 0.95 * 0.95; // 0.0975
+    let prec = [[1.0 / det, -0.95 / det], [-0.95 / det, 1.0 / det]];
+
+    let log_prob_and_grad = |z: &[f64]| -> (f64, Vec<f64>) {
+        let log_p = -0.5 * (prec[0][0] * z[0] * z[0] + 2.0 * prec[0][1] * z[0] * z[1]
+                           + prec[1][1] * z[1] * z[1]);
+        let grad = vec![
+            -(prec[0][0] * z[0] + prec[0][1] * z[1]),
+            -(prec[0][1] * z[0] + prec[1][1] * z[1]),
+        ];
+        (log_p, grad)
+    };
+
+    let mut rng = StatefulRng::new(456);
+    let mass = MassMatrix::dense_from_covariance(&cov, 2);
+
+    let mut z = vec![0.0, 0.0];
+    let (mut log_p, mut grad) = log_prob_and_grad(&z);
+
+    // Warmup with dense mass matrix
+    let mut dual_avg = DualAveraging::new(0.5, 0.80);
+    let mut step_size = 0.5;
+    for _ in 0..200 {
+        let config = NUTSConfig { max_tree_depth: 10, step_size, mass_matrix: mass.clone() };
+        let result = nuts_step(&z, log_p, &grad, &config, &log_prob_and_grad, &mut rng);
+        step_size = dual_avg.update(result.mean_accept_prob);
+        if result.accepted {
+            z = result.params; log_p = result.log_posterior;
+            let (_, g) = log_prob_and_grad(&z); grad = g;
+        }
+    }
+    step_size = dual_avg.final_step_size();
+
+    // Sampling
+    let n_samples = 2000;
+    let mut samples_0 = Vec::with_capacity(n_samples);
+    let mut samples_1 = Vec::with_capacity(n_samples);
+    let config = NUTSConfig { max_tree_depth: 10, step_size, mass_matrix: mass.clone() };
+
+    for _ in 0..n_samples {
+        let result = nuts_step(&z, log_p, &grad, &config, &log_prob_and_grad, &mut rng);
+        if result.accepted {
+            z = result.params; log_p = result.log_posterior;
+            let (_, g) = log_prob_and_grad(&z); grad = g;
+        }
+        samples_0.push(z[0]);
+        samples_1.push(z[1]);
+    }
+
+    let mean_0 = samples_0.iter().sum::<f64>() / n_samples as f64;
+    let mean_1 = samples_1.iter().sum::<f64>() / n_samples as f64;
+    let var_0 = samples_0.iter().map(|&x| (x - mean_0).powi(2)).sum::<f64>() / (n_samples - 1) as f64;
+    let var_1 = samples_1.iter().map(|&x| (x - mean_1).powi(2)).sum::<f64>() / (n_samples - 1) as f64;
+    let cov_01 = samples_0.iter().zip(&samples_1)
+        .map(|(&x, &y)| (x - mean_0) * (y - mean_1)).sum::<f64>() / (n_samples - 1) as f64;
+    let r = cov_01 / (var_0.sqrt() * var_1.sqrt());
+
+    eprintln!("  dense mass matrix test (r=0.95 target):");
+    eprintln!("    step_size={:.4}", step_size);
+    eprintln!("    mean=[{:.3}, {:.3}], var=[{:.3}, {:.3}], r={:.3}",
+        mean_0, mean_1, var_0, var_1, r);
+
+    assert!((mean_0 - true_mean[0]).abs() < 0.2, "mean[0]={:.3}", mean_0);
+    assert!((mean_1 - true_mean[1]).abs() < 0.2, "mean[1]={:.3}", mean_1);
+    assert!((var_0 - 1.0).abs() < 0.3, "var[0]={:.3}, expected ~1.0", var_0);
+    assert!((var_1 - 1.0).abs() < 0.3, "var[1]={:.3}, expected ~1.0", var_1);
+    assert!((r - 0.95).abs() < 0.1, "correlation={:.3}, expected ~0.95", r);
+}
