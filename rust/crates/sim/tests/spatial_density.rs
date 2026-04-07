@@ -284,3 +284,91 @@ fn test_density_downstream_seir_spatial_5() {
     eprintln!("  complete-data LL = {:.4}", ll);
     assert!(ll.is_finite(), "LL should be finite, got {}", ll);
 }
+
+/// Test: multi-seed round-trip on downstream SEIR spatial model.
+/// Runs 100 different seeds to catch rare stochastic edge cases.
+#[test]
+fn test_density_downstream_multi_seed() {
+    let path = "tests/fixtures/seir_spatial_5.ir.json";
+    let model = match std::fs::read_to_string(path) {
+        Ok(json) => match serde_json::from_str::<ir::Model>(&json) {
+            Ok(m) => m,
+            Err(e) => { eprintln!("  skip: {}", e); return; }
+        },
+        Err(_) => { eprintln!("  skip: not found"); return; }
+    };
+    let mut model = model;
+    for p in &mut model.parameters {
+        if p.value.is_none() {
+            p.value = Some(match p.name.as_str() {
+                "R0" => 20.0, "sigma" => 0.125, "gamma" => 0.2,
+                "amplitude" => 0.3, "s0" => 0.06, "kappa" => 0.05,
+                "rho" => 0.4, "sigma_se" => 0.05, "k" => 10.0,
+                "N0_p1" => 100000.0, "N0_p2" => 80000.0,
+                "N0_p3" => 60000.0, "N0_p4" => 50000.0,
+                "N0_p5" => 150000.0,
+                _ => 1.0,
+            });
+        }
+    }
+    let compiled = CompiledModel::new(model).unwrap();
+    let mut params = vec![0.0; compiled.param_index.len()];
+    for p in &compiled.model.parameters {
+        if let Some(v) = p.value { params[compiled.param_index[p.name.as_str()]] = v; }
+    }
+
+    let dt = compiled.model.simulation.dt.unwrap_or(1.0);
+    let t_end = compiled.model.simulation.t_end;
+    let t_start = compiled.model.simulation.t_start;
+    let mut n_inf = 0;
+
+    for seed in 0..100 {
+        let mut rng = StatefulRng::new(seed);
+        let trajectory = simulate_reference(&compiled, &params, t_end, dt, &mut rng).unwrap();
+
+        // Check per-substep
+        let mut _this_inf = false;
+        for s in 0..trajectory.substeps.len() {
+            let t = t_start + s as f64 * dt;
+            let counts_before = if s == 0 {
+                &trajectory.initial_counts
+            } else {
+                &trajectory.substeps[s - 1].counts
+            };
+            let rec = &trajectory.substeps[s];
+            let td = log_transition_density_substep(
+                &compiled, counts_before, &rec.flows, &rec.gammas, &params, t, dt,
+            ).unwrap();
+            if !td.is_finite() {
+                if n_inf == 0 {
+                    // Print diagnostic for FIRST failure
+                    eprintln!("\n  FIRST -inf at seed={}, substep {} (t={:.1}):", seed, s, t);
+
+                    let mut propensities = vec![0.0; compiled.model.transitions.len()];
+                    let int_s = sim::state::IntState { counts: counts_before.to_vec() };
+                    let real_s = sim::state::RealState::new(compiled.real_local_to_global.len());
+                    sim::propensity::eval_propensities(
+                        &compiled, &int_s, &real_s, &params, t, &mut propensities
+                    ).unwrap();
+
+                    for &(src_local, ref group) in &compiled.source_groups {
+                        for &tr_idx in group {
+                            if rec.flows[tr_idx] > 0 || propensities[tr_idx] <= 0.0 {
+                                eprintln!("    {} (idx={}): rate={:.6e}, flow={}, src_count={}",
+                                    compiled.model.transitions[tr_idx].name, tr_idx,
+                                    propensities[tr_idx], rec.flows[tr_idx],
+                                    counts_before[src_local]);
+                            }
+                        }
+                    }
+                }
+                n_inf += 1;
+                _this_inf = true;
+                break;
+            }
+        }
+    }
+
+    eprintln!("  multi-seed: {}/100 seeds produced -inf", n_inf);
+    assert_eq!(n_inf, 0, "{}/100 seeds produced -inf density at own params", n_inf);
+}
