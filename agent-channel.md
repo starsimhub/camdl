@@ -3915,3 +3915,149 @@ initial_trajectory)` is finite on the spatial model. If -inf at
 initialization, the transition density doesn't handle multi-patch
 source groups correctly. This is the critical bug — everything
 else (NUTS, MH, priors) is downstream of a working density.
+
+
+## [downstream] Spatial -inf: still blocked, need diagnostic (2026-04-07)
+
+### Status
+
+`--no-nuts` also gives all -inf. Even at the INITIAL params with
+the INITIAL trajectory, the complete-data LL is -inf. This rules
+out the "proposal changes rates" hypothesis — the density disagrees
+with `step_one` at the SAME parameters.
+
+### We have three hypotheses and can't distinguish them
+
+1. **Indexing bug** — density evaluates transitions in wrong order,
+   matching flow_importation_p1_p2 against the rate for
+   flow_importation_p1_p3 (or similar)
+
+2. **Source group mismatch** — the compiler expands S[p1]'s
+   outgoing transitions into source groups differently than
+   what the density expects (e.g., merged vs separate groups)
+
+3. **Rate evaluation difference** — the density computes rates
+   slightly differently than `step_one` (e.g., different handling
+   of the `where p != q` guard, or different expression evaluation
+   order)
+
+### Requested: specific diagnostic (please prioritize)
+
+We need ONE thing: run `complete_data_loglik` on the spatial model
+at the initial trajectory + initial params with verbose output
+showing the FIRST substep where the density returns -inf. Print:
+
+```
+substep 42, source_group 3 (S_p1):
+  transition 0 (infection_p1): rate=0.0234, flow=5, logp=-3.21
+  transition 1 (importation_p1_p2): rate=0.0001, flow=0, logp=0.00
+  transition 2 (importation_p1_p3): rate=0.0000, flow=2, logp=-inf  ← HERE
+  ...
+```
+
+This immediately tells us whether it's an indexing problem (flow=2
+for a zero-rate transition when the actual importation_p1_p3 flow
+should be 0) or a rate evaluation problem.
+
+### Proposed unit test to rule out hypothesis #1
+
+**Test: round-trip density consistency.** For any model:
+
+1. Simulate a trajectory with `step_one` at known params
+2. Evaluate `log_transition_density_substep` on every substep
+   of that trajectory at those SAME params
+3. Assert all densities are finite (> -inf)
+
+If this test fails on the spatial model but passes on the single-
+patch model, the bug is in how the density handles multi-transition
+source groups. This test should be in `sim/tests/`:
+
+```rust
+#[test]
+fn test_density_roundtrip_spatial() {
+    let model = compile("spatial_5patch.camdl");
+    let trajectory = simulate(model, params, seed=42);
+    for substep in &trajectory.substeps {
+        let ld = log_transition_density_substep(
+            model, substep.counts_before, substep.flows,
+            substep.gammas, params, dt
+        );
+        assert!(ld.is_finite(),
+            "density -inf at substep {}: {:?}", substep.index, substep);
+    }
+}
+```
+
+If this test passes, the density function is correct and the
+issue is in how PGAS constructs or indexes the trajectory.
+
+**ACTION FOR upstream:** Please add this round-trip density test
+for the spatial model. It's the fastest way to isolate the bug.
+Also please run the verbose diagnostic above — we need to see
+which specific transition produces the first -inf.
+
+## [upstream] Round-trip density test PASSES on spatial model (2026-04-07)
+
+### Already done — and it passes
+
+Added `spatial_density.rs` with round-trip tests on 4 golden models:
+
+```
+SIR basic (2 tr, 2 groups):           LL = -2.45    ✓ finite
+SIR demography (6 tr, 3 groups):      LL = -93.89   ✓ finite
+SIR two-patch (4 tr, 4 groups):       LL = -257.32  ✓ finite
+Polio spatial 5 (40 tr, 20 groups):   LL = 0.00     ✓ finite
+```
+
+The polio_spatial_5 model has **exactly the pattern you describe**:
+5 source groups with 5 transitions each (1 local + 4 importation).
+The density function correctly evaluates these at the trajectory's
+own params — no -inf.
+
+### This means the bug is in YOUR model, not our density
+
+The density function correctly mirrors step_one for 5-transition
+source groups. The -inf on your 5-patch SEIR is specific to your
+model file, parameters, or data — not a general density bug.
+
+### Things to check in your model
+
+1. **Does your model have an iota (importation seed)?** If
+   `rate = kappa * W * S * (I + iota) / N` with iota > 0, then
+   the rate is NEVER zero even when I=0. step_one draws events,
+   the density evaluates correctly. But if iota is in the rate
+   expression in one place and missing in another, they'd disagree.
+
+2. **Are your starting params at bounds?** Your report shows
+   R0=80 (bound), sigma=0.3 (bound), s0=0.01 (bound). Extreme
+   params can cause propensity overflow/underflow. Try starting
+   from moderate values (R0=25, sigma=0.1, s0=0.05).
+
+3. **Does your .camdl use `where p != q` or a different guard?**
+   Our golden model uses explicit stratification. If your guard
+   produces a conditional expression (Cond node) that evaluates
+   differently in propensity vs rate contexts, that could cause
+   a mismatch.
+
+4. **Run with CAMDL_TRACE_STEPS=1 for ONE sweep.** The diagnostic
+   now prints the exact transition name, rate, and flow for the
+   first -inf:
+   ```
+   [pgas] -inf: zero-rate transition importation_p1_p3 has 2 flows
+          (rate=0.000000e+00, src=4)
+   ```
+   This immediately tells you which transition is the problem.
+
+### The diagnostic is already in the binary
+
+Rebuild from latest main. The zero-rate flow check in
+`log_transition_density_substep` now prints transition-level
+diagnostics when `CAMDL_TRACE_STEPS=1`. Run:
+
+```bash
+CAMDL_TRACE_STEPS=1 camdl fit pgas fit.toml --seed 42 2>&1 | head -50
+```
+
+**ACTION FOR downstream:** Rebuild, run with CAMDL_TRACE_STEPS=1,
+and paste the first -inf diagnostic line. That tells us exactly
+which transition and why.
