@@ -1,6 +1,7 @@
 //! Tests for multi-stream observation likelihood accumulation.
 
 use sim::inference::obs_loglik::{poisson_logpmf, negbin_logpmf};
+use sim::inference::{ObsStreamSpec, joint_obs_weight};
 
 /// T1: Joint loglik = sum of individual stream logliks.
 /// Two Poisson streams with known projected/observed values.
@@ -105,4 +106,62 @@ fn test_single_stream_backward_compat() {
 
     assert!((single - joint).abs() < 1e-15,
         "single-stream and multi-stream(1) must be identical");
+}
+
+/// T6: joint_obs_weight with two Poisson streams — verify sum.
+#[test]
+fn test_joint_obs_weight_two_streams() {
+    let streams = vec![
+        ObsStreamSpec {
+            flow_indices: vec![0],  // stream 1 reads flow 0
+            obs_loglik_fn: Box::new(|proj, obs| poisson_logpmf(obs, proj)),
+            observations: vec![12.0, 15.0],
+        },
+        ObsStreamSpec {
+            flow_indices: vec![1],  // stream 2 reads flow 1
+            obs_loglik_fn: Box::new(|proj, obs| poisson_logpmf(obs, proj)),
+            observations: vec![48.0, 52.0],
+        },
+    ];
+
+    // Simulate cumulative flows: flow[0]=10, flow[1]=50
+    let cum_flows: Vec<u64> = vec![10, 50];
+
+    let joint = joint_obs_weight(&streams, &cum_flows, 0);
+    let expected = poisson_logpmf(12.0, 10.0) + poisson_logpmf(48.0, 50.0);
+    assert!((joint - expected).abs() < 1e-12,
+        "joint_obs_weight: {} != expected {}", joint, expected);
+
+    // Second observation time
+    let joint2 = joint_obs_weight(&streams, &cum_flows, 1);
+    let expected2 = poisson_logpmf(15.0, 10.0) + poisson_logpmf(52.0, 50.0);
+    assert!((joint2 - expected2).abs() < 1e-12);
+}
+
+/// T7: joint_obs_weight with empty streams returns 0 (no observations).
+#[test]
+fn test_joint_obs_weight_empty_streams() {
+    let streams: Vec<ObsStreamSpec> = vec![];
+    let cum_flows: Vec<u64> = vec![100];
+    let result = joint_obs_weight(&streams, &cum_flows, 0);
+    assert_eq!(result, 0.0, "empty streams should return 0 (sum of nothing)");
+}
+
+/// T8: single stream through joint_obs_weight matches direct call.
+#[test]
+fn test_joint_obs_weight_single_stream() {
+    let k = 10.0;
+    let streams = vec![
+        ObsStreamSpec {
+            flow_indices: vec![0, 1],  // project = flow[0] + flow[1]
+            obs_loglik_fn: Box::new(move |proj, obs| negbin_logpmf(obs, proj, k)),
+            observations: vec![85.0],
+        },
+    ];
+    let cum_flows: Vec<u64> = vec![50, 40]; // projected = 90
+
+    let joint = joint_obs_weight(&streams, &cum_flows, 0);
+    let direct = negbin_logpmf(85.0, 90.0, k);
+    assert!((joint - direct).abs() < 1e-12,
+        "single stream joint_obs_weight must match direct: {} vs {}", joint, direct);
 }
