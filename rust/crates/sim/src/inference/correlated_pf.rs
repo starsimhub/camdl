@@ -13,7 +13,7 @@ use crate::compiled_model::CompiledModel;
 use crate::rng::StatefulRng;
 use crate::error::SimError;
 use super::types::{ParticleState, ParticleSwarm, log_sum_exp};
-use super::particle_filter::{StepFn, DmeasureFn, Observation, PFilterResult};
+use super::particle_filter::{StepFn, ObsLoglikFn, Observation, PFilterResult};
 
 /// Pre-drawn random state for one PF evaluation.
 ///
@@ -174,7 +174,7 @@ pub fn bootstrap_filter_correlated(
     dt: f64,
     step_fn: &StepFn,
     project_fn: &dyn Fn(&ParticleState) -> f64,
-    dmeasure_fn: &DmeasureFn,
+    obs_loglik_fn: &ObsLoglikFn,
     randoms: &PFRandomState,
     seed: u64,
 ) -> Result<PFilterResult, SimError> {
@@ -291,7 +291,7 @@ pub fn bootstrap_filter_correlated(
         // Compute log-weights
         for (i, state) in swarm.states.iter().enumerate() {
             let projected = project_fn(state);
-            swarm.log_weights[i] = dmeasure_fn(projected, obs.value);
+            swarm.log_weights[i] = obs_loglik_fn(projected, obs.value);
         }
 
         let ll_increment = log_sum_exp(&swarm.log_weights) - (n_particles as f64).ln();

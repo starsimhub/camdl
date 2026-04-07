@@ -114,13 +114,13 @@ fn make_eval_loglik<'a>(
             step_one(compiled, &mut state.counts, &mut state.flow_accumulators, params, t, dt, rng, scratch)
         };
         let project_fn = |state: &ParticleState| -> f64 { state.counts[0] as f64 };
-        let dmeasure_fn = |projected: f64, observed: f64| -> f64 {
+        let obs_loglik_fn = |projected: f64, observed: f64| -> f64 {
             poisson_logpmf(observed, projected.max(0.1))
         };
 
         let result = bootstrap_filter(
             compiled, params, observations, n_particles, 1.0,
-            &step_fn, &project_fn, &dmeasure_fn, None, None, pf_seed,
+            &step_fn, &project_fn, &obs_loglik_fn, None, None, pf_seed,
         );
         match result {
             Ok(r) => r.log_likelihood,

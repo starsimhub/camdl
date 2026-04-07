@@ -136,7 +136,7 @@ fn bench_pfilter(c: &mut Criterion) {
     let project_fn = |state: &sim::inference::ParticleState| -> f64 {
         infection_indices.iter().map(|&i| state.flow_accumulators[i] as f64).sum()
     };
-    let dmeasure_fn = |projected: f64, observed: f64| -> f64 {
+    let obs_loglik_fn = |projected: f64, observed: f64| -> f64 {
         negbin_logpmf(observed, rho * projected, k)
     };
 
@@ -151,7 +151,7 @@ fn bench_pfilter(c: &mut Criterion) {
                 b.iter(|| {
                     bootstrap_filter(
                         &model, &params, &obs, np, 1.0,
-                        &step_fn, &project_fn, &dmeasure_fn, None, None, 42,
+                        &step_fn, &project_fn, &obs_loglik_fn, None, None, 42,
                     ).unwrap()
                 });
             },

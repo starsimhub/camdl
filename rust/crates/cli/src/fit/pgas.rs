@@ -176,9 +176,9 @@ pub fn run_pgas_cli(
                 dense_mass, // --diagonal-mass to disable
             };
 
-            // Each chain gets its own dmeasure closure
+            // Each chain gets its own obs_loglik closure
             let compiled = &*config.compiled;
-            let dmeasure_fn = sim::inference::dmeasure::compile_dmeasure_pf(
+            let obs_loglik_fn = sim::inference::obs_model::compile_obs_loglik_pf(
                 &config.obs_model_ir, config.compiled.clone(), &config.base_params,
             );
 
@@ -281,7 +281,7 @@ pub fn run_pgas_cli(
                 &chain_starts[chain_id],
                 &pgas_config,
                 &observations,
-                &*dmeasure_fn,
+                &*obs_loglik_fn,
                 &config.flow_indices,
                 chain_seed,
                 Some(&progress_cb),

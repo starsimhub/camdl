@@ -118,12 +118,12 @@ pub fn run_pmmh_cli(
                 let project_fn = |state: &sim::inference::ParticleState| -> f64 {
                     fi.iter().map(|&i| state.flow_accumulators[i] as f64).sum()
                 };
-                let dmeasure = sim::inference::dmeasure::compile_dmeasure_pf(
+                let obs_ll = sim::inference::obs_model::compile_obs_loglik_pf(
                     &obs_model, compiled.clone(), params,
                 );
                 match sim::inference::correlated_pf::bootstrap_filter_correlated(
                     &compiled, params, &obs, n_particles, dt,
-                    &step_fn, &project_fn, &*dmeasure, randoms, seed,
+                    &step_fn, &project_fn, &*obs_ll, randoms, seed,
                 ) {
                     Ok(r) => r.log_likelihood,
                     Err(_) => f64::NEG_INFINITY,
@@ -265,12 +265,12 @@ pub fn run_pmmh_cli(
                         let project_fn = |state: &sim::inference::ParticleState| -> f64 {
                             fi.iter().map(|&i| state.flow_accumulators[i] as f64).sum()
                         };
-                        let dmeasure = sim::inference::dmeasure::compile_dmeasure_pf(
+                        let obs_ll = sim::inference::obs_model::compile_obs_loglik_pf(
                             &obs_model, compiled.clone(), params,
                         );
                         match sim::inference::correlated_pf::bootstrap_filter_correlated(
                             &compiled, params, &obs, n_particles, dt,
-                            &step_fn, &project_fn, &*dmeasure, randoms, chain_seed,
+                            &step_fn, &project_fn, &*obs_ll, randoms, chain_seed,
                         ) {
                             Ok(r) => r.log_likelihood,
                             Err(_) => f64::NEG_INFINITY,

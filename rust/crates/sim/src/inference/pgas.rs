@@ -16,7 +16,7 @@ use crate::compiled_model::CompiledModel;
 use crate::rng::StatefulRng;
 use crate::error::SimError;
 use crate::inference::obs_loglik::{poisson_logpmf, binom_logpmf};
-use crate::inference::particle_filter::{Observation, DmeasureFn};
+use crate::inference::particle_filter::{Observation, ObsLoglikFn};
 use crate::inference::resampling::systematic_resample;
 use crate::inference::pmmh::Prior;
 use crate::inference::if2::{IF2Param, Transform};
@@ -264,7 +264,7 @@ pub fn complete_data_loglik(
     params: &[f64],
     observations: &[Observation],
     dt: f64,
-    dmeasure_fn: &DmeasureFn,
+    obs_loglik_fn: &ObsLoglikFn,
     flow_indices: &[usize],
     ivp_mappings: &[IVPMapping],
 ) -> Result<f64, SimError> {
@@ -360,7 +360,7 @@ pub fn complete_data_loglik(
         if let Some(&obs_idx) = obs_at_substep.get(&s) {
             let projected: f64 = flow_indices.iter()
                 .map(|&i| cum_flows[i] as f64).sum();
-            log_p += dmeasure_fn(projected, observations[obs_idx].value);
+            log_p += obs_loglik_fn(projected, observations[obs_idx].value);
             // Reset cumulative flows
             for f in &mut cum_flows { *f = 0; }
         }
@@ -426,7 +426,7 @@ pub fn csmc_as(
     reference: &PGASTrajectory,
     n_particles: usize,
     dt: f64,
-    dmeasure_fn: &DmeasureFn,
+    obs_loglik_fn: &ObsLoglikFn,
     flow_indices: &[usize],
     ivp_mappings: &[IVPMapping],
     seed: u64,
@@ -651,7 +651,7 @@ pub fn csmc_as(
             for j in 0..n_particles {
                 let projected: f64 = flow_indices.iter()
                     .map(|&i| cum_flows[j][i] as f64).sum();
-                log_weights[j] = dmeasure_fn(projected, obs_value);
+                log_weights[j] = obs_loglik_fn(projected, obs_value);
             }
             // Reset cumulative flows
             for j in 0..n_particles {
@@ -829,7 +829,7 @@ pub fn run_pgas(
     base_params: &[f64],
     config: &PGASConfig,
     observations: &[Observation],
-    dmeasure_fn: &DmeasureFn,
+    obs_loglik_fn: &ObsLoglikFn,
     flow_indices: &[usize],
     seed: u64,
     on_sweep: Option<&dyn Fn(usize, &PGASSweep, &PGASTrajectory)>,
@@ -922,7 +922,7 @@ pub fn run_pgas(
     // Initial complete-data log-likelihood (now includes initial state density)
     let mut current_ll = complete_data_loglik(
         model, &trajectory, &current_params, observations,
-        config.dt, dmeasure_fn, flow_indices, &ivp_mappings,
+        config.dt, obs_loglik_fn, flow_indices, &ivp_mappings,
     )?;
     eprintln!("  initial complete-data ll: {:.1}", current_ll);
 
@@ -978,7 +978,7 @@ pub fn run_pgas(
                 // LL + gradient in NATURAL scale (d/dθ)
                 let (ll, ll_grad_theta) = match super::pgas_grad::complete_data_loglik_grad(
                     model, &trajectory, &params, observations,
-                    config.dt, dmeasure_fn, flow_indices, &ivp_mappings,
+                    config.dt, obs_loglik_fn, flow_indices, &ivp_mappings,
                     &param_names, &param_model_indices,
                 ) {
                     Ok(r) => r,
@@ -1126,7 +1126,7 @@ pub fn run_pgas(
 
                 let proposed_ll = complete_data_loglik(
                     model, &trajectory, &proposed_params, observations,
-                    config.dt, dmeasure_fn, flow_indices, &ivp_mappings,
+                    config.dt, obs_loglik_fn, flow_indices, &ivp_mappings,
                 )?;
 
                 let proposed_log_prior_i = priors[i].log_density(theta_new, z_new);
@@ -1164,7 +1164,7 @@ pub fn run_pgas(
         let csmc_seed = seed ^ ((sweep as u64 + 1).wrapping_mul(0x9e3779b97f4a7c15));
         let (new_trajectory, csmc_diag) = csmc_as(
             model, &current_params, observations, &trajectory,
-            config.n_particles, config.dt, dmeasure_fn, flow_indices,
+            config.n_particles, config.dt, obs_loglik_fn, flow_indices,
             &ivp_mappings, csmc_seed,
         )?;
         trajectory = new_trajectory;
@@ -1173,7 +1173,7 @@ pub fn run_pgas(
         // (the CSMC changed X, so log p(y,X|θ) changes even at the same θ)
         current_ll = complete_data_loglik(
             model, &trajectory, &current_params, observations,
-            config.dt, dmeasure_fn, flow_indices, &ivp_mappings,
+            config.dt, obs_loglik_fn, flow_indices, &ivp_mappings,
         )?;
 
         // Log adapted proposal SDs at end of burn-in

@@ -170,13 +170,13 @@ fn test_if2_converges_from_dispersed_start() {
         step_one(&compiled, &mut state.counts, &mut state.flow_accumulators, p, t, dt, rng, scratch)
     };
     let project_fn = |state: &ParticleState| state.flow_accumulators[1] as f64;
-    let dmeasure_fn = |proj: f64, obs: f64, _p: &[f64]| {
+    let obs_loglik_fn = |proj: f64, obs: f64, _p: &[f64]| {
         negbin_logpmf(obs, proj.max(0.1), 10.0)
     };
 
     let result = run_if2(
         &compiled, &start_params, &if2_params, &data, &config,
-        &step_fn, &project_fn, &dmeasure_fn, 42,
+        &step_fn, &project_fn, &obs_loglik_fn, 42,
     ).unwrap();
 
     let final_beta = result.mle[0];
@@ -244,11 +244,11 @@ fn test_if2_respects_bounds() {
         step_one(&compiled, &mut state.counts, &mut state.flow_accumulators, p, t, dt, rng, scratch)
     };
     let project_fn = |state: &ParticleState| state.flow_accumulators[1] as f64;
-    let dmeasure_fn = |proj: f64, obs: f64, _p: &[f64]| negbin_logpmf(obs, proj.max(0.1), 10.0);
+    let obs_loglik_fn = |proj: f64, obs: f64, _p: &[f64]| negbin_logpmf(obs, proj.max(0.1), 10.0);
 
     let result = run_if2(
         &compiled, &true_params, &if2_params, &data, &config,
-        &step_fn, &project_fn, &dmeasure_fn, 42,
+        &step_fn, &project_fn, &obs_loglik_fn, 42,
     ).unwrap();
 
     // All iterations should have beta in [0.1, 0.5] and gamma in [0.05, 0.2]
@@ -287,11 +287,11 @@ fn test_if2_no_cooling_explores() {
         step_one(&compiled, &mut state.counts, &mut state.flow_accumulators, p, t, dt, rng, scratch)
     };
     let project_fn = |state: &ParticleState| state.flow_accumulators[1] as f64;
-    let dmeasure_fn = |proj: f64, obs: f64, _p: &[f64]| negbin_logpmf(obs, proj.max(0.1), 10.0);
+    let obs_loglik_fn = |proj: f64, obs: f64, _p: &[f64]| negbin_logpmf(obs, proj.max(0.1), 10.0);
 
     let result = run_if2(
         &compiled, &true_params, &if2_params, &data, &config,
-        &step_fn, &project_fn, &dmeasure_fn, 42,
+        &step_fn, &project_fn, &obs_loglik_fn, 42,
     ).unwrap();
 
     // With no cooling, beta should still be wandering (not converged tight)

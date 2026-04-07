@@ -16,7 +16,7 @@ pub mod resampling;
 pub mod particle_filter;
 pub mod if2;
 pub mod types;
-pub mod dmeasure;
+pub mod obs_model;
 pub mod pmmh;
 pub mod correlated_pf;
 pub mod pgas;

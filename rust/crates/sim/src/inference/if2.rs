@@ -254,7 +254,7 @@ pub struct Observation {
 /// * `config` — IF2 settings
 /// * `step_fn` — chain-binomial step function
 /// * `project_fn` — extract projected quantity from particle state
-/// * `dmeasure_fn` — observation log-likelihood (takes projected, observed, params)
+/// * `obs_loglik_fn` — observation log-likelihood (takes projected, observed, params)
 /// * `seed` — base RNG seed
 /// Optional callback invoked after each IF2 iteration.
 /// Arguments: (iteration_index, log_likelihood).
@@ -268,11 +268,11 @@ pub fn run_if2(
     config: &IF2Config,
     step_fn: &(dyn Fn(&mut ParticleState, &[f64], f64, f64, &mut StatefulRng, &mut StepScratch) -> Result<(), SimError> + Send + Sync),
     project_fn: &dyn Fn(&ParticleState) -> f64,
-    dmeasure_fn: &dyn Fn(f64, f64, &[f64]) -> f64,
+    obs_loglik_fn: &dyn Fn(f64, f64, &[f64]) -> f64,
     seed: u64,
 ) -> Result<IF2Result, SimError> {
     run_if2_with_progress(model, base_params, if2_params, observations, config,
-        step_fn, project_fn, dmeasure_fn, seed, None)
+        step_fn, project_fn, obs_loglik_fn, seed, None)
 }
 
 pub fn run_if2_with_progress(
@@ -283,7 +283,7 @@ pub fn run_if2_with_progress(
     config: &IF2Config,
     step_fn: &(dyn Fn(&mut ParticleState, &[f64], f64, f64, &mut StatefulRng, &mut StepScratch) -> Result<(), SimError> + Send + Sync),
     project_fn: &dyn Fn(&ParticleState) -> f64,
-    dmeasure_fn: &dyn Fn(f64, f64, &[f64]) -> f64,
+    obs_loglik_fn: &dyn Fn(f64, f64, &[f64]) -> f64,
     seed: u64,
     on_iteration: ProgressCallback,
 ) -> Result<IF2Result, SimError> {
@@ -440,7 +440,7 @@ pub fn run_if2_with_progress(
             // Weight by observation likelihood
             for i in 0..n {
                 let projected = project_fn(&states[i]);
-                log_weights[i] = dmeasure_fn(projected, obs.value, &particle_params[i]);
+                log_weights[i] = obs_loglik_fn(projected, obs.value, &particle_params[i]);
             }
 
             // Per-parameter diagnostics (before resampling, using continuous weights):

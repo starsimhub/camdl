@@ -222,12 +222,12 @@ pub fn cmd_profile(args: &[String]) {
     });
     let if2_params = Arc::new(if2_params);
 
-    // Build dmeasure: prefer IR observation model, fall back to --obs-model
-    let dmeasure_fn: Arc<dyn Fn(f64, f64, &[f64]) -> f64 + Send + Sync> = {
+    // Build obs_loglik: prefer IR observation model, fall back to --obs-model
+    let obs_loglik_fn: Arc<dyn Fn(f64, f64, &[f64]) -> f64 + Send + Sync> = {
         let obs_block = model.observations.first();
         if let Some(obs) = obs_block {
             eprintln!("profile: using observation model '{}' from IR", obs.name);
-            Arc::from(sim::inference::dmeasure::compile_dmeasure_if2(obs, compiled.clone()))
+            Arc::from(sim::inference::obs_model::compile_obs_loglik_if2(obs, compiled.clone()))
         } else {
             eprintln!("\x1b[33mwarning: using --obs-model '{}' (deprecated). Add an observations {{}} block to your model.\x1b[0m", obs_model);
             let rho_idx = compiled.param_index.get("rho").copied();
@@ -296,7 +296,7 @@ pub fn cmd_profile(args: &[String]) {
             let observations = Arc::clone(&observations);
             let flow_indices = Arc::clone(&flow_indices);
             let if2_params = Arc::clone(&if2_params);
-            let dmeasure_fn = Arc::clone(&dmeasure_fn);
+            let obs_loglik_fn = Arc::clone(&obs_loglik_fn);
             let focal_values: Vec<f64> = grid_points[grid_idx].iter().map(|&(_, v)| v).collect();
 
             // Set focal parameters
@@ -319,7 +319,7 @@ pub fn cmd_profile(args: &[String]) {
             };
             let result = run_if2(
                 &compiled, &params, &if2_params, &observations, &config,
-                &step_fn, &project_fn, &*dmeasure_fn, job_seed,
+                &step_fn, &project_fn, &*obs_loglik_fn, job_seed,
             );
 
             overall_pb.inc(1);

@@ -1,7 +1,7 @@
 //! Shared chain-running logic for all fit stages.
 //!
 //! Handles: model loading, IF2Param construction from fit.toml,
-//! dmeasure construction from IR observation model, chain execution,
+//! obs_loglik construction from IR observation model, chain execution,
 //! Rhat computation, and MAD-based auto rw_sd calibration.
 
 use crate::fit::config::FitToml;
@@ -32,7 +32,7 @@ pub struct FitRunConfig {
     pub if2_config: IF2Config,
     pub n_chains: usize,
     pub seed: u64,
-    /// The observation model from the IR (used to compile dmeasure).
+    /// The observation model from the IR (used to compile obs_loglik).
     pub obs_model_ir: ir::observation::ObservationModel,
 }
 
@@ -234,13 +234,13 @@ pub fn run_quick_pfilter(config: &FitRunConfig, params: &[f64], n_particles: usi
     let project_fn = |state: &ParticleState| -> f64 {
         flow_indices.iter().map(|&i| state.flow_accumulators[i] as f64).sum()
     };
-    let dmeasure_fn = sim::inference::dmeasure::compile_dmeasure_pf(
+    let obs_loglik_fn = sim::inference::obs_model::compile_obs_loglik_pf(
         &config.obs_model_ir, config.compiled.clone(), params,
     );
 
     match particle_filter::bootstrap_filter(
         compiled, params, &observations, n_particles, config.if2_config.dt,
-        &step_fn, &project_fn, &*dmeasure_fn, None, None, seed,
+        &step_fn, &project_fn, &*obs_loglik_fn, None, None, seed,
     ) {
         Ok(result) => result.log_likelihood,
         Err(_) => f64::NEG_INFINITY,
@@ -534,7 +534,7 @@ fn run_one_chain(
         config.flow_indices.iter().map(|&i| state.flow_accumulators[i] as f64).sum()
     };
     // Compile dmeasure from the IR observation model
-    let dmeasure_fn = sim::inference::dmeasure::compile_dmeasure_if2(
+    let obs_loglik_fn = sim::inference::obs_model::compile_obs_loglik_if2(
         &config.obs_model_ir, config.compiled.clone(),
     );
 
@@ -551,7 +551,7 @@ fn run_one_chain(
 
     let result = run_if2_with_progress(
         &config.compiled, &config.base_params, if2_params, &config.observations,
-        &config.if2_config, &step_fn, &project_fn, &*dmeasure_fn, chain_seed,
+        &config.if2_config, &step_fn, &project_fn, &*obs_loglik_fn, chain_seed,
         Some(&progress_cb),
     ).unwrap_or_else(|e| {
         eprintln!("chain {} error: {:?}", chain_id + 1, e);

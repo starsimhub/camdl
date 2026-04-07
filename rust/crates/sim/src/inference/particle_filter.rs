@@ -45,7 +45,7 @@ pub struct PFilterResult {
     /// Log-likelihood increment at each observation time.
     pub ll_increments: Vec<f64>,
     /// One-step-ahead prediction diagnostics at each observation time.
-    /// Only populated when rmeasure_fn and obs_mean_fn are provided.
+    /// Only populated when obs_sample_fn and obs_mean_fn are provided.
     pub predictions: Option<Vec<PredictionDiag>>,
     /// Final particle states after the last observation (post-resampling).
     /// Only populated when `save_final_state` is true.
@@ -61,11 +61,11 @@ pub type StepFn<'a> = dyn Fn(&mut ParticleState, f64, f64, &mut StatefulRng, &mu
 
 /// Signature for the observation log-likelihood (dmeasure).
 /// Takes (projected_value, observed_value) → log p(y | projected, θ).
-pub type DmeasureFn<'a> = dyn Fn(f64, f64) -> f64 + 'a;
+pub type ObsLoglikFn<'a> = dyn Fn(f64, f64) -> f64 + 'a;
 
 /// Signature for observation model sampler (rmeasure).
 /// Takes (projected_value, rng) → observation draw.
-pub type RmeasureFn<'a> = dyn Fn(f64, &mut StatefulRng) -> f64 + 'a;
+pub type ObsSampleFn<'a> = dyn Fn(f64, &mut StatefulRng) -> f64 + 'a;
 
 /// Signature for observation model mean (no sampling).
 /// Takes (projected_value) → E[y | projected, θ].
@@ -81,7 +81,7 @@ pub type ObsMeanFn<'a> = dyn Fn(f64) -> f64 + 'a;
 /// * `dt` — sub-step size (e.g., 1.0 for daily steps)
 /// * `step_fn` — advances one particle by dt
 /// * `project_fn` — extracts the projected quantity from a particle (e.g., cumulative infection flow)
-/// * `dmeasure_fn` — observation log-likelihood
+/// * `obs_loglik_fn` — observation log-likelihood
 /// * `seed` — RNG seed
 pub fn bootstrap_filter(
     model: &CompiledModel,
@@ -91,8 +91,8 @@ pub fn bootstrap_filter(
     dt: f64,
     step_fn: &StepFn,
     project_fn: &dyn Fn(&ParticleState) -> f64,
-    dmeasure_fn: &DmeasureFn,
-    rmeasure_fn: Option<&RmeasureFn>,
+    obs_loglik_fn: &ObsLoglikFn,
+    obs_sample_fn: Option<&ObsSampleFn>,
     obs_mean_fn: Option<&ObsMeanFn>,
     seed: u64,
 ) -> Result<PFilterResult, SimError> {
@@ -130,7 +130,7 @@ pub fn bootstrap_filter(
     let mut total_loglik = 0.0;
     let mut ess_trace = Vec::with_capacity(observations.len());
     let mut ll_increments = Vec::with_capacity(observations.len());
-    let has_obs_model = rmeasure_fn.is_some() && obs_mean_fn.is_some();
+    let has_obs_model = obs_sample_fn.is_some() && obs_mean_fn.is_some();
     let mut predictions: Vec<PredictionDiag> = if has_obs_model {
         Vec::with_capacity(observations.len())
     } else {
@@ -166,7 +166,7 @@ pub fn bootstrap_filter(
         while t < obs.time - 1e-10 { t += dt.min(obs.time - t); }
 
         // Prediction diagnostics (only when rmeasure + obs_mean are provided)
-        if let (Some(rmfn), Some(omfn)) = (rmeasure_fn, obs_mean_fn) {
+        if let (Some(rmfn), Some(omfn)) = (obs_sample_fn, obs_mean_fn) {
             let projections: Vec<f64> = swarm.states.iter().map(|s| project_fn(s)).collect();
             let equal_lw = vec![0.0_f64; n_particles];
 
@@ -191,7 +191,7 @@ pub fn bootstrap_filter(
         // Compute log-weights: log p(y_k | projected_i)
         for (i, state) in swarm.states.iter().enumerate() {
             let projected = project_fn(state);
-            swarm.log_weights[i] = dmeasure_fn(projected, obs.value);
+            swarm.log_weights[i] = obs_loglik_fn(projected, obs.value);
         }
 
         // Log-marginal increment: log(1/N × Σ exp(log_w))

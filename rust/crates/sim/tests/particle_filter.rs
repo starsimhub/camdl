@@ -112,13 +112,13 @@ fn run_pf(n_particles: usize, seed: u64) -> f64 {
     };
 
     // Poisson observation model: y ~ Poisson(N)
-    let dmeasure_fn = |projected: f64, observed: f64| -> f64 {
+    let obs_loglik_fn = |projected: f64, observed: f64| -> f64 {
         poisson_logpmf(observed, projected.max(0.1))
     };
 
     let result = bootstrap_filter(
         &compiled, &params, &observations, n_particles, 1.0,
-        &step_fn, &project_fn, &dmeasure_fn, None, None, seed,
+        &step_fn, &project_fn, &obs_loglik_fn, None, None, seed,
     ).unwrap();
 
     result.log_likelihood
@@ -185,11 +185,11 @@ fn test_pf_ess_reasonable() {
         step_one(&compiled, &mut state.counts, &mut state.flow_accumulators, &params, t, dt, rng, scratch)
     };
     let project_fn = |state: &ParticleState| state.counts[0] as f64;
-    let dmeasure_fn = |projected: f64, observed: f64| poisson_logpmf(observed, projected.max(0.1));
+    let obs_loglik_fn = |projected: f64, observed: f64| poisson_logpmf(observed, projected.max(0.1));
 
     let result = bootstrap_filter(
         &compiled, &params, &observations, 500, 1.0,
-        &step_fn, &project_fn, &dmeasure_fn, None, None, 42,
+        &step_fn, &project_fn, &obs_loglik_fn, None, None, 42,
     ).unwrap();
 
     // ESS should be reasonable — not collapsed to 1 or full N

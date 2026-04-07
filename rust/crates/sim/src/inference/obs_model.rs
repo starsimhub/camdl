@@ -15,7 +15,7 @@ use rand_distr::{Gamma, Normal};
 
 /// Build a dmeasure closure for IF2 (per-particle params).
 /// Takes (projected, observed, params) → log-likelihood.
-pub fn compile_dmeasure_if2(
+pub fn compile_obs_loglik_if2(
     obs_model: &ObservationModel,
     compiled: Arc<CompiledModel>,
 ) -> Box<dyn Fn(f64, f64, &[f64]) -> f64 + Send + Sync> {
@@ -30,7 +30,7 @@ pub fn compile_dmeasure_if2(
 
 /// Build a dmeasure closure for pfilter (fixed params).
 /// Takes (projected, observed) → log-likelihood.
-pub fn compile_dmeasure_pf(
+pub fn compile_obs_loglik_pf(
     obs_model: &ObservationModel,
     compiled: Arc<CompiledModel>,
     params: &[f64],
@@ -87,7 +87,7 @@ fn eval_likelihood(
                 + k as f64 * p_val.ln() + (n - k) as f64 * (1.0 - p_val).ln()
         }
         Likelihood::BetaBinomial(_) => {
-            panic!("BetaBinomial dmeasure not yet implemented. Use neg_binomial or normal.");
+            panic!("BetaBinomial obs_loglik not yet implemented. Use neg_binomial or normal.");
         }
         Likelihood::Bernoulli(b) => {
             let p_val = eval_expr(&b.p, &ctx(projected)).unwrap_or(0.5);
@@ -100,7 +100,7 @@ fn eval_likelihood(
 
 /// Build an rmeasure closure for pfilter (fixed params).
 /// Takes (projected, rng) → observation draw.
-pub fn compile_rmeasure_pf(
+pub fn compile_obs_sample_pf(
     obs_model: &ObservationModel,
     compiled: Arc<CompiledModel>,
     params: &[f64],

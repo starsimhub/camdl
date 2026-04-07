@@ -37,7 +37,7 @@ fn run_one_chain(
     observations: &[Observation],
     config: &IF2Config,
     flow_indices: &[usize],
-    dmeasure_fn: &(dyn Fn(f64, f64, &[f64]) -> f64 + Send + Sync),
+    obs_loglik_fn: &(dyn Fn(f64, f64, &[f64]) -> f64 + Send + Sync),
     base_seed: u64,
     pb: Option<&ProgressBar>,
 ) -> IF2Result {
@@ -64,7 +64,7 @@ fn run_one_chain(
 
     let result = run_if2_with_progress(
         compiled, params, if2_params, observations, config,
-        &step_fn, &project_fn, &*dmeasure_fn, chain_seed,
+        &step_fn, &project_fn, &*obs_loglik_fn, chain_seed,
         Some(&progress_cb),
     ).unwrap_or_else(|e| {
         eprintln!("chain {} error: {:?}", chain_id + 1, e);
@@ -368,13 +368,13 @@ pub fn cmd_if2(args: &[String]) {
 
     let compiled = Arc::new(compiled);
 
-    // Build dmeasure: prefer IR observation model, fall back to --obs-model
-    let dmeasure_fn: Box<dyn Fn(f64, f64, &[f64]) -> f64 + Send + Sync> = {
+    // Build obs_loglik: prefer IR observation model, fall back to --obs-model
+    let obs_loglik_fn: Box<dyn Fn(f64, f64, &[f64]) -> f64 + Send + Sync> = {
         // Try to find observation block (first one, or by --flow name match)
         let obs_block = model.observations.first();
         if let Some(obs) = obs_block {
             eprintln!("if2: using observation model '{}' from IR", obs.name);
-            sim::inference::dmeasure::compile_dmeasure_if2(obs, compiled.clone())
+            sim::inference::obs_model::compile_obs_loglik_if2(obs, compiled.clone())
         } else if obs_model != "negbin" || model.observations.is_empty() {
             // Deprecated fallback: hardcoded --obs-model
             eprintln!("\x1b[33mwarning: using --obs-model '{}' (deprecated). Add an observations {{}} block to your model.\x1b[0m", obs_model);
@@ -430,7 +430,7 @@ pub fn cmd_if2(args: &[String]) {
         .into_par_iter()
         .map(|chain_id| {
             let result = run_one_chain(chain_id, &compiled, &params, &if2_params,
-                &observations, &config, &flow_indices, &*dmeasure_fn,
+                &observations, &config, &flow_indices, &*obs_loglik_fn,
                 seed, Some(&bars[chain_id]));
             (chain_id, result)
         })
@@ -458,21 +458,21 @@ pub fn cmd_if2(args: &[String]) {
                     let project_fn = |state: &ParticleState| -> f64 {
                         fi.iter().map(|&i| state.flow_accumulators[i] as f64).sum()
                     };
-                    // Build PF dmeasure from IR obs model (fixed params)
+                    // Build PF obs_loglik from IR obs model (fixed params)
                     let obs_block = model.observations.first();
-                    let pf_dmeasure: Box<dyn Fn(f64, f64) -> f64> = if let Some(obs) = obs_block {
-                        sim::inference::dmeasure::compile_dmeasure_pf(obs, compiled.clone(), eval_params)
+                    let pf_obs_ll: Box<dyn Fn(f64, f64) -> f64> = if let Some(obs) = obs_block {
+                        sim::inference::obs_model::compile_obs_loglik_pf(obs, compiled.clone(), eval_params)
                     } else {
                         // Fallback: wrap IF2 dmeasure with fixed params
                         let p = eval_params.to_vec();
-                        let dm = &*dmeasure_fn;
+                        let dm = &*obs_loglik_fn;
                         Box::new(move |proj: f64, obs: f64| dm(proj, obs, &p))
                     };
 
                     let pf_seed = seed + *chain_id as u64 * 1000 + it.iteration as u64;
                     match sim::inference::bootstrap_filter(
                         &compiled, eval_params, &pf_observations, n_eval_particles, dt,
-                        &step_fn, &project_fn, &*pf_dmeasure, None, None, pf_seed,
+                        &step_fn, &project_fn, &*pf_obs_ll, None, None, pf_seed,
                     ) {
                         Ok(r) => it.loglik = r.log_likelihood,
                         Err(_) => it.loglik = f64::NEG_INFINITY,

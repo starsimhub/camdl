@@ -323,20 +323,20 @@ fn run_pfilter_with_obs(
     let project_fn = |state: &ParticleState| -> f64 {
         flow_indices.iter().map(|&i| state.flow_accumulators[i] as f64).sum()
     };
-    let dmeasure_fn = sim::inference::dmeasure::compile_dmeasure_pf(
+    let obs_loglik_fn = sim::inference::obs_model::compile_obs_loglik_pf(
         &config.obs_model_ir, config.compiled.clone(), params,
     );
-    let rmeasure_fn = sim::inference::dmeasure::compile_rmeasure_pf(
+    let obs_sample_fn = sim::inference::obs_model::compile_obs_sample_pf(
         &config.obs_model_ir, config.compiled.clone(), params,
     );
-    let obs_mean_fn = sim::inference::dmeasure::compile_obs_mean_pf(
+    let obs_mean_fn = sim::inference::obs_model::compile_obs_mean_pf(
         &config.obs_model_ir, config.compiled.clone(), params,
     );
 
     let result = bootstrap_filter(
         compiled, params, &observations, n_particles, config.if2_config.dt,
-        &step_fn, &project_fn, &*dmeasure_fn,
-        Some(&*rmeasure_fn), Some(&*obs_mean_fn), seed,
+        &step_fn, &project_fn, &*obs_loglik_fn,
+        Some(&*obs_sample_fn), Some(&*obs_mean_fn), seed,
     ).map_err(|e| format!("pfilter error: {:?}", e))?;
 
     let ess_mean = result.ess_trace.iter().sum::<f64>() / result.ess_trace.len() as f64;
@@ -494,14 +494,14 @@ fn run_profiles(
             let project_fn = |state: &ParticleState| -> f64 {
                 flow_indices.iter().map(|&i| state.flow_accumulators[i] as f64).sum()
             };
-            let dmeasure_fn = sim::inference::dmeasure::compile_dmeasure_if2(
+            let obs_loglik_fn = sim::inference::obs_model::compile_obs_loglik_if2(
                 &config.obs_model_ir, config.compiled.clone(),
             );
 
             let chain_seed = seed ^ focal.index as u64 ^ (focal_value.to_bits());
             let result = run_if2(
                 &config.compiled, &base, &fixed_params, &config.observations,
-                &profile_config, &step_fn, &project_fn, &*dmeasure_fn, chain_seed,
+                &profile_config, &step_fn, &project_fn, &*obs_loglik_fn, chain_seed,
             );
 
             match result {

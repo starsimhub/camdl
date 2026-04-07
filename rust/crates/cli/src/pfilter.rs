@@ -214,7 +214,7 @@ pub fn cmd_pfilter(args: &[String]) {
             ir::observation::Likelihood::Bernoulli(_) => "bernoulli",
         });
 
-    // Compile dmeasure from IR observation model
+    // Compile obs_loglik from IR observation model
     let compiled = std::sync::Arc::new(compiled);
 
     // Run particle filter
@@ -226,13 +226,13 @@ pub fn cmd_pfilter(args: &[String]) {
         flow_indices.iter().map(|&i| state.flow_accumulators[i] as f64).sum()
     };
 
-    let dmeasure_fn = sim::inference::dmeasure::compile_dmeasure_pf(
+    let obs_loglik_fn = sim::inference::obs_model::compile_obs_loglik_pf(
         &obs_model_ir, compiled.clone(), &params,
     );
-    let rmeasure_fn = sim::inference::dmeasure::compile_rmeasure_pf(
+    let obs_sample_fn = sim::inference::obs_model::compile_obs_sample_pf(
         &obs_model_ir, compiled.clone(), &params,
     );
-    let obs_mean_fn = sim::inference::dmeasure::compile_obs_mean_pf(
+    let obs_mean_fn = sim::inference::obs_model::compile_obs_mean_pf(
         &obs_model_ir, compiled.clone(), &params,
     );
 
@@ -244,7 +244,7 @@ pub fn cmd_pfilter(args: &[String]) {
             let rep_seed = seed + rep as u64;
             let result = bootstrap_filter(
                 &compiled, &params, &observations, n_particles, dt,
-                &step_fn, &project_fn, &*dmeasure_fn, None, None, rep_seed,
+                &step_fn, &project_fn, &*obs_loglik_fn, None, None, rep_seed,
             ).unwrap_or_else(|e| {
                 eprintln!("pfilter replicate {} error: {:?}", rep + 1, e);
                 std::process::exit(1);
@@ -286,8 +286,8 @@ pub fn cmd_pfilter(args: &[String]) {
     // ── Single pfilter run ─────────────────────────────────────────────────
     let result = bootstrap_filter(
         &compiled, &params, &observations, n_particles, dt,
-        &step_fn, &project_fn, &*dmeasure_fn,
-        Some(&*rmeasure_fn), Some(&*obs_mean_fn),
+        &step_fn, &project_fn, &*obs_loglik_fn,
+        Some(&*obs_sample_fn), Some(&*obs_mean_fn),
         seed,
     ).unwrap_or_else(|e| {
         eprintln!("pfilter error: {:?}", e);

@@ -63,12 +63,12 @@ fn test_gradient_vs_finite_differences_sir() {
     let flow_indices: Vec<usize> = vec![];
     let ivp_mappings: Vec<IVPMapping> = vec![];
 
-    let dmeasure_fn = |_: f64, _: f64| -> f64 { 0.0 };
+    let obs_loglik_fn = |_: f64, _: f64| -> f64 { 0.0 };
 
     // Analytical gradient
     let (ll, grad) = complete_data_loglik_grad(
         &compiled, &trajectory, &params, &observations, dt,
-        &dmeasure_fn, &flow_indices, &ivp_mappings,
+        &obs_loglik_fn, &flow_indices, &ivp_mappings,
         &param_names, &param_indices,
     ).unwrap();
 
@@ -86,11 +86,11 @@ fn test_gradient_vs_finite_differences_sir() {
 
         let ll_plus = complete_data_loglik(
             &compiled, &trajectory, &p_plus, &observations, dt,
-            &dmeasure_fn, &flow_indices, &ivp_mappings,
+            &obs_loglik_fn, &flow_indices, &ivp_mappings,
         ).unwrap();
         let ll_minus = complete_data_loglik(
             &compiled, &trajectory, &p_minus, &observations, dt,
-            &dmeasure_fn, &flow_indices, &ivp_mappings,
+            &obs_loglik_fn, &flow_indices, &ivp_mappings,
         ).unwrap();
 
         let fd = (ll_plus - ll_minus) / (2.0 * eps);
@@ -147,7 +147,7 @@ fn test_nuts_target_gradient_on_z_scale() {
     let observations: Vec<Observation> = vec![];
     let flow_indices: Vec<usize> = vec![];
     let ivp_mappings: Vec<IVPMapping> = vec![];
-    let dmeasure_fn = |_: f64, _: f64| -> f64 { 0.0 };
+    let obs_loglik_fn = |_: f64, _: f64| -> f64 { 0.0 };
 
     // Build IF2Params with Log transforms (like real inference)
     let if2_params: Vec<IF2Param> = compiled.model.parameters.iter().enumerate()
@@ -184,7 +184,7 @@ fn test_nuts_target_gradient_on_z_scale() {
 
         let (ll, ll_grad_theta) = sim::inference::pgas_grad::complete_data_loglik_grad(
             &compiled, &trajectory, &params, &observations, dt,
-            &dmeasure_fn, &flow_indices, &ivp_mappings,
+            &obs_loglik_fn, &flow_indices, &ivp_mappings,
             &param_names, &param_indices,
         ).unwrap_or((f64::NEG_INFINITY, vec![0.0; d]));
 
