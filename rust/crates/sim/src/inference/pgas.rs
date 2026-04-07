@@ -780,6 +780,18 @@ fn prior_log_density_and_grad_z(
             let dlp_dz = -(z - mean) / (sd * sd);
             (lp, dlp_dz)
         }
+        Prior::Beta { alpha, beta } => {
+            // log Beta(θ; a, b) = (a-1)ln(θ) + (b-1)ln(1-θ) - lnB(a,b)
+            // d/dθ = (a-1)/θ - (b-1)/(1-θ)
+            // d/dz = d/dθ × dθ/dz
+            if theta <= 0.0 || theta >= 1.0 { return (f64::NEG_INFINITY, 0.0); }
+            use crate::inference::obs_loglik::lgamma;
+            let lp = (alpha - 1.0) * theta.ln() + (beta - 1.0) * (1.0 - theta).ln()
+                - (lgamma(*alpha) + lgamma(*beta) - lgamma(alpha + beta));
+            let dlp_dtheta = (alpha - 1.0) / theta - (beta - 1.0) / (1.0 - theta);
+            let dlp_dz = dlp_dtheta * transform_deriv(param, z);
+            (lp, dlp_dz)
+        }
     }
 }
 

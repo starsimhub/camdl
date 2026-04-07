@@ -93,6 +93,13 @@ pub fn run_pgas_cli(
                     eprintln!("    {:12} LogNormal(mu={:.4}, sigma={:.4}) → median={:.1}",
                         spec.name, mean, sd, mean.exp());
                 }
+                Prior::Beta { alpha, beta } => {
+                    let mode = if *alpha > 1.0 && *beta > 1.0 {
+                        (alpha - 1.0) / (alpha + beta - 2.0)
+                    } else { 0.5 };
+                    eprintln!("    {:12} Beta({:.2}, {:.2}) → mode={:.3}",
+                        spec.name, alpha, beta, mode);
+                }
             }
         }
     }
@@ -485,6 +492,7 @@ pub fn parse_prior(s: &str) -> Option<Prior> {
     match name {
         "lognormal" => Some(Prior::TransformedNormal { mean: args[0], sd: args[1] }),
         "normal" => Some(Prior::Normal { mean: args[0], sd: args[1] }),
+        "beta" => Some(Prior::Beta { alpha: args[0], beta: args[1] }),
         _ => None,
     }
 }
