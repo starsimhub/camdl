@@ -4,7 +4,7 @@
 //! If this fails, the density function doesn't mirror step_one.
 
 use sim::compiled_model::CompiledModel;
-use sim::inference::pgas::{simulate_reference, complete_data_loglik};
+use sim::inference::pgas::{simulate_reference, complete_data_loglik, log_transition_density_substep};
 use sim::inference::ObsStreamSpec;
 use sim::inference::pgas::IVPMapping;
 use sim::inference::particle_filter::Observation;
@@ -178,4 +178,109 @@ fn test_density_matches_step_one_polio_spatial_5() {
     assert!(ll.is_finite(),
         "spatial: LL should be finite at own params, got {}. \
          Run with CAMDL_TRACE_STEPS=1 for diagnostics.", ll);
+}
+
+/// Test: downstream agent's SEIR spatial 5-patch model.
+/// This model has waning immunity (R→S), seasonal forcing, and
+/// gives -inf in their PGAS runs. If this test fails, we've
+/// reproduced the bug.
+#[test]
+fn test_density_downstream_seir_spatial_5() {
+    let path = "tests/fixtures/seir_spatial_5.ir.json";
+    let model = match std::fs::read_to_string(path) {
+        Ok(json) => match serde_json::from_str::<ir::Model>(&json) {
+            Ok(m) => m,
+            Err(e) => { eprintln!("  skip: cannot parse: {}", e); return; }
+        },
+        Err(_) => { eprintln!("  skip: {} not found", path); return; }
+    };
+
+    let mut model = model;
+    for p in &mut model.parameters {
+        if p.value.is_none() {
+            p.value = Some(match p.name.as_str() {
+                "R0" => 20.0, "sigma" => 0.125, "gamma" => 0.2,
+                "amplitude" => 0.3, "s0" => 0.06, "kappa" => 0.05,
+                "rho" => 0.4, "sigma_se" => 0.05, "k" => 10.0,
+                "N0_p1" => 100000.0, "N0_p2" => 80000.0,
+                "N0_p3" => 60000.0, "N0_p4" => 50000.0,
+                "N0_p5" => 150000.0,
+                _ => 1.0,
+            });
+        }
+    }
+    let compiled = CompiledModel::new(model).unwrap();
+    let mut params = vec![0.0; compiled.param_index.len()];
+    for p in &compiled.model.parameters {
+        if let Some(v) = p.value {
+            params[compiled.param_index[p.name.as_str()]] = v;
+        }
+    }
+
+    eprintln!("  downstream SEIR spatial 5: {} transitions, {} source groups",
+        compiled.model.transitions.len(), compiled.source_groups.len());
+    for (i, (src, group)) in compiled.source_groups.iter().enumerate() {
+        let names: Vec<&str> = group.iter()
+            .map(|&j| compiled.model.transitions[j].name.as_str()).collect();
+        if group.len() > 1 {
+            eprintln!("    group {}: src={}, {} tr: {:?}", i, src, group.len(), names);
+        }
+    }
+
+    let mut rng = StatefulRng::new(42);
+    let dt = compiled.model.simulation.dt.unwrap_or(1.0);
+    let t_end = compiled.model.simulation.t_end;
+    let trajectory = simulate_reference(&compiled, &params, t_end, dt, &mut rng).unwrap();
+    eprintln!("  {} substeps", trajectory.substeps.len());
+
+    // Check EACH substep individually to find the first -inf
+    let t_start = compiled.model.simulation.t_start;
+    for s in 0..trajectory.substeps.len() {
+        let t = t_start + s as f64 * dt;
+        let counts_before = if s == 0 {
+            &trajectory.initial_counts
+        } else {
+            &trajectory.substeps[s - 1].counts
+        };
+        let rec = &trajectory.substeps[s];
+
+        let td = log_transition_density_substep(
+            &compiled, counts_before, &rec.flows, &rec.gammas, &params, t, dt,
+        ).unwrap();
+
+        if !td.is_finite() {
+            eprintln!("\n  FIRST -inf at substep {} (t={:.1}):", s, t);
+            eprintln!("  counts_before ({} compartments): {:?}", counts_before.len(), counts_before);
+            eprintln!("  flows ({} transitions): {:?}", rec.flows.len(), &rec.flows);
+            eprintln!("  gammas: {:?}", &rec.gammas);
+
+            // Evaluate propensities to find the mismatch
+            let mut propensities = vec![0.0; compiled.model.transitions.len()];
+            let int_s = sim::state::IntState { counts: counts_before.to_vec() };
+            let real_s = sim::state::RealState::new(compiled.real_local_to_global.len());
+            sim::propensity::eval_propensities(
+                &compiled, &int_s, &real_s, &params, t, &mut propensities
+            ).unwrap();
+
+            for &(src_local, ref group) in &compiled.source_groups {
+                for &tr_idx in group {
+                    let rate = propensities[tr_idx];
+                    let flow = rec.flows[tr_idx];
+                    if (rate <= 0.0 && flow > 0) || (flow > 0) {
+                        eprintln!("    {} (idx={}): rate={:.6e}, flow={}, src_count={}",
+                            compiled.model.transitions[tr_idx].name, tr_idx,
+                            rate, flow, counts_before[src_local]);
+                    }
+                }
+            }
+
+            panic!("density -inf at substep {} — see diagnostics above", s);
+        }
+    }
+
+    let ll = complete_data_loglik(
+        &compiled, &trajectory, &params, &[], dt, &[], &[],
+    ).unwrap();
+    eprintln!("  complete-data LL = {:.4}", ll);
+    assert!(ll.is_finite(), "LL should be finite, got {}", ll);
 }

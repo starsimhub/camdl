@@ -1,0 +1,4483 @@
+{
+  "name": "seir_spatial_5",
+  "version": "0.3",
+  "time_unit": "days",
+  "description": null,
+  "compartments": [
+    { "name": "S_p1", "kind": "integer" },
+    { "name": "S_p2", "kind": "integer" },
+    { "name": "S_p3", "kind": "integer" },
+    { "name": "S_p4", "kind": "integer" },
+    { "name": "S_p5", "kind": "integer" },
+    { "name": "E_p1", "kind": "integer" },
+    { "name": "E_p2", "kind": "integer" },
+    { "name": "E_p3", "kind": "integer" },
+    { "name": "E_p4", "kind": "integer" },
+    { "name": "E_p5", "kind": "integer" },
+    { "name": "I_p1", "kind": "integer" },
+    { "name": "I_p2", "kind": "integer" },
+    { "name": "I_p3", "kind": "integer" },
+    { "name": "I_p4", "kind": "integer" },
+    { "name": "I_p5", "kind": "integer" },
+    { "name": "R_p1", "kind": "integer" },
+    { "name": "R_p2", "kind": "integer" },
+    { "name": "R_p3", "kind": "integer" },
+    { "name": "R_p4", "kind": "integer" },
+    { "name": "R_p5", "kind": "integer" }
+  ],
+  "transitions": [
+    {
+      "name": "infection_p1",
+      "stoichiometry": [ [ "S_p1", -1 ], [ "E_p1", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "div",
+          "left": {
+            "bin_op": {
+              "op": "mul",
+              "left": {
+                "bin_op": {
+                  "op": "mul",
+                  "left": {
+                    "bin_op": {
+                      "op": "mul",
+                      "left": {
+                        "bin_op": {
+                          "op": "mul",
+                          "left": { "param": "R0" },
+                          "right": { "param": "gamma" }
+                        }
+                      },
+                      "right": {
+                        "bin_op": {
+                          "op": "add",
+                          "left": {
+                            "bin_op": {
+                              "op": "sub",
+                              "left": { "const": 1.0 },
+                              "right": { "param": "amplitude" }
+                            }
+                          },
+                          "right": {
+                            "bin_op": {
+                              "op": "mul",
+                              "left": {
+                                "bin_op": {
+                                  "op": "mul",
+                                  "left": { "param": "amplitude" },
+                                  "right": { "const": 2.0 }
+                                }
+                              },
+                              "right": { "time_func": { "name": "school" } }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "right": { "pop": "S_p1" }
+                }
+              },
+              "right": { "pop": "I_p1" }
+            }
+          },
+          "right": { "pop_sum": [ "S_p1", "E_p1", "I_p1", "R_p1" ] }
+        }
+      },
+      "event_key": "infection_p1:{firing_index}",
+      "metadata": {
+        "origin_kind": "transmission",
+        "source_compartment": "S_p1",
+        "dest_compartment": "E_p1"
+      },
+      "draw_method": { "overdispersed": { "param": "sigma_se" } },
+      "rate_grad": {
+        "R0": {
+          "bin_op": {
+            "op": "div",
+            "left": {
+              "bin_op": {
+                "op": "mul",
+                "left": {
+                  "bin_op": {
+                    "op": "mul",
+                    "left": {
+                      "bin_op": {
+                        "op": "mul",
+                        "left": {
+                          "bin_op": {
+                            "op": "mul",
+                            "left": { "param": "gamma" },
+                            "right": {
+                              "bin_op": {
+                                "op": "add",
+                                "left": {
+                                  "bin_op": {
+                                    "op": "sub",
+                                    "left": { "const": 1.0 },
+                                    "right": { "param": "amplitude" }
+                                  }
+                                },
+                                "right": {
+                                  "bin_op": {
+                                    "op": "mul",
+                                    "left": {
+                                      "bin_op": {
+                                        "op": "mul",
+                                        "left": { "param": "amplitude" },
+                                        "right": { "const": 2.0 }
+                                      }
+                                    },
+                                    "right": {
+                                      "time_func": { "name": "school" }
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "right": { "pop": "S_p1" }
+                      }
+                    },
+                    "right": { "pop": "I_p1" }
+                  }
+                },
+                "right": { "pop_sum": [ "S_p1", "E_p1", "I_p1", "R_p1" ] }
+              }
+            },
+            "right": {
+              "bin_op": {
+                "op": "mul",
+                "left": { "pop_sum": [ "S_p1", "E_p1", "I_p1", "R_p1" ] },
+                "right": { "pop_sum": [ "S_p1", "E_p1", "I_p1", "R_p1" ] }
+              }
+            }
+          }
+        },
+        "sigma": { "const": 0.0 },
+        "gamma": {
+          "bin_op": {
+            "op": "div",
+            "left": {
+              "bin_op": {
+                "op": "mul",
+                "left": {
+                  "bin_op": {
+                    "op": "mul",
+                    "left": {
+                      "bin_op": {
+                        "op": "mul",
+                        "left": {
+                          "bin_op": {
+                            "op": "mul",
+                            "left": { "param": "R0" },
+                            "right": {
+                              "bin_op": {
+                                "op": "add",
+                                "left": {
+                                  "bin_op": {
+                                    "op": "sub",
+                                    "left": { "const": 1.0 },
+                                    "right": { "param": "amplitude" }
+                                  }
+                                },
+                                "right": {
+                                  "bin_op": {
+                                    "op": "mul",
+                                    "left": {
+                                      "bin_op": {
+                                        "op": "mul",
+                                        "left": { "param": "amplitude" },
+                                        "right": { "const": 2.0 }
+                                      }
+                                    },
+                                    "right": {
+                                      "time_func": { "name": "school" }
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "right": { "pop": "S_p1" }
+                      }
+                    },
+                    "right": { "pop": "I_p1" }
+                  }
+                },
+                "right": { "pop_sum": [ "S_p1", "E_p1", "I_p1", "R_p1" ] }
+              }
+            },
+            "right": {
+              "bin_op": {
+                "op": "mul",
+                "left": { "pop_sum": [ "S_p1", "E_p1", "I_p1", "R_p1" ] },
+                "right": { "pop_sum": [ "S_p1", "E_p1", "I_p1", "R_p1" ] }
+              }
+            }
+          }
+        },
+        "kappa": { "const": 0.0 },
+        "amplitude": {
+          "bin_op": {
+            "op": "div",
+            "left": {
+              "bin_op": {
+                "op": "mul",
+                "left": {
+                  "bin_op": {
+                    "op": "mul",
+                    "left": {
+                      "bin_op": {
+                        "op": "mul",
+                        "left": {
+                          "bin_op": {
+                            "op": "mul",
+                            "left": {
+                              "bin_op": {
+                                "op": "mul",
+                                "left": { "param": "R0" },
+                                "right": { "param": "gamma" }
+                              }
+                            },
+                            "right": {
+                              "bin_op": {
+                                "op": "add",
+                                "left": {
+                                  "un_op": {
+                                    "op": "neg",
+                                    "arg": { "const": 1.0 }
+                                  }
+                                },
+                                "right": {
+                                  "bin_op": {
+                                    "op": "mul",
+                                    "left": { "const": 2.0 },
+                                    "right": {
+                                      "time_func": { "name": "school" }
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "right": { "pop": "S_p1" }
+                      }
+                    },
+                    "right": { "pop": "I_p1" }
+                  }
+                },
+                "right": { "pop_sum": [ "S_p1", "E_p1", "I_p1", "R_p1" ] }
+              }
+            },
+            "right": {
+              "bin_op": {
+                "op": "mul",
+                "left": { "pop_sum": [ "S_p1", "E_p1", "I_p1", "R_p1" ] },
+                "right": { "pop_sum": [ "S_p1", "E_p1", "I_p1", "R_p1" ] }
+              }
+            }
+          }
+        },
+        "s0": { "const": 0.0 },
+        "rho": { "const": 0.0 },
+        "sigma_se": { "const": 0.0 },
+        "N0_p1": { "const": 0.0 },
+        "N0_p2": { "const": 0.0 },
+        "N0_p3": { "const": 0.0 },
+        "N0_p4": { "const": 0.0 },
+        "N0_p5": { "const": 0.0 },
+        "k": { "const": 0.0 }
+      }
+    },
+    {
+      "name": "infection_p2",
+      "stoichiometry": [ [ "S_p2", -1 ], [ "E_p2", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "div",
+          "left": {
+            "bin_op": {
+              "op": "mul",
+              "left": {
+                "bin_op": {
+                  "op": "mul",
+                  "left": {
+                    "bin_op": {
+                      "op": "mul",
+                      "left": {
+                        "bin_op": {
+                          "op": "mul",
+                          "left": { "param": "R0" },
+                          "right": { "param": "gamma" }
+                        }
+                      },
+                      "right": {
+                        "bin_op": {
+                          "op": "add",
+                          "left": {
+                            "bin_op": {
+                              "op": "sub",
+                              "left": { "const": 1.0 },
+                              "right": { "param": "amplitude" }
+                            }
+                          },
+                          "right": {
+                            "bin_op": {
+                              "op": "mul",
+                              "left": {
+                                "bin_op": {
+                                  "op": "mul",
+                                  "left": { "param": "amplitude" },
+                                  "right": { "const": 2.0 }
+                                }
+                              },
+                              "right": { "time_func": { "name": "school" } }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "right": { "pop": "S_p2" }
+                }
+              },
+              "right": { "pop": "I_p2" }
+            }
+          },
+          "right": { "pop_sum": [ "S_p2", "E_p2", "I_p2", "R_p2" ] }
+        }
+      },
+      "event_key": "infection_p2:{firing_index}",
+      "metadata": {
+        "origin_kind": "transmission",
+        "source_compartment": "S_p2",
+        "dest_compartment": "E_p2"
+      },
+      "draw_method": { "overdispersed": { "param": "sigma_se" } },
+      "rate_grad": {
+        "R0": {
+          "bin_op": {
+            "op": "div",
+            "left": {
+              "bin_op": {
+                "op": "mul",
+                "left": {
+                  "bin_op": {
+                    "op": "mul",
+                    "left": {
+                      "bin_op": {
+                        "op": "mul",
+                        "left": {
+                          "bin_op": {
+                            "op": "mul",
+                            "left": { "param": "gamma" },
+                            "right": {
+                              "bin_op": {
+                                "op": "add",
+                                "left": {
+                                  "bin_op": {
+                                    "op": "sub",
+                                    "left": { "const": 1.0 },
+                                    "right": { "param": "amplitude" }
+                                  }
+                                },
+                                "right": {
+                                  "bin_op": {
+                                    "op": "mul",
+                                    "left": {
+                                      "bin_op": {
+                                        "op": "mul",
+                                        "left": { "param": "amplitude" },
+                                        "right": { "const": 2.0 }
+                                      }
+                                    },
+                                    "right": {
+                                      "time_func": { "name": "school" }
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "right": { "pop": "S_p2" }
+                      }
+                    },
+                    "right": { "pop": "I_p2" }
+                  }
+                },
+                "right": { "pop_sum": [ "S_p2", "E_p2", "I_p2", "R_p2" ] }
+              }
+            },
+            "right": {
+              "bin_op": {
+                "op": "mul",
+                "left": { "pop_sum": [ "S_p2", "E_p2", "I_p2", "R_p2" ] },
+                "right": { "pop_sum": [ "S_p2", "E_p2", "I_p2", "R_p2" ] }
+              }
+            }
+          }
+        },
+        "sigma": { "const": 0.0 },
+        "gamma": {
+          "bin_op": {
+            "op": "div",
+            "left": {
+              "bin_op": {
+                "op": "mul",
+                "left": {
+                  "bin_op": {
+                    "op": "mul",
+                    "left": {
+                      "bin_op": {
+                        "op": "mul",
+                        "left": {
+                          "bin_op": {
+                            "op": "mul",
+                            "left": { "param": "R0" },
+                            "right": {
+                              "bin_op": {
+                                "op": "add",
+                                "left": {
+                                  "bin_op": {
+                                    "op": "sub",
+                                    "left": { "const": 1.0 },
+                                    "right": { "param": "amplitude" }
+                                  }
+                                },
+                                "right": {
+                                  "bin_op": {
+                                    "op": "mul",
+                                    "left": {
+                                      "bin_op": {
+                                        "op": "mul",
+                                        "left": { "param": "amplitude" },
+                                        "right": { "const": 2.0 }
+                                      }
+                                    },
+                                    "right": {
+                                      "time_func": { "name": "school" }
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "right": { "pop": "S_p2" }
+                      }
+                    },
+                    "right": { "pop": "I_p2" }
+                  }
+                },
+                "right": { "pop_sum": [ "S_p2", "E_p2", "I_p2", "R_p2" ] }
+              }
+            },
+            "right": {
+              "bin_op": {
+                "op": "mul",
+                "left": { "pop_sum": [ "S_p2", "E_p2", "I_p2", "R_p2" ] },
+                "right": { "pop_sum": [ "S_p2", "E_p2", "I_p2", "R_p2" ] }
+              }
+            }
+          }
+        },
+        "kappa": { "const": 0.0 },
+        "amplitude": {
+          "bin_op": {
+            "op": "div",
+            "left": {
+              "bin_op": {
+                "op": "mul",
+                "left": {
+                  "bin_op": {
+                    "op": "mul",
+                    "left": {
+                      "bin_op": {
+                        "op": "mul",
+                        "left": {
+                          "bin_op": {
+                            "op": "mul",
+                            "left": {
+                              "bin_op": {
+                                "op": "mul",
+                                "left": { "param": "R0" },
+                                "right": { "param": "gamma" }
+                              }
+                            },
+                            "right": {
+                              "bin_op": {
+                                "op": "add",
+                                "left": {
+                                  "un_op": {
+                                    "op": "neg",
+                                    "arg": { "const": 1.0 }
+                                  }
+                                },
+                                "right": {
+                                  "bin_op": {
+                                    "op": "mul",
+                                    "left": { "const": 2.0 },
+                                    "right": {
+                                      "time_func": { "name": "school" }
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "right": { "pop": "S_p2" }
+                      }
+                    },
+                    "right": { "pop": "I_p2" }
+                  }
+                },
+                "right": { "pop_sum": [ "S_p2", "E_p2", "I_p2", "R_p2" ] }
+              }
+            },
+            "right": {
+              "bin_op": {
+                "op": "mul",
+                "left": { "pop_sum": [ "S_p2", "E_p2", "I_p2", "R_p2" ] },
+                "right": { "pop_sum": [ "S_p2", "E_p2", "I_p2", "R_p2" ] }
+              }
+            }
+          }
+        },
+        "s0": { "const": 0.0 },
+        "rho": { "const": 0.0 },
+        "sigma_se": { "const": 0.0 },
+        "N0_p1": { "const": 0.0 },
+        "N0_p2": { "const": 0.0 },
+        "N0_p3": { "const": 0.0 },
+        "N0_p4": { "const": 0.0 },
+        "N0_p5": { "const": 0.0 },
+        "k": { "const": 0.0 }
+      }
+    },
+    {
+      "name": "infection_p3",
+      "stoichiometry": [ [ "S_p3", -1 ], [ "E_p3", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "div",
+          "left": {
+            "bin_op": {
+              "op": "mul",
+              "left": {
+                "bin_op": {
+                  "op": "mul",
+                  "left": {
+                    "bin_op": {
+                      "op": "mul",
+                      "left": {
+                        "bin_op": {
+                          "op": "mul",
+                          "left": { "param": "R0" },
+                          "right": { "param": "gamma" }
+                        }
+                      },
+                      "right": {
+                        "bin_op": {
+                          "op": "add",
+                          "left": {
+                            "bin_op": {
+                              "op": "sub",
+                              "left": { "const": 1.0 },
+                              "right": { "param": "amplitude" }
+                            }
+                          },
+                          "right": {
+                            "bin_op": {
+                              "op": "mul",
+                              "left": {
+                                "bin_op": {
+                                  "op": "mul",
+                                  "left": { "param": "amplitude" },
+                                  "right": { "const": 2.0 }
+                                }
+                              },
+                              "right": { "time_func": { "name": "school" } }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "right": { "pop": "S_p3" }
+                }
+              },
+              "right": { "pop": "I_p3" }
+            }
+          },
+          "right": { "pop_sum": [ "S_p3", "E_p3", "I_p3", "R_p3" ] }
+        }
+      },
+      "event_key": "infection_p3:{firing_index}",
+      "metadata": {
+        "origin_kind": "transmission",
+        "source_compartment": "S_p3",
+        "dest_compartment": "E_p3"
+      },
+      "draw_method": { "overdispersed": { "param": "sigma_se" } },
+      "rate_grad": {
+        "R0": {
+          "bin_op": {
+            "op": "div",
+            "left": {
+              "bin_op": {
+                "op": "mul",
+                "left": {
+                  "bin_op": {
+                    "op": "mul",
+                    "left": {
+                      "bin_op": {
+                        "op": "mul",
+                        "left": {
+                          "bin_op": {
+                            "op": "mul",
+                            "left": { "param": "gamma" },
+                            "right": {
+                              "bin_op": {
+                                "op": "add",
+                                "left": {
+                                  "bin_op": {
+                                    "op": "sub",
+                                    "left": { "const": 1.0 },
+                                    "right": { "param": "amplitude" }
+                                  }
+                                },
+                                "right": {
+                                  "bin_op": {
+                                    "op": "mul",
+                                    "left": {
+                                      "bin_op": {
+                                        "op": "mul",
+                                        "left": { "param": "amplitude" },
+                                        "right": { "const": 2.0 }
+                                      }
+                                    },
+                                    "right": {
+                                      "time_func": { "name": "school" }
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "right": { "pop": "S_p3" }
+                      }
+                    },
+                    "right": { "pop": "I_p3" }
+                  }
+                },
+                "right": { "pop_sum": [ "S_p3", "E_p3", "I_p3", "R_p3" ] }
+              }
+            },
+            "right": {
+              "bin_op": {
+                "op": "mul",
+                "left": { "pop_sum": [ "S_p3", "E_p3", "I_p3", "R_p3" ] },
+                "right": { "pop_sum": [ "S_p3", "E_p3", "I_p3", "R_p3" ] }
+              }
+            }
+          }
+        },
+        "sigma": { "const": 0.0 },
+        "gamma": {
+          "bin_op": {
+            "op": "div",
+            "left": {
+              "bin_op": {
+                "op": "mul",
+                "left": {
+                  "bin_op": {
+                    "op": "mul",
+                    "left": {
+                      "bin_op": {
+                        "op": "mul",
+                        "left": {
+                          "bin_op": {
+                            "op": "mul",
+                            "left": { "param": "R0" },
+                            "right": {
+                              "bin_op": {
+                                "op": "add",
+                                "left": {
+                                  "bin_op": {
+                                    "op": "sub",
+                                    "left": { "const": 1.0 },
+                                    "right": { "param": "amplitude" }
+                                  }
+                                },
+                                "right": {
+                                  "bin_op": {
+                                    "op": "mul",
+                                    "left": {
+                                      "bin_op": {
+                                        "op": "mul",
+                                        "left": { "param": "amplitude" },
+                                        "right": { "const": 2.0 }
+                                      }
+                                    },
+                                    "right": {
+                                      "time_func": { "name": "school" }
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "right": { "pop": "S_p3" }
+                      }
+                    },
+                    "right": { "pop": "I_p3" }
+                  }
+                },
+                "right": { "pop_sum": [ "S_p3", "E_p3", "I_p3", "R_p3" ] }
+              }
+            },
+            "right": {
+              "bin_op": {
+                "op": "mul",
+                "left": { "pop_sum": [ "S_p3", "E_p3", "I_p3", "R_p3" ] },
+                "right": { "pop_sum": [ "S_p3", "E_p3", "I_p3", "R_p3" ] }
+              }
+            }
+          }
+        },
+        "kappa": { "const": 0.0 },
+        "amplitude": {
+          "bin_op": {
+            "op": "div",
+            "left": {
+              "bin_op": {
+                "op": "mul",
+                "left": {
+                  "bin_op": {
+                    "op": "mul",
+                    "left": {
+                      "bin_op": {
+                        "op": "mul",
+                        "left": {
+                          "bin_op": {
+                            "op": "mul",
+                            "left": {
+                              "bin_op": {
+                                "op": "mul",
+                                "left": { "param": "R0" },
+                                "right": { "param": "gamma" }
+                              }
+                            },
+                            "right": {
+                              "bin_op": {
+                                "op": "add",
+                                "left": {
+                                  "un_op": {
+                                    "op": "neg",
+                                    "arg": { "const": 1.0 }
+                                  }
+                                },
+                                "right": {
+                                  "bin_op": {
+                                    "op": "mul",
+                                    "left": { "const": 2.0 },
+                                    "right": {
+                                      "time_func": { "name": "school" }
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "right": { "pop": "S_p3" }
+                      }
+                    },
+                    "right": { "pop": "I_p3" }
+                  }
+                },
+                "right": { "pop_sum": [ "S_p3", "E_p3", "I_p3", "R_p3" ] }
+              }
+            },
+            "right": {
+              "bin_op": {
+                "op": "mul",
+                "left": { "pop_sum": [ "S_p3", "E_p3", "I_p3", "R_p3" ] },
+                "right": { "pop_sum": [ "S_p3", "E_p3", "I_p3", "R_p3" ] }
+              }
+            }
+          }
+        },
+        "s0": { "const": 0.0 },
+        "rho": { "const": 0.0 },
+        "sigma_se": { "const": 0.0 },
+        "N0_p1": { "const": 0.0 },
+        "N0_p2": { "const": 0.0 },
+        "N0_p3": { "const": 0.0 },
+        "N0_p4": { "const": 0.0 },
+        "N0_p5": { "const": 0.0 },
+        "k": { "const": 0.0 }
+      }
+    },
+    {
+      "name": "infection_p4",
+      "stoichiometry": [ [ "S_p4", -1 ], [ "E_p4", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "div",
+          "left": {
+            "bin_op": {
+              "op": "mul",
+              "left": {
+                "bin_op": {
+                  "op": "mul",
+                  "left": {
+                    "bin_op": {
+                      "op": "mul",
+                      "left": {
+                        "bin_op": {
+                          "op": "mul",
+                          "left": { "param": "R0" },
+                          "right": { "param": "gamma" }
+                        }
+                      },
+                      "right": {
+                        "bin_op": {
+                          "op": "add",
+                          "left": {
+                            "bin_op": {
+                              "op": "sub",
+                              "left": { "const": 1.0 },
+                              "right": { "param": "amplitude" }
+                            }
+                          },
+                          "right": {
+                            "bin_op": {
+                              "op": "mul",
+                              "left": {
+                                "bin_op": {
+                                  "op": "mul",
+                                  "left": { "param": "amplitude" },
+                                  "right": { "const": 2.0 }
+                                }
+                              },
+                              "right": { "time_func": { "name": "school" } }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "right": { "pop": "S_p4" }
+                }
+              },
+              "right": { "pop": "I_p4" }
+            }
+          },
+          "right": { "pop_sum": [ "S_p4", "E_p4", "I_p4", "R_p4" ] }
+        }
+      },
+      "event_key": "infection_p4:{firing_index}",
+      "metadata": {
+        "origin_kind": "transmission",
+        "source_compartment": "S_p4",
+        "dest_compartment": "E_p4"
+      },
+      "draw_method": { "overdispersed": { "param": "sigma_se" } },
+      "rate_grad": {
+        "R0": {
+          "bin_op": {
+            "op": "div",
+            "left": {
+              "bin_op": {
+                "op": "mul",
+                "left": {
+                  "bin_op": {
+                    "op": "mul",
+                    "left": {
+                      "bin_op": {
+                        "op": "mul",
+                        "left": {
+                          "bin_op": {
+                            "op": "mul",
+                            "left": { "param": "gamma" },
+                            "right": {
+                              "bin_op": {
+                                "op": "add",
+                                "left": {
+                                  "bin_op": {
+                                    "op": "sub",
+                                    "left": { "const": 1.0 },
+                                    "right": { "param": "amplitude" }
+                                  }
+                                },
+                                "right": {
+                                  "bin_op": {
+                                    "op": "mul",
+                                    "left": {
+                                      "bin_op": {
+                                        "op": "mul",
+                                        "left": { "param": "amplitude" },
+                                        "right": { "const": 2.0 }
+                                      }
+                                    },
+                                    "right": {
+                                      "time_func": { "name": "school" }
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "right": { "pop": "S_p4" }
+                      }
+                    },
+                    "right": { "pop": "I_p4" }
+                  }
+                },
+                "right": { "pop_sum": [ "S_p4", "E_p4", "I_p4", "R_p4" ] }
+              }
+            },
+            "right": {
+              "bin_op": {
+                "op": "mul",
+                "left": { "pop_sum": [ "S_p4", "E_p4", "I_p4", "R_p4" ] },
+                "right": { "pop_sum": [ "S_p4", "E_p4", "I_p4", "R_p4" ] }
+              }
+            }
+          }
+        },
+        "sigma": { "const": 0.0 },
+        "gamma": {
+          "bin_op": {
+            "op": "div",
+            "left": {
+              "bin_op": {
+                "op": "mul",
+                "left": {
+                  "bin_op": {
+                    "op": "mul",
+                    "left": {
+                      "bin_op": {
+                        "op": "mul",
+                        "left": {
+                          "bin_op": {
+                            "op": "mul",
+                            "left": { "param": "R0" },
+                            "right": {
+                              "bin_op": {
+                                "op": "add",
+                                "left": {
+                                  "bin_op": {
+                                    "op": "sub",
+                                    "left": { "const": 1.0 },
+                                    "right": { "param": "amplitude" }
+                                  }
+                                },
+                                "right": {
+                                  "bin_op": {
+                                    "op": "mul",
+                                    "left": {
+                                      "bin_op": {
+                                        "op": "mul",
+                                        "left": { "param": "amplitude" },
+                                        "right": { "const": 2.0 }
+                                      }
+                                    },
+                                    "right": {
+                                      "time_func": { "name": "school" }
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "right": { "pop": "S_p4" }
+                      }
+                    },
+                    "right": { "pop": "I_p4" }
+                  }
+                },
+                "right": { "pop_sum": [ "S_p4", "E_p4", "I_p4", "R_p4" ] }
+              }
+            },
+            "right": {
+              "bin_op": {
+                "op": "mul",
+                "left": { "pop_sum": [ "S_p4", "E_p4", "I_p4", "R_p4" ] },
+                "right": { "pop_sum": [ "S_p4", "E_p4", "I_p4", "R_p4" ] }
+              }
+            }
+          }
+        },
+        "kappa": { "const": 0.0 },
+        "amplitude": {
+          "bin_op": {
+            "op": "div",
+            "left": {
+              "bin_op": {
+                "op": "mul",
+                "left": {
+                  "bin_op": {
+                    "op": "mul",
+                    "left": {
+                      "bin_op": {
+                        "op": "mul",
+                        "left": {
+                          "bin_op": {
+                            "op": "mul",
+                            "left": {
+                              "bin_op": {
+                                "op": "mul",
+                                "left": { "param": "R0" },
+                                "right": { "param": "gamma" }
+                              }
+                            },
+                            "right": {
+                              "bin_op": {
+                                "op": "add",
+                                "left": {
+                                  "un_op": {
+                                    "op": "neg",
+                                    "arg": { "const": 1.0 }
+                                  }
+                                },
+                                "right": {
+                                  "bin_op": {
+                                    "op": "mul",
+                                    "left": { "const": 2.0 },
+                                    "right": {
+                                      "time_func": { "name": "school" }
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "right": { "pop": "S_p4" }
+                      }
+                    },
+                    "right": { "pop": "I_p4" }
+                  }
+                },
+                "right": { "pop_sum": [ "S_p4", "E_p4", "I_p4", "R_p4" ] }
+              }
+            },
+            "right": {
+              "bin_op": {
+                "op": "mul",
+                "left": { "pop_sum": [ "S_p4", "E_p4", "I_p4", "R_p4" ] },
+                "right": { "pop_sum": [ "S_p4", "E_p4", "I_p4", "R_p4" ] }
+              }
+            }
+          }
+        },
+        "s0": { "const": 0.0 },
+        "rho": { "const": 0.0 },
+        "sigma_se": { "const": 0.0 },
+        "N0_p1": { "const": 0.0 },
+        "N0_p2": { "const": 0.0 },
+        "N0_p3": { "const": 0.0 },
+        "N0_p4": { "const": 0.0 },
+        "N0_p5": { "const": 0.0 },
+        "k": { "const": 0.0 }
+      }
+    },
+    {
+      "name": "infection_p5",
+      "stoichiometry": [ [ "S_p5", -1 ], [ "E_p5", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "div",
+          "left": {
+            "bin_op": {
+              "op": "mul",
+              "left": {
+                "bin_op": {
+                  "op": "mul",
+                  "left": {
+                    "bin_op": {
+                      "op": "mul",
+                      "left": {
+                        "bin_op": {
+                          "op": "mul",
+                          "left": { "param": "R0" },
+                          "right": { "param": "gamma" }
+                        }
+                      },
+                      "right": {
+                        "bin_op": {
+                          "op": "add",
+                          "left": {
+                            "bin_op": {
+                              "op": "sub",
+                              "left": { "const": 1.0 },
+                              "right": { "param": "amplitude" }
+                            }
+                          },
+                          "right": {
+                            "bin_op": {
+                              "op": "mul",
+                              "left": {
+                                "bin_op": {
+                                  "op": "mul",
+                                  "left": { "param": "amplitude" },
+                                  "right": { "const": 2.0 }
+                                }
+                              },
+                              "right": { "time_func": { "name": "school" } }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "right": { "pop": "S_p5" }
+                }
+              },
+              "right": { "pop": "I_p5" }
+            }
+          },
+          "right": { "pop_sum": [ "S_p5", "E_p5", "I_p5", "R_p5" ] }
+        }
+      },
+      "event_key": "infection_p5:{firing_index}",
+      "metadata": {
+        "origin_kind": "transmission",
+        "source_compartment": "S_p5",
+        "dest_compartment": "E_p5"
+      },
+      "draw_method": { "overdispersed": { "param": "sigma_se" } },
+      "rate_grad": {
+        "R0": {
+          "bin_op": {
+            "op": "div",
+            "left": {
+              "bin_op": {
+                "op": "mul",
+                "left": {
+                  "bin_op": {
+                    "op": "mul",
+                    "left": {
+                      "bin_op": {
+                        "op": "mul",
+                        "left": {
+                          "bin_op": {
+                            "op": "mul",
+                            "left": { "param": "gamma" },
+                            "right": {
+                              "bin_op": {
+                                "op": "add",
+                                "left": {
+                                  "bin_op": {
+                                    "op": "sub",
+                                    "left": { "const": 1.0 },
+                                    "right": { "param": "amplitude" }
+                                  }
+                                },
+                                "right": {
+                                  "bin_op": {
+                                    "op": "mul",
+                                    "left": {
+                                      "bin_op": {
+                                        "op": "mul",
+                                        "left": { "param": "amplitude" },
+                                        "right": { "const": 2.0 }
+                                      }
+                                    },
+                                    "right": {
+                                      "time_func": { "name": "school" }
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "right": { "pop": "S_p5" }
+                      }
+                    },
+                    "right": { "pop": "I_p5" }
+                  }
+                },
+                "right": { "pop_sum": [ "S_p5", "E_p5", "I_p5", "R_p5" ] }
+              }
+            },
+            "right": {
+              "bin_op": {
+                "op": "mul",
+                "left": { "pop_sum": [ "S_p5", "E_p5", "I_p5", "R_p5" ] },
+                "right": { "pop_sum": [ "S_p5", "E_p5", "I_p5", "R_p5" ] }
+              }
+            }
+          }
+        },
+        "sigma": { "const": 0.0 },
+        "gamma": {
+          "bin_op": {
+            "op": "div",
+            "left": {
+              "bin_op": {
+                "op": "mul",
+                "left": {
+                  "bin_op": {
+                    "op": "mul",
+                    "left": {
+                      "bin_op": {
+                        "op": "mul",
+                        "left": {
+                          "bin_op": {
+                            "op": "mul",
+                            "left": { "param": "R0" },
+                            "right": {
+                              "bin_op": {
+                                "op": "add",
+                                "left": {
+                                  "bin_op": {
+                                    "op": "sub",
+                                    "left": { "const": 1.0 },
+                                    "right": { "param": "amplitude" }
+                                  }
+                                },
+                                "right": {
+                                  "bin_op": {
+                                    "op": "mul",
+                                    "left": {
+                                      "bin_op": {
+                                        "op": "mul",
+                                        "left": { "param": "amplitude" },
+                                        "right": { "const": 2.0 }
+                                      }
+                                    },
+                                    "right": {
+                                      "time_func": { "name": "school" }
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "right": { "pop": "S_p5" }
+                      }
+                    },
+                    "right": { "pop": "I_p5" }
+                  }
+                },
+                "right": { "pop_sum": [ "S_p5", "E_p5", "I_p5", "R_p5" ] }
+              }
+            },
+            "right": {
+              "bin_op": {
+                "op": "mul",
+                "left": { "pop_sum": [ "S_p5", "E_p5", "I_p5", "R_p5" ] },
+                "right": { "pop_sum": [ "S_p5", "E_p5", "I_p5", "R_p5" ] }
+              }
+            }
+          }
+        },
+        "kappa": { "const": 0.0 },
+        "amplitude": {
+          "bin_op": {
+            "op": "div",
+            "left": {
+              "bin_op": {
+                "op": "mul",
+                "left": {
+                  "bin_op": {
+                    "op": "mul",
+                    "left": {
+                      "bin_op": {
+                        "op": "mul",
+                        "left": {
+                          "bin_op": {
+                            "op": "mul",
+                            "left": {
+                              "bin_op": {
+                                "op": "mul",
+                                "left": { "param": "R0" },
+                                "right": { "param": "gamma" }
+                              }
+                            },
+                            "right": {
+                              "bin_op": {
+                                "op": "add",
+                                "left": {
+                                  "un_op": {
+                                    "op": "neg",
+                                    "arg": { "const": 1.0 }
+                                  }
+                                },
+                                "right": {
+                                  "bin_op": {
+                                    "op": "mul",
+                                    "left": { "const": 2.0 },
+                                    "right": {
+                                      "time_func": { "name": "school" }
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "right": { "pop": "S_p5" }
+                      }
+                    },
+                    "right": { "pop": "I_p5" }
+                  }
+                },
+                "right": { "pop_sum": [ "S_p5", "E_p5", "I_p5", "R_p5" ] }
+              }
+            },
+            "right": {
+              "bin_op": {
+                "op": "mul",
+                "left": { "pop_sum": [ "S_p5", "E_p5", "I_p5", "R_p5" ] },
+                "right": { "pop_sum": [ "S_p5", "E_p5", "I_p5", "R_p5" ] }
+              }
+            }
+          }
+        },
+        "s0": { "const": 0.0 },
+        "rho": { "const": 0.0 },
+        "sigma_se": { "const": 0.0 },
+        "N0_p1": { "const": 0.0 },
+        "N0_p2": { "const": 0.0 },
+        "N0_p3": { "const": 0.0 },
+        "N0_p4": { "const": 0.0 },
+        "N0_p5": { "const": 0.0 },
+        "k": { "const": 0.0 }
+      }
+    },
+    {
+      "name": "importation_p1_p2",
+      "stoichiometry": [ [ "S_p1", -1 ], [ "E_p1", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "div",
+          "left": {
+            "bin_op": {
+              "op": "mul",
+              "left": {
+                "bin_op": {
+                  "op": "mul",
+                  "left": {
+                    "bin_op": {
+                      "op": "mul",
+                      "left": { "param": "kappa" },
+                      "right": {
+                        "table_lookup": {
+                          "table": "W",
+                          "indices": [ { "const": 1.0 } ]
+                        }
+                      }
+                    }
+                  },
+                  "right": { "pop": "S_p1" }
+                }
+              },
+              "right": { "pop": "I_p2" }
+            }
+          },
+          "right": { "pop_sum": [ "S_p2", "E_p2", "I_p2", "R_p2" ] }
+        }
+      },
+      "event_key": "importation_p1_p2:{firing_index}",
+      "metadata": {
+        "origin_kind": "transmission",
+        "source_compartment": "S_p1",
+        "dest_compartment": "E_p1"
+      },
+      "rate_grad": {
+        "R0": { "const": 0.0 },
+        "sigma": { "const": 0.0 },
+        "gamma": { "const": 0.0 },
+        "kappa": {
+          "bin_op": {
+            "op": "div",
+            "left": {
+              "bin_op": {
+                "op": "mul",
+                "left": {
+                  "bin_op": {
+                    "op": "mul",
+                    "left": {
+                      "bin_op": {
+                        "op": "mul",
+                        "left": {
+                          "table_lookup": {
+                            "table": "W",
+                            "indices": [ { "const": 1.0 } ]
+                          }
+                        },
+                        "right": { "pop": "S_p1" }
+                      }
+                    },
+                    "right": { "pop": "I_p2" }
+                  }
+                },
+                "right": { "pop_sum": [ "S_p2", "E_p2", "I_p2", "R_p2" ] }
+              }
+            },
+            "right": {
+              "bin_op": {
+                "op": "mul",
+                "left": { "pop_sum": [ "S_p2", "E_p2", "I_p2", "R_p2" ] },
+                "right": { "pop_sum": [ "S_p2", "E_p2", "I_p2", "R_p2" ] }
+              }
+            }
+          }
+        },
+        "amplitude": { "const": 0.0 },
+        "s0": { "const": 0.0 },
+        "rho": { "const": 0.0 },
+        "sigma_se": { "const": 0.0 },
+        "N0_p1": { "const": 0.0 },
+        "N0_p2": { "const": 0.0 },
+        "N0_p3": { "const": 0.0 },
+        "N0_p4": { "const": 0.0 },
+        "N0_p5": { "const": 0.0 },
+        "k": { "const": 0.0 }
+      }
+    },
+    {
+      "name": "importation_p1_p3",
+      "stoichiometry": [ [ "S_p1", -1 ], [ "E_p1", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "div",
+          "left": {
+            "bin_op": {
+              "op": "mul",
+              "left": {
+                "bin_op": {
+                  "op": "mul",
+                  "left": {
+                    "bin_op": {
+                      "op": "mul",
+                      "left": { "param": "kappa" },
+                      "right": {
+                        "table_lookup": {
+                          "table": "W",
+                          "indices": [ { "const": 2.0 } ]
+                        }
+                      }
+                    }
+                  },
+                  "right": { "pop": "S_p1" }
+                }
+              },
+              "right": { "pop": "I_p3" }
+            }
+          },
+          "right": { "pop_sum": [ "S_p3", "E_p3", "I_p3", "R_p3" ] }
+        }
+      },
+      "event_key": "importation_p1_p3:{firing_index}",
+      "metadata": {
+        "origin_kind": "transmission",
+        "source_compartment": "S_p1",
+        "dest_compartment": "E_p1"
+      },
+      "rate_grad": {
+        "R0": { "const": 0.0 },
+        "sigma": { "const": 0.0 },
+        "gamma": { "const": 0.0 },
+        "kappa": {
+          "bin_op": {
+            "op": "div",
+            "left": {
+              "bin_op": {
+                "op": "mul",
+                "left": {
+                  "bin_op": {
+                    "op": "mul",
+                    "left": {
+                      "bin_op": {
+                        "op": "mul",
+                        "left": {
+                          "table_lookup": {
+                            "table": "W",
+                            "indices": [ { "const": 2.0 } ]
+                          }
+                        },
+                        "right": { "pop": "S_p1" }
+                      }
+                    },
+                    "right": { "pop": "I_p3" }
+                  }
+                },
+                "right": { "pop_sum": [ "S_p3", "E_p3", "I_p3", "R_p3" ] }
+              }
+            },
+            "right": {
+              "bin_op": {
+                "op": "mul",
+                "left": { "pop_sum": [ "S_p3", "E_p3", "I_p3", "R_p3" ] },
+                "right": { "pop_sum": [ "S_p3", "E_p3", "I_p3", "R_p3" ] }
+              }
+            }
+          }
+        },
+        "amplitude": { "const": 0.0 },
+        "s0": { "const": 0.0 },
+        "rho": { "const": 0.0 },
+        "sigma_se": { "const": 0.0 },
+        "N0_p1": { "const": 0.0 },
+        "N0_p2": { "const": 0.0 },
+        "N0_p3": { "const": 0.0 },
+        "N0_p4": { "const": 0.0 },
+        "N0_p5": { "const": 0.0 },
+        "k": { "const": 0.0 }
+      }
+    },
+    {
+      "name": "importation_p1_p4",
+      "stoichiometry": [ [ "S_p1", -1 ], [ "E_p1", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "div",
+          "left": {
+            "bin_op": {
+              "op": "mul",
+              "left": {
+                "bin_op": {
+                  "op": "mul",
+                  "left": {
+                    "bin_op": {
+                      "op": "mul",
+                      "left": { "param": "kappa" },
+                      "right": {
+                        "table_lookup": {
+                          "table": "W",
+                          "indices": [ { "const": 3.0 } ]
+                        }
+                      }
+                    }
+                  },
+                  "right": { "pop": "S_p1" }
+                }
+              },
+              "right": { "pop": "I_p4" }
+            }
+          },
+          "right": { "pop_sum": [ "S_p4", "E_p4", "I_p4", "R_p4" ] }
+        }
+      },
+      "event_key": "importation_p1_p4:{firing_index}",
+      "metadata": {
+        "origin_kind": "transmission",
+        "source_compartment": "S_p1",
+        "dest_compartment": "E_p1"
+      },
+      "rate_grad": {
+        "R0": { "const": 0.0 },
+        "sigma": { "const": 0.0 },
+        "gamma": { "const": 0.0 },
+        "kappa": {
+          "bin_op": {
+            "op": "div",
+            "left": {
+              "bin_op": {
+                "op": "mul",
+                "left": {
+                  "bin_op": {
+                    "op": "mul",
+                    "left": {
+                      "bin_op": {
+                        "op": "mul",
+                        "left": {
+                          "table_lookup": {
+                            "table": "W",
+                            "indices": [ { "const": 3.0 } ]
+                          }
+                        },
+                        "right": { "pop": "S_p1" }
+                      }
+                    },
+                    "right": { "pop": "I_p4" }
+                  }
+                },
+                "right": { "pop_sum": [ "S_p4", "E_p4", "I_p4", "R_p4" ] }
+              }
+            },
+            "right": {
+              "bin_op": {
+                "op": "mul",
+                "left": { "pop_sum": [ "S_p4", "E_p4", "I_p4", "R_p4" ] },
+                "right": { "pop_sum": [ "S_p4", "E_p4", "I_p4", "R_p4" ] }
+              }
+            }
+          }
+        },
+        "amplitude": { "const": 0.0 },
+        "s0": { "const": 0.0 },
+        "rho": { "const": 0.0 },
+        "sigma_se": { "const": 0.0 },
+        "N0_p1": { "const": 0.0 },
+        "N0_p2": { "const": 0.0 },
+        "N0_p3": { "const": 0.0 },
+        "N0_p4": { "const": 0.0 },
+        "N0_p5": { "const": 0.0 },
+        "k": { "const": 0.0 }
+      }
+    },
+    {
+      "name": "importation_p1_p5",
+      "stoichiometry": [ [ "S_p1", -1 ], [ "E_p1", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "div",
+          "left": {
+            "bin_op": {
+              "op": "mul",
+              "left": {
+                "bin_op": {
+                  "op": "mul",
+                  "left": {
+                    "bin_op": {
+                      "op": "mul",
+                      "left": { "param": "kappa" },
+                      "right": {
+                        "table_lookup": {
+                          "table": "W",
+                          "indices": [ { "const": 4.0 } ]
+                        }
+                      }
+                    }
+                  },
+                  "right": { "pop": "S_p1" }
+                }
+              },
+              "right": { "pop": "I_p5" }
+            }
+          },
+          "right": { "pop_sum": [ "S_p5", "E_p5", "I_p5", "R_p5" ] }
+        }
+      },
+      "event_key": "importation_p1_p5:{firing_index}",
+      "metadata": {
+        "origin_kind": "transmission",
+        "source_compartment": "S_p1",
+        "dest_compartment": "E_p1"
+      },
+      "rate_grad": {
+        "R0": { "const": 0.0 },
+        "sigma": { "const": 0.0 },
+        "gamma": { "const": 0.0 },
+        "kappa": {
+          "bin_op": {
+            "op": "div",
+            "left": {
+              "bin_op": {
+                "op": "mul",
+                "left": {
+                  "bin_op": {
+                    "op": "mul",
+                    "left": {
+                      "bin_op": {
+                        "op": "mul",
+                        "left": {
+                          "table_lookup": {
+                            "table": "W",
+                            "indices": [ { "const": 4.0 } ]
+                          }
+                        },
+                        "right": { "pop": "S_p1" }
+                      }
+                    },
+                    "right": { "pop": "I_p5" }
+                  }
+                },
+                "right": { "pop_sum": [ "S_p5", "E_p5", "I_p5", "R_p5" ] }
+              }
+            },
+            "right": {
+              "bin_op": {
+                "op": "mul",
+                "left": { "pop_sum": [ "S_p5", "E_p5", "I_p5", "R_p5" ] },
+                "right": { "pop_sum": [ "S_p5", "E_p5", "I_p5", "R_p5" ] }
+              }
+            }
+          }
+        },
+        "amplitude": { "const": 0.0 },
+        "s0": { "const": 0.0 },
+        "rho": { "const": 0.0 },
+        "sigma_se": { "const": 0.0 },
+        "N0_p1": { "const": 0.0 },
+        "N0_p2": { "const": 0.0 },
+        "N0_p3": { "const": 0.0 },
+        "N0_p4": { "const": 0.0 },
+        "N0_p5": { "const": 0.0 },
+        "k": { "const": 0.0 }
+      }
+    },
+    {
+      "name": "importation_p2_p1",
+      "stoichiometry": [ [ "S_p2", -1 ], [ "E_p2", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "div",
+          "left": {
+            "bin_op": {
+              "op": "mul",
+              "left": {
+                "bin_op": {
+                  "op": "mul",
+                  "left": {
+                    "bin_op": {
+                      "op": "mul",
+                      "left": { "param": "kappa" },
+                      "right": {
+                        "table_lookup": {
+                          "table": "W",
+                          "indices": [ { "const": 5.0 } ]
+                        }
+                      }
+                    }
+                  },
+                  "right": { "pop": "S_p2" }
+                }
+              },
+              "right": { "pop": "I_p1" }
+            }
+          },
+          "right": { "pop_sum": [ "S_p1", "E_p1", "I_p1", "R_p1" ] }
+        }
+      },
+      "event_key": "importation_p2_p1:{firing_index}",
+      "metadata": {
+        "origin_kind": "transmission",
+        "source_compartment": "S_p2",
+        "dest_compartment": "E_p2"
+      },
+      "rate_grad": {
+        "R0": { "const": 0.0 },
+        "sigma": { "const": 0.0 },
+        "gamma": { "const": 0.0 },
+        "kappa": {
+          "bin_op": {
+            "op": "div",
+            "left": {
+              "bin_op": {
+                "op": "mul",
+                "left": {
+                  "bin_op": {
+                    "op": "mul",
+                    "left": {
+                      "bin_op": {
+                        "op": "mul",
+                        "left": {
+                          "table_lookup": {
+                            "table": "W",
+                            "indices": [ { "const": 5.0 } ]
+                          }
+                        },
+                        "right": { "pop": "S_p2" }
+                      }
+                    },
+                    "right": { "pop": "I_p1" }
+                  }
+                },
+                "right": { "pop_sum": [ "S_p1", "E_p1", "I_p1", "R_p1" ] }
+              }
+            },
+            "right": {
+              "bin_op": {
+                "op": "mul",
+                "left": { "pop_sum": [ "S_p1", "E_p1", "I_p1", "R_p1" ] },
+                "right": { "pop_sum": [ "S_p1", "E_p1", "I_p1", "R_p1" ] }
+              }
+            }
+          }
+        },
+        "amplitude": { "const": 0.0 },
+        "s0": { "const": 0.0 },
+        "rho": { "const": 0.0 },
+        "sigma_se": { "const": 0.0 },
+        "N0_p1": { "const": 0.0 },
+        "N0_p2": { "const": 0.0 },
+        "N0_p3": { "const": 0.0 },
+        "N0_p4": { "const": 0.0 },
+        "N0_p5": { "const": 0.0 },
+        "k": { "const": 0.0 }
+      }
+    },
+    {
+      "name": "importation_p2_p3",
+      "stoichiometry": [ [ "S_p2", -1 ], [ "E_p2", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "div",
+          "left": {
+            "bin_op": {
+              "op": "mul",
+              "left": {
+                "bin_op": {
+                  "op": "mul",
+                  "left": {
+                    "bin_op": {
+                      "op": "mul",
+                      "left": { "param": "kappa" },
+                      "right": {
+                        "table_lookup": {
+                          "table": "W",
+                          "indices": [ { "const": 7.0 } ]
+                        }
+                      }
+                    }
+                  },
+                  "right": { "pop": "S_p2" }
+                }
+              },
+              "right": { "pop": "I_p3" }
+            }
+          },
+          "right": { "pop_sum": [ "S_p3", "E_p3", "I_p3", "R_p3" ] }
+        }
+      },
+      "event_key": "importation_p2_p3:{firing_index}",
+      "metadata": {
+        "origin_kind": "transmission",
+        "source_compartment": "S_p2",
+        "dest_compartment": "E_p2"
+      },
+      "rate_grad": {
+        "R0": { "const": 0.0 },
+        "sigma": { "const": 0.0 },
+        "gamma": { "const": 0.0 },
+        "kappa": {
+          "bin_op": {
+            "op": "div",
+            "left": {
+              "bin_op": {
+                "op": "mul",
+                "left": {
+                  "bin_op": {
+                    "op": "mul",
+                    "left": {
+                      "bin_op": {
+                        "op": "mul",
+                        "left": {
+                          "table_lookup": {
+                            "table": "W",
+                            "indices": [ { "const": 7.0 } ]
+                          }
+                        },
+                        "right": { "pop": "S_p2" }
+                      }
+                    },
+                    "right": { "pop": "I_p3" }
+                  }
+                },
+                "right": { "pop_sum": [ "S_p3", "E_p3", "I_p3", "R_p3" ] }
+              }
+            },
+            "right": {
+              "bin_op": {
+                "op": "mul",
+                "left": { "pop_sum": [ "S_p3", "E_p3", "I_p3", "R_p3" ] },
+                "right": { "pop_sum": [ "S_p3", "E_p3", "I_p3", "R_p3" ] }
+              }
+            }
+          }
+        },
+        "amplitude": { "const": 0.0 },
+        "s0": { "const": 0.0 },
+        "rho": { "const": 0.0 },
+        "sigma_se": { "const": 0.0 },
+        "N0_p1": { "const": 0.0 },
+        "N0_p2": { "const": 0.0 },
+        "N0_p3": { "const": 0.0 },
+        "N0_p4": { "const": 0.0 },
+        "N0_p5": { "const": 0.0 },
+        "k": { "const": 0.0 }
+      }
+    },
+    {
+      "name": "importation_p2_p4",
+      "stoichiometry": [ [ "S_p2", -1 ], [ "E_p2", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "div",
+          "left": {
+            "bin_op": {
+              "op": "mul",
+              "left": {
+                "bin_op": {
+                  "op": "mul",
+                  "left": {
+                    "bin_op": {
+                      "op": "mul",
+                      "left": { "param": "kappa" },
+                      "right": {
+                        "table_lookup": {
+                          "table": "W",
+                          "indices": [ { "const": 8.0 } ]
+                        }
+                      }
+                    }
+                  },
+                  "right": { "pop": "S_p2" }
+                }
+              },
+              "right": { "pop": "I_p4" }
+            }
+          },
+          "right": { "pop_sum": [ "S_p4", "E_p4", "I_p4", "R_p4" ] }
+        }
+      },
+      "event_key": "importation_p2_p4:{firing_index}",
+      "metadata": {
+        "origin_kind": "transmission",
+        "source_compartment": "S_p2",
+        "dest_compartment": "E_p2"
+      },
+      "rate_grad": {
+        "R0": { "const": 0.0 },
+        "sigma": { "const": 0.0 },
+        "gamma": { "const": 0.0 },
+        "kappa": {
+          "bin_op": {
+            "op": "div",
+            "left": {
+              "bin_op": {
+                "op": "mul",
+                "left": {
+                  "bin_op": {
+                    "op": "mul",
+                    "left": {
+                      "bin_op": {
+                        "op": "mul",
+                        "left": {
+                          "table_lookup": {
+                            "table": "W",
+                            "indices": [ { "const": 8.0 } ]
+                          }
+                        },
+                        "right": { "pop": "S_p2" }
+                      }
+                    },
+                    "right": { "pop": "I_p4" }
+                  }
+                },
+                "right": { "pop_sum": [ "S_p4", "E_p4", "I_p4", "R_p4" ] }
+              }
+            },
+            "right": {
+              "bin_op": {
+                "op": "mul",
+                "left": { "pop_sum": [ "S_p4", "E_p4", "I_p4", "R_p4" ] },
+                "right": { "pop_sum": [ "S_p4", "E_p4", "I_p4", "R_p4" ] }
+              }
+            }
+          }
+        },
+        "amplitude": { "const": 0.0 },
+        "s0": { "const": 0.0 },
+        "rho": { "const": 0.0 },
+        "sigma_se": { "const": 0.0 },
+        "N0_p1": { "const": 0.0 },
+        "N0_p2": { "const": 0.0 },
+        "N0_p3": { "const": 0.0 },
+        "N0_p4": { "const": 0.0 },
+        "N0_p5": { "const": 0.0 },
+        "k": { "const": 0.0 }
+      }
+    },
+    {
+      "name": "importation_p2_p5",
+      "stoichiometry": [ [ "S_p2", -1 ], [ "E_p2", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "div",
+          "left": {
+            "bin_op": {
+              "op": "mul",
+              "left": {
+                "bin_op": {
+                  "op": "mul",
+                  "left": {
+                    "bin_op": {
+                      "op": "mul",
+                      "left": { "param": "kappa" },
+                      "right": {
+                        "table_lookup": {
+                          "table": "W",
+                          "indices": [ { "const": 9.0 } ]
+                        }
+                      }
+                    }
+                  },
+                  "right": { "pop": "S_p2" }
+                }
+              },
+              "right": { "pop": "I_p5" }
+            }
+          },
+          "right": { "pop_sum": [ "S_p5", "E_p5", "I_p5", "R_p5" ] }
+        }
+      },
+      "event_key": "importation_p2_p5:{firing_index}",
+      "metadata": {
+        "origin_kind": "transmission",
+        "source_compartment": "S_p2",
+        "dest_compartment": "E_p2"
+      },
+      "rate_grad": {
+        "R0": { "const": 0.0 },
+        "sigma": { "const": 0.0 },
+        "gamma": { "const": 0.0 },
+        "kappa": {
+          "bin_op": {
+            "op": "div",
+            "left": {
+              "bin_op": {
+                "op": "mul",
+                "left": {
+                  "bin_op": {
+                    "op": "mul",
+                    "left": {
+                      "bin_op": {
+                        "op": "mul",
+                        "left": {
+                          "table_lookup": {
+                            "table": "W",
+                            "indices": [ { "const": 9.0 } ]
+                          }
+                        },
+                        "right": { "pop": "S_p2" }
+                      }
+                    },
+                    "right": { "pop": "I_p5" }
+                  }
+                },
+                "right": { "pop_sum": [ "S_p5", "E_p5", "I_p5", "R_p5" ] }
+              }
+            },
+            "right": {
+              "bin_op": {
+                "op": "mul",
+                "left": { "pop_sum": [ "S_p5", "E_p5", "I_p5", "R_p5" ] },
+                "right": { "pop_sum": [ "S_p5", "E_p5", "I_p5", "R_p5" ] }
+              }
+            }
+          }
+        },
+        "amplitude": { "const": 0.0 },
+        "s0": { "const": 0.0 },
+        "rho": { "const": 0.0 },
+        "sigma_se": { "const": 0.0 },
+        "N0_p1": { "const": 0.0 },
+        "N0_p2": { "const": 0.0 },
+        "N0_p3": { "const": 0.0 },
+        "N0_p4": { "const": 0.0 },
+        "N0_p5": { "const": 0.0 },
+        "k": { "const": 0.0 }
+      }
+    },
+    {
+      "name": "importation_p3_p1",
+      "stoichiometry": [ [ "S_p3", -1 ], [ "E_p3", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "div",
+          "left": {
+            "bin_op": {
+              "op": "mul",
+              "left": {
+                "bin_op": {
+                  "op": "mul",
+                  "left": {
+                    "bin_op": {
+                      "op": "mul",
+                      "left": { "param": "kappa" },
+                      "right": {
+                        "table_lookup": {
+                          "table": "W",
+                          "indices": [ { "const": 10.0 } ]
+                        }
+                      }
+                    }
+                  },
+                  "right": { "pop": "S_p3" }
+                }
+              },
+              "right": { "pop": "I_p1" }
+            }
+          },
+          "right": { "pop_sum": [ "S_p1", "E_p1", "I_p1", "R_p1" ] }
+        }
+      },
+      "event_key": "importation_p3_p1:{firing_index}",
+      "metadata": {
+        "origin_kind": "transmission",
+        "source_compartment": "S_p3",
+        "dest_compartment": "E_p3"
+      },
+      "rate_grad": {
+        "R0": { "const": 0.0 },
+        "sigma": { "const": 0.0 },
+        "gamma": { "const": 0.0 },
+        "kappa": {
+          "bin_op": {
+            "op": "div",
+            "left": {
+              "bin_op": {
+                "op": "mul",
+                "left": {
+                  "bin_op": {
+                    "op": "mul",
+                    "left": {
+                      "bin_op": {
+                        "op": "mul",
+                        "left": {
+                          "table_lookup": {
+                            "table": "W",
+                            "indices": [ { "const": 10.0 } ]
+                          }
+                        },
+                        "right": { "pop": "S_p3" }
+                      }
+                    },
+                    "right": { "pop": "I_p1" }
+                  }
+                },
+                "right": { "pop_sum": [ "S_p1", "E_p1", "I_p1", "R_p1" ] }
+              }
+            },
+            "right": {
+              "bin_op": {
+                "op": "mul",
+                "left": { "pop_sum": [ "S_p1", "E_p1", "I_p1", "R_p1" ] },
+                "right": { "pop_sum": [ "S_p1", "E_p1", "I_p1", "R_p1" ] }
+              }
+            }
+          }
+        },
+        "amplitude": { "const": 0.0 },
+        "s0": { "const": 0.0 },
+        "rho": { "const": 0.0 },
+        "sigma_se": { "const": 0.0 },
+        "N0_p1": { "const": 0.0 },
+        "N0_p2": { "const": 0.0 },
+        "N0_p3": { "const": 0.0 },
+        "N0_p4": { "const": 0.0 },
+        "N0_p5": { "const": 0.0 },
+        "k": { "const": 0.0 }
+      }
+    },
+    {
+      "name": "importation_p3_p2",
+      "stoichiometry": [ [ "S_p3", -1 ], [ "E_p3", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "div",
+          "left": {
+            "bin_op": {
+              "op": "mul",
+              "left": {
+                "bin_op": {
+                  "op": "mul",
+                  "left": {
+                    "bin_op": {
+                      "op": "mul",
+                      "left": { "param": "kappa" },
+                      "right": {
+                        "table_lookup": {
+                          "table": "W",
+                          "indices": [ { "const": 11.0 } ]
+                        }
+                      }
+                    }
+                  },
+                  "right": { "pop": "S_p3" }
+                }
+              },
+              "right": { "pop": "I_p2" }
+            }
+          },
+          "right": { "pop_sum": [ "S_p2", "E_p2", "I_p2", "R_p2" ] }
+        }
+      },
+      "event_key": "importation_p3_p2:{firing_index}",
+      "metadata": {
+        "origin_kind": "transmission",
+        "source_compartment": "S_p3",
+        "dest_compartment": "E_p3"
+      },
+      "rate_grad": {
+        "R0": { "const": 0.0 },
+        "sigma": { "const": 0.0 },
+        "gamma": { "const": 0.0 },
+        "kappa": {
+          "bin_op": {
+            "op": "div",
+            "left": {
+              "bin_op": {
+                "op": "mul",
+                "left": {
+                  "bin_op": {
+                    "op": "mul",
+                    "left": {
+                      "bin_op": {
+                        "op": "mul",
+                        "left": {
+                          "table_lookup": {
+                            "table": "W",
+                            "indices": [ { "const": 11.0 } ]
+                          }
+                        },
+                        "right": { "pop": "S_p3" }
+                      }
+                    },
+                    "right": { "pop": "I_p2" }
+                  }
+                },
+                "right": { "pop_sum": [ "S_p2", "E_p2", "I_p2", "R_p2" ] }
+              }
+            },
+            "right": {
+              "bin_op": {
+                "op": "mul",
+                "left": { "pop_sum": [ "S_p2", "E_p2", "I_p2", "R_p2" ] },
+                "right": { "pop_sum": [ "S_p2", "E_p2", "I_p2", "R_p2" ] }
+              }
+            }
+          }
+        },
+        "amplitude": { "const": 0.0 },
+        "s0": { "const": 0.0 },
+        "rho": { "const": 0.0 },
+        "sigma_se": { "const": 0.0 },
+        "N0_p1": { "const": 0.0 },
+        "N0_p2": { "const": 0.0 },
+        "N0_p3": { "const": 0.0 },
+        "N0_p4": { "const": 0.0 },
+        "N0_p5": { "const": 0.0 },
+        "k": { "const": 0.0 }
+      }
+    },
+    {
+      "name": "importation_p3_p4",
+      "stoichiometry": [ [ "S_p3", -1 ], [ "E_p3", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "div",
+          "left": {
+            "bin_op": {
+              "op": "mul",
+              "left": {
+                "bin_op": {
+                  "op": "mul",
+                  "left": {
+                    "bin_op": {
+                      "op": "mul",
+                      "left": { "param": "kappa" },
+                      "right": {
+                        "table_lookup": {
+                          "table": "W",
+                          "indices": [ { "const": 13.0 } ]
+                        }
+                      }
+                    }
+                  },
+                  "right": { "pop": "S_p3" }
+                }
+              },
+              "right": { "pop": "I_p4" }
+            }
+          },
+          "right": { "pop_sum": [ "S_p4", "E_p4", "I_p4", "R_p4" ] }
+        }
+      },
+      "event_key": "importation_p3_p4:{firing_index}",
+      "metadata": {
+        "origin_kind": "transmission",
+        "source_compartment": "S_p3",
+        "dest_compartment": "E_p3"
+      },
+      "rate_grad": {
+        "R0": { "const": 0.0 },
+        "sigma": { "const": 0.0 },
+        "gamma": { "const": 0.0 },
+        "kappa": {
+          "bin_op": {
+            "op": "div",
+            "left": {
+              "bin_op": {
+                "op": "mul",
+                "left": {
+                  "bin_op": {
+                    "op": "mul",
+                    "left": {
+                      "bin_op": {
+                        "op": "mul",
+                        "left": {
+                          "table_lookup": {
+                            "table": "W",
+                            "indices": [ { "const": 13.0 } ]
+                          }
+                        },
+                        "right": { "pop": "S_p3" }
+                      }
+                    },
+                    "right": { "pop": "I_p4" }
+                  }
+                },
+                "right": { "pop_sum": [ "S_p4", "E_p4", "I_p4", "R_p4" ] }
+              }
+            },
+            "right": {
+              "bin_op": {
+                "op": "mul",
+                "left": { "pop_sum": [ "S_p4", "E_p4", "I_p4", "R_p4" ] },
+                "right": { "pop_sum": [ "S_p4", "E_p4", "I_p4", "R_p4" ] }
+              }
+            }
+          }
+        },
+        "amplitude": { "const": 0.0 },
+        "s0": { "const": 0.0 },
+        "rho": { "const": 0.0 },
+        "sigma_se": { "const": 0.0 },
+        "N0_p1": { "const": 0.0 },
+        "N0_p2": { "const": 0.0 },
+        "N0_p3": { "const": 0.0 },
+        "N0_p4": { "const": 0.0 },
+        "N0_p5": { "const": 0.0 },
+        "k": { "const": 0.0 }
+      }
+    },
+    {
+      "name": "importation_p3_p5",
+      "stoichiometry": [ [ "S_p3", -1 ], [ "E_p3", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "div",
+          "left": {
+            "bin_op": {
+              "op": "mul",
+              "left": {
+                "bin_op": {
+                  "op": "mul",
+                  "left": {
+                    "bin_op": {
+                      "op": "mul",
+                      "left": { "param": "kappa" },
+                      "right": {
+                        "table_lookup": {
+                          "table": "W",
+                          "indices": [ { "const": 14.0 } ]
+                        }
+                      }
+                    }
+                  },
+                  "right": { "pop": "S_p3" }
+                }
+              },
+              "right": { "pop": "I_p5" }
+            }
+          },
+          "right": { "pop_sum": [ "S_p5", "E_p5", "I_p5", "R_p5" ] }
+        }
+      },
+      "event_key": "importation_p3_p5:{firing_index}",
+      "metadata": {
+        "origin_kind": "transmission",
+        "source_compartment": "S_p3",
+        "dest_compartment": "E_p3"
+      },
+      "rate_grad": {
+        "R0": { "const": 0.0 },
+        "sigma": { "const": 0.0 },
+        "gamma": { "const": 0.0 },
+        "kappa": {
+          "bin_op": {
+            "op": "div",
+            "left": {
+              "bin_op": {
+                "op": "mul",
+                "left": {
+                  "bin_op": {
+                    "op": "mul",
+                    "left": {
+                      "bin_op": {
+                        "op": "mul",
+                        "left": {
+                          "table_lookup": {
+                            "table": "W",
+                            "indices": [ { "const": 14.0 } ]
+                          }
+                        },
+                        "right": { "pop": "S_p3" }
+                      }
+                    },
+                    "right": { "pop": "I_p5" }
+                  }
+                },
+                "right": { "pop_sum": [ "S_p5", "E_p5", "I_p5", "R_p5" ] }
+              }
+            },
+            "right": {
+              "bin_op": {
+                "op": "mul",
+                "left": { "pop_sum": [ "S_p5", "E_p5", "I_p5", "R_p5" ] },
+                "right": { "pop_sum": [ "S_p5", "E_p5", "I_p5", "R_p5" ] }
+              }
+            }
+          }
+        },
+        "amplitude": { "const": 0.0 },
+        "s0": { "const": 0.0 },
+        "rho": { "const": 0.0 },
+        "sigma_se": { "const": 0.0 },
+        "N0_p1": { "const": 0.0 },
+        "N0_p2": { "const": 0.0 },
+        "N0_p3": { "const": 0.0 },
+        "N0_p4": { "const": 0.0 },
+        "N0_p5": { "const": 0.0 },
+        "k": { "const": 0.0 }
+      }
+    },
+    {
+      "name": "importation_p4_p1",
+      "stoichiometry": [ [ "S_p4", -1 ], [ "E_p4", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "div",
+          "left": {
+            "bin_op": {
+              "op": "mul",
+              "left": {
+                "bin_op": {
+                  "op": "mul",
+                  "left": {
+                    "bin_op": {
+                      "op": "mul",
+                      "left": { "param": "kappa" },
+                      "right": {
+                        "table_lookup": {
+                          "table": "W",
+                          "indices": [ { "const": 15.0 } ]
+                        }
+                      }
+                    }
+                  },
+                  "right": { "pop": "S_p4" }
+                }
+              },
+              "right": { "pop": "I_p1" }
+            }
+          },
+          "right": { "pop_sum": [ "S_p1", "E_p1", "I_p1", "R_p1" ] }
+        }
+      },
+      "event_key": "importation_p4_p1:{firing_index}",
+      "metadata": {
+        "origin_kind": "transmission",
+        "source_compartment": "S_p4",
+        "dest_compartment": "E_p4"
+      },
+      "rate_grad": {
+        "R0": { "const": 0.0 },
+        "sigma": { "const": 0.0 },
+        "gamma": { "const": 0.0 },
+        "kappa": {
+          "bin_op": {
+            "op": "div",
+            "left": {
+              "bin_op": {
+                "op": "mul",
+                "left": {
+                  "bin_op": {
+                    "op": "mul",
+                    "left": {
+                      "bin_op": {
+                        "op": "mul",
+                        "left": {
+                          "table_lookup": {
+                            "table": "W",
+                            "indices": [ { "const": 15.0 } ]
+                          }
+                        },
+                        "right": { "pop": "S_p4" }
+                      }
+                    },
+                    "right": { "pop": "I_p1" }
+                  }
+                },
+                "right": { "pop_sum": [ "S_p1", "E_p1", "I_p1", "R_p1" ] }
+              }
+            },
+            "right": {
+              "bin_op": {
+                "op": "mul",
+                "left": { "pop_sum": [ "S_p1", "E_p1", "I_p1", "R_p1" ] },
+                "right": { "pop_sum": [ "S_p1", "E_p1", "I_p1", "R_p1" ] }
+              }
+            }
+          }
+        },
+        "amplitude": { "const": 0.0 },
+        "s0": { "const": 0.0 },
+        "rho": { "const": 0.0 },
+        "sigma_se": { "const": 0.0 },
+        "N0_p1": { "const": 0.0 },
+        "N0_p2": { "const": 0.0 },
+        "N0_p3": { "const": 0.0 },
+        "N0_p4": { "const": 0.0 },
+        "N0_p5": { "const": 0.0 },
+        "k": { "const": 0.0 }
+      }
+    },
+    {
+      "name": "importation_p4_p2",
+      "stoichiometry": [ [ "S_p4", -1 ], [ "E_p4", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "div",
+          "left": {
+            "bin_op": {
+              "op": "mul",
+              "left": {
+                "bin_op": {
+                  "op": "mul",
+                  "left": {
+                    "bin_op": {
+                      "op": "mul",
+                      "left": { "param": "kappa" },
+                      "right": {
+                        "table_lookup": {
+                          "table": "W",
+                          "indices": [ { "const": 16.0 } ]
+                        }
+                      }
+                    }
+                  },
+                  "right": { "pop": "S_p4" }
+                }
+              },
+              "right": { "pop": "I_p2" }
+            }
+          },
+          "right": { "pop_sum": [ "S_p2", "E_p2", "I_p2", "R_p2" ] }
+        }
+      },
+      "event_key": "importation_p4_p2:{firing_index}",
+      "metadata": {
+        "origin_kind": "transmission",
+        "source_compartment": "S_p4",
+        "dest_compartment": "E_p4"
+      },
+      "rate_grad": {
+        "R0": { "const": 0.0 },
+        "sigma": { "const": 0.0 },
+        "gamma": { "const": 0.0 },
+        "kappa": {
+          "bin_op": {
+            "op": "div",
+            "left": {
+              "bin_op": {
+                "op": "mul",
+                "left": {
+                  "bin_op": {
+                    "op": "mul",
+                    "left": {
+                      "bin_op": {
+                        "op": "mul",
+                        "left": {
+                          "table_lookup": {
+                            "table": "W",
+                            "indices": [ { "const": 16.0 } ]
+                          }
+                        },
+                        "right": { "pop": "S_p4" }
+                      }
+                    },
+                    "right": { "pop": "I_p2" }
+                  }
+                },
+                "right": { "pop_sum": [ "S_p2", "E_p2", "I_p2", "R_p2" ] }
+              }
+            },
+            "right": {
+              "bin_op": {
+                "op": "mul",
+                "left": { "pop_sum": [ "S_p2", "E_p2", "I_p2", "R_p2" ] },
+                "right": { "pop_sum": [ "S_p2", "E_p2", "I_p2", "R_p2" ] }
+              }
+            }
+          }
+        },
+        "amplitude": { "const": 0.0 },
+        "s0": { "const": 0.0 },
+        "rho": { "const": 0.0 },
+        "sigma_se": { "const": 0.0 },
+        "N0_p1": { "const": 0.0 },
+        "N0_p2": { "const": 0.0 },
+        "N0_p3": { "const": 0.0 },
+        "N0_p4": { "const": 0.0 },
+        "N0_p5": { "const": 0.0 },
+        "k": { "const": 0.0 }
+      }
+    },
+    {
+      "name": "importation_p4_p3",
+      "stoichiometry": [ [ "S_p4", -1 ], [ "E_p4", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "div",
+          "left": {
+            "bin_op": {
+              "op": "mul",
+              "left": {
+                "bin_op": {
+                  "op": "mul",
+                  "left": {
+                    "bin_op": {
+                      "op": "mul",
+                      "left": { "param": "kappa" },
+                      "right": {
+                        "table_lookup": {
+                          "table": "W",
+                          "indices": [ { "const": 17.0 } ]
+                        }
+                      }
+                    }
+                  },
+                  "right": { "pop": "S_p4" }
+                }
+              },
+              "right": { "pop": "I_p3" }
+            }
+          },
+          "right": { "pop_sum": [ "S_p3", "E_p3", "I_p3", "R_p3" ] }
+        }
+      },
+      "event_key": "importation_p4_p3:{firing_index}",
+      "metadata": {
+        "origin_kind": "transmission",
+        "source_compartment": "S_p4",
+        "dest_compartment": "E_p4"
+      },
+      "rate_grad": {
+        "R0": { "const": 0.0 },
+        "sigma": { "const": 0.0 },
+        "gamma": { "const": 0.0 },
+        "kappa": {
+          "bin_op": {
+            "op": "div",
+            "left": {
+              "bin_op": {
+                "op": "mul",
+                "left": {
+                  "bin_op": {
+                    "op": "mul",
+                    "left": {
+                      "bin_op": {
+                        "op": "mul",
+                        "left": {
+                          "table_lookup": {
+                            "table": "W",
+                            "indices": [ { "const": 17.0 } ]
+                          }
+                        },
+                        "right": { "pop": "S_p4" }
+                      }
+                    },
+                    "right": { "pop": "I_p3" }
+                  }
+                },
+                "right": { "pop_sum": [ "S_p3", "E_p3", "I_p3", "R_p3" ] }
+              }
+            },
+            "right": {
+              "bin_op": {
+                "op": "mul",
+                "left": { "pop_sum": [ "S_p3", "E_p3", "I_p3", "R_p3" ] },
+                "right": { "pop_sum": [ "S_p3", "E_p3", "I_p3", "R_p3" ] }
+              }
+            }
+          }
+        },
+        "amplitude": { "const": 0.0 },
+        "s0": { "const": 0.0 },
+        "rho": { "const": 0.0 },
+        "sigma_se": { "const": 0.0 },
+        "N0_p1": { "const": 0.0 },
+        "N0_p2": { "const": 0.0 },
+        "N0_p3": { "const": 0.0 },
+        "N0_p4": { "const": 0.0 },
+        "N0_p5": { "const": 0.0 },
+        "k": { "const": 0.0 }
+      }
+    },
+    {
+      "name": "importation_p4_p5",
+      "stoichiometry": [ [ "S_p4", -1 ], [ "E_p4", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "div",
+          "left": {
+            "bin_op": {
+              "op": "mul",
+              "left": {
+                "bin_op": {
+                  "op": "mul",
+                  "left": {
+                    "bin_op": {
+                      "op": "mul",
+                      "left": { "param": "kappa" },
+                      "right": {
+                        "table_lookup": {
+                          "table": "W",
+                          "indices": [ { "const": 19.0 } ]
+                        }
+                      }
+                    }
+                  },
+                  "right": { "pop": "S_p4" }
+                }
+              },
+              "right": { "pop": "I_p5" }
+            }
+          },
+          "right": { "pop_sum": [ "S_p5", "E_p5", "I_p5", "R_p5" ] }
+        }
+      },
+      "event_key": "importation_p4_p5:{firing_index}",
+      "metadata": {
+        "origin_kind": "transmission",
+        "source_compartment": "S_p4",
+        "dest_compartment": "E_p4"
+      },
+      "rate_grad": {
+        "R0": { "const": 0.0 },
+        "sigma": { "const": 0.0 },
+        "gamma": { "const": 0.0 },
+        "kappa": {
+          "bin_op": {
+            "op": "div",
+            "left": {
+              "bin_op": {
+                "op": "mul",
+                "left": {
+                  "bin_op": {
+                    "op": "mul",
+                    "left": {
+                      "bin_op": {
+                        "op": "mul",
+                        "left": {
+                          "table_lookup": {
+                            "table": "W",
+                            "indices": [ { "const": 19.0 } ]
+                          }
+                        },
+                        "right": { "pop": "S_p4" }
+                      }
+                    },
+                    "right": { "pop": "I_p5" }
+                  }
+                },
+                "right": { "pop_sum": [ "S_p5", "E_p5", "I_p5", "R_p5" ] }
+              }
+            },
+            "right": {
+              "bin_op": {
+                "op": "mul",
+                "left": { "pop_sum": [ "S_p5", "E_p5", "I_p5", "R_p5" ] },
+                "right": { "pop_sum": [ "S_p5", "E_p5", "I_p5", "R_p5" ] }
+              }
+            }
+          }
+        },
+        "amplitude": { "const": 0.0 },
+        "s0": { "const": 0.0 },
+        "rho": { "const": 0.0 },
+        "sigma_se": { "const": 0.0 },
+        "N0_p1": { "const": 0.0 },
+        "N0_p2": { "const": 0.0 },
+        "N0_p3": { "const": 0.0 },
+        "N0_p4": { "const": 0.0 },
+        "N0_p5": { "const": 0.0 },
+        "k": { "const": 0.0 }
+      }
+    },
+    {
+      "name": "importation_p5_p1",
+      "stoichiometry": [ [ "S_p5", -1 ], [ "E_p5", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "div",
+          "left": {
+            "bin_op": {
+              "op": "mul",
+              "left": {
+                "bin_op": {
+                  "op": "mul",
+                  "left": {
+                    "bin_op": {
+                      "op": "mul",
+                      "left": { "param": "kappa" },
+                      "right": {
+                        "table_lookup": {
+                          "table": "W",
+                          "indices": [ { "const": 20.0 } ]
+                        }
+                      }
+                    }
+                  },
+                  "right": { "pop": "S_p5" }
+                }
+              },
+              "right": { "pop": "I_p1" }
+            }
+          },
+          "right": { "pop_sum": [ "S_p1", "E_p1", "I_p1", "R_p1" ] }
+        }
+      },
+      "event_key": "importation_p5_p1:{firing_index}",
+      "metadata": {
+        "origin_kind": "transmission",
+        "source_compartment": "S_p5",
+        "dest_compartment": "E_p5"
+      },
+      "rate_grad": {
+        "R0": { "const": 0.0 },
+        "sigma": { "const": 0.0 },
+        "gamma": { "const": 0.0 },
+        "kappa": {
+          "bin_op": {
+            "op": "div",
+            "left": {
+              "bin_op": {
+                "op": "mul",
+                "left": {
+                  "bin_op": {
+                    "op": "mul",
+                    "left": {
+                      "bin_op": {
+                        "op": "mul",
+                        "left": {
+                          "table_lookup": {
+                            "table": "W",
+                            "indices": [ { "const": 20.0 } ]
+                          }
+                        },
+                        "right": { "pop": "S_p5" }
+                      }
+                    },
+                    "right": { "pop": "I_p1" }
+                  }
+                },
+                "right": { "pop_sum": [ "S_p1", "E_p1", "I_p1", "R_p1" ] }
+              }
+            },
+            "right": {
+              "bin_op": {
+                "op": "mul",
+                "left": { "pop_sum": [ "S_p1", "E_p1", "I_p1", "R_p1" ] },
+                "right": { "pop_sum": [ "S_p1", "E_p1", "I_p1", "R_p1" ] }
+              }
+            }
+          }
+        },
+        "amplitude": { "const": 0.0 },
+        "s0": { "const": 0.0 },
+        "rho": { "const": 0.0 },
+        "sigma_se": { "const": 0.0 },
+        "N0_p1": { "const": 0.0 },
+        "N0_p2": { "const": 0.0 },
+        "N0_p3": { "const": 0.0 },
+        "N0_p4": { "const": 0.0 },
+        "N0_p5": { "const": 0.0 },
+        "k": { "const": 0.0 }
+      }
+    },
+    {
+      "name": "importation_p5_p2",
+      "stoichiometry": [ [ "S_p5", -1 ], [ "E_p5", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "div",
+          "left": {
+            "bin_op": {
+              "op": "mul",
+              "left": {
+                "bin_op": {
+                  "op": "mul",
+                  "left": {
+                    "bin_op": {
+                      "op": "mul",
+                      "left": { "param": "kappa" },
+                      "right": {
+                        "table_lookup": {
+                          "table": "W",
+                          "indices": [ { "const": 21.0 } ]
+                        }
+                      }
+                    }
+                  },
+                  "right": { "pop": "S_p5" }
+                }
+              },
+              "right": { "pop": "I_p2" }
+            }
+          },
+          "right": { "pop_sum": [ "S_p2", "E_p2", "I_p2", "R_p2" ] }
+        }
+      },
+      "event_key": "importation_p5_p2:{firing_index}",
+      "metadata": {
+        "origin_kind": "transmission",
+        "source_compartment": "S_p5",
+        "dest_compartment": "E_p5"
+      },
+      "rate_grad": {
+        "R0": { "const": 0.0 },
+        "sigma": { "const": 0.0 },
+        "gamma": { "const": 0.0 },
+        "kappa": {
+          "bin_op": {
+            "op": "div",
+            "left": {
+              "bin_op": {
+                "op": "mul",
+                "left": {
+                  "bin_op": {
+                    "op": "mul",
+                    "left": {
+                      "bin_op": {
+                        "op": "mul",
+                        "left": {
+                          "table_lookup": {
+                            "table": "W",
+                            "indices": [ { "const": 21.0 } ]
+                          }
+                        },
+                        "right": { "pop": "S_p5" }
+                      }
+                    },
+                    "right": { "pop": "I_p2" }
+                  }
+                },
+                "right": { "pop_sum": [ "S_p2", "E_p2", "I_p2", "R_p2" ] }
+              }
+            },
+            "right": {
+              "bin_op": {
+                "op": "mul",
+                "left": { "pop_sum": [ "S_p2", "E_p2", "I_p2", "R_p2" ] },
+                "right": { "pop_sum": [ "S_p2", "E_p2", "I_p2", "R_p2" ] }
+              }
+            }
+          }
+        },
+        "amplitude": { "const": 0.0 },
+        "s0": { "const": 0.0 },
+        "rho": { "const": 0.0 },
+        "sigma_se": { "const": 0.0 },
+        "N0_p1": { "const": 0.0 },
+        "N0_p2": { "const": 0.0 },
+        "N0_p3": { "const": 0.0 },
+        "N0_p4": { "const": 0.0 },
+        "N0_p5": { "const": 0.0 },
+        "k": { "const": 0.0 }
+      }
+    },
+    {
+      "name": "importation_p5_p3",
+      "stoichiometry": [ [ "S_p5", -1 ], [ "E_p5", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "div",
+          "left": {
+            "bin_op": {
+              "op": "mul",
+              "left": {
+                "bin_op": {
+                  "op": "mul",
+                  "left": {
+                    "bin_op": {
+                      "op": "mul",
+                      "left": { "param": "kappa" },
+                      "right": {
+                        "table_lookup": {
+                          "table": "W",
+                          "indices": [ { "const": 22.0 } ]
+                        }
+                      }
+                    }
+                  },
+                  "right": { "pop": "S_p5" }
+                }
+              },
+              "right": { "pop": "I_p3" }
+            }
+          },
+          "right": { "pop_sum": [ "S_p3", "E_p3", "I_p3", "R_p3" ] }
+        }
+      },
+      "event_key": "importation_p5_p3:{firing_index}",
+      "metadata": {
+        "origin_kind": "transmission",
+        "source_compartment": "S_p5",
+        "dest_compartment": "E_p5"
+      },
+      "rate_grad": {
+        "R0": { "const": 0.0 },
+        "sigma": { "const": 0.0 },
+        "gamma": { "const": 0.0 },
+        "kappa": {
+          "bin_op": {
+            "op": "div",
+            "left": {
+              "bin_op": {
+                "op": "mul",
+                "left": {
+                  "bin_op": {
+                    "op": "mul",
+                    "left": {
+                      "bin_op": {
+                        "op": "mul",
+                        "left": {
+                          "table_lookup": {
+                            "table": "W",
+                            "indices": [ { "const": 22.0 } ]
+                          }
+                        },
+                        "right": { "pop": "S_p5" }
+                      }
+                    },
+                    "right": { "pop": "I_p3" }
+                  }
+                },
+                "right": { "pop_sum": [ "S_p3", "E_p3", "I_p3", "R_p3" ] }
+              }
+            },
+            "right": {
+              "bin_op": {
+                "op": "mul",
+                "left": { "pop_sum": [ "S_p3", "E_p3", "I_p3", "R_p3" ] },
+                "right": { "pop_sum": [ "S_p3", "E_p3", "I_p3", "R_p3" ] }
+              }
+            }
+          }
+        },
+        "amplitude": { "const": 0.0 },
+        "s0": { "const": 0.0 },
+        "rho": { "const": 0.0 },
+        "sigma_se": { "const": 0.0 },
+        "N0_p1": { "const": 0.0 },
+        "N0_p2": { "const": 0.0 },
+        "N0_p3": { "const": 0.0 },
+        "N0_p4": { "const": 0.0 },
+        "N0_p5": { "const": 0.0 },
+        "k": { "const": 0.0 }
+      }
+    },
+    {
+      "name": "importation_p5_p4",
+      "stoichiometry": [ [ "S_p5", -1 ], [ "E_p5", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "div",
+          "left": {
+            "bin_op": {
+              "op": "mul",
+              "left": {
+                "bin_op": {
+                  "op": "mul",
+                  "left": {
+                    "bin_op": {
+                      "op": "mul",
+                      "left": { "param": "kappa" },
+                      "right": {
+                        "table_lookup": {
+                          "table": "W",
+                          "indices": [ { "const": 23.0 } ]
+                        }
+                      }
+                    }
+                  },
+                  "right": { "pop": "S_p5" }
+                }
+              },
+              "right": { "pop": "I_p4" }
+            }
+          },
+          "right": { "pop_sum": [ "S_p4", "E_p4", "I_p4", "R_p4" ] }
+        }
+      },
+      "event_key": "importation_p5_p4:{firing_index}",
+      "metadata": {
+        "origin_kind": "transmission",
+        "source_compartment": "S_p5",
+        "dest_compartment": "E_p5"
+      },
+      "rate_grad": {
+        "R0": { "const": 0.0 },
+        "sigma": { "const": 0.0 },
+        "gamma": { "const": 0.0 },
+        "kappa": {
+          "bin_op": {
+            "op": "div",
+            "left": {
+              "bin_op": {
+                "op": "mul",
+                "left": {
+                  "bin_op": {
+                    "op": "mul",
+                    "left": {
+                      "bin_op": {
+                        "op": "mul",
+                        "left": {
+                          "table_lookup": {
+                            "table": "W",
+                            "indices": [ { "const": 23.0 } ]
+                          }
+                        },
+                        "right": { "pop": "S_p5" }
+                      }
+                    },
+                    "right": { "pop": "I_p4" }
+                  }
+                },
+                "right": { "pop_sum": [ "S_p4", "E_p4", "I_p4", "R_p4" ] }
+              }
+            },
+            "right": {
+              "bin_op": {
+                "op": "mul",
+                "left": { "pop_sum": [ "S_p4", "E_p4", "I_p4", "R_p4" ] },
+                "right": { "pop_sum": [ "S_p4", "E_p4", "I_p4", "R_p4" ] }
+              }
+            }
+          }
+        },
+        "amplitude": { "const": 0.0 },
+        "s0": { "const": 0.0 },
+        "rho": { "const": 0.0 },
+        "sigma_se": { "const": 0.0 },
+        "N0_p1": { "const": 0.0 },
+        "N0_p2": { "const": 0.0 },
+        "N0_p3": { "const": 0.0 },
+        "N0_p4": { "const": 0.0 },
+        "N0_p5": { "const": 0.0 },
+        "k": { "const": 0.0 }
+      }
+    },
+    {
+      "name": "progression_p1",
+      "stoichiometry": [ [ "E_p1", -1 ], [ "I_p1", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": { "param": "sigma" },
+          "right": { "pop": "E_p1" }
+        }
+      },
+      "event_key": "progression_p1:{firing_index}",
+      "metadata": {
+        "origin_kind": "intrinsic",
+        "source_compartment": "E_p1",
+        "dest_compartment": "I_p1"
+      },
+      "rate_grad": {
+        "R0": { "const": 0.0 },
+        "sigma": { "pop": "E_p1" },
+        "gamma": { "const": 0.0 },
+        "kappa": { "const": 0.0 },
+        "amplitude": { "const": 0.0 },
+        "s0": { "const": 0.0 },
+        "rho": { "const": 0.0 },
+        "sigma_se": { "const": 0.0 },
+        "N0_p1": { "const": 0.0 },
+        "N0_p2": { "const": 0.0 },
+        "N0_p3": { "const": 0.0 },
+        "N0_p4": { "const": 0.0 },
+        "N0_p5": { "const": 0.0 },
+        "k": { "const": 0.0 }
+      }
+    },
+    {
+      "name": "progression_p2",
+      "stoichiometry": [ [ "E_p2", -1 ], [ "I_p2", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": { "param": "sigma" },
+          "right": { "pop": "E_p2" }
+        }
+      },
+      "event_key": "progression_p2:{firing_index}",
+      "metadata": {
+        "origin_kind": "intrinsic",
+        "source_compartment": "E_p2",
+        "dest_compartment": "I_p2"
+      },
+      "rate_grad": {
+        "R0": { "const": 0.0 },
+        "sigma": { "pop": "E_p2" },
+        "gamma": { "const": 0.0 },
+        "kappa": { "const": 0.0 },
+        "amplitude": { "const": 0.0 },
+        "s0": { "const": 0.0 },
+        "rho": { "const": 0.0 },
+        "sigma_se": { "const": 0.0 },
+        "N0_p1": { "const": 0.0 },
+        "N0_p2": { "const": 0.0 },
+        "N0_p3": { "const": 0.0 },
+        "N0_p4": { "const": 0.0 },
+        "N0_p5": { "const": 0.0 },
+        "k": { "const": 0.0 }
+      }
+    },
+    {
+      "name": "progression_p3",
+      "stoichiometry": [ [ "E_p3", -1 ], [ "I_p3", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": { "param": "sigma" },
+          "right": { "pop": "E_p3" }
+        }
+      },
+      "event_key": "progression_p3:{firing_index}",
+      "metadata": {
+        "origin_kind": "intrinsic",
+        "source_compartment": "E_p3",
+        "dest_compartment": "I_p3"
+      },
+      "rate_grad": {
+        "R0": { "const": 0.0 },
+        "sigma": { "pop": "E_p3" },
+        "gamma": { "const": 0.0 },
+        "kappa": { "const": 0.0 },
+        "amplitude": { "const": 0.0 },
+        "s0": { "const": 0.0 },
+        "rho": { "const": 0.0 },
+        "sigma_se": { "const": 0.0 },
+        "N0_p1": { "const": 0.0 },
+        "N0_p2": { "const": 0.0 },
+        "N0_p3": { "const": 0.0 },
+        "N0_p4": { "const": 0.0 },
+        "N0_p5": { "const": 0.0 },
+        "k": { "const": 0.0 }
+      }
+    },
+    {
+      "name": "progression_p4",
+      "stoichiometry": [ [ "E_p4", -1 ], [ "I_p4", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": { "param": "sigma" },
+          "right": { "pop": "E_p4" }
+        }
+      },
+      "event_key": "progression_p4:{firing_index}",
+      "metadata": {
+        "origin_kind": "intrinsic",
+        "source_compartment": "E_p4",
+        "dest_compartment": "I_p4"
+      },
+      "rate_grad": {
+        "R0": { "const": 0.0 },
+        "sigma": { "pop": "E_p4" },
+        "gamma": { "const": 0.0 },
+        "kappa": { "const": 0.0 },
+        "amplitude": { "const": 0.0 },
+        "s0": { "const": 0.0 },
+        "rho": { "const": 0.0 },
+        "sigma_se": { "const": 0.0 },
+        "N0_p1": { "const": 0.0 },
+        "N0_p2": { "const": 0.0 },
+        "N0_p3": { "const": 0.0 },
+        "N0_p4": { "const": 0.0 },
+        "N0_p5": { "const": 0.0 },
+        "k": { "const": 0.0 }
+      }
+    },
+    {
+      "name": "progression_p5",
+      "stoichiometry": [ [ "E_p5", -1 ], [ "I_p5", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": { "param": "sigma" },
+          "right": { "pop": "E_p5" }
+        }
+      },
+      "event_key": "progression_p5:{firing_index}",
+      "metadata": {
+        "origin_kind": "intrinsic",
+        "source_compartment": "E_p5",
+        "dest_compartment": "I_p5"
+      },
+      "rate_grad": {
+        "R0": { "const": 0.0 },
+        "sigma": { "pop": "E_p5" },
+        "gamma": { "const": 0.0 },
+        "kappa": { "const": 0.0 },
+        "amplitude": { "const": 0.0 },
+        "s0": { "const": 0.0 },
+        "rho": { "const": 0.0 },
+        "sigma_se": { "const": 0.0 },
+        "N0_p1": { "const": 0.0 },
+        "N0_p2": { "const": 0.0 },
+        "N0_p3": { "const": 0.0 },
+        "N0_p4": { "const": 0.0 },
+        "N0_p5": { "const": 0.0 },
+        "k": { "const": 0.0 }
+      }
+    },
+    {
+      "name": "recovery_p1",
+      "stoichiometry": [ [ "I_p1", -1 ], [ "R_p1", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": { "param": "gamma" },
+          "right": { "pop": "I_p1" }
+        }
+      },
+      "event_key": "recovery_p1:{firing_index}",
+      "metadata": {
+        "origin_kind": "intrinsic",
+        "source_compartment": "I_p1",
+        "dest_compartment": "R_p1"
+      },
+      "rate_grad": {
+        "R0": { "const": 0.0 },
+        "sigma": { "const": 0.0 },
+        "gamma": { "pop": "I_p1" },
+        "kappa": { "const": 0.0 },
+        "amplitude": { "const": 0.0 },
+        "s0": { "const": 0.0 },
+        "rho": { "const": 0.0 },
+        "sigma_se": { "const": 0.0 },
+        "N0_p1": { "const": 0.0 },
+        "N0_p2": { "const": 0.0 },
+        "N0_p3": { "const": 0.0 },
+        "N0_p4": { "const": 0.0 },
+        "N0_p5": { "const": 0.0 },
+        "k": { "const": 0.0 }
+      }
+    },
+    {
+      "name": "recovery_p2",
+      "stoichiometry": [ [ "I_p2", -1 ], [ "R_p2", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": { "param": "gamma" },
+          "right": { "pop": "I_p2" }
+        }
+      },
+      "event_key": "recovery_p2:{firing_index}",
+      "metadata": {
+        "origin_kind": "intrinsic",
+        "source_compartment": "I_p2",
+        "dest_compartment": "R_p2"
+      },
+      "rate_grad": {
+        "R0": { "const": 0.0 },
+        "sigma": { "const": 0.0 },
+        "gamma": { "pop": "I_p2" },
+        "kappa": { "const": 0.0 },
+        "amplitude": { "const": 0.0 },
+        "s0": { "const": 0.0 },
+        "rho": { "const": 0.0 },
+        "sigma_se": { "const": 0.0 },
+        "N0_p1": { "const": 0.0 },
+        "N0_p2": { "const": 0.0 },
+        "N0_p3": { "const": 0.0 },
+        "N0_p4": { "const": 0.0 },
+        "N0_p5": { "const": 0.0 },
+        "k": { "const": 0.0 }
+      }
+    },
+    {
+      "name": "recovery_p3",
+      "stoichiometry": [ [ "I_p3", -1 ], [ "R_p3", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": { "param": "gamma" },
+          "right": { "pop": "I_p3" }
+        }
+      },
+      "event_key": "recovery_p3:{firing_index}",
+      "metadata": {
+        "origin_kind": "intrinsic",
+        "source_compartment": "I_p3",
+        "dest_compartment": "R_p3"
+      },
+      "rate_grad": {
+        "R0": { "const": 0.0 },
+        "sigma": { "const": 0.0 },
+        "gamma": { "pop": "I_p3" },
+        "kappa": { "const": 0.0 },
+        "amplitude": { "const": 0.0 },
+        "s0": { "const": 0.0 },
+        "rho": { "const": 0.0 },
+        "sigma_se": { "const": 0.0 },
+        "N0_p1": { "const": 0.0 },
+        "N0_p2": { "const": 0.0 },
+        "N0_p3": { "const": 0.0 },
+        "N0_p4": { "const": 0.0 },
+        "N0_p5": { "const": 0.0 },
+        "k": { "const": 0.0 }
+      }
+    },
+    {
+      "name": "recovery_p4",
+      "stoichiometry": [ [ "I_p4", -1 ], [ "R_p4", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": { "param": "gamma" },
+          "right": { "pop": "I_p4" }
+        }
+      },
+      "event_key": "recovery_p4:{firing_index}",
+      "metadata": {
+        "origin_kind": "intrinsic",
+        "source_compartment": "I_p4",
+        "dest_compartment": "R_p4"
+      },
+      "rate_grad": {
+        "R0": { "const": 0.0 },
+        "sigma": { "const": 0.0 },
+        "gamma": { "pop": "I_p4" },
+        "kappa": { "const": 0.0 },
+        "amplitude": { "const": 0.0 },
+        "s0": { "const": 0.0 },
+        "rho": { "const": 0.0 },
+        "sigma_se": { "const": 0.0 },
+        "N0_p1": { "const": 0.0 },
+        "N0_p2": { "const": 0.0 },
+        "N0_p3": { "const": 0.0 },
+        "N0_p4": { "const": 0.0 },
+        "N0_p5": { "const": 0.0 },
+        "k": { "const": 0.0 }
+      }
+    },
+    {
+      "name": "recovery_p5",
+      "stoichiometry": [ [ "I_p5", -1 ], [ "R_p5", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": { "param": "gamma" },
+          "right": { "pop": "I_p5" }
+        }
+      },
+      "event_key": "recovery_p5:{firing_index}",
+      "metadata": {
+        "origin_kind": "intrinsic",
+        "source_compartment": "I_p5",
+        "dest_compartment": "R_p5"
+      },
+      "rate_grad": {
+        "R0": { "const": 0.0 },
+        "sigma": { "const": 0.0 },
+        "gamma": { "pop": "I_p5" },
+        "kappa": { "const": 0.0 },
+        "amplitude": { "const": 0.0 },
+        "s0": { "const": 0.0 },
+        "rho": { "const": 0.0 },
+        "sigma_se": { "const": 0.0 },
+        "N0_p1": { "const": 0.0 },
+        "N0_p2": { "const": 0.0 },
+        "N0_p3": { "const": 0.0 },
+        "N0_p4": { "const": 0.0 },
+        "N0_p5": { "const": 0.0 },
+        "k": { "const": 0.0 }
+      }
+    },
+    {
+      "name": "waning_p1",
+      "stoichiometry": [ [ "R_p1", -1 ], [ "S_p1", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": {
+            "bin_op": {
+              "op": "div",
+              "left": { "const": 1.0 },
+              "right": { "const": 730.0 }
+            }
+          },
+          "right": { "pop": "R_p1" }
+        }
+      },
+      "event_key": "waning_p1:{firing_index}",
+      "metadata": {
+        "origin_kind": "intrinsic",
+        "source_compartment": "R_p1",
+        "dest_compartment": "S_p1"
+      },
+      "rate_grad": {
+        "R0": { "const": 0.0 },
+        "sigma": { "const": 0.0 },
+        "gamma": { "const": 0.0 },
+        "kappa": { "const": 0.0 },
+        "amplitude": { "const": 0.0 },
+        "s0": { "const": 0.0 },
+        "rho": { "const": 0.0 },
+        "sigma_se": { "const": 0.0 },
+        "N0_p1": { "const": 0.0 },
+        "N0_p2": { "const": 0.0 },
+        "N0_p3": { "const": 0.0 },
+        "N0_p4": { "const": 0.0 },
+        "N0_p5": { "const": 0.0 },
+        "k": { "const": 0.0 }
+      }
+    },
+    {
+      "name": "waning_p2",
+      "stoichiometry": [ [ "R_p2", -1 ], [ "S_p2", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": {
+            "bin_op": {
+              "op": "div",
+              "left": { "const": 1.0 },
+              "right": { "const": 730.0 }
+            }
+          },
+          "right": { "pop": "R_p2" }
+        }
+      },
+      "event_key": "waning_p2:{firing_index}",
+      "metadata": {
+        "origin_kind": "intrinsic",
+        "source_compartment": "R_p2",
+        "dest_compartment": "S_p2"
+      },
+      "rate_grad": {
+        "R0": { "const": 0.0 },
+        "sigma": { "const": 0.0 },
+        "gamma": { "const": 0.0 },
+        "kappa": { "const": 0.0 },
+        "amplitude": { "const": 0.0 },
+        "s0": { "const": 0.0 },
+        "rho": { "const": 0.0 },
+        "sigma_se": { "const": 0.0 },
+        "N0_p1": { "const": 0.0 },
+        "N0_p2": { "const": 0.0 },
+        "N0_p3": { "const": 0.0 },
+        "N0_p4": { "const": 0.0 },
+        "N0_p5": { "const": 0.0 },
+        "k": { "const": 0.0 }
+      }
+    },
+    {
+      "name": "waning_p3",
+      "stoichiometry": [ [ "R_p3", -1 ], [ "S_p3", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": {
+            "bin_op": {
+              "op": "div",
+              "left": { "const": 1.0 },
+              "right": { "const": 730.0 }
+            }
+          },
+          "right": { "pop": "R_p3" }
+        }
+      },
+      "event_key": "waning_p3:{firing_index}",
+      "metadata": {
+        "origin_kind": "intrinsic",
+        "source_compartment": "R_p3",
+        "dest_compartment": "S_p3"
+      },
+      "rate_grad": {
+        "R0": { "const": 0.0 },
+        "sigma": { "const": 0.0 },
+        "gamma": { "const": 0.0 },
+        "kappa": { "const": 0.0 },
+        "amplitude": { "const": 0.0 },
+        "s0": { "const": 0.0 },
+        "rho": { "const": 0.0 },
+        "sigma_se": { "const": 0.0 },
+        "N0_p1": { "const": 0.0 },
+        "N0_p2": { "const": 0.0 },
+        "N0_p3": { "const": 0.0 },
+        "N0_p4": { "const": 0.0 },
+        "N0_p5": { "const": 0.0 },
+        "k": { "const": 0.0 }
+      }
+    },
+    {
+      "name": "waning_p4",
+      "stoichiometry": [ [ "R_p4", -1 ], [ "S_p4", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": {
+            "bin_op": {
+              "op": "div",
+              "left": { "const": 1.0 },
+              "right": { "const": 730.0 }
+            }
+          },
+          "right": { "pop": "R_p4" }
+        }
+      },
+      "event_key": "waning_p4:{firing_index}",
+      "metadata": {
+        "origin_kind": "intrinsic",
+        "source_compartment": "R_p4",
+        "dest_compartment": "S_p4"
+      },
+      "rate_grad": {
+        "R0": { "const": 0.0 },
+        "sigma": { "const": 0.0 },
+        "gamma": { "const": 0.0 },
+        "kappa": { "const": 0.0 },
+        "amplitude": { "const": 0.0 },
+        "s0": { "const": 0.0 },
+        "rho": { "const": 0.0 },
+        "sigma_se": { "const": 0.0 },
+        "N0_p1": { "const": 0.0 },
+        "N0_p2": { "const": 0.0 },
+        "N0_p3": { "const": 0.0 },
+        "N0_p4": { "const": 0.0 },
+        "N0_p5": { "const": 0.0 },
+        "k": { "const": 0.0 }
+      }
+    },
+    {
+      "name": "waning_p5",
+      "stoichiometry": [ [ "R_p5", -1 ], [ "S_p5", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": {
+            "bin_op": {
+              "op": "div",
+              "left": { "const": 1.0 },
+              "right": { "const": 730.0 }
+            }
+          },
+          "right": { "pop": "R_p5" }
+        }
+      },
+      "event_key": "waning_p5:{firing_index}",
+      "metadata": {
+        "origin_kind": "intrinsic",
+        "source_compartment": "R_p5",
+        "dest_compartment": "S_p5"
+      },
+      "rate_grad": {
+        "R0": { "const": 0.0 },
+        "sigma": { "const": 0.0 },
+        "gamma": { "const": 0.0 },
+        "kappa": { "const": 0.0 },
+        "amplitude": { "const": 0.0 },
+        "s0": { "const": 0.0 },
+        "rho": { "const": 0.0 },
+        "sigma_se": { "const": 0.0 },
+        "N0_p1": { "const": 0.0 },
+        "N0_p2": { "const": 0.0 },
+        "N0_p3": { "const": 0.0 },
+        "N0_p4": { "const": 0.0 },
+        "N0_p5": { "const": 0.0 },
+        "k": { "const": 0.0 }
+      }
+    }
+  ],
+  "ode_equations": [],
+  "time_functions": [
+    {
+      "name": "school",
+      "kind": {
+        "periodic": {
+          "period": { "const": 365.25 },
+          "values": [
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 1.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 },
+            { "const": 0.0 }
+          ]
+        }
+      }
+    }
+  ],
+  "tables": [
+    {
+      "name": "W",
+      "values": [
+        { "const": 0.0 },
+        { "const": 0.15 },
+        { "const": 0.05 },
+        { "const": 0.05 },
+        { "const": 0.2 },
+        { "const": 0.15 },
+        { "const": 0.0 },
+        { "const": 0.15 },
+        { "const": 0.05 },
+        { "const": 0.1 },
+        { "const": 0.05 },
+        { "const": 0.15 },
+        { "const": 0.0 },
+        { "const": 0.15 },
+        { "const": 0.1 },
+        { "const": 0.05 },
+        { "const": 0.05 },
+        { "const": 0.15 },
+        { "const": 0.0 },
+        { "const": 0.2 },
+        { "const": 0.2 },
+        { "const": 0.1 },
+        { "const": 0.1 },
+        { "const": 0.2 },
+        { "const": 0.0 }
+      ],
+      "out_of_bounds": "error"
+    }
+  ],
+  "interventions": [],
+  "observations": [
+    {
+      "name": "cases_p1",
+      "data_stream": "cases_p1",
+      "schedule": { "regular": { "start": 0.0, "step": 7.0, "end": 1825.0 } },
+      "projection": { "cumulative_flow": "recovery_p1" },
+      "likelihood": {
+        "neg_binomial": {
+          "mean": {
+            "bin_op": {
+              "op": "mul",
+              "left": { "param": "rho" },
+              "right": { "projected": null }
+            }
+          },
+          "dispersion": { "param": "k" }
+        }
+      }
+    },
+    {
+      "name": "cases_p2",
+      "data_stream": "cases_p2",
+      "schedule": { "regular": { "start": 0.0, "step": 7.0, "end": 1825.0 } },
+      "projection": { "cumulative_flow": "recovery_p2" },
+      "likelihood": {
+        "neg_binomial": {
+          "mean": {
+            "bin_op": {
+              "op": "mul",
+              "left": { "param": "rho" },
+              "right": { "projected": null }
+            }
+          },
+          "dispersion": { "param": "k" }
+        }
+      }
+    },
+    {
+      "name": "cases_p3",
+      "data_stream": "cases_p3",
+      "schedule": { "regular": { "start": 0.0, "step": 7.0, "end": 1825.0 } },
+      "projection": { "cumulative_flow": "recovery_p3" },
+      "likelihood": {
+        "neg_binomial": {
+          "mean": {
+            "bin_op": {
+              "op": "mul",
+              "left": { "param": "rho" },
+              "right": { "projected": null }
+            }
+          },
+          "dispersion": { "param": "k" }
+        }
+      }
+    },
+    {
+      "name": "cases_p4",
+      "data_stream": "cases_p4",
+      "schedule": { "regular": { "start": 0.0, "step": 7.0, "end": 1825.0 } },
+      "projection": { "cumulative_flow": "recovery_p4" },
+      "likelihood": {
+        "neg_binomial": {
+          "mean": {
+            "bin_op": {
+              "op": "mul",
+              "left": { "param": "rho" },
+              "right": { "projected": null }
+            }
+          },
+          "dispersion": { "param": "k" }
+        }
+      }
+    },
+    {
+      "name": "cases_p5",
+      "data_stream": "cases_p5",
+      "schedule": { "regular": { "start": 0.0, "step": 7.0, "end": 1825.0 } },
+      "projection": { "cumulative_flow": "recovery_p5" },
+      "likelihood": {
+        "neg_binomial": {
+          "mean": {
+            "bin_op": {
+              "op": "mul",
+              "left": { "param": "rho" },
+              "right": { "projected": null }
+            }
+          },
+          "dispersion": { "param": "k" }
+        }
+      }
+    }
+  ],
+  "parameters": [
+    {
+      "name": "R0",
+      "value": null,
+      "bounds": [ 5.0, 80.0 ],
+      "prior": null,
+      "transform": null,
+      "initial_value": null,
+      "param_kind": "positive"
+    },
+    {
+      "name": "sigma",
+      "value": null,
+      "bounds": [ 0.01, 0.3 ],
+      "prior": null,
+      "transform": null,
+      "initial_value": null,
+      "param_kind": "rate"
+    },
+    {
+      "name": "gamma",
+      "value": null,
+      "bounds": [ 0.01, 0.3 ],
+      "prior": null,
+      "transform": null,
+      "initial_value": null,
+      "param_kind": "rate"
+    },
+    {
+      "name": "kappa",
+      "value": null,
+      "bounds": [ 0.001, 0.5 ],
+      "prior": null,
+      "transform": null,
+      "initial_value": null,
+      "param_kind": "positive"
+    },
+    {
+      "name": "amplitude",
+      "value": null,
+      "bounds": [ 0.05, 0.7 ],
+      "prior": null,
+      "transform": null,
+      "initial_value": null,
+      "param_kind": "probability"
+    },
+    {
+      "name": "s0",
+      "value": null,
+      "bounds": [ 0.01, 0.15 ],
+      "prior": null,
+      "transform": null,
+      "initial_value": null,
+      "param_kind": "probability"
+    },
+    {
+      "name": "rho",
+      "value": null,
+      "bounds": [ 0.1, 0.9 ],
+      "prior": null,
+      "transform": null,
+      "initial_value": null,
+      "param_kind": "probability"
+    },
+    {
+      "name": "sigma_se",
+      "value": null,
+      "bounds": [ 0.001, 1.0 ],
+      "prior": null,
+      "transform": null,
+      "initial_value": null,
+      "param_kind": "positive"
+    },
+    {
+      "name": "N0_p1",
+      "value": null,
+      "bounds": [ 1000.0, 500000.0 ],
+      "prior": null,
+      "transform": null,
+      "initial_value": null,
+      "param_kind": "count"
+    },
+    {
+      "name": "N0_p2",
+      "value": null,
+      "bounds": [ 1000.0, 500000.0 ],
+      "prior": null,
+      "transform": null,
+      "initial_value": null,
+      "param_kind": "count"
+    },
+    {
+      "name": "N0_p3",
+      "value": null,
+      "bounds": [ 1000.0, 500000.0 ],
+      "prior": null,
+      "transform": null,
+      "initial_value": null,
+      "param_kind": "count"
+    },
+    {
+      "name": "N0_p4",
+      "value": null,
+      "bounds": [ 1000.0, 500000.0 ],
+      "prior": null,
+      "transform": null,
+      "initial_value": null,
+      "param_kind": "count"
+    },
+    {
+      "name": "N0_p5",
+      "value": null,
+      "bounds": [ 1000.0, 500000.0 ],
+      "prior": null,
+      "transform": null,
+      "initial_value": null,
+      "param_kind": "count"
+    },
+    {
+      "name": "k",
+      "value": null,
+      "bounds": [ 1.0, 100.0 ],
+      "prior": null,
+      "transform": null,
+      "initial_value": null,
+      "param_kind": "positive"
+    }
+  ],
+  "parameter_groups": [],
+  "initial_conditions": {
+    "parameterized": {
+      "S_p1": {
+        "bin_op": {
+          "op": "sub",
+          "left": {
+            "bin_op": {
+              "op": "mul",
+              "left": { "param": "s0" },
+              "right": { "param": "N0_p1" }
+            }
+          },
+          "right": { "const": 50.0 }
+        }
+      },
+      "S_p2": {
+        "bin_op": {
+          "op": "mul",
+          "left": { "param": "s0" },
+          "right": { "param": "N0_p2" }
+        }
+      },
+      "S_p3": {
+        "bin_op": {
+          "op": "mul",
+          "left": { "param": "s0" },
+          "right": { "param": "N0_p3" }
+        }
+      },
+      "S_p4": {
+        "bin_op": {
+          "op": "mul",
+          "left": { "param": "s0" },
+          "right": { "param": "N0_p4" }
+        }
+      },
+      "S_p5": {
+        "bin_op": {
+          "op": "mul",
+          "left": { "param": "s0" },
+          "right": { "param": "N0_p5" }
+        }
+      },
+      "I_p1": { "const": 50.0 },
+      "R_p1": {
+        "bin_op": {
+          "op": "sub",
+          "left": { "param": "N0_p1" },
+          "right": {
+            "bin_op": {
+              "op": "mul",
+              "left": { "param": "s0" },
+              "right": { "param": "N0_p1" }
+            }
+          }
+        }
+      },
+      "R_p2": {
+        "bin_op": {
+          "op": "sub",
+          "left": { "param": "N0_p2" },
+          "right": {
+            "bin_op": {
+              "op": "mul",
+              "left": { "param": "s0" },
+              "right": { "param": "N0_p2" }
+            }
+          }
+        }
+      },
+      "R_p3": {
+        "bin_op": {
+          "op": "sub",
+          "left": { "param": "N0_p3" },
+          "right": {
+            "bin_op": {
+              "op": "mul",
+              "left": { "param": "s0" },
+              "right": { "param": "N0_p3" }
+            }
+          }
+        }
+      },
+      "R_p4": {
+        "bin_op": {
+          "op": "sub",
+          "left": { "param": "N0_p4" },
+          "right": {
+            "bin_op": {
+              "op": "mul",
+              "left": { "param": "s0" },
+              "right": { "param": "N0_p4" }
+            }
+          }
+        }
+      },
+      "R_p5": {
+        "bin_op": {
+          "op": "sub",
+          "left": { "param": "N0_p5" },
+          "right": {
+            "bin_op": {
+              "op": "mul",
+              "left": { "param": "s0" },
+              "right": { "param": "N0_p5" }
+            }
+          }
+        }
+      }
+    }
+  },
+  "data_contract": null,
+  "output": {
+    "times": { "regular": { "start": 0.0, "step": 1.0, "end": 1825.0 } },
+    "format": "tsv",
+    "trajectory": true,
+    "observations": true
+  },
+  "simulation": {
+    "t_start": 0.0,
+    "t_end": 1825.0,
+    "time_semantics": "continuous",
+    "dt": null,
+    "rng_seed": null
+  },
+  "scenarios": [],
+  "model_structure": {
+    "dimensions": [
+      { "name": "patch", "values": [ "p1", "p2", "p3", "p4", "p5" ] }
+    ],
+    "compartment_dims": {
+      "S": [ "patch" ],
+      "E": [ "patch" ],
+      "I": [ "patch" ],
+      "R": [ "patch" ]
+    },
+    "base_compartments": [ "S", "E", "I", "R" ],
+    "transmission_transitions": [ "infection", "importation" ],
+    "infectious_compartments": [ "I" ]
+  }
+}
