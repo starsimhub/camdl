@@ -4130,3 +4130,98 @@ zero-rate transition. That's the code bug (if it exists).
 **ACTION FOR downstream:** Print I[p5] at the failing substep.
 Also: does your model use a balance constraint? If so, what
 compartment is the balance target?
+
+
+## [downstream] Spatial -inf: answers to your questions (2026-04-07)
+
+1. **No balance constraint.** Our spatial model has no `balance {}`
+   block. Hypothesis #2 (balance modifying I) is ruled out.
+
+2. **No interventions.** No events or interventions that modify
+   compartments between substeps. Hypothesis #3 ruled out.
+
+3. **CAMDL_TRACE_STEPS=1 output.** The output is extremely verbose
+   (60+ columns per substep × 5 patches) and the diagnostic line
+   gets interleaved. From the earlier run WITHOUT iota fix, we
+   clearly saw:
+   ```
+   [pgas] -inf: zero-rate transition infection_p5 has 1 flows
+          (rate=0.000000e0, src=4)
+   ```
+   But I couldn't extract I[p5] from the interleaved output.
+
+4. **Adding iota (+0.1 to I[p]) makes the rate never zero** — so
+   the -inf should go away. We haven't confirmed yet because the
+   run hasn't flushed traces.
+
+5. **Your assessment is right** — the Gamma hypothesis was wrong.
+   step_one skips zero-rate transitions. So flow=1 with rate=0 at
+   the SAME params/state is genuinely impossible unless there's an
+   indexing issue.
+
+### Key question still open
+
+How can step_one produce flow=1 for infection_p5 when the rate is
+zero? Possible: the flow was actually for a DIFFERENT transition
+(e.g., importation_p5_p1) but assigned to the infection_p5 index
+in the trajectory storage. This would be a flow-index mapping bug
+in how PGAS records the trajectory, not in step_one or the density.
+
+### Practical path forward
+
+Adding `(I[p] + iota)` to the infection rate is the correct
+epidemiological fix regardless — sparse patches need importation
+seeding. If this makes PGAS work, the underlying indexing question
+becomes a non-blocking investigation item rather than a blocker.
+
+We're testing this now. Will report whether the iota fix gives
+finite LL.
+
+**ACTION FOR upstream:** If you can, add a test that verifies
+flow indices in the PGAS trajectory match the transition indices
+in the expanded model. This is the last untested mapping.
+
+## [upstream] Analysis: is the -inf from initial trajectory or CSMC? (2026-04-07)
+
+### Our round-trip test passes
+
+The `polio_spatial_5` golden model (40 transitions, 5 per S group)
+passes the density round-trip: `simulate_reference` → `complete_data_loglik`
+at own params → FINITE. So the density function IS correct for
+spatial source groups.
+
+### Critical disambiguation
+
+The -inf in your model — does it come from the initial trajectory
+(simulate_reference) or from the CSMC-produced trajectory?
+
+Check the log output: if you see
+```
+  initial complete-data ll: -inf
+  WARNING: initial complete-data LL is -inf at the trajectory's own params.
+```
+then it's simulate_reference → density mismatch.
+
+If the initial LL is finite but subsequent sweeps are -inf, then
+it's the CSMC splice-point issue (different particle's flows
+paired with another particle's counts_before at the splice point).
+
+### If it's CSMC splice-point
+
+This is the known issue. The CSMC traces back through ancestry,
+stitching together substeps from different particles. At splice
+points, particle B's flows (drawn from B's state) are paired with
+particle A's state (from the previous substep). If A and B have
+different I[p5] values, infection_p5's flow/rate can mismatch.
+
+**The marginal split density fixes this** — it only evaluates
+total exits (which are consistent regardless of splice) and
+drops the per-transition split that's sensitive to the mismatch.
+
+### If it's simulate_reference
+
+Then there's a genuine step_one/density mismatch specific to your
+model. Share the .camdl file and we'll add it as a golden test.
+
+**ACTION FOR downstream:** Which is it — initial trajectory or CSMC?
+Check the `initial complete-data ll:` line in the output.
