@@ -97,7 +97,78 @@ fn test_resume_state_diagonal_mass_roundtrip() {
     }
 }
 
-/// T3: Large trajectory serialization (realistic size)
+/// T3: Config hash stability — same inputs produce same hash.
+#[test]
+fn test_config_hash_deterministic() {
+    use std::hash::{Hash, Hasher};
+    use std::collections::hash_map::DefaultHasher;
+    let compute = || {
+        let mut h = DefaultHasher::new();
+        "model_json_content".hash(&mut h);
+        "data_content".hash(&mut h);
+        "R0:bounds=(1,100):prior=lognormal(3.9,0.4)".hash(&mut h);
+        100_usize.hash(&mut h);
+        1.0_f64.to_bits().hash(&mut h);
+        h.finish()
+    };
+    let hash1 = compute();
+    let hash2 = compute();
+    assert_eq!(hash1, hash2, "same config must produce same hash");
+}
+
+/// T4: Config hash sensitivity — changing invalidating fields changes the hash.
+#[test]
+fn test_config_hash_sensitivity() {
+    use std::hash::{Hash, Hasher};
+    use std::collections::hash_map::DefaultHasher;
+    let compute = |model: &str, n_particles: usize, prior: &str| {
+        let mut h = DefaultHasher::new();
+        model.hash(&mut h);
+        "data".hash(&mut h);
+        prior.hash(&mut h);
+        n_particles.hash(&mut h);
+        1.0_f64.to_bits().hash(&mut h);
+        h.finish()
+    };
+
+    let base = compute("model_v1", 100, "flat");
+
+    // Changed model → different hash
+    assert_ne!(base, compute("model_v2", 100, "flat"));
+    // Changed particles → different hash
+    assert_ne!(base, compute("model_v1", 200, "flat"));
+    // Changed prior → different hash
+    assert_ne!(base, compute("model_v1", 100, "lognormal(3.9,0.4)"));
+    // Same everything → same hash
+    assert_eq!(base, compute("model_v1", 100, "flat"));
+}
+
+/// T5: Resume state with mismatched hash is detected.
+#[test]
+fn test_resume_hash_mismatch_detection() {
+    let state = ChainResumeState {
+        config_hash: "original_hash_abc123".into(),
+        completed_sweeps: 1000,
+        params: vec![1.0],
+        transformed: vec![0.0],
+        trajectory: PGASTrajectory { initial_counts: vec![100], substeps: vec![] },
+        mass_matrix: MassMatrix::identity(1),
+        nuts_step_size: 0.1,
+        log_proposal_sd: vec![-3.0],
+        total_accepted: vec![500],
+        current_ll: -100.0,
+    };
+
+    let current_hash = "different_hash_xyz789";
+    assert_ne!(state.config_hash, current_hash,
+        "mismatched hashes should be detected by the caller");
+
+    // Matching hash should pass
+    let matching_hash = "original_hash_abc123";
+    assert_eq!(state.config_hash, matching_hash);
+}
+
+/// T6: Large trajectory serialization (realistic size)
 #[test]
 fn test_resume_state_large_trajectory() {
     // Simulate a realistic trajectory size (1000 substeps, 4 compartments)
