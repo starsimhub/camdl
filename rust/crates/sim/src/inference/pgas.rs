@@ -208,15 +208,29 @@ pub fn log_transition_density_substep(
         // Step 1: compute effective per-capita rates (same as step_one)
         let mut probs: Vec<(usize, f64)> = Vec::new();
         let mut total_rate = 0.0_f64;
-        let mut group_has_overdispersion = false;
+        let mut gamma_was_used = false;  // track if gamma was actually drawn
         for &tr_idx in group {
             let rate = propensities[tr_idx];
             if rate <= 0.0 || is_determ[tr_idx] {
                 // Zero-rate transition must have zero flows
                 if flows[tr_idx] > 0 {
                     if crate::chain_binomial::trace_enabled() {
-                        eprintln!("[pgas] -inf: zero-rate transition {} has {} flows (rate={:.6e}, src={})",
-                            model.model.transitions[tr_idx].name, flows[tr_idx], rate, src_local);
+                        eprintln!("[pgas] -inf: zero-rate transition {} has {} flows (rate={:.6e}, src_idx={}, src_count={})",
+                            model.model.transitions[tr_idx].name, flows[tr_idx], rate,
+                            src_local, counts_before[src_local]);
+                        // Print compartments with their names
+                        for (ci, comp) in model.model.compartments.iter().enumerate() {
+                            if ci < counts_before.len() {
+                                eprintln!("  {} = {}", comp.name, counts_before[ci]);
+                            }
+                        }
+                        // Print all flows in this source group
+                        eprintln!("  source group transitions:");
+                        for &gtr in group {
+                            eprintln!("    {} (idx={}): rate={:.6e}, flow={}",
+                                model.model.transitions[gtr].name, gtr,
+                                propensities[gtr], flows[gtr]);
+                        }
                     }
                     return Ok(f64::NEG_INFINITY);
                 }
@@ -225,11 +239,8 @@ pub fn log_transition_density_substep(
             }
             let per_capita = rate / n_src as f64;
             let effective = if let Some(_sigma_sq) = sigma_sq_by_tr[tr_idx] {
-                group_has_overdispersion = true;
+                gamma_was_used = true;
                 let g = if gamma_idx < gammas.len() { gammas[gamma_idx] } else { 1.0 };
-                // Don't increment gamma_idx yet — all transitions in the same
-                // group share the same gamma (step_one only draws one gamma
-                // per overdispersed group via .take())
                 per_capita * g
             } else {
                 per_capita
@@ -237,7 +248,12 @@ pub fn log_transition_density_substep(
             total_rate += effective;
             probs.push((tr_idx, effective));
         }
-        if group_has_overdispersion {
+        // Only advance gamma_idx if the overdispersed transition was actually
+        // evaluated (rate > 0). step_one only pushes to gamma_used when the
+        // Overdispersed transition has positive rate and enters the split.
+        // If it was skipped (rate=0), no gamma was drawn — gamma_idx must NOT
+        // advance, or all subsequent groups read the wrong gamma.
+        if gamma_was_used {
             gamma_idx += 1;
         }
 

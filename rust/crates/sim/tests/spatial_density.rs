@@ -372,3 +372,80 @@ fn test_density_downstream_multi_seed() {
     eprintln!("  multi-seed: {}/100 seeds produced -inf", n_inf);
     assert_eq!(n_inf, 0, "{}/100 seeds produced -inf density at own params", n_inf);
 }
+
+/// Targeted test: simulate ONE substep where I_p5=0, check that
+/// infection_p5 flow is 0 (not misattributed from importation).
+#[test]
+fn test_step_one_zero_infection_flow() {
+    use sim::chain_binomial::{StepScratch, step_one};
+
+    let path = "tests/fixtures/seir_spatial_5.ir.json";
+    let model = match std::fs::read_to_string(path) {
+        Ok(json) => serde_json::from_str::<ir::Model>(&json).unwrap(),
+        Err(_) => { eprintln!("skip"); return; }
+    };
+    let mut model = model;
+    for p in &mut model.parameters {
+        if p.value.is_none() {
+            p.value = Some(match p.name.as_str() {
+                "R0" => 38.0, "sigma" => 0.055, "gamma" => 0.2,
+                "amplitude" => 0.467, "s0" => 0.053, "kappa" => 0.038,
+                "rho" => 0.4, "sigma_se" => 0.05, "k" => 10.0,
+                "N0_p1" => 100000.0, "N0_p2" => 80000.0,
+                "N0_p3" => 60000.0, "N0_p4" => 50000.0,
+                "N0_p5" => 150000.0,
+                _ => 1.0,
+            });
+        }
+    }
+    let compiled = CompiledModel::new(model).unwrap();
+    let mut params = vec![0.0; compiled.param_index.len()];
+    for p in &compiled.model.parameters {
+        if let Some(v) = p.value { params[compiled.param_index[p.name.as_str()]] = v; }
+    }
+
+    // Find infection_p5 and I_p5 indices
+    let inf_p5_idx = compiled.model.transitions.iter().position(|t| t.name == "infection_p5").unwrap();
+    let i_p5_idx = compiled.model.compartments.iter().position(|c| c.name == "I_p5").unwrap();
+
+    eprintln!("  infection_p5 transition idx = {}", inf_p5_idx);
+    eprintln!("  I_p5 compartment idx = {}", i_p5_idx);
+
+    // Set up initial state with I_p5 = 0
+    let (init_int, _) = compiled.initial_state(&params).unwrap();
+    let mut counts = init_int.counts.clone();
+    // Force I_p5 = 0
+    counts[i_p5_idx] = 0;
+    // Give I_p1 some infections so importation can fire
+    let i_p1_idx = compiled.model.compartments.iter().position(|c| c.name == "I_p1").unwrap();
+    counts[i_p1_idx] = 100;
+
+    eprintln!("  I_p5 = {}, I_p1 = {}", counts[i_p5_idx], counts[i_p1_idx]);
+
+    let n_tr = compiled.model.transitions.len();
+    let mut scratch = StepScratch::new(&compiled);
+
+    // Run 100 substeps, check that infection_p5 NEVER fires
+    let mut rng = StatefulRng::new(42);
+    for step in 0..100 {
+        let mut flows = vec![0u64; n_tr];
+        scratch.gamma_used.clear();
+        step_one(&compiled, &mut counts, &mut flows, &params, step as f64, 1.0, &mut rng, &mut scratch).unwrap();
+
+        if flows[inf_p5_idx] > 0 {
+            eprintln!("  STEP {}: infection_p5 has {} flows but I_p5 was {}",
+                step, flows[inf_p5_idx], counts[i_p5_idx]);
+            // Check what I_p5 was BEFORE step_one (it's now after)
+            panic!("infection_p5 fired with I_p5={} at step {}", counts[i_p5_idx], step);
+        }
+
+        // After importation fires, I_p5 may become > 0. Subsequent steps
+        // should be allowed to have infection_p5 fire. Only check when I_p5=0.
+        if counts[i_p5_idx] > 0 {
+            // I_p5 is now positive (from importation or progression), stop checking
+            eprintln!("  I_p5 became {} at step {} — stopping zero-check", counts[i_p5_idx], step);
+            break;
+        }
+    }
+    eprintln!("  test passed: infection_p5 never fires when I_p5=0");
+}
