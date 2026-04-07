@@ -10,15 +10,167 @@
 
 use crate::rng::StatefulRng;
 
+/// Mass matrix for HMC/NUTS. Controls how momentum translates into movement.
+///
+/// Diagonal: rescales each parameter independently by its posterior variance.
+///   Handles scale differences (R0 ~30 vs sigma ~0.1) but NOT correlations.
+///
+/// Dense: full covariance matrix via Cholesky decomposition. Handles both
+///   scale differences AND correlations (e.g., R0-amplitude ridge with r=0.94).
+///   NUTS proposes along the ridge instead of zigzagging across it.
+#[derive(Clone)]
+pub enum MassMatrix {
+    /// Diagonal: M_inv[i] = Var(z_i). Identity when all 1.0.
+    Diagonal(Vec<f64>),
+    /// Dense: L is the lower Cholesky factor of M (NOT M_inv).
+    /// M = L L^T. L_inv is precomputed for kinetic energy and leapfrog.
+    Dense {
+        dim: usize,
+        /// Lower Cholesky factor of M (row-major, dim×dim).
+        /// Used for momentum draw: p = L * z, z ~ N(0,I).
+        l: Vec<f64>,
+        /// Lower Cholesky factor of M^{-1} (row-major, dim×dim).
+        /// Used for kinetic energy and leapfrog: M^{-1} p.
+        l_inv: Vec<f64>,
+    },
+}
+
+impl MassMatrix {
+    pub fn identity(d: usize) -> Self {
+        MassMatrix::Diagonal(vec![1.0; d])
+    }
+
+    pub fn diagonal(variances: Vec<f64>) -> Self {
+        MassMatrix::Diagonal(variances)
+    }
+
+    /// Build a dense mass matrix from an empirical covariance matrix (row-major).
+    /// Computes Cholesky of cov (= M_inv), then inverts to get L for momentum draws.
+    pub fn dense_from_covariance(cov: &[f64], d: usize) -> Self {
+        assert_eq!(cov.len(), d * d);
+        // Regularize: cov + eps*I
+        let mut reg = cov.to_vec();
+        for i in 0..d {
+            reg[i * d + i] += 1e-6;
+        }
+        // Cholesky of cov → L_inv (since cov = M^{-1})
+        let l_inv = cholesky_lower(&reg, d);
+        // Invert L_inv to get L (Cholesky of M)
+        let l = invert_lower_triangular(&l_inv, d);
+        MassMatrix::Dense { dim: d, l, l_inv }
+    }
+
+    /// Draw momentum: p ~ N(0, M).
+    /// Diagonal: p_i = z_i / sqrt(M_inv_i)
+    /// Dense: p = L * z where z ~ N(0,I)
+    pub fn draw_momentum(&self, rng: &mut StatefulRng) -> Vec<f64> {
+        match self {
+            MassMatrix::Diagonal(m_inv) => {
+                m_inv.iter().map(|&mi| rng.normal() / mi.sqrt()).collect()
+            }
+            MassMatrix::Dense { dim, l, .. } => {
+                let d = *dim;
+                let z: Vec<f64> = (0..d).map(|_| rng.normal()).collect();
+                matvec_lower(l, &z, d)
+            }
+        }
+    }
+
+    /// Kinetic energy: 0.5 * p^T M^{-1} p
+    pub fn kinetic_energy(&self, p: &[f64]) -> f64 {
+        match self {
+            MassMatrix::Diagonal(m_inv) => {
+                p.iter().zip(m_inv).map(|(&pi, &mi)| pi * pi * mi).sum::<f64>() * 0.5
+            }
+            MassMatrix::Dense { dim, l_inv, .. } => {
+                // M^{-1} p = L_inv^T L_inv p, so ||L_inv p||^2 / 2
+                let v = matvec_lower(l_inv, p, *dim);
+                v.iter().map(|&vi| vi * vi).sum::<f64>() * 0.5
+            }
+        }
+    }
+
+    /// M^{-1} * p (for leapfrog position update and U-turn check)
+    pub fn m_inv_times(&self, p: &[f64]) -> Vec<f64> {
+        match self {
+            MassMatrix::Diagonal(m_inv) => {
+                p.iter().zip(m_inv).map(|(&pi, &mi)| pi * mi).collect()
+            }
+            MassMatrix::Dense { dim, l_inv, .. } => {
+                // M^{-1} p = L_inv^T (L_inv p)
+                let v = matvec_lower(l_inv, p, *dim);
+                matvec_lower_transpose(l_inv, &v, *dim)
+            }
+        }
+    }
+}
+
+/// Lower triangular matrix × vector (row-major storage).
+fn matvec_lower(l: &[f64], x: &[f64], d: usize) -> Vec<f64> {
+    let mut y = vec![0.0; d];
+    for i in 0..d {
+        for j in 0..=i {
+            y[i] += l[i * d + j] * x[j];
+        }
+    }
+    y
+}
+
+/// Lower triangular matrix TRANSPOSE × vector (row-major storage).
+fn matvec_lower_transpose(l: &[f64], x: &[f64], d: usize) -> Vec<f64> {
+    let mut y = vec![0.0; d];
+    for i in 0..d {
+        for j in i..d {
+            y[i] += l[j * d + i] * x[j];
+        }
+    }
+    y
+}
+
+/// Cholesky decomposition: A = L L^T. Returns L (lower triangular, row-major).
+fn cholesky_lower(a: &[f64], d: usize) -> Vec<f64> {
+    let mut l = vec![0.0; d * d];
+    for i in 0..d {
+        for j in 0..=i {
+            let mut sum = 0.0;
+            for k in 0..j {
+                sum += l[i * d + k] * l[j * d + k];
+            }
+            if i == j {
+                let diag = a[i * d + i] - sum;
+                l[i * d + j] = if diag > 0.0 { diag.sqrt() } else { 1e-10 };
+            } else {
+                l[i * d + j] = (a[i * d + j] - sum) / l[j * d + j];
+            }
+        }
+    }
+    l
+}
+
+/// Invert a lower triangular matrix (row-major). Returns L^{-1}.
+fn invert_lower_triangular(l: &[f64], d: usize) -> Vec<f64> {
+    let mut inv = vec![0.0; d * d];
+    for i in 0..d {
+        inv[i * d + i] = 1.0 / l[i * d + i];
+        for j in (0..i).rev() {
+            let mut sum = 0.0;
+            for k in (j + 1)..=i {
+                sum += l[i * d + k] * inv[k * d + j];
+            }
+            inv[i * d + j] = -sum / l[i * d + i];
+        }
+    }
+    inv
+}
+
 /// Configuration for the NUTS sampler.
 pub struct NUTSConfig {
     /// Maximum tree depth (number of doublings). Default 10 → up to 1024 leapfrog steps.
     pub max_tree_depth: usize,
     /// Step size for leapfrog integration. Adapted during warmup.
     pub step_size: f64,
-    /// Diagonal mass matrix (inverse). One entry per parameter.
-    /// M_inv[i] scales the momentum for parameter i.
-    pub mass_matrix_inv: Vec<f64>,
+    /// Mass matrix (diagonal or dense).
+    pub mass_matrix: MassMatrix,
 }
 
 /// Result of one NUTS step.
@@ -40,12 +192,6 @@ pub struct NUTSStepResult {
 }
 
 /// One NUTS step: propose all parameters jointly using gradients.
-///
-/// `log_prob_and_grad` evaluates the FULL target log-density AND its gradient
-/// on the z (unconstrained) scale. Returns (log_p, gradient). This function
-/// must handle ALL chain rules internally — NUTS only sees z-scale values.
-///
-/// Parameters are on the TRANSFORMED (unconstrained) scale.
 pub fn nuts_step(
     current_z: &[f64],
     current_log_p: f64,
@@ -54,27 +200,14 @@ pub fn nuts_step(
     log_prob_and_grad: &dyn Fn(&[f64]) -> (f64, Vec<f64>),
     rng: &mut StatefulRng,
 ) -> NUTSStepResult {
-    let d = current_z.len();
+    let _d = current_z.len();
     let eps = config.step_size;
     let max_depth = config.max_tree_depth;
 
-    // Draw momentum: p ~ N(0, M), where M = diag(1/M_inv)
-    let momentum: Vec<f64> = (0..d)
-        .map(|i| rng.normal() / config.mass_matrix_inv[i].sqrt())
-        .collect();
-
-    // Initial Hamiltonian: H = -log_p + 0.5 * p^T M^{-1} p
-    let kinetic = |p: &[f64]| -> f64 {
-        p.iter().zip(&config.mass_matrix_inv)
-            .map(|(&pi, &mi)| pi * pi * mi)
-            .sum::<f64>() * 0.5
-    };
-    let h0 = -current_log_p + kinetic(&momentum);
-
-    // Slice variable
+    let momentum = config.mass_matrix.draw_momentum(rng);
+    let h0 = -current_log_p + config.mass_matrix.kinetic_energy(&momentum);
     let log_slice = -h0 - rng.exp(1.0);
 
-    // Initialize tree
     let mut z_minus = current_z.to_vec();
     let mut z_plus = current_z.to_vec();
     let mut p_minus = momentum.clone();
@@ -100,13 +233,13 @@ pub fn nuts_step(
              n_prime, stop_prime, div_prime, n_lf, sum_ap, n_as) = if direction > 0.0 {
             build_tree(
                 &z_plus, &p_plus, &grad_plus, direction, depth, eps,
-                &config.mass_matrix_inv, log_slice, h0, delta_max,
+                &config.mass_matrix, log_slice, h0, delta_max,
                 log_prob_and_grad, rng,
             )
         } else {
             build_tree(
                 &z_minus, &p_minus, &grad_minus, direction, depth, eps,
-                &config.mass_matrix_inv, log_slice, h0, delta_max,
+                &config.mass_matrix, log_slice, h0, delta_max,
                 log_prob_and_grad, rng,
             )
         };
@@ -127,17 +260,13 @@ pub fn nuts_step(
         divergent = divergent || div_prime;
 
         if direction > 0.0 {
-            z_plus = z_new;
-            p_plus = p_new;
-            grad_plus = grad_new;
+            z_plus = z_new; p_plus = p_new; grad_plus = grad_new;
         } else {
-            z_minus = z_new;
-            p_minus = p_new;
-            grad_minus = grad_new;
+            z_minus = z_new; p_minus = p_new; grad_minus = grad_new;
         }
 
         let stop = stop_prime || uturn(&z_minus, &z_plus, &p_minus, &p_plus,
-                                        &config.mass_matrix_inv);
+                                        &config.mass_matrix);
         tree_depth = depth + 1;
         if stop { break; }
     }
@@ -145,33 +274,33 @@ pub fn nuts_step(
     let accepted = z_proposal != current_z;
     let mean_accept_prob = if n_accept_steps > 0 {
         sum_accept_prob / n_accept_steps as f64
-    } else {
-        0.0
-    };
+    } else { 0.0 };
 
     NUTSStepResult {
-        params: z_proposal,
-        log_posterior: log_p_proposal,
-        accepted,
-        n_leapfrog,
-        tree_depth,
-        divergent,
-        mean_accept_prob,
+        params: z_proposal, log_posterior: log_p_proposal, accepted,
+        n_leapfrog, tree_depth, divergent, mean_accept_prob,
     }
 }
 
 /// Leapfrog integrator: one step of Störmer-Verlet.
 fn leapfrog(
     z: &[f64], p: &[f64], grad: &[f64],
-    eps: f64, direction: f64, m_inv: &[f64],
+    eps: f64, direction: f64, mass: &MassMatrix,
     log_prob_and_grad: &dyn Fn(&[f64]) -> (f64, Vec<f64>),
 ) -> (Vec<f64>, Vec<f64>, f64, Vec<f64>) {
     let d = z.len();
     let dt = eps * direction;
 
+    // Half-step momentum
     let mut p_half: Vec<f64> = (0..d).map(|i| p[i] + 0.5 * dt * grad[i]).collect();
-    let z_new: Vec<f64> = (0..d).map(|i| z[i] + dt * m_inv[i] * p_half[i]).collect();
+
+    // Full-step position: z += dt * M^{-1} * p
+    let m_inv_p = mass.m_inv_times(&p_half);
+    let z_new: Vec<f64> = (0..d).map(|i| z[i] + dt * m_inv_p[i]).collect();
+
     let (log_p_new, grad_new) = log_prob_and_grad(&z_new);
+
+    // Half-step momentum
     for i in 0..d {
         p_half[i] += 0.5 * dt * grad_new[i];
     }
@@ -180,39 +309,31 @@ fn leapfrog(
 }
 
 /// Recursively build a balanced binary tree of leapfrog states.
-/// Returns: (z_end, p_end, grad_end, z_proposal, log_p_proposal,
-///           n_valid, stop, divergent, n_leapfrog, sum_accept_prob, n_accept_steps)
 #[allow(clippy::too_many_arguments)]
 fn build_tree(
     z: &[f64], p: &[f64], grad: &[f64],
     direction: f64, depth: usize, eps: f64,
-    m_inv: &[f64], log_slice: f64, h0: f64, delta_max: f64,
+    mass: &MassMatrix, log_slice: f64, h0: f64, delta_max: f64,
     log_prob_and_grad: &dyn Fn(&[f64]) -> (f64, Vec<f64>),
     rng: &mut StatefulRng,
 ) -> (Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>, f64, usize, bool, bool, usize, f64, usize) {
     if depth == 0 {
         let (z_new, p_new, log_p_new, grad_new) =
-            leapfrog(z, p, grad, eps, direction, m_inv, log_prob_and_grad);
+            leapfrog(z, p, grad, eps, direction, mass, log_prob_and_grad);
 
-        let kinetic: f64 = p_new.iter().zip(m_inv)
-            .map(|(&pi, &mi)| pi * pi * mi).sum::<f64>() * 0.5;
-        let h_new = -log_p_new + kinetic;
-
+        let h_new = -log_p_new + mass.kinetic_energy(&p_new);
         let n_valid = if log_slice <= -h_new { 1 } else { 0 };
         let divergent = (h_new - h0).abs() > delta_max;
-        let stop = divergent;
-
-        // Acceptance probability for this leapfrog step
         let accept_prob = ((-h_new + h0).exp()).min(1.0);
 
         return (z_new.clone(), p_new, grad_new, z_new, log_p_new,
-                n_valid, stop, divergent, 1, accept_prob, 1);
+                n_valid, divergent, divergent, 1, accept_prob, 1);
     }
 
     // Left subtree
     let (z_inner, p_inner, grad_inner, z_prime, log_p_prime,
          n_prime, stop_prime, div_prime, n_lf1, sum_ap1, n_as1) =
-        build_tree(z, p, grad, direction, depth - 1, eps, m_inv,
+        build_tree(z, p, grad, direction, depth - 1, eps, mass,
                    log_slice, h0, delta_max, log_prob_and_grad, rng);
 
     if stop_prime {
@@ -223,10 +344,10 @@ fn build_tree(
     // Right subtree
     let (z_outer, p_outer, grad_outer, z_dprime, log_p_dprime,
          n_dprime, stop_dprime, div_dprime, n_lf2, sum_ap2, n_as2) =
-        build_tree(&z_inner, &p_inner, &grad_inner, direction, depth - 1, eps, m_inv,
+        build_tree(&z_inner, &p_inner, &grad_inner, direction, depth - 1, eps, mass,
                    log_slice, h0, delta_max, log_prob_and_grad, rng);
 
-    // Random choice between subtree proposals (Hoffman & Gelman Algorithm 6)
+    // Random choice (Hoffman & Gelman Algorithm 6)
     let (z_proposal, log_p_proposal) = if n_dprime > 0 && n_prime + n_dprime > 0 {
         if rng.uniform() < n_dprime as f64 / (n_prime + n_dprime) as f64 {
             (z_dprime, log_p_dprime)
@@ -244,23 +365,21 @@ fn build_tree(
     let z_plus = if direction > 0.0 { z_outer.clone() } else { z.to_vec() };
     let p_minus = if direction > 0.0 { p.to_vec() } else { p_outer.clone() };
     let p_plus = if direction > 0.0 { p_outer.clone() } else { p.to_vec() };
-    let stop = stop_dprime || uturn(&z_minus, &z_plus, &p_minus, &p_plus, m_inv);
+    let stop = stop_dprime || uturn(&z_minus, &z_plus, &p_minus, &p_plus, mass);
 
     (z_outer, p_outer, grad_outer, z_proposal, log_p_proposal,
      n_valid, stop, divergent, n_lf1 + n_lf2, sum_ap1 + sum_ap2, n_as1 + n_as2)
 }
 
-/// U-turn criterion.
+/// U-turn criterion: (z+ - z-) · M^{-1} p < 0 for either endpoint.
 fn uturn(z_minus: &[f64], z_plus: &[f64], p_minus: &[f64], p_plus: &[f64],
-         m_inv: &[f64]) -> bool {
+         mass: &MassMatrix) -> bool {
     let d = z_minus.len();
-    let mut dot_minus = 0.0;
-    let mut dot_plus = 0.0;
-    for i in 0..d {
-        let dz = z_plus[i] - z_minus[i];
-        dot_minus += dz * m_inv[i] * p_minus[i];
-        dot_plus += dz * m_inv[i] * p_plus[i];
-    }
+    let dz: Vec<f64> = (0..d).map(|i| z_plus[i] - z_minus[i]).collect();
+    let m_inv_p_minus = mass.m_inv_times(p_minus);
+    let m_inv_p_plus = mass.m_inv_times(p_plus);
+    let dot_minus: f64 = dz.iter().zip(&m_inv_p_minus).map(|(&a, &b)| a * b).sum();
+    let dot_plus: f64 = dz.iter().zip(&m_inv_p_plus).map(|(&a, &b)| a * b).sum();
     dot_minus < 0.0 || dot_plus < 0.0
 }
 
@@ -279,18 +398,12 @@ pub struct DualAveraging {
 impl DualAveraging {
     pub fn new(initial_eps: f64, target_accept: f64) -> Self {
         DualAveraging {
-            target_accept,
-            gamma: 0.05,
-            t0: 10.0,
-            kappa: 0.75,
+            target_accept, gamma: 0.05, t0: 10.0, kappa: 0.75,
             mu: (10.0 * initial_eps).ln(),
-            log_eps_bar: 0.0,
-            h_bar: 0.0,
-            count: 0,
+            log_eps_bar: 0.0, h_bar: 0.0, count: 0,
         }
     }
 
-    /// Update with the mean acceptance probability from one NUTS step.
     pub fn update(&mut self, accept_prob: f64) -> f64 {
         self.count += 1;
         let m = self.count as f64;

@@ -38,6 +38,10 @@ pub struct PGASConfig {
     /// Requires rate_grad expressions in the IR (compiled with autodiff).
     /// Falls back to MH if gradients are not available.
     pub use_nuts: bool,
+    /// Use dense (full covariance) mass matrix for NUTS. Default: true.
+    /// Dense handles parameter correlations (e.g., R0-amplitude ridge).
+    /// Set false for diagonal-only (handles scale but not correlations).
+    pub dense_mass: bool,
 }
 
 /// Per-substep record: minimal information for transition density
@@ -920,13 +924,14 @@ pub fn run_pgas(
     // NUTS state (only used when has_gradients)
     let mut nuts_step_size = 0.1; // initial guess, adapted via dual averaging
     let mut nuts_dual_avg = super::nuts::DualAveraging::new(nuts_step_size, 0.80);
-    let mut nuts_mass_matrix_inv = vec![1.0; d]; // identity initially, adapted at end of burn-in
+    let mut nuts_mass = super::nuts::MassMatrix::identity(d);
 
     // Collect z-scale samples during burn-in for mass matrix adaptation.
-    // Welford online algorithm: accumulate mean and M2 for each parameter.
+    // Online covariance: accumulate mean and cross-products for dense mass matrix.
     let mut welford_n = 0.0_f64;
     let mut welford_mean = vec![0.0; d];
-    let mut welford_m2 = vec![0.0; d];
+    let mut welford_m2 = vec![0.0; d];          // diagonal variances
+    let mut welford_cov = vec![0.0; d * d];     // full covariance (for dense mode)
 
     let mut sweeps = Vec::new();
     let mut total_accepted = vec![0usize; d];
@@ -999,7 +1004,7 @@ pub fn run_pgas(
             let nuts_config = super::nuts::NUTSConfig {
                 max_tree_depth: 10,
                 step_size: nuts_step_size,
-                mass_matrix_inv: nuts_mass_matrix_inv.clone(),
+                mass_matrix: nuts_mass.clone(),
             };
 
             let result = super::nuts::nuts_step(
@@ -1026,31 +1031,67 @@ pub fn run_pgas(
             let mass_adapt_end = (adapt_end as f64 * 0.7) as usize;
 
             if sweep < mass_adapt_end {
-                // Phase 1: step size adaptation + Welford collection
+                // Phase 1: step size adaptation + covariance collection
                 nuts_step_size = nuts_dual_avg.update(result.mean_accept_prob);
 
+                // Online covariance (Welford for diagonal + cross-products for dense)
                 welford_n += 1.0;
+                let old_mean = welford_mean.clone();
                 for i in 0..d {
                     let delta = current_transformed[i] - welford_mean[i];
                     welford_mean[i] += delta / welford_n;
                     let delta2 = current_transformed[i] - welford_mean[i];
                     welford_m2[i] += delta * delta2;
                 }
-            } else if sweep == mass_adapt_end {
-                // Compute mass matrix, reset dual averaging for phase 2
-                if welford_n > 10.0 {
-                    for i in 0..d {
-                        let var = welford_m2[i] / (welford_n - 1.0);
-                        nuts_mass_matrix_inv[i] = var.max(1e-10);
+                // Cross-products for full covariance: C_{ij} += (x_i - mean_old_i)(x_j - mean_new_j)
+                for i in 0..d {
+                    for j in 0..d {
+                        welford_cov[i * d + j] += (current_transformed[i] - old_mean[i])
+                            * (current_transformed[j] - welford_mean[j]);
                     }
-                    eprintln!("  mass matrix estimated (sweep {}):", sweep);
-                    for (i, spec) in if2_params.iter().enumerate() {
-                        eprintln!("    {:12} sd={:.6}", spec.name,
-                            nuts_mass_matrix_inv[i].sqrt());
+                }
+            } else if sweep == mass_adapt_end {
+                // Compute mass matrix from burn-in covariance
+                if welford_n > 10.0 {
+                    if config.dense_mass {
+                        // Dense: full empirical covariance → Cholesky
+                        let mut cov = vec![0.0; d * d];
+                        for i in 0..d {
+                            for j in 0..d {
+                                cov[i * d + j] = welford_cov[i * d + j] / (welford_n - 1.0);
+                            }
+                        }
+                        nuts_mass = super::nuts::MassMatrix::dense_from_covariance(&cov, d);
+                        eprintln!("  dense mass matrix estimated (sweep {}):", sweep);
+                        for (i, spec) in if2_params.iter().enumerate() {
+                            let sd = (cov[i * d + i]).max(1e-10).sqrt();
+                            eprintln!("    {:12} sd={:.6}", spec.name, sd);
+                        }
+                        // Print correlations
+                        eprint!("    correlations:");
+                        for i in 0..d {
+                            for j in (i+1)..d {
+                                let r = cov[i * d + j]
+                                    / (cov[i * d + i].max(1e-10).sqrt() * cov[j * d + j].max(1e-10).sqrt());
+                                eprint!(" {}-{}={:.2}", &if2_params[i].name[..3.min(if2_params[i].name.len())],
+                                    &if2_params[j].name[..3.min(if2_params[j].name.len())], r);
+                            }
+                        }
+                        eprintln!();
+                    } else {
+                        // Diagonal: variances only
+                        let variances: Vec<f64> = (0..d).map(|i|
+                            (welford_m2[i] / (welford_n - 1.0)).max(1e-10)
+                        ).collect();
+                        eprintln!("  diagonal mass matrix estimated (sweep {}):", sweep);
+                        for (i, spec) in if2_params.iter().enumerate() {
+                            eprintln!("    {:12} sd={:.6}", spec.name, variances[i].sqrt());
+                        }
+                        nuts_mass = super::nuts::MassMatrix::diagonal(variances);
                     }
                 }
                 // Reset dual averaging — step size must be re-tuned for new mass matrix
-                nuts_step_size = 0.1; // re-start from moderate guess
+                nuts_step_size = 0.1;
                 nuts_dual_avg = super::nuts::DualAveraging::new(nuts_step_size, 0.80);
             } else if sweep < adapt_end {
                 // Phase 2: re-adapt step size WITH the mass matrix

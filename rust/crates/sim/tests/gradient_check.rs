@@ -295,7 +295,7 @@ fn test_nuts_invariance_gaussian() {
     let mut step_size = 0.5;
     let warmup = 500;
     for _ in 0..warmup {
-        let config = NUTSConfig { max_tree_depth: 10, step_size, mass_matrix_inv: vec![1.0; 2] };
+        let config = NUTSConfig { max_tree_depth: 10, step_size, mass_matrix: sim::inference::nuts::MassMatrix::identity(2) };
         let result = nuts_step(&z, log_p, &grad, &config, &log_prob_and_grad, &mut rng);
         step_size = dual_avg.update(result.mean_accept_prob);
         if result.accepted {
@@ -310,7 +310,7 @@ fn test_nuts_invariance_gaussian() {
     // Sampling
     let n_samples = 5000;
     let mut sum = [0.0_f64; 2];
-    let config = NUTSConfig { max_tree_depth: 10, step_size, mass_matrix_inv: vec![1.0; 2] };
+    let config = NUTSConfig { max_tree_depth: 10, step_size, mass_matrix: sim::inference::nuts::MassMatrix::identity(2) };
 
     for _ in 0..n_samples {
         let result = nuts_step(&z, log_p, &grad, &config, &log_prob_and_grad, &mut rng);
