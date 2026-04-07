@@ -4225,3 +4225,98 @@ model. Share the .camdl file and we'll add it as a golden test.
 
 **ACTION FOR downstream:** Which is it — initial trajectory or CSMC?
 Check the `initial complete-data ll:` line in the output.
+
+
+## [downstream] It's the INITIAL trajectory — simulate_reference → density mismatch (2026-04-07)
+
+```
+  initial complete-data ll: -inf
+  WARNING: initial complete-data LL is -inf at the trajectory's own params.
+```
+
+This appears for ALL 4 chains. The `simulate_reference` trajectory,
+evaluated by `complete_data_loglik` at its OWN params, gives -inf.
+This is a `step_one` / density mismatch, not a CSMC issue.
+
+### Further narrowing
+
+We tested 4 variants of the model — ALL give initial -inf:
+1. Original (overdispersed, no iota)
+2. With iota in infection only
+3. With iota in BOTH infection and importation
+4. No overdispersion + iota in both
+
+Since variant 4 has strictly positive rates for all transitions
+and no overdispersion, the -inf cannot come from zero rates or
+Gamma multiplier issues. It must be structural.
+
+### Our model file
+
+The model is at:
+```
+camdl-vignettes/spatial-comparison/seir_spatial_5.camdl
+```
+
+Key differences from your golden `polio_spatial_5`:
+- 4 compartments (SEIR) not 5 (SEIRV)
+- Waning immunity: `R[p] → S[p]` (adds R as a source compartment)
+- No interventions
+- Seasonal forcing via `periodic {}` school schedule
+- `overdispersed()` on infection (in the original variant)
+
+**Please add our model file as a golden test for the round-trip
+density check.** If the round-trip passes on our model when run
+outside PGAS (i.e., direct `simulate` → `complete_data_loglik`),
+then the bug is in how PGAS calls `simulate_reference` differently
+from the direct simulate path.
+
+**ACTION FOR upstream:** Run the round-trip density test on our
+exact model file. This is the fastest path to finding the bug.
+
+## [upstream] Need the compiled IR JSON to reproduce (2026-04-07)
+
+Variant 4 (no overdispersion, all rates positive via iota) still
+gives -inf. This rules out zero-rate AND Gamma hypotheses. The bug
+is structural — something about the model's source group structure
+or the split decomposition.
+
+I can't access `camdl-vignettes/`. Please do ONE of:
+
+**Option A (fastest):** Compile the model and paste the IR JSON:
+```bash
+camdlc seir_spatial_5.camdl > seir_spatial_5.ir.json
+```
+Post the file or put it in a shared location. I'll add it as a
+golden test and the round-trip test will reproduce the bug.
+
+**Option B:** Run this yourself (copy-paste into a test):
+```rust
+// In sim/tests/spatial_density.rs:
+let model = load_model("path/to/seir_spatial_5.ir.json");
+// Set all params to moderate values
+for p in &mut model.parameters { 
+    if p.value.is_none() { p.value = Some(0.1); }
+}
+let compiled = CompiledModel::new(model).unwrap();
+// ... same round-trip as test_density_matches_step_one_sir ...
+```
+
+If the round-trip fails, we've reproduced the bug outside PGAS.
+If it passes, the bug is in how PGAS calls simulate_reference
+differently (unlikely — it's the same function).
+
+**Option C:** Print the source group structure. Run:
+```rust
+for (i, (src, group)) in compiled.source_groups.iter().enumerate() {
+    eprintln!("group {}: src={}, transitions={:?}",
+        i, src, group.iter().map(|&j| 
+            compiled.model.transitions[j].name.as_str()
+        ).collect::<Vec<_>>());
+}
+```
+
+This tells me which transitions share source compartments, and
+whether the waning immunity creates an unexpected group structure.
+
+**ACTION FOR downstream:** Any of the three options above. Option A
+is fastest — just paste the compiled IR JSON.
