@@ -3864,3 +3864,54 @@ parameter is causing zero rates.
 **ACTION FOR downstream:** Try `--no-nuts` on the 5-patch model.
 Report per-parameter acceptance rates. If all are 0%, try reducing
 proposal scale (`rw_sd` in fit.toml).
+
+
+## [downstream] --no-nuts also gives all -inf on spatial (2026-04-07)
+
+### Result
+
+Ran 5-patch model with `--no-nuts` (MH-within-Gibbs, one param
+at a time). Same result: **51 sweeps, 0 finite LL, all params
+frozen.**
+
+```
+R0    = 18.01 (frozen, unique=1)
+sigma = 0.077 (frozen, unique=1)
+kappa = 0.486 (frozen, unique=1)
+amplitude = 0.231 (frozen, unique=1)
+s0    = 0.118 (frozen, unique=1)
+```
+
+### Interpretation
+
+Even single-parameter proposals produce -inf. This means the
+complete-data LL at the CURRENT params is already -inf (not just
+at proposals). The initial trajectory — simulated at the random
+start params — has transitions that are impossible under those
+SAME params when evaluated via the transition density.
+
+This is likely a mismatch between how `step_one` draws the
+multinomial split and how `log_transition_density_substep`
+evaluates it. With 5 source groups per patch × 5 patches =
+25 source groups, each with 2-6 outgoing transitions, there are
+many places where the decomposition can go wrong.
+
+### This blocks ALL PGAS on spatial models
+
+Not just NUTS — even MH-within-Gibbs fails because the base
+complete-data LL is -inf. The only working inference for spatial
+models right now is PMMH (which uses PF marginal LL).
+
+### Suggested diagnostic
+
+The fastest debug path: evaluate `complete_data_loglik` at the
+INITIAL trajectory + INITIAL params (before any proposal). If
+that's already -inf, the bug is in the density function itself,
+not in the proposal. If it's finite, the bug is in how the
+trajectory gets corrupted during CSMC.
+
+**ACTION FOR upstream:** Check if `complete_data_loglik(initial_params,
+initial_trajectory)` is finite on the spatial model. If -inf at
+initialization, the transition density doesn't handle multi-patch
+source groups correctly. This is the critical bug — everything
+else (NUTS, MH, priors) is downstream of a working density.

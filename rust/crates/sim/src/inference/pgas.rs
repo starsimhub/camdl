@@ -214,6 +214,10 @@ pub fn log_transition_density_substep(
             if rate <= 0.0 || is_determ[tr_idx] {
                 // Zero-rate transition must have zero flows
                 if flows[tr_idx] > 0 {
+                    if crate::chain_binomial::trace_enabled() {
+                        eprintln!("[pgas] -inf: zero-rate transition {} has {} flows (rate={:.6e}, src={})",
+                            model.model.transitions[tr_idx].name, flows[tr_idx], rate, src_local);
+                    }
                     return Ok(f64::NEG_INFINITY);
                 }
                 handled[tr_idx] = true;
@@ -970,6 +974,14 @@ pub fn run_pgas(
         config.dt, obs_streams, &ivp_mappings,
     )?;
     eprintln!("  initial complete-data ll: {:.1}", current_ll);
+    if !current_ll.is_finite() {
+        eprintln!("  WARNING: initial complete-data LL is -inf at the trajectory's own params.");
+        eprintln!("  This indicates a mismatch between step_one and log_transition_density_substep.");
+        eprintln!("  Run with CAMDL_TRACE_STEPS=1 for detailed per-substep diagnostics.");
+        eprintln!("  Model has {} transitions, {} source groups",
+            model.model.transitions.len(),
+            model.source_groups.len());
+    }
 
     // Check if gradients are available (compiler emitted rate_grad)
     let has_gradients = config.use_nuts && model.model.transitions.iter()
