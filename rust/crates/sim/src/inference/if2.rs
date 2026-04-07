@@ -239,6 +239,7 @@ pub struct IF2Result {
 }
 
 /// Observation for IF2 (same as particle_filter::Observation).
+#[derive(Clone)]
 pub struct Observation {
     pub time: f64,
     pub value: f64,

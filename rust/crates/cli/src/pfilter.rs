@@ -244,7 +244,7 @@ pub fn cmd_pfilter(args: &[String]) {
             let rep_seed = seed + rep as u64;
             let result = bootstrap_filter(
                 &compiled, &params, &observations, n_particles, dt,
-                &step_fn, &project_fn, &*obs_loglik_fn, None, None, rep_seed,
+                &step_fn, &project_fn, &*obs_loglik_fn, None, None, rep_seed, None,
             ).unwrap_or_else(|e| {
                 eprintln!("pfilter replicate {} error: {:?}", rep + 1, e);
                 std::process::exit(1);
@@ -288,7 +288,7 @@ pub fn cmd_pfilter(args: &[String]) {
         &compiled, &params, &observations, n_particles, dt,
         &step_fn, &project_fn, &*obs_loglik_fn,
         Some(&*obs_sample_fn), Some(&*obs_mean_fn),
-        seed,
+        seed, None,
     ).unwrap_or_else(|e| {
         eprintln!("pfilter error: {:?}", e);
         std::process::exit(1);

@@ -118,7 +118,7 @@ fn run_pf(n_particles: usize, seed: u64) -> f64 {
 
     let result = bootstrap_filter(
         &compiled, &params, &observations, n_particles, 1.0,
-        &step_fn, &project_fn, &obs_loglik_fn, None, None, seed,
+        &step_fn, &project_fn, &obs_loglik_fn, None, None, seed, None,
     ).unwrap();
 
     result.log_likelihood
@@ -189,7 +189,7 @@ fn test_pf_ess_reasonable() {
 
     let result = bootstrap_filter(
         &compiled, &params, &observations, 500, 1.0,
-        &step_fn, &project_fn, &obs_loglik_fn, None, None, 42,
+        &step_fn, &project_fn, &obs_loglik_fn, None, None, 42, None,
     ).unwrap();
 
     // ESS should be reasonable — not collapsed to 1 or full N

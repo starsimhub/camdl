@@ -34,7 +34,7 @@ pub fn compile_obs_loglik_pf(
     obs_model: &ObservationModel,
     compiled: Arc<CompiledModel>,
     params: &[f64],
-) -> Box<dyn Fn(f64, f64) -> f64> {
+) -> Box<dyn Fn(f64, f64) -> f64 + Send + Sync> {
     let likelihood = obs_model.likelihood.clone();
     let params = params.to_vec();
     let int_s = IntState::new(compiled.int_local_to_global.len());
@@ -216,4 +216,38 @@ fn eval_obs_mean(
             eval_expr(&b.p, &ctx(projected)).unwrap_or(0.5)
         }
     }
+}
+
+/// Build a joint observation weight function for multi-stream models.
+///
+/// At each observation time, sums log-likelihoods across all streams.
+/// Each stream projects from its own flow_indices, evaluates its own
+/// likelihood, and contributes to the total weight.
+///
+/// For single-stream models, this returns the same result as the
+/// single-stream obs_loglik_fn. The PF/PGAS/IF2 call this ONE function
+/// — the accumulation across streams happens inside the closure.
+pub fn compile_joint_obs_loglik(
+    stream_specs: &[(Vec<usize>, ObservationModel, Vec<super::particle_filter::Observation>)],
+    compiled: Arc<CompiledModel>,
+    params: &[f64],
+) -> Box<dyn Fn(&super::types::ParticleState, usize) -> f64 + Send + Sync> {
+    // Pre-compile per-stream obs_loglik closures
+    let per_stream: Vec<(Vec<usize>, Box<dyn Fn(f64, f64) -> f64 + Send + Sync>, Vec<f64>)> =
+        stream_specs.iter().map(|(flow_idx, obs_model, obs_data)| {
+            let ll_fn = compile_obs_loglik_pf(obs_model, compiled.clone(), params);
+            let values: Vec<f64> = obs_data.iter().map(|o| o.value).collect();
+            (flow_idx.clone(), ll_fn, values)
+        }).collect();
+
+    Box::new(move |state: &super::types::ParticleState, obs_idx: usize| -> f64 {
+        let mut total_ll = 0.0;
+        for (flow_idx, ll_fn, values) in &per_stream {
+            let projected: f64 = flow_idx.iter()
+                .map(|&i| state.flow_accumulators[i] as f64).sum();
+            let observed = values[obs_idx];
+            total_ll += ll_fn(projected, observed);
+        }
+        total_ll
+    })
 }

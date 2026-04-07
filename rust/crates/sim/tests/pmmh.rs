@@ -120,7 +120,7 @@ fn make_eval_loglik<'a>(
 
         let result = bootstrap_filter(
             compiled, params, observations, n_particles, 1.0,
-            &step_fn, &project_fn, &obs_loglik_fn, None, None, pf_seed,
+            &step_fn, &project_fn, &obs_loglik_fn, None, None, pf_seed, None,
         );
         match result {
             Ok(r) => r.log_likelihood,

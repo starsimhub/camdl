@@ -21,18 +21,32 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 /// Everything needed to run IF2 chains, built from fit.toml + optional prior state.
+/// One observation data stream with its projection and likelihood.
+pub struct ObsStream {
+    pub name: String,
+    pub flow_indices: Vec<usize>,
+    pub obs_model_ir: ir::observation::ObservationModel,
+    pub data: Vec<Observation>,
+}
+
 pub struct FitRunConfig {
     pub compiled: Arc<CompiledModel>,
     pub model: ir::Model,
     pub model_ir_json: String,
     pub base_params: Vec<f64>,
     pub if2_params: Vec<IF2Param>,
+    /// Canonical observation times (shared across all streams).
     pub observations: Vec<Observation>,
+    /// Per-stream data. For single-stream models, len() == 1.
+    /// Multi-stream callers use this for joint obs loglik construction.
+    #[allow(dead_code)]
+    pub streams: Vec<ObsStream>,
+    /// Flow indices for the FIRST stream (backward compat convenience).
     pub flow_indices: Vec<usize>,
     pub if2_config: IF2Config,
     pub n_chains: usize,
     pub seed: u64,
-    /// The observation model from the IR (used to compile obs_loglik).
+    /// Observation model for the first stream (backward compat convenience).
     pub obs_model_ir: ir::observation::ObservationModel,
 }
 
@@ -112,31 +126,65 @@ impl FitRunConfig {
             fit, prior_state, &model, &compiled, &base_params, random_starts, seed,
         )?;
 
-        // Load data (currently single-stream only)
-        if fit.data.len() != 1 {
-            return Err(format!(
-                "fit currently supports exactly 1 data stream, got {}. Multi-stream support coming soon.",
-                fit.data.len()
-            ));
-        }
-        let (stream_name, data_path) = fit.data.iter().next().unwrap();
-
-        // Validate observation time alignment
+        // Load data — one or more observation streams
         let dt = fit.config.dt;
-        let observations = load_observations(data_path, dt)?;
+        if fit.data.is_empty() {
+            return Err("fit.toml [data] section is empty".into());
+        }
 
-        // Resolve flow indices from the model's observation blocks
-        let flow_indices = resolve_flow_indices(&model, stream_name)?;
+        let mut streams = Vec::new();
+        let mut canonical_times: Option<Vec<f64>> = None;
 
-        // Get observation model from IR
-        let obs_model_ir = model.observations.iter()
-            .find(|o| o.name == *stream_name)
-            .cloned()
-            .ok_or_else(|| format!(
-                "no observation block named '{}'. Available: {}",
-                stream_name,
-                model.observations.iter().map(|o| o.name.as_str()).collect::<Vec<_>>().join(", ")
-            ))?;
+        // Sort by name for deterministic ordering
+        let mut data_entries: Vec<_> = fit.data.iter().collect();
+        data_entries.sort_by_key(|(k, _)| k.as_str());
+
+        for (stream_name, data_path) in &data_entries {
+            let obs = load_observations(data_path, dt)?;
+            let flow_idx = resolve_flow_indices(&model, stream_name)?;
+            let obs_model = model.observations.iter()
+                .find(|o| o.name == **stream_name)
+                .cloned()
+                .ok_or_else(|| format!(
+                    "no observation block named '{}'. Available: {}",
+                    stream_name,
+                    model.observations.iter().map(|o| o.name.as_str()).collect::<Vec<_>>().join(", ")
+                ))?;
+
+            // Validate all streams share the same observation times
+            let times: Vec<f64> = obs.iter().map(|o| o.time).collect();
+            match &canonical_times {
+                None => canonical_times = Some(times),
+                Some(ct) => {
+                    if ct.len() != times.len() || ct.iter().zip(&times).any(|(a, b)| (a - b).abs() > 1e-9) {
+                        return Err(format!(
+                            "observation times for stream '{}' differ from first stream. \
+                             All streams must have identical observation times.",
+                            stream_name
+                        ));
+                    }
+                }
+            }
+
+            streams.push(ObsStream {
+                name: stream_name.to_string(),
+                flow_indices: flow_idx,
+                obs_model_ir: obs_model,
+                data: obs,
+            });
+        }
+
+        // Canonical observations (from first stream)
+        let observations = streams[0].data.clone();
+        // Backward compat convenience fields (from first stream)
+        let flow_indices = streams[0].flow_indices.clone();
+        let obs_model_ir = streams[0].obs_model_ir.clone();
+
+        if streams.len() > 1 {
+            eprintln!("  {} observation streams: {}",
+                streams.len(),
+                streams.iter().map(|s| s.name.as_str()).collect::<Vec<_>>().join(", "));
+        }
 
         let config = IF2Config {
             n_particles,
@@ -153,6 +201,7 @@ impl FitRunConfig {
             base_params,
             if2_params,
             observations,
+            streams,
             flow_indices,
             if2_config: config,
             n_chains,
@@ -240,7 +289,7 @@ pub fn run_quick_pfilter(config: &FitRunConfig, params: &[f64], n_particles: usi
 
     match particle_filter::bootstrap_filter(
         compiled, params, &observations, n_particles, config.if2_config.dt,
-        &step_fn, &project_fn, &*obs_loglik_fn, None, None, seed,
+        &step_fn, &project_fn, &*obs_loglik_fn, None, None, seed, None,
     ) {
         Ok(result) => result.log_likelihood,
         Err(_) => f64::NEG_INFINITY,

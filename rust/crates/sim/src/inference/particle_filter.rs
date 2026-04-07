@@ -15,6 +15,7 @@ use super::types::{ParticleState, ParticleSwarm, log_sum_exp};
 use super::resampling::systematic_resample;
 
 /// Observation: one data point at a specific time.
+#[derive(Clone)]
 pub struct Observation {
     pub time: f64,
     pub value: f64,
@@ -67,6 +68,11 @@ pub type ObsLoglikFn<'a> = dyn Fn(f64, f64) -> f64 + 'a;
 /// Takes (projected_value, rng) → observation draw.
 pub type ObsSampleFn<'a> = dyn Fn(f64, &mut StatefulRng) -> f64 + 'a;
 
+/// Joint observation weight function for multi-stream models.
+/// Takes (particle_state, observation_time_index) → total log-likelihood
+/// across all streams. When provided, overrides project_fn + obs_loglik_fn.
+pub type JointObsFn<'a> = dyn Fn(&ParticleState, usize) -> f64 + Send + Sync + 'a;
+
 /// Signature for observation model mean (no sampling).
 /// Takes (projected_value) → E[y | projected, θ].
 pub type ObsMeanFn<'a> = dyn Fn(f64) -> f64 + 'a;
@@ -95,6 +101,7 @@ pub fn bootstrap_filter(
     obs_sample_fn: Option<&ObsSampleFn>,
     obs_mean_fn: Option<&ObsMeanFn>,
     seed: u64,
+    joint_obs_fn: Option<&JointObsFn>,
 ) -> Result<PFilterResult, SimError> {
     let n_int = model.int_local_to_global.len();
     let n_tr = model.model.transitions.len();
@@ -141,7 +148,7 @@ pub fn bootstrap_filter(
     // Resampling RNG (separate from particle RNGs)
     let mut resample_rng = StatefulRng::new(seed.wrapping_add(0xdeadbeef));
 
-    for obs in observations {
+    for (obs_idx, obs) in observations.iter().enumerate() {
         // Propagate all particles from t to obs.time.
         // Batched: one rayon dispatch per observation interval. Each thread
         // runs all sub-steps for its particles, keeping state in L1/L2.
@@ -188,10 +195,16 @@ pub fn bootstrap_filter(
             });
         }
 
-        // Compute log-weights: log p(y_k | projected_i)
-        for (i, state) in swarm.states.iter().enumerate() {
-            let projected = project_fn(state);
-            swarm.log_weights[i] = obs_loglik_fn(projected, obs.value);
+        // Compute log-weights: joint obs loglik (multi-stream) or single-stream
+        if let Some(jfn) = joint_obs_fn {
+            for (i, state) in swarm.states.iter().enumerate() {
+                swarm.log_weights[i] = jfn(state, obs_idx);
+            }
+        } else {
+            for (i, state) in swarm.states.iter().enumerate() {
+                let projected = project_fn(state);
+                swarm.log_weights[i] = obs_loglik_fn(projected, obs.value);
+            }
         }
 
         // Log-marginal increment: log(1/N × Σ exp(log_w))

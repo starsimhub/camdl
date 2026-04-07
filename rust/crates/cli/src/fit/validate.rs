@@ -336,7 +336,7 @@ fn run_pfilter_with_obs(
     let result = bootstrap_filter(
         compiled, params, &observations, n_particles, config.if2_config.dt,
         &step_fn, &project_fn, &*obs_loglik_fn,
-        Some(&*obs_sample_fn), Some(&*obs_mean_fn), seed,
+        Some(&*obs_sample_fn), Some(&*obs_mean_fn), seed, None,
     ).map_err(|e| format!("pfilter error: {:?}", e))?;
 
     let ess_mean = result.ess_trace.iter().sum::<f64>() / result.ess_trace.len() as f64;

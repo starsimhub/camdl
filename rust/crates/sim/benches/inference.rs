@@ -151,7 +151,7 @@ fn bench_pfilter(c: &mut Criterion) {
                 b.iter(|| {
                     bootstrap_filter(
                         &model, &params, &obs, np, 1.0,
-                        &step_fn, &project_fn, &obs_loglik_fn, None, None, 42,
+                        &step_fn, &project_fn, &obs_loglik_fn, None, None, 42, None,
                     ).unwrap()
                 });
             },

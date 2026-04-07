@@ -472,7 +472,7 @@ pub fn cmd_if2(args: &[String]) {
                     let pf_seed = seed + *chain_id as u64 * 1000 + it.iteration as u64;
                     match sim::inference::bootstrap_filter(
                         &compiled, eval_params, &pf_observations, n_eval_particles, dt,
-                        &step_fn, &project_fn, &*pf_obs_ll, None, None, pf_seed,
+                        &step_fn, &project_fn, &*pf_obs_ll, None, None, pf_seed, None,
                     ) {
                         Ok(r) => it.loglik = r.log_likelihood,
                         Err(_) => it.loglik = f64::NEG_INFINITY,
