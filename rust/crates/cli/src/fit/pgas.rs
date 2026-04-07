@@ -65,10 +65,37 @@ pub fn run_pgas_cli(
 
     let dt = config.if2_config.dt;
 
-    // Build priors (flat for now)
+    // Build priors from fit.toml [estimate] section
     let priors: Vec<Prior> = config.if2_params.iter()
-        .map(|_| Prior::Flat)
+        .map(|spec| {
+            let est = fit.estimate.get(&spec.name);
+            match est.and_then(|e| e.prior.as_deref()) {
+                None => Prior::Flat,
+                Some(s) => parse_prior(s).unwrap_or_else(|| {
+                    eprintln!("warning: cannot parse prior '{}' for {}, using Flat", s, spec.name);
+                    Prior::Flat
+                }),
+            }
+        })
         .collect();
+
+    // Report priors
+    let any_non_flat = priors.iter().any(|p| !matches!(p, Prior::Flat));
+    if any_non_flat {
+        eprintln!("  priors:");
+        for (spec, prior) in config.if2_params.iter().zip(&priors) {
+            match prior {
+                Prior::Flat => {},
+                Prior::Normal { mean, sd } => {
+                    eprintln!("    {:12} Normal({:.4}, {:.4})", spec.name, mean, sd);
+                }
+                Prior::TransformedNormal { mean, sd } => {
+                    eprintln!("    {:12} LogNormal(mu={:.4}, sigma={:.4}) → median={:.1}",
+                        spec.name, mean, sd, mean.exp());
+                }
+            }
+        }
+    }
 
     // Generate per-chain starting parameters.
     // Without --starts-from: random uniform on the natural scale within declared
@@ -427,4 +454,51 @@ fn write_summary(
         .map_err(|e| format!("json error: {}", e))?;
     std::fs::write(&path, contents)
         .map_err(|e| format!("cannot write {}: {}", path, e))
+}
+
+/// Parse a prior specification string from fit.toml.
+///
+/// Supported formats:
+///   "lognormal(mu, sigma)" → TransformedNormal { mean: mu, sd: sigma }
+///   "normal(mu, sigma)"    → Normal { mean: mu, sd: sigma }
+///   "flat"                 → Flat
+///
+/// Examples:
+///   "lognormal(log(50), 0.4)"   → LogNormal with median 50
+///   "lognormal(3.912, 0.4)"     → same (log(50) ≈ 3.912)
+///   "normal(0.08, 0.02)"        → Normal(0.08, 0.02) on natural scale
+pub fn parse_prior(s: &str) -> Option<Prior> {
+    let s = s.trim();
+    if s == "flat" { return Some(Prior::Flat); }
+
+    // Match "name(arg1, arg2)"
+    let open = s.find('(')?;
+    let close = s.rfind(')')?;
+    let name = s[..open].trim();
+    let args_str = &s[open + 1..close];
+    let args: Vec<f64> = args_str.split(',')
+        .map(|a| eval_prior_arg(a.trim()))
+        .collect::<Option<Vec<_>>>()?;
+
+    if args.len() != 2 { return None; }
+
+    match name {
+        "lognormal" => Some(Prior::TransformedNormal { mean: args[0], sd: args[1] }),
+        "normal" => Some(Prior::Normal { mean: args[0], sd: args[1] }),
+        _ => None,
+    }
+}
+
+/// Evaluate a prior argument — supports bare numbers and log(x).
+fn eval_prior_arg(s: &str) -> Option<f64> {
+    if let Ok(v) = s.parse::<f64>() {
+        return Some(v);
+    }
+    // Handle log(x)
+    if s.starts_with("log(") && s.ends_with(')') {
+        let inner = &s[4..s.len() - 1];
+        let v: f64 = inner.parse().ok()?;
+        return Some(v.ln());
+    }
+    None
 }

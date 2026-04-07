@@ -79,6 +79,11 @@ pub struct EstimateSpec {
     pub start: Option<f64>,
     pub transform: Option<String>,
     pub bounds: Option<(f64, f64)>,
+    /// Prior distribution string. Supported:
+    ///   "lognormal(mu, sigma)" → TransformedNormal on log scale
+    ///   "normal(mu, sigma)"    → Normal on natural scale
+    ///   omitted                → Flat (improper uniform)
+    pub prior: Option<String>,
 }
 
 /// PMMH posterior sampling configuration.

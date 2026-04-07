@@ -185,9 +185,18 @@ pub fn run_pmmh_cli(
     std::fs::create_dir_all(&stage_dir)
         .map_err(|e| format!("cannot create {}: {}", stage_dir, e))?;
 
-    // Build priors (flat for now — future: [prior] section in fit.toml)
+    // Build priors from fit.toml [estimate] section
     let priors: Vec<Prior> = config.if2_params.iter()
-        .map(|_| Prior::Flat)
+        .map(|spec| {
+            let est = fit.estimate.get(&spec.name);
+            match est.and_then(|e| e.prior.as_deref()) {
+                None => Prior::Flat,
+                Some(s) => super::pgas::parse_prior(s).unwrap_or_else(|| {
+                    eprintln!("warning: cannot parse prior '{}' for {}, using Flat", s, spec.name);
+                    Prior::Flat
+                }),
+            }
+        })
         .collect();
 
     let dt = config.if2_config.dt;
