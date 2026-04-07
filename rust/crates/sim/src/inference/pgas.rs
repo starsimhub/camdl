@@ -212,6 +212,10 @@ pub fn log_transition_density_substep(
         for &tr_idx in group {
             let rate = propensities[tr_idx];
             if rate <= 0.0 || is_determ[tr_idx] {
+                // Zero-rate transition must have zero flows
+                if flows[tr_idx] > 0 {
+                    return Ok(f64::NEG_INFINITY);
+                }
                 handled[tr_idx] = true;
                 continue;
             }

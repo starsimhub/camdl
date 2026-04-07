@@ -3642,3 +3642,225 @@ before testing priors.
 
 **ACTION FOR downstream:** Rebuild, add priors for R0 in the
 He et al. 6-param config, re-run PGAS+NUTS with dense mass matrix.
+
+
+## [downstream] Request: chain continuation / resume (2026-04-07)
+
+### Need
+
+We frequently run 5-10K sweeps, look at the traces, and want
+more. Currently we have to start over — wasting the burn-in and
+all accumulated samples. With PGAS sweeps at 0.5-2 sec each, a
+10K run is 1-5 hours. Restarting from scratch to get 20K means
+another full 5 hours including re-doing burn-in.
+
+### Proposed feature
+
+```bash
+# Initial run
+camdl fit pgas fit.toml --seed 42
+
+# Later: extend from where we left off
+camdl fit pgas fit.toml --resume results/pgas/
+```
+
+`--resume` reads the existing chain state and continues sampling:
+- Loads the last parameter values and trajectory from each chain
+- Loads the adapted mass matrix and step size (no re-warmup)
+- Appends new samples to the existing trace.tsv files
+- Extends the summary JSON with updated R-hat/ESS
+
+### Safety: hash-based chain identity
+
+The critical risk is appending to the wrong chain (different
+model, different data, different priors). Prevent this with a
+config hash:
+
+1. At run start, compute `hash(model_file + data_file + estimate_block
+   + fixed_block + priors + particles + seed)` → store as
+   `config_hash` in each chain's trace header and in the summary.
+
+2. On `--resume`, recompute the hash from the current fit.toml.
+   If it doesn't match the stored hash, refuse to resume with
+   a clear error: `"config hash mismatch: this run used different
+   model/data/priors"`.
+
+3. The hash should NOT include `sweeps`, `burn_in`, `thin` —
+   those are the things you'd change when resuming.
+
+### What gets saved per chain (for resume)
+
+At the end of each run, write a `chain_N/state.bin` (or `.json`)
+containing:
+- Last parameter values (θ)
+- Last trajectory (the CSMC reference)
+- Adapted mass matrix (L, L_inv)
+- Adapted step size
+- Current RNG state
+- Sweep counter (so trace.tsv continues from the right index)
+- Config hash
+
+### Trace file handling
+
+On resume, open trace.tsv in append mode. New rows continue
+the sweep numbering from where the last run ended. The header
+is already written. Flush behavior unchanged.
+
+### What this enables
+
+- **Adaptive run length**: start with 5K, check diagnostics,
+  extend to 20K if needed — no wasted compute
+- **Overnight runs**: start before bed, check in the morning,
+  extend if ESS is too low
+- **Fault tolerance**: if a run crashes at sweep 8000/10000,
+  resume from 8000 instead of restarting
+
+**ACTION FOR upstream:** This would save us hours of recompute.
+The hash-based safety check makes it impossible to corrupt chains
+by accidentally resuming with the wrong config.
+
+
+## [downstream] BLOCKER: multi-stream observations for spatial model (2026-04-07)
+
+Tried to run the 5-patch spatial SEIR and hit:
+
+```
+error: fit currently supports exactly 1 data stream, got 5.
+Multi-stream support coming soon.
+```
+
+The spatial model has 5 observation streams (one per patch):
+```toml
+[data]
+cases_p1 = "sim_spatial_cases.tsv"
+cases_p2 = "sim_spatial_cases.tsv"
+cases_p3 = "sim_spatial_cases.tsv"
+cases_p4 = "sim_spatial_cases.tsv"
+cases_p5 = "sim_spatial_cases.tsv"
+```
+
+Each maps to a separate `observations {}` block in the model.
+The PF and PGAS need to evaluate the joint likelihood across all
+5 streams at each observation time.
+
+### What's needed
+
+The fit CLI and the inference engines (PF, IF2, PMMH, PGAS) need
+to handle multiple observation streams:
+- Joint loglik = sum of per-stream logliks at each obs time
+- All streams must have the same observation times (weekly)
+- The data file has all 5 columns; each stream reads its column
+
+This is essential for any spatial or age-stratified model.
+
+**ACTION FOR upstream:** Multi-stream observation support in fit.
+This blocks the spatial comparison vignette.
+
+
+## [downstream] Spatial PGAS: all LL = -inf (2026-04-07)
+
+### Setup
+
+5-patch spatial SEIR (`spatial-comparison/seir_spatial_5.camdl`),
+5 observation streams (multi-stream working!), PGAS+NUTS with
+100 particles, random starts.
+
+### Result
+
+**Every single complete-data LL is -inf.** 1201 sweeps, 0 finite.
+CSMC trajectory renewal is 73-99% (healthy) but the transition
+density always returns -inf.
+
+Parameters are frozen at bounds:
+```
+R0    = 80 (bound), unique=1
+sigma = 0.3 (bound), unique=1
+s0    = 0.01 (bound), unique=1
+```
+
+### Likely cause
+
+The spatial model has importation transitions:
+```
+importation[p in patch, q in patch] : S[p] --> E[p]
+  @ kappa * W[p,q] * S[p] * I[q] / N[q] where p != q
+```
+
+This expands to 20 cross-patch transitions (4 per patch ×
+5 patches). The `log_transition_density_substep` function
+evaluates Binomial densities for each source group's exits.
+With importation, the source group for S[p] has 5 outgoing
+transitions (1 local infection + 4 importation), and the
+flow indices may not match what the density function expects.
+
+Possible issues:
+1. Flow index mismatch — the density reads `flows[i]` but the
+   importation transitions have different indices than expected
+2. The `where p != q` guard may not propagate into the density
+   evaluation — the density tries to evaluate all 25 importation
+   transitions including p==q (which has zero rate → Binom(n,0)
+   with n>0 → -inf)
+3. Source group ordering in the expanded model may differ from
+   what `step_one` produces
+
+### Diagnostic request
+
+**ACTION FOR upstream:** Run `CAMDL_TRACE_STEPS=1` on a 1-sweep
+PGAS of the spatial model and check which substep/transition
+produces the first -inf. The model compiles and simulates fine
+(`camdl simulate` works) — the issue is only in the transition
+density evaluation for PGAS.
+
+## [upstream] Spatial -inf diagnosis: θ|X sensitivity (2026-04-07)
+
+### Root cause
+
+The -inf is correct behavior, not a bug. When the θ|X step proposes
+new params (e.g., slightly different kappa/R0), some importation
+transitions' rates change. For a 5-patch model, S[p] has 5 outgoing
+transitions (1 local + 4 importation). If the proposed params make
+one importation rate numerically zero (because I[q] dropped to 0 in
+the trajectory at that substep), but the stored flows show nonzero
+events for that transition, the density evaluates Binom(n>0; N, 0)
+= -inf. That transition was possible under the old params but
+impossible under the new ones.
+
+With 20+ importation transitions × 7672 substeps = 150K+ density
+terms, even tiny parameter changes make SOME term impossible. Every
+proposal returns -inf. The MH acceptance is 0%. Parameters freeze.
+
+### This is the known PGAS scaling issue
+
+PGAS conditions on X (the trajectory). The complete-data LL has
+O(n_transitions × n_substeps) terms. For spatial models with
+cross-patch transitions, n_transitions scales as patches². With 5
+patches × 6 transitions/patch = 30 transitions × 7672 substeps =
+~230K density terms. The probability of ALL being finite under a
+perturbed θ approaches zero.
+
+### The fix: MH-within-Gibbs (not NUTS) for spatial
+
+NUTS proposes ALL parameters jointly — if any transition becomes
+impossible, the whole proposal is rejected. MH-within-Gibbs
+proposes one parameter at a time, so only the transitions affected
+by that parameter are at risk.
+
+For the spatial model, `--no-nuts` may work better because:
+- Each parameter affects only a subset of transitions
+- One-at-a-time proposals have smaller blast radius
+- The sharp conditional θ|X is 1-dimensional, not 6-dimensional
+
+### Longer-term: marginal transition density
+
+The fundamental fix is to marginalize over the multinomial split
+within each source group instead of conditioning on the exact split.
+This is the same idea as using the PF marginal instead of the
+complete-data LL — but applied at the per-source-group level.
+
+For now: try `--no-nuts` on the spatial model. If single-param
+proposals still produce -inf, we need to investigate which specific
+parameter is causing zero rates.
+
+**ACTION FOR downstream:** Try `--no-nuts` on the 5-patch model.
+Report per-parameter acceptance rates. If all are 0%, try reducing
+proposal scale (`rw_sd` in fit.toml).
