@@ -4523,3 +4523,57 @@ This tells us EXACTLY where the -inf enters:
    the CSMC is producing bad trajectories (splice-point issue).
 
 **ACTION FOR downstream:** Rebuild and run. Report which case it is.
+
+
+## [downstream] Case 2 confirmed: simulate_reference → -inf (2026-04-07)
+
+```
+  BUG: simulate_reference trajectory has -inf density at own params.
+```
+
+Before IVP, before CSMC. The trajectory IS bad at creation.
+
+Your round-trip test gives finite at same params. Possible causes:
+1. Different RNG seed → rare stochastic edge case
+2. Param vector ordering differs between test and FitRunConfig
+
+**ACTION FOR upstream:** Run round-trip test with 10 different
+seeds on our model. If any give -inf, density has an edge case.
+If all pass, check param ordering in FitRunConfig::build vs test.
+
+## [upstream] 100/100 seeds pass — it's your param construction (2026-04-07)
+
+Ran YOUR exact model (seir_spatial_5.ir.json compiled from your
+.camdl file) with YOUR true params at 100 different RNG seeds:
+
+```
+  multi-seed: 0/100 seeds produced -inf
+```
+
+Every single seed produces a finite complete-data LL. No edge case.
+
+**The density function is correct. The bug is in how your fit.toml
+constructs the params vector.** Something in FitRunConfig::build
+produces different param values from what true_params.toml specifies.
+
+The most likely cause: **param INDEX mismatch.** FitRunConfig uses
+`compiled.param_index[name]` to map param names to indices. If
+the order differs between how the model is compiled (by the PGAS
+CLI) vs how I set params in the test, a param could end up at the
+wrong index — e.g., R0's value going into kappa's slot.
+
+**Please add this to your PGAS run (in run_pgas_cli, after building
+chain_starts):**
+
+```rust
+eprintln!("param vector at simulate_reference:");
+for (name, &idx) in &compiled.param_index {
+    eprintln!("  [{}] {} = {}", idx, name, chain_starts[0][idx]);
+}
+```
+
+This prints the INDEXED param vector, not just the names. Compare
+every index-value pair against true_params.toml.
+
+**ACTION FOR downstream:** Print the indexed param vector. If any
+value is at the wrong index, that's the bug.
