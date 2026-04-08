@@ -623,6 +623,12 @@ pub fn csmc_as(
         counts[j_ref].copy_from_slice(&ref_rec.counts_after);
         substep_flows[j_ref].copy_from_slice(&ref_rec.flows);
         substep_gammas[j_ref] = ref_rec.gammas.clone();
+        // Fix: prev_counts[j_ref] was saved at step 2 from the post-resample
+        // state (which could be any particle's state). But ref_rec.flows were
+        // drawn from ref_rec.counts_before. The history must pair the correct
+        // counts_before with the reference's flows, otherwise the traceback
+        // produces Binom(k; n, p) with k > n.
+        prev_counts[j_ref].copy_from_slice(&ref_rec.counts_before);
 
         // ── 4. Ancestor sampling for reference particle ──
         // ã_j = w_{s-1}^j + log f(X_ref_s | x_{s-1}^j, θ, gamma_ref_s)
