@@ -440,6 +440,10 @@ pub fn run_pgas_cli(
         n_good_chains: None,
         start_values,
         rw_sd: HashMap::new(),
+        loglik_type: Some("complete_data".into()),
+        acceptance_rate: Some(best_chain.1.iter()
+            .map(|s| s.accepted.iter().filter(|&&a| a).count() as f64 / s.accepted.len().max(1) as f64)
+            .sum::<f64>() / best_chain.1.len().max(1) as f64),
     };
     state.save(&stage_dir)?;
 

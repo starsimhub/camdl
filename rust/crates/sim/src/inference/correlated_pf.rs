@@ -8,6 +8,7 @@
 //! Reference: Deligiannidis, Doucet & Pitt (2018), JRSSB.
 
 use rayon::prelude::*;
+use serde::{Serialize, Deserialize};
 use crate::chain_binomial::StepScratch;
 use crate::compiled_model::CompiledModel;
 use crate::rng::StatefulRng;
@@ -19,7 +20,7 @@ use super::particle_filter::{StepFn, ObsLoglikFn, Observation, PFilterResult};
 ///
 /// All values are standard normals. Transformed to the target distribution
 /// (Gamma, Uniform) at consumption time.
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct PFRandomState {
     /// Gamma multiplier draws: gamma_noise[obs_idx][particle_idx * steps_per_obs + step]
     /// One normal per overdispersed transition per substep per particle.

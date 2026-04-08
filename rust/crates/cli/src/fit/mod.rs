@@ -4,7 +4,7 @@
 //!   camdl fit scout    fit.toml [--seed N] [--force]
 //!   camdl fit refine   fit.toml --starts-from scout/ [--seed N] [--force]
 //!   camdl fit validate fit.toml --starts-from refine/ [--seed N] [--force]
-//!   camdl fit pmmh     fit.toml [--starts-from validate/] [--seed N] [--force] [--check-variance]
+//!   camdl fit pmmh     fit.toml [--starts-from validate/] [--seed N] [--force] [--resume] [--check-variance]
 //!   camdl fit pgas     fit.toml [--starts-from validate/] [--seed N] [--force]
 //!   camdl fit status   fit.toml
 
@@ -81,6 +81,7 @@ pub fn cmd_fit_pmmh(args: &[String]) {
     let (fit, seed, force) = parse_fit_args(args, false);
     let starts_from = parse_optional_starts_from(args);
     let check_variance = args.iter().any(|a| a == "--check-variance");
+    let resume = args.iter().any(|a| a == "--resume");
 
     let (model, _) = load_model_for_validation(&fit);
     let model_params: Vec<String> = model.parameters.iter().map(|p| p.name.clone()).collect();
@@ -93,7 +94,7 @@ pub fn cmd_fit_pmmh(args: &[String]) {
         std::process::exit(1);
     });
 
-    pmmh::run_pmmh_cli(&fit, starts_from.as_deref(), seed, force, check_variance).unwrap_or_else(|e| {
+    pmmh::run_pmmh_cli(&fit, starts_from.as_deref(), seed, force, check_variance, resume).unwrap_or_else(|e| {
         eprintln!("error: {}", e);
         std::process::exit(1);
     });
@@ -145,7 +146,7 @@ fn parse_fit_args(args: &[String], _needs_starts_from: bool) -> (FitToml, u64, b
             "--check-variance" => {} // consumed by cmd_fit_pmmh
             "--no-nuts" => {} // consumed by cmd_fit_pgas
             "--diagonal-mass" => {} // consumed by cmd_fit_pgas
-            "--resume" => {} // consumed by cmd_fit_pgas
+            "--resume" => {} // consumed by cmd_fit_pgas / cmd_fit_pmmh
             s if s.starts_with("--") => {
                 eprintln!("unknown flag: {}", s);
                 std::process::exit(1);

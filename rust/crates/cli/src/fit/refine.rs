@@ -123,6 +123,8 @@ pub fn run_refine(fit: &FitToml, starts_from: &str, seed: u64, force: bool) -> R
         n_good_chains: None,
         start_values,
         rw_sd,
+        loglik_type: Some("if2".into()),
+        acceptance_rate: None,
     };
     state.save(&stage_dir)?;
 

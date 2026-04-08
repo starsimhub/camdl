@@ -141,7 +141,9 @@ pub fn run_scout(fit: &FitToml, seed: u64, force: bool) -> Result<(), String> {
         n_chains: n_chains,
         n_good_chains: None,
         start_values,
-        rw_sd: HashMap::new(), // rw_sd not propagated — refine reads from fit.toml
+        rw_sd: HashMap::new(),
+        loglik_type: Some("if2".into()),
+        acceptance_rate: None,
     };
     state.save(&stage_dir)?;
 

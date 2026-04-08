@@ -21,6 +21,13 @@ pub struct FitState {
     pub n_good_chains: Option<usize>,
     pub start_values: HashMap<String, f64>,
     pub rw_sd: HashMap<String, f64>,
+    /// What kind of log-likelihood is in `best_loglik`.
+    /// "marginal" (PMMH), "complete_data" (PGAS), "if2" (IF2/scout/refine).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub loglik_type: Option<String>,
+    /// Overall acceptance rate of the best chain (PGAS/PMMH only).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub acceptance_rate: Option<f64>,
 }
 
 impl FitState {

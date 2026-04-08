@@ -8,11 +8,10 @@ use crate::fit::config::FitToml;
 use crate::fit::state::FitState;
 use crate::fit::runner::{self, FitRunConfig};
 use crate::fit::scout::now_iso8601_pub;
-use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use rayon::prelude::*;
 use sim::inference::{
     if2::IF2Param,
-    pmmh::{run_pmmh, Prior, PMMHConfig, PMMHResult},
+    pmmh::{run_pmmh, Prior, PMMHConfig, PMMHResult, PMMHResumeState},
 };
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -30,6 +29,7 @@ pub fn run_pmmh_cli(
     seed: u64,
     force: bool,
     check_variance: bool,
+    resume: bool,
 ) -> Result<(), String> {
     eprintln!("\x1b[33m⚠ PMMH is experimental. For models with T > 500 observations,\x1b[0m");
     eprintln!("\x1b[33m  acceptance rates may be too low for reliable posterior sampling.\x1b[0m");
@@ -177,10 +177,10 @@ pub fn run_pmmh_cli(
         return Ok(());
     }
 
-    if !force {
+    if !force && !resume {
         let state_path = format!("{}/fit_state.toml", stage_dir);
         if std::path::Path::new(&state_path).exists() {
-            eprintln!("\x1b[33mpmmh results already exist in {}. Use --force to re-run.\x1b[0m", stage_dir);
+            eprintln!("\x1b[33mpmmh results already exist in {}. Use --force to re-run or --resume to continue.\x1b[0m", stage_dir);
             return Ok(());
         }
     }
@@ -204,6 +204,53 @@ pub fn run_pmmh_cli(
 
     let dt = config.if2_config.dt;
 
+    // Compute config hash — identifies the statistical problem.
+    let config_hash = super::runner::compute_config_hash(fit, &config);
+
+    // Load resume states if --resume
+    let resume_states: Vec<Option<PMMHResumeState>> = if resume {
+        let mut states = Vec::with_capacity(n_chains);
+        let mut any_failed = false;
+        for chain_id in 0..n_chains {
+            let path = format!("{}/chain_{}/resume_state.bin", stage_dir, chain_id + 1);
+            match std::fs::read(&path) {
+                Ok(data) => match bincode::deserialize::<PMMHResumeState>(&data) {
+                    Ok(state) => {
+                        if state.config_hash != config_hash {
+                            eprintln!("error: config hash mismatch for chain {} — \
+                                model/data/priors have changed since the original run. \
+                                Cannot resume. Re-run from scratch with --force.",
+                                chain_id + 1);
+                            std::process::exit(1);
+                        }
+                        eprintln!("  chain {}: resuming from step {}", chain_id + 1, state.completed_steps);
+                        states.push(Some(state));
+                    }
+                    Err(e) => {
+                        eprintln!("error: cannot deserialize resume state for chain {}: {}. \
+                            Resume state format may have changed — re-run with --force.", chain_id + 1, e);
+                        any_failed = true;
+                        states.push(None);
+                    }
+                }
+                Err(_) => {
+                    eprintln!("error: no resume state file for chain {} ({})", chain_id + 1, path);
+                    any_failed = true;
+                    states.push(None);
+                }
+            }
+        }
+        if any_failed {
+            eprintln!("error: --resume requires resume state files for all chains.");
+            eprintln!("  These are written automatically at the end of every PMMH run.");
+            eprintln!("  If the original run was interrupted before saving, use --force to start fresh.");
+            std::process::exit(1);
+        }
+        states
+    } else {
+        vec![None; n_chains]
+    };
+
     eprintln!("\npmmh: {} chains × {} steps × {} particles, burn_in={}, thin={}, adapt={}",
         n_chains, n_steps, n_particles, burn_in, thin, adapt);
     eprintln!("  proposal_sd (transformed): [{}]",
@@ -211,18 +258,25 @@ pub fn run_pmmh_cli(
             .map(|(p, &sd)| format!("{}={:.4}", p.name, sd))
             .collect::<Vec<_>>().join(", "));
 
-    let mp = MultiProgress::new();
-    let bar_style = ProgressStyle::default_bar()
+    let mp = indicatif::MultiProgress::new();
+    let bar_style = indicatif::ProgressStyle::default_bar()
         .template("  chain {prefix} [{bar:25.cyan/dim}] {pos}/{len} {msg}")
         .unwrap()
         .progress_chars("━╸─");
 
-    let bars: Vec<ProgressBar> = (0..n_chains).map(|chain_id| {
-        let pb = mp.add(ProgressBar::new(n_steps as u64));
+    let bars: Vec<indicatif::ProgressBar> = (0..n_chains).map(|chain_id| {
+        let pb = mp.add(indicatif::ProgressBar::new(n_steps as u64));
         pb.set_style(bar_style.clone());
         pb.set_prefix(format!("{}", chain_id + 1));
         pb
     }).collect();
+
+    // Pre-create chain directories
+    for chain_id in 0..n_chains {
+        let chain_dir = format!("{}/chain_{}", stage_dir, chain_id + 1);
+        std::fs::create_dir_all(&chain_dir)
+            .map_err(|e| format!("cannot create {}: {}", chain_dir, e))?;
+    }
 
     let t0 = std::time::Instant::now();
 
@@ -297,23 +351,17 @@ pub fn run_pmmh_cli(
             let is_tty = std::io::IsTerminal::is_terminal(&std::io::stderr());
             let chain_start = std::time::Instant::now();
 
-            // Streaming trace: open file, write header, flush per-step
+            // Streaming trace: use TraceWriter with append mode when resuming
             let chain_dir = format!("{}/pmmh/chain_{}", fit.fit.output_dir, chain_id + 1);
             let _ = std::fs::create_dir_all(&chain_dir);
             let trace_path = format!("{}/trace.tsv", chain_dir);
-            let trace_file = std::sync::Mutex::new({
-                use std::io::Write;
-                let mut f = std::io::BufWriter::new(
-                    std::fs::File::create(&trace_path).unwrap()
-                );
-                write!(f, "step\tlog_likelihood\tlog_posterior\taccepted").unwrap();
-                for spec in &config.estimated_params { write!(f, "\t{}", spec.name).unwrap(); }
-                writeln!(f).unwrap();
-                f
-            });
-
-            let _param_names: Vec<String> = config.estimated_params.iter()
+            let is_resuming = resume_states[chain_id].is_some();
+            let param_names: Vec<String> = config.estimated_params.iter()
                 .map(|s| s.name.clone()).collect();
+            let trace_writer = super::trace_writer::TraceWriter::new(
+                &trace_path, "step", &["accepted"],
+                &param_names, is_resuming,
+            );
 
             let progress_cb = |step: usize, loglik: f64, accepted: bool, params: &[f64]| {
                 if accepted { accepted_count.fetch_add(1, Ordering::Relaxed); }
@@ -321,7 +369,6 @@ pub fn run_pmmh_cli(
 
                 // Stream trace row to disk (respecting burn-in/thin)
                 if step >= burn_in && (step - burn_in) % thin == 0 {
-                    use std::io::Write;
                     let log_prior: f64 = config.estimated_params.iter().zip(priors.iter())
                         .map(|(spec, prior)| {
                             let theta = params[spec.index];
@@ -330,15 +377,13 @@ pub fn run_pmmh_cli(
                         })
                         .sum();
                     let log_posterior = loglik + log_prior;
-                    if let Ok(mut f) = trace_file.lock() {
-                        write!(f, "{}\t{:.4}\t{:.4}\t{}",
-                            step, loglik, log_posterior, if accepted { 1 } else { 0 }).unwrap();
-                        for spec in &config.estimated_params {
-                            write!(f, "\t{:.6}", params[spec.index]).unwrap();
-                        }
-                        writeln!(f).unwrap();
-                        if step % 50 == 0 { f.flush().ok(); }
-                    }
+                    let accepted_str = if accepted { "1" } else { "0" };
+                    let param_vals: Vec<f64> = config.estimated_params.iter()
+                        .map(|s| params[s.index]).collect();
+                    trace_writer.write_row(
+                        step, loglik, log_posterior,
+                        &[accepted_str], &param_vals,
+                    );
                 }
 
                 // Progress display (always, regardless of burn-in/thin)
@@ -363,11 +408,18 @@ pub fn run_pmmh_cli(
             let result = run_pmmh(
                 &config.estimated_params, &priors, &config.base_params,
                 &pmmh_config, &eval_loglik, eval_corr_ref, chain_seed, Some(&progress_cb),
+                resume_states[chain_id].clone(), config_hash.clone(),
             );
 
             bar.finish_with_message(format!(
                 "ll={:.1} acc={:.0}%", result.map_loglik, result.acceptance_rate * 100.0
             ));
+
+            // Save resume state for future --resume
+            let resume_path = format!("{}/resume_state.bin", chain_dir);
+            if let Ok(encoded) = bincode::serialize(&result.resume_state) {
+                let _ = std::fs::write(&resume_path, encoded);
+            }
 
             (chain_id, result)
         })
@@ -439,6 +491,8 @@ pub fn run_pmmh_cli(
         n_good_chains: None,
         start_values,
         rw_sd: HashMap::new(),
+        loglik_type: Some("marginal".into()),
+        acceptance_rate: Some(map_result.acceptance_rate),
     };
     state.save(&stage_dir)?;
 

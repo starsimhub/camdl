@@ -16,6 +16,7 @@
 //! - Acceptance/rejection step gives valid posterior samples.
 //! - Optional adaptive proposal covariance (Haario et al. 2001).
 
+use serde::{Serialize, Deserialize};
 use crate::rng::StatefulRng;
 use super::if2::IF2Param;
 
@@ -114,13 +115,49 @@ pub struct PMMHResult {
     pub map_params: Vec<f64>,
     pub map_loglik: f64,
     pub map_log_posterior: f64,
+    /// Resume state for chain continuation. Populated at end of every run.
+    pub resume_state: PMMHResumeState,
+}
+
+/// Serializable chain state for `--resume`. Saved to `chain_N/resume_state.bin`
+/// via bincode at end of every PMMH run, enabling continuation without
+/// re-doing burn-in or adaptive proposal warm-up.
+#[derive(Clone, Serialize, Deserialize)]
+pub struct PMMHResumeState {
+    /// Config hash — only resume if the statistical problem matches.
+    pub config_hash: String,
+    /// Number of MCMC steps completed (resume starts from here).
+    pub completed_steps: usize,
+    /// Current parameter values (natural scale, full model param vector).
+    pub params: Vec<f64>,
+    /// Current transformed parameters (unconstrained scale).
+    pub transformed: Vec<f64>,
+    /// Estimated parameter names (for reordering on resume).
+    pub param_names: Vec<String>,
+    /// Current PF log-likelihood estimate.
+    pub current_ll: f64,
+    /// Current log prior density.
+    pub current_log_prior: f64,
+    /// Number of accepted proposals so far.
+    pub n_accepted: usize,
+    /// Adaptive proposal state (None if adapt=false).
+    pub adaptive: Option<AdaptiveProposal>,
+    /// CPM random state (None if rho=None).
+    pub current_randoms: Option<super::correlated_pf::PFRandomState>,
+    /// MAP parameter values.
+    pub map_params: Vec<f64>,
+    /// MAP log-likelihood.
+    pub map_loglik: f64,
+    /// MAP log-posterior.
+    pub map_log_posterior: f64,
 }
 
 // ── Adaptive proposal (Haario et al. 2001) ─────────────────────────
 
 /// Running mean + covariance via Welford's online algorithm,
 /// plus Cholesky factor for sampling N(0, Σ).
-struct AdaptiveProposal {
+#[derive(Clone, Serialize, Deserialize)]
+pub struct AdaptiveProposal {
     d: usize,
     n: usize,
     mean: Vec<f64>,
@@ -276,64 +313,132 @@ pub fn run_pmmh(
     eval_loglik_correlated: Option<&CorrelatedEvalFn>,
     seed: u64,
     on_step: Option<&dyn Fn(usize, f64, bool, &[f64])>,
+    resume_from: Option<PMMHResumeState>,
+    config_hash: String,
 ) -> PMMHResult {
     let d = if2_params.len();
     assert_eq!(d, priors.len(), "priors must match if2_params length");
     assert_eq!(d, config.proposal_sd.len(), "proposal_sd must match if2_params length");
 
-    let mut rng = StatefulRng::new(seed);
-    let mut current_params = base_params.to_vec();
-
-    // Current state on transformed scale
-    let mut current_transformed: Vec<f64> = if2_params.iter()
-        .map(|p| p.to_transformed(current_params[p.index]))
-        .collect();
-
-    // CPM random state (if correlated mode)
     use super::correlated_pf::PFRandomState;
-    let steps_per_obs = config.steps_per_obs;
-    let mut current_randoms: Option<PFRandomState> = config.rho.map(|_| {
-        PFRandomState::draw_fresh(
-            config.n_particles, config.n_obs, steps_per_obs,
-            config.n_source_groups, &mut rng,
-        )
-    });
 
-    // Initial PF evaluation
-    let mut current_ll = if let (Some(ref randoms), Some(eval_corr)) =
-        (&current_randoms, &eval_loglik_correlated)
-    {
-        eval_corr(&current_params, randoms)
+    let start_step;
+    let mut current_params: Vec<f64>;
+    let mut current_transformed: Vec<f64>;
+    let mut current_ll: f64;
+    let mut current_log_prior: f64;
+    let mut current_randoms: Option<PFRandomState>;
+    let mut map_log_posterior: f64;
+    let mut map_params: Vec<f64>;
+    let mut map_loglik: f64;
+    let mut adaptive: Option<AdaptiveProposal>;
+    let mut n_accepted: usize;
+    let mut rng: StatefulRng;
+
+    if let Some(state) = resume_from {
+        eprintln!("  resuming from step {}...", state.completed_steps);
+        start_step = state.completed_steps;
+        current_params = state.params;
+        n_accepted = state.n_accepted;
+        current_ll = state.current_ll;
+        current_log_prior = state.current_log_prior;
+        current_randoms = state.current_randoms;
+        adaptive = state.adaptive;
+        map_params = state.map_params;
+        map_loglik = state.map_loglik;
+        map_log_posterior = state.map_log_posterior;
+
+        // Restore z-values with name-based reordering (same pattern as PGAS)
+        if !state.param_names.is_empty() && state.param_names.len() == state.transformed.len() {
+            let saved_z: std::collections::HashMap<&str, f64> = state.param_names.iter()
+                .zip(state.transformed.iter())
+                .map(|(name, &z)| (name.as_str(), z))
+                .collect();
+            current_transformed = if2_params.iter().map(|spec| {
+                if let Some(&z) = saved_z.get(spec.name.as_str()) {
+                    z
+                } else {
+                    eprintln!("  warning: param '{}' not found in resume state, computing from theta", spec.name);
+                    spec.to_transformed(current_params[spec.index])
+                }
+            }).collect();
+        } else {
+            eprintln!("  warning: resume state lacks param_names — recomputing z from params.");
+            current_transformed = if2_params.iter()
+                .map(|spec| spec.to_transformed(current_params[spec.index]))
+                .collect();
+        }
+
+        // Enforce bounds on restored params
+        for (i, spec) in if2_params.iter().enumerate() {
+            let clamped = spec.from_transformed(current_transformed[i]);
+            current_params[spec.index] = clamped;
+        }
+
+        // Derive RNG from seed ^ completed_steps for continuation
+        rng = StatefulRng::new(seed ^ start_step as u64);
     } else {
-        eval_loglik(&current_params, seed.wrapping_add(0))
-    };
-    let mut current_log_prior: f64 = if2_params.iter().zip(priors.iter())
-        .zip(current_transformed.iter())
-        .map(|((p, prior), &z)| prior.log_density(current_params[p.index], z))
-        .sum();
+        start_step = 0;
+        rng = StatefulRng::new(seed);
+        current_params = base_params.to_vec();
+
+        // Current state on transformed scale
+        current_transformed = if2_params.iter()
+            .map(|p| p.to_transformed(current_params[p.index]))
+            .collect();
+
+        // CPM random state (if correlated mode)
+        let steps_per_obs = config.steps_per_obs;
+        current_randoms = config.rho.map(|_| {
+            PFRandomState::draw_fresh(
+                config.n_particles, config.n_obs, steps_per_obs,
+                config.n_source_groups, &mut rng,
+            )
+        });
+
+        // Initial PF evaluation
+        current_ll = if let (Some(ref randoms), Some(eval_corr)) =
+            (&current_randoms, &eval_loglik_correlated)
+        {
+            eval_corr(&current_params, randoms)
+        } else {
+            eval_loglik(&current_params, seed.wrapping_add(0))
+        };
+        current_log_prior = if2_params.iter().zip(priors.iter())
+            .zip(current_transformed.iter())
+            .map(|((p, prior), &z)| prior.log_density(current_params[p.index], z))
+            .sum();
+
+        // Track MAP
+        map_log_posterior = current_ll + current_log_prior;
+        map_params = current_params.clone();
+        map_loglik = current_ll;
+
+        // Adaptive proposal
+        adaptive = if config.adapt {
+            let mut ap = AdaptiveProposal::new(d);
+            ap.update(&current_transformed);
+            Some(ap)
+        } else {
+            None
+        };
+
+        n_accepted = 0;
+    }
+
     let mut current_log_jacobian: f64 = if2_params.iter()
         .zip(current_transformed.iter())
         .map(|(p, &z)| p.log_jacobian(z))
         .sum();
 
-    // Track MAP
-    let mut map_log_posterior = current_ll + current_log_prior;
-    let mut map_params = current_params.clone();
-    let mut map_loglik = current_ll;
-
-    // Adaptive proposal
-    let mut adaptive = if config.adapt {
-        let mut ap = AdaptiveProposal::new(d);
-        ap.update(&current_transformed);
-        Some(ap)
-    } else {
-        None
-    };
-
     let mut steps = Vec::new();
-    let mut n_accepted: usize = 0;
 
-    for step in 0..config.n_steps {
+    if start_step >= config.n_steps {
+        eprintln!("  warning: chain already completed {} steps (requested {}). \
+                   Increase steps in fit.toml to continue.", start_step, config.n_steps);
+    }
+
+    for step in start_step..config.n_steps {
         // Propose: θ' = θ + Δ on transformed scale
         let delta = if let Some(ref ap) = adaptive {
             if config.adapt && step >= config.adapt_start {
@@ -430,7 +535,28 @@ pub fn run_pmmh(
         }
     }
 
-    let acceptance_rate = n_accepted as f64 / config.n_steps as f64;
+    let total_steps = config.n_steps - start_step;
+    let acceptance_rate = if total_steps > 0 {
+        n_accepted as f64 / config.n_steps as f64
+    } else {
+        0.0
+    };
+
+    let resume_state = PMMHResumeState {
+        config_hash,
+        completed_steps: config.n_steps,
+        params: current_params.clone(),
+        transformed: current_transformed,
+        param_names: if2_params.iter().map(|p| p.name.clone()).collect(),
+        current_ll,
+        current_log_prior,
+        n_accepted,
+        adaptive,
+        current_randoms,
+        map_params: map_params.clone(),
+        map_loglik,
+        map_log_posterior,
+    };
 
     PMMHResult {
         steps,
@@ -439,6 +565,7 @@ pub fn run_pmmh(
         map_params,
         map_loglik,
         map_log_posterior,
+        resume_state,
     }
 }
 
