@@ -1,11 +1,12 @@
 # Incident: Spatial PGAS -inf complete-data log-likelihood
 
 **Date:** 2026-04-07
-**Status:** Fixed (two bugs). Gamma density disabled pending separate fix.
+**Status:** Fixed (three bugs). Gamma density disabled pending separate fix.
 **Severity:** Blocking — spatial PGAS inference produced -inf on every sweep, making Bayesian inference impossible for multi-patch models.
 **Fix commits:**
 - `f64668f` — snapshot counts_before in SubstepRecord (simulate_reference)
 - `b15cb39` — reference particle counts_before mismatch in CSMC-AS traceback
+- `faffe8f` — near-zero rate/flow mismatch: soft handling + iota warning
 
 ## Fundamental vs. implementation
 
@@ -232,6 +233,30 @@ prev_counts[j_ref].copy_from_slice(&ref_rec.counts_before);
 This ensures the history correctly pairs the reference's pre-step state
 with its flows, regardless of what resampling did to the `j_ref` slot.
 
+### Fix 3: Near-zero rate/flow mismatch (iota warning)
+
+When `step_one` evaluates a spatial importation expression like
+`c_ij * I_j / N_j * S_i`, floating-point arithmetic can produce a
+near-zero but nonzero rate (e.g., `1e-16`) even when `I_j = 0`. If
+step_one draws `flow=1` from this near-zero rate, the density evaluator
+may recompute the rate as exactly zero (or below `RATE_EPSILON`) and
+reject the trajectory.
+
+Before this fix, any `flow > 0` with `rate ≤ RATE_EPSILON` returned
+`-inf`. After:
+
+- **rate == 0.0 exactly, flow > 0:** Still `-inf`, but emits a one-time
+  warning: "transition X has rate=0 but flow=N — consider adding a
+  seeding term (iota)." This catches the model specification issue where
+  infection rates vanish when a compartment empties.
+- **0 < rate ≤ RATE_EPSILON, flow > 0:** Include the transition in the
+  multinomial with its tiny rate. The Binomial density gives a very
+  negative but finite score, correctly penalizing the unlikely event
+  without hard-rejecting the trajectory.
+
+User-facing documentation added to `docs/inference.md` under "Spatial
+models and seeding (iota)".
+
 ## Remaining issues
 
 ### Gamma density disabled
@@ -310,25 +335,15 @@ if n_high_p > 0 {
 }
 ```
 
-### 2. Centralize the rate epsilon
+### 2. Centralize the rate epsilon — DONE (`19ac52c`)
 
-The zero-rate threshold `1e-15` appears in both `step_one`
-(`chain_binomial.rs`) and `log_transition_density_substep` (`pgas.rs`). Define
-it once:
+`RATE_EPSILON = 1e-15` defined once in `chain_binomial.rs`, imported by
+`pgas.rs`.
 
-```rust
-// In chain_binomial.rs or a shared constants module:
-pub const RATE_EPSILON: f64 = 1e-15;
-```
+### 3. Debug assertions in step_one — DONE (`19ac52c`, `44b28d7`)
 
-The dual-file magic number is the most likely source of a future divergence
-between simulation and density.
-
-### 3. Debug assertions in step_one
-
-Add `debug_assert!(n_exit <= n_src)` after the total-exits draw in `step_one`.
-This is free in release mode and catches the exact class of bug that caused
-this incident — overdrafts that the density can't evaluate.
+`debug_assert!(n_exit <= n_src)` in `step_one`, `simulate_reference`,
+and `csmc_as` traceback.
 
 ### 4. Trace-gated -inf logging in distribution functions
 
@@ -338,10 +353,13 @@ propagates silently through summation and is only caught by the cumulative
 check in `complete_data_loglik`. Per-term logging would have identified the
 `k > n` binomial immediately.
 
-### 5. Clean up existing debug diagnostics
+### 5. Clean up existing debug diagnostics — DONE (`19ac52c`)
 
-The current code has `eprintln!` diagnostics and `CAMDL_VERIFY_DENSITY` env
-var checks scattered through `log_transition_density_substep`. These should be
-consolidated: either gate everything behind `trace_enabled()` or remove the
-ad-hoc prints now that the bug is fixed. The `if false {}` block around the
-gamma density should get a tracking issue number.
+All density diagnostics gated behind `trace_enabled()`. `CAMDL_VERIFY_DENSITY`
+removed. Gamma density `if false {}` block replaced with TODO comment.
+
+### 6. Near-zero rate soft handling + iota warning — DONE (`faffe8f`)
+
+Near-zero rates with nonzero flow are included in the multinomial rather than
+hard-rejected. Truly zero rates emit a one-time warning about adding iota.
+User-facing guidance added to `docs/inference.md`.

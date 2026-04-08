@@ -507,6 +507,37 @@ giving the CSMC diverse initial states to select among. A Binomial
 density term is added to the complete-data LL to constrain s0 via the
 MH ratio. IVP parameters are auto-detected at startup.
 
+### Spatial models and seeding (iota)
+
+Spatial models with inter-patch coupling need care to ensure inference
+works correctly. Two issues arise that don't affect single-patch models:
+
+**Seeding terms.** If the infection rate for patch $i$ is
+$\beta \cdot S_i \cdot I_i / N_i$, it goes to exactly zero when
+$I_i = 0$. The stochastic simulator can still draw events from
+near-zero floating-point rates (importation coupling creates tiny
+nonzero values), but the density evaluator computes the rate as
+exactly zero and rejects the trajectory.
+
+Fix: add a small seeding term to the infection rate:
+$\beta \cdot S_i \cdot (I_i + \iota) / N_i$ where $\iota \approx 10^{-6}$.
+This ensures the infection rate is never exactly zero, allowing
+importation-driven infections to have finite (though very small)
+density. pomp spatial models use the same pattern. If camdl detects
+a zero-rate transition with nonzero flow during PGAS, it emits a
+warning suggesting this fix.
+
+Not all spatial models need iota. Models with constant importation
+via `events {}` blocks, or models where the rate expression already
+includes an additive term, are fine without it.
+
+**Time step size.** The Euler-multinomial approximation assumes exit
+probabilities are small per substep. In spatial models with high
+$R_0$ and $dt = 1$, $p_{\text{total}}$ can approach 1, causing
+overdrafts where total withdrawals from a compartment exceed its
+population (resolved by clamping). Use a smaller dt (e.g., 0.25)
+to keep $p_{\text{total}} < 0.3$ and avoid approximation breakdown.
+
 ---
 
 ## Diagnostic interpretation guide
