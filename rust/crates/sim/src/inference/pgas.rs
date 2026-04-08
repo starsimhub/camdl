@@ -217,15 +217,10 @@ pub fn log_transition_density_substep(
         let mut gamma_was_used = false;  // track if gamma was actually drawn
         for &tr_idx in group {
             let rate = propensities[tr_idx];
-            if rate <= RATE_EPSILON || is_determ[tr_idx] {
+            // Mirror step_one's logic exactly: check rate first, then deterministic.
+            if rate <= RATE_EPSILON {
                 if flows[tr_idx] > 0 && rate <= 0.0 {
-                    // Truly zero rate with nonzero flow — impossible transition.
-                    // This happens when a compartment-dependent rate (e.g.,
-                    // beta * I/N * S with I=0) produces exactly 0, but step_one
-                    // drew from a near-zero floating-point value. Log a warning
-                    // once per model run; the trajectory will be penalized
-                    // heavily but not hard-rejected. Models with this pattern
-                    // should add a seeding term (iota) for robust inference.
+                    // Truly zero rate with nonzero flow — model needs iota.
                     use std::sync::atomic::{AtomicBool, Ordering};
                     static WARNED: AtomicBool = AtomicBool::new(false);
                     if !WARNED.swap(true, Ordering::Relaxed) {
@@ -239,14 +234,18 @@ pub fn log_transition_density_substep(
                     return Ok(f64::NEG_INFINITY);
                 } else if flows[tr_idx] > 0 {
                     // Near-zero rate (0 < rate ≤ RATE_EPSILON) with nonzero flow.
-                    // step_one saw rate above its threshold but the density
-                    // recomputed it as below. Include this transition in the
-                    // multinomial with its tiny rate rather than hard-rejecting.
+                    // Include in multinomial with its tiny rate rather than -inf.
                     let per_capita = rate / n_src as f64;
                     total_rate += per_capita;
                     probs.push((tr_idx, per_capita));
                     continue;
                 }
+                handled[tr_idx] = true;
+                continue;
+            }
+            if is_determ[tr_idx] {
+                // Deterministic transitions are not part of the multinomial.
+                // step_one handles them separately (exact count = rate * dt).
                 handled[tr_idx] = true;
                 continue;
             }
@@ -447,14 +446,17 @@ pub fn simulate_reference(
         let counts_before = counts.clone();
         step_one(model, &mut counts, &mut flows, params, t, dt, rng, &mut scratch)?;
 
-        // Verify consistency: for each source group, total flow ≤ pre-step count.
+        // Verify: density evaluation of this record won't produce k > n.
+        // This catches state/flow mismatches before they cause -inf later.
         if cfg!(debug_assertions) {
-            for &(src_local, ref group) in &model.source_groups {
-                let n_src = counts_before[src_local].max(0) as u64;
-                let n_exit: u64 = group.iter().map(|&ti| flows[ti]).sum();
-                debug_assert!(n_exit <= n_src,
-                    "simulate_reference: n_exit={} > n_src={} at substep {} src_comp={}",
-                    n_exit, n_src, s, src_local);
+            let verify_td = log_transition_density_substep(
+                model, &counts_before, &flows, &scratch.gamma_used, params, t, dt,
+            );
+            if let Ok(td) = verify_td {
+                debug_assert!(td.is_finite(),
+                    "simulate_reference: density is -inf at substep {} (t={:.1}) \
+                     despite matching state. counts_before={:?}, flows={:?}",
+                    s, t, &counts_before, &flows);
             }
         }
 
@@ -782,15 +784,18 @@ pub fn csmc_as(
     }
     trajectory_substeps.reverse();
 
-    // Verify consistency: counts_before and flows must be from the same particle.
+    // Verify: density evaluation of each traceback record is finite.
     if cfg!(debug_assertions) {
         for (s, rec) in trajectory_substeps.iter().enumerate() {
-            for &(src_local, ref group) in &model.source_groups {
-                let n_src = rec.counts_before[src_local].max(0) as u64;
-                let n_exit: u64 = group.iter().map(|&ti| rec.flows[ti]).sum();
-                debug_assert!(n_exit <= n_src,
-                    "csmc_as traceback: n_exit={} > n_src={} at substep {} src_comp={}",
-                    n_exit, n_src, s, src_local);
+            let t = t_start + s as f64 * dt;
+            let verify_td = log_transition_density_substep(
+                model, &rec.counts_before, &rec.flows, &rec.gammas, params, t, dt,
+            );
+            if let Ok(td) = verify_td {
+                debug_assert!(td.is_finite(),
+                    "csmc_as traceback: density is -inf at substep {} (t={:.1}) \
+                     counts_before={:?}, flows={:?}",
+                    s, t, &rec.counts_before, &rec.flows);
             }
         }
     }
