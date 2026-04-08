@@ -306,6 +306,53 @@ pub fn eval_resolved(expr: &ResolvedExpr, ctx: &EvalCtx<'_>) -> f64 {
     }
 }
 
+// ── Resolved observation likelihood ──────────────────────────────────────────
+
+/// Pre-resolved observation likelihood. All `Expr` fields replaced by
+/// `ResolvedExpr`. Constructed at closure-build time, captured by obs closures.
+#[derive(Debug, Clone)]
+pub enum ResolvedLikelihood {
+    Poisson { rate: ResolvedExpr },
+    NegBinomial { mean: ResolvedExpr, dispersion: ResolvedExpr },
+    Normal { mean: ResolvedExpr, sd: ResolvedExpr },
+    Binomial { n: ResolvedExpr, p: ResolvedExpr },
+    BetaBinomial { n: ResolvedExpr, alpha: ResolvedExpr, beta: ResolvedExpr },
+    Bernoulli { p: ResolvedExpr },
+}
+
+/// Resolve a `Likelihood` into a `ResolvedLikelihood`.
+pub fn resolve_likelihood(
+    lik: &ir::observation::Likelihood,
+    ctx: &ResolveCtx<'_>,
+) -> Result<ResolvedLikelihood, SimError> {
+    use ir::observation::Likelihood;
+    match lik {
+        Likelihood::Poisson(p) => Ok(ResolvedLikelihood::Poisson {
+            rate: resolve_expr(&p.rate, ctx)?,
+        }),
+        Likelihood::NegBinomial(nb) => Ok(ResolvedLikelihood::NegBinomial {
+            mean: resolve_expr(&nb.mean, ctx)?,
+            dispersion: resolve_expr(&nb.dispersion, ctx)?,
+        }),
+        Likelihood::Normal(n) => Ok(ResolvedLikelihood::Normal {
+            mean: resolve_expr(&n.mean, ctx)?,
+            sd: resolve_expr(&n.sd, ctx)?,
+        }),
+        Likelihood::Binomial(b) => Ok(ResolvedLikelihood::Binomial {
+            n: resolve_expr(&b.n, ctx)?,
+            p: resolve_expr(&b.p, ctx)?,
+        }),
+        Likelihood::BetaBinomial(bb) => Ok(ResolvedLikelihood::BetaBinomial {
+            n: resolve_expr(&bb.n, ctx)?,
+            alpha: resolve_expr(&bb.alpha, ctx)?,
+            beta: resolve_expr(&bb.beta, ctx)?,
+        }),
+        Likelihood::Bernoulli(b) => Ok(ResolvedLikelihood::Bernoulli {
+            p: resolve_expr(&b.p, ctx)?,
+        }),
+    }
+}
+
 // ── Forward-mode AD on resolved trees ────────────────────────────────────────
 
 /// Evaluate d(expr)/d(param at index `wrt`) on a pre-resolved tree.

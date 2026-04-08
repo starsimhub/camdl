@@ -12,7 +12,8 @@
 
 use crate::compiled_model::CompiledModel;
 use crate::error::SimError;
-use crate::propensity::{eval_propensities, eval_expr, eval_expr_deriv, EvalCtx};
+use crate::propensity::{eval_propensities, EvalCtx};
+use crate::resolved_expr::{eval_resolved, eval_resolved_deriv};
 use crate::state::{IntState, RealState};
 use crate::inference::obs_loglik::binom_logpmf;
 use crate::inference::pgas::{PGASTrajectory, IVPMapping};
@@ -83,16 +84,15 @@ pub fn log_transition_density_grad(
             let per_capita = rate / n_src as f64;
 
             // Compute d(rate)/dθ for each estimated parameter
-            let tr = &model.model.transitions[tr_idx];
             let mut d_rate = vec![0.0; d];
-            for (i, pname) in param_names.iter().enumerate() {
-                if let Some(grad_expr) = tr.rate_grad.get(pname) {
-                    d_rate[i] = eval_expr(grad_expr, &ctx).unwrap_or(0.0) / n_src as f64;
+            for (name, resolved_grad) in &model.resolved.rate_grads[tr_idx] {
+                if let Some(i) = param_names.iter().position(|pn| pn == name) {
+                    d_rate[i] = eval_resolved(resolved_grad, &ctx) / n_src as f64;
                 }
             }
 
             let (effective, d_effective) = if let ir::transition::DrawMethod::Overdispersed(_) =
-                &tr.draw_method
+                &model.model.transitions[tr_idx].draw_method
             {
                 group_has_overdispersion = true;
                 let g = if gamma_idx < gammas.len() { gammas[gamma_idx] } else { 1.0 };
@@ -177,10 +177,9 @@ pub fn log_transition_density_grad(
         // dλ/dθ = d(rate)/dθ * dt
         log_p += crate::inference::obs_loglik::poisson_logpmf(flow, mean);
 
-        let tr = &model.model.transitions[tr_idx];
-        for (i, pname) in param_names.iter().enumerate() {
-            if let Some(grad_expr) = tr.rate_grad.get(pname) {
-                let d_rate = eval_expr(grad_expr, &ctx).unwrap_or(0.0);
+        for (name, resolved_grad) in &model.resolved.rate_grads[tr_idx] {
+            if let Some(i) = param_names.iter().position(|pn| pn == name) {
+                let d_rate = eval_resolved(resolved_grad, &ctx);
                 let d_mean = d_rate * dt;
                 if mean > 0.0 {
                     grad[i] += (flow / mean - 1.0) * d_mean;
@@ -221,19 +220,17 @@ fn log_gamma_density_grad_substep(
     let mut gamma_idx = 0;
 
     for &(_, ref group) in &model.source_groups {
-        let mut sigma_sq_expr: Option<&ir::expr::Expr> = None;
+        let mut resolved_od: Option<&crate::resolved_expr::ResolvedExpr> = None;
         let mut sigma_sq = 1.0;
 
         for &tr_idx in group {
-            if let ir::transition::DrawMethod::Overdispersed(ref expr)
-                = model.model.transitions[tr_idx].draw_method
-            {
-                sigma_sq = eval_expr(expr, &ctx).unwrap_or(1.0);
-                sigma_sq_expr = Some(expr);
+            if let Some(ref re) = model.resolved.overdispersion[tr_idx] {
+                sigma_sq = eval_resolved(re, &ctx);
+                resolved_od = Some(re);
                 break;
             }
         }
-        if let Some(expr) = sigma_sq_expr {
+        if let Some(re) = resolved_od {
             if gamma_idx < gammas.len() {
                 let g = gammas[gamma_idx];
                 if g > 0.0 && sigma_sq > 0.0 {
@@ -252,7 +249,7 @@ fn log_gamma_density_grad_substep(
 
                     // Chain rule through σ² expression
                     for i in 0..d {
-                        let d_sq = eval_expr_deriv(expr, param_indices[i], &ctx);
+                        let d_sq = eval_resolved_deriv(re, param_indices[i], &ctx);
                         grad[i] += dlg_dsq * d_sq;
                     }
                 }

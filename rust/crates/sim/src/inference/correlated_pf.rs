@@ -216,26 +216,17 @@ pub fn bootstrap_filter_correlated(
     let steps_per_obs = (obs_dt / dt).round() as usize;
 
     // Gamma shape/scale for the overdispersed transition (precompute)
-    let sigma_sq = model.model.transitions.iter()
-        .find_map(|tr| match &tr.draw_method {
-            ir::transition::DrawMethod::Overdispersed(_) => {
-                // Get sigma_sq from params — this is model-specific
-                // For now, evaluate the expression at t=0
+    let sigma_sq = model.resolved.overdispersion.iter()
+        .find_map(|od| {
+            od.as_ref().map(|re| {
                 let int_s = crate::state::IntState::new(n_int);
                 let real_s = crate::state::RealState::new(model.real_local_to_global.len());
                 let ctx = crate::propensity::EvalCtx {
                     model, int_s: &int_s, real_s: &real_s, params,
                     t: 0.0, projected: None,
                 };
-                crate::propensity::eval_expr(
-                    match &tr.draw_method {
-                        ir::transition::DrawMethod::Overdispersed(e) => e,
-                        _ => unreachable!(),
-                    },
-                    &ctx,
-                ).ok()
-            }
-            _ => None,
+                crate::resolved_expr::eval_resolved(re, &ctx)
+            })
         })
         .unwrap_or(1.0);
 

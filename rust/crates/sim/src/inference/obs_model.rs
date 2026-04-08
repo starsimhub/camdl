@@ -6,10 +6,11 @@
 use std::sync::Arc;
 use crate::compiled_model::CompiledModel;
 use crate::rng::StatefulRng;
-use crate::propensity::{eval_expr, EvalCtx};
+use crate::propensity::EvalCtx;
+use crate::resolved_expr::{ResolvedLikelihood, ResolveCtx, resolve_likelihood, eval_resolved};
 use crate::state::{IntState, RealState};
 use crate::inference::obs_loglik::{negbin_logpmf, discretized_normal_logpmf_tol, poisson_logpmf, DEFAULT_TOL};
-use ir::observation::{Likelihood, ObservationModel};
+use ir::observation::ObservationModel;
 use rand::prelude::Distribution;
 use rand_distr::{Gamma, Normal};
 
@@ -19,12 +20,12 @@ pub fn compile_obs_loglik_if2(
     obs_model: &ObservationModel,
     compiled: Arc<CompiledModel>,
 ) -> Box<dyn Fn(f64, f64, &[f64]) -> f64 + Send + Sync> {
-    let likelihood = obs_model.likelihood.clone();
+    let resolved = resolve_likelihood_from_model(&obs_model.likelihood, &compiled);
     let int_s = IntState::new(compiled.int_local_to_global.len());
     let real_s = RealState::new(compiled.real_local_to_global.len());
 
     Box::new(move |projected: f64, observed: f64, params: &[f64]| {
-        eval_likelihood(&likelihood, projected, observed, params, &compiled, &int_s, &real_s)
+        eval_likelihood_resolved(&resolved, projected, observed, params, &compiled, &int_s, &real_s)
     })
 }
 
@@ -35,19 +36,42 @@ pub fn compile_obs_loglik_pf(
     compiled: Arc<CompiledModel>,
     params: &[f64],
 ) -> Box<dyn Fn(f64, f64) -> f64 + Send + Sync> {
-    let likelihood = obs_model.likelihood.clone();
+    let resolved = resolve_likelihood_from_model(&obs_model.likelihood, &compiled);
     let params = params.to_vec();
     let int_s = IntState::new(compiled.int_local_to_global.len());
     let real_s = RealState::new(compiled.real_local_to_global.len());
 
     Box::new(move |projected: f64, observed: f64| {
-        eval_likelihood(&likelihood, projected, observed, &params, &compiled, &int_s, &real_s)
+        eval_likelihood_resolved(&resolved, projected, observed, &params, &compiled, &int_s, &real_s)
     })
 }
 
-/// Evaluate a likelihood at (projected, observed, params).
-fn eval_likelihood(
-    likelihood: &Likelihood,
+/// Resolve a Likelihood using the compiled model's index maps.
+fn resolve_likelihood_from_model(
+    likelihood: &ir::observation::Likelihood,
+    compiled: &CompiledModel,
+) -> ResolvedLikelihood {
+    use ir::table::OobPolicy;
+    let table_meta: Vec<(OobPolicy, usize)> = compiled.model.tables.iter()
+        .zip(&compiled.table_values_cache)
+        .map(|(t, cached)| (t.out_of_bounds.clone(), cached.len()))
+        .collect();
+    let ctx = ResolveCtx {
+        comp_index: &compiled.comp_index,
+        param_index: &compiled.param_index,
+        time_func_index: &compiled.time_func_index,
+        table_index: &compiled.table_index,
+        global_to_int: &compiled.global_to_int,
+        global_to_real: &compiled.global_to_real,
+        table_meta: &table_meta,
+    };
+    resolve_likelihood(likelihood, &ctx)
+        .expect("observation likelihood resolution failed — this is a model construction bug")
+}
+
+/// Evaluate a resolved likelihood at (projected, observed, params).
+fn eval_likelihood_resolved(
+    likelihood: &ResolvedLikelihood,
     projected: f64,
     observed: f64,
     params: &[f64],
@@ -60,37 +84,36 @@ fn eval_likelihood(
     };
 
     match likelihood {
-        Likelihood::NegBinomial(nb) => {
-            let mean = eval_expr(&nb.mean, &ctx(projected)).unwrap_or(projected);
-            let k = eval_expr(&nb.dispersion, &ctx(projected)).unwrap_or(10.0);
-            negbin_logpmf(observed, mean, k)
+        ResolvedLikelihood::NegBinomial { mean, dispersion } => {
+            let m = eval_resolved(mean, &ctx(projected));
+            let k = eval_resolved(dispersion, &ctx(projected));
+            negbin_logpmf(observed, m, k)
         }
-        Likelihood::Normal(n) => {
-            let mean = eval_expr(&n.mean, &ctx(projected)).unwrap_or(projected);
-            let sd = eval_expr(&n.sd, &ctx(projected)).unwrap_or(1.0);
-            // Discretized normal for count data
-            discretized_normal_logpmf_tol(observed, mean, sd * sd, DEFAULT_TOL)
+        ResolvedLikelihood::Normal { mean, sd } => {
+            let m = eval_resolved(mean, &ctx(projected));
+            let s = eval_resolved(sd, &ctx(projected));
+            discretized_normal_logpmf_tol(observed, m, s * s, DEFAULT_TOL)
         }
-        Likelihood::Poisson(p) => {
-            let rate = eval_expr(&p.rate, &ctx(projected)).unwrap_or(projected);
-            poisson_logpmf(observed, rate)
+        ResolvedLikelihood::Poisson { rate } => {
+            let r = eval_resolved(rate, &ctx(projected));
+            poisson_logpmf(observed, r)
         }
-        Likelihood::Binomial(b) => {
-            let n_val = eval_expr(&b.n, &ctx(projected)).unwrap_or(projected);
-            let p_val = eval_expr(&b.p, &ctx(projected)).unwrap_or(0.5);
-            // Simple binomial logpmf
+        ResolvedLikelihood::Binomial { n, p } => {
+            let n_val = eval_resolved(n, &ctx(projected));
+            let p_val = eval_resolved(p, &ctx(projected));
             let k = observed.round() as i64;
-            let n = n_val.round() as i64;
-            if k < 0 || k > n { return f64::NEG_INFINITY; }
+            let n_int = n_val.round() as i64;
+            if k < 0 || k > n_int { return f64::NEG_INFINITY; }
             use crate::inference::obs_loglik::lgamma;
-            lgamma((n + 1) as f64) - lgamma((k + 1) as f64) - lgamma((n - k + 1) as f64)
-                + k as f64 * p_val.ln() + (n - k) as f64 * (1.0 - p_val).ln()
+            lgamma((n_int + 1) as f64) - lgamma((k + 1) as f64) - lgamma((n_int - k + 1) as f64)
+                + k as f64 * p_val.ln() + (n_int - k) as f64 * (1.0 - p_val).ln()
         }
-        Likelihood::BetaBinomial(_) => {
-            log::warn!("BetaBinomial obs_loglik not implemented — returning -inf"); return f64::NEG_INFINITY;
+        ResolvedLikelihood::BetaBinomial { .. } => {
+            log::warn!("BetaBinomial obs_loglik not implemented — returning -inf");
+            f64::NEG_INFINITY
         }
-        Likelihood::Bernoulli(b) => {
-            let p_val = eval_expr(&b.p, &ctx(projected)).unwrap_or(0.5);
+        ResolvedLikelihood::Bernoulli { p } => {
+            let p_val = eval_resolved(p, &ctx(projected));
             if observed > 0.5 { p_val.max(1e-300).ln() } else { (1.0 - p_val).max(1e-300).ln() }
         }
     }
@@ -104,14 +127,14 @@ pub fn compile_obs_sample_pf(
     obs_model: &ObservationModel,
     compiled: Arc<CompiledModel>,
     params: &[f64],
-) -> Box<dyn Fn(f64, &mut StatefulRng) -> f64> {
-    let likelihood = obs_model.likelihood.clone();
+) -> Box<dyn Fn(f64, &mut crate::rng::StatefulRng) -> f64> {
+    let resolved = resolve_likelihood_from_model(&obs_model.likelihood, &compiled);
     let params = params.to_vec();
     let int_s = IntState::new(compiled.int_local_to_global.len());
     let real_s = RealState::new(compiled.real_local_to_global.len());
 
     Box::new(move |projected: f64, rng: &mut StatefulRng| {
-        sample_obs(&likelihood, projected, &params, &compiled, &int_s, &real_s, rng)
+        sample_obs_resolved(&resolved, projected, &params, &compiled, &int_s, &real_s, rng)
     })
 }
 
@@ -123,19 +146,19 @@ pub fn compile_obs_mean_pf(
     compiled: Arc<CompiledModel>,
     params: &[f64],
 ) -> Box<dyn Fn(f64) -> f64> {
-    let likelihood = obs_model.likelihood.clone();
+    let resolved = resolve_likelihood_from_model(&obs_model.likelihood, &compiled);
     let params = params.to_vec();
     let int_s = IntState::new(compiled.int_local_to_global.len());
     let real_s = RealState::new(compiled.real_local_to_global.len());
 
     Box::new(move |projected: f64| {
-        eval_obs_mean(&likelihood, projected, &params, &compiled, &int_s, &real_s)
+        eval_obs_mean_resolved(&resolved, projected, &params, &compiled, &int_s, &real_s)
     })
 }
 
-/// Draw one sample from the observation model at a given projected value.
-fn sample_obs(
-    likelihood: &Likelihood,
+/// Draw one sample from the resolved observation model.
+fn sample_obs_resolved(
+    likelihood: &ResolvedLikelihood,
     projected: f64,
     params: &[f64],
     compiled: &CompiledModel,
@@ -148,42 +171,41 @@ fn sample_obs(
     };
 
     match likelihood {
-        Likelihood::NegBinomial(nb) => {
-            let mean = eval_expr(&nb.mean, &ctx(projected)).unwrap_or(projected);
-            let k = eval_expr(&nb.dispersion, &ctx(projected)).unwrap_or(10.0);
-            if mean <= 0.0 || k <= 0.0 { return 0.0; }
-            // NegBin via Gamma-Poisson: G ~ Gamma(k, mean/k), Y ~ Poisson(G)
-            let g = Gamma::new(k, mean / k).unwrap().sample(rng.inner_mut());
+        ResolvedLikelihood::NegBinomial { mean, dispersion } => {
+            let m = eval_resolved(mean, &ctx(projected));
+            let k = eval_resolved(dispersion, &ctx(projected));
+            if m <= 0.0 || k <= 0.0 { return 0.0; }
+            let g = Gamma::new(k, m / k).unwrap().sample(rng.inner_mut());
             rng.poisson(g) as f64
         }
-        Likelihood::Normal(n) => {
-            let mean = eval_expr(&n.mean, &ctx(projected)).unwrap_or(projected);
-            let sd = eval_expr(&n.sd, &ctx(projected)).unwrap_or(1.0);
-            let draw = Normal::new(mean, sd.max(1e-10)).unwrap().sample(rng.inner_mut());
-            draw.round().max(0.0) // discretized, non-negative
+        ResolvedLikelihood::Normal { mean, sd } => {
+            let m = eval_resolved(mean, &ctx(projected));
+            let s = eval_resolved(sd, &ctx(projected));
+            let draw = Normal::new(m, s.max(1e-10)).unwrap().sample(rng.inner_mut());
+            draw.round().max(0.0)
         }
-        Likelihood::Poisson(p) => {
-            let rate = eval_expr(&p.rate, &ctx(projected)).unwrap_or(projected);
-            rng.poisson(rate) as f64
+        ResolvedLikelihood::Poisson { rate } => {
+            let r = eval_resolved(rate, &ctx(projected));
+            rng.poisson(r) as f64
         }
-        Likelihood::Binomial(b) => {
-            let n_val = eval_expr(&b.n, &ctx(projected)).unwrap_or(projected);
-            let p_val = eval_expr(&b.p, &ctx(projected)).unwrap_or(0.5);
+        ResolvedLikelihood::Binomial { n, p } => {
+            let n_val = eval_resolved(n, &ctx(projected));
+            let p_val = eval_resolved(p, &ctx(projected));
             rng.binomial(n_val.round().max(0.0) as u64, p_val.clamp(0.0, 1.0)) as f64
         }
-        Likelihood::BetaBinomial(_) => {
-            log::warn!("BetaBinomial rmeasure not implemented — returning 0"); return 0.0;
+        ResolvedLikelihood::BetaBinomial { .. } => {
+            log::warn!("BetaBinomial rmeasure not implemented — returning 0"); 0.0
         }
-        Likelihood::Bernoulli(b) => {
-            let p_val = eval_expr(&b.p, &ctx(projected)).unwrap_or(0.5);
+        ResolvedLikelihood::Bernoulli { p } => {
+            let p_val = eval_resolved(p, &ctx(projected));
             if rng.uniform() < p_val { 1.0 } else { 0.0 }
         }
     }
 }
 
 /// Compute E[y | projected, params] — the observation model mean, no sampling.
-fn eval_obs_mean(
-    likelihood: &Likelihood,
+fn eval_obs_mean_resolved(
+    likelihood: &ResolvedLikelihood,
     projected: f64,
     params: &[f64],
     compiled: &CompiledModel,
@@ -195,25 +217,25 @@ fn eval_obs_mean(
     };
 
     match likelihood {
-        Likelihood::NegBinomial(nb) => {
-            eval_expr(&nb.mean, &ctx(projected)).unwrap_or(projected)
+        ResolvedLikelihood::NegBinomial { mean, .. } => {
+            eval_resolved(mean, &ctx(projected))
         }
-        Likelihood::Normal(n) => {
-            eval_expr(&n.mean, &ctx(projected)).unwrap_or(projected)
+        ResolvedLikelihood::Normal { mean, .. } => {
+            eval_resolved(mean, &ctx(projected))
         }
-        Likelihood::Poisson(p) => {
-            eval_expr(&p.rate, &ctx(projected)).unwrap_or(projected)
+        ResolvedLikelihood::Poisson { rate } => {
+            eval_resolved(rate, &ctx(projected))
         }
-        Likelihood::Binomial(b) => {
-            let n_val = eval_expr(&b.n, &ctx(projected)).unwrap_or(projected);
-            let p_val = eval_expr(&b.p, &ctx(projected)).unwrap_or(0.5);
+        ResolvedLikelihood::Binomial { n, p } => {
+            let n_val = eval_resolved(n, &ctx(projected));
+            let p_val = eval_resolved(p, &ctx(projected));
             n_val * p_val
         }
-        Likelihood::BetaBinomial(_) => {
-            log::warn!("BetaBinomial obs_mean not implemented — returning projected"); return projected;
+        ResolvedLikelihood::BetaBinomial { .. } => {
+            log::warn!("BetaBinomial obs_mean not implemented — returning projected"); projected
         }
-        Likelihood::Bernoulli(b) => {
-            eval_expr(&b.p, &ctx(projected)).unwrap_or(0.5)
+        ResolvedLikelihood::Bernoulli { p } => {
+            eval_resolved(p, &ctx(projected))
         }
     }
 }

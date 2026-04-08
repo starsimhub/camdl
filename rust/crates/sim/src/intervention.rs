@@ -1,7 +1,8 @@
 use crate::{
     compiled_model::CompiledModel,
     error::SimError,
-    propensity::{eval_expr, EvalCtx},
+    propensity::EvalCtx,
+    resolved_expr::eval_resolved,
     state::{IntState, RealState},
 };
 use ir::intervention::{Action, Intervention, InterventionSchedule};
@@ -48,7 +49,7 @@ pub fn apply_interventions_at(
     for (iv_idx, iv) in model.model.interventions.iter().enumerate() {
         if iv.always_active { continue; }
         if model.fire_steps[iv_idx].contains(&current_step) {
-            apply_intervention(iv, model, int_s, real_s, params, t)?;
+            apply_intervention(iv, iv_idx, model, int_s, real_s, params, t)?;
             any_fired = true;
         }
     }
@@ -81,10 +82,11 @@ pub fn inject_event_deltas(
     for (iv_idx, iv) in model.model.interventions.iter().enumerate() {
         if !iv.always_active { continue; }
         if !model.fire_steps[iv_idx].contains(&current_step) { continue; }
-        for action in &iv.actions {
+        for (action_idx, action) in iv.actions.iter().enumerate() {
+            let resolved_val = eval_resolved(&model.resolved.intervention_exprs[iv_idx][action_idx], &ctx);
             match action {
                 Action::Add(aa) => {
-                    let raw = eval_expr(&aa.count, &ctx)?;
+                    let raw = resolved_val;
                     let n = raw.round() as i64;
                     {
                         use std::sync::OnceLock;
@@ -101,7 +103,7 @@ pub fn inject_event_deltas(
                     }
                 }
                 Action::FractionTransfer(ft) => {
-                    let frac = eval_expr(&ft.fraction, &ctx)?.clamp(0.0, 1.0);
+                    let frac = resolved_val.clamp(0.0, 1.0);
                     if let (Some(&sg), Some(&dg)) = (
                         model.comp_index.get(ft.src.as_str()),
                         model.comp_index.get(ft.dst.as_str()),
@@ -114,7 +116,7 @@ pub fn inject_event_deltas(
                     }
                 }
                 Action::AbsoluteTransfer(at) => {
-                    let n = eval_expr(&at.count, &ctx)?.round() as i64;
+                    let n = resolved_val.round() as i64;
                     if let (Some(&sg), Some(&dg)) = (
                         model.comp_index.get(at.src.as_str()),
                         model.comp_index.get(at.dst.as_str()),
@@ -127,7 +129,7 @@ pub fn inject_event_deltas(
                     }
                 }
                 Action::Set(sa) => {
-                    let new_val = eval_expr(&sa.value, &ctx)?.round() as i64;
+                    let new_val = resolved_val.round() as i64;
                     if let Some(&global) = model.comp_index.get(sa.compartment.as_str()) {
                         if let Some(local) = model.global_to_int[global] {
                             let old_val = snapshot.counts[local];
@@ -153,17 +155,21 @@ pub fn all_intervention_times(model: &CompiledModel) -> Vec<f64> {
 
 fn apply_intervention(
     iv: &Intervention,
+    iv_idx: usize,
     model: &CompiledModel,
     int_s: &mut IntState,
     real_s: &mut RealState,
     params: &[f64],
     t: f64,
 ) -> Result<(), SimError> {
-    for action in &iv.actions {
+    for (action_idx, action) in iv.actions.iter().enumerate() {
+        let resolved_val = eval_resolved(
+            &model.resolved.intervention_exprs[iv_idx][action_idx],
+            &EvalCtx { model, int_s, real_s, params, t, projected: None },
+        );
         match action {
             Action::FractionTransfer(ft) => {
-                // Eval at current state before mutation; ctx scoped to drop before the &mut borrows.
-                let frac = eval_expr(&ft.fraction, &EvalCtx { model, int_s, real_s, params, t , projected: None })?.clamp(0.0, 1.0);
+                let frac = resolved_val.clamp(0.0, 1.0);
                 let src_global = *model.comp_index.get(ft.src.as_str())
                     .ok_or_else(|| SimError::UnknownCompartment(ft.src.clone()))?;
                 let dst_global = *model.comp_index.get(ft.dst.as_str())
@@ -187,7 +193,7 @@ fn apply_intervention(
             }
 
             Action::AbsoluteTransfer(at) => {
-                let n = eval_expr(&at.count, &EvalCtx { model, int_s, real_s, params, t , projected: None })?;
+                let n = resolved_val;
                 let src_global = *model.comp_index.get(at.src.as_str())
                     .ok_or_else(|| SimError::UnknownCompartment(at.src.clone()))?;
                 let dst_global = *model.comp_index.get(at.dst.as_str())
@@ -211,7 +217,7 @@ fn apply_intervention(
             }
 
             Action::Set(sa) => {
-                let v = eval_expr(&sa.value, &EvalCtx { model, int_s, real_s, params, t , projected: None })?;
+                let v = resolved_val;
                 let global = *model.comp_index.get(sa.compartment.as_str())
                     .ok_or_else(|| SimError::UnknownCompartment(sa.compartment.clone()))?;
                 if let Some(local) = model.global_to_int[global] {
@@ -222,7 +228,7 @@ fn apply_intervention(
             }
 
             Action::Add(aa) => {
-                let n = eval_expr(&aa.count, &EvalCtx { model, int_s, real_s, params, t , projected: None })?;
+                let n = resolved_val;
                 let count = n.round() as i64;
                 if count < 0 {
                     log::warn!("event '{}' adding negative count ({}) to '{}'",

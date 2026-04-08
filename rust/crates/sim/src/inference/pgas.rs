@@ -22,7 +22,8 @@ use crate::inference::particle_filter::Observation;
 use crate::inference::resampling::systematic_resample;
 use crate::inference::pmmh::Prior;
 use crate::inference::if2::{EstimatedParam, Transform};
-use crate::propensity::{eval_propensities, eval_expr, EvalCtx};
+use crate::propensity::{eval_propensities, EvalCtx};
+use crate::resolved_expr::eval_resolved;
 use crate::state::{IntState, RealState};
 
 // ═══════════════════════════════════════════════════════════════════
@@ -194,8 +195,8 @@ pub fn log_transition_density_substep(
     for (i, tr) in model.model.transitions.iter().enumerate() {
         match &tr.draw_method {
             ir::transition::DrawMethod::Deterministic => { is_determ[i] = true; }
-            ir::transition::DrawMethod::Overdispersed(expr) => {
-                sigma_sq_by_tr[i] = Some(eval_expr(expr, &ctx)?);
+            ir::transition::DrawMethod::Overdispersed(_) => {
+                sigma_sq_by_tr[i] = Some(eval_resolved(model.resolved.overdispersion[i].as_ref().unwrap(), &ctx));
             }
             _ => {}
         }
