@@ -21,7 +21,7 @@ use sim::{
     chain_binomial::step_one,
     inference::{
         obs_loglik::{negbin_logpmf, discretized_normal_logpmf_tol, DEFAULT_TOL},
-        if2::{run_if2_with_progress, IF2Config, IF2Param, IF2Result, Observation, Transform},
+        if2::{run_if2_with_progress, IF2Config, EstimatedParam, IF2Result, Observation, Transform},
         ParticleState,
     },
     rng::StatefulRng,
@@ -33,7 +33,7 @@ fn run_one_chain(
     chain_id: usize,
     compiled: &CompiledModel,
     params: &[f64],
-    if2_params: &[IF2Param],
+    if2_params: &[EstimatedParam],
     observations: &[Observation],
     config: &IF2Config,
     flow_indices: &[usize],
@@ -256,7 +256,7 @@ pub fn cmd_if2(args: &[String]) {
     let flow_indices = crate::util::resolve_flow_indices(&model, flow_name.as_deref())
         .unwrap_or_else(|e| { eprintln!("error: {}", e); std::process::exit(1); });
 
-    // Build IF2Param specs from --rw-sd
+    // Build EstimatedParam specs from --rw-sd
     //
     // Two modes:
     //   Explicit: --rw-sd "R0=5,sigma=0.01" → only named params estimated.

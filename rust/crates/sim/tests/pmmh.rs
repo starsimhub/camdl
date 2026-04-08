@@ -21,7 +21,7 @@ use sim::{
     inference::{
         obs_loglik::poisson_logpmf,
         particle_filter::{bootstrap_filter, Observation},
-        if2::{IF2Param, Transform},
+        if2::{EstimatedParam, Transform},
         pmmh::{run_pmmh, Prior, PMMHConfig, mcmc_ess},
         ParticleState,
     },
@@ -129,9 +129,9 @@ fn make_eval_loglik<'a>(
     }
 }
 
-/// IF2Param spec for the death rate μ (log-transformed, positive).
-fn mu_param() -> IF2Param {
-    IF2Param {
+/// EstimatedParam spec for the death rate μ (log-transformed, positive).
+fn mu_param() -> EstimatedParam {
+    EstimatedParam {
         name: "mu".into(),
         index: 0, // μ is the only parameter
         initial: 0.01,

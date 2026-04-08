@@ -118,7 +118,7 @@ fn test_gradient_vs_finite_differences_sir() {
 /// Bug #1 (double chain rule) lived in exactly this layer.
 #[test]
 fn test_nuts_target_gradient_on_z_scale() {
-    use sim::inference::if2::{IF2Param, Transform};
+    use sim::inference::if2::{EstimatedParam, Transform};
     use sim::inference::pmmh::Prior;
 
     let model = load_model("../../../ocaml/golden/sir_basic.ir.json");
@@ -147,9 +147,9 @@ fn test_nuts_target_gradient_on_z_scale() {
     let ivp_mappings: Vec<IVPMapping> = vec![];
     let obs_streams: Vec<sim::inference::ObsStreamSpec> = vec![];
 
-    // Build IF2Params with Log transforms (like real inference)
-    let if2_params: Vec<IF2Param> = compiled.model.parameters.iter().enumerate()
-        .map(|(i, p)| IF2Param {
+    // Build EstimatedParams with Log transforms (like real inference)
+    let if2_params: Vec<EstimatedParam> = compiled.model.parameters.iter().enumerate()
+        .map(|(i, p)| EstimatedParam {
             index: i,
             name: p.name.clone(),
             initial: p.value.unwrap_or(0.5),

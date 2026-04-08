@@ -9,7 +9,7 @@ use crate::fit::state::FitState;
 use crate::fit::runner::FitRunConfig;
 use crate::fit::scout::now_iso8601_pub;
 use sim::inference::{
-    if2::IF2Param,
+    if2::EstimatedParam,
     pmmh::Prior,
     pgas::{PGASConfig, ChainResumeState, run_pgas, PGASSweep, PGASTrajectory},
 };
@@ -464,7 +464,7 @@ struct Diagnostics {
 
 fn compute_diagnostics(
     results: &[(usize, Vec<PGASSweep>, Vec<f64>)],
-    estimated_params: &[IF2Param],
+    estimated_params: &[EstimatedParam],
 ) -> Diagnostics {
     let mut rhat_map = HashMap::new();
     let mut ess_map = HashMap::new();

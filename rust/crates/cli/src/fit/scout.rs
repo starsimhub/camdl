@@ -4,7 +4,7 @@ use crate::fit::config::FitToml;
 use crate::fit::state::FitState;
 use crate::fit::provenance;
 use crate::fit::runner::{self, FitRunConfig};
-use sim::inference::if2::IF2Param;
+use sim::inference::if2::EstimatedParam;
 use std::collections::HashMap;
 
 const SCOUT_CHAINS: usize = 8;
@@ -70,7 +70,7 @@ pub fn run_scout(fit: &FitToml, seed: u64, force: bool) -> Result<(), String> {
 
     // Generate per-chain starts
     let mut rng = sim::rng::StatefulRng::new(seed ^ 0xcafe_u64);
-    let per_chain_params: Vec<Vec<IF2Param>> = (0..n_chains).map(|chain_id| {
+    let per_chain_params: Vec<Vec<EstimatedParam>> = (0..n_chains).map(|chain_id| {
         config.estimated_params.iter().map(|spec| {
             let initial = if chain_id < start_chains {
                 // Seeded chain: use start value with jitter, or random if no start
@@ -84,7 +84,7 @@ pub fn run_scout(fit: &FitToml, seed: u64, force: bool) -> Result<(), String> {
                 // Fully random chain
                 random_from_bounds(spec, &mut rng)
             };
-            IF2Param {
+            EstimatedParam {
                 initial,
                 ..spec.clone()
             }
@@ -220,7 +220,7 @@ fn write_summary(
         .map_err(|e| format!("cannot write {}: {}", path, e))
 }
 
-fn random_from_bounds(spec: &IF2Param, rng: &mut sim::rng::StatefulRng) -> f64 {
+fn random_from_bounds(spec: &EstimatedParam, rng: &mut sim::rng::StatefulRng) -> f64 {
     if spec.lower.is_finite() && spec.upper.is_finite() {
         spec.lower + rng.uniform() * (spec.upper - spec.lower)
     } else {

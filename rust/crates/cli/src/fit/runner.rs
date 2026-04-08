@@ -1,6 +1,6 @@
 //! Shared chain-running logic for all fit stages.
 //!
-//! Handles: model loading, IF2Param construction from fit.toml,
+//! Handles: model loading, EstimatedParam construction from fit.toml,
 //! obs_loglik construction from IR observation model, chain execution,
 //! Rhat computation, and MAD-based auto rw_sd calibration.
 
@@ -12,7 +12,7 @@ use sim::{
     compiled_model::CompiledModel,
     chain_binomial::step_one,
     inference::{
-        if2::{run_if2_with_progress, IF2Config, IF2Param, IF2Result, Observation, Transform},
+        if2::{run_if2_with_progress, IF2Config, EstimatedParam, IF2Result, Observation, Transform},
         pmmh::Prior,
         ParticleState,
     },
@@ -35,7 +35,7 @@ pub struct FitRunConfig {
     pub model: ir::Model,
     pub model_ir_json: String,
     pub base_params: Vec<f64>,
-    pub estimated_params: Vec<IF2Param>,
+    pub estimated_params: Vec<EstimatedParam>,
     /// Canonical observation times (shared across all streams).
     pub observations: Vec<Observation>,
     /// Per-stream data. For single-stream models, len() == 1.
@@ -120,7 +120,7 @@ impl FitRunConfig {
             }
         }
 
-        // Build IF2Param specs
+        // Build EstimatedParam specs
         let if2_params = build_if2_params(
             fit, prior_state, &model, &compiled, &base_params, random_starts, seed,
         )?;
@@ -212,7 +212,7 @@ impl FitRunConfig {
 
 // load_model is now in util.rs
 
-/// Build IF2Param specs from fit.toml [estimate] + optional prior state overrides.
+/// Build EstimatedParam specs from fit.toml [estimate] + optional prior state overrides.
 /// Uses the shared build_if2_params_from_specs for core logic, then applies
 /// fit-specific overrides (prior state rw_sd, start values, random starts).
 fn build_if2_params(
@@ -223,7 +223,7 @@ fn build_if2_params(
     base_params: &[f64],
     random_starts: bool,
     seed: u64,
-) -> Result<Vec<IF2Param>, String> {
+) -> Result<Vec<EstimatedParam>, String> {
     // Build ParamSpecs from fit.toml [estimate]
     let specs: Vec<ParamSpec> = fit.estimate.iter().map(|(name, est)| {
         // rw_sd priority: prior state > fit.toml explicit > None (auto)
@@ -428,7 +428,7 @@ pub fn derive_transform(
 ///
 /// Each CLI (if2, profile, fit) builds a Vec<ParamSpec> from its own
 /// flags or config. The shared `build_if2_params_from_specs` turns
-/// these into Vec<IF2Param> — the format the IF2 engine consumes.
+/// these into Vec<EstimatedParam> — the format the IF2 engine consumes.
 ///
 /// Design: the caller decides WHAT to estimate (the partition).
 /// The shared function decides HOW (transform, rw_sd, bounds).
@@ -447,14 +447,14 @@ pub struct ParamSpec {
     pub start: Option<f64>,
 }
 
-/// Build IF2Param specs from caller-provided ParamSpecs.
+/// Build EstimatedParam specs from caller-provided ParamSpecs.
 /// Pure mechanical work: look up indices, derive transforms, compute auto rw_sd.
 pub fn build_if2_params_from_specs(
     model: &ir::Model,
     compiled: &CompiledModel,
     base_params: &[f64],
     specs: &[ParamSpec],
-) -> Result<Vec<IF2Param>, String> {
+) -> Result<Vec<EstimatedParam>, String> {
     let mut params = Vec::with_capacity(specs.len());
 
     for spec in specs {
@@ -473,7 +473,7 @@ pub fn build_if2_params_from_specs(
         let rw_sd = spec.rw_sd
             .unwrap_or_else(|| auto_rw_sd_from_value(base_params[idx], lo, hi, &transform));
 
-        params.push(IF2Param {
+        params.push(EstimatedParam {
             name: spec.name.clone(),
             index: idx,
             initial: base_params[idx],
@@ -498,7 +498,7 @@ pub fn auto_rw_sd_from_value_pub(current_value: f64, lower: f64, upper: f64, tra
 /// Auto-compute rw_sd from bounds on the transformed scale.
 ///
 /// Returns a natural-scale rw_sd value. At each IF2 perturbation step,
-/// `IF2Param::transformed_sd(natural_sd, current_value)` re-converts
+/// `EstimatedParam::transformed_sd(natural_sd, current_value)` re-converts
 /// this to the transformed scale using the delta method at the CURRENT
 /// parameter value. So the midpoint used here is just a reference point
 /// for expressing the natural-scale number — the actual perturbation
@@ -593,7 +593,7 @@ fn resolve_flow_indices(model: &ir::Model, stream_name: &str) -> Result<Vec<usiz
 fn run_one_chain(
     chain_id: usize,
     config: &FitRunConfig,
-    per_chain_params: Option<&[IF2Param]>,
+    per_chain_params: Option<&[EstimatedParam]>,
     pb: Option<&ProgressBar>,
 ) -> IF2Result {
     let chain_seed = config.seed ^ (chain_id as u64).wrapping_mul(0x9e3779b97f4a7c15);
@@ -642,10 +642,10 @@ pub fn run_chains(config: &FitRunConfig) -> ChainResults {
     run_chains_with_per_chain_params(config, None)
 }
 
-/// Run N chains with optional per-chain IF2Param overrides (for scout random starts).
+/// Run N chains with optional per-chain EstimatedParam overrides (for scout random starts).
 pub fn run_chains_with_per_chain_params(
     config: &FitRunConfig,
-    per_chain_params: Option<&[Vec<IF2Param>]>,
+    per_chain_params: Option<&[Vec<EstimatedParam>]>,
 ) -> ChainResults {
     eprintln!("running {} chains × {} particles × {} iterations, cooling={}, dt={}",
         config.n_chains, config.if2_config.n_particles, config.if2_config.n_iterations,
@@ -757,7 +757,7 @@ pub fn run_chains_with_per_chain_params(
 /// Compute Rhat across chains (last half of iterations).
 pub fn compute_rhat(
     results: &[(usize, IF2Result)],
-    if2_params: &[IF2Param],
+    if2_params: &[EstimatedParam],
     n_iterations: usize,
 ) -> HashMap<String, f64> {
     let n_chains = results.len();
@@ -837,7 +837,7 @@ pub fn compute_rhat_ess(chains: &[Vec<f64>]) -> (f64, f64) {
 /// Returns (rw_sd map, n_good_chains) or error if no consensus.
 pub fn auto_rw_sd(
     results: &[(usize, IF2Result)],
-    if2_params: &[IF2Param],
+    if2_params: &[EstimatedParam],
 ) -> Result<(HashMap<String, f64>, usize), String> {
     let n_chains = results.len();
     if n_chains < 3 {
@@ -954,7 +954,7 @@ pub fn auto_rw_sd(
 pub fn write_chain_outputs(
     dir: &str,
     results: &[(usize, IF2Result)],
-    if2_params: &[IF2Param],
+    if2_params: &[EstimatedParam],
     all_param_names: &[String],
     base_params: &[f64],
     compiled: &CompiledModel,
@@ -1110,7 +1110,7 @@ mod tests {
         let base_params = compiled.default_params.clone();
 
         // beta is estimated, gamma and N0 are fixed
-        let if2_params = vec![IF2Param {
+        let if2_params = vec![EstimatedParam {
             name: "beta".into(),
             index: compiled.param_index["beta"],
             initial: 0.3,
@@ -1178,7 +1178,7 @@ pub fn compute_fit_input_hash(fit: &FitToml, config: &FitRunConfig, seed: u64) -
 /// Collect ALL parameter values (estimated + fixed) for MLE output.
 pub fn collect_all_params(
     mle: &[f64],
-    if2_params: &[IF2Param],
+    if2_params: &[EstimatedParam],
     model: &ir::Model,
     base_params: &[f64],
     compiled: &CompiledModel,

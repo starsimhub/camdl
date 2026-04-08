@@ -8,7 +8,7 @@ use crate::hashing;
 use sha2::Digest;
 use sim::inference::{
     bootstrap_filter,
-    if2::{IF2Config, IF2Param, run_if2},
+    if2::{IF2Config, EstimatedParam, run_if2},
     ParticleState,
 };
 use sim::chain_binomial::step_one;
@@ -466,7 +466,7 @@ fn run_profiles(
 
         for &focal_value in &grid {
             // Run short IF2 with focal param fixed at grid value
-            let mut fixed_params: Vec<IF2Param> = config.estimated_params.iter()
+            let mut fixed_params: Vec<EstimatedParam> = config.estimated_params.iter()
                 .filter(|p| p.name != focal.name)
                 .cloned()
                 .collect();

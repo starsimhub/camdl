@@ -10,7 +10,7 @@ use crate::fit::runner::{self, FitRunConfig};
 use crate::fit::scout::now_iso8601_pub;
 use rayon::prelude::*;
 use sim::inference::{
-    if2::IF2Param,
+    if2::EstimatedParam,
     pmmh::{run_pmmh, Prior, PMMHConfig, PMMHResult, PMMHResumeState},
 };
 use std::collections::HashMap;
@@ -531,7 +531,7 @@ fn build_proposal_sd(
 
 /// Load chain endpoint parameters from a prior stage and compute
 /// empirical SD on the transformed scale. Scale by 2.38/√d (optimal RWM).
-fn load_scout_proposal_sd(dir: &str, if2_params: &[IF2Param]) -> Result<Vec<f64>, String> {
+fn load_scout_proposal_sd(dir: &str, if2_params: &[EstimatedParam]) -> Result<Vec<f64>, String> {
     // Find chain directories
     let mut chain_dirs: Vec<String> = Vec::new();
     for entry in std::fs::read_dir(dir).map_err(|e| format!("{}: {}", dir, e))? {
@@ -586,7 +586,7 @@ struct Diagnostics {
 
 fn compute_diagnostics(
     results: &[(usize, PMMHResult)],
-    estimated_params: &[IF2Param],
+    estimated_params: &[EstimatedParam],
 ) -> Diagnostics {
     let mut rhat_map = HashMap::new();
     let mut ess_map = HashMap::new();

@@ -18,7 +18,7 @@
 
 use serde::{Serialize, Deserialize};
 use crate::rng::StatefulRng;
-use super::if2::IF2Param;
+use super::if2::EstimatedParam;
 
 // ── Prior ──────────────────────────────────────────────────────────
 
@@ -305,7 +305,7 @@ pub type CorrelatedEvalFn<'a> = dyn Fn(&[f64], &super::correlated_pf::PFRandomSt
     -> f64 + 'a;
 
 pub fn run_pmmh(
-    if2_params: &[IF2Param],
+    if2_params: &[EstimatedParam],
     priors: &[Prior],
     base_params: &[f64],
     config: &PMMHConfig,

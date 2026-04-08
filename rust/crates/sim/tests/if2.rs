@@ -17,7 +17,7 @@ use sim::{
     chain_binomial::{step_one, StepScratch},
     inference::{
         obs_loglik::negbin_logpmf,
-        if2::{run_if2, IF2Config, IF2Param, Observation, Transform},
+        if2::{run_if2, IF2Config, EstimatedParam, Observation, Transform},
         ParticleState,
     },
     rng::StatefulRng,
@@ -148,11 +148,11 @@ fn test_if2_converges_from_dispersed_start() {
     start_params[1] = 0.3;  // gamma (true: 0.1)
 
     let if2_params = vec![
-        IF2Param {
+        EstimatedParam {
             name: "beta".into(), index: 0, initial: 0.8,
             rw_sd: 0.05, transform: Transform::Logit { lo: 0.01, hi: 2.0 }, lower: 0.01, upper: 2.0, ivp: false, rw_sd_auto: false,
         },
-        IF2Param {
+        EstimatedParam {
             name: "gamma".into(), index: 1, initial: 0.3,
             rw_sd: 0.01, transform: Transform::Logit { lo: 0.01, hi: 1.0 }, lower: 0.01, upper: 1.0, ivp: false, rw_sd_auto: false,
         },
@@ -220,12 +220,12 @@ fn test_if2_respects_bounds() {
 
     // Use tight bounds to test enforcement
     let if2_params = vec![
-        IF2Param {
+        EstimatedParam {
             name: "beta".into(), index: 0, initial: 0.3,
             rw_sd: 0.1, // aggressive — would escape without bounds
             transform: Transform::Logit { lo: 0.1, hi: 0.5 }, lower: 0.1, upper: 0.5, ivp: false, rw_sd_auto: false,
         },
-        IF2Param {
+        EstimatedParam {
             name: "gamma".into(), index: 1, initial: 0.1,
             rw_sd: 0.03,
             transform: Transform::Logit { lo: 0.05, hi: 0.2 }, lower: 0.05, upper: 0.2, ivp: false, rw_sd_auto: false,
@@ -268,7 +268,7 @@ fn test_if2_no_cooling_explores() {
     let data = generate_data(&compiled, &true_params);
 
     let if2_params = vec![
-        IF2Param {
+        EstimatedParam {
             name: "beta".into(), index: 0, initial: 0.3,
             rw_sd: 0.02, transform: Transform::Logit { lo: 0.01, hi: 2.0 }, lower: 0.01, upper: 2.0, ivp: false, rw_sd_auto: false,
         },
@@ -309,7 +309,7 @@ fn test_if2_no_cooling_explores() {
 
 #[test]
 fn log_transform_clamps_to_bounds() {
-    let param = IF2Param {
+    let param = EstimatedParam {
         name: "test".into(), index: 0, initial: 1.0, rw_sd: 0.1,
         transform: Transform::Log { lo: 0.01, hi: 100.0 },
         lower: 0.01, upper: 100.0, ivp: false, rw_sd_auto: false,
@@ -325,7 +325,7 @@ fn log_transform_clamps_to_bounds() {
 
 #[test]
 fn logit_transform_enforces_bounds() {
-    let param = IF2Param {
+    let param = EstimatedParam {
         name: "test".into(), index: 0, initial: 0.5, rw_sd: 0.1,
         transform: Transform::Logit { lo: 0.0, hi: 1.0 },
         lower: 0.0, upper: 1.0, ivp: false, rw_sd_auto: false,
@@ -344,7 +344,7 @@ fn logit_transform_enforces_bounds() {
 
 #[test]
 fn log_round_trip_within_bounds() {
-    let param = IF2Param {
+    let param = EstimatedParam {
         name: "test".into(), index: 0, initial: 5.0, rw_sd: 0.1,
         transform: Transform::Log { lo: 0.001, hi: 1000.0 },
         lower: 0.001, upper: 1000.0, ivp: false, rw_sd_auto: false,
@@ -358,7 +358,7 @@ fn log_round_trip_within_bounds() {
 
 #[test]
 fn logit_round_trip() {
-    let param = IF2Param {
+    let param = EstimatedParam {
         name: "test".into(), index: 0, initial: 0.5, rw_sd: 0.1,
         transform: Transform::Logit { lo: 0.0, hi: 1.0 },
         lower: 0.0, upper: 1.0, ivp: false, rw_sd_auto: false,
@@ -373,7 +373,7 @@ fn logit_round_trip() {
 #[test]
 fn scaled_logit_round_trip() {
     // Logit on [0.01, 0.10] — the s0 case
-    let param = IF2Param {
+    let param = EstimatedParam {
         name: "s0".into(), index: 0, initial: 0.03, rw_sd: 0.005,
         transform: Transform::Logit { lo: 0.01, hi: 0.10 },
         lower: 0.01, upper: 0.10, ivp: true, rw_sd_auto: false,

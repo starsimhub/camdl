@@ -24,7 +24,7 @@ use super::resampling::systematic_resample;
 
 /// One parameter's transform and perturbation spec.
 #[derive(Clone, Debug)]
-pub struct IF2Param {
+pub struct EstimatedParam {
     /// Parameter name (for reporting).
     pub name: String,
     /// Index into the params array.
@@ -120,7 +120,7 @@ pub enum Transform {
     None,
 }
 
-impl IF2Param {
+impl EstimatedParam {
     pub fn to_transformed(&self, x: f64) -> f64 {
         match &self.transform {
             Transform::Log { lo, hi } => x.clamp(*lo, *hi).max(1e-300).ln(),
@@ -294,7 +294,7 @@ pub type ProgressCallback<'a> = Option<&'a dyn Fn(usize, f64)>;
 pub fn run_if2(
     model: &CompiledModel,
     base_params: &[f64],
-    if2_params: &[IF2Param],
+    if2_params: &[EstimatedParam],
     observations: &[Observation],
     config: &IF2Config,
     step_fn: &(dyn Fn(&mut ParticleState, &[f64], f64, f64, &mut StatefulRng, &mut StepScratch) -> Result<(), SimError> + Send + Sync),
@@ -309,7 +309,7 @@ pub fn run_if2(
 pub fn run_if2_with_progress(
     model: &CompiledModel,
     base_params: &[f64],
-    if2_params: &[IF2Param],
+    if2_params: &[EstimatedParam],
     observations: &[Observation],
     config: &IF2Config,
     step_fn: &(dyn Fn(&mut ParticleState, &[f64], f64, f64, &mut StatefulRng, &mut StepScratch) -> Result<(), SimError> + Send + Sync),

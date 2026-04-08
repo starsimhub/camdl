@@ -21,7 +21,7 @@ use crate::inference::obs_loglik::{poisson_logpmf, binom_logpmf};
 use crate::inference::particle_filter::Observation;
 use crate::inference::resampling::systematic_resample;
 use crate::inference::pmmh::Prior;
-use crate::inference::if2::{IF2Param, Transform};
+use crate::inference::if2::{EstimatedParam, Transform};
 use crate::propensity::{eval_propensities, eval_expr, EvalCtx};
 use crate::state::{IntState, RealState};
 
@@ -867,7 +867,7 @@ pub fn csmc_as(
 
 /// Derivative of the transform θ(z) w.r.t. z.
 /// dθ/dz for chain rule: d(f(θ))/dz = d(f)/dθ × dθ/dz.
-fn transform_deriv(param: &IF2Param, z: f64) -> f64 {
+fn transform_deriv(param: &EstimatedParam, z: f64) -> f64 {
     match &param.transform {
         Transform::Log { .. } => z.exp(), // θ = exp(z), dθ/dz = exp(z)
         Transform::Logit { lo, hi } => {
@@ -881,7 +881,7 @@ fn transform_deriv(param: &IF2Param, z: f64) -> f64 {
 /// Prior log-density AND its gradient on the z (unconstrained) scale.
 /// Each variant handles its own chain rule — the caller just sums.
 fn prior_log_density_and_grad_z(
-    prior: &Prior, param: &IF2Param, theta: f64, z: f64,
+    prior: &Prior, param: &EstimatedParam, theta: f64, z: f64,
 ) -> (f64, f64) {
     match prior {
         Prior::Flat => (0.0, 0.0),
@@ -927,7 +927,7 @@ fn prior_log_density_and_grad_z(
 /// Gibbs alternation provides mixing: small θ steps track the shifting mode.
 pub fn run_pgas(
     model: &CompiledModel,
-    if2_params: &[IF2Param],
+    if2_params: &[EstimatedParam],
     priors: &[Prior],
     base_params: &[f64],
     config: &PGASConfig,
