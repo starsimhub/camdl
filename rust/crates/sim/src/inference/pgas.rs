@@ -440,6 +440,17 @@ pub fn simulate_reference(
         let counts_before = counts.clone();
         step_one(model, &mut counts, &mut flows, params, t, dt, rng, &mut scratch)?;
 
+        // Verify consistency: for each source group, total flow ≤ pre-step count.
+        if cfg!(debug_assertions) {
+            for &(src_local, ref group) in &model.source_groups {
+                let n_src = counts_before[src_local].max(0) as u64;
+                let n_exit: u64 = group.iter().map(|&ti| flows[ti]).sum();
+                debug_assert!(n_exit <= n_src,
+                    "simulate_reference: n_exit={} > n_src={} at substep {} src_comp={}",
+                    n_exit, n_src, s, src_local);
+            }
+        }
+
         substeps.push(SubstepRecord {
             counts_before,
             counts_after: counts.clone(),
@@ -763,6 +774,19 @@ pub fn csmc_as(
         particle = ancestors[s][particle];
     }
     trajectory_substeps.reverse();
+
+    // Verify consistency: counts_before and flows must be from the same particle.
+    if cfg!(debug_assertions) {
+        for (s, rec) in trajectory_substeps.iter().enumerate() {
+            for &(src_local, ref group) in &model.source_groups {
+                let n_src = rec.counts_before[src_local].max(0) as u64;
+                let n_exit: u64 = group.iter().map(|&ti| rec.flows[ti]).sum();
+                debug_assert!(n_exit <= n_src,
+                    "csmc_as traceback: n_exit={} > n_src={} at substep {} src_comp={}",
+                    n_exit, n_src, s, src_local);
+            }
+        }
+    }
 
     let trajectory_renewal = 1.0 - n_from_ref as f64 / n_substeps as f64;
 
