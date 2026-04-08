@@ -263,13 +263,24 @@ pub fn log_transition_density_substep(
         // Step 2: evaluate total exits density
         let p_total = (1.0 - (-total_rate * dt).exp()).clamp(1e-15, 1.0 - 1e-15);
         let n_exit: u64 = probs.iter().map(|&(tr_idx, _)| flows[tr_idx]).sum();
+        let binom_total = binom_logpmf(n_exit, n_src as u64, p_total);
 
-        // Handle clamping: step_one may draw n_exit from a LARGER source count
-        // than what's stored in counts_before (because negative clamping reduced
-        // the count between substeps). Use the larger of n_src and n_exit as the
-        // effective population for the Binomial density.
-        let effective_n_src = (n_src as u64).max(n_exit);
-        let binom_total = binom_logpmf(n_exit, effective_n_src, p_total);
+        if !binom_total.is_finite() {
+            eprintln!("[density-debug] TOTAL EXITS -inf: Binom({}, {}, {:.6e}), src_comp_idx={}",
+                n_exit, n_src, p_total, src_local);
+            eprintln!("  transitions in group:");
+            for &(ti, eff) in &probs {
+                eprintln!("    {} (idx={}): eff_rate={:.6e}, flow={}",
+                    model.model.transitions[ti].name, ti, eff, flows[ti]);
+            }
+            // Also check: what are ALL flows for transitions with this source?
+            eprintln!("  ALL flows from source compartment {}:", src_local);
+            for &ti in group {
+                eprintln!("    {} (idx={}): flow={}, handled={}",
+                    model.model.transitions[ti].name, ti, flows[ti], handled[ti]);
+            }
+        }
+
         log_p += binom_total;
 
         // Step 3: evaluate split density (mirrors step_one's proportional split)
@@ -280,21 +291,15 @@ pub fn log_transition_density_substep(
             handled[tr_idx] = true;
             if k == n_competing - 1 {
                 if flows[tr_idx] != remaining {
-                    if std::env::var("CAMDL_VERIFY_DENSITY").is_ok() {
-                        eprintln!("[density] -inf at REMAINDER: {} flow={} != remaining={}",
-                            model.model.transitions[tr_idx].name, flows[tr_idx], remaining);
-                        for &(ti, eff) in &probs {
-                            eprintln!("  {} ({}): eff={:.6e}, flow={}",
-                                model.model.transitions[ti].name, ti, eff, flows[ti]);
-                        }
-                    }
+                    eprintln!("[density-debug] REMAINDER mismatch: {} flow={} != remaining={}",
+                        model.model.transitions[tr_idx].name, flows[tr_idx], remaining);
                     return Ok(f64::NEG_INFINITY);
                 }
             } else if remaining > 0 && rate_remaining > 0.0 {
                 let p_split = (eff_rate / rate_remaining).clamp(1e-15, 1.0 - 1e-15);
                 let binom_split = binom_logpmf(flows[tr_idx], remaining, p_split);
-                if !binom_split.is_finite() && std::env::var("CAMDL_VERIFY_DENSITY").is_ok() {
-                    eprintln!("[density] -inf at SPLIT: Binom({}, {}, {:.6e}) for {}",
+                if !binom_split.is_finite() {
+                    eprintln!("[density-debug] SPLIT -inf: Binom({}, {}, {:.6e}) for {}",
                         flows[tr_idx], remaining, p_split, model.model.transitions[tr_idx].name);
                 }
                 log_p += binom_split;
@@ -497,7 +502,24 @@ pub fn simulate_reference(
         let mut flows = vec![0u64; n_tr];
         scratch.gamma_used.clear();
 
+        let snapshot = counts.clone(); // what step_one will use
         step_one(model, &mut counts, &mut flows, params, t, dt, rng, &mut scratch)?;
+
+        // Verify n_exit <= snapshot for every source group
+        for &(src_local, ref group) in &model.source_groups {
+            let n_src = snapshot[src_local].max(0) as u64;
+            let n_exit: u64 = group.iter()
+                .filter(|&&ti| {
+                    let rate = scratch.propensities.get(ti).copied().unwrap_or(0.0);
+                    rate > 1e-15
+                })
+                .map(|&ti| flows[ti])
+                .sum();
+            if n_exit > n_src {
+                eprintln!("[simulate_reference] BUG: n_exit={} > n_src={} at substep {} src={}",
+                    n_exit, n_src, s, src_local);
+            }
+        }
 
         substeps.push(SubstepRecord {
             counts: counts.clone(),
