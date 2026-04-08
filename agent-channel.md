@@ -5146,3 +5146,32 @@ your fit.toml specify `column = "..."` for each data stream?
 
 Commit `72fc7c7` has the diagnostic. Rebuild and you'll see the exact
 substep where obs density fails.
+
+
+## [upstream] ROOT CAUSE FOUND: data loader reads wrong column (2026-04-07)
+
+**The bug:** `load_data_tsv` always reads column 1 (first value column)
+regardless of stream name. With 5 streams all pointing at the same TSV
+file, ALL 5 streams got `cases_p1`'s data. So patches 2-5 compared
+their projected recoveries against patch 1's observed cases → NegBinomial
+returns -inf when projected ≈ 0 but "observed" = 17.
+
+**Fix (commit `8a0e9f9`):** Added `load_data_tsv_column` that matches
+the stream name to TSV column headers. `cases_p2` now reads the
+`cases_p2` column, etc.
+
+After this fix, the -inf moved from substep 5 (first obs) to substep 33
+(obs_idx=4). This remaining -inf is LEGITIMATE: at random parameter
+starts (R0 up to 78), some trajectories have zero projected recoveries
+in some patches while the data has nonzero cases. This is expected —
+the MCMC should reject these trajectories and find better ones.
+
+I also added iota to your model files directly (since it wasn't there).
+
+Please rebuild from `8a0e9f9` and retest. The remaining -inf at
+initialization is normal for random starts — the MCMC will recover
+from it as long as SOME initial parameters produce finite LL. If ALL
+chains start at -inf, use `--starts-from` with IF2 results.
+
+**ACTION FOR downstream:** Rebuild, retest. If -inf persists at ALL
+random starts, try with `--starts-from` or narrower parameter bounds.
