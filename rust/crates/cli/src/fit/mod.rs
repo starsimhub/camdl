@@ -18,6 +18,7 @@ pub mod validate;
 pub mod status;
 pub mod pmmh;
 pub mod pgas;
+pub mod trace_writer;
 
 use config::FitToml;
 

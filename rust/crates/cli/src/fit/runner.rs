@@ -1244,3 +1244,44 @@ fn eval_prior_arg(s: &str) -> Option<f64> {
     }
     None
 }
+
+/// Compute a config hash identifying the statistical problem.
+/// Changes to model/data/priors/bounds/particles/dt invalidate resume state.
+/// Fields NOT included (safe to change on resume): sweeps/steps, burn_in,
+/// thin, n_trajectories, use_nuts, dense_mass.
+pub fn compute_config_hash(fit: &super::config::FitToml, config: &FitRunConfig) -> String {
+    use sha2::{Sha256, Digest};
+
+    let mut h = Sha256::new();
+    h.update(config.model_ir_json.as_bytes());
+
+    let mut data_entries: Vec<_> = fit.data.iter().collect();
+    data_entries.sort_by_key(|(k, _)| k.as_str());
+    for (name, path) in &data_entries {
+        h.update(name.as_bytes());
+        h.update(b"\x00");
+        if let Ok(contents) = std::fs::read(path) {
+            h.update(&contents);
+        }
+        h.update(b"\x00");
+    }
+
+    let mut est_entries: Vec<_> = fit.estimate.iter().collect();
+    est_entries.sort_by_key(|(k, _)| k.as_str());
+    for (name, spec) in &est_entries {
+        h.update(name.as_bytes());
+        h.update(format!("{:?}{:?}{:?}{:?}",
+            spec.bounds, spec.prior, spec.transform, spec.ivp).as_bytes());
+    }
+
+    let mut fixed_entries: Vec<_> = fit.fixed.iter().collect();
+    fixed_entries.sort_by_key(|(k, _)| k.as_str());
+    for (name, val) in &fixed_entries {
+        h.update(format!("{}={}", name, val).as_bytes());
+    }
+
+    h.update(config.if2_config.n_particles.to_le_bytes());
+    h.update(config.if2_config.dt.to_bits().to_le_bytes());
+
+    hex::encode(h.finalize())
+}

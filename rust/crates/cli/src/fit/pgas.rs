@@ -107,7 +107,7 @@ pub fn run_pgas_cli(
 
     // Compute config hash — identifies the statistical problem.
     // Changes to model/data/priors/bounds/particles/dt invalidate resume state.
-    let config_hash = compute_config_hash(fit, &config);
+    let config_hash = super::runner::compute_config_hash(fit, &config);
 
     // Load resume states if --resume
     let resume_states: Vec<Option<ChainResumeState>> = if resume {
@@ -247,23 +247,12 @@ pub fn run_pgas_cli(
             // Streaming trace file — append when resuming, create when fresh
             let trace_path = format!("{}/trace.tsv", chain_dir);
             let is_resuming = resume_states[chain_id].is_some();
-            let trace_file = std::sync::Mutex::new({
-                use std::io::Write;
-                if is_resuming && std::path::Path::new(&trace_path).exists() {
-                    // Append mode — header already exists
-                    std::io::BufWriter::new(
-                        std::fs::OpenOptions::new().append(true).open(&trace_path).unwrap()
-                    )
-                } else {
-                    let mut f = std::io::BufWriter::new(
-                        std::fs::File::create(&trace_path).unwrap()
-                    );
-                    write!(f, "sweep\tlog_likelihood\tlog_posterior\ttrajectory_renewal").unwrap();
-                    for spec in &config.estimated_params { write!(f, "\t{}", spec.name).unwrap(); }
-                    writeln!(f).unwrap();
-                    f
-                }
-            });
+            let param_names: Vec<String> = config.estimated_params.iter()
+                .map(|s| s.name.clone()).collect();
+            let trace_writer = super::trace_writer::TraceWriter::new(
+                &trace_path, "sweep", &["trajectory_renewal"],
+                &param_names, is_resuming,
+            );
 
             let chain_start = std::time::Instant::now();
 
@@ -288,29 +277,22 @@ pub fn run_pgas_cli(
             let traj_t_start = config.compiled.model.simulation.t_start;
 
             let progress_cb = |sweep: usize, result: &PGASSweep, traj: &PGASTrajectory| {
-                // Stream trace row
-                {
-                    use std::io::Write;
-                    if let Ok(mut f) = trace_file.lock() {
-                        // log_posterior = log_likelihood + sum(log_prior)
-                        let log_prior: f64 = config.estimated_params.iter().zip(priors.iter())
-                            .map(|(spec, prior)| {
-                                let natural = result.params[spec.index];
-                                let z = spec.to_transformed(natural);
-                                prior.log_density(natural, z)
-                            })
-                            .sum();
-                        let log_posterior = result.log_complete_data_ll + log_prior;
-                        write!(f, "{}\t{:.4}\t{:.4}\t{:.4}",
-                            sweep, result.log_complete_data_ll, log_posterior,
-                            result.csmc_diag.trajectory_renewal).unwrap();
-                        for spec in &config.estimated_params {
-                            write!(f, "\t{:.6}", result.params[spec.index]).unwrap();
-                        }
-                        writeln!(f).unwrap();
-                        if sweep % 50 == 0 { f.flush().ok(); }
-                    }
-                }
+                // Stream trace row via shared TraceWriter
+                let log_prior: f64 = config.estimated_params.iter().zip(priors.iter())
+                    .map(|(spec, prior)| {
+                        let natural = result.params[spec.index];
+                        let z = spec.to_transformed(natural);
+                        prior.log_density(natural, z)
+                    })
+                    .sum();
+                let log_posterior = result.log_complete_data_ll + log_prior;
+                let param_vals: Vec<f64> = config.estimated_params.iter()
+                    .map(|s| result.params[s.index]).collect();
+                let renewal = format!("{:.4}", result.csmc_diag.trajectory_renewal);
+                trace_writer.write_row(
+                    sweep, result.log_complete_data_ll, log_posterior,
+                    &[&renewal], &param_vals,
+                );
 
                 // Save posterior trajectory sample
                 if sweep >= burn_in && (sweep - burn_in) % traj_stride == 0 {
@@ -523,49 +505,4 @@ fn write_summary(
         .map_err(|e| format!("cannot write {}: {}", path, e))
 }
 
-/// Compute a config hash that identifies the statistical problem.
-/// Changes to any of these fields invalidate a resume state.
-/// Fields NOT included (safe to change on resume): sweeps, burn_in, thin,
-/// n_trajectories, use_nuts, dense_mass.
-fn compute_config_hash(fit: &FitToml, config: &FitRunConfig) -> String {
-    use sha2::{Sha256, Digest};
-
-    let mut h = Sha256::new();
-
-    // Model structure
-    h.update(config.model_ir_json.as_bytes());
-
-    // Data file contents (not paths — content determines the problem)
-    let mut data_entries: Vec<_> = fit.data.iter().collect();
-    data_entries.sort_by_key(|(k, _)| k.as_str());
-    for (name, path) in &data_entries {
-        h.update(name.as_bytes());
-        h.update(b"\x00");
-        if let Ok(contents) = std::fs::read(path) {
-            h.update(&contents);
-        }
-        h.update(b"\x00");
-    }
-
-    // Estimate specs (sorted by name for determinism)
-    let mut est_entries: Vec<_> = fit.estimate.iter().collect();
-    est_entries.sort_by_key(|(k, _)| k.as_str());
-    for (name, spec) in &est_entries {
-        h.update(name.as_bytes());
-        h.update(format!("{:?}{:?}{:?}{:?}",
-            spec.bounds, spec.prior, spec.transform, spec.ivp).as_bytes());
-    }
-
-    // Fixed parameter values
-    let mut fixed_entries: Vec<_> = fit.fixed.iter().collect();
-    fixed_entries.sort_by_key(|(k, _)| k.as_str());
-    for (name, val) in &fixed_entries {
-        h.update(format!("{}={}", name, val).as_bytes());
-    }
-
-    // n_particles and dt
-    h.update(config.if2_config.n_particles.to_le_bytes());
-    h.update(config.if2_config.dt.to_bits().to_le_bytes());
-
-    hex::encode(h.finalize())
-}
+// compute_config_hash moved to runner.rs (shared by PGAS and PMMH)
