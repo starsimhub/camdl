@@ -1,9 +1,11 @@
 # Incident: Spatial PGAS -inf complete-data log-likelihood
 
 **Date:** 2026-04-07
-**Status:** Fixed (transition density). Gamma density disabled pending separate fix.
+**Status:** Fixed (two bugs). Gamma density disabled pending separate fix.
 **Severity:** Blocking — spatial PGAS inference produced -inf on every sweep, making Bayesian inference impossible for multi-patch models.
-**Fix commit:** `f64668f` (fix(pgas): snapshot counts_before in SubstepRecord for spatial density)
+**Fix commits:**
+- `f64668f` — snapshot counts_before in SubstepRecord (simulate_reference)
+- `b15cb39` — reference particle counts_before mismatch in CSMC-AS traceback
 
 ## Fundamental vs. implementation
 
@@ -159,7 +161,28 @@ the exact counts that `step_one` used when drawing exits. This is
 mathematically correct: the density evaluates the probability of the observed
 flows given the state that actually generated them.
 
-## The fix
+### Phase 6: Second bug — CSMC reference counts_before (commit `b15cb39`)
+
+After deploying the snapshot fix, the downstream agent rebuilt and still
+got `-inf`: `Binom(677, 670, p)` at `src_comp_idx=3`. This was NOT a
+clamping issue — it was a separate bug in `csmc_as`.
+
+In CSMC-AS, each substep: (1) resamples particles, (2) saves
+`prev_counts[j] = counts[j]`, (3) propagates free particles, (4) clamps
+the reference particle to its stored trajectory. Step 2 saves
+`prev_counts[j_ref]` from the post-resample state — which after
+resampling could be *any* particle's state, not the reference's actual
+pre-step state. But the reference's flows (`ref_rec.flows`) at step 4
+were drawn from `ref_rec.counts_before`.
+
+The traceback paired `counts_before = prev_counts[j_ref]` (wrong) with
+`flows = ref_rec.flows` (drawn from a different state), producing
+`k > n → -inf`. Fix: after step 4, overwrite
+`prev_counts[j_ref] = ref_rec.counts_before`.
+
+## The fixes
+
+### Fix 1: Snapshot in SubstepRecord (simulate_reference)
 
 `SubstepRecord` was changed from:
 
@@ -196,6 +219,18 @@ pre-step particle states) and `history_counts_after` (post-step states).
 **Memory overhead:** One extra `Vec<i64>` per substep (n_compartments integers).
 For a 5-patch SEIR model (20 compartments) with 1000 substeps, this adds
 ~160 KB per trajectory — negligible compared to the particle array.
+
+### Fix 2: Reference particle counts_before in CSMC-AS
+
+After clamping the reference particle (step 3 in the CSMC loop), overwrite
+`prev_counts[j_ref]` with the reference's actual pre-step state:
+
+```rust
+prev_counts[j_ref].copy_from_slice(&ref_rec.counts_before);
+```
+
+This ensures the history correctly pairs the reference's pre-step state
+with its flows, regardless of what resampling did to the `j_ref` slot.
 
 ## Remaining issues
 
