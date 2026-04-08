@@ -376,6 +376,79 @@ future iteration.
    multi-stream requires verifying that each stream receives its own data, not
    just that the joint likelihood computation works.
 
+## Applicability beyond spatial models
+
+These bugs were surfaced by a 5-patch spatial SEIR model, but patches
+are just one kind of stratification. The fixes have varying applicability
+to other stratified models (age, risk group, species, etc.).
+
+### Fixes that affect ANY stratified model
+
+**Fix 4 (deterministic check ordering)** and **Fix 6 (data column
+mismatch)** are structural bugs independent of model type. Any
+multi-stream model — whether streams represent patches, age groups, or
+surveillance sites — would hit the data loader bug.
+
+**Fix 5 (IVP per-patch population)** applies to any model where an IVP
+parameter (`s0`) controls a compartment in one stratum. An age-stratified
+model with `init { S[age1] = s0 * N_age1 }` would produce the same
+`Binom(S[age1]; total_pop_all_ages, s0)` ≈ -inf. The suffix-matching fix
+works for any dimension name, not just patches.
+
+### Fixes specific to models where clamping fires
+
+**Fixes 1–2 (counts_before snapshot, CSMC reference mismatch)** only
+matter when negative clamping occurs, which requires total outflows from a
+compartment to exceed its population in one substep. This needs either:
+
+- **Multiple independent rate components** drawing from the same
+  compartment (spatial importation is the canonical case), or
+- **Very high rates** where $p_{\text{total}} \to 1$
+  ($R_0 \cdot \gamma \cdot \Delta t$ large).
+
+For **age-stratified models**, the typical pattern is one outflow per
+age-compartment (aging from `age_i` to `age_{i+1}`), which doesn't
+compete with other transitions. Clamping is unlikely unless the aging rate
+is very high relative to dt.
+
+The exception: models with both aging AND disease transitions sharing a
+source. `S[age1]` with both `infection[age1]: S[age1] → E[age1]` and
+`aging[age1]: S[age1] → S[age2]` are in the same source group. If both
+rates are high, overdraft can occur. The fix is the same: smaller dt.
+
+For **demographic models**, birth/death transitions are typically Poisson
+(ungrouped, not in the multinomial). They don't compete with other
+transitions for the same source compartment, so clamping isn't a risk.
+
+### Fix 3 (iota / zero-rate) — depends on mixing structure
+
+The zero-compartment problem (`I[j] = 0` makes rate exactly zero) is
+specific to models where force of infection depends on a stratum-specific
+infectious count that can reach zero. This includes:
+
+- **Spatial coupling:** importation rate ∝ `I[patch_j] / N[patch_j]` →
+  zero when `I[patch_j] = 0`
+- **Age-structured mixing via WAIFW matrices:** FOI for age group `i` ∝
+  `Σ_j C[i,j] * I[age_j] / N[age_j]` → zero when ALL age groups in the
+  sum have `I = 0`
+- **Multi-species models:** cross-species transmission with species-
+  specific reservoirs
+
+Models where the infection rate depends on a TOTAL infectious count (summed
+across strata) don't need iota — `I_total = 0` means no infection anywhere,
+which is a legitimate absorbing state.
+
+### Recommended golden test coverage
+
+The `seir_spatial_5_inference` golden model exercises the spatial coupling
+corner case. To catch analogous bugs in other stratification dimensions:
+
+- **Age-stratified WAIFW model** — exercises cross-age force of infection,
+  age-specific IVPs, and multi-stream age-specific surveillance data.
+  Would catch age-specific variants of fixes 3, 5, and 6.
+- **Two-species model** — exercises cross-species transmission, which has
+  the same zero-compartment structure as spatial importation.
+
 ## Hardening recommendations
 
 These follow-up changes would prevent recurrence and catch related issues
