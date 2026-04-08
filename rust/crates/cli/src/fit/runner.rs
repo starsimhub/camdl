@@ -13,6 +13,7 @@ use sim::{
     chain_binomial::step_one,
     inference::{
         if2::{run_if2_with_progress, IF2Config, IF2Param, IF2Result, Observation, Transform},
+        pmmh::Prior,
         ParticleState,
     },
     rng::StatefulRng,
@@ -274,6 +275,7 @@ fn build_if2_params(
 /// Used by scout for initial_loglik baseline.
 pub fn run_quick_pfilter(config: &FitRunConfig, params: &[f64], n_particles: usize, seed: u64) -> f64 {
     use sim::inference::particle_filter::{self, Observation as PfObs};
+    use sim::inference::types::{ObsStreamSpec, joint_obs_weight_particle};
 
     let compiled = &*config.compiled;
     let observations: Vec<PfObs> = config.observations.iter()
@@ -283,17 +285,34 @@ pub fn run_quick_pfilter(config: &FitRunConfig, params: &[f64], n_particles: usi
     let step_fn = |state: &mut ParticleState, t: f64, step_dt: f64, rng: &mut StatefulRng, scratch: &mut sim::chain_binomial::StepScratch| {
         step_one(compiled, &mut state.counts, &mut state.flow_accumulators, params, t, step_dt, rng, scratch)
     };
+
+    // Build multi-stream observation specs — handles both single and multi-stream models.
+    let obs_stream_specs: Vec<ObsStreamSpec> = config.streams.iter()
+        .map(|s| ObsStreamSpec {
+            flow_indices: s.flow_indices.clone(),
+            obs_loglik_fn: sim::inference::obs_model::compile_obs_loglik_pf(
+                &s.obs_model_ir, config.compiled.clone(), params,
+            ),
+            observations: s.data.iter().map(|o| o.value).collect(),
+        })
+        .collect();
+
+    let joint_obs_fn = move |state: &ParticleState, obs_idx: usize| -> f64 {
+        joint_obs_weight_particle(&obs_stream_specs, state, obs_idx)
+    };
+
+    // Single-stream fallback for project_fn/obs_loglik_fn (required by bootstrap_filter signature)
     let flow_indices = &config.flow_indices;
     let project_fn = |state: &ParticleState| -> f64 {
         flow_indices.iter().map(|&i| state.flow_accumulators[i] as f64).sum()
     };
     let obs_loglik_fn = sim::inference::obs_model::compile_obs_loglik_pf(
-        &config.obs_model_ir, config.compiled.clone(), params,
+        &config.streams[0].obs_model_ir, config.compiled.clone(), params,
     );
 
     match particle_filter::bootstrap_filter(
         compiled, params, &observations, n_particles, config.if2_config.dt,
-        &step_fn, &project_fn, &*obs_loglik_fn, None, None, seed, None,
+        &step_fn, &project_fn, &*obs_loglik_fn, None, None, seed, Some(&joint_obs_fn),
     ) {
         Ok(result) => result.log_likelihood,
         Err(_) => f64::NEG_INFINITY,
@@ -1141,4 +1160,53 @@ pub fn collect_all_params(
         params.insert(p.name.clone(), value);
     }
     params
+}
+
+/// Parse a prior specification string from fit.toml.
+///
+/// Supported formats:
+///   "lognormal(mu, sigma)" → TransformedNormal { mean: mu, sd: sigma }
+///   "normal(mu, sigma)"    → Normal { mean: mu, sd: sigma }
+///   "beta(alpha, beta)"    → Beta { alpha, beta }
+///   "flat"                 → Flat
+///
+/// Examples:
+///   "lognormal(log(50), 0.4)"   → LogNormal with median 50
+///   "lognormal(3.912, 0.4)"     → same (log(50) ≈ 3.912)
+///   "normal(0.08, 0.02)"        → Normal(0.08, 0.02) on natural scale
+pub fn parse_prior(s: &str) -> Option<Prior> {
+    let s = s.trim();
+    if s == "flat" { return Some(Prior::Flat); }
+
+    // Match "name(arg1, arg2)"
+    let open = s.find('(')?;
+    let close = s.rfind(')')?;
+    let name = s[..open].trim();
+    let args_str = &s[open + 1..close];
+    let args: Vec<f64> = args_str.split(',')
+        .map(|a| eval_prior_arg(a.trim()))
+        .collect::<Option<Vec<_>>>()?;
+
+    if args.len() != 2 { return None; }
+
+    match name {
+        "lognormal" => Some(Prior::TransformedNormal { mean: args[0], sd: args[1] }),
+        "normal" => Some(Prior::Normal { mean: args[0], sd: args[1] }),
+        "beta" => Some(Prior::Beta { alpha: args[0], beta: args[1] }),
+        _ => None,
+    }
+}
+
+/// Evaluate a prior argument — supports bare numbers and log(x).
+fn eval_prior_arg(s: &str) -> Option<f64> {
+    if let Ok(v) = s.parse::<f64>() {
+        return Some(v);
+    }
+    // Handle log(x)
+    if s.starts_with("log(") && s.ends_with(')') {
+        let inner = &s[4..s.len() - 1];
+        let v: f64 = inner.parse().ok()?;
+        return Some(v.ln());
+    }
+    None
 }

@@ -17,7 +17,7 @@
 //! - Optional adaptive proposal covariance (Haario et al. 2001).
 
 use crate::rng::StatefulRng;
-use super::if2::{IF2Param, Transform};
+use super::if2::IF2Param;
 
 // ── Prior ──────────────────────────────────────────────────────────
 
@@ -251,25 +251,6 @@ fn cholesky_lower(a: &mut [f64], d: usize) -> bool {
     true
 }
 
-// ── Transform Jacobian ─────────────────────────────────────────────
-
-/// Log |dθ/dz| for the transform θ = f(z).
-/// Needed for the MH ratio when proposing on the transformed scale.
-///
-/// For log-transform: θ = exp(z), so |dθ/dz| = exp(z) = θ → log-Jacobian = z.
-/// For logit-transform: θ = lo + (hi-lo)/(1+exp(-z)), Jacobian = (hi-lo) × p × (1-p).
-/// For no transform: Jacobian = 1 → log-Jacobian = 0.
-fn log_jacobian(param: &IF2Param, transformed: f64) -> f64 {
-    match &param.transform {
-        Transform::Log { .. } => transformed, // log(exp(z)) = z
-        Transform::Logit { lo, hi } => {
-            let p = 1.0 / (1.0 + (-transformed).exp());
-            ((hi - lo) * p * (1.0 - p)).ln()
-        }
-        Transform::None => 0.0,
-    }
-}
-
 // ── Core PMMH algorithm ────────────────────────────────────────────
 
 /// Run PMMH.
@@ -329,7 +310,7 @@ pub fn run_pmmh(
         .sum();
     let mut current_log_jacobian: f64 = if2_params.iter()
         .zip(current_transformed.iter())
-        .map(|(p, &z)| log_jacobian(p, z))
+        .map(|(p, &z)| p.log_jacobian(z))
         .sum();
 
     // Track MAP
@@ -396,7 +377,7 @@ pub fn run_pmmh(
         // Jacobian correction
         let proposed_log_jacobian: f64 = if2_params.iter()
             .zip(proposed_transformed.iter())
-            .map(|(p, &z)| log_jacobian(p, z))
+            .map(|(p, &z)| p.log_jacobian(z))
             .sum();
 
         // MH acceptance ratio (log scale)

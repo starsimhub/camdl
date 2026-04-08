@@ -72,7 +72,7 @@ pub fn run_pgas_cli(
             let est = fit.estimate.get(&spec.name);
             match est.and_then(|e| e.prior.as_deref()) {
                 None => Prior::Flat,
-                Some(s) => parse_prior(s).unwrap_or_else(|| {
+                Some(s) => super::runner::parse_prior(s).unwrap_or_else(|| {
                     eprintln!("warning: cannot parse prior '{}' for {}, using Flat", s, spec.name);
                     Prior::Flat
                 }),

@@ -900,21 +900,6 @@ pub fn csmc_as(
     }, diag))
 }
 
-// ═══════════════════════════════════════════════════════════════════
-// Jacobian for transforms (shared with PMMH)
-// ═══════════════════════════════════════════════════════════════════
-
-fn log_jacobian(param: &IF2Param, z: f64) -> f64 {
-    match &param.transform {
-        Transform::Log { .. } => z, // d/dz exp(z) = exp(z), log|exp(z)| = z
-        Transform::Logit { lo, hi } => {
-            let p = 1.0 / (1.0 + (-z).exp());
-            ((hi - lo) * p * (1.0 - p)).ln()
-        }
-        Transform::None => 0.0,
-    }
-}
-
 /// Derivative of the transform θ(z) w.r.t. z.
 /// dθ/dz for chain rule: d(f(θ))/dz = d(f)/dθ × dθ/dz.
 fn transform_deriv(param: &IF2Param, z: f64) -> f64 {
@@ -958,19 +943,6 @@ fn prior_log_density_and_grad_z(
             let dlp_dz = dlp_dtheta * transform_deriv(param, z);
             (lp, dlp_dz)
         }
-    }
-}
-
-/// Derivative of log|Jacobian| w.r.t. z.
-/// d/dz log|dθ/dz|.
-fn jacobian_grad(param: &IF2Param, z: f64) -> f64 {
-    match &param.transform {
-        Transform::Log { .. } => 1.0, // d/dz z = 1
-        Transform::Logit { .. } => {
-            let p = 1.0 / (1.0 + (-z).exp());
-            1.0 - 2.0 * p // d/dz log(p*(1-p)) = (1 - 2p)
-        }
-        Transform::None => 0.0,
     }
 }
 
@@ -1261,8 +1233,8 @@ pub fn run_pgas(
                     grad_z[i] += prior_grad_z;
 
                     // Jacobian: (value, d/dz) — already on z scale
-                    log_p += log_jacobian(&if2_params[i], z[i]);
-                    grad_z[i] += jacobian_grad(&if2_params[i], z[i]);
+                    log_p += if2_params[i].log_jacobian(z[i]);
+                    grad_z[i] += if2_params[i].jacobian_grad(z[i]);
                 }
 
                 (log_p, grad_z)
@@ -1390,8 +1362,8 @@ pub fn run_pgas(
                 let current_log_prior_i = priors[i].log_density(
                     current_params[spec.index], z_old,
                 );
-                let proposed_log_jac_i = log_jacobian(spec, z_new);
-                let current_log_jac_i = log_jacobian(spec, z_old);
+                let proposed_log_jac_i = spec.log_jacobian(z_new);
+                let current_log_jac_i = spec.log_jacobian(z_old);
 
                 let log_alpha = (proposed_ll + proposed_log_prior_i + proposed_log_jac_i)
                               - (current_ll + current_log_prior_i + current_log_jac_i);

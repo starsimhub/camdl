@@ -148,6 +148,36 @@ impl IF2Param {
         }
     }
 
+    /// Log |dθ/dz| for the transform θ = f(z).
+    /// Needed for the MH ratio when proposing on the transformed scale.
+    ///
+    /// For log-transform: θ = exp(z), so |dθ/dz| = exp(z) = θ → log-Jacobian = z.
+    /// For logit-transform: θ = lo + (hi-lo)/(1+exp(-z)), Jacobian = (hi-lo) × p × (1-p).
+    /// For no transform: Jacobian = 1 → log-Jacobian = 0.
+    pub fn log_jacobian(&self, z: f64) -> f64 {
+        match &self.transform {
+            Transform::Log { .. } => z, // log(exp(z)) = z
+            Transform::Logit { lo, hi } => {
+                let p = 1.0 / (1.0 + (-z).exp());
+                ((hi - lo) * p * (1.0 - p)).ln()
+            }
+            Transform::None => 0.0,
+        }
+    }
+
+    /// Derivative of log|Jacobian| w.r.t. z.
+    /// d/dz log|dθ/dz|.
+    pub fn jacobian_grad(&self, z: f64) -> f64 {
+        match &self.transform {
+            Transform::Log { .. } => 1.0, // d/dz z = 1
+            Transform::Logit { .. } => {
+                let p = 1.0 / (1.0 + (-z).exp());
+                1.0 - 2.0 * p // d/dz log(p*(1-p)) = (1 - 2p)
+            }
+            Transform::None => 0.0,
+        }
+    }
+
     /// Delta method: convert natural-scale rw_sd to transformed-scale.
     /// Matches pomp's convention: user specifies rw.sd on natural scale.
     pub fn transformed_sd(&self, natural_sd: f64, current_value: f64) -> f64 {
