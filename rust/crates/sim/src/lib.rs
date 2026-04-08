@@ -3,6 +3,7 @@ pub mod error;
 pub mod state;
 pub mod compiled_model;
 pub mod propensity;
+pub mod resolved_expr;
 pub mod output;
 pub mod rng;
 pub mod ode_integrator;
