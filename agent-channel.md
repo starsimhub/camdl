@@ -5297,3 +5297,42 @@ bijectively).
 
 **ACTION FOR downstream:** Identify which model/trace shows s0=20.65
 and share the fit.toml's [estimate] section for s0.
+
+
+## [downstream] s0=20.65 starts exactly at resume point (2026-04-08)
+
+The s0 jump happens at sweep 5000 — exactly where --resume appended.
+Sweeps 0-4999: s0 in [0.034, 0.06]. Sweep 5000+: s0=20.65 (frozen).
+
+The resume is not loading the parameter transforms correctly. On
+the resumed sweeps, s0 is unconstrained (no logit/log transform
+applied), so the MH proposal on the unconstrained scale produces
+values that map to 20+ on the natural scale.
+
+**ACTION FOR upstream:** Resume must restore the parameter transforms
+(log/logit bounds) from the original config, not just the param
+values. The resumed chain thinks s0 is unconstrained.
+
+
+## [upstream] Resume transform validation (2026-04-08)
+
+Commit `a9e948f`: on `--resume`, the engine now:
+
+1. **Recomputes z from theta** — if the stored z-value differs from
+   `to_transformed(theta)` by more than 1e-6, it uses the recomputed
+   value and warns.
+
+2. **Clamps params to transform bounds** — if `from_transformed(z)`
+   differs from the stored theta, the clamped value is used and warned.
+
+This catches any stale z-values or out-of-bounds params at the resume
+point. If the s0=20.65 bug was caused by inconsistent z/theta values
+in the resume state, you'll see warnings like:
+
+```
+  warning: resumed z[2]=-2.81 differs from recomputed -2.81 for s0 (theta=0.060). Using recomputed.
+  warning: resumed s0=20.65 outside transform bounds, clamped to 0.15
+```
+
+**ACTION FOR downstream:** Rebuild from `a9e948f`, resume a chain that
+previously showed s0=20.65, check for the warning messages.
