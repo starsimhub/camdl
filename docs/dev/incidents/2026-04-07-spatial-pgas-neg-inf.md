@@ -1,12 +1,15 @@
 # Incident: Spatial PGAS -inf complete-data log-likelihood
 
 **Date:** 2026-04-07
-**Status:** Fixed (three bugs). Gamma density disabled pending separate fix.
+**Status:** Resolved. Six bugs fixed across engine and CLI.
 **Severity:** Blocking — spatial PGAS inference produced -inf on every sweep, making Bayesian inference impossible for multi-patch models.
 **Fix commits:**
 - `f64668f` — snapshot counts_before in SubstepRecord (simulate_reference)
 - `b15cb39` — reference particle counts_before mismatch in CSMC-AS traceback
 - `faffe8f` — near-zero rate/flow mismatch: soft handling + iota warning
+- `9547ef9` — deterministic check ordering in density evaluator
+- `c20de85` — IVP density uses per-patch population for spatial models
+- `8a0e9f9` — multi-stream data loader reads correct column per stream
 
 ## Fundamental vs. implementation
 
@@ -257,6 +260,47 @@ Before this fix, any `flow > 0` with `rate ≤ RATE_EPSILON` returned
 User-facing documentation added to `docs/inference.md` under "Spatial
 models and seeding (iota)".
 
+### Fix 4: Deterministic check ordering in density (`9547ef9`)
+
+The density combined `rate <= RATE_EPSILON || is_determ[tr_idx]` in one
+branch. A deterministic transition with positive rate entered the
+near-zero handler instead of being skipped from the multinomial. This
+could inflate `n_exit` by including deterministic flows. Fixed by
+checking rate first, then deterministic — matching step_one's exact
+order.
+
+### Fix 5: IVP density per-patch population (`c20de85`)
+
+The initial state density `Binom(S₀; N₀, s0)` used `N₀ = total_pop`
+(sum of all compartments across all patches). For a 5-patch model with
+440K total pop, `Binom(5950; 440000, 0.06)` ≈ `-inf` because the
+expected value (26,400) is far from the actual (5,950). The correct
+denominator is the per-patch population: `Binom(5950; 100000, 0.06)`,
+which gives expected value 6,000 — reasonable.
+
+Fixed by detecting stratified compartments via name suffix matching:
+`S_p1` shares the `_p1` suffix with `E_p1`, `I_p1`, `R_p1`, so
+`N₀ = S_p1 + E_p1 + I_p1 + R_p1 = 100,000`. Same fix applied to the
+stochastic initial state draws in CSMC-AS, which were drawing
+`Binom(440000, 0.06) ≈ 26,400` susceptibles per patch instead of the
+correct per-patch count.
+
+### Fix 6: Multi-stream data loader column mismatch (`8a0e9f9`)
+
+**This was the final blocker.** `load_data_tsv` always read column 1
+(the first value column after time) regardless of stream name. With 5
+observation streams (`cases_p1` through `cases_p5`) all pointing at the
+same TSV file, all 5 streams received `cases_p1`'s data.
+
+Patches 2–5 compared their projected recovery incidence (often near
+zero early in an epidemic) against patch 1's observed cases (17+ per
+week) → NegBinomial `-inf`. This bug was invisible in single-stream
+models (only one value column) and in forward simulation (no observation
+density evaluation).
+
+Fixed by adding `load_data_tsv_column` that matches the stream name to
+TSV column headers. `cases_p2` now reads the `cases_p2` column.
+
 ## Remaining issues
 
 ### Gamma density disabled
@@ -311,6 +355,26 @@ future iteration.
    what happened" (density), store the input state explicitly rather than
    deriving it from adjacent records. The derivation breaks when there are
    non-invertible transformations (like clamping) between steps.
+
+5. **Golden tests must exercise the full inference pipeline.** The existing
+   density round-trip tests only checked transition density (empty
+   `obs_streams`, empty `observations`). They never evaluated the observation
+   density or the IVP density, so fixes 5 and 6 were invisible to the test
+   suite. A golden test that runs `complete_data_loglik` with actual
+   observation data would have caught the column mismatch immediately.
+
+6. **Layered bugs mask each other.** Six bugs produced the same symptom
+   (`-inf`). Fixing one revealed the next. The investigation would have been
+   faster with component-level diagnostics from the start — separate checks
+   for IVP density, transition density, and observation density, each printing
+   when it returns `-inf`. The final diagnostic framework (added during this
+   incident) should be kept permanently.
+
+7. **Multi-stream data loading is a distinct concern from multi-stream
+   observation models.** The `ObsStreamSpec` + `joint_obs_weight` architecture
+   was correct, but the data loader fed identical data to all streams. Testing
+   multi-stream requires verifying that each stream receives its own data, not
+   just that the joint likelihood computation works.
 
 ## Hardening recommendations
 
