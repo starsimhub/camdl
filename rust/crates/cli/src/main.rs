@@ -44,6 +44,38 @@ fn main() {
         return;
     }
 
+    // --verbosity LEVEL: set log level (default: warn)
+    // Levels: error, warn, info, debug, trace
+    let verbosity = all_args.iter()
+        .position(|a| a == "--verbosity")
+        .and_then(|i| all_args.get(i + 1))
+        .map(|s| s.as_str())
+        .unwrap_or("warn");
+    let log_level = match verbosity {
+        "trace" => log::LevelFilter::Trace,
+        "debug" => log::LevelFilter::Debug,
+        "info" => log::LevelFilter::Info,
+        "warn" => log::LevelFilter::Warn,
+        "error" => log::LevelFilter::Error,
+        other => {
+            eprintln!("invalid verbosity level: '{}'. Use: error, warn, info, debug, trace", other);
+            std::process::exit(1);
+        }
+    };
+    env_logger::builder().filter_level(log_level).init();
+
+    // Strip --verbosity LEVEL from args before dispatch
+    let all_args: Vec<String> = {
+        let mut filtered = Vec::new();
+        let mut skip_next = false;
+        for arg in &all_args {
+            if skip_next { skip_next = false; continue; }
+            if arg == "--verbosity" { skip_next = true; continue; }
+            filtered.push(arg.clone());
+        }
+        filtered
+    };
+
     // Dispatch on first argument
     match all_args[0].as_str() {
         "experiment" => {
