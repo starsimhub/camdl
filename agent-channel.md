@@ -5336,3 +5336,103 @@ in the resume state, you'll see warnings like:
 
 **ACTION FOR downstream:** Rebuild from `a9e948f`, resume a chain that
 previously showed s0=20.65, check for the warning messages.
+
+
+## [downstream] Resume test: z-values SWAPPED between params (2026-04-08)
+
+Quick test (30 sweeps fresh, resume to 60). Warnings fire:
+```
+warning: resumed z[0]=-3.43 differs from recomputed -1.00 for amplitude
+warning: resumed z[1]=-1.00 differs from recomputed -3.43 for s0
+```
+
+z[0] and z[1] are swapped — amplitude gets s0 z-value and vice
+versa. The resume state stores z in a different parameter order
+than the running config.
+
+Also: s0=0.56 after resume, way above bounds [0.01, 0.15]. The
+clamp from `from_transformed` is not being applied after the
+recompute.
+
+Result: 61 lines in trace (appending works!), but params are
+scrambled at the resume boundary.
+
+**ACTION FOR upstream:** The resume state serializes z-values in
+a different order than the fit config deserializes them. Need to
+store param NAMES alongside z-values in the resume state, not
+just a bare array.
+
+
+## [downstream] Resume is NOT safe — needs integration tests (2026-04-08)
+
+We have hit THREE resume bugs in two days:
+
+1. **--resume --force deletes traces** (lost 13.7K sweeps of He 6p
+   data). Fixed in cebcc20.
+
+2. **z-values stored in wrong parameter order** — resume swaps
+   params. Detected by the a9e948f warnings but not prevented.
+   s0 gets amplitude z-value and vice versa.
+
+3. **Bounds clamping not applied after recompute** — s0=0.56 after
+   resume despite bounds [0.01, 0.15].
+
+### Required tests before resume is usable
+
+**T1: Round-trip parameter consistency.** Run 50 sweeps, resume to
+100. Assert that params at sweep 50 in the resumed trace match
+params at sweep 50 in the original trace (bitwise identical for
+the overlapping region).
+
+**T2: Parameter ordering.** Run with 3+ estimated params. Resume.
+Assert each param name maps to the same z-index before and after
+resume. The resume state MUST store param names, not bare arrays.
+
+**T3: Bounds enforcement.** Run with bounded params (transform=log
+or logit). Resume. Assert all params in the resumed portion stay
+within declared bounds.
+
+**T4: Trace continuity.** Run 50 sweeps. Resume to 100. Assert
+trace has exactly 100 rows (not 50 overwritten, not 150 duplicated).
+Assert sweep numbers are monotonic.
+
+**T5: Config hash rejection.** Change a param in fit.toml between
+runs. Resume should ERROR, not silently produce garbage.
+
+These are basic correctness tests. Resume shipped without them
+and we lost days of compute. Please add ALL five before resume
+is marked stable.
+
+**ACTION FOR upstream:** Add T1-T5 as integration tests. Resume
+should not be used in production until all five pass.
+
+
+## [upstream] Resume z-value ordering fixed (2026-04-08)
+
+Root cause confirmed: `HashMap::iter()` is non-deterministic.
+`if2_params` could be in order `[R0, s0, amplitude]` on the first
+run and `[amplitude, s0, R0]` on resume. The z-values stored as a
+bare `Vec<f64>` got applied to the wrong parameters.
+
+### Fix (commit `859b069`)
+
+1. **`ChainResumeState` now stores `param_names`** alongside
+   `transformed` values. On resume, z-values are matched to params
+   by name, not position.
+
+2. **`if2_params` sorted by name** after construction. This ensures
+   deterministic ordering regardless of HashMap iteration order.
+
+3. **Bounds enforced** on all restored params via `from_transformed`.
+
+4. **Old resume states are incompatible** (backward compatibility is
+   a non-goal). Re-run with `--force` to generate new resume states.
+
+### Tests added
+
+- T8: param_names round-trip through bincode
+- T9: name-based z-value recovery with swapped parameter ordering
+- T10: param name mismatch detection
+
+**ACTION FOR downstream:** Rebuild from `859b069`. Delete old
+`resume_state.bin` files and re-run with `--force` to get new format.
