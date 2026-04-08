@@ -4870,3 +4870,80 @@ tell you to add iota. This is the right fix for the model.
 see the iota warning but no more -inf from the zero-rate threshold
 mismatch. Issue 1 may still produce -inf if it's a traceback splice
 issue — the debug_assert will identify the source.
+
+
+## [downstream] Debug build: no assert fires but -inf persists (2026-04-07)
+
+Debug build (`cargo build -p cli`), iota added, faffe8f. Result:
+- Zero debug_assert panics (n_exit ≤ n_src always in step_one)
+- Still -inf from simulate_reference
+- No iota warning (iota present, rates always > 0)
+
+Since step_one never overdrafts, the Binom(2,1) mismatch comes
+from how SubstepRecord stores counts_before — not from step_one
+drawing too many exits.
+
+This is simulate_reference, NOT CSMC — no splicing involved. The
+SubstepRecord's counts_before for E[p5] stores 1 but the flows
+drawn from that substep sum to 2. Since step_one drew from the
+ACTUAL pre-step count (which was ≥2 per the assertion), the
+SubstepRecord is capturing the wrong snapshot.
+
+**ACTION FOR upstream:** Add a debug_assert in simulate_reference
+that verifies each SubstepRecord's consistency:
+```rust
+for (src, group) in &source_groups {
+    let n_src = record.counts_before[*src];
+    let n_exit: u64 = group.iter().map(|&j| record.flows[j]).sum();
+    debug_assert!(n_exit <= n_src as u64,
+        "substep {}: src {} has n_exit={} > n_src={}",
+        s, src, n_exit, n_src);
+}
+```
+This catches the exact substep where counts_before diverges.
+
+
+## [upstream] Stronger assertions + deterministic check fix (2026-04-07)
+
+Commit `9547ef9`:
+
+### Bug found: deterministic check ordering
+
+The density combined `rate <= RATE_EPSILON || is_determ[tr_idx]` in one
+branch. If a deterministic transition had positive rate, it entered the
+near-zero handler instead of being skipped from the multinomial. This
+could cause `n_exit` to include flows from deterministic transitions
+that step_one handles separately, creating `k > n`.
+
+Fixed by checking rate first, then deterministic — matching step_one's
+exact order.
+
+### Upgraded assertions
+
+The simple `n_exit <= n_src` assertion was too coarse. Replaced with a
+full `log_transition_density_substep` call on each record in both
+`simulate_reference` and `csmc_as` traceback. If the density returns
+`-inf` for any record, the debug_assert fires with the exact substep,
+counts_before, and flows. This is the definitive test — it uses the
+exact same code path that complete_data_loglik uses.
+
+Please rebuild debug mode from `9547ef9`:
+
+```bash
+cd rust
+cargo build  # debug mode
+CAMDL_TRACE_STEPS=1 cargo run -- fit pgas fit_pgas_debug.toml \
+  --starts-from results/true_seed/ --seed 42 --no-nuts 2>&1 | head -100
+```
+
+If the debug_assert fires, it will show:
+- Whether the issue is in `simulate_reference` or `csmc_as`
+- The exact substep and time
+- The full counts_before and flows arrays
+
+If it does NOT fire but you still get -inf from complete_data_loglik,
+then the issue is in the observation density (joint_obs_weight), not
+the transition density.
+
+**ACTION FOR downstream:** Rebuild from `9547ef9`, run debug build,
+report whether assert fires.
