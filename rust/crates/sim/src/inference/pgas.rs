@@ -224,10 +224,11 @@ pub fn log_transition_density_substep(
                     use std::sync::atomic::{AtomicBool, Ordering};
                     static WARNED: AtomicBool = AtomicBool::new(false);
                     if !WARNED.swap(true, Ordering::Relaxed) {
-                        log::warn!(
-                            "transition '{}' has rate=0 but flow={} — \
-                             consider adding a seeding term (iota) to the rate expression. \
-                             Without it, zero-compartment states produce density mismatches.",
+                        eprintln!(
+                            "  WARNING: transition '{}' has rate=0 but flow={}. \
+                             Add a seeding term (iota) to the rate expression: \
+                             e.g., beta * (I + iota) / N * S. Without it, \
+                             zero-compartment states produce density mismatches in PGAS.",
                             model.model.transitions[tr_idx].name, flows[tr_idx],
                         );
                     }
@@ -354,12 +355,33 @@ pub fn complete_data_loglik(
 
     // Initial state density: log p(x₀ | θ) for IVP-controlled compartments.
     // S₀ ~ Binom(N₀, s0) → log Binom(S₀; N₀, s0) constrains s0.
+    // N₀ is the total population of the PATCH containing this compartment,
+    // not the global population across all patches. We compute it as the
+    // sum of initial counts in the same stratification group.
     if !ivp_mappings.is_empty() {
+        // For each IVP compartment, find the patch population by summing
+        // all compartments that share the same patch suffix. For unstratified
+        // models, this is just the total population.
         let total_pop: i64 = trajectory.initial_counts.iter().sum();
         for ivp in ivp_mappings {
             let count = trajectory.initial_counts[ivp.compartment_idx] as u64;
             let frac = params[ivp.model_param_idx].clamp(1e-10, 1.0 - 1e-10);
-            log_p += binom_logpmf(count, total_pop as u64, frac);
+            // Determine the per-patch population for this IVP compartment.
+            // In a stratified model, only compartments in the same patch
+            // contribute to N₀. Detect by matching the patch suffix.
+            let comp_name = &model.model.compartments[ivp.compartment_idx].name;
+            let patch_suffix = comp_name.rsplit('_').next().unwrap_or("");
+            let patch_pop: i64 = if patch_suffix.is_empty() || !comp_name.contains('_') {
+                // Unstratified: use total population
+                total_pop
+            } else {
+                // Stratified: sum all compartments with matching patch suffix
+                model.model.compartments.iter().enumerate()
+                    .filter(|(_, c)| c.name.ends_with(&format!("_{}", patch_suffix)))
+                    .map(|(i, _)| trajectory.initial_counts[i])
+                    .sum()
+            };
+            log_p += binom_logpmf(count, patch_pop as u64, frac);
         }
     }
 
@@ -408,7 +430,15 @@ pub fn complete_data_loglik(
 
         // Observation density — joint across all streams
         if let Some(&obs_idx) = obs_at_substep.get(&s) {
-            log_p += super::types::joint_obs_weight(obs_streams, &cum_flows, obs_idx);
+            let obs_ll = super::types::joint_obs_weight(obs_streams, &cum_flows, obs_idx);
+            if !obs_ll.is_finite() && crate::chain_binomial::trace_enabled() {
+                eprintln!("[pgas] obs density -inf at substep {} (obs_idx={}), cum_flows={:?}",
+                    s, obs_idx, &cum_flows);
+            }
+            log_p += obs_ll;
+            if !log_p.is_finite() {
+                return Ok(f64::NEG_INFINITY);
+            }
             for f in &mut cum_flows { *f = 0; }
         }
     }
@@ -512,6 +542,21 @@ pub fn csmc_as(
     let (init_int, _) = model.initial_state(params)?;
     let total_pop = init_int.counts.iter().sum::<i64>();
 
+    // Precompute per-IVP patch populations (for stratified models, N₀ is the
+    // patch population, not the global population).
+    let ivp_patch_pops: Vec<i64> = ivp_mappings.iter().map(|ivp| {
+        let comp_name = &model.model.compartments[ivp.compartment_idx].name;
+        let patch_suffix = comp_name.rsplit('_').next().unwrap_or("");
+        if patch_suffix.is_empty() || !comp_name.contains('_') {
+            total_pop
+        } else {
+            model.model.compartments.iter().enumerate()
+                .filter(|(_, c)| c.name.ends_with(&format!("_{}", patch_suffix)))
+                .map(|(i, _)| init_int.counts[i])
+                .sum()
+        }
+    }).collect();
+
     // Per-particle RNGs (needed early for stochastic init)
     let mut rngs: Vec<StatefulRng> = (0..n_particles)
         .map(|i| StatefulRng::new(seed ^ (i as u64).wrapping_mul(0x517cc1b727220a95)))
@@ -524,9 +569,10 @@ pub fn csmc_as(
             } else {
                 let mut c = init_int.counts.clone();
                 // Draw stochastic initial state for IVP compartments
-                for ivp in ivp_mappings {
+                for (k, ivp) in ivp_mappings.iter().enumerate() {
                     let frac = params[ivp.model_param_idx].clamp(1e-10, 1.0 - 1e-10);
-                    c[ivp.compartment_idx] = rngs[j].binomial(total_pop as u64, frac) as i64;
+                    let patch_n = ivp_patch_pops[k] as u64;
+                    c[ivp.compartment_idx] = rngs[j].binomial(patch_n, frac) as i64;
                 }
                 // Reapply balance constraint if present
                 if let Some(ref bal) = model.balance {

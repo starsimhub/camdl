@@ -287,16 +287,27 @@ pub fn complete_data_loglik_grad(
     let mut grad = vec![0.0; d];
 
     // Initial state density gradient: d/dθ log Binom(S₀; N₀, s0)
+    // N₀ is the per-patch population (not global) for stratified models.
     if !ivp_mappings.is_empty() {
         let total_pop: i64 = trajectory.initial_counts.iter().sum();
         for ivp in ivp_mappings {
             let count = trajectory.initial_counts[ivp.compartment_idx] as u64;
             let frac = params[ivp.model_param_idx].clamp(1e-10, 1.0 - 1e-10);
-            log_p += binom_logpmf(count, total_pop as u64, frac);
+            let comp_name = &model.model.compartments[ivp.compartment_idx].name;
+            let patch_suffix = comp_name.rsplit('_').next().unwrap_or("");
+            let patch_pop: i64 = if patch_suffix.is_empty() || !comp_name.contains('_') {
+                total_pop
+            } else {
+                model.model.compartments.iter().enumerate()
+                    .filter(|(_, c)| c.name.ends_with(&format!("_{}", patch_suffix)))
+                    .map(|(i, _)| trajectory.initial_counts[i])
+                    .sum()
+            };
+            log_p += binom_logpmf(count, patch_pop as u64, frac);
 
             // d/d(frac) log Binom(count; N, frac) = count/frac - (N-count)/(1-frac)
             let dbinom_dfrac = count as f64 / frac
-                - (total_pop as u64 - count) as f64 / (1.0 - frac);
+                - (patch_pop as u64 - count) as f64 / (1.0 - frac);
             grad[ivp.param_idx] += dbinom_dfrac;
         }
     }
