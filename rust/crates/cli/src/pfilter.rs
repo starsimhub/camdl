@@ -363,6 +363,52 @@ pub fn load_data_tsv_pub(path: &str) -> Result<Vec<Observation>, String> {
     load_data_tsv(path)
 }
 
+/// Load observations from a specific column in a TSV file.
+/// The column name must match a header field. First column is always time.
+pub fn load_data_tsv_column(path: &str, column: &str) -> Result<Vec<Observation>, String> {
+    let content = std::fs::read_to_string(path)
+        .map_err(|e| format!("{}: {}", path, e))?;
+    let mut lines = content.lines();
+    let header = lines.next().ok_or("empty data file")?;
+    let cols: Vec<&str> = header.split('\t').collect();
+
+    // Find the column index for the requested stream name
+    let col_idx = cols.iter().position(|&c| c == column)
+        .or_else(|| {
+            // Fallback: if only 2 columns (time + value), use column 1
+            if cols.len() == 2 { Some(1) } else { None }
+        })
+        .ok_or_else(|| format!(
+            "column '{}' not found in data file '{}'. Available columns: {:?}",
+            column, path, &cols[1..]))?;
+
+    let mut observations = Vec::new();
+    for (line_num, line) in lines.enumerate() {
+        if line.trim().is_empty() { continue; }
+        let fields: Vec<&str> = line.split('\t').collect();
+        if fields.len() <= col_idx {
+            return Err(format!("line {}: expected {}+ columns, got {}",
+                line_num + 2, col_idx + 1, fields.len()));
+        }
+        let time: f64 = fields[0].trim().parse()
+            .map_err(|_| format!("line {}: cannot parse time '{}'", line_num + 2, fields[0]))?;
+        let value: f64 = fields[col_idx].trim().parse()
+            .map_err(|_| format!("line {}: cannot parse value '{}' in column '{}'",
+                line_num + 2, fields[col_idx], column))?;
+        observations.push(Observation { time, value });
+    }
+
+    for i in 1..observations.len() {
+        if observations[i].time < observations[i - 1].time {
+            return Err(format!(
+                "observations not in chronological order: t={} at row {} follows t={} at row {}",
+                observations[i].time, i + 2, observations[i - 1].time, i + 1));
+        }
+    }
+
+    Ok(observations)
+}
+
 fn load_data_tsv(path: &str) -> Result<Vec<Observation>, String> {
     let content = std::fs::read_to_string(path)
         .map_err(|e| format!("{}: {}", path, e))?;
