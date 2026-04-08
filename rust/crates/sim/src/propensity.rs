@@ -1,6 +1,7 @@
 use crate::{
     compiled_model::{CompiledModel, CompiledTimeFuncKind},
     error::SimError,
+    resolved_expr::eval_resolved,
     state::{IntState, RealState},
 };
 use ir::expr::{BinOp, Expr, UnOp};
@@ -298,6 +299,9 @@ pub fn eval_time_func(kind: &CompiledTimeFuncKind, t: f64) -> f64 {
 
 /// Evaluate all propensities into `out` (cleared and refilled in-place).
 /// No allocation if `out` is already the right size.
+///
+/// Uses pre-resolved expression trees — no HashMap lookups, no Result
+/// propagation from expression evaluation. Only error: negative propensity.
 pub fn eval_propensities(
     model: &CompiledModel,
     int_s: &IntState,
@@ -308,8 +312,8 @@ pub fn eval_propensities(
 ) -> Result<(), SimError> {
     let ctx = EvalCtx { model, int_s, real_s, params, t , projected: None };
     out.clear();
-    for tr in model.model.transitions.iter() {
-        let p = eval_expr(&tr.rate, &ctx)?;
+    for (i, tr) in model.model.transitions.iter().enumerate() {
+        let p = eval_resolved(&model.resolved.rates[i], &ctx);
         if p < 0.0 {
             return Err(SimError::NegativePropensity {
                 transition: tr.name.clone(),
