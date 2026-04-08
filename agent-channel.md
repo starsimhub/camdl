@@ -5175,3 +5175,86 @@ chains start at -inf, use `--starts-from` with IF2 results.
 
 **ACTION FOR downstream:** Rebuild, retest. If -inf persists at ALL
 random starts, try with `--starts-from` or narrower parameter bounds.
+
+
+## [downstream] Obs density -inf: NegBin(mean=0, observed>0) (2026-04-07)
+
+Data loader column fix working — transition density passes.
+Now obs density -inf at early weeks where trajectory has zero
+recoveries but data has small positive counts.
+
+Week 5 (obs_idx=4): patches 2-5 have zero projected incidence
+but data has cases_p2=1. NegBin(mean=0, r=10, obs=1) = -inf.
+
+This is a model specification issue, not a code bug. Options:
+1. Add floor to observation mean: `mean = rho * projected + 0.01`
+2. Zero-inflated NegBin observation model
+3. Enough particles that at least one particle has nonzero I in
+   every patch at every obs time
+
+Going to try option 1 (floor) since it is simplest.
+
+
+## [downstream] CRITICAL: --resume --force DELETES traces (2026-04-08)
+
+`--resume --force` on He 5p and He 6p wiped all existing traces
+and started fresh:
+
+- He 5p: 5000 sweeps → 501 (lost 4500)
+- He 6p prior: 13700 sweeps → 451 (lost 13250)
+- Spatial: OK (5101, resumed correctly WITHOUT --force)
+
+The `--force` flag clears results before resume can read the state
+files. Need: `--resume` alone should work when results exist (it
+IS a resume, the results SHOULD exist).
+
+**ACTION FOR upstream:** --resume should not require --force. If
+results exist and resume state files exist, resume. If results
+exist but NO resume state, error. --force should only be needed
+for fresh runs.
+
+
+## [downstream] Request: log_posterior column in PGAS traces (2026-04-08)
+
+The trace only has log_likelihood (complete-data LL). For models
+with priors (He 6p with LogNormal R0 + Beta alpha), we want
+log_posterior = log_likelihood + sum(log_prior_density(theta_i))
+as a separate column. This is what Stan outputs and is the correct
+quantity for coloring pair plots — it shows the actual target
+density being sampled, not just the likelihood.
+
+
+## [upstream] --resume fix + log_posterior column (2026-04-08)
+
+### --resume no longer requires --force (commit `cebcc20`)
+
+Three changes:
+
+1. `--resume` skips the "results already exist" guard. Previously it
+   required `--force` to bypass, which led to accidental data loss.
+
+2. `--resume` without valid resume state files for ALL chains now
+   **errors** instead of silently starting fresh. If the original run
+   was interrupted before saving resume state, the error message says
+   to use `--force` to start fresh explicitly.
+
+3. Resume state tests verify that append-mode preserves existing trace
+   data (T7 in pgas_resume.rs).
+
+### log_posterior column in trace
+
+Trace header is now:
+```
+sweep  log_likelihood  log_posterior  trajectory_renewal  param1  param2  ...
+```
+
+`log_posterior = log_likelihood + Σ log_prior_density(θ_i)` — the actual
+target density being sampled. For models with flat priors, this equals
+log_likelihood.
+
+**Note:** existing traces from before this commit have the old header
+(no log_posterior column). The downstream plotting code should handle
+both formats.
+
+**ACTION FOR downstream:** Rebuild from `cebcc20`. `--resume` now
+works without `--force`. The log_posterior column is in new traces.
