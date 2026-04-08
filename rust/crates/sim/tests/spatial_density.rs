@@ -186,21 +186,18 @@ fn test_density_matches_step_one_polio_spatial_5() {
 /// reproduced the bug.
 #[test]
 fn test_density_downstream_seir_spatial_5() {
-    let path = "tests/fixtures/seir_spatial_5.ir.json";
-    let model = match std::fs::read_to_string(path) {
-        Ok(json) => match serde_json::from_str::<ir::Model>(&json) {
-            Ok(m) => m,
-            Err(e) => { eprintln!("  skip: cannot parse: {}", e); return; }
-        },
-        Err(_) => { eprintln!("  skip: {} not found", path); return; }
-    };
+    // Uses the golden model with iota, overdispersion, seasonal forcing,
+    // and high R0 — the exact combination that triggers spatial density bugs.
+    // See docs/dev/incidents/2026-04-07-spatial-pgas-neg-inf.md.
+    let path = "../../../ocaml/golden/seir_spatial_5_inference.ir.json";
+    let model = load_model(path);
 
     let mut model = model;
     for p in &mut model.parameters {
         if p.value.is_none() {
             p.value = Some(match p.name.as_str() {
                 "R0" => 20.0, "sigma" => 0.125, "gamma" => 0.2,
-                "amplitude" => 0.3, "s0" => 0.06, "kappa" => 0.05,
+                "amplitude" => 0.3, "kappa" => 0.05, "iota" => 1e-6,
                 "rho" => 0.4, "sigma_se" => 0.05, "k" => 10.0,
                 "N0_p1" => 100000.0, "N0_p2" => 80000.0,
                 "N0_p3" => 60000.0, "N0_p4" => 50000.0,
@@ -285,20 +282,14 @@ fn test_density_downstream_seir_spatial_5() {
 /// Runs 100 different seeds to catch rare stochastic edge cases.
 #[test]
 fn test_density_downstream_multi_seed() {
-    let path = "tests/fixtures/seir_spatial_5.ir.json";
-    let model = match std::fs::read_to_string(path) {
-        Ok(json) => match serde_json::from_str::<ir::Model>(&json) {
-            Ok(m) => m,
-            Err(e) => { eprintln!("  skip: {}", e); return; }
-        },
-        Err(_) => { eprintln!("  skip: not found"); return; }
-    };
+    let path = "../../../ocaml/golden/seir_spatial_5_inference.ir.json";
+    let model = load_model(path);
     let mut model = model;
     for p in &mut model.parameters {
         if p.value.is_none() {
             p.value = Some(match p.name.as_str() {
                 "R0" => 20.0, "sigma" => 0.125, "gamma" => 0.2,
-                "amplitude" => 0.3, "s0" => 0.06, "kappa" => 0.05,
+                "amplitude" => 0.3, "kappa" => 0.05, "iota" => 1e-6,
                 "rho" => 0.4, "sigma_se" => 0.05, "k" => 10.0,
                 "N0_p1" => 100000.0, "N0_p2" => 80000.0,
                 "N0_p3" => 60000.0, "N0_p4" => 50000.0,

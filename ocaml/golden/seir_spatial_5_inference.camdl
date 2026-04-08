@@ -1,0 +1,139 @@
+# 5-patch spatial SEIR — inference stress test
+#
+# This model exercises the specific combination that causes density/simulation
+# mismatches in PGAS: high R0 (overdraft risk), spatial coupling (clamping),
+# overdispersion (gamma indexing), seasonal forcing, and iota seeding.
+#
+# Added to the golden suite after the spatial PGAS -inf incident (2026-04-07).
+# See docs/dev/incidents/2026-04-07-spatial-pgas-neg-inf.md.
+
+time_unit = 'days
+
+compartments { S, E, I, R }
+
+dimensions {
+  patch = [p1, p2, p3, p4, p5]
+}
+
+stratify(by = patch)
+
+let N[p in patch] = S[p] + E[p] + I[p] + R[p]
+
+parameters {
+  R0        : positive    in [5.0, 80.0]
+  sigma     : rate        in [0.01, 0.3]
+  gamma     : rate        in [0.01, 0.3]
+  kappa     : positive    in [0.001, 0.5]
+  amplitude : probability in [0.05, 0.7]
+  iota      : positive    in [1e-8, 1e-2]
+  rho       : probability in [0.1, 0.9]
+  sigma_se  : positive    in [0.001, 1.0]
+  N0[patch] : count       in [1000, 500000]
+  k         : positive    in [1.0, 100.0]
+}
+
+# Seasonal forcing: square wave (school term)
+forcing {
+  school : periodic {
+    period = 365.25 'days
+    step   = 1 'days
+    on     = [0:182]
+  }
+}
+
+let beta = R0 * gamma
+let seas = 1.0 - amplitude + amplitude * 2.0 * school(t)
+
+tables {
+  # Gravity coupling weights — asymmetric, center-heavy
+  W : patch × patch = [[0.00, 0.15, 0.05, 0.05, 0.20],
+                        [0.15, 0.00, 0.15, 0.05, 0.10],
+                        [0.05, 0.15, 0.00, 0.15, 0.10],
+                        [0.05, 0.05, 0.15, 0.00, 0.20],
+                        [0.20, 0.10, 0.10, 0.20, 0.00]]
+}
+
+transitions {
+  # Local transmission with seasonal forcing, overdispersion, and iota seeding.
+  # iota ensures the rate is never exactly zero when I[p]=0, which is
+  # required for PGAS density evaluation on spatial models.
+  infection[p in patch] : S[p] --> E[p]
+    @ overdispersed(beta * seas * S[p] * (I[p] + iota) / N[p], sigma_se)
+
+  # Spatial importation: infectious in q seed infections in p
+  importation[p in patch, q in patch] : S[p] --> E[p]
+    @ kappa * W[p, q] * S[p] * I[q] / N[q] where p != q
+
+  progression[p in patch] : E[p] --> I[p]  @ sigma * E[p]
+  recovery[p in patch]    : I[p] --> R[p]  @ gamma * I[p]
+  waning[p in patch]      : R[p] --> S[p]  @ (1.0 / 730.0) * R[p]
+}
+
+init {
+  S[p1] = 0.06 * N0_p1 - 50
+  S[p2] = 0.06 * N0_p2
+  S[p3] = 0.06 * N0_p3
+  S[p4] = 0.06 * N0_p4
+  S[p5] = 0.06 * N0_p5
+  I[p1] = 50
+  R[p1] = N0_p1 - 0.06 * N0_p1
+  R[p2] = N0_p2 - 0.06 * N0_p2
+  R[p3] = N0_p3 - 0.06 * N0_p3
+  R[p4] = N0_p4 - 0.06 * N0_p4
+  R[p5] = N0_p5 - 0.06 * N0_p5
+}
+
+observations {
+  cases_p1 : {
+    projected  = incidence(recovery_p1)
+    every      = 7 'days
+    likelihood = neg_binomial(mean = rho * projected, r = k)
+  }
+  cases_p2 : {
+    projected  = incidence(recovery_p2)
+    every      = 7 'days
+    likelihood = neg_binomial(mean = rho * projected, r = k)
+  }
+  cases_p3 : {
+    projected  = incidence(recovery_p3)
+    every      = 7 'days
+    likelihood = neg_binomial(mean = rho * projected, r = k)
+  }
+  cases_p4 : {
+    projected  = incidence(recovery_p4)
+    every      = 7 'days
+    likelihood = neg_binomial(mean = rho * projected, r = k)
+  }
+  cases_p5 : {
+    projected  = incidence(recovery_p5)
+    every      = 7 'days
+    likelihood = neg_binomial(mean = rho * projected, r = k)
+  }
+}
+
+simulate {
+  from = 0 'days
+  to   = 365 'days
+}
+
+scenarios {
+  true_params {
+    label = "true parameter values for PGAS density round-trip"
+    set = {
+      R0        = 20.0
+      sigma     = 0.125
+      gamma     = 0.2
+      kappa     = 0.05
+      amplitude = 0.3
+      iota      = 1e-6
+      rho       = 0.4
+      sigma_se  = 0.05
+      N0_p1     = 100000
+      N0_p2     = 80000
+      N0_p3     = 60000
+      N0_p4     = 50000
+      N0_p5     = 150000
+      k         = 10.0
+    }
+  }
+}
