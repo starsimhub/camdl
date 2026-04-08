@@ -381,8 +381,19 @@ pub fn complete_data_loglik(
                     .map(|(i, _)| trajectory.initial_counts[i])
                     .sum()
             };
-            log_p += binom_logpmf(count, patch_pop as u64, frac);
+            let ivp_ll = binom_logpmf(count, patch_pop as u64, frac);
+            if !ivp_ll.is_finite() {
+                eprintln!("  IVP density -inf: Binom({}, {}, {:.6e}) for {} (comp={}, patch_pop={})",
+                    count, patch_pop, frac,
+                    comp_name, ivp.compartment_idx, patch_pop);
+            }
+            log_p += ivp_ll;
         }
+    }
+
+    if !log_p.is_finite() {
+        eprintln!("[cdll] -inf AFTER IVP density: log_p={:.1}", log_p);
+        return Ok(f64::NEG_INFINITY);
     }
 
     // Precompute observation substep indices
@@ -407,10 +418,30 @@ pub fn complete_data_loglik(
             model, counts_before, &rec.flows, &rec.gammas, params, t, dt,
         )?;
         if !td.is_finite() {
-            if crate::chain_binomial::trace_enabled() {
-                eprintln!("[pgas] -inf transition density at substep {} (t={:.1})", s, t);
-                eprintln!("  counts_before: {:?}", counts_before);
-                eprintln!("  flows: {:?}", &rec.flows);
+            eprintln!("[pgas] complete_data_loglik: -inf transition density at substep {} (t={:.1})", s, t);
+            // Print the source groups with n_exit > n_src
+            for &(src_local, ref group) in &model.source_groups {
+                let n_src = counts_before[src_local].max(0) as u64;
+                let n_exit: u64 = group.iter().map(|&ti| rec.flows[ti]).sum();
+                if n_exit > n_src {
+                    let names: Vec<&str> = group.iter()
+                        .map(|&ti| model.model.transitions[ti].name.as_str()).collect();
+                    eprintln!("  n_exit={} > n_src={} at src_comp={} ({:?})",
+                        n_exit, n_src, src_local, names);
+                }
+            }
+            // Check for zero-rate transitions with nonzero flow
+            let n_int = model.int_local_to_global.len();
+            let mut int_s = crate::state::IntState::new(n_int);
+            int_s.counts.copy_from_slice(counts_before);
+            let real_s = crate::state::RealState::new(model.real_local_to_global.len());
+            let mut props = vec![0.0; model.model.transitions.len()];
+            eval_propensities(model, &int_s, &real_s, params, t, &mut props).ok();
+            for (ti, &rate) in props.iter().enumerate() {
+                if rec.flows[ti] > 0 && rate <= 0.0 {
+                    eprintln!("  zero-rate: {} rate={:.6e} flow={}",
+                        model.model.transitions[ti].name, rate, rec.flows[ti]);
+                }
             }
             return Ok(f64::NEG_INFINITY);
         }
@@ -431,12 +462,12 @@ pub fn complete_data_loglik(
         // Observation density — joint across all streams
         if let Some(&obs_idx) = obs_at_substep.get(&s) {
             let obs_ll = super::types::joint_obs_weight(obs_streams, &cum_flows, obs_idx);
-            if !obs_ll.is_finite() && crate::chain_binomial::trace_enabled() {
-                eprintln!("[pgas] obs density -inf at substep {} (obs_idx={}), cum_flows={:?}",
-                    s, obs_idx, &cum_flows);
+            if !obs_ll.is_finite() {
+                eprintln!("[cdll] obs density -inf at substep {} (obs_idx={})", s, obs_idx);
             }
             log_p += obs_ll;
             if !log_p.is_finite() {
+                eprintln!("[cdll] -inf after obs at substep {} (cumulative log_p={:.1})", s, log_p);
                 return Ok(f64::NEG_INFINITY);
             }
             for f in &mut cum_flows { *f = 0; }
