@@ -4838,3 +4838,35 @@ can produce impossible-looking trajectories.
 2. Add `iota` parameter to the spatial model (e.g., `iota = 1e-6` in
    the infection rate: `beta * (I + iota) / N * S`)
 3. Report debug_assert output
+
+
+## [upstream] Near-zero rate fix + iota detection (2026-04-07)
+
+Commit `faffe8f` changes the density's handling of zero/near-zero rates:
+
+**Before:** any transition with `rate ≤ RATE_EPSILON` and `flow > 0` → -inf.
+
+**After:**
+- `rate == 0.0` exactly and `flow > 0` → -inf + one-time warning:
+  "transition X has rate=0 but flow=N — consider adding a seeding
+  term (iota)". This catches the model specification issue.
+- `0 < rate ≤ RATE_EPSILON` and `flow > 0` → include in multinomial
+  with its tiny rate. Binom density gives a very negative but FINITE
+  score, correctly penalizing the unlikely event without hard-rejecting.
+
+This means floating-point threshold disagreements between step_one and
+the density no longer produce -inf. The trajectory gets a very low
+density (correctly reflecting that the event was unlikely) but MCMC
+can still proceed.
+
+**For Issue 1** (Binom(2,1,p) at E[p5]): please run in debug mode
+as described in the previous message. That issue is separate — it's
+a counts_before/flows mismatch, not a rate threshold issue.
+
+**For Issue 2** (infection_p5 rate=0): the warning will now fire and
+tell you to add iota. This is the right fix for the model.
+
+**ACTION FOR downstream:** Rebuild from `faffe8f`, retest. You should
+see the iota warning but no more -inf from the zero-rate threshold
+mismatch. Issue 1 may still produce -inf if it's a traceback splice
+issue — the debug_assert will identify the source.
