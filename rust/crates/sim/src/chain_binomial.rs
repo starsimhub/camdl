@@ -6,7 +6,7 @@ use crate::{
     intervention::{all_intervention_times, apply_interventions_at},
     ode_integrator::rk4_step,
     output::output_times as get_output_times,
-    propensity::{eval_propensities, eval_expr, EvalCtx},
+    propensity::{eval_propensities, EvalCtx},
     resolved_expr::eval_resolved,
     simulate::Simulate,
     state::{FlowVec, IntState, RealState, Snapshot, Trajectory},
@@ -171,12 +171,14 @@ fn run_chain_binomial(
         enum ResolvedDraw { Poisson, Deterministic, Overdispersed(f64) }
         let draws: Vec<ResolvedDraw> = {
             let ctx = EvalCtx { model, int_s: &int_s, real_s: &real_s, params, t , projected: None };
-            model.model.transitions.iter()
-                .map(|tr| match &tr.draw_method {
+            model.model.transitions.iter().enumerate()
+                .map(|(i, tr)| match &tr.draw_method {
                     ir::transition::DrawMethod::Poisson => Ok(ResolvedDraw::Poisson),
                     ir::transition::DrawMethod::Deterministic => Ok(ResolvedDraw::Deterministic),
-                    ir::transition::DrawMethod::Overdispersed(expr) =>
-                        eval_expr(expr, &ctx).map(ResolvedDraw::Overdispersed),
+                    ir::transition::DrawMethod::Overdispersed(_) => {
+                        let sigma_sq = eval_resolved(model.resolved.overdispersion[i].as_ref().unwrap(), &ctx);
+                        Ok(ResolvedDraw::Overdispersed(sigma_sq))
+                    }
                 })
                 .collect::<Result<_, _>>()?
         };
@@ -390,12 +392,14 @@ pub fn step_one(
     scratch.draws.clear();
     {
         let ctx = EvalCtx { model, int_s: &scratch.int_s, real_s: &scratch.real_s, params, t , projected: None };
-        for tr in &model.model.transitions {
+        for (i, tr) in model.model.transitions.iter().enumerate() {
             scratch.draws.push(match &tr.draw_method {
                 ir::transition::DrawMethod::Poisson => ResolvedDraw::Poisson,
                 ir::transition::DrawMethod::Deterministic => ResolvedDraw::Deterministic,
-                ir::transition::DrawMethod::Overdispersed(expr) =>
-                    ResolvedDraw::Overdispersed(eval_expr(expr, &ctx)?),
+                ir::transition::DrawMethod::Overdispersed(_) => {
+                    let sigma_sq = eval_resolved(model.resolved.overdispersion[i].as_ref().unwrap(), &ctx);
+                    ResolvedDraw::Overdispersed(sigma_sq)
+                }
             });
         }
     }
