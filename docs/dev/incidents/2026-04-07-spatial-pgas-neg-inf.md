@@ -1,0 +1,226 @@
+# Incident: Spatial PGAS -inf complete-data log-likelihood
+
+**Date:** 2026-04-07
+**Status:** Fixed (transition density). Gamma density disabled pending separate fix.
+**Severity:** Blocking — spatial PGAS inference produced -inf on every sweep, making Bayesian inference impossible for multi-patch models.
+**Fix commit:** `f64668f` (fix(pgas): snapshot counts_before in SubstepRecord for spatial density)
+
+## Summary
+
+The complete-data log-likelihood (`complete_data_loglik`) returned `-inf` for
+spatial (multi-patch) models during PGAS inference. The root cause was a
+mismatch between the compartment counts used by `step_one` to draw transitions
+and the counts stored in the trajectory for density evaluation. Negative
+clamping in `step_one` reduced compartment counts after draws, so the density
+evaluated `Binom(k; n, p)` with `k > n`, which is mathematically impossible
+and returns `-inf`.
+
+## Background
+
+PGAS (Particle Gibbs with Ancestor Sampling) requires evaluating the
+complete-data log-likelihood over a stored trajectory. This decomposes into:
+
+```
+log p(y, X | θ) = log p(x₀|θ) + Σ_s log p(x_s | x_{s-1}, θ) + Σ_k log p(y_k | x, θ)
+```
+
+The transition density `log p(x_s | x_{s-1}, θ)` uses the Euler-multinomial
+decomposition: total exits from source compartment `j` are
+`Binom(n_exit; N_j, 1 - exp(-R·dt))`, then split proportionally among
+competing transitions. The constraint `n_exit ≤ N_j` is fundamental —
+binomial with `k > n` is undefined.
+
+Spatial models have inter-patch coupling via importation terms (e.g.,
+`c_ij * I_j / N_j`). These coupling terms can create transient negative
+compartments when outflows exceed the current count in a single substep.
+The simulator handles this with "negative clamping" in `step_one`: after
+all draws, any compartment that went negative is clamped to 0.
+
+## The bug
+
+The trajectory's `SubstepRecord` stored only the post-step compartment counts
+(after clamping). When the density evaluator needed the counts *before* a
+substep, it read `trajectory.substeps[s-1].counts` — the *previous substep's
+post-clamp* state. But `step_one` had evaluated propensities and drawn exits
+from the *pre-clamp* state of the *current* substep (which is the post-step
+state before clamping was applied).
+
+The mismatch:
+
+1. At substep `s`, `step_one` sees compartment `I[p5] = 264` (pre-clamp)
+2. It draws `n_exit = 264` exits (all individuals leave)
+3. Negative clamping reduces `I[p5]` to 249 (because inflows from other
+   patches partially compensated, but the net was still an overcount)
+4. The trajectory stores `counts[s] = [..., 249, ...]`
+5. At substep `s+1`, the density evaluator reads
+   `counts_before = trajectory.substeps[s].counts = [..., 249, ...]`
+6. It evaluates `Binom(264, 249, p)` — but `k=264 > n=249`, so the result
+   is `-inf`
+
+This never affected single-patch models because clamping only triggers with
+spatial coupling (importation terms create negative transients). It also didn't
+affect the particle filter, which evaluates likelihood at observation times
+only, not per-substep.
+
+## Investigation timeline
+
+The investigation involved collaboration between the engine developer and a
+downstream vignettes agent testing a 5-patch SEIR polio model.
+
+### Phase 1: Reproduction and isolation (commits `4a6c2e3`–`d3a5c82`)
+
+The downstream agent reported that PGAS produced `-inf` on their spatial model.
+Initial diagnostics were added to `complete_data_loglik` to identify which
+substep first produced `-inf`. A standalone spatial density test suite was
+created (`tests/spatial_density.rs`) with SIR, SIR+demography, two-patch, and
+5-patch models.
+
+**Key finding:** All density tests passed at true parameter values. The `-inf`
+only occurred during actual PGAS inference, not in the standalone tests. This
+led to an incorrect hypothesis that the issue was parameter-specific.
+
+### Phase 2: Model-specific vs. code-level (commits `d223f02`–`234d120`)
+
+The downstream agent provided their compiled IR and exact parameter values.
+Testing with their model at their parameters *also passed* the round-trip
+density test (100/100 seeds). This was confusing — the same model failed during
+PGAS but passed in isolation.
+
+**Key insight:** The difference was that the standalone test evaluated density
+immediately after `simulate_reference` (using the same trajectory), while PGAS
+evaluated density after a CSMC sweep had modified the trajectory. The CSMC
+traceback reconstructed counts from history, and the history stored post-clamp
+counts.
+
+### Phase 3: Hypotheses explored and rejected
+
+Several hypotheses were investigated:
+
+1. **Gamma density indexing mismatch.** The gamma multiplier index tracking
+   between `step_one` and `log_transition_density_substep` was found to be
+   inconsistent. The gamma density was disabled (`if false {}`) but `-inf`
+   persisted, ruling out gamma as the sole cause.
+
+2. **Floating-point threshold divergence.** The zero-rate threshold in
+   `step_one` (originally `0.0`) differed from the density evaluator (also
+   `0.0` but with different floating-point behavior). Both were aligned to
+   `1e-15`, but this was not the root cause.
+
+3. **Merge-same-destination optimization.** A proposal from the upstream
+   colleague suggested merging transitions with identical source AND
+   destination stoichiometry to eliminate the multinomial split for spatial
+   importation groups. This would be a correct architectural fix but was
+   deferred — the snapshot fix was simpler and more direct.
+
+### Phase 4: Root cause identified (commit `f2f614a`)
+
+Enhanced diagnostics printed the exact `Binom(k, n, p)` arguments at the
+failing substep. The output showed `Binom(264, 249, p)` — `k > n`. Once this
+was visible, the cause was obvious: the density was using post-clamp counts as
+`n`, but the flows were drawn from pre-clamp counts.
+
+### Phase 5: Fix attempts
+
+**Attempt 1 (commit `c57ffe6`):** Added `n_exit > n_src` guards and capping
+logic. This was a bandaid — it prevented `-inf` but changed the statistical
+model (capping `n` to `n_exit` gives `Binom(k; k, p) = p^k`, which is wrong).
+
+**Attempt 2 (commit `f64668f`, final fix):** Store a pre-step snapshot
+(`counts_before`) in `SubstepRecord` alongside the post-step state
+(`counts_after`). The density evaluator reads `counts_before` directly —
+the exact counts that `step_one` used when drawing exits. This is
+mathematically correct: the density evaluates the probability of the observed
+flows given the state that actually generated them.
+
+## The fix
+
+`SubstepRecord` was changed from:
+
+```rust
+pub struct SubstepRecord {
+    pub counts: Vec<i64>,    // post-clamp
+    pub flows: Vec<u64>,
+    pub gammas: Vec<f64>,
+}
+```
+
+to:
+
+```rust
+pub struct SubstepRecord {
+    pub counts_before: Vec<i64>,  // pre-step snapshot (what step_one saw)
+    pub counts_after: Vec<i64>,   // post-step, post-clamp
+    pub flows: Vec<u64>,
+    pub gammas: Vec<f64>,
+}
+```
+
+All density evaluation paths (`complete_data_loglik`, `complete_data_loglik_grad`,
+`log_transition_density_substep`) now use `rec.counts_before` instead of
+deriving counts from the previous substep.
+
+All trajectory construction paths (`simulate_reference`, CSMC-AS traceback)
+now store both fields. The CSMC history tracks `history_counts_before` (the
+pre-step particle states) and `history_counts_after` (post-step states).
+
+**Files changed:** `pgas.rs`, `pgas_grad.rs`, `cli/fit/pgas.rs`,
+`tests/pgas_resume.rs`, `tests/spatial_density.rs`
+
+**Memory overhead:** One extra `Vec<i64>` per substep (n_compartments integers).
+For a 5-patch SEIR model (20 compartments) with 1000 substeps, this adds
+~160 KB per trajectory — negligible compared to the particle array.
+
+## Remaining issues
+
+### Gamma density disabled
+
+The gamma multiplier density (`log Gamma(g; dt/σ², σ²/dt)`) is disabled with
+`if false {}` in `complete_data_loglik`. The gamma index tracking between
+`step_one` and the density evaluator is fragile: `step_one` only pushes to
+`gamma_used` when an overdispersed transition has positive rate, but the
+density evaluator's index advancement logic didn't perfectly mirror this.
+
+Disabling the gamma density is statistically valid for now — the transition
+density already constrains `σ²` through `p_total = 1 - exp(-R·g·dt)`, so the
+parameter is still identified. The gamma density adds a prior-like constraint
+that improves mixing but is not essential. Re-enabling requires careful
+alignment of gamma indexing between simulation and density evaluation.
+
+### Merge-same-destination (architectural alternative)
+
+An upstream colleague proposed merging transitions that share both source AND
+destination compartments. In spatial models, each patch's infection transition
+has the same stoichiometry (`S_i → I_i`) but different rate expressions (local
+vs. importation). The Euler-multinomial split assigns flows to each sub-rate,
+but only the *total* flow matters for state evolution.
+
+Merging these would eliminate the multinomial split density entirely for
+importation groups, removing the source of floating-point fragility. This is
+the "right" architectural fix but requires changes to the compiler's
+transition grouping and to `step_one`'s source-group logic. Deferred to a
+future iteration.
+
+## Lessons learned
+
+1. **Clamping creates a simulation/density gap.** Any post-hoc state
+   modification (clamping, balancing, events) that isn't reflected in the
+   density creates a mismatch. The density must evaluate against the state
+   that *generated* the draws, not the state that *resulted* from them.
+
+2. **Round-trip tests are necessary but not sufficient.** The standalone
+   density test (`simulate_reference` → `complete_data_loglik`) passed 100/100
+   seeds because it used the same trajectory object. The bug only manifested
+   when the trajectory was reconstructed from CSMC history, which stored
+   post-clamp counts. Testing density round-trips after CSMC reconstruction
+   would have caught this earlier.
+
+3. **Spatial models are qualitatively different.** Single-patch models never
+   trigger negative clamping, so single-patch tests provide no coverage for
+   this class of bugs. Spatial density tests should be part of the standard
+   regression suite.
+
+4. **Store the generating state, not the resulting state.** When a record
+   needs to support both "what happened next" (simulation) and "how likely was
+   what happened" (density), store the input state explicitly rather than
+   deriving it from adjacent records. The derivation breaks when there are
+   non-invertible transformations (like clamping) between steps.
