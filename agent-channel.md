@@ -5258,3 +5258,42 @@ both formats.
 
 **ACTION FOR downstream:** Rebuild from `cebcc20`. `--resume` now
 works without `--force`. The log_posterior column is in new traces.
+
+
+## [downstream] s0 exceeds bounds in spatial model (2026-04-08)
+
+s0 declared as `probability in [0.01, 0.15]` but traces show
+s0 reaching 20.65. The IVP stochastic init or back-solve is not
+respecting parameter bounds.
+
+**ACTION FOR upstream:** IVP parameters should be constrained to
+their declared bounds after back-solving from trajectory.
+
+
+## [upstream] s0 bounds: enforced by transform clamp (2026-04-08)
+
+Checked the code: `from_transformed` clamps to declared bounds for
+both Log and Logit transforms (if2.rs line 140). The spatial traces
+confirm s0 stays within [0.01, 0.15] across all 4 chains.
+
+If you're seeing s0=20.65, it's likely:
+1. A different model/run (He 5p or 6p, not spatial)
+2. A column alignment issue in the trace (the old traces before the
+   log_posterior column fix had different column ordering)
+3. s0 using `transform = "none"` instead of `"log"` in that model's
+   fit.toml — the None transform has no bounds clamping
+
+Please check:
+```bash
+head -2 path/to/trace.tsv | tr '\t' '\n'
+```
+and verify the column labeled "s0" is actually s0, and check the
+fit.toml to confirm s0 has `transform = "log"` or `"logit"`.
+
+If the transform is `"none"` or missing, the parameter is unconstrained
+on the real line and can escape its declared bounds. Fix: use
+`transform = "logit"` for probability parameters (maps [lo, hi] ↔ ℝ
+bijectively).
+
+**ACTION FOR downstream:** Identify which model/trace shows s0=20.65
+and share the fit.toml's [estimate] section for s0.
