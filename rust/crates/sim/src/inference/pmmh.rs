@@ -85,6 +85,9 @@ pub struct PMMHConfig {
     pub n_source_groups: usize,
     /// Number of observations (for sizing PFRandomState).
     pub n_obs: usize,
+    /// Substeps per observation interval (= obs_spacing / dt).
+    /// Used to size the CPM random state. Computed from actual observation times.
+    pub steps_per_obs: usize,
 }
 
 // ── Output types ───────────────────────────────────────────────────
@@ -288,7 +291,7 @@ pub fn run_pmmh(
 
     // CPM random state (if correlated mode)
     use super::correlated_pf::PFRandomState;
-    let steps_per_obs = (config.dt.recip() * 7.0).round() as usize; // 7 for weekly obs, dt=1
+    let steps_per_obs = config.steps_per_obs;
     let mut current_randoms: Option<PFRandomState> = config.rho.map(|_| {
         PFRandomState::draw_fresh(
             config.n_particles, config.n_obs, steps_per_obs,

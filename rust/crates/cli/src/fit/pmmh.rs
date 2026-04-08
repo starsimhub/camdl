@@ -100,7 +100,10 @@ pub fn run_pmmh_cli(
             eprintln!("\nCPM correlation check (rho={}, 50 correlated pairs)...", rho);
             let n_source_groups = config.compiled.source_groups.len();
             let n_obs = config.observations.len();
-            let steps_per_obs = (1.0_f64 / dt * 7.0).round() as usize;
+            let obs_spacing = if config.observations.len() >= 2 {
+                config.observations[1].time - config.observations[0].time
+            } else { 7.0 };
+            let steps_per_obs = (obs_spacing / dt).round() as usize;
             let mut corr_rng = sim::rng::StatefulRng::new(seed + 999);
 
             let compiled = config.compiled.clone();
@@ -191,7 +194,7 @@ pub fn run_pmmh_cli(
             let est = fit.estimate.get(&spec.name);
             match est.and_then(|e| e.prior.as_deref()) {
                 None => Prior::Flat,
-                Some(s) => super::pgas::parse_prior(s).unwrap_or_else(|| {
+                Some(s) => super::runner::parse_prior(s).unwrap_or_else(|| {
                     eprintln!("warning: cannot parse prior '{}' for {}, using Flat", s, spec.name);
                     Prior::Flat
                 }),
@@ -241,6 +244,12 @@ pub fn run_pmmh_cli(
                 rho: sc.and_then(|c| c.rho),
                 n_source_groups: config.compiled.source_groups.len(),
                 n_obs: config.observations.len(),
+                steps_per_obs: {
+                    let obs_spacing = if config.observations.len() >= 2 {
+                        config.observations[1].time - config.observations[0].time
+                    } else { 7.0 };
+                    (obs_spacing / dt).round() as usize
+                },
             };
 
             // Build the loglik evaluator closure for this chain
@@ -310,12 +319,20 @@ pub fn run_pmmh_cli(
                 if accepted { accepted_count.fetch_add(1, Ordering::Relaxed); }
                 let acc = accepted_count.load(Ordering::Relaxed) as f64 / (step + 1) as f64;
 
-                // Stream trace row to disk
-                {
+                // Stream trace row to disk (respecting burn-in/thin)
+                if step >= burn_in && (step - burn_in) % thin == 0 {
                     use std::io::Write;
+                    let log_prior: f64 = config.if2_params.iter().zip(priors.iter())
+                        .map(|(spec, prior)| {
+                            let theta = params[spec.index];
+                            let z = spec.to_transformed(theta);
+                            prior.log_density(theta, z)
+                        })
+                        .sum();
+                    let log_posterior = loglik + log_prior;
                     if let Ok(mut f) = trace_file.lock() {
-                        write!(f, "{}\t{:.2}\t{:.2}\t{}",
-                            step, loglik, loglik, if accepted { 1 } else { 0 }).unwrap();
+                        write!(f, "{}\t{:.4}\t{:.4}\t{}",
+                            step, loglik, log_posterior, if accepted { 1 } else { 0 }).unwrap();
                         for spec in &config.if2_params {
                             write!(f, "\t{:.6}", params[spec.index]).unwrap();
                         }
@@ -324,7 +341,7 @@ pub fn run_pmmh_cli(
                     }
                 }
 
-                // Progress display
+                // Progress display (always, regardless of burn-in/thin)
                 if step % 100 == 0 || step == n_steps - 1 {
                     if is_tty {
                         bar.set_position(step as u64 + 1);
@@ -358,8 +375,7 @@ pub fn run_pmmh_cli(
 
     let elapsed = t0.elapsed();
 
-    // Write per-chain traces
-    write_chain_traces(&stage_dir, &results, &config.if2_params)?;
+    // Traces already written by streaming callback — no post-hoc write needed.
 
     // Compute diagnostics
     let diagnostics = compute_diagnostics(&results, &config.if2_params);
@@ -558,40 +574,8 @@ fn compute_diagnostics(
     Diagnostics { rhat: rhat_map, ess: ess_map }
 }
 
-fn write_chain_traces(
-    dir: &str,
-    results: &[(usize, PMMHResult)],
-    if2_params: &[IF2Param],
-) -> Result<(), String> {
-    use std::io::Write;
-
-    for (chain_id, result) in results {
-        let chain_dir = format!("{}/chain_{}", dir, chain_id + 1);
-        std::fs::create_dir_all(&chain_dir)
-            .map_err(|e| format!("cannot create {}: {}", chain_dir, e))?;
-
-        let trace_path = format!("{}/trace.tsv", chain_dir);
-        let mut f = std::fs::File::create(&trace_path)
-            .map_err(|e| format!("cannot write {}: {}", trace_path, e))?;
-        writeln!(f, "# {}", crate::version::VERSION).unwrap();
-        write!(f, "step\tlog_likelihood\tlog_posterior\taccepted").unwrap();
-        for spec in if2_params { write!(f, "\t{}", spec.name).unwrap(); }
-        writeln!(f).unwrap();
-
-        for step in &result.steps {
-            let log_posterior = step.log_likelihood + step.log_prior;
-            write!(f, "{}\t{:.4}\t{:.4}\t{}",
-                step.step, step.log_likelihood, log_posterior,
-                if step.accepted { 1 } else { 0 }
-            ).unwrap();
-            for spec in if2_params {
-                write!(f, "\t{:.6}", step.params[spec.index]).unwrap();
-            }
-            writeln!(f).unwrap();
-        }
-    }
-    Ok(())
-}
+// write_chain_traces removed — streaming callback now handles trace output
+// with correct log_posterior and burn-in/thin filtering.
 
 fn write_summary(
     dir: &str,
