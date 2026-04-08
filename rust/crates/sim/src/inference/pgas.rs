@@ -1023,6 +1023,25 @@ pub fn run_pgas(
         current_transformed = state.transformed;
         trajectory = state.trajectory;
         start_sweep = state.completed_sweeps;
+
+        // Verify restored params are consistent with transforms and bounds.
+        // Recompute transformed from params to avoid stale z-values.
+        for (i, spec) in if2_params.iter().enumerate() {
+            let theta = current_params[spec.index];
+            let z_recomputed = spec.to_transformed(theta);
+            if (z_recomputed - current_transformed[i]).abs() > 1e-6 {
+                eprintln!("  warning: resumed z[{}]={:.6} differs from recomputed {:.6} for {} (theta={:.6}). Using recomputed.",
+                    i, current_transformed[i], z_recomputed, spec.name, theta);
+                current_transformed[i] = z_recomputed;
+            }
+            // Enforce bounds on restored params
+            let clamped = spec.from_transformed(current_transformed[i]);
+            if (clamped - theta).abs() > 1e-10 {
+                eprintln!("  warning: resumed {}={:.6} outside transform bounds, clamped to {:.6}",
+                    spec.name, theta, clamped);
+                current_params[spec.index] = clamped;
+            }
+        }
     } else {
         eprintln!("  initializing reference trajectory...");
         trajectory = simulate_reference(
