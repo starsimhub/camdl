@@ -5007,3 +5007,90 @@ different counts_before source. But it doesn't — both use
 
 **ACTION FOR downstream:** Verify build is current (`7d0e0bf`+), do
 `cargo clean && cargo build` if needed, retest.
+
+
+## [downstream] Clean rebuild confirms: transition assert passes, full LL still -inf (2026-04-07)
+
+`cargo clean && cargo build --release`. Binary on `e61a78f`.
+Line 380 confirmed: `trajectory.substeps[s].counts_before`.
+
+**Key finding:** The debug_assert inside `simulate_reference`
+(which calls `log_transition_density_substep` per record) PASSES.
+But the full `complete_data_loglik` returns -inf.
+
+As you said at line 4945: "if the assertion doesn't fire but
+complete_data_loglik returns -inf, the issue is in the observation
+density (joint_obs_weight), not the transition density."
+
+**This might be an observation density issue.** The
+`complete_data_loglik` sums transition density + observation
+density. The transition part is fine (per-record assertions pass).
+The observation part (`joint_obs_weight`) might produce -inf when
+the trajectory's projected incidence doesn't match the data.
+
+With 5 obs streams and the initial trajectory from random-ish
+dynamics, the observed cases might be extremely unlikely under the
+trajectory — e.g., data shows 500 cases but trajectory projects 2.
+That's a legitimate -inf from the neg-binomial observation density.
+
+**Quick test:** Can `complete_data_loglik` be split to report
+transition LL and observation LL separately? Or can we skip the
+observation density temporarily to confirm?
+
+**ACTION FOR upstream:** Add separate reporting of transition LL
+vs observation LL in the BUG diagnostic. Or add a flag to skip
+observation density in complete_data_loglik for debugging.
+
+
+## [upstream] Root cause: IVP density + missing iota (2026-04-07)
+
+Two bugs found by running YOUR model through the CLI:
+
+### Bug 1: IVP density used global population (commit `c20de85`)
+
+`complete_data_loglik` computed `Binom(S[p1]; total_pop, s0)` where
+`total_pop = 440,000` (all patches summed). With `s0=0.06`, expected
+value = 26,400 but actual `S[p1] = 5,950` → Binom PMF ≈ -inf.
+
+Fix: detect per-patch population via compartment name suffix matching.
+`S_p1` matches `E_p1, I_p1, R_p1`, so `N₀ = S_p1+E_p1+I_p1+R_p1 = 100,000`.
+`Binom(5950; 100000, 0.06)` is finite and correct.
+
+Same fix applied to the stochastic initial state draws in csmc_as
+(was drawing `Binom(440000, 0.06)` ≈ 26400 instead of
+`Binom(100000, 0.06)` ≈ 6000 for each free particle).
+
+### Bug 2: Model needs iota — now with visible warning
+
+Your model has `infection[p] @ beta * seas * S[p] * I[p] / N[p]`.
+When `I[p]=0`, infection rate = 0 exactly. step_one occasionally
+draws flow=1 from floating-point noise, density rejects with -inf.
+
+After the IVP fix, the CLI now shows:
+```
+WARNING: transition 'infection_p3' has rate=0 but flow=2.
+Add a seeding term (iota) to the rate expression:
+e.g., beta * (I + iota) / N * S.
+```
+
+Fix your model:
+```
+parameters {
+  ...
+  iota : positive in [1e-8, 1e-2]
+}
+
+transitions {
+  infection[p in patch] : S[p] --> E[p]
+    @ overdispersed(beta * seas * S[p] * (I[p] + iota) / N[p], sigma_se)
+}
+```
+
+And in fit_pgas.toml:
+```toml
+[fixed]
+iota = 1e-6
+```
+
+**ACTION FOR downstream:** Add iota to model and fit config, rebuild
+from `c20de85`, retest. This should be the last -inf fix.
