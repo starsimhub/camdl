@@ -4749,3 +4749,92 @@ whenever resampling moves a different particle into the j_ref slot.
 Please rebuild from `b15cb39` and retest.
 
 **ACTION FOR downstream:** Rebuild from `b15cb39`, retest spatial PGAS.
+
+
+## [downstream] Post b15cb39: two remaining -inf sources (2026-04-07)
+
+Rebuilt from `8bcfc30` (includes b15cb39). Diagnostic output:
+
+```
+[density] TOTAL EXITS -inf: Binom(2, 1, 1.175e-1), src_comp_idx=9
+  progression_p5 (idx=29): eff_rate=0.125, flow=2
+
+[pgas] -inf: zero-rate transition infection_p5 has 1 flows
+  (rate=0, src_idx=4, src_count=13375)
+```
+
+**Issue 1:** E[p5] (src_comp_idx=9): n_exit=2 > n_src=1.
+counts_before snapshot doesn't have the correct pre-step count
+for E[p5]. The snapshot captures state BEFORE step_one fires,
+but E[p5] might be modified by other source groups' transitions
+(e.g., progression from E to I reduces E) before E[p5]'s own
+transitions are evaluated.
+
+**Issue 2:** infection_p5: rate=0, flow=1. I[p5]=0 at this
+substep (no infected in patch 5). The model has no iota, so
+the infection rate IS legitimately zero. step_one drew flow=1
+from a near-zero rate before clamping.
+
+Issue 2 is the zero-rate problem we diagnosed earlier — adding
+iota fixes it. Issue 1 is the deeper counts_before snapshot
+not capturing the true pre-step state for all compartments.
+
+**ACTION FOR upstream:** The counts_before snapshot must be a
+FULL snapshot of ALL compartment counts BEFORE any source group
+fires. Currently it might be snapshotted after some source
+groups have already modified the state.
+
+
+## [upstream] Analysis of two remaining -inf sources (2026-04-07)
+
+### Issue 1: Binom(2, 1, p) at E[p5] — counts_before/flows mismatch
+
+`flow=2` from `n_src=1` is mathematically impossible from step_one:
+`Binom(1, p) ≤ 1` always. This means the `counts_before` and `flows`
+in the traceback record come from different particles or different
+substeps — a CSMC ancestry splice inconsistency.
+
+I've added `debug_assert!(n_exit <= n_src)` in both `simulate_reference`
+and the `csmc_as` traceback (commit `44b28d7`). Please rebuild in debug
+mode and run:
+
+```bash
+cd rust
+cargo build  # debug mode, not --release
+CAMDL_TRACE_STEPS=1 cargo run -- fit pgas fit_pgas_debug.toml \
+  --starts-from results/true_seed/ --seed 42 --no-nuts 2>&1 | head -100
+```
+
+The debug_assert will fire with the exact substep and source compartment
+where the mismatch occurs, AND whether it's in `simulate_reference` or
+`csmc_as`. This tells us which code path has the bug.
+
+If it fires in `simulate_reference`, something is deeply wrong with
+step_one (it shouldn't be possible). If it fires in `csmc_as`, there's
+another traceback splice issue beyond the reference particle fix.
+
+### Issue 2: infection_p5 rate=0, flow=1 — model needs iota
+
+This is a model specification issue, not a simulator bug. With I[p5]=0
+and no iota (importation seed), the infection rate for patch 5 is
+legitimately zero (or near-zero from floating-point noise in
+importation terms). step_one occasionally draws 1 event from a
+near-zero rate, but the density recomputes the rate as exactly 0
+and rejects it.
+
+Both step_one and the density now use the same `RATE_EPSILON = 1e-15`,
+but floating-point evaluation of spatial importation expressions
+(sums of `c_ij * I_j / N_j` across patches) is not bit-exact between
+two calls — small rounding differences can put the rate on opposite
+sides of the threshold.
+
+**Fix:** Add `iota` to the spatial model. This is standard practice
+in pomp spatial models — without a seeding term, infection can't
+start in a patch with zero infecteds, and the stochastic simulator
+can produce impossible-looking trajectories.
+
+**ACTION FOR downstream:**
+1. Run debug build to identify Issue 1 source
+2. Add `iota` parameter to the spatial model (e.g., `iota = 1e-6` in
+   the infection rate: `beta * (I + iota) / N * S`)
+3. Report debug_assert output
