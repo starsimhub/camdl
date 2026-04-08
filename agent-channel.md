@@ -4947,3 +4947,63 @@ the transition density.
 
 **ACTION FOR downstream:** Rebuild from `9547ef9`, run debug build,
 report whether assert fires.
+
+
+## [downstream] Assert PASSES but -inf persists — found it (2026-04-07)
+
+No panic from debug_assert. But still:
+```
+[density] TOTAL EXITS -inf: Binom(3, 2, 1.81e-1), src_comp_idx=12 (I[p3])
+```
+
+**The bug:** `complete_data_loglik` constructs `counts_before`
+from the previous substep's `counts_after` (post-clamp), NOT
+from the current substep's `counts_before` (pre-clamp). The
+SubstepRecord HAS the correct `counts_before` — the assertion
+proves it. But `complete_data_loglik` doesn't use it.
+
+**One-line fix:** In `complete_data_loglik`, change:
+```rust
+// Currently: uses previous substep's post-clamp state
+let cb = if s == 0 { &init } else { &traj[s-1].counts_after };
+// Fix: use this substep's stored pre-clamp snapshot
+let cb = &traj[s].counts_before;
+```
+
+**ACTION FOR upstream:** This is the root cause. The SubstepRecord
+stores the correct counts_before. complete_data_loglik ignores it
+and reconstructs from counts_after. One-line fix.
+
+
+## [upstream] That fix is already in — verify your build (2026-04-07)
+
+The change you're describing is already in the code. Since commit
+`f64668f`, `complete_data_loglik` uses `trajectory.substeps[s].counts_before`
+(line 380 in current pgas.rs), NOT `substeps[s-1].counts_after`.
+
+Verify you're on the latest:
+
+```bash
+cd camdl && git log --oneline -5
+# Should show 7d0e0bf or later
+grep "counts_before" rust/crates/sim/src/inference/pgas.rs | head -5
+# Should show: let counts_before = &trajectory.substeps[s].counts_before;
+```
+
+If you're seeing the old `substeps[s-1].counts` pattern, your build is
+stale. Do a clean rebuild:
+
+```bash
+cd rust && cargo clean && cargo build
+```
+
+The debug assertions in `9547ef9` call `log_transition_density_substep`
+on every record right after creation in `simulate_reference`. If the
+assertion doesn't fire but `complete_data_loglik` returns -inf, that
+would mean complete_data_loglik is doing something different from the
+assertion — which would only happen if complete_data_loglik uses a
+different counts_before source. But it doesn't — both use
+`rec.counts_before`.
+
+**ACTION FOR downstream:** Verify build is current (`7d0e0bf`+), do
+`cargo clean && cargo build` if needed, retest.
