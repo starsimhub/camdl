@@ -7,6 +7,7 @@ use crate::{
     ode_integrator::rk4_step,
     output::output_times as get_output_times,
     propensity::{eval_propensities, eval_expr, EvalCtx},
+    resolved_expr::eval_resolved,
     simulate::Simulate,
     state::{FlowVec, IntState, RealState, Snapshot, Trajectory},
 };
@@ -322,7 +323,7 @@ fn run_chain_binomial(
             let ctx = EvalCtx {
                 model, int_s: &int_s, real_s: &real_s, params, t, projected: None,
             };
-            let val = eval_expr(&bal.expr, &ctx)?;
+            let val = eval_resolved(&bal.expr, &ctx);
             int_s.counts[bal.local_int_idx] = val.round() as i64;
         }
 
@@ -586,7 +587,7 @@ pub fn step_one(
             model, int_s: &scratch.int_s, real_s: &scratch.real_s,
             params, t: t_end, projected: None,
         };
-        let val = eval_expr(&bal.expr, &ctx)?;
+        let val = eval_resolved(&bal.expr, &ctx);
         let bal_count = val.round() as i64;
         if bal_count < 0 {
             log::warn!("balance compartment went negative ({}) at t={:.1} — \

@@ -14,7 +14,6 @@ use std::collections::HashMap;
 use ir::expr::{BinOp, Expr, UnOp};
 use ir::table::OobPolicy;
 
-use crate::compiled_model::CompiledTimeFuncKind;
 use crate::error::SimError;
 use crate::propensity::{eval_time_func, EvalCtx};
 

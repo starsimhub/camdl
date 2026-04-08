@@ -3,6 +3,7 @@ use std::sync::Arc;
 use ir::{Model, model::CompartmentKind};
 use ir::expr::{BinOp, Expr, UnOp};
 use crate::error::SimError;
+use crate::resolved_expr::{ResolvedExpr, ResolveCtx, resolve_expr};
 use crate::state::{IntState, RealState};
 
 /// A time function with all Expr fields resolved to concrete f64 values.
@@ -303,6 +304,9 @@ pub struct CompiledModel {
     /// tolerance issues (double-fires, zero-fires) by rounding fire times
     /// to the nearest integer step at model init.
     pub fire_steps: Vec<std::collections::HashSet<i64>>,
+
+    /// Pre-resolved expression trees for all hot-path evaluations.
+    pub resolved: ResolvedModel,
 }
 
 /// Pre-resolved balance constraint.
@@ -310,8 +314,24 @@ pub struct CompiledModel {
 pub struct ResolvedBalance {
     /// Local integer compartment index of the target (e.g., R).
     pub local_int_idx: usize,
-    /// Expression to evaluate (e.g., pop(t) - S - E - I).
-    pub expr: ir::expr::Expr,
+    /// Pre-resolved expression (e.g., pop(t) - S - E - I).
+    pub expr: ResolvedExpr,
+}
+
+/// All pre-resolved expression trees for hot-path evaluation.
+/// Populated once during `CompiledModel::new()`, used by all simulation
+/// backends and inference algorithms.
+pub struct ResolvedModel {
+    /// Per-transition resolved rate expression.
+    pub rates: Vec<ResolvedExpr>,
+    /// Per-transition resolved overdispersion σ² (None for Poisson/Deterministic).
+    pub overdispersion: Vec<Option<ResolvedExpr>>,
+    /// Per-transition resolved rate gradients: Vec of (param_name, resolved_expr).
+    pub rate_grads: Vec<Vec<(String, ResolvedExpr)>>,
+    /// Per-ODE-equation resolved derivative expression.
+    pub ode_derivatives: Vec<ResolvedExpr>,
+    /// Per-intervention, per-action resolved expression (count/fraction/value).
+    pub intervention_exprs: Vec<Vec<ResolvedExpr>>,
 }
 
 impl CompiledModel {
@@ -510,7 +530,24 @@ impl CompiledModel {
             }).collect()
         };
 
-        // Resolve balance constraint before model is moved into Arc
+        // ── Pre-resolve all expression trees ─────────────────────────────
+        // Build ResolveCtx from the index maps we just constructed.
+        let table_meta: Vec<(ir::table::OobPolicy, usize)> = model.tables.iter()
+            .zip(&table_values_cache)
+            .map(|(t, cached)| (t.out_of_bounds.clone(), cached.len()))
+            .collect();
+
+        let resolve_ctx = ResolveCtx {
+            comp_index: &comp_index,
+            param_index: &param_index,
+            time_func_index: &time_func_index,
+            table_index: &table_index,
+            global_to_int: &global_to_int,
+            global_to_real: &global_to_real,
+            table_meta: &table_meta,
+        };
+
+        // Resolve balance constraint
         let balance = if let Some(ref bs) = model.balance {
             let global = *comp_index.get(bs.target.as_str())
                 .ok_or_else(|| SimError::UnknownCompartment(bs.target.clone()))?;
@@ -518,9 +555,61 @@ impl CompiledModel {
                 .ok_or_else(|| SimError::Validation(
                     format!("balance target '{}' must be an integer compartment", bs.target)
                 ))?;
-            Some(ResolvedBalance { local_int_idx: local, expr: bs.expr.clone() })
+            let resolved_expr = resolve_expr(&bs.expr, &resolve_ctx)?;
+            Some(ResolvedBalance { local_int_idx: local, expr: resolved_expr })
         } else {
             None
+        };
+
+        // Resolve transition rates + overdispersion + rate_grad
+        let rates: Vec<ResolvedExpr> = model.transitions.iter()
+            .map(|tr| resolve_expr(&tr.rate, &resolve_ctx))
+            .collect::<Result<_, _>>()?;
+
+        let overdispersion: Vec<Option<ResolvedExpr>> = model.transitions.iter()
+            .map(|tr| match &tr.draw_method {
+                ir::transition::DrawMethod::Overdispersed(expr) =>
+                    resolve_expr(expr, &resolve_ctx).map(Some),
+                _ => Ok(None),
+            })
+            .collect::<Result<_, _>>()?;
+
+        let rate_grads: Vec<Vec<(String, ResolvedExpr)>> = model.transitions.iter()
+            .map(|tr| {
+                tr.rate_grad.iter()
+                    .map(|(name, expr)| {
+                        resolve_expr(expr, &resolve_ctx).map(|r| (name.clone(), r))
+                    })
+                    .collect::<Result<Vec<_>, _>>()
+            })
+            .collect::<Result<_, _>>()?;
+
+        // Resolve ODE derivatives
+        let ode_derivatives: Vec<ResolvedExpr> = model.ode_equations.iter()
+            .map(|eq| resolve_expr(&eq.derivative, &resolve_ctx))
+            .collect::<Result<_, _>>()?;
+
+        // Resolve intervention action expressions
+        let intervention_exprs: Vec<Vec<ResolvedExpr>> = model.interventions.iter()
+            .map(|iv| {
+                iv.actions.iter().map(|action| {
+                    let expr = match action {
+                        ir::intervention::Action::Add(a) => &a.count,
+                        ir::intervention::Action::Set(s) => &s.value,
+                        ir::intervention::Action::FractionTransfer(ft) => &ft.fraction,
+                        ir::intervention::Action::AbsoluteTransfer(at) => &at.count,
+                    };
+                    resolve_expr(expr, &resolve_ctx)
+                }).collect::<Result<Vec<_>, _>>()
+            })
+            .collect::<Result<_, _>>()?;
+
+        let resolved = ResolvedModel {
+            rates,
+            overdispersion,
+            rate_grads,
+            ode_derivatives,
+            intervention_exprs,
         };
 
         Ok(CompiledModel {
@@ -545,6 +634,7 @@ impl CompiledModel {
             time_dep_transitions,
             balance,
             fire_steps,
+            resolved,
         })
     }
 
