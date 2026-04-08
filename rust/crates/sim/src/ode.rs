@@ -4,7 +4,8 @@ use crate::{
     error::SimError,
     intervention::{all_intervention_times, apply_interventions_at},
     output::output_times as get_output_times,
-    propensity::{eval_expr, eval_propensities, EvalCtx},
+    propensity::{eval_propensities, EvalCtx},
+    resolved_expr::eval_resolved,
     simulate::Simulate,
     state::{FlowVec, IntState, RealState, Snapshot, Trajectory},
 };
@@ -71,9 +72,9 @@ fn ode_derivs(
     // Real compartment derivatives from explicit ODE equations.
     for v in d_real.iter_mut() { *v = 0.0; }
     let ctx = EvalCtx { model, int_s: &int_s, real_s: &real_s, params, t , projected: None };
-    for (eq_idx, eq) in model.model.ode_equations.iter().enumerate() {
+    for (eq_idx, _eq) in model.model.ode_equations.iter().enumerate() {
         let local = model.ode_real_indices[eq_idx];
-        d_real[local] = eval_expr(&eq.derivative, &ctx)?;
+        d_real[local] = eval_resolved(&model.resolved.ode_derivatives[eq_idx], &ctx);
     }
 
     Ok(())

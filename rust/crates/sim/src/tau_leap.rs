@@ -6,7 +6,8 @@ use crate::{
     intervention::{all_intervention_times, apply_interventions_at},
     ode_integrator::rk4_step,
     output::output_times as get_output_times,
-    propensity::{eval_propensities, eval_expr, EvalCtx},
+    propensity::{eval_propensities, EvalCtx},
+    resolved_expr::eval_resolved,
     simulate::Simulate,
     state::{FlowVec, Snapshot, Trajectory},
 };
@@ -110,14 +111,16 @@ fn run_tau_leap(
         enum ResolvedDraw { Poisson, Deterministic, Overdispersed(f64) }
         let draws: Vec<ResolvedDraw> = {
             let ctx = EvalCtx { model, int_s: &int_s, real_s: &real_s, params, t , projected: None };
-            model.model.transitions.iter()
-                .map(|tr| match &tr.draw_method {
-                    ir::transition::DrawMethod::Poisson => Ok(ResolvedDraw::Poisson),
-                    ir::transition::DrawMethod::Deterministic => Ok(ResolvedDraw::Deterministic),
-                    ir::transition::DrawMethod::Overdispersed(expr) =>
-                        eval_expr(expr, &ctx).map(ResolvedDraw::Overdispersed),
+            model.model.transitions.iter().enumerate()
+                .map(|(i, tr)| match &tr.draw_method {
+                    ir::transition::DrawMethod::Poisson => ResolvedDraw::Poisson,
+                    ir::transition::DrawMethod::Deterministic => ResolvedDraw::Deterministic,
+                    ir::transition::DrawMethod::Overdispersed(_) => {
+                        let sigma_sq = eval_resolved(model.resolved.overdispersion[i].as_ref().unwrap(), &ctx);
+                        ResolvedDraw::Overdispersed(sigma_sq)
+                    }
                 })
-                .collect::<Result<_, _>>()?
+                .collect()
         };
         for (i, &lambda) in propensities.iter().enumerate() {
             let mean = lambda * dt;
