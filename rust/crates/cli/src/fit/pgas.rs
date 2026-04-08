@@ -129,7 +129,8 @@ pub fn run_pgas_cli(
                         states.push(Some(state));
                     }
                     Err(e) => {
-                        eprintln!("error: cannot deserialize resume state for chain {}: {}", chain_id + 1, e);
+                        eprintln!("error: cannot deserialize resume state for chain {}: {}. \
+                            Resume state format may have changed — re-run with --force.", chain_id + 1, e);
                         any_failed = true;
                         states.push(None);
                     }

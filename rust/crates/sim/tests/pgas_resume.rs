@@ -34,6 +34,7 @@ fn test_resume_state_bincode_roundtrip() {
         completed_sweeps: 5000,
         params: vec![0.4, 0.1, 1000.0],
         transformed: vec![-0.916, -2.302, 6.908],
+        param_names: vec!["beta".into(), "gamma".into(), "N0".into()],
         trajectory,
         mass_matrix: mass,
         nuts_step_size: 0.0234,
@@ -79,6 +80,7 @@ fn test_resume_state_diagonal_mass_roundtrip() {
         completed_sweeps: 100,
         params: vec![1.0],
         transformed: vec![0.0],
+        param_names: vec!["x".into()],
         trajectory: PGASTrajectory { initial_counts: vec![100], substeps: vec![] },
         mass_matrix: MassMatrix::identity(3),
         nuts_step_size: 0.1,
@@ -153,6 +155,7 @@ fn test_resume_hash_mismatch_detection() {
         completed_sweeps: 1000,
         params: vec![1.0],
         transformed: vec![0.0],
+        param_names: vec!["x".into()],
         trajectory: PGASTrajectory { initial_counts: vec![100], substeps: vec![] },
         mass_matrix: MassMatrix::identity(1),
         nuts_step_size: 0.1,
@@ -185,6 +188,7 @@ fn test_resume_state_large_trajectory() {
         completed_sweeps: 10000,
         params: vec![50.0, 0.08, 0.55, 0.035],
         transformed: vec![3.91, -2.53, 0.20, -3.35],
+        param_names: vec!["R0".into(), "gamma".into(), "amplitude".into(), "kappa".into()],
         trajectory: PGASTrajectory { initial_counts: vec![10000, 0, 0, 0], substeps },
         mass_matrix: MassMatrix::dense_from_covariance(&[
             1.0, 0.9, 0.1, 0.2,
@@ -240,6 +244,7 @@ fn test_resume_trace_file_safety() {
         completed_sweeps: 100,
         params: vec![0.5],
         transformed: vec![0.0],
+        param_names: vec!["x".into()],
         trajectory: PGASTrajectory { initial_counts: vec![1000], substeps: vec![] },
         mass_matrix: MassMatrix::identity(1),
         nuts_step_size: 0.1,
@@ -286,4 +291,98 @@ fn test_resume_trace_file_safety() {
         "File::create destroys existing content — this is why --resume must use append");
 
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// T8: param_names round-trip — names are stored and recovered.
+#[test]
+fn test_resume_param_names_roundtrip() {
+    let state = ChainResumeState {
+        config_hash: "test".into(),
+        completed_sweeps: 100,
+        params: vec![20.0, 0.06, 0.3],
+        transformed: vec![3.0, -2.81, -1.20],
+        param_names: vec!["R0".into(), "s0".into(), "amplitude".into()],
+        trajectory: PGASTrajectory { initial_counts: vec![100], substeps: vec![] },
+        mass_matrix: MassMatrix::identity(3),
+        nuts_step_size: 0.1,
+        log_proposal_sd: vec![-3.0; 3],
+        total_accepted: vec![50; 3],
+        current_ll: -1000.0,
+    };
+
+    let encoded = bincode::serialize(&state).unwrap();
+    let decoded: ChainResumeState = bincode::deserialize(&encoded).unwrap();
+
+    assert_eq!(decoded.param_names, vec!["R0", "s0", "amplitude"]);
+    assert_eq!(decoded.transformed, vec![3.0, -2.81, -1.20]);
+}
+
+/// T9: name-based z-value recovery when parameter order differs.
+/// Simulates the HashMap ordering bug: saved state has [R0, s0, amplitude]
+/// but the current run's if2_params are in order [amplitude, R0, s0].
+#[test]
+fn test_resume_reorder_z_by_name() {
+    // Saved state: order [R0, s0, amplitude]
+    let state = ChainResumeState {
+        config_hash: "test".into(),
+        completed_sweeps: 100,
+        params: vec![20.0, 0.06, 0.3],  // full model param vec
+        transformed: vec![3.0, -2.81, -1.20],  // z for [R0, s0, amplitude]
+        param_names: vec!["R0".into(), "s0".into(), "amplitude".into()],
+        trajectory: PGASTrajectory { initial_counts: vec![100], substeps: vec![] },
+        mass_matrix: MassMatrix::identity(3),
+        nuts_step_size: 0.1,
+        log_proposal_sd: vec![-3.0; 3],
+        total_accepted: vec![50; 3],
+        current_ll: -1000.0,
+    };
+
+    // Build name→z lookup (same logic as run_pgas resume path)
+    let saved_z: std::collections::HashMap<&str, f64> = state.param_names.iter()
+        .zip(state.transformed.iter())
+        .map(|(name, &z)| (name.as_str(), z))
+        .collect();
+
+    // Current run's parameter order: [amplitude, R0, s0] (different!)
+    let current_order = vec!["amplitude", "R0", "s0"];
+    let reordered: Vec<f64> = current_order.iter()
+        .map(|name| *saved_z.get(name).unwrap())
+        .collect();
+
+    // amplitude should get -1.20, R0 should get 3.0, s0 should get -2.81
+    assert!((reordered[0] - (-1.20)).abs() < 1e-10, "amplitude z should be -1.20, got {}", reordered[0]);
+    assert!((reordered[1] - 3.0).abs() < 1e-10, "R0 z should be 3.0, got {}", reordered[1]);
+    assert!((reordered[2] - (-2.81)).abs() < 1e-10, "s0 z should be -2.81, got {}", reordered[2]);
+}
+
+/// T10: param_names mismatch detection — saved names must match current config.
+#[test]
+fn test_resume_param_names_mismatch_detected() {
+    let state = ChainResumeState {
+        config_hash: "test".into(),
+        completed_sweeps: 100,
+        params: vec![20.0, 0.06, 0.3],
+        transformed: vec![3.0, -2.81, -1.20],
+        param_names: vec!["R0".into(), "s0".into(), "amplitude".into()],
+        trajectory: PGASTrajectory { initial_counts: vec![100], substeps: vec![] },
+        mass_matrix: MassMatrix::identity(3),
+        nuts_step_size: 0.1,
+        log_proposal_sd: vec![-3.0; 3],
+        total_accepted: vec![50; 3],
+        current_ll: -1000.0,
+    };
+
+    // Build name→z lookup
+    let saved_z: std::collections::HashMap<&str, f64> = state.param_names.iter()
+        .zip(state.transformed.iter())
+        .map(|(name, &z)| (name.as_str(), z))
+        .collect();
+
+    // Missing param in saved state should be detected
+    let current_names = vec!["R0", "s0", "amplitude", "new_param"];
+    let missing: Vec<&&str> = current_names.iter()
+        .filter(|name| !saved_z.contains_key(**name))
+        .collect();
+    assert_eq!(missing, vec![&"new_param"],
+        "should detect that 'new_param' is not in saved state");
 }

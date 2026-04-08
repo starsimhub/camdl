@@ -241,6 +241,12 @@ fn build_if2_params(
 
     let mut params = build_if2_params_from_specs(model, compiled, base_params, &specs)?;
 
+    // Sort by name for deterministic ordering. HashMap iteration is
+    // non-deterministic, so without this sort the parameter order in
+    // if2_params can differ between runs — causing z-value mismatches
+    // on --resume.
+    params.sort_by(|a, b| a.name.cmp(&b.name));
+
     // Fit-specific: apply start values and random starts
     let mut rng = StatefulRng::new(seed ^ 0xdeadbeef_u64);
     for p in &mut params {

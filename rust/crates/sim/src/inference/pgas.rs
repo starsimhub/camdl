@@ -128,7 +128,7 @@ pub struct ChainResumeState {
     pub config_hash: String,
     /// Number of sweeps completed (resume starts from here).
     pub completed_sweeps: usize,
-    /// Current parameter values (natural scale).
+    /// Current parameter values (natural scale, full model param vector).
     pub params: Vec<f64>,
     /// Current transformed parameters (z-scale for NUTS).
     pub transformed: Vec<f64>,
@@ -144,6 +144,11 @@ pub struct ChainResumeState {
     pub total_accepted: Vec<usize>,
     /// Current complete-data log-likelihood.
     pub current_ll: f64,
+    /// Estimated parameter names in the same order as `transformed`.
+    /// Used to match z-values to the correct parameters on resume,
+    /// since HashMap iteration order is non-deterministic.
+    /// Empty for legacy states (before this field was added).
+    pub param_names: Vec<String>,
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -1020,27 +1025,42 @@ pub fn run_pgas(
     if let Some(state) = resume_from {
         eprintln!("  resuming from sweep {}...", state.completed_sweeps);
         current_params.copy_from_slice(&state.params);
-        current_transformed = state.transformed;
         trajectory = state.trajectory;
         start_sweep = state.completed_sweeps;
 
-        // Verify restored params are consistent with transforms and bounds.
-        // Recompute transformed from params to avoid stale z-values.
+        // Restore z-values with name-based reordering.
+        // The resume state stores param_names alongside transformed values.
+        // HashMap iteration order is non-deterministic, so the current run's
+        // if2_params may be in a different order than when the state was saved.
+        if !state.param_names.is_empty() && state.param_names.len() == state.transformed.len() {
+            // Build name→z lookup from saved state
+            let saved_z: std::collections::HashMap<&str, f64> = state.param_names.iter()
+                .zip(state.transformed.iter())
+                .map(|(name, &z)| (name.as_str(), z))
+                .collect();
+
+            current_transformed = if2_params.iter().map(|spec| {
+                if let Some(&z) = saved_z.get(spec.name.as_str()) {
+                    z
+                } else {
+                    // Param not in saved state — compute from theta
+                    eprintln!("  warning: param '{}' not found in resume state, computing from theta", spec.name);
+                    spec.to_transformed(current_params[spec.index])
+                }
+            }).collect();
+        } else {
+            // Legacy resume state without param_names — recompute from params.
+            // This is the safe fallback: z = to_transformed(theta).
+            eprintln!("  warning: resume state lacks param_names — recomputing z from params.");
+            current_transformed = if2_params.iter()
+                .map(|spec| spec.to_transformed(current_params[spec.index]))
+                .collect();
+        }
+
+        // Enforce bounds on restored params
         for (i, spec) in if2_params.iter().enumerate() {
-            let theta = current_params[spec.index];
-            let z_recomputed = spec.to_transformed(theta);
-            if (z_recomputed - current_transformed[i]).abs() > 1e-6 {
-                eprintln!("  warning: resumed z[{}]={:.6} differs from recomputed {:.6} for {} (theta={:.6}). Using recomputed.",
-                    i, current_transformed[i], z_recomputed, spec.name, theta);
-                current_transformed[i] = z_recomputed;
-            }
-            // Enforce bounds on restored params
             let clamped = spec.from_transformed(current_transformed[i]);
-            if (clamped - theta).abs() > 1e-10 {
-                eprintln!("  warning: resumed {}={:.6} outside transform bounds, clamped to {:.6}",
-                    spec.name, theta, clamped);
-                current_params[spec.index] = clamped;
-            }
+            current_params[spec.index] = clamped;
         }
     } else {
         eprintln!("  initializing reference trajectory...");
@@ -1451,6 +1471,7 @@ pub fn run_pgas(
         completed_sweeps: config.n_sweeps,
         params: current_params,
         transformed: current_transformed,
+        param_names: if2_params.iter().map(|p| p.name.clone()).collect(),
         trajectory: trajectory.clone(),
         mass_matrix: nuts_mass,
         nuts_step_size,
