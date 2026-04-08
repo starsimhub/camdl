@@ -482,21 +482,40 @@ if n_high_p > 0 {
 `debug_assert!(n_exit <= n_src)` in `step_one`, `simulate_reference`,
 and `csmc_as` traceback.
 
-### 4. Trace-gated -inf logging in distribution functions
+### 4. Trace-gated -inf logging in distribution functions — TODO
 
-Add checked wrappers on `binom_logpmf`, `poisson_logpmf`, etc. that trace-log
-when returning `-inf` (gated behind `CAMDL_TRACE_STEPS`). Currently, `-inf`
-propagates silently through summation and is only caught by the cumulative
-check in `complete_data_loglik`. Per-term logging would have identified the
-`k > n` binomial immediately.
+Add `log::trace!` wrappers on `binom_logpmf`, `poisson_logpmf`, etc. that
+log when returning `-inf`. Use `--verbosity trace` to see per-term density
+values that would have identified the `k > n` binomial immediately.
 
-### 5. Clean up existing debug diagnostics — DONE (`19ac52c`)
+### 5. Clean up existing debug diagnostics — DONE (`9e3b849`)
 
-All density diagnostics gated behind `trace_enabled()`. `CAMDL_VERIFY_DENSITY`
-removed. Gamma density `if false {}` block replaced with TODO comment.
+All density diagnostics use `log::debug!` / `log::warn!` via `--verbosity`
+flag. `CAMDL_VERIFY_DENSITY` removed. Gamma density disabled with TODO.
 
 ### 6. Near-zero rate soft handling + iota warning — DONE (`faffe8f`)
 
 Near-zero rates with nonzero flow are included in the multinomial rather than
-hard-rejected. Truly zero rates emit a one-time warning about adding iota.
+hard-rejected. Truly zero rates emit `log::warn!` about adding iota.
 User-facing guidance added to `docs/inference.md`.
+
+### 7. Gamma density re-enablement — TODO
+
+The gamma multiplier density `log Gamma(g; dt/σ², σ²/dt)` is disabled in
+`complete_data_loglik`. Re-enabling requires aligning gamma index tracking
+between `step_one` and the density evaluator. The transition density already
+constrains σ² through `p_total`, so this is correctness-enhancing but not
+blocking.
+
+### 8. Euler approximation `p_total` warning — TODO
+
+Warn when `p_total > 0.5` at any substep, signaling the Euler-multinomial
+approximation is breaking down. Use `log::warn!` with count of affected
+substeps.
+
+### 9. Golden inference test — TODO
+
+Add a golden test that runs `complete_data_loglik` with actual observation
+data (not just transition density). This would have caught fix 6 (data column
+mismatch) immediately. The `seir_spatial_5_inference` golden model is in
+place; needs a test that loads observation data and evaluates the full LL.
