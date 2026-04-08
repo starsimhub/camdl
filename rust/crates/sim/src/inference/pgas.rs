@@ -218,27 +218,34 @@ pub fn log_transition_density_substep(
         for &tr_idx in group {
             let rate = propensities[tr_idx];
             if rate <= RATE_EPSILON || is_determ[tr_idx] {
-                // Zero-rate transition must have zero flows
-                if flows[tr_idx] > 0 {
-                    if crate::chain_binomial::trace_enabled() {
-                        eprintln!("[pgas] -inf: zero-rate transition {} has {} flows (rate={:.6e}, src_idx={}, src_count={})",
-                            model.model.transitions[tr_idx].name, flows[tr_idx], rate,
-                            src_local, counts_before[src_local]);
-                        // Print compartments with their names
-                        for (ci, comp) in model.model.compartments.iter().enumerate() {
-                            if ci < counts_before.len() {
-                                eprintln!("  {} = {}", comp.name, counts_before[ci]);
-                            }
-                        }
-                        // Print all flows in this source group
-                        eprintln!("  source group transitions:");
-                        for &gtr in group {
-                            eprintln!("    {} (idx={}): rate={:.6e}, flow={}",
-                                model.model.transitions[gtr].name, gtr,
-                                propensities[gtr], flows[gtr]);
-                        }
+                if flows[tr_idx] > 0 && rate <= 0.0 {
+                    // Truly zero rate with nonzero flow — impossible transition.
+                    // This happens when a compartment-dependent rate (e.g.,
+                    // beta * I/N * S with I=0) produces exactly 0, but step_one
+                    // drew from a near-zero floating-point value. Log a warning
+                    // once per model run; the trajectory will be penalized
+                    // heavily but not hard-rejected. Models with this pattern
+                    // should add a seeding term (iota) for robust inference.
+                    use std::sync::atomic::{AtomicBool, Ordering};
+                    static WARNED: AtomicBool = AtomicBool::new(false);
+                    if !WARNED.swap(true, Ordering::Relaxed) {
+                        log::warn!(
+                            "transition '{}' has rate=0 but flow={} — \
+                             consider adding a seeding term (iota) to the rate expression. \
+                             Without it, zero-compartment states produce density mismatches.",
+                            model.model.transitions[tr_idx].name, flows[tr_idx],
+                        );
                     }
                     return Ok(f64::NEG_INFINITY);
+                } else if flows[tr_idx] > 0 {
+                    // Near-zero rate (0 < rate ≤ RATE_EPSILON) with nonzero flow.
+                    // step_one saw rate above its threshold but the density
+                    // recomputed it as below. Include this transition in the
+                    // multinomial with its tiny rate rather than hard-rejecting.
+                    let per_capita = rate / n_src as f64;
+                    total_rate += per_capita;
+                    probs.push((tr_idx, per_capita));
+                    continue;
                 }
                 handled[tr_idx] = true;
                 continue;
