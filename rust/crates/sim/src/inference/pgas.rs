@@ -211,7 +211,8 @@ pub fn log_transition_density_substep(
         let mut gamma_was_used = false;  // track if gamma was actually drawn
         for &tr_idx in group {
             let rate = propensities[tr_idx];
-            if rate <= 0.0 || is_determ[tr_idx] {
+            // Epsilon threshold — must match step_one in chain_binomial.rs
+            if rate <= 1e-15 || is_determ[tr_idx] {
                 // Zero-rate transition must have zero flows
                 if flows[tr_idx] > 0 {
                     if crate::chain_binomial::trace_enabled() {
@@ -257,12 +258,23 @@ pub fn log_transition_density_substep(
             gamma_idx += 1;
         }
 
-        if total_rate <= 0.0 || probs.is_empty() { continue; }
+        if total_rate <= 1e-15 || probs.is_empty() { continue; }
 
         // Step 2: evaluate total exits density
-        let p_total = (1.0 - (-total_rate * dt).exp()).clamp(0.0, 1.0);
+        let p_total = (1.0 - (-total_rate * dt).exp()).clamp(1e-15, 1.0 - 1e-15);
         let n_exit: u64 = probs.iter().map(|&(tr_idx, _)| flows[tr_idx]).sum();
-        log_p += binom_logpmf(n_exit, n_src as u64, p_total);
+        let binom_total = binom_logpmf(n_exit, n_src as u64, p_total);
+        log_p += binom_total;
+
+        if !binom_total.is_finite() && std::env::var("CAMDL_VERIFY_DENSITY").is_ok() {
+            eprintln!("[density] -inf at TOTAL EXITS: Binom({}, {}, {:.6e}) = {}",
+                n_exit, n_src, p_total, binom_total);
+            eprintln!("  total_rate={:.6e}, dt={}", total_rate, dt);
+            for &(ti, eff) in &probs {
+                eprintln!("  {} ({}): eff_rate={:.6e}, flow={}",
+                    model.model.transitions[ti].name, ti, eff, flows[ti]);
+            }
+        }
 
         // Step 3: evaluate split density (mirrors step_one's proportional split)
         let n_competing = probs.len();
@@ -271,16 +283,32 @@ pub fn log_transition_density_substep(
         for (k, &(tr_idx, eff_rate)) in probs.iter().enumerate() {
             handled[tr_idx] = true;
             if k == n_competing - 1 {
-                // Last category: remainder — check consistency
                 if flows[tr_idx] != remaining {
+                    if std::env::var("CAMDL_VERIFY_DENSITY").is_ok() {
+                        eprintln!("[density] -inf at REMAINDER: {} flow={} != remaining={}",
+                            model.model.transitions[tr_idx].name, flows[tr_idx], remaining);
+                        for &(ti, eff) in &probs {
+                            eprintln!("  {} ({}): eff={:.6e}, flow={}",
+                                model.model.transitions[ti].name, ti, eff, flows[ti]);
+                        }
+                    }
                     return Ok(f64::NEG_INFINITY);
                 }
             } else if remaining > 0 && rate_remaining > 0.0 {
-                let p_split = (eff_rate / rate_remaining).clamp(0.0, 1.0);
-                log_p += binom_logpmf(flows[tr_idx], remaining, p_split);
+                let p_split = (eff_rate / rate_remaining).clamp(1e-15, 1.0 - 1e-15);
+                let binom_split = binom_logpmf(flows[tr_idx], remaining, p_split);
+                if !binom_split.is_finite() && std::env::var("CAMDL_VERIFY_DENSITY").is_ok() {
+                    eprintln!("[density] -inf at SPLIT: Binom({}, {}, {:.6e}) for {}",
+                        flows[tr_idx], remaining, p_split, model.model.transitions[tr_idx].name);
+                }
+                log_p += binom_split;
                 remaining -= flows[tr_idx];
                 rate_remaining -= eff_rate;
             } else if flows[tr_idx] > 0 {
+                if std::env::var("CAMDL_VERIFY_DENSITY").is_ok() {
+                    eprintln!("[density] -inf at ZERO-REMAINING: {} flow={} but remaining=0",
+                        model.model.transitions[tr_idx].name, flows[tr_idx]);
+                }
                 return Ok(f64::NEG_INFINITY);
             }
         }
@@ -288,7 +316,7 @@ pub fn log_transition_density_substep(
 
     // Ungrouped / inflow transitions
     for (i, &rate) in propensities.iter().enumerate() {
-        if handled[i] || rate <= 0.0 { continue; }
+        if handled[i] || rate <= 1e-15 { continue; }
         let mean = rate * dt;
         if is_determ[i] {
             if flows[i] != mean.round() as u64 {
@@ -447,13 +475,78 @@ pub fn simulate_reference(
         let mut flows = vec![0u64; n_tr];
         scratch.gamma_used.clear();
 
+        // Snapshot counts BEFORE step_one for density verification
+        let counts_before_step = counts.clone();
+
         step_one(model, &mut counts, &mut flows, params, t, dt, rng, &mut scratch)?;
+
+        // Verify density is finite at this substep (debug mode only)
+        if crate::chain_binomial::trace_enabled() || std::env::var("CAMDL_VERIFY_DENSITY").is_ok() {
+            let td = log_transition_density_substep(
+                model, &counts_before_step, &flows, &scratch.gamma_used, params, t, dt,
+            )?;
+            if !td.is_finite() {
+                eprintln!("[simulate_reference] DENSITY -inf at substep {} (t={:.1})", s, t);
+                eprintln!("  counts_before: {:?}", &counts_before_step);
+                eprintln!("  flows: {:?}", &flows);
+                eprintln!("  gammas: {:?}", &scratch.gamma_used);
+
+                // Evaluate propensities at the EXACT snapshot step_one used
+                let mut props = vec![0.0; n_tr];
+                let int_s = crate::state::IntState { counts: counts_before_step.clone() };
+                let real_s = crate::state::RealState::new(model.real_local_to_global.len());
+                crate::propensity::eval_propensities(model, &int_s, &real_s, params, t, &mut props)?;
+                for &(src2, ref group) in &model.source_groups {
+                    for &tr_idx in group {
+                        if flows[tr_idx] > 0 || props[tr_idx] <= 1e-15 {
+                            eprintln!("  {} (idx={}): prop={:.6e}, flow={}, src_count={}",
+                                model.model.transitions[tr_idx].name, tr_idx,
+                                props[tr_idx], flows[tr_idx], counts_before_step[src2]);
+                        }
+                    }
+                }
+            }
+        }
 
         substeps.push(SubstepRecord {
             counts: counts.clone(),
             flows,
             gammas: scratch.gamma_used.clone(),
         });
+    }
+
+    // Verify: sum per-substep densities
+    if std::env::var("CAMDL_VERIFY_DENSITY").is_ok() {
+        let mut sum_ll = 0.0;
+        for s in 0..substeps.len() {
+            let cb = if s == 0 { &init_int.counts } else { &substeps[s-1].counts };
+            let t = t_start + s as f64 * dt;
+            let td = log_transition_density_substep(
+                model, cb, &substeps[s].flows, &substeps[s].gammas, params, t, dt,
+            )?;
+            if !td.is_finite() {
+                eprintln!("[verify] -inf at substep {} using trajectory.substeps[s-1].counts", s);
+                eprintln!("  counts_before: {:?}", cb);
+                eprintln!("  flows: {:?}", &substeps[s].flows);
+                eprintln!("  gammas: {:?}", &substeps[s].gammas);
+
+                let mut props = vec![0.0; n_tr];
+                let is2 = crate::state::IntState { counts: cb.to_vec() };
+                let rs2 = crate::state::RealState::new(model.real_local_to_global.len());
+                crate::propensity::eval_propensities(model, &is2, &rs2, params, t, &mut props)?;
+                for &(_src, ref group) in &model.source_groups {
+                    for &ti in group {
+                        if substeps[s].flows[ti] > 0 || props[ti] <= 1e-15 {
+                            eprintln!("  {} ({}): prop={:.3e}, flow={}",
+                                model.model.transitions[ti].name, ti, props[ti], substeps[s].flows[ti]);
+                        }
+                    }
+                }
+                break;
+            }
+            sum_ll += td;
+        }
+        eprintln!("[verify] per-substep sum LL = {:.4}", sum_ll);
     }
 
     Ok(PGASTrajectory {

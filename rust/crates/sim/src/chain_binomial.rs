@@ -421,7 +421,12 @@ pub fn step_one(
         let mut total_rate = 0.0_f64;
         for &tr_idx in group {
             let rate = scratch.propensities[tr_idx];
-            if rate <= 0.0 { scratch.handled[tr_idx] = true; continue; }
+            // Epsilon threshold: rates below this are treated as zero.
+            // Must match log_transition_density_substep in pgas.rs to avoid
+            // the floating-point mismatch where step_one sees 1e-300 (positive,
+            // enters split, occasionally draws 1 event) but the density sees
+            // 0.0 exactly (skipped, flow=1 → -inf). See spatial-pgas-inf-bug.md.
+            if rate <= 1e-15 { scratch.handled[tr_idx] = true; continue; }
             let per_capita = rate / n_src as f64;
             match &scratch.draws[tr_idx] {
                 ResolvedDraw::Deterministic => { scratch.handled[tr_idx] = true; continue; }
@@ -492,7 +497,7 @@ pub fn step_one(
 
     // Inflows and ungrouped transitions
     for (i, &rate) in scratch.propensities.iter().enumerate() {
-        if scratch.handled[i] || rate <= 0.0 { continue; }
+        if scratch.handled[i] || rate <= 1e-15 { continue; }
         let mean = rate * dt;
         let count = match &scratch.draws[i] {
             ResolvedDraw::Poisson => rng.poisson(mean),
