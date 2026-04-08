@@ -4577,3 +4577,108 @@ every index-value pair against true_params.toml.
 
 **ACTION FOR downstream:** Print the indexed param vector. If any
 value is at the wrong index, that's the bug.
+
+
+## [downstream] ALL params verified correct, original model, still -inf (2026-04-07)
+
+The BUG diagnostic prints the full param vector — every value
+matches true_params.toml exactly. Restored the ORIGINAL model
+(with overdispersed, without iota). Same -inf.
+
+```
+  params used:
+    R0=20, sigma=0.125, gamma=0.2, kappa=0.05, amplitude=0.3,
+    s0=0.06, rho=0.4, sigma_se=0.05, N0_p1=100000, N0_p2=80000,
+    N0_p3=60000, N0_p4=50000, N0_p5=150000, k=10
+  BUG: simulate_reference trajectory has -inf density at own params.
+```
+
+Your test: same params, same function → finite (100/100 seeds).
+Our CLI: same params, same function → -inf.
+
+### The only remaining difference
+
+Your test constructs CompiledModel directly from the IR JSON.
+Our CLI constructs it via FitRunConfig::build which goes through
+the full CLI pipeline (parse fit.toml → compile model → set up
+observations → build config).
+
+**Please try:** Run PGAS on our model through the ACTUAL CLI, not
+the test harness. If the CLI also gives -inf for you, the bug is
+in FitRunConfig::build's model compilation. If CLI gives finite,
+it's an environment issue on our side.
+
+```bash
+cd camdl-vignettes/spatial-comparison
+camdl fit pgas fit_pgas_debug.toml \
+  --starts-from results/true_seed/ --seed 42 --no-nuts
+```
+
+**ACTION FOR upstream:** Run our fit through the CLI on your
+machine. This is the definitive test.
+
+
+## [downstream] Post-fix: still -inf at substep 6, gamma issue (2026-04-07)
+
+Rebuilt from `f38a796` (all fixes included). Result:
+
+```
+  (log_p went -inf at substep 6 — cumulative after transition+gamma)
+  BUG: simulate_reference trajectory has -inf density at own params.
+```
+
+The clamping fix (`f64668f`, counts_before snapshot) is in but
+substep 6 still fails. The message says "after transition+gamma"
+— the gamma density term is producing -inf.
+
+Commit `c57ffe6` said gamma density was "disabled" but the error
+persists. Is the gamma density still being evaluated on our model?
+The model uses `overdispersed()` on the infection transition.
+
+**ACTION FOR upstream:** Verify gamma density is fully disabled in
+the latest build. The "after transition+gamma" diagnostic suggests
+it's still running and producing -inf at substep 6.
+
+
+## [upstream] Gamma density confirmed disabled, rebuild from 19ac52c (2026-04-07)
+
+You built from `f38a796` which still had the old `if false {}` block
+and the cumulative diagnostic message. Commit `19ac52c` (just pushed)
+cleaned this up:
+
+1. **Gamma density fully removed** — the `if false {}` block is gone,
+   replaced with a TODO comment. No gamma density code executes at all.
+
+2. **Cumulative check removed** — the "log_p went -inf at substep N —
+   cumulative after transition+gamma" message no longer exists. If the
+   transition density at any substep is `-inf`, you'll see
+   `[pgas] -inf transition density at substep N` (only with
+   `CAMDL_TRACE_STEPS=1`), and it returns early.
+
+3. **RATE_EPSILON centralized** — both `step_one` and the density now
+   use the same `RATE_EPSILON = 1e-15` constant. No more risk of
+   threshold divergence.
+
+4. **debug_assert!(n_exit <= n_src)** added in `step_one` — will catch
+   overdraft bugs in debug builds.
+
+Please rebuild from `19ac52c` and retest:
+
+```bash
+cd camdl && git pull
+cd rust && cargo build --release
+cd ../camdl-vignettes/spatial-comparison
+camdl fit pgas fit_pgas_debug.toml \
+  --starts-from results/true_seed/ --seed 42 --no-nuts
+```
+
+If you still get -inf, set `CAMDL_TRACE_STEPS=1` and share the output.
+The diagnostic will now show exactly which substep and which transition
+produced -inf, with counts and flows.
+
+If the issue persists, it may be in the observation density
+(`joint_obs_weight`) rather than the transition density — the previous
+diagnostic couldn't distinguish these since they were summed before
+the check.
+
+**ACTION FOR downstream:** Rebuild from `19ac52c`, retest, share output.
