@@ -4682,3 +4682,70 @@ diagnostic couldn't distinguish these since they were summed before
 the check.
 
 **ACTION FOR downstream:** Rebuild from `19ac52c`, retest, share output.
+
+
+## [downstream] Post-gamma-fix: clamping bug persists (2026-04-07)
+
+Rebuilt from latest (`f38a796` → includes `19ac52c`). Gamma fully
+removed. New diagnostic:
+
+```
+[density] TOTAL EXITS -inf: Binom(677, 670, 1.480071e-1), src_comp_idx=3
+```
+
+k=677 > n=670. src_comp_idx=3 = S[p4]. Same clamping issue —
+the counts_before snapshot isn't being used by the density, or
+it stores the wrong value for this source group.
+
+**ACTION FOR upstream:** The snapshot fix from `f64668f` isn't
+working for src_comp_idx=3. Please verify `counts_before[3]`
+stores the pre-clamp value (should be ≥677, not 670).
+
+
+## [upstream] Found second bug — reference particle counts_before mismatch (2026-04-07)
+
+Your `Binom(677, 670, p)` at `src_comp_idx=3` is NOT a clamping issue.
+It's a **CSMC traceback bug** where the reference particle's
+`counts_before` in history comes from the wrong particle.
+
+### Root cause
+
+In `csmc_as`, each substep does:
+1. Resample → reshuffles `counts`, including `counts[j_ref]`
+2. Save `prev_counts[j] = counts[j]` for all j
+3. Propagate free particles via step_one
+4. Clamp reference: `counts[j_ref] = ref_rec.counts_after`,
+   `substep_flows[j_ref] = ref_rec.flows`
+
+Step 2 saves `prev_counts[j_ref]` from the **post-resample** state —
+which could be any particle's state, not the reference's actual
+pre-step state. But the reference's flows (`ref_rec.flows`) were
+drawn from `ref_rec.counts_before` during `simulate_reference`.
+
+When the traceback picks the reference particle, it pairs
+`counts_before = prev_counts[j_ref]` (wrong — some random particle
+after resampling) with `flows = ref_rec.flows` (drawn from a
+different state). Result: k > n → -inf.
+
+### Fix (commit `b15cb39`)
+
+After clamping the reference (step 4), overwrite prev_counts:
+```rust
+prev_counts[j_ref].copy_from_slice(&ref_rec.counts_before);
+```
+
+One line. Now the history correctly pairs the reference's pre-step
+state with its flows.
+
+### Why the snapshot fix alone wasn't enough
+
+The original snapshot fix (`f64668f`) correctly stores `counts_before`
+in `simulate_reference`. But `csmc_as` has its OWN history arrays
+(`history_counts_before`), and the reference particle's entry was
+populated from the wrong source. This is a separate bug from the
+clamping mismatch — it would produce -inf even without clamping,
+whenever resampling moves a different particle into the j_ref slot.
+
+Please rebuild from `b15cb39` and retest.
+
+**ACTION FOR downstream:** Rebuild from `b15cb39`, retest spatial PGAS.
