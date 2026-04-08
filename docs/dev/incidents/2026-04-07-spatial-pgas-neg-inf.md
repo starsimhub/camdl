@@ -5,6 +5,33 @@
 **Severity:** Blocking — spatial PGAS inference produced -inf on every sweep, making Bayesian inference impossible for multi-patch models.
 **Fix commit:** `f64668f` (fix(pgas): snapshot counts_before in SubstepRecord for spatial density)
 
+## Fundamental vs. implementation
+
+This incident has two layers.
+
+**The implementation bug** was: the density used post-clamp counts while
+`step_one` used pre-clamp counts. This is purely a coding error — the density
+and simulator must agree on what state generated the draws. Fixed by storing
+both snapshots in `SubstepRecord`.
+
+**The fundamental issue** is: the Euler-multinomial approximation assumes
+per-step exit probabilities are small ($p_{\text{total}} \ll 1$). When R0 is
+large and dt = 1 day, $p_{\text{total}} = 1 - e^{-R_0 \cdot \gamma \cdot
+\Delta t}$ can approach 1, meaning almost everyone exits S in one step. With
+spatial models, multiple source groups draw from overlapping compartments via
+the deferred-delta mechanism, and total withdrawals can exceed the population —
+the overdraft that triggers clamping.
+
+This is a known limitation of the Euler scheme. pomp has the same issue and
+handles it the same way (clamp negative counts). The correct fix for the
+approximation is smaller dt (subdivide each day into 4–10 substeps), which
+keeps $p_{\text{total}} < 0.3$ and makes overdrafts vanishingly rare. But
+smaller dt means more substeps, which means slower inference.
+
+The `counts_before`/`counts_after` fix addresses the implementation bug. The
+Euler approximation breakdown requires either smaller dt or the
+merge-same-destination optimization (see Remaining Issues).
+
 ## Summary
 
 The complete-data log-likelihood (`complete_data_loglik`) returned `-inf` for
@@ -224,3 +251,62 @@ future iteration.
    what happened" (density), store the input state explicitly rather than
    deriving it from adjacent records. The derivation breaks when there are
    non-invertible transformations (like clamping) between steps.
+
+## Hardening recommendations
+
+These follow-up changes would prevent recurrence and catch related issues
+earlier.
+
+### 1. Euler approximation warning
+
+Add a runtime check for $p_{\text{total}} > 0.5$ during the particle filter
+validation step. When the exit probability is high, the Euler-multinomial
+approximation is breaking down and the user should reduce dt.
+
+```rust
+// In step_one or the pfilter validation pass:
+if p_total > 0.5 {
+    n_high_p += 1;
+}
+// After simulation:
+if n_high_p > 0 {
+    log::warn!("{} substeps had exit probability > 0.5. \
+        Consider reducing dt (e.g., dt = 0.25) for numerical stability.", n_high_p);
+}
+```
+
+### 2. Centralize the rate epsilon
+
+The zero-rate threshold `1e-15` appears in both `step_one`
+(`chain_binomial.rs`) and `log_transition_density_substep` (`pgas.rs`). Define
+it once:
+
+```rust
+// In chain_binomial.rs or a shared constants module:
+pub const RATE_EPSILON: f64 = 1e-15;
+```
+
+The dual-file magic number is the most likely source of a future divergence
+between simulation and density.
+
+### 3. Debug assertions in step_one
+
+Add `debug_assert!(n_exit <= n_src)` after the total-exits draw in `step_one`.
+This is free in release mode and catches the exact class of bug that caused
+this incident — overdrafts that the density can't evaluate.
+
+### 4. Trace-gated -inf logging in distribution functions
+
+Add checked wrappers on `binom_logpmf`, `poisson_logpmf`, etc. that trace-log
+when returning `-inf` (gated behind `CAMDL_TRACE_STEPS`). Currently, `-inf`
+propagates silently through summation and is only caught by the cumulative
+check in `complete_data_loglik`. Per-term logging would have identified the
+`k > n` binomial immediately.
+
+### 5. Clean up existing debug diagnostics
+
+The current code has `eprintln!` diagnostics and `CAMDL_VERIFY_DENSITY` env
+var checks scattered through `log_transition_density_substep`. These should be
+consolidated: either gate everything behind `trace_enabled()` or remove the
+ad-hoc prints now that the bug is fixed. The `if false {}` block around the
+gamma density should get a tracking issue number.

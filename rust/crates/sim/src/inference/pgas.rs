@@ -13,7 +13,7 @@
 
 use serde::{Serialize, Deserialize};
 
-use crate::chain_binomial::{StepScratch, step_one};
+use crate::chain_binomial::{StepScratch, step_one, RATE_EPSILON};
 use crate::compiled_model::CompiledModel;
 use crate::rng::StatefulRng;
 use crate::error::SimError;
@@ -217,8 +217,7 @@ pub fn log_transition_density_substep(
         let mut gamma_was_used = false;  // track if gamma was actually drawn
         for &tr_idx in group {
             let rate = propensities[tr_idx];
-            // Epsilon threshold — must match step_one in chain_binomial.rs
-            if rate <= 1e-15 || is_determ[tr_idx] {
+            if rate <= RATE_EPSILON || is_determ[tr_idx] {
                 // Zero-rate transition must have zero flows
                 if flows[tr_idx] > 0 {
                     if crate::chain_binomial::trace_enabled() {
@@ -264,7 +263,7 @@ pub fn log_transition_density_substep(
             gamma_idx += 1;
         }
 
-        if total_rate <= 1e-15 || probs.is_empty() { continue; }
+        if total_rate <= RATE_EPSILON || probs.is_empty() { continue; }
 
         // Step 2: evaluate total exits density
         let p_total = (1.0 - (-total_rate * dt).exp()).clamp(1e-15, 1.0 - 1e-15);
@@ -272,19 +271,15 @@ pub fn log_transition_density_substep(
         let binom_total = binom_logpmf(n_exit, n_src as u64, p_total);
 
         if !binom_total.is_finite() {
-            eprintln!("[density-debug] TOTAL EXITS -inf: Binom({}, {}, {:.6e}), src_comp_idx={}",
-                n_exit, n_src, p_total, src_local);
-            eprintln!("  transitions in group:");
-            for &(ti, eff) in &probs {
-                eprintln!("    {} (idx={}): eff_rate={:.6e}, flow={}",
-                    model.model.transitions[ti].name, ti, eff, flows[ti]);
+            if crate::chain_binomial::trace_enabled() {
+                eprintln!("[density] TOTAL EXITS -inf: Binom({}, {}, {:.6e}), src_comp_idx={}",
+                    n_exit, n_src, p_total, src_local);
+                for &(ti, eff) in &probs {
+                    eprintln!("  {} (idx={}): eff_rate={:.6e}, flow={}",
+                        model.model.transitions[ti].name, ti, eff, flows[ti]);
+                }
             }
-            // Also check: what are ALL flows for transitions with this source?
-            eprintln!("  ALL flows from source compartment {}:", src_local);
-            for &ti in group {
-                eprintln!("    {} (idx={}): flow={}, handled={}",
-                    model.model.transitions[ti].name, ti, flows[ti], handled[ti]);
-            }
+            return Ok(f64::NEG_INFINITY);
         }
 
         log_p += binom_total;
@@ -297,25 +292,14 @@ pub fn log_transition_density_substep(
             handled[tr_idx] = true;
             if k == n_competing - 1 {
                 if flows[tr_idx] != remaining {
-                    eprintln!("[density-debug] REMAINDER mismatch: {} flow={} != remaining={}",
-                        model.model.transitions[tr_idx].name, flows[tr_idx], remaining);
                     return Ok(f64::NEG_INFINITY);
                 }
             } else if remaining > 0 && rate_remaining > 0.0 {
                 let p_split = (eff_rate / rate_remaining).clamp(1e-15, 1.0 - 1e-15);
-                let binom_split = binom_logpmf(flows[tr_idx], remaining, p_split);
-                if !binom_split.is_finite() {
-                    eprintln!("[density-debug] SPLIT -inf: Binom({}, {}, {:.6e}) for {}",
-                        flows[tr_idx], remaining, p_split, model.model.transitions[tr_idx].name);
-                }
-                log_p += binom_split;
+                log_p += binom_logpmf(flows[tr_idx], remaining, p_split);
                 remaining -= flows[tr_idx];
                 rate_remaining -= eff_rate;
             } else if flows[tr_idx] > 0 {
-                if std::env::var("CAMDL_VERIFY_DENSITY").is_ok() {
-                    eprintln!("[density] -inf at ZERO-REMAINING: {} flow={} but remaining=0",
-                        model.model.transitions[tr_idx].name, flows[tr_idx]);
-                }
                 return Ok(f64::NEG_INFINITY);
             }
         }
@@ -323,7 +307,7 @@ pub fn log_transition_density_substep(
 
     // Ungrouped / inflow transitions
     for (i, &rate) in propensities.iter().enumerate() {
-        if handled[i] || rate <= 1e-15 { continue; }
+        if handled[i] || rate <= RATE_EPSILON { continue; }
         let mean = rate * dt;
         if is_determ[i] {
             if flows[i] != mean.round() as u64 {
@@ -395,74 +379,21 @@ pub fn complete_data_loglik(
             model, counts_before, &rec.flows, &rec.gammas, params, t, dt,
         )?;
         if !td.is_finite() {
-            // Early exit: one impossible transition makes the whole trajectory invalid.
-            // Log the first -inf for debugging (env CAMDL_TRACE_STEPS=1).
             if crate::chain_binomial::trace_enabled() {
                 eprintln!("[pgas] -inf transition density at substep {} (t={:.1})", s, t);
                 eprintln!("  counts_before: {:?}", counts_before);
                 eprintln!("  flows: {:?}", &rec.flows);
-                eprintln!("  gammas: {:?}", &rec.gammas);
             }
-            eprintln!("  (transition density -inf at substep {})", s);
             return Ok(f64::NEG_INFINITY);
         }
         log_p += td;
 
-        // Gamma multiplier density (for sigma_se estimation)
-        // TODO: gamma indexing across source groups with zero-rate overdispersed
-        // transitions is fragile. Disabled for now — the transition density
-        // already constrains sigma_se through p_total. Re-enable after fixing
-        // gamma index tracking to match step_one exactly.
-        if false {  // DISABLED — gamma indexing bug causes -inf on spatial models
-        // Must use the SAME gamma indexing as step_one: only increment
-        // gamma_idx when the overdispersed transition had positive rate
-        // (step_one only pushes to gamma_used when rate > 0).
-        if !rec.gammas.is_empty() {
-            let n_int = model.int_local_to_global.len();
-            let mut int_s = IntState::new(n_int);
-            int_s.counts.copy_from_slice(counts_before);
-            let real_s = RealState::new(model.real_local_to_global.len());
-            let ctx = EvalCtx {
-                model, int_s: &int_s, real_s: &real_s, params, t, projected: None,
-            };
-            // Evaluate propensities once for gamma rate check
-            let mut gamma_props = vec![0.0; model.model.transitions.len()];
-            eval_propensities(model, &int_s, &real_s, params, t, &mut gamma_props).ok();
-            let mut gamma_idx = 0;
-            for &(_, ref group) in &model.source_groups {
-                for &tr_idx in group {
-                    if let ir::transition::DrawMethod::Overdispersed(ref expr)
-                        = model.model.transitions[tr_idx].draw_method
-                    {
-                        // Only consume a gamma if this transition had positive
-                        // rate (same condition as step_one line 424)
-                        let rate = gamma_props[tr_idx];
-                        if rate > 1e-15 && gamma_idx < rec.gammas.len() {
-                            let g = rec.gammas[gamma_idx];
-                            let sigma_sq = eval_expr(expr, &ctx).unwrap_or(1.0);
-                            if g > 0.0 && sigma_sq > 0.0 {
-                                let shape = dt / sigma_sq;
-                                let scale = sigma_sq / dt;
-                                let gd = crate::inference::obs_loglik::log_gamma_density(g, shape, scale);
-                                if !gd.is_finite() {
-                                    eprintln!("  (gamma density -inf at substep {}: g={:.6e}, shape={:.6e}, scale={:.6e}, sigma_sq={:.6e})",
-                                        s, g, shape, scale, sigma_sq);
-                                }
-                                log_p += gd;
-                            }
-                            gamma_idx += 1;
-                        }
-                        break;
-                    }
-                }
-            }
-        }
-        } // end if false (gamma density disabled)
-
-        if !log_p.is_finite() {
-            eprintln!("  (log_p went -inf at substep {} — cumulative after transition+gamma)", s);
-            return Ok(f64::NEG_INFINITY);
-        }
+        // TODO: gamma multiplier density (log Gamma(g; dt/σ², σ²/dt)) is
+        // disabled. The gamma index tracking between step_one and the density
+        // doesn't align for models with zero-rate overdispersed transitions.
+        // The transition density already constrains σ² through p_total, so
+        // this is not blocking. See incident report:
+        // docs/dev/incidents/2026-04-07-spatial-pgas-neg-inf.md
 
         // Accumulate flows
         for (i, &f) in rec.flows.iter().enumerate() {

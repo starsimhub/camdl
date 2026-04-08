@@ -13,6 +13,12 @@ use crate::{
 
 pub struct ChainBinomialSim;
 
+/// Minimum rate threshold: transitions with rate ≤ this are treated as
+/// zero-rate (no draws, zero flow required). Used by both `step_one` and
+/// `log_transition_density_substep` — must be identical to avoid simulation/
+/// density mismatch.
+pub const RATE_EPSILON: f64 = 1e-15;
+
 /// Pre-allocated scratch buffers for `step_one`, eliminating per-call heap
 /// allocations. Allocate one per particle (or per thread) and reuse across
 /// all time steps.
@@ -421,12 +427,7 @@ pub fn step_one(
         let mut total_rate = 0.0_f64;
         for &tr_idx in group {
             let rate = scratch.propensities[tr_idx];
-            // Epsilon threshold: rates below this are treated as zero.
-            // Must match log_transition_density_substep in pgas.rs to avoid
-            // the floating-point mismatch where step_one sees 1e-300 (positive,
-            // enters split, occasionally draws 1 event) but the density sees
-            // 0.0 exactly (skipped, flow=1 → -inf). See spatial-pgas-inf-bug.md.
-            if rate <= 1e-15 { scratch.handled[tr_idx] = true; continue; }
+            if rate <= RATE_EPSILON { scratch.handled[tr_idx] = true; continue; }
             let per_capita = rate / n_src as f64;
             match &scratch.draws[tr_idx] {
                 ResolvedDraw::Deterministic => { scratch.handled[tr_idx] = true; continue; }
@@ -470,6 +471,10 @@ pub fn step_one(
             rng.binomial(n_src as u64, p_total)
         };
 
+        debug_assert!(n_events <= n_src as u64,
+            "n_exit ({}) > n_src ({}) at source compartment {}",
+            n_events, n_src, src_local);
+
         // Step 3: split total exits proportional to rates (pomp's inner loop)
         let n_competing = scratch.probs.len();
         let mut rate_remaining = total_rate;
@@ -497,7 +502,7 @@ pub fn step_one(
 
     // Inflows and ungrouped transitions
     for (i, &rate) in scratch.propensities.iter().enumerate() {
-        if scratch.handled[i] || rate <= 1e-15 { continue; }
+        if scratch.handled[i] || rate <= RATE_EPSILON { continue; }
         let mean = rate * dt;
         let count = match &scratch.draws[i] {
             ResolvedDraw::Poisson => rng.poisson(mean),
