@@ -50,8 +50,14 @@ pub struct PGASConfig {
 /// evaluation and trajectory reconstruction.
 #[derive(Clone, Serialize, Deserialize)]
 pub struct SubstepRecord {
+    /// Compartment counts BEFORE this substep — the exact snapshot that
+    /// step_one evaluated propensities from. The density MUST use this
+    /// (not the previous substep's post-clamp counts) to avoid the
+    /// clamping mismatch where n_exit > n_src_clamped.
+    pub counts_before: Vec<i64>,
     /// Compartment counts AFTER this substep (post-clamp, post-intervention).
-    pub counts: Vec<i64>,
+    /// Used as input to the NEXT substep's step_one.
+    pub counts_after: Vec<i64>,
     /// Per-transition flow counts FOR THIS SUBSTEP ONLY.
     pub flows: Vec<u64>,
     /// Gamma multipliers used at this substep (one per overdispersed
@@ -379,11 +385,9 @@ pub fn complete_data_loglik(
 
     for s in 0..n_substeps {
         let t = t_start + s as f64 * dt;
-        let counts_before = if s == 0 {
-            &trajectory.initial_counts
-        } else {
-            &trajectory.substeps[s - 1].counts
-        };
+        // Use the pre-step snapshot stored in the record — this is the
+        // exact state step_one evaluated propensities from.
+        let counts_before = &trajectory.substeps[s].counts_before;
         let rec = &trajectory.substeps[s];
 
         // Transition density
@@ -502,27 +506,12 @@ pub fn simulate_reference(
         let mut flows = vec![0u64; n_tr];
         scratch.gamma_used.clear();
 
-        let snapshot = counts.clone(); // what step_one will use
+        let counts_before = counts.clone();
         step_one(model, &mut counts, &mut flows, params, t, dt, rng, &mut scratch)?;
 
-        // Verify n_exit <= snapshot for every source group
-        for &(src_local, ref group) in &model.source_groups {
-            let n_src = snapshot[src_local].max(0) as u64;
-            let n_exit: u64 = group.iter()
-                .filter(|&&ti| {
-                    let rate = scratch.propensities.get(ti).copied().unwrap_or(0.0);
-                    rate > 1e-15
-                })
-                .map(|&ti| flows[ti])
-                .sum();
-            if n_exit > n_src {
-                eprintln!("[simulate_reference] BUG: n_exit={} > n_src={} at substep {} src={}",
-                    n_exit, n_src, s, src_local);
-            }
-        }
-
         substeps.push(SubstepRecord {
-            counts: counts.clone(),
+            counts_before,
+            counts_after: counts.clone(),
             flows,
             gammas: scratch.gamma_used.clone(),
         });
@@ -622,7 +611,8 @@ pub fn csmc_as(
         .collect();
 
     // History for traceback
-    let mut history_counts: Vec<Vec<Vec<i64>>> = Vec::with_capacity(n_substeps);
+    let mut history_counts_before: Vec<Vec<Vec<i64>>> = Vec::with_capacity(n_substeps);
+    let mut history_counts_after: Vec<Vec<Vec<i64>>> = Vec::with_capacity(n_substeps);
     let mut history_flows: Vec<Vec<Vec<u64>>> = Vec::with_capacity(n_substeps);
     let mut history_gammas: Vec<Vec<Vec<f64>>> = Vec::with_capacity(n_substeps);
     let mut ancestors: Vec<Vec<usize>> = Vec::with_capacity(n_substeps);
@@ -699,7 +689,7 @@ pub fn csmc_as(
 
         // ── 3. Clamp reference particle ──
         let ref_rec = &reference.substeps[s];
-        counts[j_ref].copy_from_slice(&ref_rec.counts);
+        counts[j_ref].copy_from_slice(&ref_rec.counts_after);
         substep_flows[j_ref].copy_from_slice(&ref_rec.flows);
         substep_gammas[j_ref] = ref_rec.gammas.clone();
 
@@ -782,7 +772,8 @@ pub fn csmc_as(
         }
 
         // ── 6. Store history ──
-        history_counts.push(counts.iter().map(|c| c.clone()).collect());
+        history_counts_before.push(prev_counts.iter().map(|c| c.clone()).collect());
+        history_counts_after.push(counts.iter().map(|c| c.clone()).collect());
         history_flows.push(substep_flows.iter().map(|f| f.clone()).collect());
         history_gammas.push(substep_gammas.iter().map(|g| g.clone()).collect());
     }
@@ -827,7 +818,8 @@ pub fn csmc_as(
     for s in (0..n_substeps).rev() {
         if particle == j_ref { n_from_ref += 1; }
         trajectory_substeps.push(SubstepRecord {
-            counts: history_counts[s][particle].clone(),
+            counts_before: history_counts_before[s][particle].clone(),
+            counts_after: history_counts_after[s][particle].clone(),
             flows: history_flows[s][particle].clone(),
             gammas: history_gammas[s][particle].clone(),
         });

@@ -11,12 +11,14 @@ fn test_resume_state_bincode_roundtrip() {
         initial_counts: vec![1000, 10, 0],
         substeps: vec![
             SubstepRecord {
-                counts: vec![995, 15, 0],
+                counts_before: vec![995, 15, 0],
+                counts_after: vec![993, 17, 0],
                 flows: vec![5, 3],
                 gammas: vec![1.02],
             },
             SubstepRecord {
-                counts: vec![990, 18, 2],
+                counts_before: vec![990, 18, 2],
+                counts_after: vec![988, 20, 2],
                 flows: vec![5, 2],
                 gammas: vec![0.98],
             },
@@ -54,7 +56,7 @@ fn test_resume_state_bincode_roundtrip() {
     assert_eq!(decoded.transformed, vec![-0.916, -2.302, 6.908]);
     assert_eq!(decoded.trajectory.initial_counts, vec![1000, 10, 0]);
     assert_eq!(decoded.trajectory.substeps.len(), 2);
-    assert_eq!(decoded.trajectory.substeps[0].counts, vec![995, 15, 0]);
+    assert_eq!(decoded.trajectory.substeps[0].counts_before, vec![995, 15, 0]);
     assert_eq!(decoded.trajectory.substeps[0].flows, vec![5, 3]);
     assert!((decoded.trajectory.substeps[0].gammas[0] - 1.02).abs() < 1e-10);
     assert!((decoded.nuts_step_size - 0.0234).abs() < 1e-10);
@@ -173,7 +175,7 @@ fn test_resume_hash_mismatch_detection() {
 fn test_resume_state_large_trajectory() {
     // Simulate a realistic trajectory size (1000 substeps, 4 compartments)
     let substeps: Vec<SubstepRecord> = (0..1000).map(|i| SubstepRecord {
-        counts: vec![10000 - i as i64, i as i64, 0, 0],
+        counts_before: vec![10000 - i as i64, i as i64, 0, 0], counts_after: vec![10000 - i as i64 - 1, i as i64 + 1, 0, 0],
         flows: vec![1, 0, 0, 0, 0, 0],
         gammas: vec![1.0],
     }).collect();

@@ -237,12 +237,8 @@ fn test_density_downstream_seir_spatial_5() {
     let t_start = compiled.model.simulation.t_start;
     for s in 0..trajectory.substeps.len() {
         let t = t_start + s as f64 * dt;
-        let counts_before = if s == 0 {
-            &trajectory.initial_counts
-        } else {
-            &trajectory.substeps[s - 1].counts
-        };
         let rec = &trajectory.substeps[s];
+        let counts_before = &rec.counts_before;
 
         let td = log_transition_density_substep(
             &compiled, counts_before, &rec.flows, &rec.gammas, &params, t, dt,
@@ -330,12 +326,8 @@ fn test_density_downstream_multi_seed() {
         let mut _this_inf = false;
         for s in 0..trajectory.substeps.len() {
             let t = t_start + s as f64 * dt;
-            let counts_before = if s == 0 {
-                &trajectory.initial_counts
-            } else {
-                &trajectory.substeps[s - 1].counts
-            };
             let rec = &trajectory.substeps[s];
+            let counts_before = &rec.counts_before;
             let td = log_transition_density_substep(
                 &compiled, counts_before, &rec.flows, &rec.gammas, &params, t, dt,
             ).unwrap();

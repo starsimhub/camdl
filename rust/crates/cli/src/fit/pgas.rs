@@ -305,7 +305,7 @@ pub fn run_pgas_cli(
                         for (s, rec) in traj.substeps.iter().enumerate() {
                             let t = traj_t_start + (s + 1) as f64 * traj_dt;
                             write!(f, "{:.1}", t).unwrap();
-                            for &c in &rec.counts { write!(f, "\t{}", c).unwrap(); }
+                            for &c in &rec.counts_after { write!(f, "\t{}", c).unwrap(); }
                             for &fl in &rec.flows { write!(f, "\t{}", fl).unwrap(); }
                             writeln!(f).unwrap();
                         }

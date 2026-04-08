@@ -312,11 +312,7 @@ pub fn complete_data_loglik_grad(
 
     for s in 0..n_substeps {
         let t = t_start + s as f64 * dt;
-        let counts_before = if s == 0 {
-            &trajectory.initial_counts
-        } else {
-            &trajectory.substeps[s - 1].counts
-        };
+        let counts_before = &trajectory.substeps[s].counts_before;
         let rec = &trajectory.substeps[s];
 
         let (td, td_grad) = log_transition_density_grad(
