@@ -40,10 +40,10 @@ pub fn run_pgas_cli(
     let thin = sc.and_then(|s| s.thin).unwrap_or(DEFAULT_THIN);
     let n_trajectories = sc.and_then(|s| s.n_trajectories).unwrap_or(200);
 
-    if !force {
+    if !force && !resume {
         let state_path = format!("{}/fit_state.toml", stage_dir);
         if std::path::Path::new(&state_path).exists() {
-            eprintln!("\x1b[33mpgas results already exist in {}. Use --force to re-run.\x1b[0m", stage_dir);
+            eprintln!("\x1b[33mpgas results already exist in {}. Use --force to re-run or --resume to continue.\x1b[0m", stage_dir);
             return Ok(());
         }
     }
@@ -111,7 +111,9 @@ pub fn run_pgas_cli(
 
     // Load resume states if --resume
     let resume_states: Vec<Option<ChainResumeState>> = if resume {
-        (0..n_chains).map(|chain_id| {
+        let mut states = Vec::with_capacity(n_chains);
+        let mut any_failed = false;
+        for chain_id in 0..n_chains {
             let path = format!("{}/chain_{}/resume_state.bin", stage_dir, chain_id + 1);
             match std::fs::read(&path) {
                 Ok(data) => match bincode::deserialize::<ChainResumeState>(&data) {
@@ -119,24 +121,33 @@ pub fn run_pgas_cli(
                         if state.config_hash != config_hash {
                             eprintln!("error: config hash mismatch for chain {} — \
                                 model/data/priors have changed since the original run. \
-                                Cannot resume. Re-run from scratch or use --force.",
+                                Cannot resume. Re-run from scratch with --force.",
                                 chain_id + 1);
                             std::process::exit(1);
                         }
                         eprintln!("  chain {}: resuming from sweep {}", chain_id + 1, state.completed_sweeps);
-                        Some(state)
+                        states.push(Some(state));
                     }
                     Err(e) => {
-                        eprintln!("warning: cannot deserialize {}: {}. Starting fresh.", path, e);
-                        None
+                        eprintln!("error: cannot deserialize resume state for chain {}: {}", chain_id + 1, e);
+                        any_failed = true;
+                        states.push(None);
                     }
                 }
                 Err(_) => {
-                    eprintln!("warning: no resume state for chain {}. Starting fresh.", chain_id + 1);
-                    None
+                    eprintln!("error: no resume state file for chain {} ({})", chain_id + 1, path);
+                    any_failed = true;
+                    states.push(None);
                 }
             }
-        }).collect()
+        }
+        if any_failed {
+            eprintln!("error: --resume requires resume state files for all chains.");
+            eprintln!("  These are written automatically at the end of every PGAS run.");
+            eprintln!("  If the original run was interrupted before saving, use --force to start fresh.");
+            std::process::exit(1);
+        }
+        states
     } else {
         vec![None; n_chains]
     };
@@ -246,7 +257,7 @@ pub fn run_pgas_cli(
                     let mut f = std::io::BufWriter::new(
                         std::fs::File::create(&trace_path).unwrap()
                     );
-                    write!(f, "sweep\tlog_likelihood\ttrajectory_renewal").unwrap();
+                    write!(f, "sweep\tlog_likelihood\tlog_posterior\ttrajectory_renewal").unwrap();
                     for spec in &config.if2_params { write!(f, "\t{}", spec.name).unwrap(); }
                     writeln!(f).unwrap();
                     f
@@ -280,8 +291,17 @@ pub fn run_pgas_cli(
                 {
                     use std::io::Write;
                     if let Ok(mut f) = trace_file.lock() {
-                        write!(f, "{}\t{:.4}\t{:.4}",
-                            sweep, result.log_complete_data_ll,
+                        // log_posterior = log_likelihood + sum(log_prior)
+                        let log_prior: f64 = config.if2_params.iter().zip(priors.iter())
+                            .map(|(spec, prior)| {
+                                let natural = result.params[spec.index];
+                                let z = spec.to_transformed(natural);
+                                prior.log_density(natural, z)
+                            })
+                            .sum();
+                        let log_posterior = result.log_complete_data_ll + log_prior;
+                        write!(f, "{}\t{:.4}\t{:.4}\t{:.4}",
+                            sweep, result.log_complete_data_ll, log_posterior,
                             result.csmc_diag.trajectory_renewal).unwrap();
                         for spec in &config.if2_params {
                             write!(f, "\t{:.6}", result.params[spec.index]).unwrap();

@@ -207,3 +207,83 @@ fn test_resume_state_large_trajectory() {
     assert_eq!(decoded.completed_sweeps, 10000);
     assert_eq!(decoded.params.len(), 4);
 }
+
+/// T7: Resume state file protects trace data.
+/// When a resume state exists, the trace must be opened in append mode.
+/// When no resume state exists, creating a new trace is safe.
+#[test]
+fn test_resume_trace_file_safety() {
+    use std::io::Write;
+
+    let dir = std::env::temp_dir().join("camdl_test_resume_safety");
+    let chain_dir = dir.join("chain_1");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&chain_dir).unwrap();
+
+    let trace_path = chain_dir.join("trace.tsv");
+    let resume_path = chain_dir.join("resume_state.bin");
+
+    // Write a fake trace with 100 lines of data
+    {
+        let mut f = std::fs::File::create(&trace_path).unwrap();
+        writeln!(f, "sweep\tlog_likelihood\tparam1").unwrap();
+        for i in 1..=100 {
+            writeln!(f, "{}\t-1000.0\t0.5", i).unwrap();
+        }
+    }
+    let original_size = std::fs::metadata(&trace_path).unwrap().len();
+    assert!(original_size > 0, "trace file should have content");
+
+    // Write a resume state
+    let state = ChainResumeState {
+        config_hash: "test".into(),
+        completed_sweeps: 100,
+        params: vec![0.5],
+        transformed: vec![0.0],
+        trajectory: PGASTrajectory { initial_counts: vec![1000], substeps: vec![] },
+        mass_matrix: MassMatrix::identity(1),
+        nuts_step_size: 0.1,
+        log_proposal_sd: vec![-3.0],
+        total_accepted: vec![50],
+        current_ll: -1000.0,
+    };
+    let encoded = bincode::serialize(&state).unwrap();
+    std::fs::write(&resume_path, &encoded).unwrap();
+
+    // Key invariant: when resume state exists and we open the trace
+    // in append mode, original data is preserved.
+    {
+        let mut f = std::fs::OpenOptions::new()
+            .append(true)
+            .open(&trace_path)
+            .unwrap();
+        writeln!(f, "101\t-999.0\t0.51").unwrap();
+    }
+    let appended_size = std::fs::metadata(&trace_path).unwrap().len();
+    assert!(appended_size > original_size, "append should grow file, not truncate");
+
+    // Verify original content is intact
+    let content = std::fs::read_to_string(&trace_path).unwrap();
+    let lines: Vec<&str> = content.lines().collect();
+    assert_eq!(lines.len(), 102, "header + 100 original + 1 appended");
+    assert!(lines[0].starts_with("sweep"), "header preserved");
+    assert!(lines[1].starts_with("1\t"), "first original line preserved");
+    assert!(lines[100].starts_with("100\t"), "last original line preserved");
+    assert!(lines[101].starts_with("101\t"), "appended line present");
+
+    // Anti-pattern: File::create would DESTROY existing data
+    let would_destroy_size = {
+        let path2 = chain_dir.join("trace_destroyed.tsv");
+        std::fs::copy(&trace_path, &path2).unwrap();
+        {
+            let mut f = std::fs::File::create(&path2).unwrap();
+            writeln!(f, "sweep\tlog_likelihood\tparam1").unwrap();
+            writeln!(f, "101\t-999.0\t0.51").unwrap();
+        }
+        std::fs::metadata(&path2).unwrap().len()
+    };
+    assert!(would_destroy_size < original_size,
+        "File::create destroys existing content — this is why --resume must use append");
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
