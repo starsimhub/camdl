@@ -35,7 +35,7 @@ pub struct FitRunConfig {
     pub model: ir::Model,
     pub model_ir_json: String,
     pub base_params: Vec<f64>,
-    pub if2_params: Vec<IF2Param>,
+    pub estimated_params: Vec<IF2Param>,
     /// Canonical observation times (shared across all streams).
     pub observations: Vec<Observation>,
     /// Per-stream data. For single-stream models, len() == 1.
@@ -198,7 +198,7 @@ impl FitRunConfig {
             model,
             model_ir_json,
             base_params,
-            if2_params,
+            estimated_params: if2_params,
             observations,
             streams,
             flow_indices,
@@ -322,12 +322,12 @@ pub fn run_quick_pfilter(config: &FitRunConfig, params: &[f64], n_particles: usi
 /// Print preflight transform report to stderr.
 /// `explicit_rw_sd` maps param names that had explicit rw_sd in fit.toml.
 pub fn print_preflight(config: &FitRunConfig) {
-    let n_auto = config.if2_params.iter()
+    let n_auto = config.estimated_params.iter()
         .filter(|s| s.rw_sd_auto)
         .count();
 
     eprintln!("\ntransforms:");
-    for spec in &config.if2_params {
+    for spec in &config.estimated_params {
         let (tname, pos) = match &spec.transform {
             Transform::Log { lo, hi } => {
                 let z = spec.initial.max(1e-300).ln();
@@ -352,7 +352,7 @@ pub fn print_preflight(config: &FitRunConfig) {
 
     if n_auto > 0 {
         eprintln!("\n  \x1b[33m⚠ {}/{} parameters using auto rw_sd. Check traces and set explicit values.\x1b[0m",
-            n_auto, config.if2_params.len());
+            n_auto, config.estimated_params.len());
     }
 
     // Cooling schedule preview
@@ -597,7 +597,7 @@ fn run_one_chain(
     pb: Option<&ProgressBar>,
 ) -> IF2Result {
     let chain_seed = config.seed ^ (chain_id as u64).wrapping_mul(0x9e3779b97f4a7c15);
-    let if2_params = per_chain_params.unwrap_or(&config.if2_params);
+    let if2_params = per_chain_params.unwrap_or(&config.estimated_params);
 
     let step_fn = |state: &mut ParticleState, p: &[f64], t: f64, step_dt: f64, rng: &mut StatefulRng, scratch: &mut sim::chain_binomial::StepScratch| {
         step_one(&config.compiled, &mut state.counts, &mut state.flow_accumulators, p, t, step_dt, rng, scratch)
@@ -711,7 +711,7 @@ pub fn run_chains_with_per_chain_params(
         .unwrap();
 
     // Compute Rhat
-    let rhat = compute_rhat(&results, &config.if2_params, config.if2_config.n_iterations);
+    let rhat = compute_rhat(&results, &config.estimated_params, config.if2_config.n_iterations);
 
     // Report
     eprintln!("\nbest chain: {} (loglik={:.2})", best_chain + 1, best_loglik);
@@ -729,7 +729,7 @@ pub fn run_chains_with_per_chain_params(
             - logliks.iter().cloned().fold(f64::INFINITY, f64::min);
 
         eprintln!("\nRhat:");
-        for spec in &config.if2_params {
+        for spec in &config.estimated_params {
             if let Some(&r) = rhat.get(&spec.name) {
                 let status = if r < 1.1 { "\x1b[32m✓\x1b[0m" } else if r < 1.5 { "\x1b[33m~\x1b[0m" } else { "\x1b[31m✗\x1b[0m" };
                 eprintln!("  {:12} Rhat={:.3} {}", spec.name, r, status);
@@ -796,6 +796,40 @@ pub fn compute_rhat(
     }
 
     rhat_map
+}
+
+/// Compute Rhat and ESS from per-chain parameter traces.
+/// `chains[chain_id]` is a Vec of param values (one per sample).
+/// Returns `(rhat, ess)`. Rhat requires >= 2 chains with >= 4 samples each;
+/// returns NaN if the precondition is not met.
+pub fn compute_rhat_ess(chains: &[Vec<f64>]) -> (f64, f64) {
+    use sim::inference::pmmh::mcmc_ess;
+
+    let total_ess: f64 = chains.iter().map(|c| mcmc_ess(c)).sum();
+
+    let n_chains = chains.len();
+    if n_chains < 2 || !chains.iter().all(|c| c.len() >= 4) {
+        return (f64::NAN, total_ess);
+    }
+
+    let chain_means: Vec<f64> = chains.iter().map(|c| {
+        c.iter().sum::<f64>() / c.len() as f64
+    }).collect();
+    let chain_vars: Vec<f64> = chains.iter().map(|c| {
+        let m = c.iter().sum::<f64>() / c.len() as f64;
+        c.iter().map(|&x| (x - m).powi(2)).sum::<f64>() / (c.len() - 1).max(1) as f64
+    }).collect();
+
+    let n_samples = chains[0].len() as f64;
+    let grand_mean = chain_means.iter().sum::<f64>() / n_chains as f64;
+    let between = chain_means.iter().map(|&m| (m - grand_mean).powi(2)).sum::<f64>()
+        * n_samples / (n_chains - 1).max(1) as f64;
+    let within = chain_vars.iter().sum::<f64>() / n_chains as f64;
+    let rhat = if within > 0.0 {
+        (((n_samples - 1.0) / n_samples * within + between / n_samples) / within).sqrt()
+    } else { f64::NAN };
+
+    (rhat, total_ess)
 }
 
 /// MAD-based auto rw_sd calibration from chain best-loglik parameters.

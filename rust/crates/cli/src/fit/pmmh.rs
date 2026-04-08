@@ -12,7 +12,7 @@ use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use rayon::prelude::*;
 use sim::inference::{
     if2::IF2Param,
-    pmmh::{run_pmmh, Prior, PMMHConfig, PMMHResult, mcmc_ess},
+    pmmh::{run_pmmh, Prior, PMMHConfig, PMMHResult},
 };
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -68,7 +68,7 @@ pub fn run_pmmh_cli(
     eprintln!("\npfilter variance check ({} particles, 20 replicates)...", n_particles);
     let base = prior_state.as_ref().map(|s| {
         let mut p = config.base_params.clone();
-        for spec in &config.if2_params {
+        for spec in &config.estimated_params {
             if let Some(&v) = s.start_values.get(&spec.name) {
                 p[spec.index] = v;
             }
@@ -189,7 +189,7 @@ pub fn run_pmmh_cli(
         .map_err(|e| format!("cannot create {}: {}", stage_dir, e))?;
 
     // Build priors from fit.toml [estimate] section
-    let priors: Vec<Prior> = config.if2_params.iter()
+    let priors: Vec<Prior> = config.estimated_params.iter()
         .map(|spec| {
             let est = fit.estimate.get(&spec.name);
             match est.and_then(|e| e.prior.as_deref()) {
@@ -207,7 +207,7 @@ pub fn run_pmmh_cli(
     eprintln!("\npmmh: {} chains × {} steps × {} particles, burn_in={}, thin={}, adapt={}",
         n_chains, n_steps, n_particles, burn_in, thin, adapt);
     eprintln!("  proposal_sd (transformed): [{}]",
-        config.if2_params.iter().zip(&proposal_sd)
+        config.estimated_params.iter().zip(&proposal_sd)
             .map(|(p, &sd)| format!("{}={:.4}", p.name, sd))
             .collect::<Vec<_>>().join(", "));
 
@@ -307,12 +307,12 @@ pub fn run_pmmh_cli(
                     std::fs::File::create(&trace_path).unwrap()
                 );
                 write!(f, "step\tlog_likelihood\tlog_posterior\taccepted").unwrap();
-                for spec in &config.if2_params { write!(f, "\t{}", spec.name).unwrap(); }
+                for spec in &config.estimated_params { write!(f, "\t{}", spec.name).unwrap(); }
                 writeln!(f).unwrap();
                 f
             });
 
-            let _param_names: Vec<String> = config.if2_params.iter()
+            let _param_names: Vec<String> = config.estimated_params.iter()
                 .map(|s| s.name.clone()).collect();
 
             let progress_cb = |step: usize, loglik: f64, accepted: bool, params: &[f64]| {
@@ -322,7 +322,7 @@ pub fn run_pmmh_cli(
                 // Stream trace row to disk (respecting burn-in/thin)
                 if step >= burn_in && (step - burn_in) % thin == 0 {
                     use std::io::Write;
-                    let log_prior: f64 = config.if2_params.iter().zip(priors.iter())
+                    let log_prior: f64 = config.estimated_params.iter().zip(priors.iter())
                         .map(|(spec, prior)| {
                             let theta = params[spec.index];
                             let z = spec.to_transformed(theta);
@@ -333,7 +333,7 @@ pub fn run_pmmh_cli(
                     if let Ok(mut f) = trace_file.lock() {
                         write!(f, "{}\t{:.4}\t{:.4}\t{}",
                             step, loglik, log_posterior, if accepted { 1 } else { 0 }).unwrap();
-                        for spec in &config.if2_params {
+                        for spec in &config.estimated_params {
                             write!(f, "\t{:.6}", params[spec.index]).unwrap();
                         }
                         writeln!(f).unwrap();
@@ -361,7 +361,7 @@ pub fn run_pmmh_cli(
             };
 
             let result = run_pmmh(
-                &config.if2_params, &priors, &config.base_params,
+                &config.estimated_params, &priors, &config.base_params,
                 &pmmh_config, &eval_loglik, eval_corr_ref, chain_seed, Some(&progress_cb),
             );
 
@@ -378,7 +378,7 @@ pub fn run_pmmh_cli(
     // Traces already written by streaming callback — no post-hoc write needed.
 
     // Compute diagnostics
-    let diagnostics = compute_diagnostics(&results, &config.if2_params);
+    let diagnostics = compute_diagnostics(&results, &config.estimated_params);
 
     // Report
     eprintln!("\nacceptance rates:");
@@ -395,7 +395,7 @@ pub fn run_pmmh_cli(
 
     if n_chains > 1 {
         eprintln!("\nRhat:");
-        for spec in &config.if2_params {
+        for spec in &config.estimated_params {
             if let Some(&rhat) = diagnostics.rhat.get(&spec.name) {
                 let status = if rhat < 1.1 { "\x1b[32m✓\x1b[0m" } else if rhat < 1.5 { "\x1b[33m~\x1b[0m" } else { "\x1b[31m✗\x1b[0m" };
                 let ess = diagnostics.ess.get(&spec.name).copied().unwrap_or(0.0);
@@ -414,7 +414,7 @@ pub fn run_pmmh_cli(
 
     // Write fit_state.toml
     let mut start_values = HashMap::new();
-    for spec in config.if2_params.iter() {
+    for spec in config.estimated_params.iter() {
         start_values.insert(spec.name.clone(), map_result.map_params[spec.index]);
     }
     // Include fixed params too
@@ -462,7 +462,7 @@ fn build_proposal_sd(
     // Try to load scout chain endpoints for empirical covariance
     let proposal_dir = sc.and_then(|s| s.proposal_from.as_deref()).or(starts_from);
     if let Some(dir) = proposal_dir {
-        if let Ok(sds) = load_scout_proposal_sd(dir, &config.if2_params) {
+        if let Ok(sds) = load_scout_proposal_sd(dir, &config.estimated_params) {
             eprintln!("  proposal_sd seeded from chain spread in {}/", dir);
             return Ok(sds);
         }
@@ -470,7 +470,7 @@ fn build_proposal_sd(
 
     // Fallback: use rw_sd from [estimate], scaled up for MH jumps
     // IF2 rw_sd is per-perturbation-step; PMMH needs per-proposal (larger)
-    Ok(config.if2_params.iter().map(|p| {
+    Ok(config.estimated_params.iter().map(|p| {
         p.transformed_sd(p.rw_sd, p.initial) * 5.0
     }).collect())
 }
@@ -532,43 +532,21 @@ struct Diagnostics {
 
 fn compute_diagnostics(
     results: &[(usize, PMMHResult)],
-    if2_params: &[IF2Param],
+    estimated_params: &[IF2Param],
 ) -> Diagnostics {
-    let n_chains = results.len();
     let mut rhat_map = HashMap::new();
     let mut ess_map = HashMap::new();
 
-    for spec in if2_params {
-        // Collect per-chain samples for this parameter
+    for spec in estimated_params {
         let chains: Vec<Vec<f64>> = results.iter()
             .map(|(_, r)| r.steps.iter().map(|s| s.params[spec.index]).collect())
             .collect();
 
-        // ESS: sum across chains
-        let total_ess: f64 = chains.iter().map(|c| mcmc_ess(c)).sum();
-        ess_map.insert(spec.name.clone(), total_ess);
-
-        // Rhat across chains
-        if n_chains >= 2 && chains.iter().all(|c| c.len() >= 4) {
-            let chain_means: Vec<f64> = chains.iter().map(|c| {
-                c.iter().sum::<f64>() / c.len() as f64
-            }).collect();
-            let chain_vars: Vec<f64> = chains.iter().map(|c| {
-                let m = c.iter().sum::<f64>() / c.len() as f64;
-                c.iter().map(|&x| (x - m).powi(2)).sum::<f64>() / (c.len() - 1).max(1) as f64
-            }).collect();
-
-            let n_samples = chains[0].len() as f64;
-            let grand_mean = chain_means.iter().sum::<f64>() / n_chains as f64;
-            let between = chain_means.iter().map(|&m| (m - grand_mean).powi(2)).sum::<f64>()
-                * n_samples / (n_chains - 1).max(1) as f64;
-            let within = chain_vars.iter().sum::<f64>() / n_chains as f64;
-            let rhat = if within > 0.0 {
-                (((n_samples - 1.0) / n_samples * within + between / n_samples) / within).sqrt()
-            } else { f64::NAN };
-
+        let (rhat, ess) = super::runner::compute_rhat_ess(&chains);
+        if rhat.is_finite() {
             rhat_map.insert(spec.name.clone(), rhat);
         }
+        ess_map.insert(spec.name.clone(), ess);
     }
 
     Diagnostics { rhat: rhat_map, ess: ess_map }
@@ -589,7 +567,7 @@ fn write_summary(
         .max_by(|a, b| a.1.map_log_posterior.total_cmp(&b.1.map_log_posterior))
         .unwrap();
 
-    let map_params: HashMap<String, f64> = config.if2_params.iter()
+    let map_params: HashMap<String, f64> = config.estimated_params.iter()
         .map(|spec| (spec.name.clone(), map_result.map_params[spec.index]))
         .collect();
 

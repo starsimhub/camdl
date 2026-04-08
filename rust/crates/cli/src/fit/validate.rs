@@ -49,7 +49,7 @@ pub fn run_validate(fit: &FitToml, starts_from: &str, seed: u64, force: bool) ->
     )?;
 
     if rw_sd_scale != 1.0 {
-        for p in &mut config.if2_params { p.rw_sd *= rw_sd_scale; }
+        for p in &mut config.estimated_params { p.rw_sd *= rw_sd_scale; }
         eprintln!("validate: rw_sd scaled by {:.1}×", rw_sd_scale);
     }
 
@@ -92,7 +92,7 @@ pub fn run_validate(fit: &FitToml, starts_from: &str, seed: u64, force: bool) ->
     eprintln!("\nrunning pfilter at MLE with {} particles...", pfilter_particles);
 
     let mut mle_params = config.base_params.clone();
-    for spec in &config.if2_params {
+    for spec in &config.estimated_params {
         mle_params[spec.index] = best.mle[spec.index];
     }
 
@@ -178,7 +178,7 @@ pub fn run_validate(fit: &FitToml, starts_from: &str, seed: u64, force: bool) ->
     write_pfilter_trace(&stage_dir, &pf_result, &config)?;
 
     // ── Phase 3: Profile likelihoods ─────────────────────────────────────────
-    eprintln!("\nprofiling all {} estimated parameters...", config.if2_params.len());
+    eprintln!("\nprofiling all {} estimated parameters...", config.estimated_params.len());
     let profile_dir = format!("{}/profiles", stage_dir);
     std::fs::create_dir_all(&profile_dir)
         .map_err(|e| format!("cannot create {}: {}", profile_dir, e))?;
@@ -187,13 +187,13 @@ pub fn run_validate(fit: &FitToml, starts_from: &str, seed: u64, force: bool) ->
 
     // ── Write outputs ────────────────────────────────────────────────────────
     let start_values: HashMap<String, f64> = runner::collect_all_params(
-        &best.mle, &config.if2_params, &config.model,
+        &best.mle, &config.estimated_params, &config.model,
         &config.base_params, &config.compiled,
     );
 
-    let rw_sd = match runner::auto_rw_sd(&chain_results.results, &config.if2_params) {
+    let rw_sd = match runner::auto_rw_sd(&chain_results.results, &config.estimated_params) {
         Ok((rw, _)) => rw,
-        Err(_) => config.if2_params.iter()
+        Err(_) => config.estimated_params.iter()
             .map(|s| (s.name.clone(), s.rw_sd * 0.5))
             .collect(),
     };
@@ -217,14 +217,14 @@ pub fn run_validate(fit: &FitToml, starts_from: &str, seed: u64, force: bool) ->
     // Per-chain outputs
     let param_names: Vec<String> = config.model.parameters.iter().map(|p| p.name.clone()).collect();
     runner::write_chain_outputs(
-        &stage_dir, &chain_results.results, &config.if2_params,
+        &stage_dir, &chain_results.results, &config.estimated_params,
         &param_names, &config.base_params, &config.compiled,
     )?;
     runner::write_diagnostics(&stage_dir, &chain_results.results)?;
 
     // mle_params.toml with provenance
     let all_params = runner::collect_all_params(
-        &best.mle, &config.if2_params, &config.model,
+        &best.mle, &config.estimated_params, &config.model,
         &config.base_params, &config.compiled,
     );
     let model_hash = hashing::model_hash(&config.model_ir_json);
@@ -444,7 +444,7 @@ fn run_profiles(
         .template("{prefix:>12} [{bar:20}] {pos}/{len}")
         .unwrap();
 
-    let results: Vec<ProfileResult> = config.if2_params.par_iter().map(|focal| {
+    let results: Vec<ProfileResult> = config.estimated_params.par_iter().map(|focal| {
         let pb = mp.add(ProgressBar::new(n_grid as u64));
         pb.set_style(style.clone());
         pb.set_prefix(focal.name.clone());
@@ -464,7 +464,7 @@ fn run_profiles(
 
         for &focal_value in &grid {
             // Run short IF2 with focal param fixed at grid value
-            let mut fixed_params: Vec<IF2Param> = config.if2_params.iter()
+            let mut fixed_params: Vec<IF2Param> = config.estimated_params.iter()
                 .filter(|p| p.name != focal.name)
                 .cloned()
                 .collect();
@@ -591,7 +591,7 @@ fn write_fit_record(
             (name.clone(), serde_json::json!({ "path": path }))
         }).collect::<serde_json::Map<String, serde_json::Value>>(),
         "fit_config": {
-            "estimated": config.if2_params.iter().map(|p| &p.name).collect::<Vec<_>>(),
+            "estimated": config.estimated_params.iter().map(|p| &p.name).collect::<Vec<_>>(),
             "fixed": fit.fixed.keys().collect::<Vec<_>>(),
         },
         "method": {
@@ -665,7 +665,7 @@ fn write_fit_report(
     }
     writeln!(f).unwrap();
     writeln!(f, "Estimated parameters:").unwrap();
-    for spec in &config.if2_params {
+    for spec in &config.estimated_params {
         let best = &results.results.iter()
             .find(|(id, _)| *id == results.best_chain).unwrap().1;
         let rhat = results.rhat.get(&spec.name).copied().unwrap_or(f64::NAN);
@@ -705,7 +705,7 @@ fn write_summary(
         "ess_at_mle": metadata.ess_at_mle.map(|(m, n)| serde_json::json!({"mean": m, "min": n})),
         "input_hash": metadata.input_hash,
         "converged": results.rhat.values().all(|&r| r < 1.1),
-        "parameters": config.if2_params.iter().map(|spec| {
+        "parameters": config.estimated_params.iter().map(|spec| {
             let rhat = results.rhat.get(&spec.name).copied().unwrap_or(f64::NAN);
             let best = &results.results.iter()
                 .find(|(id, _)| *id == results.best_chain).unwrap().1;

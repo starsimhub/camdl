@@ -42,7 +42,7 @@ pub fn run_refine(fit: &FitToml, starts_from: &str, seed: u64, force: bool) -> R
     )?;
 
     if rw_sd_scale != 1.0 {
-        for p in &mut config.if2_params { p.rw_sd *= rw_sd_scale; }
+        for p in &mut config.estimated_params { p.rw_sd *= rw_sd_scale; }
         eprintln!("refine: rw_sd scaled by {:.1}×", rw_sd_scale);
     }
 
@@ -95,16 +95,16 @@ pub fn run_refine(fit: &FitToml, starts_from: &str, seed: u64, force: bool) -> R
 
     // Start values for next stage
     let start_values: HashMap<String, f64> = runner::collect_all_params(
-        &best.mle, &config.if2_params, &config.model,
+        &best.mle, &config.estimated_params, &config.model,
         &config.base_params, &config.compiled,
     );
 
     // Auto rw_sd from this stage's convergence
-    let rw_sd = match runner::auto_rw_sd(&chain_results.results, &config.if2_params) {
+    let rw_sd = match runner::auto_rw_sd(&chain_results.results, &config.estimated_params) {
         Ok((rw, _)) => rw,
         Err(_) => {
             // If auto fails, halve the incoming rw_sd
-            config.if2_params.iter()
+            config.estimated_params.iter()
                 .map(|s| (s.name.clone(), s.rw_sd * 0.5))
                 .collect()
         }
@@ -129,14 +129,14 @@ pub fn run_refine(fit: &FitToml, starts_from: &str, seed: u64, force: bool) -> R
     // Write per-chain outputs
     let param_names: Vec<String> = config.model.parameters.iter().map(|p| p.name.clone()).collect();
     runner::write_chain_outputs(
-        &stage_dir, &chain_results.results, &config.if2_params,
+        &stage_dir, &chain_results.results, &config.estimated_params,
         &param_names, &config.base_params, &config.compiled,
     )?;
     runner::write_diagnostics(&stage_dir, &chain_results.results)?;
 
     // Write mle_params.toml
     let all_params = runner::collect_all_params(
-        &best.mle, &config.if2_params, &config.model,
+        &best.mle, &config.estimated_params, &config.model,
         &config.base_params, &config.compiled,
     );
     let model_hash = hashing::model_hash(&config.model_ir_json);
@@ -193,7 +193,7 @@ fn write_summary(
         "best_chain": results.best_chain + 1,
         "converged": converged,
         "loglik_spread": loglik_spread,
-        "parameters": config.if2_params.iter().map(|spec| {
+        "parameters": config.estimated_params.iter().map(|spec| {
             let rhat = results.rhat.get(&spec.name).copied().unwrap_or(f64::NAN);
             let best = &results.results.iter()
                 .find(|(id, _)| *id == results.best_chain).unwrap().1;

@@ -10,7 +10,7 @@ use crate::fit::runner::FitRunConfig;
 use crate::fit::scout::now_iso8601_pub;
 use sim::inference::{
     if2::IF2Param,
-    pmmh::{Prior, mcmc_ess},
+    pmmh::Prior,
     pgas::{PGASConfig, ChainResumeState, run_pgas, PGASSweep, PGASTrajectory},
 };
 use std::collections::HashMap;
@@ -67,7 +67,7 @@ pub fn run_pgas_cli(
     let dt = config.if2_config.dt;
 
     // Build priors from fit.toml [estimate] section
-    let priors: Vec<Prior> = config.if2_params.iter()
+    let priors: Vec<Prior> = config.estimated_params.iter()
         .map(|spec| {
             let est = fit.estimate.get(&spec.name);
             match est.and_then(|e| e.prior.as_deref()) {
@@ -84,7 +84,7 @@ pub fn run_pgas_cli(
     let any_non_flat = priors.iter().any(|p| !matches!(p, Prior::Flat));
     if any_non_flat {
         eprintln!("  priors:");
-        for (spec, prior) in config.if2_params.iter().zip(&priors) {
+        for (spec, prior) in config.estimated_params.iter().zip(&priors) {
             match prior {
                 Prior::Flat => {},
                 Prior::Normal { mean, sd } => {
@@ -165,7 +165,7 @@ pub fn run_pgas_cli(
             let mut params = config.base_params.clone();
             if !has_starts {
                 // Random uniform within bounds on natural scale
-                for spec in &config.if2_params {
+                for spec in &config.estimated_params {
                     let lo = spec.lower;
                     let hi = spec.upper;
                     if lo.is_finite() && hi.is_finite() {
@@ -186,7 +186,7 @@ pub fn run_pgas_cli(
         eprintln!("  starting all chains from prior stage (--starts-from)");
     } else {
         eprintln!("  random starts: uniform within parameter bounds");
-        for spec in &config.if2_params {
+        for spec in &config.estimated_params {
             let vals: Vec<f64> = chain_starts.iter().map(|p| p[spec.index]).collect();
             eprintln!("    {:12} [{:.4} .. {:.4}]", spec.name,
                 vals.iter().cloned().fold(f64::INFINITY, f64::min),
@@ -259,7 +259,7 @@ pub fn run_pgas_cli(
                         std::fs::File::create(&trace_path).unwrap()
                     );
                     write!(f, "sweep\tlog_likelihood\tlog_posterior\ttrajectory_renewal").unwrap();
-                    for spec in &config.if2_params { write!(f, "\t{}", spec.name).unwrap(); }
+                    for spec in &config.estimated_params { write!(f, "\t{}", spec.name).unwrap(); }
                     writeln!(f).unwrap();
                     f
                 }
@@ -293,7 +293,7 @@ pub fn run_pgas_cli(
                     use std::io::Write;
                     if let Ok(mut f) = trace_file.lock() {
                         // log_posterior = log_likelihood + sum(log_prior)
-                        let log_prior: f64 = config.if2_params.iter().zip(priors.iter())
+                        let log_prior: f64 = config.estimated_params.iter().zip(priors.iter())
                             .map(|(spec, prior)| {
                                 let natural = result.params[spec.index];
                                 let z = spec.to_transformed(natural);
@@ -304,7 +304,7 @@ pub fn run_pgas_cli(
                         write!(f, "{}\t{:.4}\t{:.4}\t{:.4}",
                             sweep, result.log_complete_data_ll, log_posterior,
                             result.csmc_diag.trajectory_renewal).unwrap();
-                        for spec in &config.if2_params {
+                        for spec in &config.estimated_params {
                             write!(f, "\t{:.6}", result.params[spec.index]).unwrap();
                         }
                         writeln!(f).unwrap();
@@ -348,7 +348,7 @@ pub fn run_pgas_cli(
 
             let result = run_pgas(
                 compiled,
-                &config.if2_params,
+                &config.estimated_params,
                 &priors,
                 &chain_starts[chain_id],
                 &pgas_config,
@@ -370,7 +370,7 @@ pub fn run_pgas_cli(
             eprintln!("  chain {} done: {:.1}s, acceptance: [{}]",
                 chain_id + 1,
                 chain_elapsed.as_secs_f64(),
-                config.if2_params.iter().zip(&result.acceptance_rates)
+                config.estimated_params.iter().zip(&result.acceptance_rates)
                     .map(|(p, &r)| format!("{}={:.0}%", p.name, r * 100.0))
                     .collect::<Vec<_>>().join(", "));
 
@@ -386,12 +386,12 @@ pub fn run_pgas_cli(
     let elapsed = t0.elapsed();
 
     // Compute diagnostics
-    let diagnostics = compute_diagnostics(&all_results, &config.if2_params);
+    let diagnostics = compute_diagnostics(&all_results, &config.estimated_params);
 
     // Report
     eprintln!("\nacceptance rates:");
     for &(chain_id, _, ref rates) in &all_results {
-        let summary: Vec<String> = config.if2_params.iter().zip(rates)
+        let summary: Vec<String> = config.estimated_params.iter().zip(rates)
             .map(|(p, &r)| {
                 let status = if r < 0.10 { "\x1b[31m" }
                     else if r > 0.50 { "\x1b[33m" }
@@ -404,7 +404,7 @@ pub fn run_pgas_cli(
 
     if n_chains > 1 {
         eprintln!("\nRhat / ESS:");
-        for spec in &config.if2_params {
+        for spec in &config.estimated_params {
             if let Some(&rhat) = diagnostics.rhat.get(&spec.name) {
                 let status = if rhat < 1.1 { "\x1b[32m✓\x1b[0m" }
                     else if rhat < 1.5 { "\x1b[33m~\x1b[0m" }
@@ -434,7 +434,7 @@ pub fn run_pgas_cli(
         .unwrap();
 
     let mut start_values = HashMap::new();
-    for spec in &config.if2_params {
+    for spec in &config.estimated_params {
         start_values.insert(spec.name.clone(), best_sweep.params[spec.index]);
     }
     for p in &config.model.parameters {
@@ -478,40 +478,21 @@ struct Diagnostics {
 
 fn compute_diagnostics(
     results: &[(usize, Vec<PGASSweep>, Vec<f64>)],
-    if2_params: &[IF2Param],
+    estimated_params: &[IF2Param],
 ) -> Diagnostics {
-    let n_chains = results.len();
     let mut rhat_map = HashMap::new();
     let mut ess_map = HashMap::new();
 
-    for spec in if2_params {
+    for spec in estimated_params {
         let chains: Vec<Vec<f64>> = results.iter()
             .map(|(_, sweeps, _)| sweeps.iter().map(|s| s.params[spec.index]).collect())
             .collect();
 
-        let total_ess: f64 = chains.iter().map(|c| mcmc_ess(c)).sum();
-        ess_map.insert(spec.name.clone(), total_ess);
-
-        if n_chains >= 2 && chains.iter().all(|c| c.len() >= 4) {
-            let chain_means: Vec<f64> = chains.iter().map(|c| {
-                c.iter().sum::<f64>() / c.len() as f64
-            }).collect();
-            let chain_vars: Vec<f64> = chains.iter().map(|c| {
-                let m = c.iter().sum::<f64>() / c.len() as f64;
-                c.iter().map(|&x| (x - m).powi(2)).sum::<f64>() / (c.len() - 1).max(1) as f64
-            }).collect();
-
-            let n_samples = chains[0].len() as f64;
-            let grand_mean = chain_means.iter().sum::<f64>() / n_chains as f64;
-            let between = chain_means.iter().map(|&m| (m - grand_mean).powi(2)).sum::<f64>()
-                * n_samples / (n_chains - 1).max(1) as f64;
-            let within = chain_vars.iter().sum::<f64>() / n_chains as f64;
-            let rhat = if within > 0.0 {
-                (((n_samples - 1.0) / n_samples * within + between / n_samples) / within).sqrt()
-            } else { f64::NAN };
-
+        let (rhat, ess) = super::runner::compute_rhat_ess(&chains);
+        if rhat.is_finite() {
             rhat_map.insert(spec.name.clone(), rhat);
         }
+        ess_map.insert(spec.name.clone(), ess);
     }
 
     Diagnostics { rhat: rhat_map, ess: ess_map }
@@ -540,54 +521,6 @@ fn write_summary(
         .map_err(|e| format!("json error: {}", e))?;
     std::fs::write(&path, contents)
         .map_err(|e| format!("cannot write {}: {}", path, e))
-}
-
-/// Parse a prior specification string from fit.toml.
-///
-/// Supported formats:
-///   "lognormal(mu, sigma)" → TransformedNormal { mean: mu, sd: sigma }
-///   "normal(mu, sigma)"    → Normal { mean: mu, sd: sigma }
-///   "flat"                 → Flat
-///
-/// Examples:
-///   "lognormal(log(50), 0.4)"   → LogNormal with median 50
-///   "lognormal(3.912, 0.4)"     → same (log(50) ≈ 3.912)
-///   "normal(0.08, 0.02)"        → Normal(0.08, 0.02) on natural scale
-pub fn parse_prior(s: &str) -> Option<Prior> {
-    let s = s.trim();
-    if s == "flat" { return Some(Prior::Flat); }
-
-    // Match "name(arg1, arg2)"
-    let open = s.find('(')?;
-    let close = s.rfind(')')?;
-    let name = s[..open].trim();
-    let args_str = &s[open + 1..close];
-    let args: Vec<f64> = args_str.split(',')
-        .map(|a| eval_prior_arg(a.trim()))
-        .collect::<Option<Vec<_>>>()?;
-
-    if args.len() != 2 { return None; }
-
-    match name {
-        "lognormal" => Some(Prior::TransformedNormal { mean: args[0], sd: args[1] }),
-        "normal" => Some(Prior::Normal { mean: args[0], sd: args[1] }),
-        "beta" => Some(Prior::Beta { alpha: args[0], beta: args[1] }),
-        _ => None,
-    }
-}
-
-/// Evaluate a prior argument — supports bare numbers and log(x).
-fn eval_prior_arg(s: &str) -> Option<f64> {
-    if let Ok(v) = s.parse::<f64>() {
-        return Some(v);
-    }
-    // Handle log(x)
-    if s.starts_with("log(") && s.ends_with(')') {
-        let inner = &s[4..s.len() - 1];
-        let v: f64 = inner.parse().ok()?;
-        return Some(v.ln());
-    }
-    None
 }
 
 /// Compute a config hash that identifies the statistical problem.

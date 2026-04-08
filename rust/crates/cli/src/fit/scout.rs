@@ -31,7 +31,7 @@ pub fn run_scout(fit: &FitToml, seed: u64, force: bool) -> Result<(), String> {
 
     // Apply rw_sd_scale from [scout] config
     if rw_sd_scale != 1.0 {
-        for p in &mut config.if2_params {
+        for p in &mut config.estimated_params {
             p.rw_sd *= rw_sd_scale;
         }
         eprintln!("scout: rw_sd scaled by {:.1}×", rw_sd_scale);
@@ -71,7 +71,7 @@ pub fn run_scout(fit: &FitToml, seed: u64, force: bool) -> Result<(), String> {
     // Generate per-chain starts
     let mut rng = sim::rng::StatefulRng::new(seed ^ 0xcafe_u64);
     let per_chain_params: Vec<Vec<IF2Param>> = (0..n_chains).map(|chain_id| {
-        config.if2_params.iter().map(|spec| {
+        config.estimated_params.iter().map(|spec| {
             let initial = if chain_id < start_chains {
                 // Seeded chain: use start value with jitter, or random if no start
                 if let Some(start) = fit.estimate.get(&spec.name).and_then(|e| e.start) {
@@ -105,7 +105,7 @@ pub fn run_scout(fit: &FitToml, seed: u64, force: bool) -> Result<(), String> {
         .fold(f64::NEG_INFINITY, f64::max);
     if !best_early_ll.is_finite() {
         eprintln!("\n\x1b[31mscout: filter degenerate — all chains have -inf loglik at iteration {}.\x1b[0m", early_check_iter);
-        eprintln!("  The particle count ({}) is likely too low for {} estimated parameters.", n_particles, config.if2_params.len());
+        eprintln!("  The particle count ({}) is likely too low for {} estimated parameters.", n_particles, config.estimated_params.len());
         eprintln!("  Add to fit.toml:");
         eprintln!("    [scout]");
         eprintln!("    particles = {}", n_particles * 4);
@@ -119,7 +119,7 @@ pub fn run_scout(fit: &FitToml, seed: u64, force: bool) -> Result<(), String> {
     // Store ALL param values (estimated from MLE + fixed from base) so
     // fit_state is self-contained and robust to model edits between stages.
     let start_values: HashMap<String, f64> = runner::collect_all_params(
-        &best.mle, &config.if2_params, &config.model,
+        &best.mle, &config.estimated_params, &config.model,
         &config.base_params, &config.compiled,
     );
 
@@ -148,7 +148,7 @@ pub fn run_scout(fit: &FitToml, seed: u64, force: bool) -> Result<(), String> {
     // Write per-chain outputs
     let param_names: Vec<String> = config.model.parameters.iter().map(|p| p.name.clone()).collect();
     runner::write_chain_outputs(
-        &stage_dir, &chain_results.results, &config.if2_params,
+        &stage_dir, &chain_results.results, &config.estimated_params,
         &param_names, &config.base_params, &config.compiled,
     )?;
     runner::write_diagnostics(&stage_dir, &chain_results.results)?;
@@ -156,7 +156,7 @@ pub fn run_scout(fit: &FitToml, seed: u64, force: bool) -> Result<(), String> {
     // Write scout_best_params.toml — best chain's params for downstream use
     // Named "scout_best" (not "mle") to signal these are scout-level estimates.
     let all_params = runner::collect_all_params(
-        &best.mle, &config.if2_params, &config.model,
+        &best.mle, &config.estimated_params, &config.model,
         &config.base_params, &config.compiled,
     );
     let best_params_path = format!("{}/scout_best_params.toml", stage_dir);
@@ -200,7 +200,7 @@ fn write_summary(
         "best_loglik": results.best_loglik,
         "best_chain": results.best_chain + 1,
         "initial_loglik": initial_loglik,
-        "parameters": config.if2_params.iter().map(|spec| {
+        "parameters": config.estimated_params.iter().map(|spec| {
             let rhat = results.rhat.get(&spec.name).copied().unwrap_or(f64::NAN);
             serde_json::json!({
                 "name": spec.name,
