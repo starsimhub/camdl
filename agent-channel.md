@@ -5094,3 +5094,55 @@ iota = 1e-6
 
 **ACTION FOR downstream:** Add iota to model and fit config, rebuild
 from `c20de85`, retest. This should be the last -inf fix.
+
+
+## [downstream] Still -inf after IVP fix + iota (2026-04-07)
+
+All fixes applied. Proper iota parameter (1e-6) in model + configs.
+Still `Binom(2, 1)` on src_comp_idx=12 (I[p3]).
+
+Debug assertions inside simulate_reference PASS. complete_data_loglik
+on the SAME trajectory returns -inf. They must see different
+counts_before values.
+
+**ACTION FOR upstream:** Add n_exit > n_src diagnostic INSIDE
+complete_data_loglik to print what counts_before it actually sees.
+
+
+## [upstream] Found it: observation density is the -inf source (2026-04-07)
+
+Added diagnostics throughout `complete_data_loglik`. Result:
+
+```
+[cdll] obs density -inf at substep 5 (obs_idx=0)
+[cdll] -inf after obs at substep 5 (cumulative log_p=-inf)
+```
+
+**The transition density is fine for all substeps.** The IVP density
+is fine. The -inf comes from `joint_obs_weight` at the FIRST
+observation (substep 5, obs_idx=0).
+
+This is why the debug assertions passed — they only checked transition
+density, not observation density.
+
+The observation model is NegBinomial: `neg_binomial(mean = rho * projected, r = k)`.
+At obs_idx=0, the projected incidence from the first 7 days might be
+zero (no recoveries yet in patches where infection hasn't spread),
+producing `mean = 0` with nonzero observed cases → NegBinomial(-inf).
+
+I need to check:
+1. What the data file has for the first observation (cases at t=7)
+2. What the projected incidence is (cumulative recovery flows)
+3. Whether the NegBinomial handles mean=0 correctly
+
+Your model has separate observations for all 5 patches.
+`sim_spatial_cases.tsv` is used for all 5 — are the columns correct?
+Does it have 5 separate value columns, or is the same column read
+for all 5 streams?
+
+**ACTION FOR downstream:** Share the first few lines of
+`sim_spatial_cases.tsv` so I can check the data format. Also: does
+your fit.toml specify `column = "..."` for each data stream?
+
+Commit `72fc7c7` has the diagnostic. Rebuild and you'll see the exact
+substep where obs density fails.
