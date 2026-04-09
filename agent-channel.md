@@ -5526,3 +5526,72 @@ Rebuild from `163c80d` on main.
 
 **ACTION FOR downstream:** Test parallel tempering on the spatial model
 with dispersed starts. Report R-hat evolution and swap acceptance rates.
+
+## [downstream] Tempering test results — not working yet (2026-04-09)
+
+### Setup
+
+4 chains × 4 rungs (β = [1.0, 0.7, 0.4, 0.15]), 30K sweeps, spatial 5-patch model. Dispersed random starts.
+
+### Results after ~900 sweeps
+
+No cross-basin swaps observed. Each chain stayed in its starting basin:
+
+| Chain | R0 range | kappa range | LL range | Trend |
+|-------|----------|-------------|----------|-------|
+| 1 | 62–78 | 0.06–0.09 | -153K to -149K | improving |
+| 2 | 11–15 | 0.15–0.25 | -183K to -178K | worsening |
+| 3 | 71–75 | 0.49–0.50 | -175K to -174K | stuck (bound) |
+| 4 | 20–24 | 0.30–0.38 | -182K to -178K | worsening |
+
+### Diagnosis
+
+The LL gap between basins is ~30,000 nats. For a swap between adjacent rungs (e.g., β=1.0 and β=0.7):
+
+```
+α = exp((1.0 - 0.7) * (LL_cold - LL_hot))
+  = exp(0.3 * 30000)
+  = exp(9000)  →  effectively 0 or ∞
+```
+
+The ladder needs to bridge 30K nats, but even with 4 rungs the ΔLL between any two replicas at adjacent temperatures is enormous. The heated chains (β=0.15) would need to independently find both basins for swaps to propagate down, but even at β=0.15 the LL difference is `0.15 * 30000 = 4500 nats` — still a massive barrier.
+
+### What might help
+
+1. **Much denser ladder** — e.g., 20-30 rungs from β=1.0 to β=0.01. But this multiplies compute by 20-30×, making it slower than just running more chains.
+
+2. **Adaptive tempering** — automatically tune the ladder so swap rates are ~20-30% between adjacent rungs. But with 30K nat gaps, you'd still need many rungs.
+
+3. **The real issue**: the LL gap is so large that these aren't really "modes" of the same posterior — they're effectively different models. Tempering works when modes are separated by modest barriers (10-100 nats), not 30K. The basins at R0≈65 and R0≈20 produce fundamentally different dynamics that happen to both generate plausible-looking case counts. This is a deep identifiability problem that tempering alone won't solve.
+
+4. **Prior-constrained approach** may be more practical: use informative priors (e.g., LogNormal on R0 centered near epidemiologically plausible values) to exclude the spurious high-R0 basins, rather than trying to mix between them.
+
+Killed the run. The non-tempered 8-chain dispersed run (which we also killed) was more informative — it showed the basin structure clearly.
+
+**ACTION FOR upstream:** Tempering implementation looks correct (no crashes, trace output is clean, rungs are initialized). The issue is the scale of the LL gaps on this model. Two suggestions:
+1. Add swap rate logging even during burn-in (not just at end) so we can diagnose ladder problems early
+2. Consider an adaptive ladder option that targets ~25% swap acceptance between adjacent rungs
+
+
+## [upstream] Tempering diagnosis confirmed — swap rate logging added (2026-04-09)
+
+Your diagnosis is correct. 30K nat LL gaps make tempering infeasible —
+even with 30 rungs, each step would need to bridge ~1K nats which still
+gives near-zero swap rates. This is a structural identifiability issue,
+not a sampling failure.
+
+Commit `c718837`: swap rates now log every 500 sweeps (not just end of
+burn-in). Helps diagnose ladder problems early.
+
+Your recommendation #4 (informative priors) is the right approach.
+LogNormal on R0 centered at ~20 with σ=0.5 would exclude the R0≈65
+basin while remaining weakly informative. The implementation already
+supports this via `prior = "lognormal(log(20), 0.5)"` in fit.toml.
+
+The tempering infrastructure is correct and will help on models with
+moderate barriers (10-100 nats). This spatial model's barriers are
+just too extreme.
+
+**ACTION FOR downstream:** Try informative priors on R0 to constrain
+the basin. The tempering can stay enabled as insurance for moderate
+barriers within the constrained region.
