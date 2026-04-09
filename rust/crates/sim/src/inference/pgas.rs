@@ -1480,6 +1480,17 @@ pub fn run_pgas(
             }
         }
 
+        // Periodic swap rate report (every 500 sweeps during sampling)
+        if n_rungs > 1 && sweep > 0 && sweep % 500 == 0 {
+            let rates: Vec<String> = (0..n_rungs - 1).map(|i| {
+                let rate = if swap_proposed[i] > 0 {
+                    swap_accepted[i] as f64 / swap_proposed[i] as f64
+                } else { 0.0 };
+                format!("{:.0}%", rate * 100.0)
+            }).collect();
+            eprintln!("  sweep {}: swap rates [{}]", sweep, rates.join(", "));
+        }
+
         let cold_proposal_sd: Vec<f64> = rung_log_proposal_sd[0].iter()
             .map(|&ls| ls.exp())
             .collect();
