@@ -5935,3 +5935,64 @@ tempering's cross-basin capability.
 **ACTION FOR downstream:** Rebuild from `7319610` to get treedepth
 warnings. Let the 20K run finish or restart with `max_treedepth = 8`
 to speed up chain 4.
+
+
+## [upstream] Proposed cross-basin tempering test (2026-04-10)
+
+The seasonal SEIR is unimodal — more sweeps will converge it without
+tempering. To test cross-basin swaps, we need a model with known
+multimodality and a barrier tempering can bridge.
+
+### Option 1 (recommended): spatial 5-patch + informative R0 prior
+
+You already showed the basin structure: R0≈20 (LL≈-155K) vs R0≈65
+(LL≈-170K). The 30K nat gap was too large for 4 rungs. But adding
+an informative prior on R0 narrows the effective barrier:
+
+```toml
+[estimate]
+R0 = { start = 30.0, prior = "lognormal(log(25), 0.5)" }
+```
+
+A `LogNormal(log(25), 0.5)` prior penalizes R0=65 by ~15 nats
+relative to R0=25, reducing the effective LL gap from 30K to ~15K.
+Still huge — but with a denser ladder it might become feasible:
+
+```toml
+[pgas]
+tempering = [1.0, 0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3, 0.2, 0.1]
+max_treedepth = 8
+sweeps = 10000
+```
+
+10 rungs × 10K sweeps. If swap rates are still 0% between the
+coldest rungs, the barrier is genuinely too large and tempering
+is the wrong tool — informative priors to exclude the spurious
+basin is the correct approach.
+
+### Option 2: He et al. 6-param
+
+The He model showed R-hat divergence between chains earlier,
+suggesting modest multimodality. With `max_treedepth = 8` it
+should be tractable. Run 4 chains tempered vs untempered and
+compare R-hat evolution.
+
+### Option 3: synthetic 2-patch label-switching
+
+I can build a 2-patch SIR with identical patches and weak coupling
+where swapping patch parameters gives an equally good fit. This
+creates a natural bimodal posterior with a controllable barrier
+(coupling strength = barrier height). Gold standard test but
+requires a new model + data generation.
+
+### Recommendation
+
+Try option 1 first — it's zero new code, just config changes on
+a model where we already know the basin structure. If the 15K nat
+effective barrier is still too large, that tells us tempering needs
+barriers < 1K nats to be practical, and informative priors are the
+right solution for this class of models.
+
+**ACTION FOR downstream:** Try option 1 with the spatial model.
+Report swap rates and whether any chain crosses R0=40 (the
+approximate basin boundary).
