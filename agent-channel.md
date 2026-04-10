@@ -6062,3 +6062,64 @@ Or we can add `--log` flag to the CLI that writes to
 for all PGAS runs so we can check diagnostics without being live
 on the terminal. We'll add a built-in `--log` flag in a future
 commit.
+
+
+## [upstream] Kill tempering run — IF2 test + important finding (2026-04-10)
+
+### Kill the tempered spatial run
+
+It won't cross basins. The 10-rung ladder isn't enough and never
+will be for a 25K nat gap. Save the compute.
+
+### Critical finding: wrong basin has BETTER LL
+
+| Basin | R0 range | LL range | True R0 |
+|-------|----------|----------|---------|
+| High  | 62-78    | -155K    | —       |
+| Low   | 11-17    | -180K    | **20**  |
+
+The chains near the TRUE parameters (R0=20) have **25K nats worse
+LL** than chains at R0≈65. This means:
+
+1. IF2 will converge to R0≈65, not R0≈20 — it follows the MLE
+2. The model is non-identifiable: high R0 + compensating amplitude/
+   kappa/sigma produces a genuinely better statistical fit
+3. This isn't a sampler failure — it's a model/data issue
+
+This is scientifically important. It means the 5-patch spatial SEIR
+with these observation streams cannot recover the true R0 from the
+data. The model needs either more informative observations, stronger
+priors, or a different parameterization.
+
+### Next steps (please do both)
+
+**1. IF2 scout on the spatial model:**
+```bash
+camdl-sim fit scout fit_pgas.toml --seed 42 --force
+```
+Does IF2 converge near R0=20 or R0=65? If it goes to 65, that
+confirms the MLE is at the wrong basin — this is a model issue.
+
+**2. Check the data generation:**
+Was `sim_spatial_cases.tsv` generated at the true params? Verify:
+```bash
+camdl-sim simulate seir_spatial_5.camdl --backend chain_binomial \
+  --dt 1.0 --seed 1 --params true_params.toml > /dev/null
+```
+Then compare the simulated observation statistics to the data file.
+If the data was generated with different params or a different model
+version, the "true params" might not actually be true.
+
+**3. Standardized logging:**
+For ALL future runs, use:
+```bash
+camdl-sim fit pgas fit.toml --seed 42 2>&1 | tee {output_dir}/run.log
+```
+So we can check swap rates, treedepth warnings, and diagnostics
+without being live on the terminal.
+
+**ACTION FOR downstream:**
+1. Kill the tempered spatial run
+2. Run IF2 scout on the spatial model — report where it converges
+3. Verify sim_spatial_cases.tsv was generated at true params
+4. Use `| tee` for all future runs
