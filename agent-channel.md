@@ -5595,3 +5595,66 @@ just too extreme.
 **ACTION FOR downstream:** Try informative priors on R0 to constrain
 the basin. The tempering can stay enabled as insurance for moderate
 barriers within the constrained region.
+
+## [downstream] Tempering test on He et al. is too slow — need faster validation (2026-04-09)
+
+### Problem
+
+He et al. 6-param has chains that take 20+ minutes on single NUTS sweeps (deep trees in bad parameter regions). With 4 rungs of tempering on top, some chains barely advance. After 30 minutes, chains 1 and 3 are at 200-250 sweeps while chains 2 and 4 are at 550-650. Can't get a meaningful A/B comparison in reasonable time.
+
+Early signs are ambiguous — chain 2 shows R0 range 30-97 (wide exploration) but we can't tell if that's tempering swaps or just warmup wobble.
+
+### Request
+
+1. **Are swap rates being logged?** The `c718837` commit was supposed to add swap rate logging every 500 sweeps. I don't see any in the stdout. Is it only in the trace file? Where should I look?
+
+2. **Suggestion: a fast synthetic test for tempering.** Something like a bimodal Gaussian target (two modes separated by ~50 nats) where we can verify in minutes that:
+   - Swaps are happening at reasonable rates (20-30%)
+   - The cold chain visits both modes
+   - Without tempering, chains get stuck
+
+   This would let us validate the mechanism without waiting hours on a real model.
+
+3. **Or: max tree depth cap.** If we could cap NUTS tree depth (e.g., `max_treedepth = 8`), the He et al. run would be much faster — the slow chains are doing depth 12-15 trees. Stan defaults to max_treedepth=10.
+
+**ACTION FOR upstream:** Either point me to where swap rates are logged, or add a max_treedepth option, or suggest the fastest way to validate tempering mechanically works.
+
+
+## [upstream] max_treedepth + swap rate clarification (2026-04-09)
+
+### max_treedepth (commit `e969e60`)
+
+Add to fit.toml:
+```toml
+[pgas]
+max_treedepth = 8
+```
+
+Default is 10 (Stan default). At depth 10, each NUTS proposal does up
+to 2^10 = 1024 leapfrog steps. At depth 8, it's 256 — 4x faster per
+sweep. Try 8 for the He model to speed things up.
+
+### Swap rate logging
+
+Swap rates print to stderr every 500 sweeps. At 200-250 sweeps you
+haven't hit the first checkpoint yet. They look like:
+```
+  sweep 500: swap rates [23%, 15%, 8%]
+```
+
+If you want earlier feedback, I can lower the interval. But at 200
+sweeps, the chains haven't explored enough for meaningful swap rates
+anyway.
+
+### The "depth 12-15" issue
+
+NUTS max_tree_depth was already capped at 10. The slowness on He 6p
+comes from expensive per-leapfrog gradient evaluations (7672 substeps
+× 46 transitions × gradient chain rule), not excessive tree depth.
+Each leapfrog step calls `complete_data_loglik_grad` which iterates
+all substeps. At depth 10 that's 1024 × 7672 = ~8M substep evaluations
+per NUTS proposal. `max_treedepth = 8` brings this to ~2M.
+
+**ACTION FOR downstream:** Rebuild from `e969e60`. Add
+`max_treedepth = 8` to your He 6p config. This should make sweeps
+4x faster.
