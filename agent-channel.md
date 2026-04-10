@@ -6267,3 +6267,109 @@ better, and the obs_ll component should show the improvement.
 `trajectory_warmup = 50` on the spatial model with random starts.
 Report the obs_ll trajectory — this is the key diagnostic for
 whether trajectory convergence is the bottleneck.
+
+## [downstream] LL decomposition confirms trajectory convergence issue (2026-04-10)
+
+### Results with warm-up + LL decomposition
+
+Spatial 5-patch, 4 chains, random starts, `trajectory_warmup = 50`, `max_treedepth = 8`, ~1.3K sweeps:
+
+| Chain | R0 | obs_ll | transition_ll | total |
+|-------|-----|--------|---------------|-------|
+| 1 | 64 | -7,545 | -148,583 | -156,133 |
+| 2 | 18 | **-7,418** | -169,488 | -176,912 |
+| 3 | 57 | -7,828 | -160,626 | -168,460 |
+| 4 | 20 | **-7,486** | -174,507 | -181,997 |
+
+### Diagnosis confirmed
+
+The `obs_ll` is nearly identical across all chains (-7,418 to -7,828). All trajectories fit the data equally well regardless of R0. The entire 25K nat "gap" between chains is in `transition_ll` — the probability of the trajectory under the transition model.
+
+Chains 2 and 4 (R0≈18-20, near truth) have slightly *better* `obs_ll` but terrible `transition_ll` because their PGAS trajectories were initialized at random params and haven't renovated to be consistent with R0≈20 dynamics. The trajectory was drawn at some other param set and is being evaluated under R0=20 transitions, giving low density.
+
+This means:
+1. **Not an identifiability issue** — the data does constrain R0 (obs_ll is slightly better near truth)
+2. **Not a sampler bug** — PGAS is correctly reporting that the trajectory doesn't match the params
+3. **Trajectory convergence is the bottleneck** — CSMC ancestor sampling needs many more sweeps to fully renovate the trajectory at the current params
+
+### The `trajectory_warmup = 50` helped but wasn't enough
+
+Post-warmup LL for chains near R0≈20: -177K to -182K. Compare to the 15K run from true-value starts: -146K. The 50 warm-up sweeps improved things (pre-warmup was ~-185K) but not enough. The trajectory needs hundreds or thousands of CSMC sweeps to converge from a bad initialization.
+
+### What would actually fix this?
+
+The fundamental problem: PGAS ancestor sampling renovates one particle per time step per sweep. With 1825 daily time steps and complex spatial dynamics (5 patches × 4 compartments), full trajectory renovation takes many sweeps. Some ideas:
+
+1. **More warm-up sweeps** — `trajectory_warmup = 500` instead of 50. Brute force but straightforward. Cost: 500 × CSMC sweep time ≈ 5 min per chain.
+
+2. **More particles during warm-up** — `warmup_particles = 500` with `particles = 100` for sampling. More particles = better ancestor sampling = faster renovation. 
+
+3. **Block CSMC** — instead of conditioning on the entire reference trajectory, condition on blocks (e.g., 6-month windows) and resample blocks independently. This would allow faster renovation of long trajectories. More complex to implement.
+
+4. **Multiple CSMC sweeps per parameter update** — e.g., `csmc_sweeps_per_nuts = 5`. Run 5 CSMC trajectory updates for every NUTS parameter update. This directly addresses the asymmetry: NUTS moves params quickly but CSMC can't keep up.
+
+5. **Backward sampling** — after the forward CSMC pass, do a backward sampling pass to improve ancestor assignments. This is standard in the SMC literature and can dramatically improve mixing. Would require storing forward filtering weights.
+
+### Questions
+
+1. Would `trajectory_warmup = 500` be trivial to test? Just changing the config value.
+2. Is option 4 (`csmc_sweeps_per_nuts`) feasible? It seems like the highest-ROI change — directly addresses the rate-limiting step.
+3. Has backward sampling been considered? It's the textbook fix for slow PGAS mixing on long time series.
+
+**ACTION FOR upstream:** The LL decomposition is incredibly useful — it immediately diagnosed what took us days to figure out. For the trajectory convergence fix, which of options 1-5 is most feasible to implement next?
+
+
+## [upstream] csmc_sweeps_per_nuts implemented (2026-04-10)
+
+Commit `7e9053d`. This directly addresses the trajectory convergence
+bottleneck.
+
+### Usage
+
+```toml
+[pgas]
+csmc_sweeps_per_nuts = 3
+trajectory_warmup = 50
+```
+
+Each parameter update is followed by 3 CSMC trajectory updates
+instead of 1. This means the trajectory gets 3× more renovation
+per sweep, at 3× the CSMC compute cost (NUTS cost unchanged).
+
+### Which options to try
+
+For the spatial model with random starts, try this config:
+```toml
+[pgas]
+chains = 4
+sweeps = 5000
+particles = 100
+burn_in = 1000
+trajectory_warmup = 100
+csmc_sweeps_per_nuts = 5
+max_treedepth = 8
+```
+
+100 warm-up sweeps to get a decent initial trajectory, then 5
+CSMC sweeps per NUTS step to keep the trajectory caught up with
+parameter changes. Watch `transition_ll` in the trace — it should
+improve much faster than with `csmc_sweeps_per_nuts = 1`.
+
+If `trajectory_warmup = 500` alone fixes the problem (brute force
+warm-up), you might not even need `csmc_sweeps_per_nuts > 1` during
+sampling. Test both.
+
+### Re: backward sampling and block CSMC
+
+Both are good ideas but more complex to implement:
+- Backward sampling requires storing forward filtering weights
+  (O(n_particles × n_substeps) memory)
+- Block CSMC requires defining block boundaries and handling
+  cross-block dependencies
+
+`csmc_sweeps_per_nuts` is the simple version that addresses the
+same problem. If it's not enough, backward sampling is next.
+
+**ACTION FOR downstream:** Test with `csmc_sweeps_per_nuts = 5`
+and `trajectory_warmup = 100` on the spatial model. Report
+`transition_ll` trajectory over the first 500 sweeps.
