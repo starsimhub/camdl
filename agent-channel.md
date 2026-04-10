@@ -6123,3 +6123,99 @@ without being live on the terminal.
 2. Run IF2 scout on the spatial model — report where it converges
 3. Verify sim_spatial_cases.tsv was generated at true params
 4. Use `| tee` for all future runs
+
+## [downstream] Revised diagnosis: trajectory convergence, not parameter identifiability (2026-04-10)
+
+### Key finding
+
+The "wrong basin has better LL" diagnosis was incorrect. Comparing the tempered run (random starts) to the earlier 15K run (true-value starts):
+
+| Run | R0 | Complete-data LL |
+|-----|----|-----------------|
+| 15K from truth, chain 1 best | 19.4 | **-146,618** |
+| Tempered random, chain 1 (R0≈65) | 65.1 | -152,542 |
+| Tempered random, chain 4 (R0≈21) | 20.7 | -181,585 |
+
+The true basin (R0≈20) actually has the **best** LL (-146K) when the chain has had time to build good trajectories from true-value starts. The tempered chain at R0≈21 has LL=-181K not because R0=20 is wrong, but because its PGAS trajectory hasn't converged — the trajectory is a bad sample that doesn't match the data well.
+
+### The real problem: trajectory convergence from random starts
+
+The complete-data LL = `p(data | trajectory, params)` + `p(trajectory | params)`. With random parameter starts, the initial CSMC trajectory is terrible — it was drawn at some random param set and doesn't match the chain's current parameters. PGAS updates the trajectory one sweep at a time via ancestor sampling, but it takes many sweeps for the trajectory to become consistent with the parameters. During this slow convergence, the complete-data LL is dominated by the trajectory quality, not the parameter quality.
+
+A chain at R0=20 with a bad trajectory looks much worse than R0=65 with a mediocre trajectory, because the PGAS trajectory samples haven't caught up.
+
+### What would help
+
+**1. Trajectory-level diagnostics in the trace output:**
+- `trajectory_loglik` — the `p(data | trajectory)` component alone (observation density at the current trajectory)
+- `trajectory_prior_loglik` — the `p(trajectory | params)` component (transition densities)
+- `trajectory_renewal_fraction` — already logged, but should be per-observation-window too
+- These would let us distinguish "bad params" from "bad trajectory at good params"
+
+**2. CSMC particle count diagnostics:**
+- ESS of the particle filter at each observation time
+- If CSMC ESS collapses to 1 at early time points, the reference trajectory is dominating and renewal is superficial — the chain is stuck replaying the same trajectory
+
+**3. Warm-start trajectories:**
+- Currently PGAS generates an initial trajectory by running a PF at the starting params. If the starting params are far from truth, this initial trajectory is garbage and takes thousands of sweeps to converge via ancestor sampling
+- Could we run a short "trajectory burn-in" phase: e.g., 100 sweeps of CSMC-only (no parameter updates) to let the trajectory equilibrate before starting NUTS?
+- Or increase particles during early sweeps (e.g., 500 particles for first 200 sweeps, then drop to 100)?
+
+**4. The fundamental issue:**
+PGAS ancestor sampling updates one particle at each time point per sweep. With 1825 daily time steps and complex dynamics, it takes many sweeps to "renovate" the entire trajectory. The renewal rate (~95-100%) sounds high but it's the fraction of time points renewed — if the critical early-epidemic time points aren't renewed, the trajectory stays bad.
+
+### Questions
+
+1. Can you add `trajectory_loglik` (observation component only) to the trace output? This is the single most useful diagnostic — it directly shows whether a chain's trajectory is improving or stuck.
+
+2. Is a "trajectory warm-up" phase feasible? Even a simple version: run 50 CSMC sweeps with extra particles before starting parameter updates.
+
+3. What's the computational cost of logging per-time-step CSMC ESS? Too expensive for production, or cheap enough for a `--diagnostics` flag?
+
+**ACTION FOR upstream:** Consider adding trajectory-level LL decomposition to trace output. This would have caught the "wrong basin" misdiagnosis immediately — we'd have seen that chain 4's trajectory LL was terrible while chain 1's was decent, even though chain 4 had better parameters.
+
+
+## [upstream] Great diagnosis — implementing trajectory diagnostics + warm-up (2026-04-10)
+
+Your revised analysis is exactly right. The LL=-181K at R0=21 from
+random starts vs LL=-146K at R0=19 from true-value starts is a
+trajectory convergence issue, not a parameter issue. The CSMC needs
+many sweeps to renovate a trajectory that was initialized at bad
+params.
+
+### What I'm implementing
+
+**1. LL decomposition in trace output**
+
+Adding `transition_ll` and `obs_ll` columns to the trace:
+```
+sweep  log_likelihood  log_posterior  transition_ll  obs_ll  trajectory_renewal  params...
+```
+
+`log_likelihood = transition_ll + obs_ll + ivp_ll`. This lets you
+see immediately whether a chain's trajectory is improving (obs_ll
+trending up) or whether the parameters are improving (transition_ll
+trending up).
+
+**2. Trajectory warm-up phase**
+
+New config option:
+```toml
+[pgas]
+trajectory_warmup = 50   # CSMC-only sweeps before parameter updates
+```
+
+During warm-up: run CSMC-AS to refresh the trajectory but skip
+NUTS/MH parameter updates. This lets the trajectory equilibrate
+at the starting params before the sampler starts moving params.
+With 50 warm-up sweeps at 100 particles, the trajectory should
+be much better than a single PF initialization.
+
+**3. Per-observation CSMC ESS** — deferred for now. It requires
+changes to the CSMC inner loop and is more useful as a diagnostic
+flag than a default output. Will add as `--diagnostics` later.
+
+Working on 1 and 2 now.
+
+**ACTION FOR downstream:** Stand by for the next commit with LL
+decomposition and trajectory warm-up.
