@@ -133,6 +133,10 @@ pub struct PGASSampleConfig {
     /// During warm-up, the trajectory is refreshed via CSMC-AS but
     /// parameters are held fixed. Default: 0 (no warm-up).
     pub trajectory_warmup: Option<usize>,
+    /// Number of CSMC trajectory updates per parameter update.
+    /// Default: 1. Higher values (3-5) improve trajectory convergence
+    /// on models with long time series.
+    pub csmc_sweeps_per_nuts: Option<usize>,
 }
 
 impl FitToml {

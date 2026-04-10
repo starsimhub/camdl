@@ -228,6 +228,7 @@ pub fn run_pgas_cli(
                 tempering,
                 max_tree_depth: sc.and_then(|s| s.max_treedepth).unwrap_or(10),
                 trajectory_warmup: sc.and_then(|s| s.trajectory_warmup).unwrap_or(0),
+                csmc_sweeps_per_nuts: sc.and_then(|s| s.csmc_sweeps_per_nuts).unwrap_or(1),
             };
 
             // Build per-stream observation specs

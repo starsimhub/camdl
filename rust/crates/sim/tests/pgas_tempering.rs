@@ -140,7 +140,7 @@ fn test_single_rung_deterministic() {
         use_nuts: false,
         dense_mass: false,
         max_tree_depth: 10, tempering: vec![1.0],
-        trajectory_warmup: 0,
+        trajectory_warmup: 0, csmc_sweeps_per_nuts: 1,
     };
 
     let result1 = run_pgas(
@@ -159,7 +159,7 @@ fn test_single_rung_deterministic() {
         use_nuts: false,
         dense_mass: false,
         max_tree_depth: 10, tempering: vec![1.0],
-        trajectory_warmup: 0,
+        trajectory_warmup: 0, csmc_sweeps_per_nuts: 1,
     };
 
     let result2 = run_pgas(
@@ -192,7 +192,7 @@ fn test_two_rungs_no_panic() {
         use_nuts: false,
         dense_mass: false,
         max_tree_depth: 10, tempering: vec![1.0, 0.5],
-        trajectory_warmup: 0,
+        trajectory_warmup: 0, csmc_sweeps_per_nuts: 1,
     };
 
     let result = run_pgas(
@@ -225,7 +225,7 @@ fn test_four_rungs_runs() {
         use_nuts: false,
         dense_mass: false,
         max_tree_depth: 10, tempering: vec![1.0, 0.7, 0.4, 0.15],
-        trajectory_warmup: 0,
+        trajectory_warmup: 0, csmc_sweeps_per_nuts: 1,
     };
 
     let result = run_pgas(

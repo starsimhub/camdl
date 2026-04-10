@@ -59,6 +59,12 @@ pub struct PGASConfig {
     /// During warm-up, the trajectory is refreshed via CSMC-AS but
     /// parameters are held fixed. Default: 0 (no warm-up).
     pub trajectory_warmup: usize,
+    /// Number of CSMC trajectory updates per parameter update.
+    /// Default: 1. Higher values (e.g., 3-5) improve trajectory
+    /// convergence on models with long time series where ancestor
+    /// sampling is the bottleneck. Each extra CSMC sweep renovates
+    /// more of the trajectory before the next NUTS step.
+    pub csmc_sweeps_per_nuts: usize,
 }
 
 /// Per-substep record: minimal information for transition density
@@ -1483,14 +1489,23 @@ pub fn run_pgas(
 
             // ── Step 2: Update X | θ, y via CSMC-AS ──
             // CSMC always runs at β=1 — the trajectory must match the data.
-            let csmc_seed = seed ^ ((sweep as u64 + 1).wrapping_mul(0x9e3779b97f4a7c15))
-                ^ (rung as u64).wrapping_mul(0x6c62272e07bb0142);
-            let (new_trajectory, csmc_diag) = csmc_as(
-                model, &rung_params[rung], observations, &rung_trajectory[rung],
-                config.n_particles, config.dt, obs_streams,
-                &ivp_mappings, csmc_seed,
-            )?;
-            rung_trajectory[rung] = new_trajectory;
+            // Multiple CSMC sweeps per NUTS step improve trajectory convergence
+            // on long time series where ancestor sampling is the bottleneck.
+            let mut csmc_diag = CSMCDiagnostics {
+                trajectory_renewal: 0.0, n_degenerate: 0, n_substeps: 0,
+            };
+            for csmc_rep in 0..config.csmc_sweeps_per_nuts {
+                let csmc_seed = seed ^ ((sweep as u64 + 1).wrapping_mul(0x9e3779b97f4a7c15))
+                    ^ (rung as u64).wrapping_mul(0x6c62272e07bb0142)
+                    ^ (csmc_rep as u64).wrapping_mul(0xa2ce44bbfe0cf6d5);
+                let (new_trajectory, diag) = csmc_as(
+                    model, &rung_params[rung], observations, &rung_trajectory[rung],
+                    config.n_particles, config.dt, obs_streams,
+                    &ivp_mappings, csmc_seed,
+                )?;
+                rung_trajectory[rung] = new_trajectory;
+                csmc_diag = diag;
+            }
 
             // Recompute complete-data LL at β=1 (untempered, for swap proposals)
             let ll_components = complete_data_loglik(
