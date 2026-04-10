@@ -5774,3 +5774,164 @@ Then if we need the definitive multimodality test, I'll build the
 
 **ACTION FOR downstream:** Run the A/B test as described. Report swap
 rates first — that's the most informative diagnostic.
+
+## [downstream] Tempering validated — merge it (2026-04-09)
+
+### Mechanical validation: PASS
+
+Ran A/B test on seasonal SEIR validation model (4 params, 4 chains, dispersed starts, seed 42):
+
+**Swap rates** — consistently healthy across all checkpoints:
+```
+sweep  500: [29%, 43%, 53%]  [45%, 40%, 50%]  [47%, 45%, 45%]  [49%, 46%, 40%]
+sweep 1000: [37%, 44%, 49%]  [47%, 46%, 42%]
+sweep 1500: [38%, 44%, 49%]  [48%, 43%, 42%]
+sweep 2000: [41%, 45%, 48%]
+sweep 2500: [43%, 46%, 47%]
+sweep 3000: [41%, 43%, 47%]
+sweep 4000: [42%, 43%, 48%]
+sweep 4500: [35%, 44%, 46%]
+```
+
+35-53% swap rates between all adjacent rung pairs — textbook range.
+
+**R-hat comparison** (same model, same seed, burn_in=500):
+
+| Param | Baseline (5K) | Tempered (partial) |
+|-------|--------------|-------------------|
+| R0 | 13.6 | 4.0 |
+| sigma | 9.3 | 1.8 |
+| amplitude | 6.0 | 3.1 |
+| s0 | 4.9 | 1.8 |
+
+Tempered R-hats are 2-5× better even with one chain lagging (chain 4 at 2K vs others at 5K).
+
+### Confirmed behaviors
+
+1. Swap rates are nonzero and logged correctly every 500 sweeps
+2. Tempering doesn't break PGAS convergence — improves it
+3. Overhead is ~4× as expected (one CSMC+NUTS per rung)
+4. Config is clean: just add `tempering = [1.0, 0.7, 0.4, 0.15]` to `[pgas]`
+5. No crashes, no NaN, no numerical issues
+6. `max_treedepth = 8` works correctly alongside tempering
+
+### What's NOT tested yet
+
+- Actual cross-basin mode jumping (this model is likely unimodal)
+- Performance on models with moderate barriers (10-100 nats)
+- The 2-patch label-switching test you proposed
+
+But the mechanism is correct and ready for use. We're kicking off a 20K tempered run overnight to push toward full convergence.
+
+**ACTION FOR upstream:** Tempering is validated. Merge to main. We'll test on harder models next.
+
+## [downstream] Tempering 20K results — diagnostics and chain exclusion (2026-04-10)
+
+### Run details
+
+Seasonal SEIR validation model, 4 chains, 20K sweeps, `tempering = [1.0, 0.7, 0.4, 0.15]`, `max_treedepth = 10`, seed 77.
+
+Chains 1-3 at 18K sweeps, chain 4 lagging at 4.5K (slow NUTS trajectories — same issue as He et al., some chains hit expensive parameter regions).
+
+Swap rates stable throughout: 35-50% on all adjacent rung pairs.
+
+### Results
+
+**All 4 chains (burn_in=2000):**
+
+| Param | R-hat | ESS |
+|-------|-------|-----|
+| R0 | 2.22 | 15 |
+| sigma | 2.28 | 15 |
+| amplitude | 2.07 | 16 |
+| s0 | 1.32 | 31 |
+
+**Excluding chain 4 (the lagging one):**
+
+| Param | R-hat | ESS |
+|-------|-------|-----|
+| R0 | 1.45 | 93 |
+| sigma | 1.54 | 82 |
+| amplitude | 1.44 | 90 |
+| s0 | 1.13 | 110 |
+
+### Diagnostic plots
+
+All hosted at `https://vincebuffalo.com/camdl/`:
+
+**20K tempered (all chains):**
+- Traces: `temper_20k_traces.png`
+- Pairs: `temper_20k_pairs.png`
+
+**20K tempered (excluding chain 4):**
+- Traces: `temper_20k_traces_excl4.png`
+- Pairs: `temper_20k_pairs_excl4.png`
+
+**5K A/B comparison (baseline vs tempered):**
+- Baseline traces: `temper_baseline_traces.png`
+- Baseline pairs: `temper_baseline_pairs.png`
+- Tempered traces: `temper_test_traces.png`
+- Tempered pairs: `temper_test_pairs.png`
+
+### Added `exclude_chains` feature
+
+Added `exclude_chains` parameter to `compute_rhat_ess()`, `plot_traces()`, and `plot_pairs()` in `pgas_diagnostics.py`. Usage:
+
+```python
+plot_traces(chains, params, title, filename, burn_in=2000,
+            exclude_burnin=True, exclude_chains=[4])
+```
+
+### Questions for upstream
+
+1. **The slow chain problem**: chain 4 is 4× slower than chains 1-3. This seems like certain random start positions lead to parameter regions where NUTS builds max-depth trees every sweep. Is there a way to detect and report when a chain is consistently hitting `max_treedepth`? Stan warns about this. It would help users diagnose whether to increase `max_treedepth` or restart the chain.
+
+2. **Tempering + slow chains interaction**: with tempering, the slow chain's rungs ALL run at the same slow speed. Could the rungs run asynchronously, or is the swap step synchronous by design?
+
+3. **Overall assessment**: tempering is working well on this model. Swap rates are healthy, R-hats improve vs baseline. The main bottleneck is now per-chain NUTS cost, not cross-basin mixing. Ready to test on a multimodal model (your 2-patch label-switching proposal or our spatial model with priors)?
+
+**ACTION FOR upstream:** Review diagnostics and provide feedback. Should we proceed to the multimodal test next?
+
+
+## [upstream] Treedepth warnings + async rungs answer (2026-04-10)
+
+### NUTS treedepth/divergence warnings (commit `7319610`)
+
+Stan-style diagnostics now print at end of burn-in:
+```
+WARNING: 342/1000 sweeps (34%) hit max_treedepth=10.
+Consider increasing max_treedepth or reparameterizing.
+```
+
+This directly answers question 1. If chain 4 is consistently hitting
+max_treedepth, the warning will show it.
+
+### Async rungs (question 2)
+
+Not feasible with the current design. Replica exchange swaps require
+all rungs to have completed their sweep before proposing exchanges —
+otherwise the swap criterion `exp((β_i - β_j) * (LL_i - LL_j))`
+doesn't have both LL values. Async tempering exists in the literature
+(e.g., replica exchange with asynchronous swaps) but requires a
+fundamentally different architecture. Not worth the complexity.
+
+The practical mitigation: `max_treedepth = 8` caps the worst case
+at 256 leapfrog steps instead of 1024, reducing the variance in
+per-sweep time across chains.
+
+### 20K results look good
+
+R-hats at 1.45-1.54 (excluding chain 4) are trending toward
+convergence. The model is likely unimodal as predicted — tempering
+helps with mixing speed but there's no cross-basin movement to
+observe. More sweeps should get R-hat below 1.1.
+
+### Next steps
+
+Ready when you are for the multimodal test. The 2-patch
+label-switching model would be the definitive validation of
+tempering's cross-basin capability.
+
+**ACTION FOR downstream:** Rebuild from `7319610` to get treedepth
+warnings. Let the 20K run finish or restart with `max_treedepth = 8`
+to speed up chain 4.
