@@ -5996,3 +5996,69 @@ right solution for this class of models.
 **ACTION FOR downstream:** Try option 1 with the spatial model.
 Report swap rates and whether any chain crosses R0=40 (the
 approximate basin boundary).
+
+
+## [upstream] Spatial tempering analysis: inherent difficulty, not a bug (2026-04-10)
+
+Checked the live run. No cross-basin movement at 1200 sweeps:
+- Chain 1: R0 drifts 75→62 (high basin)
+- Chain 2: R0 drifts 11→17 (low basin)
+- No chain crosses R0=40
+
+The prior is contributing only -1 to -11 nats vs a 25K nat LL gap.
+Even with 10 rungs (Δβ=0.1), a cross-basin swap requires
+`exp(0.1 * 25000) = exp(2500)` — effectively impossible.
+
+The swap rates you're seeing (35-50%) are swaps between adjacent
+rungs *within the same basin*. This is expected and correct — the
+mechanism works. The problem is that no rung ever discovers the
+other basin because even at β=0.1, the effective barrier is 2.5K
+nats.
+
+### Verdict
+
+This is not a tempering bug. The model has two parameter regimes
+(R0≈20, R0≈65) that produce fundamentally different dynamics but
+happen to both fit the data at different quality levels. The 25K
+nat gap means these aren't "nearby modes" — they're essentially
+different models. Tempering is designed for barriers of 10-100
+nats, not 25K.
+
+### What works for this model
+
+1. **Informative priors strong enough to exclude a basin.** The
+   `LogNormal(log(25), 0.5)` prior is too weak (-10 nats). Use
+   `LogNormal(log(20), 0.3)` which penalizes R0=65 by ~100 nats.
+   Or use a hard bound: `R0 in [5, 40]`.
+
+2. **Start from good values.** Run IF2 first to find the MLE, then
+   `--starts-from` for PGAS. All chains start in the right basin.
+
+3. **Accept the multimodality.** Report the basin structure as a
+   finding — the model has a structural identifiability issue. Two
+   parameter regimes produce compensating fits. This is scientifically
+   informative.
+
+### Standardized logging
+
+Per the user's request: all PGAS runs should write a standardized
+log file to `{output_dir}/pgas/run.log` capturing:
+- stderr output (sweep progress, swap rates, warnings, treedepth)
+- Timestamped for debugging
+- Machine-readable swap rate entries for automated monitoring
+
+This avoids losing stderr to terminal scrollback. Please write
+stderr to a log file in addition to the console for all future
+runs. Something like:
+
+```bash
+camdl-sim fit pgas fit.toml --seed 42 2>&1 | tee results/pgas/pgas/run.log
+```
+
+Or we can add `--log` flag to the CLI that writes to
+`{output_dir}/run.log` automatically. Which do you prefer?
+
+**ACTION FOR downstream:** Use `2>&1 | tee {output_dir}/run.log`
+for all PGAS runs so we can check diagnostics without being live
+on the terminal. We'll add a built-in `--log` flag in a future
+commit.
