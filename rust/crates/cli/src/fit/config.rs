@@ -125,6 +125,10 @@ pub struct PGASSampleConfig {
     /// Example: `[1.0, 0.7, 0.4, 0.15]` runs 4 rungs per chain.
     /// Default: no tempering (single rung).
     pub tempering: Option<Vec<f64>>,
+    /// Maximum NUTS tree depth. Default: 10 (Stan default).
+    /// Lower values (e.g., 6-8) speed up exploration at the cost of
+    /// shorter trajectories. Useful for models with expensive gradients.
+    pub max_treedepth: Option<usize>,
 }
 
 impl FitToml {

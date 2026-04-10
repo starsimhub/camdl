@@ -139,7 +139,7 @@ fn test_single_rung_deterministic() {
         dt: 1.0,
         use_nuts: false,
         dense_mass: false,
-        tempering: vec![1.0],
+        max_tree_depth: 10, tempering: vec![1.0],
     };
 
     let result1 = run_pgas(
@@ -157,7 +157,7 @@ fn test_single_rung_deterministic() {
         dt: 1.0,
         use_nuts: false,
         dense_mass: false,
-        tempering: vec![1.0],
+        max_tree_depth: 10, tempering: vec![1.0],
     };
 
     let result2 = run_pgas(
@@ -189,7 +189,7 @@ fn test_two_rungs_no_panic() {
         dt: 1.0,
         use_nuts: false,
         dense_mass: false,
-        tempering: vec![1.0, 0.5],
+        max_tree_depth: 10, tempering: vec![1.0, 0.5],
     };
 
     let result = run_pgas(
@@ -221,7 +221,7 @@ fn test_four_rungs_runs() {
         dt: 1.0,
         use_nuts: false,
         dense_mass: false,
-        tempering: vec![1.0, 0.7, 0.4, 0.15],
+        max_tree_depth: 10, tempering: vec![1.0, 0.7, 0.4, 0.15],
     };
 
     let result = run_pgas(

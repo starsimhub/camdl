@@ -226,6 +226,7 @@ pub fn run_pgas_cli(
                 use_nuts,
                 dense_mass, // --diagonal-mass to disable
                 tempering,
+                max_tree_depth: sc.and_then(|s| s.max_treedepth).unwrap_or(10),
             };
 
             // Build per-stream observation specs

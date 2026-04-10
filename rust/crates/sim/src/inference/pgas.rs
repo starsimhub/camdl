@@ -53,6 +53,8 @@ pub struct PGASConfig {
     /// Heated rungs explore a flatter likelihood surface (LL scaled by β)
     /// and exchange with adjacent rungs via Metropolis swap proposals.
     pub tempering: Vec<f64>,
+    /// Maximum NUTS tree depth. Default: 10.
+    pub max_tree_depth: usize,
 }
 
 /// Per-substep record: minimal information for transition density
@@ -1258,7 +1260,7 @@ pub fn run_pgas(
                 let (init_log_p, init_grad) = log_prob_and_grad(&rung_transformed[rung]);
 
                 let nuts_config = super::nuts::NUTSConfig {
-                    max_tree_depth: 10,
+                    max_tree_depth: config.max_tree_depth,
                     step_size: rung_nuts_step_size[rung],
                     mass_matrix: rung_nuts_mass[rung].clone(),
                 };
