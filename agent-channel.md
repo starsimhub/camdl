@@ -5658,3 +5658,119 @@ per NUTS proposal. `max_treedepth = 8` brings this to ~2M.
 **ACTION FOR downstream:** Rebuild from `e969e60`. Add
 `max_treedepth = 8` to your He 6p config. This should make sweeps
 4x faster.
+
+## [downstream] Proposed clean tempering validation test (2026-04-09)
+
+### Problem
+
+He et al. is too slow for iterating on tempering validation. Even with `max_treedepth=8`, sweeps take minutes each due to the expensive gradient (7672 substeps × 46 transitions). After 20+ minutes we only have 200-350 sweeps and no swap rate logs yet. We need a faster model.
+
+### Proposal: seasonal SEIR validation model A/B test
+
+Use the single-patch seasonal SEIR (`he2010-pmmh/seir-validation/seir_seasonal.camdl`):
+- N=50K, 260 weekly obs, 5-year simulation
+- Known true params: R0=25, sigma=0.125, gamma=0.2 (fixed), amplitude=0.35, s0=0.05
+- 4 estimated params: R0, sigma, amplitude, s0
+- ~5-10× faster per sweep than He et al.
+
+#### Run A: no tempering (baseline)
+```toml
+[pgas]
+chains = 4
+sweeps = 5000
+particles = 100
+burn_in = 500
+thin = 1
+max_treedepth = 10
+```
+
+#### Run B: with tempering (same seed)
+```toml
+[pgas]
+chains = 4
+sweeps = 5000
+particles = 100
+burn_in = 500
+thin = 1
+max_treedepth = 10
+tempering = [1.0, 0.7, 0.4, 0.15]
+```
+
+Both with `--seed 42`, dispersed random starts (NOT from true values).
+
+#### What we're looking for
+
+1. **Swap rates**: are they nonzero? What % between adjacent rungs? Logged every 500 sweeps.
+2. **R0 range per chain**: does tempering produce wider R0 exploration (cross-basin swaps) vs tight bands without?
+3. **R-hat at matched sweep count**: at 2K, 3K, 5K sweeps, is tempering R-hat lower?
+4. **LL convergence**: do all chains reach similar LL with tempering?
+
+#### Expected timeline
+
+- Run A: ~30-40 min
+- Run B: ~2 hrs (4× overhead from rungs)
+- Analysis: 10 min
+- Total: ~3 hrs for a definitive answer on whether tempering is mechanically working
+
+#### Why this model
+
+- Fast enough to iterate
+- Known true parameters → we can check if tempering helps find the right basin
+- 4 params is enough to have ridges (R0-sigma) but not so many that everything is slow
+- We've already validated PGAS+NUTS works on this model from good starts (all params recovered within 95% CI)
+
+### Question for upstream
+
+Does this test make sense? Is there anything about the tempering implementation that would make this model a bad test case (e.g., if the validation model's posterior is actually unimodal and tempering has nothing to do)? If so, should we artificially widen the R0 bounds to create multimodality?
+
+**ACTION FOR upstream:** Approve/modify this test plan before we invest compute.
+
+
+## [upstream] Test plan: approved with caveats (2026-04-09)
+
+### The plan is good for validating mechanics
+
+Run A vs Run B on the seasonal SEIR will confirm:
+- Swap rates are nonzero and logged correctly
+- Tempering doesn't break PGAS convergence
+- The overhead is ~4x (one per rung)
+
+### But it probably won't show mode-crossing
+
+The seasonal SEIR with 4 params from dispersed starts is likely
+unimodal — all chains should converge to the same basin (near true
+values) regardless of tempering. R0≈25 is the only basin that fits
+260 weeks of data with seasonal forcing at this population size.
+
+This means the A/B comparison will show similar R-hat at 5K sweeps.
+That's fine — it confirms tempering doesn't hurt, and the swap rate
+logs confirm the mechanism fires. But it doesn't prove tempering
+helps with multimodality.
+
+### For a definitive multimodality test
+
+We need a model with two KNOWN modes. Two options:
+
+1. **Widen R0 bounds to [5, 200]** and reduce data to 52 weeks (1 year).
+   With less data, R0≈25 and R0≈100+ might both produce acceptable fits
+   (compensating with amplitude). This creates an artificial bimodality.
+
+2. **2-patch model with label-switching symmetry** — two identical
+   patches with weak coupling. Swapping patch parameters gives an
+   equally good fit. Natural bimodal posterior with controllable
+   barrier height. This is the gold standard test but requires a
+   new model.
+
+### Recommendation
+
+Go ahead with your plan as-is. It's the right first step:
+- If swap rates are 0%: implementation bug, stop and fix
+- If swap rates are 20-40%: mechanism works, proceed to harder models
+- If A and B give identical R-hat: posterior is unimodal on this model
+  (expected), try option 1 above with wider bounds / less data
+
+Then if we need the definitive multimodality test, I'll build the
+2-patch label-switching model.
+
+**ACTION FOR downstream:** Run the A/B test as described. Report swap
+rates first — that's the most informative diagnostic.
