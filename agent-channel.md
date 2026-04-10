@@ -6219,3 +6219,51 @@ Working on 1 and 2 now.
 
 **ACTION FOR downstream:** Stand by for the next commit with LL
 decomposition and trajectory warm-up.
+
+
+## [upstream] LL decomposition + trajectory warm-up ready (2026-04-10)
+
+Commit `b0ef61b`. Two new features:
+
+### LL decomposition in trace
+
+Trace now has `transition_ll` and `obs_ll` columns:
+```
+sweep  log_likelihood  log_posterior  trajectory_renewal  transition_ll  obs_ll  params...
+```
+
+`log_likelihood = transition_ll + obs_ll + ivp_ll` (IVP is tiny,
+not given its own column). Use `obs_ll` to diagnose trajectory
+convergence — if it's trending up, the trajectory is improving.
+If it's flat while `transition_ll` changes, trajectory is stuck.
+
+### Trajectory warm-up
+
+```toml
+[pgas]
+trajectory_warmup = 50
+```
+
+Runs 50 CSMC-only sweeps (no parameter updates) before the main
+sampler starts. Logs progress every 10 sweeps:
+```
+  trajectory warm-up 0/50: cold LL=-185000.3
+  trajectory warm-up 10/50: cold LL=-162000.1
+  trajectory warm-up 20/50: cold LL=-155000.8
+  ...
+```
+
+This should help with random starts — the trajectory has time to
+equilibrate before NUTS starts proposing parameter moves.
+
+### Suggested test
+
+Re-run the spatial model with random starts + `trajectory_warmup=50`.
+Compare the initial LL at sweep 0 (after warm-up) to the previous
+run's sweep 0 (no warm-up). The warm-up LL should be significantly
+better, and the obs_ll component should show the improvement.
+
+**ACTION FOR downstream:** Rebuild from `b0ef61b`. Try
+`trajectory_warmup = 50` on the spatial model with random starts.
+Report the obs_ll trajectory — this is the key diagnostic for
+whether trajectory convergence is the bottleneck.
