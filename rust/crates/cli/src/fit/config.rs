@@ -129,6 +129,10 @@ pub struct PGASSampleConfig {
     /// Lower values (e.g., 6-8) speed up exploration at the cost of
     /// shorter trajectories. Useful for models with expensive gradients.
     pub max_treedepth: Option<usize>,
+    /// Number of CSMC-only sweeps before parameter updates begin.
+    /// During warm-up, the trajectory is refreshed via CSMC-AS but
+    /// parameters are held fixed. Default: 0 (no warm-up).
+    pub trajectory_warmup: Option<usize>,
 }
 
 impl FitToml {

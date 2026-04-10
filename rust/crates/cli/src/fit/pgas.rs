@@ -227,6 +227,7 @@ pub fn run_pgas_cli(
                 dense_mass, // --diagonal-mass to disable
                 tempering,
                 max_tree_depth: sc.and_then(|s| s.max_treedepth).unwrap_or(10),
+                trajectory_warmup: sc.and_then(|s| s.trajectory_warmup).unwrap_or(0),
             };
 
             // Build per-stream observation specs
@@ -254,7 +255,7 @@ pub fn run_pgas_cli(
             let param_names: Vec<String> = config.estimated_params.iter()
                 .map(|s| s.name.clone()).collect();
             let trace_writer = super::trace_writer::TraceWriter::new(
-                &trace_path, "sweep", &["trajectory_renewal"],
+                &trace_path, "sweep", &["trajectory_renewal", "transition_ll", "obs_ll"],
                 &param_names, is_resuming,
             );
 
@@ -293,9 +294,11 @@ pub fn run_pgas_cli(
                 let param_vals: Vec<f64> = config.estimated_params.iter()
                     .map(|s| result.params[s.index]).collect();
                 let renewal = format!("{:.4}", result.csmc_diag.trajectory_renewal);
+                let transition_ll_str = format!("{:.4}", result.transition_ll);
+                let obs_ll_str = format!("{:.4}", result.obs_ll);
                 trace_writer.write_row(
                     sweep, result.log_complete_data_ll, log_posterior,
-                    &[&renewal], &param_vals,
+                    &[&renewal, &transition_ll_str, &obs_ll_str], &param_vals,
                 );
 
                 // Save posterior trajectory sample

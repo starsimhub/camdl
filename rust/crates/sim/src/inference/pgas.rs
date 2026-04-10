@@ -55,6 +55,10 @@ pub struct PGASConfig {
     pub tempering: Vec<f64>,
     /// Maximum NUTS tree depth. Default: 10.
     pub max_tree_depth: usize,
+    /// Number of CSMC-only sweeps before parameter updates begin.
+    /// During warm-up, the trajectory is refreshed via CSMC-AS but
+    /// parameters are held fixed. Default: 0 (no warm-up).
+    pub trajectory_warmup: usize,
 }
 
 /// Per-substep record: minimal information for transition density
@@ -111,6 +115,19 @@ pub struct CSMCDiagnostics {
     pub n_substeps: usize,
 }
 
+/// Decomposed complete-data log-likelihood components.
+#[derive(Clone, Debug)]
+pub struct LogLikComponents {
+    /// Sum of all components.
+    pub total: f64,
+    /// Sum of per-substep transition densities.
+    pub transition: f64,
+    /// Sum of observation densities (joint_obs_weight).
+    pub observation: f64,
+    /// Initial state density (Binomial for IVP params).
+    pub ivp: f64,
+}
+
 /// Result of one Gibbs sweep.
 #[derive(Clone, Serialize, Deserialize)]
 pub struct PGASSweep {
@@ -119,6 +136,10 @@ pub struct PGASSweep {
     pub accepted: Vec<bool>,
     pub csmc_diag: CSMCDiagnostics,
     pub proposal_sds: Vec<f64>,
+    /// Transition component of the complete-data log-likelihood.
+    pub transition_ll: f64,
+    /// Observation component of the complete-data log-likelihood.
+    pub obs_ll: f64,
 }
 
 /// Full PGAS result.
@@ -352,11 +373,13 @@ pub fn complete_data_loglik(
     dt: f64,
     obs_streams: &[super::types::ObsStreamSpec],
     ivp_mappings: &[IVPMapping],
-) -> Result<f64, SimError> {
+) -> Result<LogLikComponents, SimError> {
     let t_start = model.model.simulation.t_start;
     let n_substeps = trajectory.substeps.len();
     let n_tr = model.model.transitions.len();
-    let mut log_p = 0.0;
+    let mut ivp_ll = 0.0;
+    let mut transition_ll = 0.0;
+    let mut observation_ll = 0.0;
 
     // Initial state density: log p(x₀ | θ) for IVP-controlled compartments.
     // S₀ ~ Binom(N₀, s0) → log Binom(S₀; N₀, s0) constrains s0.
@@ -386,19 +409,24 @@ pub fn complete_data_loglik(
                     .map(|(i, _)| trajectory.initial_counts[i])
                     .sum()
             };
-            let ivp_ll = binom_logpmf(count, patch_pop as u64, frac);
-            if !ivp_ll.is_finite() {
+            let this_ivp_ll = binom_logpmf(count, patch_pop as u64, frac);
+            if !this_ivp_ll.is_finite() {
                 eprintln!("  IVP density -inf: Binom({}, {}, {:.6e}) for {} (comp={}, patch_pop={})",
                     count, patch_pop, frac,
                     comp_name, ivp.compartment_idx, patch_pop);
             }
-            log_p += ivp_ll;
+            ivp_ll += this_ivp_ll;
         }
     }
 
-    if !log_p.is_finite() {
-        log::debug!("complete_data_loglik: -inf after IVP density (log_p={:.1})", log_p);
-        return Ok(f64::NEG_INFINITY);
+    if !ivp_ll.is_finite() {
+        log::debug!("complete_data_loglik: -inf after IVP density (ivp_ll={:.1})", ivp_ll);
+        return Ok(LogLikComponents {
+            total: f64::NEG_INFINITY,
+            transition: 0.0,
+            observation: 0.0,
+            ivp: ivp_ll,
+        });
     }
 
     // Precompute observation substep indices
@@ -424,9 +452,14 @@ pub fn complete_data_loglik(
         )?;
         if !td.is_finite() {
             log::debug!("complete_data_loglik: -inf transition density at substep {} (t={:.1})", s, t);
-            return Ok(f64::NEG_INFINITY);
+            return Ok(LogLikComponents {
+                total: f64::NEG_INFINITY,
+                transition: transition_ll + td,
+                observation: observation_ll,
+                ivp: ivp_ll,
+            });
         }
-        log_p += td;
+        transition_ll += td;
 
         // TODO: gamma multiplier density (log Gamma(g; dt/σ², σ²/dt)) is
         // disabled. The gamma index tracking between step_one and the density
@@ -446,16 +479,27 @@ pub fn complete_data_loglik(
             if !obs_ll.is_finite() {
                 log::debug!("complete_data_loglik: obs density -inf at substep {} (obs_idx={})", s, obs_idx);
             }
-            log_p += obs_ll;
-            if !log_p.is_finite() {
+            observation_ll += obs_ll;
+            let total = ivp_ll + transition_ll + observation_ll;
+            if !total.is_finite() {
                 log::debug!("complete_data_loglik: -inf after obs at substep {} (cumulative)", s);
-                return Ok(f64::NEG_INFINITY);
+                return Ok(LogLikComponents {
+                    total: f64::NEG_INFINITY,
+                    transition: transition_ll,
+                    observation: observation_ll,
+                    ivp: ivp_ll,
+                });
             }
             for f in &mut cum_flows { *f = 0; }
         }
     }
 
-    Ok(log_p)
+    Ok(LogLikComponents {
+        total: ivp_ll + transition_ll + observation_ll,
+        transition: transition_ll,
+        observation: observation_ll,
+        ivp: ivp_ll,
+    })
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -1028,7 +1072,7 @@ pub fn run_pgas(
         let sanity_ll = complete_data_loglik(
             model, &trajectory, &current_params, observations,
             config.dt, obs_streams, &[],  // empty IVP mappings
-        )?;
+        )?.total;
         if !sanity_ll.is_finite() {
             eprintln!("  BUG: simulate_reference trajectory has -inf density at own params.");
             eprintln!("  params used:");
@@ -1107,7 +1151,7 @@ pub fn run_pgas(
     let current_ll = complete_data_loglik(
         model, &trajectory, &current_params, observations,
         config.dt, obs_streams, &ivp_mappings,
-    )?;
+    )?.total;
     eprintln!("  initial complete-data ll: {:.1}", current_ll);
     if !current_ll.is_finite() {
         eprintln!("  WARNING: initial complete-data LL is -inf at the trajectory's own params.");
@@ -1196,11 +1240,40 @@ pub fn run_pgas(
                    Increase sweeps in fit.toml to continue.", start_sweep, config.n_sweeps);
     }
 
+    // ── Trajectory warm-up: CSMC-only sweeps before parameter updates ──
+    if config.trajectory_warmup > 0 && start_sweep == 0 {
+        eprintln!("  trajectory warm-up: {} CSMC-only sweeps", config.trajectory_warmup);
+        for warmup_sweep in 0..config.trajectory_warmup {
+            for rung in 0..n_rungs {
+                let csmc_seed = seed ^ ((warmup_sweep as u64).wrapping_mul(0x517cc1b727220a95))
+                    ^ (rung as u64).wrapping_mul(0x6c62272e07bb0142);
+                let (new_traj, _diag) = csmc_as(
+                    model, &rung_params[rung], observations, &rung_trajectory[rung],
+                    config.n_particles, config.dt, obs_streams,
+                    &ivp_mappings, csmc_seed,
+                )?;
+                rung_trajectory[rung] = new_traj;
+                rung_ll[rung] = complete_data_loglik(
+                    model, &rung_trajectory[rung], &rung_params[rung], observations,
+                    config.dt, obs_streams, &ivp_mappings,
+                )?.total;
+            }
+            if warmup_sweep % 10 == 0 {
+                eprintln!("  trajectory warm-up {}/{}: cold LL={:.1}",
+                    warmup_sweep, config.trajectory_warmup, rung_ll[0]);
+            }
+        }
+        eprintln!("  trajectory warm-up complete: cold LL={:.1}", rung_ll[0]);
+    }
+
     for sweep in start_sweep..config.n_sweeps {
         // Per-rung accepted flags (only cold rung's is used for output)
         let mut rung_accepted: Vec<Vec<bool>> = vec![vec![false; d]; n_rungs];
         // Per-rung CSMC diagnostics (only cold rung's is used for output)
         let mut rung_csmc_diag: Vec<CSMCDiagnostics> = Vec::with_capacity(n_rungs);
+        // Cold rung LL components (populated during rung loop)
+        let mut cold_transition_ll = 0.0_f64;
+        let mut cold_obs_ll = 0.0_f64;
 
         for rung in 0..n_rungs {
             let beta = betas[rung];
@@ -1376,7 +1449,7 @@ pub fn run_pgas(
                     let proposed_ll = complete_data_loglik(
                         model, &rung_trajectory[rung], &proposed_params, observations,
                         config.dt, obs_streams, &ivp_mappings,
-                    )?;
+                    )?.total;
 
                     let proposed_log_prior_i = priors[i].log_density(theta_new, z_new);
                     let current_log_prior_i = priors[i].log_density(
@@ -1420,12 +1493,19 @@ pub fn run_pgas(
             rung_trajectory[rung] = new_trajectory;
 
             // Recompute complete-data LL at β=1 (untempered, for swap proposals)
-            rung_ll[rung] = complete_data_loglik(
+            let ll_components = complete_data_loglik(
                 model, &rung_trajectory[rung], &rung_params[rung], observations,
                 config.dt, obs_streams, &ivp_mappings,
             )?;
+            rung_ll[rung] = ll_components.total;
 
             rung_csmc_diag.push(csmc_diag);
+
+            // Store components for cold rung output
+            if rung == 0 {
+                cold_transition_ll = ll_components.transition;
+                cold_obs_ll = ll_components.observation;
+            }
         } // end rung loop
 
         // ── Replica exchange: swap adjacent rungs ──
@@ -1528,6 +1608,8 @@ pub fn run_pgas(
             accepted: rung_accepted[0].clone(),
             csmc_diag: rung_csmc_diag[0].clone(),
             proposal_sds: cold_proposal_sd,
+            transition_ll: cold_transition_ll,
+            obs_ll: cold_obs_ll,
         };
 
         if let Some(cb) = on_sweep {

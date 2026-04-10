@@ -50,7 +50,7 @@ fn test_density_matches_step_one_sir() {
     let ll = complete_data_loglik(
         &compiled, &trajectory, &params, &observations, dt,
         &obs_streams, &ivp_mappings,
-    ).unwrap();
+    ).unwrap().total;
 
     eprintln!("  SIR basic: complete-data LL = {:.4} ({} substeps, {} transitions, {} groups)",
         ll, trajectory.substeps.len(), compiled.model.transitions.len(), compiled.source_groups.len());
@@ -90,7 +90,7 @@ fn test_density_matches_step_one_sir_demography() {
     let ll = complete_data_loglik(
         &compiled, &trajectory, &params, &observations, dt,
         &obs_streams, &ivp_mappings,
-    ).unwrap();
+    ).unwrap().total;
 
     eprintln!("  SIR demography: complete-data LL = {:.4} ({} substeps, {} transitions, {} groups)",
         ll, trajectory.substeps.len(), compiled.model.transitions.len(), compiled.source_groups.len());
@@ -120,7 +120,7 @@ fn test_density_matches_step_one_two_patch() {
     let trajectory = simulate_reference(&compiled, &params, t_end, dt, &mut rng).unwrap();
     let ll = complete_data_loglik(
         &compiled, &trajectory, &params, &[], dt, &[], &[],
-    ).unwrap();
+    ).unwrap().total;
     eprintln!("  two_patch: LL={:.4} ({} substeps, {} tr, {} groups)",
         ll, trajectory.substeps.len(), compiled.model.transitions.len(), compiled.source_groups.len());
     assert!(ll.is_finite(), "two_patch LL should be finite, got {}", ll);
@@ -171,7 +171,7 @@ fn test_density_matches_step_one_polio_spatial_5() {
     let ll = complete_data_loglik(
         &compiled, &trajectory, &params, &observations, dt,
         &obs_streams, &ivp_mappings,
-    ).unwrap();
+    ).unwrap().total;
 
     eprintln!("  spatial: complete-data LL = {:.4} ({} substeps)",
         ll, trajectory.substeps.len());
@@ -273,7 +273,7 @@ fn test_density_downstream_seir_spatial_5() {
 
     let ll = complete_data_loglik(
         &compiled, &trajectory, &params, &[], dt, &[], &[],
-    ).unwrap();
+    ).unwrap().total;
     eprintln!("  complete-data LL = {:.4}", ll);
     assert!(ll.is_finite(), "LL should be finite, got {}", ll);
 }

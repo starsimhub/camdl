@@ -86,11 +86,11 @@ fn test_gradient_vs_finite_differences_sir() {
         let ll_plus = complete_data_loglik(
             &compiled, &trajectory, &p_plus, &observations, dt,
             &obs_streams, &ivp_mappings,
-        ).unwrap();
+        ).unwrap().total;
         let ll_minus = complete_data_loglik(
             &compiled, &trajectory, &p_minus, &observations, dt,
             &obs_streams, &ivp_mappings,
-        ).unwrap();
+        ).unwrap().total;
 
         let fd = (ll_plus - ll_minus) / (2.0 * eps);
 
