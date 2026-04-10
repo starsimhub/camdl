@@ -1187,6 +1187,8 @@ pub fn run_pgas(
 
     // Swap acceptance tracking (n_rungs - 1 adjacent pairs)
     let mut swap_proposed: Vec<usize> = vec![0; n_rungs.saturating_sub(1)];
+    let mut n_max_treedepth: usize = 0;
+    let mut n_divergent: usize = 0;
     let mut swap_accepted: Vec<usize> = vec![0; n_rungs.saturating_sub(1)];
 
     if start_sweep >= config.n_sweeps {
@@ -1277,6 +1279,14 @@ pub fn run_pgas(
                     }
                     for a in &mut rung_accepted[rung] { *a = true; }
                     for t in &mut rung_total_accepted[rung] { *t += 1; }
+                }
+                if rung == 0 {
+                    if result.tree_depth >= config.max_tree_depth {
+                        n_max_treedepth += 1;
+                    }
+                    if result.divergent {
+                        n_divergent += 1;
+                    }
                 }
 
                 // Two-phase adaptation (same schedule as single-rung, per-rung state)
@@ -1468,6 +1478,21 @@ pub fn run_pgas(
                     spec.name, rung_log_proposal_sd[0][i].exp(), acc_rate * 100.0);
             }
             eprintln!("  trajectory renewal: {:.1}%", rung_csmc_diag[0].trajectory_renewal * 100.0);
+
+            // NUTS diagnostics (Stan-style warnings)
+            if has_gradients {
+                let pct_maxdepth = n_max_treedepth as f64 / (sweep + 1) as f64 * 100.0;
+                if n_max_treedepth > 0 {
+                    eprintln!("  WARNING: {}/{} sweeps ({:.0}%) hit max_treedepth={}. \
+                        Consider increasing max_treedepth or reparameterizing.",
+                        n_max_treedepth, sweep + 1, pct_maxdepth, config.max_tree_depth);
+                }
+                if n_divergent > 0 {
+                    eprintln!("  WARNING: {} divergent transitions during burn-in. \
+                        Consider reducing step size or reparameterizing.",
+                        n_divergent);
+                }
+            }
 
             // Report swap rates at end of burn-in
             if n_rungs > 1 {
