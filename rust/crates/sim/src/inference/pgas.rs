@@ -278,7 +278,6 @@ pub fn log_transition_density_substep(
         // Step 1: compute effective per-capita rates (same as step_one)
         let mut probs: Vec<(usize, f64)> = Vec::new();
         let mut total_rate = 0.0_f64;
-        let mut gamma_was_used = false;  // track if gamma was actually drawn
         for &tr_idx in group {
             let rate = propensities[tr_idx];
             // Mirror step_one's logic exactly: check rate first, then deterministic.
@@ -311,22 +310,16 @@ pub fn log_transition_density_substep(
             }
             let per_capita = rate / n_src as f64;
             let effective = if let Some(_sigma_sq) = sigma_sq_by_tr[tr_idx] {
-                gamma_was_used = true;
+                // Advance gamma_idx per overdispersed transition with rate > 0.
+                // Matches step_one which pushes one gamma per such transition.
                 let g = if gamma_idx < gammas.len() { gammas[gamma_idx] } else { 1.0 };
+                gamma_idx += 1;
                 per_capita * g
             } else {
                 per_capita
             };
             total_rate += effective;
             probs.push((tr_idx, effective));
-        }
-        // Only advance gamma_idx if the overdispersed transition was actually
-        // evaluated (rate > 0). step_one only pushes to gamma_used when the
-        // Overdispersed transition has positive rate and enters the split.
-        // If it was skipped (rate=0), no gamma was drawn — gamma_idx must NOT
-        // advance, or all subsequent groups read the wrong gamma.
-        if gamma_was_used {
-            gamma_idx += 1;
         }
 
         if total_rate <= RATE_EPSILON || probs.is_empty() { continue; }
@@ -465,12 +458,61 @@ pub fn complete_data_loglik(
         }
         transition_ll += td;
 
-        // TODO: gamma multiplier density (log Gamma(g; dt/σ², σ²/dt)) is
-        // disabled. The gamma index tracking between step_one and the density
-        // doesn't align for models with zero-rate overdispersed transitions.
-        // The transition density already constrains σ² through p_total, so
-        // this is not blocking. See incident report:
-        // docs/dev/incidents/2026-04-07-spatial-pgas-neg-inf.md
+        // Gamma multiplier density: log Gamma(g; shape, scale) for each
+        // gamma recorded at this substep. The gammas are stored in order
+        // matching step_one's push order (one per overdispersed transition
+        // with rate > 0).
+        //
+        // Shape = dt / σ², Scale = σ² / dt. Mean = shape * scale = 1.
+        // This constrains the gamma multiplier to be near 1 (no overdispersion
+        // at high shape) or allow large variation (low shape = high σ²).
+        if !rec.gammas.is_empty() {
+            // Collect σ² values for overdispersed transitions in source-group order,
+            // matching the order step_one pushes to gamma_used.
+            let n_int_local = model.int_local_to_global.len();
+            let int_s_local = IntState::new(n_int_local);
+            let real_s_local = RealState::new(model.real_local_to_global.len());
+            let ctx = EvalCtx {
+                model, int_s: &int_s_local, real_s: &real_s_local,
+                params, t: model.model.simulation.t_start + s as f64 * dt,
+                projected: None,
+            };
+            let mut gamma_idx_local = 0;
+            for &(src_local, ref group) in &model.source_groups {
+                let n_src = rec.counts_before[src_local].max(0);
+                if n_src == 0 { continue; }
+                // Recompute propensities for rate check
+                let mut local_props = vec![0.0; n_tr];
+                let _ = eval_propensities(model, &{
+                    let mut s = IntState::new(n_int_local);
+                    s.counts.copy_from_slice(&rec.counts_before);
+                    s
+                }, &real_s_local, params, ctx.t, &mut local_props);
+                for &tr_idx in group {
+                    let rate = local_props[tr_idx];
+                    if rate <= RATE_EPSILON { continue; }
+                    if let ir::transition::DrawMethod::Deterministic = model.model.transitions[tr_idx].draw_method {
+                        continue;
+                    }
+                    if let Some(ref resolved_od) = model.resolved.overdispersion[tr_idx] {
+                        let sigma_sq = eval_resolved(resolved_od, &ctx);
+                        if gamma_idx_local < rec.gammas.len() && sigma_sq > 1e-30 {
+                            let g = rec.gammas[gamma_idx_local];
+                            let shape = dt / sigma_sq;
+                            let scale = sigma_sq / dt;
+                            // log Gamma(g; shape, scale) = (shape-1)*ln(g) - g/scale
+                            //   - shape*ln(scale) - ln(Gamma(shape))
+                            let log_gamma_density = (shape - 1.0) * g.max(1e-300).ln()
+                                - g / scale
+                                - shape * scale.ln()
+                                - crate::inference::obs_loglik::lgamma(shape);
+                            transition_ll += log_gamma_density;
+                        }
+                        gamma_idx_local += 1;
+                    }
+                }
+            }
+        }
 
         // Accumulate flows
         for (i, &f) in rec.flows.iter().enumerate() {

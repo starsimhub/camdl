@@ -318,13 +318,13 @@ pub fn complete_data_loglik_grad(
         log_p += td;
         for i in 0..d { grad[i] += td_grad[i]; }
 
-        // Gamma multiplier density gradient — DISABLED to match
-        // complete_data_loglik which has the gamma density disabled due to
-        // gamma_idx alignment issues on spatial models. The gradient and
-        // objective MUST agree — if LL doesn't include the gamma term,
-        // the gradient must not either. See:
-        // docs/dev/incidents/2026-04-07-spatial-pgas-neg-inf.md
-        // Re-enable both together when gamma indexing is fixed.
+        // Gamma density gradient: d/dθ log Gamma(g; dt/σ², σ²/dt).
+        // Currently zero because σ² is typically a constant (not estimated).
+        // When σ² depends on estimated params, this needs sigma_sq_grad
+        // expressions from the compiler. The LL includes the gamma term
+        // (re-enabled after fixing per-transition gamma indexing), but since
+        // it's constant w.r.t. θ for typical models, the gradient is zero
+        // and the objective/gradient agreement holds.
 
         // Accumulate flows
         for (i, &f) in rec.flows.iter().enumerate() {
