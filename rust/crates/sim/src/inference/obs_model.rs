@@ -101,12 +101,9 @@ fn eval_likelihood_resolved(
         ResolvedLikelihood::Binomial { n, p } => {
             let n_val = eval_resolved(n, &ctx(projected));
             let p_val = eval_resolved(p, &ctx(projected));
-            let k = observed.round() as i64;
-            let n_int = n_val.round() as i64;
-            if k < 0 || k > n_int { return f64::NEG_INFINITY; }
-            use crate::inference::obs_loglik::lgamma;
-            lgamma((n_int + 1) as f64) - lgamma((k + 1) as f64) - lgamma((n_int - k + 1) as f64)
-                + k as f64 * p_val.ln() + (n_int - k) as f64 * (1.0 - p_val).ln()
+            let k = observed.round().max(0.0) as u64;
+            let n_int = n_val.round().max(0.0) as u64;
+            crate::inference::obs_loglik::binom_logpmf(k, n_int, p_val)
         }
         ResolvedLikelihood::BetaBinomial { .. } => {
             log::warn!("BetaBinomial obs_loglik not implemented — returning -inf");
