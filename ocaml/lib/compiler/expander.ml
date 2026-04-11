@@ -32,6 +32,13 @@ type context = {
   (* dim name → ordered levels; populated by resolve_dimensions pass *)
   mutable origin          : string option;
   (* ISO date string for date() → float conversion *)
+  (* O(1) lookup tables — populated by build_lookup_tables after resolve_dimensions *)
+  mutable let_tbl         : (string, let_binding) Hashtbl.t;
+  mutable comp_tbl        : (string, compartment_decl) Hashtbl.t;
+  mutable scalar_param_tbl: (string, unit) Hashtbl.t;
+  mutable expanded_param_tbl : (string, unit) Hashtbl.t;
+  mutable func_tbl        : (string, func_decl) Hashtbl.t;
+  mutable expanded_comp_tbl  : (string, unit) Hashtbl.t;
 }
 
 let empty_context ?(source_dir = "") () = {
@@ -60,6 +67,12 @@ let empty_context ?(source_dir = "") () = {
   dim_decls            = [];
   dim_registry         = [];
   origin               = None;
+  let_tbl              = Hashtbl.create 0;
+  comp_tbl             = Hashtbl.create 0;
+  scalar_param_tbl     = Hashtbl.create 0;
+  expanded_param_tbl   = Hashtbl.create 0;
+  func_tbl             = Hashtbl.create 0;
+  expanded_comp_tbl    = Hashtbl.create 0;
 }
 
 (* ── Model summary ────────────────────────────────────────────────────────── *)
@@ -549,6 +562,46 @@ let get_expanded_compartments ctx =
     let c = all_expanded_compartments ctx in
     ctx.expanded_comp_cache <- Some c; c
 
+(** Build O(1) lookup tables from the declaration lists and dim_registry.
+    Call after resolve_dimensions so expanded indexed param names are known. *)
+let build_lookup_tables ctx =
+  (* let bindings: name -> binding *)
+  let lt = Hashtbl.create (List.length ctx.let_bindings) in
+  List.iter (fun lb -> Hashtbl.replace lt lb.lname lb) ctx.let_bindings;
+  ctx.let_tbl <- lt;
+  (* compartment decls: name -> decl *)
+  let ct = Hashtbl.create (List.length ctx.comp_decls) in
+  List.iter (fun cd -> Hashtbl.replace ct cd.cname cd) ctx.comp_decls;
+  ctx.comp_tbl <- ct;
+  (* scalar params: name -> unit *)
+  let spt = Hashtbl.create (List.length ctx.param_decls) in
+  List.iter (fun pd -> match pd with
+    | PScalar p -> Hashtbl.replace spt p.pname ()
+    | _ -> ()
+  ) ctx.param_decls;
+  ctx.scalar_param_tbl <- spt;
+  (* expanded indexed param names: "R0_urban" etc. -> unit *)
+  let ept = Hashtbl.create 16 in
+  List.iter (fun pd -> match pd with
+    | PIndexed { pname; pdims = [dim]; _ } ->
+      let vals = match List.assoc_opt dim ctx.dim_registry with
+        | Some vs -> vs | None -> []
+      in
+      List.iter (fun v -> Hashtbl.replace ept (pname ^ "_" ^ v) ()) vals
+    | _ -> ()
+  ) ctx.param_decls;
+  ctx.expanded_param_tbl <- ept;
+  (* func decls: name -> decl *)
+  let ft = Hashtbl.create (List.length ctx.func_decls) in
+  List.iter (fun (fd : func_decl) -> Hashtbl.replace ft fd.fname fd) ctx.func_decls;
+  ctx.func_tbl <- ft;
+  (* expanded compartment names: prime the hash table and cache *)
+  let ec = Hashtbl.create 64 in
+  let expanded = all_expanded_compartments ctx in
+  List.iter (fun n -> Hashtbl.replace ec n ()) expanded;
+  ctx.expanded_comp_tbl <- ec;
+  ctx.expanded_comp_cache <- Some expanded
+
 (* ── Table helpers ───────────────────────────────────────────────────────── *)
 
 let dim_name_of_entry = function
@@ -624,13 +677,7 @@ let is_indexed_param ctx name =
 
 (** True if [name] matches any fully-expanded indexed param (e.g. "R0_urban"). *)
 let is_expanded_indexed_param_name ctx name =
-  List.exists (fun pd ->
-    match pd with
-    | PIndexed { pname; pdims = [dim]; _ } ->
-      let vals = dim_values ctx dim in
-      List.exists (fun v -> pname ^ "_" ^ v = name) vals
-    | _ -> false
-  ) ctx.param_decls
+  Hashtbl.mem ctx.expanded_param_tbl name
 
 (** Resolve an index token in index position (inside [...]):
     1. Check substitution env  → stratum value via env binding
@@ -727,7 +774,7 @@ let rec resolve_expr ctx (env : (string * string) list) (e : expr) : Ir.expr =
       Ir.TableLookup (base_name, [Ir.Const (float_of_int linear)])
     else
     (* 2. Indexed let binding? → inline body with index vars substituted *)
-    match List.find_opt (fun lb -> lb.lname = base_name) ctx.let_bindings with
+    match Hashtbl.find_opt ctx.let_tbl base_name with
     | Some lb when lb.lindices <> [] ->
       let inner_env = List.mapi (fun i ib ->
         let var_name = match ib with
@@ -759,7 +806,8 @@ let rec resolve_expr ctx (env : (string * string) list) (e : expr) : Ir.expr =
       end
     | _ ->
     (* 2c. Indexed time function: beta[p] → Ir.TimeFunc "beta_urban" *)
-    if List.exists (fun (fd : func_decl) -> fd.fname = base_name && fd.findices <> []) ctx.func_decls then
+    if (match Hashtbl.find_opt ctx.func_tbl base_name with
+        | Some fd -> fd.findices <> [] | None -> false) then
       let idx_vals = List.map (index_item_to_str env) items in
       Ir.TimeFunc (String.concat "_" (base_name :: idx_vals))
     else
@@ -849,7 +897,7 @@ let rec resolve_expr ctx (env : (string * string) list) (e : expr) : Ir.expr =
           ~hint:"usage: mod(a, b)" ();
         Ir.Const 0.0
     end
-    else if List.exists (fun (fd : func_decl) -> fd.fname = fname) ctx.func_decls
+    else if Hashtbl.mem ctx.func_tbl fname
     then begin
       let ok = match args with
         | [] -> true                                       (* bare: seasonal *)
@@ -873,23 +921,22 @@ let rec resolve_expr ctx (env : (string * string) list) (e : expr) : Ir.expr =
 
 and resolve_ident_name ctx name ~loc =
   (* 1. Let binding? Inline it. *)
-  match List.find_opt (fun lb -> lb.lname = name) ctx.let_bindings with
+  match Hashtbl.find_opt ctx.let_tbl name with
   | Some lb ->
     normalize_expr (resolve_expr ctx [] lb.lbody)
   | None ->
   (* 2. Known expanded compartment? *)
-  let expanded = get_expanded_compartments ctx in
-  if List.mem name expanded then Ir.Pop name
-  else if List.exists (fun cd -> cd.cname = name) ctx.comp_decls then begin
+  if Hashtbl.mem ctx.expanded_comp_tbl name then Ir.Pop name
+  else if Hashtbl.mem ctx.comp_tbl name then begin
     let expansions = expand_compartment_name ctx name in
     if List.length expansions = 1 then Ir.Pop (List.hd expansions)
     else Ir.PopSum expansions
   end
-  else if List.exists (fun pd -> match pd with PScalar p -> p.pname = name | _ -> false) ctx.param_decls then
+  else if Hashtbl.mem ctx.scalar_param_tbl name then
     Ir.Param name
   else if is_expanded_indexed_param_name ctx name then
     Ir.Param name
-  else if List.exists (fun (fd : func_decl) -> fd.fname = name) ctx.func_decls then
+  else if Hashtbl.mem ctx.func_tbl name then
     Ir.TimeFunc name
   else if name = "t" then
     Ir.Time
@@ -1894,6 +1941,8 @@ let expand_detail ?(source_dir = "") (name : string) (decls : declaration list)
   collect_declarations ctx decls;
   (* Pass 1: resolve dimensions {} block, build dim_registry *)
   resolve_dimensions ctx;
+  (* Build O(1) lookup tables for resolve_expr *)
+  build_lookup_tables ctx;
   (* W103 shadowing check: let bindings vs stratum values *)
   check_shadowing ctx;
   (* E217: check that guard expressions only reference dim levels / loop vars *)
