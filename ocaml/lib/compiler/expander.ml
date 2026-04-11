@@ -177,6 +177,11 @@ let load_table_data ctx path ~dims ~n_values ~default_val =
     let arrays = Array.init n_values (fun _ -> Array.make total sentinel) in
     (* Keep track of which cells were set, for duplicate detection *)
     let set_flags = Array.make total false in
+    (* Precompute strides: dim 0 has stride = product of all later dim sizes *)
+    let strides = Array.make n_dims 1 in
+    for i = n_dims - 2 downto 0 do
+      strides.(i) <- strides.(i + 1) * (List.nth dim_sizes (i + 1))
+    done;
     let dim_names = List.map fst dim_info in
     let ic = open_in abs_path in
     (try
@@ -232,21 +237,13 @@ let load_table_data ctx path ~dims ~n_values ~default_val =
           end else begin
             (* Compute flat index from dim columns *)
             let flat_idx = ref 0 in
-            let stride = ref 1 in
-            (* strides: dim 0 has stride = product of all later dim sizes *)
-            let strides = Array.make n_dims 1 in
-            let n = n_dims in
-            for i = n - 2 downto 0 do
-              strides.(i) <- strides.(i + 1) * (List.nth dim_sizes (i + 1))
-            done;
             let ok = ref true in
             List.iteri (fun i de ->
               let dname, levels = List.nth dim_info i in
               let cell = String.trim (List.nth cols i) in
               (match List.find_index (fun v -> v = cell) levels with
                | Some idx ->
-                 flat_idx := !flat_idx + idx * strides.(i);
-                 ignore stride
+                 flat_idx := !flat_idx + idx * strides.(i)
                | None ->
                  Diagnostics.error ctx.diags
                    ~code:"E207"
@@ -298,12 +295,7 @@ let load_table_data ctx path ~dims ~n_values ~default_val =
           (* Find which dim combination this idx corresponds to *)
           let coords = ref [] in
           let rem = ref idx in
-          let n = n_dims in
-          let strides = Array.make n 1 in
-          for i = n - 2 downto 0 do
-            strides.(i) <- strides.(i + 1) * (List.nth dim_sizes (i + 1))
-          done;
-          for i = 0 to n - 1 do
+          for i = 0 to n_dims - 1 do
             let q = !rem / strides.(i) in
             rem := !rem mod strides.(i);
             let (dname, levels) = List.nth dim_info i in
