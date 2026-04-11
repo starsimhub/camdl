@@ -178,6 +178,21 @@ impl EstimatedParam {
         }
     }
 
+    /// Derivative of the transform θ(z) w.r.t. z: dθ/dz.
+    ///
+    /// Used in the chain rule to convert natural-scale gradients to the
+    /// unconstrained scale: d(f(θ))/dz = d(f)/dθ × dθ/dz.
+    pub fn transform_deriv(&self, z: f64) -> f64 {
+        match &self.transform {
+            Transform::Log { .. } => z.exp(), // θ = exp(z), dθ/dz = exp(z)
+            Transform::Logit { lo, hi } => {
+                let p = 1.0 / (1.0 + (-z).exp());
+                (hi - lo) * p * (1.0 - p) // θ = lo + (hi-lo)*σ(z), dθ/dz = (hi-lo)*σ(z)*(1-σ(z))
+            }
+            Transform::None => 1.0,
+        }
+    }
+
     /// Delta method: convert natural-scale rw_sd to transformed-scale.
     /// Matches pomp's convention: user specifies rw.sd on natural scale.
     pub fn transformed_sd(&self, natural_sd: f64, current_value: f64) -> f64 {
