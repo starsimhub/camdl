@@ -134,7 +134,8 @@ fn run_chain_binomial(
     let n_real = real_s.values.len();
 
     let mut rng = StatefulRng::new(seed);
-    let mut propensities = Vec::with_capacity(n_transitions);
+    let mut scratch = StepScratch::new(model);
+    let mut flows = vec![0u64; n_transitions];
 
     let output_times = get_output_times(&model.model.output.times);
     let mut output_idx = 0;
@@ -163,170 +164,23 @@ fn run_chain_binomial(
             real_s.clamp_nonneg();
         }
 
-        // Evaluate propensities
-        eval_propensities(model, &int_s, &real_s, params, t, &mut propensities)?;
+        // All Euler-multinomial draws, events, clamping, balance via step_one
+        for f in &mut flows { *f = 0; }
+        scratch.gamma_used.clear();
+        step_one(model, &mut int_s.counts, &mut flows, params, t, dt, &mut rng, &mut scratch)?;
 
-        // Pre-evaluate draw methods (resolves overdispersion σ² expressions
-        // from start-of-step state before any mutations).
-        enum ResolvedDraw { Poisson, Deterministic, Overdispersed(f64) }
-        let draws: Vec<ResolvedDraw> = {
-            let ctx = EvalCtx { model, int_s: &int_s, real_s: &real_s, params, t , projected: None };
-            model.model.transitions.iter().enumerate()
-                .map(|(i, tr)| match &tr.draw_method {
-                    ir::transition::DrawMethod::Poisson => Ok(ResolvedDraw::Poisson),
-                    ir::transition::DrawMethod::Deterministic => Ok(ResolvedDraw::Deterministic),
-                    ir::transition::DrawMethod::Overdispersed(_) => {
-                        let sigma_sq = eval_resolved(model.resolved.overdispersion[i].as_ref().unwrap(), &ctx);
-                        Ok(ResolvedDraw::Overdispersed(sigma_sq))
-                    }
-                })
-                .collect::<Result<_, _>>()?
-        };
-        // ── CRITICAL: deferred state update ────────────────────────────────
-        //
-        // All draws must use the START-OF-STEP state. Updates are buffered
-        // and applied simultaneously AFTER all draws complete.
-        //
-        // Why this matters: in an SEIR model, if infection (S→E) draws are
-        // applied immediately, the E compartment grows mid-step. When the
-        // progression (E→I) group is processed next, it reads the inflated E
-        // and draws more progressions than should occur in one dt. This
-        // creates a "pipeline acceleration" where individuals flow through
-        // S→E→I→R within a single timestep — physically impossible for dt
-        // shorter than the latent + infectious period.
-        //
-        // pomp's reulermultinom draws all multinomials from a frozen state
-        // snapshot, then applies all deltas at once. We do the same by
-        // accumulating (compartment_index, delta) pairs in a buffer.
-        //
-        // The propensities (line 82) are already evaluated from start-of-step
-        // state, so those are correct. The n_src reads (line below) also need
-        // the frozen state — we read from int_s which is NOT mutated during
-        // the draw loop.
-        // ──────────────────────────────────────────────────────────────────
-
-        let mut pending_deltas: Vec<(usize, i64)> = Vec::new();
-        let mut handled = vec![false; n_transitions];
-
-        // Euler-multinomial draws for transitions sharing a source compartment.
-        // Matches pomp's reulermultinom:
-        //   1. Compute effective per-capita rates (with gamma noise if overdispersed)
-        //   2. Draw total exits from Binom(n_src, 1-exp(-sum_rates * dt))
-        //   3. Split total exits proportional to rates
-        for &(src_local, ref group) in &model.source_groups {
-            let n_src = int_s.counts[src_local].max(0);
-            if n_src == 0 {
-                for &tr_idx in group { handled[tr_idx] = true; }
-                continue;
-            }
-
-            let mut rates: Vec<(usize, f64)> = Vec::with_capacity(group.len());
-            let mut total_rate = 0.0_f64;
-            for &tr_idx in group {
-                let rate = propensities[tr_idx];
-                if rate <= 0.0 {
-                    handled[tr_idx] = true;
-                    continue;
-                }
-                let per_capita = rate / n_src as f64;
-                match &draws[tr_idx] {
-                    ResolvedDraw::Deterministic => {
-                        handled[tr_idx] = true;
-                        continue;
-                    }
-                    _ => {}
-                }
-                let effective = match &draws[tr_idx] {
-                    ResolvedDraw::Overdispersed(sigma_sq) =>
-                        per_capita * rng.gamma_multiplier(*sigma_sq, dt),
-                    _ => per_capita,
-                };
-                total_rate += effective;
-                rates.push((tr_idx, effective));
-            }
-
-            if total_rate <= 0.0 || rates.is_empty() { continue; }
-
-            // Step 1: draw total exits
-            let p_total = (1.0 - (-total_rate * dt).exp()).clamp(0.0, 1.0);
-            let mut n_events = rng.binomial(n_src as u64, p_total);
-
-            // Step 2: split proportional to rates
-            let n_competing = rates.len();
-            let mut rate_remaining = total_rate;
-            for (k, &(tr_idx, eff_rate)) in rates.iter().enumerate() {
-                let count = if k == n_competing - 1 {
-                    n_events
-                } else if n_events > 0 && rate_remaining > 0.0 {
-                    let p_split = (eff_rate / rate_remaining).clamp(0.0, 1.0);
-                    let c = rng.binomial(n_events, p_split);
-                    n_events -= c;
-                    rate_remaining -= eff_rate;
-                    c
-                } else {
-                    0
-                };
-                for &(local, delta) in &model.transition_stoich[tr_idx] {
-                    pending_deltas.push((local, delta * count as i64));
-                }
-                current_flows.add(tr_idx, count);
-                handled[tr_idx] = true;
-            }
-        }
-
-        // Inflows and ungrouped transitions (no source compartment)
-        for (i, &rate) in propensities.iter().enumerate() {
-            if handled[i] || rate <= 0.0 { continue; }
-            let mean = rate * dt;
-            let count = match &draws[i] {
-                ResolvedDraw::Poisson => rng.poisson(mean),
-                ResolvedDraw::Deterministic => mean.round() as u64,
-                ResolvedDraw::Overdispersed(sigma_sq) => rng.neg_binomial(mean, *sigma_sq, dt),
-            };
-            for &(local, delta) in &model.transition_stoich[i] {
-                pending_deltas.push((local, delta * count as i64));
-            }
-            current_flows.add(i, count);
-        }
-
-        // Inject always_active event deltas (evaluated from snapshot)
-        crate::intervention::inject_event_deltas(
-            model, &int_s, &real_s, params, t, dt, &mut pending_deltas,
-        )?;
-
-        // Apply all deltas simultaneously — transitions + events atomically.
-        for (local, delta) in pending_deltas {
-            int_s.counts[local] += delta;
-        }
-
-        // Clamp non-negative (skip balance target)
-        if let Some(ref bal) = model.balance {
-            for (i, c) in int_s.counts.iter_mut().enumerate() {
-                if i == bal.local_int_idx { continue; }
-                if *c < 0 { *c = 0; }
-            }
-        } else {
-            let clamped = int_s.clamp_nonneg();
-            if clamped > 0 {
-                log::warn!("chain-binomial: clamped {} negative compartments at t={}", clamped, t);
-            }
+        // Accumulate flows into output FlowVec
+        for (i, &f) in flows.iter().enumerate() {
+            current_flows.add(i, f);
         }
 
         t += dt;
 
-        // Interventions
+        // Interventions (step_one handles always_active events internally,
+        // but scheduled interventions at specific times are handled here)
         if iv_times.get(iv_idx).copied().is_some_and(|iv| (iv - t).abs() < cfg.dt * 0.5) {
             apply_interventions_at(t, model, &mut int_s, &mut real_s, params, cfg.dt * 0.5)?;
             while iv_idx < iv_times.len() && iv_times[iv_idx] <= t + cfg.dt * 0.5 { iv_idx += 1; }
-        }
-
-        // Apply balance constraint
-        if let Some(ref bal) = model.balance {
-            let ctx = EvalCtx {
-                model, int_s: &int_s, real_s: &real_s, params, t, projected: None,
-            };
-            let val = eval_resolved(&bal.expr, &ctx);
-            int_s.counts[bal.local_int_idx] = val.round() as i64;
         }
 
         // Output
