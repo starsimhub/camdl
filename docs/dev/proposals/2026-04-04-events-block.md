@@ -1,8 +1,11 @@
-# Proposal: `events {}` block and action type taxonomy
+---
+status: implemented
+date: 2026-04-04
+implemented: "commit c43cc8a, 2026-04-04"
+note: DSL primitive for scheduled discrete state modifications (cohort pulses, importation).
+---
 
-**Status:** Implemented
-**Date:** 2026-04-04
-**Implemented:** commit `c43cc8a`, 2026-04-04
+# Proposal: `events {}` block and action type taxonomy
 **Motivation:** The He et al. 2000-nat loglik gap was caused by a
 cohort pulse implemented as a rate spike via `mod(t, 365.25)` arithmetic
 in a transition. The DSL lacked a primitive for scheduled discrete state

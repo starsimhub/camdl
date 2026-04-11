@@ -1,3 +1,13 @@
+---
+status: closed
+date: 2026-03-28
+last_updated: 2026-03-28
+items_total: 28
+items_done: 28
+items_deferred: 0
+note: Pre-implementation language spec review. Spec has since been implemented.
+---
+
 # camdl Language Spec Review
 
 **Reviewing:** `camdl-language-spec.md` v0.1-draft **Date:** 2026-03-13

@@ -1,8 +1,10 @@
-# Proposal: Correlated Pseudo-Marginal MCMC
+---
+status: superseded
+date: 2026-04-05
+note: Superseded by PGAS proposal — PGAS avoids PF variance entirely, making CPM unnecessary.
+---
 
-**Status:** Proposal
-**Date:** 2026-04-05
-**Implemented:** _(pending)_
+# Proposal: Correlated Pseudo-Marginal MCMC
 **Motivation:** Vanilla PMMH is impractical on long time series (T>500)
 because PF variance scales with T. On He et al. (T=1096), sd(log L̂) =
 30-170 at 2000 particles, giving 1-2% acceptance rates. CPM correlates

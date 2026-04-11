@@ -1,7 +1,10 @@
-# Proposal: Marginal Split Density for Spatial PGAS
+---
+status: deferred
+date: 2026-04-07
+note: PGAS all-inf log-likelihoods on spatial models with cross-patch importation. Blocked on spatial model support.
+---
 
-**Status:** Proposal
-**Date:** 2026-04-07
+# Proposal: Marginal Split Density for Spatial PGAS
 **Motivation:** PGAS produces all-`-inf` complete-data log-likelihoods on
 spatial models with cross-patch importation transitions. This blocks
 Bayesian inference on any multi-patch model.
