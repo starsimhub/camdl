@@ -234,17 +234,17 @@ pub fn run_pgas_cli(
                 csmc_sweeps_per_nuts: sc.and_then(|s| s.csmc_sweeps_per_nuts).unwrap_or(1),
             };
 
-            // Build per-stream observation specs
+            // Build multi-stream observation model (evaluates with params at call time)
             let compiled = &*config.compiled;
-            let obs_stream_specs: Vec<sim::inference::ObsStreamSpec> = config.streams.iter()
-                .map(|s| sim::inference::ObsStreamSpec {
+            let obs_model = sim::inference::MultiStreamObsModel::new(
+                config.streams.iter().map(|s| sim::inference::multi_stream_obs::StreamSpec {
                     flow_indices: s.flow_indices.clone(),
-                    obs_loglik_fn: sim::inference::obs_model::compile_obs_loglik_pf(
-                        &s.obs_model_ir, config.compiled.clone(), &config.base_params,
-                    ),
+                    ir_model: s.obs_model_ir.clone(),
                     observations: s.data.iter().map(|o| o.value).collect(),
-                })
-                .collect();
+                    obs_times: config.observations.iter().map(|o| o.time).collect(),
+                }).collect(),
+                config.compiled.clone(),
+            );
 
             let observations: Vec<sim::inference::particle_filter::Observation> =
                 config.observations.iter()
@@ -346,7 +346,7 @@ pub fn run_pgas_cli(
                 &chain_starts[chain_id],
                 &pgas_config,
                 &observations,
-                &obs_stream_specs,
+                &obs_model,
                 chain_seed,
                 Some(&progress_cb),
                 resume_states[chain_id].clone(),

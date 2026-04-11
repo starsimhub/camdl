@@ -16,12 +16,12 @@ use ir::{
 use sim::{
     compiled_model::CompiledModel,
     inference::{
-        obs_loglik::poisson_logpmf,
         particle_filter::Observation,
         if2::{EstimatedParam, Transform},
         pgas::{PGASConfig, run_pgas},
         pmmh::Prior,
-        ObsStreamSpec,
+        MultiStreamObsModel,
+        multi_stream_obs::StreamSpec,
     },
 };
 
@@ -111,15 +111,25 @@ fn mu_param() -> EstimatedParam {
     }
 }
 
-fn obs_stream() -> Vec<ObsStreamSpec> {
+fn obs_model(compiled: &Arc<CompiledModel>) -> MultiStreamObsModel {
     let obs = observations();
-    vec![ObsStreamSpec {
-        flow_indices: vec![0],
-        obs_loglik_fn: Box::new(|projected: f64, observed: f64| {
-            poisson_logpmf(observed, projected.max(0.1))
-        }),
-        observations: obs.iter().map(|o| o.value).collect(),
-    }]
+    MultiStreamObsModel::new(
+        vec![StreamSpec {
+            flow_indices: vec![0],
+            ir_model: ir::observation::ObservationModel {
+                name: "cases".into(),
+                data_stream: "cases".into(),
+                schedule: ir::observation::ObservationSchedule::FromData,
+                projection: ir::observation::Projection::CumulativeFlow("death".into()),
+                likelihood: ir::observation::Likelihood::Poisson(ir::observation::PoissonLikelihood {
+                    rate: ir::expr::Expr::Projected(ir::expr::ProjectedExpr { projected: () }),
+                }),
+            },
+            observations: obs.iter().map(|o| o.value).collect(),
+            obs_times: obs.iter().map(|o| o.time).collect(),
+        }],
+        compiled.clone(),
+    )
 }
 
 /// T1: Single rung [1.0] is deterministic — same seed gives same results.
@@ -129,7 +139,7 @@ fn test_single_rung_deterministic() {
     let obs = observations();
     let if2_params = vec![mu_param()];
     let priors = vec![Prior::Flat];
-    let streams = obs_stream();
+    let obs_m = obs_model(&compiled);
 
     let config = PGASConfig {
         n_particles: 20,
@@ -145,11 +155,10 @@ fn test_single_rung_deterministic() {
 
     let result1 = run_pgas(
         &compiled, &if2_params, &priors, &base_params,
-        &config, &obs, &streams, 12345, None, None, "hash".into(),
+        &config, &obs, &obs_m, 12345, None, None, "hash".into(),
     ).unwrap();
 
-    // Re-create obs_stream (closures are not Clone)
-    let streams2 = obs_stream();
+    let obs_m2 = obs_model(&compiled);
     let config2 = PGASConfig {
         n_particles: 20,
         n_sweeps: 50,
@@ -164,7 +173,7 @@ fn test_single_rung_deterministic() {
 
     let result2 = run_pgas(
         &compiled, &if2_params, &priors, &base_params,
-        &config2, &obs, &streams2, 12345, None, None, "hash".into(),
+        &config2, &obs, &obs_m2, 12345, None, None, "hash".into(),
     ).unwrap();
 
     assert_eq!(result1.sweeps.len(), result2.sweeps.len());
@@ -181,7 +190,7 @@ fn test_two_rungs_no_panic() {
     let obs = observations();
     let if2_params = vec![mu_param()];
     let priors = vec![Prior::Flat];
-    let streams = obs_stream();
+    let obs_m = obs_model(&compiled);
 
     let config = PGASConfig {
         n_particles: 20,
@@ -197,7 +206,7 @@ fn test_two_rungs_no_panic() {
 
     let result = run_pgas(
         &compiled, &if2_params, &priors, &base_params,
-        &config, &obs, &streams, 54321, None, None, "hash".into(),
+        &config, &obs, &obs_m, 54321, None, None, "hash".into(),
     ).unwrap();
 
     assert!(!result.sweeps.is_empty(), "should produce posterior samples with 2 rungs");
@@ -214,7 +223,7 @@ fn test_four_rungs_runs() {
     let obs = observations();
     let if2_params = vec![mu_param()];
     let priors = vec![Prior::Flat];
-    let streams = obs_stream();
+    let obs_m = obs_model(&compiled);
 
     let config = PGASConfig {
         n_particles: 20,
@@ -230,7 +239,7 @@ fn test_four_rungs_runs() {
 
     let result = run_pgas(
         &compiled, &if2_params, &priors, &base_params,
-        &config, &obs, &streams, 99999, None, None, "hash".into(),
+        &config, &obs, &obs_m, 99999, None, None, "hash".into(),
     ).unwrap();
 
     assert!(!result.sweeps.is_empty(), "should produce posterior samples with 4 rungs");

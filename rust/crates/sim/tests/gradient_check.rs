@@ -1,9 +1,11 @@
 //! Gradient validation: compare analytical gradients (from compiler-emitted
 //! derivative expressions) against finite-difference approximations.
 
+use std::sync::Arc;
 use sim::compiled_model::CompiledModel;
 use sim::inference::pgas::{IVPMapping, simulate_reference, complete_data_loglik, build_obs_at_substep};
 use sim::inference::pgas_grad::complete_data_loglik_grad;
+use sim::inference::MultiStreamObsModel;
 use sim::inference::particle_filter::Observation;
 use sim::rng::StatefulRng;
 
@@ -38,7 +40,7 @@ fn test_gradient_vs_finite_differences_sir() {
             });
         }
     }
-    let compiled = CompiledModel::new(model).unwrap();
+    let compiled = Arc::new(CompiledModel::new(model).unwrap());
 
     let param_names: Vec<String> = compiled.model.parameters.iter()
         .map(|p| p.name.clone()).collect();
@@ -62,14 +64,14 @@ fn test_gradient_vs_finite_differences_sir() {
     let observations: Vec<Observation> = vec![];
     let ivp_mappings: Vec<IVPMapping> = vec![];
 
-    let obs_streams: Vec<sim::inference::ObsStreamSpec> = vec![];
+    let obs_model = MultiStreamObsModel::empty(compiled.clone());
 
     let oas = build_obs_at_substep(&observations, compiled.model.simulation.t_start, dt);
 
     // Analytical gradient
     let (ll, grad) = complete_data_loglik_grad(
         &compiled, &trajectory, &params, &observations, dt,
-        &obs_streams, &ivp_mappings,
+        &obs_model, &ivp_mappings,
         &param_names, &param_indices, &oas,
     ).unwrap();
 
@@ -87,11 +89,11 @@ fn test_gradient_vs_finite_differences_sir() {
 
         let ll_plus = complete_data_loglik(
             &compiled, &trajectory, &p_plus, &observations, dt,
-            &obs_streams, &ivp_mappings, &oas,
+            &obs_model, &ivp_mappings, &oas,
         ).unwrap().total;
         let ll_minus = complete_data_loglik(
             &compiled, &trajectory, &p_minus, &observations, dt,
-            &obs_streams, &ivp_mappings, &oas,
+            &obs_model, &ivp_mappings, &oas,
         ).unwrap().total;
 
         let fd = (ll_plus - ll_minus) / (2.0 * eps);
@@ -138,7 +140,7 @@ fn test_nuts_target_gradient_on_z_scale() {
             });
         }
     }
-    let compiled = CompiledModel::new(model).unwrap();
+    let compiled = Arc::new(CompiledModel::new(model).unwrap());
 
     let mut rng = StatefulRng::new(42);
     let dt = compiled.model.simulation.dt.unwrap_or(1.0);
@@ -147,7 +149,7 @@ fn test_nuts_target_gradient_on_z_scale() {
 
     let observations: Vec<Observation> = vec![];
     let ivp_mappings: Vec<IVPMapping> = vec![];
-    let obs_streams: Vec<sim::inference::ObsStreamSpec> = vec![];
+    let obs_model = MultiStreamObsModel::empty(compiled.clone());
     let oas = build_obs_at_substep(&observations, compiled.model.simulation.t_start, dt);
 
     // Build EstimatedParams with Log transforms (like real inference)
@@ -185,7 +187,7 @@ fn test_nuts_target_gradient_on_z_scale() {
 
         let (ll, ll_grad_theta) = sim::inference::pgas_grad::complete_data_loglik_grad(
             &compiled, &trajectory, &params, &observations, dt,
-            &obs_streams, &ivp_mappings,
+            &obs_model, &ivp_mappings,
             &param_names, &param_indices, &oas,
         ).unwrap_or((f64::NEG_INFINITY, vec![0.0; d]));
 

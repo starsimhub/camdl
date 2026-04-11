@@ -53,6 +53,15 @@ pub struct StreamSpec {
 }
 
 impl MultiStreamObsModel {
+    /// Create an empty observation model (no streams, no data).
+    /// Used when only the transition density is needed (e.g., gradient tests
+    /// with no observation data). `log_likelihood_from_flows` returns 0.0.
+    pub fn empty(compiled: Arc<CompiledModel>) -> Self {
+        let int_s = IntState::new(compiled.int_local_to_global.len());
+        let real_s = RealState::new(compiled.real_local_to_global.len());
+        MultiStreamObsModel { streams: vec![], obs_times: vec![], compiled, int_s, real_s }
+    }
+
     pub fn new(
         stream_specs: Vec<StreamSpec>,
         compiled: Arc<CompiledModel>,

@@ -398,7 +398,7 @@ pub fn complete_data_loglik(
     params: &[f64],
     _observations: &[Observation],
     dt: f64,
-    obs_streams: &[super::types::ObsStreamSpec],
+    obs_model: &super::multi_stream_obs::MultiStreamObsModel,
     ivp_mappings: &[IVPMapping],
     obs_at_substep: &ObsAtSubstep,
 ) -> Result<LogLikComponents, SimError> {
@@ -479,7 +479,7 @@ pub fn complete_data_loglik(
 
         // Observation density — joint across all streams
         if let Some(&obs_idx) = obs_at_substep.get(&s) {
-            let obs_ll = super::types::joint_obs_weight(obs_streams, &cum_flows, obs_idx);
+            let obs_ll = obs_model.log_likelihood_from_flows(&cum_flows, obs_idx, params);
             if !obs_ll.is_finite() {
                 log::debug!("complete_data_loglik: obs density -inf at substep {} (obs_idx={})", s, obs_idx);
             }
@@ -579,7 +579,7 @@ pub fn csmc_as(
     reference: &PGASTrajectory,
     n_particles: usize,
     dt: f64,
-    obs_streams: &[super::types::ObsStreamSpec],
+    obs_model: &super::multi_stream_obs::MultiStreamObsModel,
     ivp_mappings: &[IVPMapping],
     seed: u64,
     obs_at_substep: &ObsAtSubstep,
@@ -785,8 +785,8 @@ pub fn csmc_as(
         // ── 5. Compute weights — joint across all streams ──
         if let Some(&obs_idx) = obs_at_substep.get(&s) {
             for j in 0..n_particles {
-                log_weights[j] = super::types::joint_obs_weight(
-                    obs_streams, &cum_flows[j], obs_idx);
+                log_weights[j] = obs_model.log_likelihood_from_flows(
+                    &cum_flows[j], obs_idx, params);
             }
             for j in 0..n_particles {
                 for f in &mut cum_flows[j] { *f = 0; }
@@ -1020,7 +1020,7 @@ pub fn run_pgas(
     base_params: &[f64],
     config: &PGASConfig,
     observations: &[Observation],
-    obs_streams: &[super::types::ObsStreamSpec],
+    obs_model: &super::multi_stream_obs::MultiStreamObsModel,
     seed: u64,
     on_sweep: Option<&dyn Fn(usize, &PGASSweep, &PGASTrajectory)>,
     resume_from: Option<ChainResumeState>,
@@ -1084,7 +1084,7 @@ pub fn run_pgas(
         // (before IVP mapping, which adds initial state density)
         let sanity_ll = complete_data_loglik(
             model, &trajectory, &current_params, observations,
-            config.dt, obs_streams, &[],  // empty IVP mappings
+            config.dt, obs_model, &[],  // empty IVP mappings
             &obs_at_substep,
         )?.total;
         if !sanity_ll.is_finite() {
@@ -1164,7 +1164,7 @@ pub fn run_pgas(
     // Initial complete-data log-likelihood (now includes initial state density)
     let current_ll = complete_data_loglik(
         model, &trajectory, &current_params, observations,
-        config.dt, obs_streams, &ivp_mappings, &obs_at_substep,
+        config.dt, obs_model, &ivp_mappings, &obs_at_substep,
     )?.total;
     eprintln!("  initial complete-data ll: {:.1}", current_ll);
     if !current_ll.is_finite() {
@@ -1250,13 +1250,13 @@ pub fn run_pgas(
                     ^ (rung as u64).wrapping_mul(0x6c62272e07bb0142);
                 let (new_traj, _diag) = csmc_as(
                     model, &rungs[rung].params, observations, &rungs[rung].trajectory,
-                    config.n_particles, config.dt, obs_streams,
+                    config.n_particles, config.dt, obs_model,
                     &ivp_mappings, csmc_seed, &obs_at_substep,
                 )?;
                 rungs[rung].trajectory = new_traj;
                 rungs[rung].ll = complete_data_loglik(
                     model, &rungs[rung].trajectory, &rungs[rung].params, observations,
-                    config.dt, obs_streams, &ivp_mappings, &obs_at_substep,
+                    config.dt, obs_model, &ivp_mappings, &obs_at_substep,
                 )?.total;
             }
             if warmup_sweep % 10 == 0 {
@@ -1300,7 +1300,7 @@ pub fn run_pgas(
 
                     let (ll, ll_grad_theta) = match super::pgas_grad::complete_data_loglik_grad(
                         model, rung_traj, &params, observations,
-                        config.dt, obs_streams, &ivp_mappings,
+                        config.dt, obs_model, &ivp_mappings,
                         &param_names, &param_model_indices, &obs_at_substep,
                     ) {
                         Ok(r) => r,
@@ -1449,7 +1449,7 @@ pub fn run_pgas(
 
                     let proposed_ll = complete_data_loglik(
                         model, &rungs[rung].trajectory, &proposed_params, observations,
-                        config.dt, obs_streams, &ivp_mappings, &obs_at_substep,
+                        config.dt, obs_model, &ivp_mappings, &obs_at_substep,
                     )?.total;
 
                     let proposed_log_prior_i = priors[i].log_density(theta_new, z_new);
@@ -1495,7 +1495,7 @@ pub fn run_pgas(
                     ^ (csmc_rep as u64).wrapping_mul(0xa2ce44bbfe0cf6d5);
                 let (new_trajectory, diag) = csmc_as(
                     model, &rungs[rung].params, observations, &rungs[rung].trajectory,
-                    config.n_particles, config.dt, obs_streams,
+                    config.n_particles, config.dt, obs_model,
                     &ivp_mappings, csmc_seed, &obs_at_substep,
                 )?;
                 rungs[rung].trajectory = new_trajectory;
@@ -1505,7 +1505,7 @@ pub fn run_pgas(
             // Recompute complete-data LL at β=1 (untempered, for swap proposals)
             let ll_components = complete_data_loglik(
                 model, &rungs[rung].trajectory, &rungs[rung].params, observations,
-                config.dt, obs_streams, &ivp_mappings, &obs_at_substep,
+                config.dt, obs_model, &ivp_mappings, &obs_at_substep,
             )?;
             rungs[rung].ll = ll_components.total;
 

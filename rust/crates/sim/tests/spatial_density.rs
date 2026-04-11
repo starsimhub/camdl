@@ -3,9 +3,10 @@
 //!
 //! If this fails, the density function doesn't mirror step_one.
 
+use std::sync::Arc;
 use sim::compiled_model::CompiledModel;
 use sim::inference::pgas::{simulate_reference, complete_data_loglik, log_transition_density_substep, build_obs_at_substep};
-use sim::inference::ObsStreamSpec;
+use sim::inference::MultiStreamObsModel;
 use sim::inference::pgas::IVPMapping;
 use sim::inference::particle_filter::Observation;
 use sim::rng::StatefulRng;
@@ -30,7 +31,7 @@ fn test_density_matches_step_one_sir() {
             });
         }
     }
-    let compiled = CompiledModel::new(model).unwrap();
+    let compiled = Arc::new(CompiledModel::new(model).unwrap());
     let mut params = vec![0.0; compiled.param_index.len()];
     for p in &compiled.model.parameters {
         if let Some(v) = p.value {
@@ -43,14 +44,14 @@ fn test_density_matches_step_one_sir() {
     let t_end = compiled.model.simulation.t_end;
     let trajectory = simulate_reference(&compiled, &params, t_end, dt, &mut rng).unwrap();
 
-    let obs_streams: Vec<ObsStreamSpec> = vec![];
+    let obs_model = MultiStreamObsModel::empty(compiled.clone());
     let ivp_mappings: Vec<IVPMapping> = vec![];
     let observations: Vec<Observation> = vec![];
 
     let oas = build_obs_at_substep(&observations, compiled.model.simulation.t_start, dt);
     let ll = complete_data_loglik(
         &compiled, &trajectory, &params, &observations, dt,
-        &obs_streams, &ivp_mappings, &oas,
+        &obs_model, &ivp_mappings, &oas,
     ).unwrap().total;
 
     eprintln!("  SIR basic: complete-data LL = {:.4} ({} substeps, {} transitions, {} groups)",
@@ -71,7 +72,7 @@ fn test_density_matches_step_one_sir_demography() {
             });
         }
     }
-    let compiled = CompiledModel::new(model).unwrap();
+    let compiled = Arc::new(CompiledModel::new(model).unwrap());
     let mut params = vec![0.0; compiled.param_index.len()];
     for p in &compiled.model.parameters {
         if let Some(v) = p.value {
@@ -84,14 +85,14 @@ fn test_density_matches_step_one_sir_demography() {
     let t_end = compiled.model.simulation.t_end;
     let trajectory = simulate_reference(&compiled, &params, t_end, dt, &mut rng).unwrap();
 
-    let obs_streams: Vec<ObsStreamSpec> = vec![];
+    let obs_model = MultiStreamObsModel::empty(compiled.clone());
     let ivp_mappings: Vec<IVPMapping> = vec![];
     let observations: Vec<Observation> = vec![];
 
     let oas = build_obs_at_substep(&observations, compiled.model.simulation.t_start, dt);
     let ll = complete_data_loglik(
         &compiled, &trajectory, &params, &observations, dt,
-        &obs_streams, &ivp_mappings, &oas,
+        &obs_model, &ivp_mappings, &oas,
     ).unwrap().total;
 
     eprintln!("  SIR demography: complete-data LL = {:.4} ({} substeps, {} transitions, {} groups)",
@@ -111,7 +112,7 @@ fn test_density_matches_step_one_two_patch() {
     };
     let mut model = model;
     for p in &mut model.parameters { if p.value.is_none() { p.value = Some(0.1); } }
-    let compiled = CompiledModel::new(model).unwrap();
+    let compiled = Arc::new(CompiledModel::new(model).unwrap());
     let mut params = vec![0.0; compiled.param_index.len()];
     for p in &compiled.model.parameters {
         if let Some(v) = p.value { params[compiled.param_index[p.name.as_str()]] = v; }
@@ -122,8 +123,9 @@ fn test_density_matches_step_one_two_patch() {
     let trajectory = simulate_reference(&compiled, &params, t_end, dt, &mut rng).unwrap();
     let empty_obs: Vec<Observation> = vec![];
     let oas = build_obs_at_substep(&empty_obs, compiled.model.simulation.t_start, dt);
+    let obs_model = MultiStreamObsModel::empty(compiled.clone());
     let ll = complete_data_loglik(
-        &compiled, &trajectory, &params, &empty_obs, dt, &[], &[], &oas,
+        &compiled, &trajectory, &params, &empty_obs, dt, &obs_model, &[], &oas,
     ).unwrap().total;
     eprintln!("  two_patch: LL={:.4} ({} substeps, {} tr, {} groups)",
         ll, trajectory.substeps.len(), compiled.model.transitions.len(), compiled.source_groups.len());
@@ -149,7 +151,7 @@ fn test_density_matches_step_one_polio_spatial_5() {
             p.value = Some(0.1); // default for any missing param
         }
     }
-    let compiled = CompiledModel::new(model).unwrap();
+    let compiled = Arc::new(CompiledModel::new(model).unwrap());
     let mut params = vec![0.0; compiled.param_index.len()];
     for p in &compiled.model.parameters {
         if let Some(v) = p.value {
@@ -168,14 +170,14 @@ fn test_density_matches_step_one_polio_spatial_5() {
     let t_end = compiled.model.simulation.t_end;
     let trajectory = simulate_reference(&compiled, &params, t_end, dt, &mut rng).unwrap();
 
-    let obs_streams: Vec<ObsStreamSpec> = vec![];
+    let obs_model = MultiStreamObsModel::empty(compiled.clone());
     let ivp_mappings: Vec<IVPMapping> = vec![];
     let observations: Vec<Observation> = vec![];
 
     let oas = build_obs_at_substep(&observations, compiled.model.simulation.t_start, dt);
     let ll = complete_data_loglik(
         &compiled, &trajectory, &params, &observations, dt,
-        &obs_streams, &ivp_mappings, &oas,
+        &obs_model, &ivp_mappings, &oas,
     ).unwrap().total;
 
     eprintln!("  spatial: complete-data LL = {:.4} ({} substeps)",
@@ -211,7 +213,7 @@ fn test_density_downstream_seir_spatial_5() {
             });
         }
     }
-    let compiled = CompiledModel::new(model).unwrap();
+    let compiled = Arc::new(CompiledModel::new(model).unwrap());
     let mut params = vec![0.0; compiled.param_index.len()];
     for p in &compiled.model.parameters {
         if let Some(v) = p.value {
@@ -278,8 +280,9 @@ fn test_density_downstream_seir_spatial_5() {
 
     let empty_obs: Vec<Observation> = vec![];
     let oas = build_obs_at_substep(&empty_obs, compiled.model.simulation.t_start, dt);
+    let obs_model = MultiStreamObsModel::empty(compiled.clone());
     let ll = complete_data_loglik(
-        &compiled, &trajectory, &params, &empty_obs, dt, &[], &[], &oas,
+        &compiled, &trajectory, &params, &empty_obs, dt, &obs_model, &[], &oas,
     ).unwrap().total;
     eprintln!("  complete-data LL = {:.4}", ll);
     assert!(ll.is_finite(), "LL should be finite, got {}", ll);

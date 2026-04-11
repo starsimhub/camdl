@@ -271,7 +271,7 @@ pub fn complete_data_loglik_grad(
     params: &[f64],
     _observations: &[Observation],
     dt: f64,
-    obs_streams: &[super::types::ObsStreamSpec],
+    obs_model: &super::multi_stream_obs::MultiStreamObsModel,
     ivp_mappings: &[IVPMapping],
     param_names: &[String],
     param_indices: &[usize],
@@ -333,7 +333,7 @@ pub fn complete_data_loglik_grad(
 
         // Observation density (gradient is zero when obs params are fixed)
         if let Some(&obs_idx) = obs_at_substep.get(&s) {
-            log_p += super::types::joint_obs_weight(obs_streams, &cum_flows, obs_idx);
+            log_p += obs_model.log_likelihood_from_flows(&cum_flows, obs_idx, params);
             for f in &mut cum_flows { *f = 0; }
         }
     }
