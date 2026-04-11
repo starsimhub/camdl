@@ -323,38 +323,55 @@ let check_reserved ctx name kind =
       ~hint:"choose a different name" ()
 
 let collect_declarations ctx decls =
+  (* Use List.rev_append (prepend reversed chunk) during iteration, then
+     reverse each list once at the end.  This avoids O(n) per append. *)
   List.iter (fun d -> match d with
     | DTimeUnit u        -> ctx.time_unit <- u
     | DDescription s     -> ctx.description <- Some s
     | DOrigin s          -> ctx.origin <- Some s
-    | DDimensions es     -> ctx.dim_decls <- ctx.dim_decls @ es
+    | DDimensions es     -> ctx.dim_decls <- List.rev_append es ctx.dim_decls
     | DCompartments cs   ->
       List.iter (fun (c : compartment_decl) -> check_reserved ctx c.cname "compartment") cs;
-      ctx.comp_decls <- ctx.comp_decls @ cs
+      ctx.comp_decls <- List.rev_append cs ctx.comp_decls
     | DParameters ps     ->
       List.iter (fun p -> match p with
         | PScalar s  -> check_reserved ctx s.pname "parameter"
         | PIndexed s -> check_reserved ctx s.pname "parameter") ps;
-      ctx.param_decls <- ctx.param_decls @ ps
+      ctx.param_decls <- List.rev_append ps ctx.param_decls
     | DLet lb            ->
       check_reserved ctx lb.lname "let binding";
-      ctx.let_bindings <- ctx.let_bindings @ [lb]
+      ctx.let_bindings <- lb :: ctx.let_bindings
     | DStratify sd       ->
-      ctx.stratifies <- ctx.stratifies @ [sd]
-    | DTransitions trs   -> ctx.transitions <- ctx.transitions @ trs
-    | DInit ies          -> ctx.init_entries <- ctx.init_entries @ ies
+      ctx.stratifies <- sd :: ctx.stratifies
+    | DTransitions trs   -> ctx.transitions <- List.rev_append trs ctx.transitions
+    | DInit ies          -> ctx.init_entries <- List.rev_append ies ctx.init_entries
     | DSimulate sd       -> ctx.simulate <- Some sd
-    | DODE odes          -> ctx.ode_decls <- ctx.ode_decls @ odes
-    | DForcing fs        -> ctx.func_decls <- ctx.func_decls @ fs
-    | DObservations obs  -> ctx.obs_decls <- ctx.obs_decls @ obs
-    | DInterventions ivs -> ctx.interv_decls <- ctx.interv_decls @ ivs
+    | DODE odes          -> ctx.ode_decls <- List.rev_append odes ctx.ode_decls
+    | DForcing fs        -> ctx.func_decls <- List.rev_append fs ctx.func_decls
+    | DObservations obs  -> ctx.obs_decls <- List.rev_append obs ctx.obs_decls
+    | DInterventions ivs -> ctx.interv_decls <- List.rev_append ivs ctx.interv_decls
     | DOutput od         -> ctx.output_decl <- Some od
-    | DTables tds        -> ctx.table_decls <- ctx.table_decls @ tds
+    | DTables tds        -> ctx.table_decls <- List.rev_append tds ctx.table_decls
     | DTimepoints _      -> ()
-    | DScenarios ss      -> ctx.scenario_decls <- ctx.scenario_decls @ ss
+    | DScenarios ss      -> ctx.scenario_decls <- List.rev_append ss ctx.scenario_decls
     | DBalance bd        -> ctx.balance_decl <- Some bd
-    | DEvents evs        -> ctx.event_decls <- ctx.event_decls @ evs
+    | DEvents evs        -> ctx.event_decls <- List.rev_append evs ctx.event_decls
   ) decls;
+  (* Reverse all accumulated lists to restore declaration order *)
+  ctx.dim_decls      <- List.rev ctx.dim_decls;
+  ctx.comp_decls     <- List.rev ctx.comp_decls;
+  ctx.param_decls    <- List.rev ctx.param_decls;
+  ctx.let_bindings   <- List.rev ctx.let_bindings;
+  ctx.stratifies     <- List.rev ctx.stratifies;
+  ctx.transitions    <- List.rev ctx.transitions;
+  ctx.init_entries   <- List.rev ctx.init_entries;
+  ctx.ode_decls      <- List.rev ctx.ode_decls;
+  ctx.func_decls     <- List.rev ctx.func_decls;
+  ctx.obs_decls      <- List.rev ctx.obs_decls;
+  ctx.interv_decls   <- List.rev ctx.interv_decls;
+  ctx.table_decls    <- List.rev ctx.table_decls;
+  ctx.scenario_decls <- List.rev ctx.scenario_decls;
+  ctx.event_decls    <- List.rev ctx.event_decls;
   ctx.orig_transitions <- ctx.transitions
 
 (* ── Dimensions pass ─────────────────────────────────────────────────────── *)
