@@ -59,3 +59,4 @@ web/dist/
 web/compiler-server/node_modules/
 web/src/lib/wasm/pkg/
 web/.env.local
+review-zips/
