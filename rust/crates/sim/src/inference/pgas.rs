@@ -978,6 +978,28 @@ fn prior_log_density_and_grad_z(
 }
 
 // ═══════════════════════════════════════════════════════════════════
+// Rung state for parallel tempering
+// ═══════════════════════════════════════════════════════════════════
+
+/// Per-rung state for parallel tempering. Consolidates the 12+ parallel
+/// vectors that were previously maintained separately.
+struct RungState {
+    params: Vec<f64>,
+    transformed: Vec<f64>,
+    ll: f64,
+    trajectory: PGASTrajectory,
+    nuts_mass: super::nuts::MassMatrix,
+    nuts_step_size: f64,
+    nuts_dual_avg: super::nuts::DualAveraging,
+    log_proposal_sd: Vec<f64>,
+    total_accepted: Vec<usize>,
+    welford_n: f64,
+    welford_mean: Vec<f64>,
+    welford_m2: Vec<f64>,
+    welford_cov: Vec<f64>,
+}
+
+// ═══════════════════════════════════════════════════════════════════
 // Main PGAS loop
 // ═══════════════════════════════════════════════════════════════════
 
@@ -1172,13 +1194,6 @@ pub fn run_pgas(
         eprintln!("  parallel tempering: {} rungs, β = {:?}", n_rungs, betas);
     }
 
-    // Per-rung state: rung 0 is cold (β=1), higher indices are hotter.
-    // All rungs start from the same initial state.
-    let mut rung_params: Vec<Vec<f64>> = vec![current_params.clone(); n_rungs];
-    let mut rung_transformed: Vec<Vec<f64>> = vec![current_transformed.clone(); n_rungs];
-    let mut rung_ll: Vec<f64> = vec![current_ll; n_rungs];
-    let mut rung_trajectory: Vec<PGASTrajectory> = vec![trajectory.clone(); n_rungs];
-
     // NUTS state — restored from resume or initialized fresh (cold rung only,
     // heated rungs start fresh per the spec).
     let (nuts_mass_init, nuts_step_size_init, log_proposal_sd_restored,
@@ -1188,37 +1203,31 @@ pub fn run_pgas(
         (super::nuts::MassMatrix::identity(d), 0.1, log_proposal_sd, vec![0usize; d], None)
     };
 
-    // Per-rung adaptation state
-    let mut rung_nuts_mass: Vec<super::nuts::MassMatrix> = (0..n_rungs)
-        .map(|r| if r == 0 { nuts_mass_init.clone() } else { super::nuts::MassMatrix::identity(d) })
-        .collect();
-    let mut rung_nuts_step_size: Vec<f64> = (0..n_rungs)
-        .map(|r| if r == 0 { nuts_step_size_init } else { 0.1 })
-        .collect();
-    let mut rung_log_proposal_sd: Vec<Vec<f64>> = (0..n_rungs)
-        .map(|r| if r == 0 { log_proposal_sd_restored.clone() } else {
-            // Heated rungs: same initial proposal SD as cold
-            log_proposal_sd_restored.clone()
-        })
-        .collect();
-    let mut rung_total_accepted: Vec<Vec<usize>> = (0..n_rungs)
-        .map(|r| if r == 0 { total_accepted_init.clone() } else { vec![0usize; d] })
-        .collect();
-    let mut rung_nuts_dual_avg: Vec<super::nuts::DualAveraging> = (0..n_rungs)
-        .map(|r| super::nuts::DualAveraging::new(rung_nuts_step_size[r], 0.80))
-        .collect();
-
-    // Per-rung Welford statistics for mass matrix adaptation
-    let mut rung_welford_n: Vec<f64> = vec![0.0; n_rungs];
-    let mut rung_welford_mean: Vec<Vec<f64>> = vec![vec![0.0; d]; n_rungs];
-    let mut rung_welford_m2: Vec<Vec<f64>> = vec![vec![0.0; d]; n_rungs];
-    let mut rung_welford_cov: Vec<Vec<f64>> = vec![vec![0.0; d * d]; n_rungs];
+    // Per-rung state: rung 0 is cold (β=1), higher indices are hotter.
+    let mut rungs: Vec<RungState> = (0..n_rungs).map(|r| {
+        let step_size = if r == 0 { nuts_step_size_init } else { 0.1 };
+        RungState {
+            params: current_params.clone(),
+            transformed: current_transformed.clone(),
+            ll: current_ll,
+            trajectory: trajectory.clone(),
+            nuts_mass: if r == 0 { nuts_mass_init.clone() } else { super::nuts::MassMatrix::identity(d) },
+            nuts_step_size: step_size,
+            nuts_dual_avg: super::nuts::DualAveraging::new(step_size, 0.80),
+            log_proposal_sd: log_proposal_sd_restored.clone(),
+            total_accepted: if r == 0 { total_accepted_init.clone() } else { vec![0usize; d] },
+            welford_n: 0.0,
+            welford_mean: vec![0.0; d],
+            welford_m2: vec![0.0; d],
+            welford_cov: vec![0.0; d * d],
+        }
+    }).collect();
 
     let mut sweeps = Vec::new();
 
     // Override cold rung LL if we have a resumed value
     if let Some(ll) = current_ll_restored {
-        rung_ll[0] = ll;
+        rungs[0].ll = ll;
     }
 
     // Swap acceptance tracking (n_rungs - 1 adjacent pairs)
@@ -1240,22 +1249,22 @@ pub fn run_pgas(
                 let csmc_seed = seed ^ ((warmup_sweep as u64).wrapping_mul(0x517cc1b727220a95))
                     ^ (rung as u64).wrapping_mul(0x6c62272e07bb0142);
                 let (new_traj, _diag) = csmc_as(
-                    model, &rung_params[rung], observations, &rung_trajectory[rung],
+                    model, &rungs[rung].params, observations, &rungs[rung].trajectory,
                     config.n_particles, config.dt, obs_streams,
                     &ivp_mappings, csmc_seed, &obs_at_substep,
                 )?;
-                rung_trajectory[rung] = new_traj;
-                rung_ll[rung] = complete_data_loglik(
-                    model, &rung_trajectory[rung], &rung_params[rung], observations,
+                rungs[rung].trajectory = new_traj;
+                rungs[rung].ll = complete_data_loglik(
+                    model, &rungs[rung].trajectory, &rungs[rung].params, observations,
                     config.dt, obs_streams, &ivp_mappings, &obs_at_substep,
                 )?.total;
             }
             if warmup_sweep % 10 == 0 {
                 eprintln!("  trajectory warm-up {}/{}: cold LL={:.1}",
-                    warmup_sweep, config.trajectory_warmup, rung_ll[0]);
+                    warmup_sweep, config.trajectory_warmup, rungs[0].ll);
             }
         }
-        eprintln!("  trajectory warm-up complete: cold LL={:.1}", rung_ll[0]);
+        eprintln!("  trajectory warm-up complete: cold LL={:.1}", rungs[0].ll);
     }
 
     for sweep in start_sweep..config.n_sweeps {
@@ -1271,7 +1280,7 @@ pub fn run_pgas(
             let beta = betas[rung];
 
             // Current proposal SDs for this rung (MH only)
-            let proposal_sd: Vec<f64> = rung_log_proposal_sd[rung].iter()
+            let proposal_sd: Vec<f64> = rungs[rung].log_proposal_sd.iter()
                 .map(|&ls| ls.exp())
                 .collect();
 
@@ -1281,10 +1290,10 @@ pub fn run_pgas(
             if has_gradients {
                 let param_names: Vec<String> = if2_params.iter().map(|p| p.name.clone()).collect();
                 let param_model_indices: Vec<usize> = if2_params.iter().map(|p| p.index).collect();
-                let rung_traj = &rung_trajectory[rung];
+                let rung_traj = &rungs[rung].trajectory;
 
                 let log_prob_and_grad = |z: &[f64]| -> (f64, Vec<f64>) {
-                    let mut params = rung_params[rung].clone();
+                    let mut params = rungs[rung].params.clone();
                     for (i, spec) in if2_params.iter().enumerate() {
                         params[spec.index] = spec.from_transformed(z[i]);
                     }
@@ -1324,26 +1333,26 @@ pub fn run_pgas(
                     (log_p, grad_z)
                 };
 
-                let (init_log_p, init_grad) = log_prob_and_grad(&rung_transformed[rung]);
+                let (init_log_p, init_grad) = log_prob_and_grad(&rungs[rung].transformed);
 
                 let nuts_config = super::nuts::NUTSConfig {
                     max_tree_depth: config.max_tree_depth,
-                    step_size: rung_nuts_step_size[rung],
-                    mass_matrix: rung_nuts_mass[rung].clone(),
+                    step_size: rungs[rung].nuts_step_size,
+                    mass_matrix: rungs[rung].nuts_mass.clone(),
                 };
 
                 let result = super::nuts::nuts_step(
-                    &rung_transformed[rung], init_log_p, &init_grad,
+                    &rungs[rung].transformed, init_log_p, &init_grad,
                     &nuts_config, &log_prob_and_grad, &mut rng,
                 );
 
                 if result.accepted {
-                    rung_transformed[rung].copy_from_slice(&result.params);
+                    rungs[rung].transformed.copy_from_slice(&result.params);
                     for (i, spec) in if2_params.iter().enumerate() {
-                        rung_params[rung][spec.index] = spec.from_transformed(rung_transformed[rung][i]);
+                        rungs[rung].params[spec.index] = spec.from_transformed(rungs[rung].transformed[i]);
                     }
                     for a in &mut rung_accepted[rung] { *a = true; }
-                    for t in &mut rung_total_accepted[rung] { *t += 1; }
+                    for t in &mut rungs[rung].total_accepted { *t += 1; }
                 }
                 if rung == 0 {
                     if result.tree_depth >= config.max_tree_depth {
@@ -1358,33 +1367,33 @@ pub fn run_pgas(
                 let mass_adapt_end = (adapt_end as f64 * 0.7) as usize;
 
                 if sweep < mass_adapt_end {
-                    rung_nuts_step_size[rung] = rung_nuts_dual_avg[rung].update(result.mean_accept_prob);
+                    rungs[rung].nuts_step_size = rungs[rung].nuts_dual_avg.update(result.mean_accept_prob);
 
-                    rung_welford_n[rung] += 1.0;
-                    let old_mean = rung_welford_mean[rung].clone();
+                    rungs[rung].welford_n += 1.0;
+                    let old_mean = rungs[rung].welford_mean.clone();
                     for i in 0..d {
-                        let delta = rung_transformed[rung][i] - rung_welford_mean[rung][i];
-                        rung_welford_mean[rung][i] += delta / rung_welford_n[rung];
-                        let delta2 = rung_transformed[rung][i] - rung_welford_mean[rung][i];
-                        rung_welford_m2[rung][i] += delta * delta2;
+                        let delta = rungs[rung].transformed[i] - rungs[rung].welford_mean[i];
+                        rungs[rung].welford_mean[i] += delta / rungs[rung].welford_n;
+                        let delta2 = rungs[rung].transformed[i] - rungs[rung].welford_mean[i];
+                        rungs[rung].welford_m2[i] += delta * delta2;
                     }
                     for i in 0..d {
                         for j in 0..d {
-                            rung_welford_cov[rung][i * d + j] +=
-                                (rung_transformed[rung][i] - old_mean[i])
-                                * (rung_transformed[rung][j] - rung_welford_mean[rung][j]);
+                            rungs[rung].welford_cov[i * d + j] +=
+                                (rungs[rung].transformed[i] - old_mean[i])
+                                * (rungs[rung].transformed[j] - rungs[rung].welford_mean[j]);
                         }
                     }
                 } else if sweep == mass_adapt_end {
-                    if rung_welford_n[rung] > 10.0 {
+                    if rungs[rung].welford_n > 10.0 {
                         if config.dense_mass {
                             let mut cov = vec![0.0; d * d];
                             for i in 0..d {
                                 for j in 0..d {
-                                    cov[i * d + j] = rung_welford_cov[rung][i * d + j] / (rung_welford_n[rung] - 1.0);
+                                    cov[i * d + j] = rungs[rung].welford_cov[i * d + j] / (rungs[rung].welford_n - 1.0);
                                 }
                             }
-                            rung_nuts_mass[rung] = super::nuts::MassMatrix::dense_from_covariance(&cov, d);
+                            rungs[rung].nuts_mass = super::nuts::MassMatrix::dense_from_covariance(&cov, d);
                             if rung == 0 {
                                 eprintln!("  dense mass matrix estimated (sweep {}):", sweep);
                                 for (i, spec) in if2_params.iter().enumerate() {
@@ -1404,7 +1413,7 @@ pub fn run_pgas(
                             }
                         } else {
                             let variances: Vec<f64> = (0..d).map(|i|
-                                (rung_welford_m2[rung][i] / (rung_welford_n[rung] - 1.0)).max(1e-10)
+                                (rungs[rung].welford_m2[i] / (rungs[rung].welford_n - 1.0)).max(1e-10)
                             ).collect();
                             if rung == 0 {
                                 eprintln!("  diagonal mass matrix estimated (sweep {}):", sweep);
@@ -1412,63 +1421,63 @@ pub fn run_pgas(
                                     eprintln!("    {:12} sd={:.6}", spec.name, variances[i].sqrt());
                                 }
                             }
-                            rung_nuts_mass[rung] = super::nuts::MassMatrix::diagonal(variances);
+                            rungs[rung].nuts_mass = super::nuts::MassMatrix::diagonal(variances);
                         }
                     }
-                    rung_nuts_step_size[rung] = 0.1;
-                    rung_nuts_dual_avg[rung] = super::nuts::DualAveraging::new(rung_nuts_step_size[rung], 0.80);
+                    rungs[rung].nuts_step_size = 0.1;
+                    rungs[rung].nuts_dual_avg = super::nuts::DualAveraging::new(rungs[rung].nuts_step_size, 0.80);
                 } else if sweep < adapt_end {
-                    rung_nuts_step_size[rung] = rung_nuts_dual_avg[rung].update(result.mean_accept_prob);
+                    rungs[rung].nuts_step_size = rungs[rung].nuts_dual_avg.update(result.mean_accept_prob);
                 } else if sweep == adapt_end && rung == 0 {
-                    rung_nuts_step_size[rung] = rung_nuts_dual_avg[rung].final_step_size();
+                    rungs[rung].nuts_step_size = rungs[rung].nuts_dual_avg.final_step_size();
                     eprintln!("  NUTS fully adapted (sweep {}):", sweep);
-                    eprintln!("    final step_size: {:.6}", rung_nuts_step_size[rung]);
+                    eprintln!("    final step_size: {:.6}", rungs[rung].nuts_step_size);
                 } else if sweep == adapt_end {
-                    rung_nuts_step_size[rung] = rung_nuts_dual_avg[rung].final_step_size();
+                    rungs[rung].nuts_step_size = rungs[rung].nuts_dual_avg.final_step_size();
                 }
             } else {
                 // MH-within-Gibbs: one-at-a-time random walk proposals
                 // For heated rungs, scale LL by β in the MH ratio.
                 for i in 0..d {
                     let spec = &if2_params[i];
-                    let z_old = rung_transformed[rung][i];
+                    let z_old = rungs[rung].transformed[i];
                     let z_new = z_old + proposal_sd[i] * rng.normal();
                     let theta_new = spec.from_transformed(z_new);
 
-                    let mut proposed_params = rung_params[rung].clone();
+                    let mut proposed_params = rungs[rung].params.clone();
                     proposed_params[spec.index] = theta_new;
 
                     let proposed_ll = complete_data_loglik(
-                        model, &rung_trajectory[rung], &proposed_params, observations,
+                        model, &rungs[rung].trajectory, &proposed_params, observations,
                         config.dt, obs_streams, &ivp_mappings, &obs_at_substep,
                     )?.total;
 
                     let proposed_log_prior_i = priors[i].log_density(theta_new, z_new);
                     let current_log_prior_i = priors[i].log_density(
-                        rung_params[rung][spec.index], z_old,
+                        rungs[rung].params[spec.index], z_old,
                     );
                     let proposed_log_jac_i = spec.log_jacobian(z_new);
                     let current_log_jac_i = spec.log_jacobian(z_old);
 
                     // Temper: scale LL difference by β, prior + Jacobian untempered
-                    let log_alpha = beta * (proposed_ll - rung_ll[rung])
+                    let log_alpha = beta * (proposed_ll - rungs[rung].ll)
                                   + (proposed_log_prior_i - current_log_prior_i)
                                   + (proposed_log_jac_i - current_log_jac_i);
 
                     if log_alpha.is_finite() && rng.uniform().ln() < log_alpha {
-                        rung_params[rung][spec.index] = theta_new;
-                        rung_transformed[rung][i] = z_new;
-                        rung_ll[rung] = proposed_ll;
+                        rungs[rung].params[spec.index] = theta_new;
+                        rungs[rung].transformed[i] = z_new;
+                        rungs[rung].ll = proposed_ll;
                         rung_accepted[rung][i] = true;
-                        rung_total_accepted[rung][i] += 1;
+                        rungs[rung].total_accepted[i] += 1;
                     }
 
                     // Robbins-Monro adaptation (per-rung)
                     if sweep < adapt_end {
                         let gamma_rm = ADAPT_C / (1.0 + sweep as f64).sqrt();
                         let acc_indicator = if rung_accepted[rung][i] { 1.0 } else { 0.0 };
-                        rung_log_proposal_sd[rung][i] += gamma_rm * (acc_indicator - TARGET_ACCEPTANCE);
-                        rung_log_proposal_sd[rung][i] = rung_log_proposal_sd[rung][i].clamp(-20.0, 5.0);
+                        rungs[rung].log_proposal_sd[i] += gamma_rm * (acc_indicator - TARGET_ACCEPTANCE);
+                        rungs[rung].log_proposal_sd[i] = rungs[rung].log_proposal_sd[i].clamp(-20.0, 5.0);
                     }
                 }
             }
@@ -1485,20 +1494,20 @@ pub fn run_pgas(
                     ^ (rung as u64).wrapping_mul(0x6c62272e07bb0142)
                     ^ (csmc_rep as u64).wrapping_mul(0xa2ce44bbfe0cf6d5);
                 let (new_trajectory, diag) = csmc_as(
-                    model, &rung_params[rung], observations, &rung_trajectory[rung],
+                    model, &rungs[rung].params, observations, &rungs[rung].trajectory,
                     config.n_particles, config.dt, obs_streams,
                     &ivp_mappings, csmc_seed, &obs_at_substep,
                 )?;
-                rung_trajectory[rung] = new_trajectory;
+                rungs[rung].trajectory = new_trajectory;
                 csmc_diag = diag;
             }
 
             // Recompute complete-data LL at β=1 (untempered, for swap proposals)
             let ll_components = complete_data_loglik(
-                model, &rung_trajectory[rung], &rung_params[rung], observations,
+                model, &rungs[rung].trajectory, &rungs[rung].params, observations,
                 config.dt, obs_streams, &ivp_mappings, &obs_at_substep,
             )?;
-            rung_ll[rung] = ll_components.total;
+            rungs[rung].ll = ll_components.total;
 
             rung_csmc_diag.push(csmc_diag);
 
@@ -1520,29 +1529,14 @@ pub fn run_pgas(
 
                 // Acceptance: α = min(1, exp((β_i - β_j) * (LL_i - LL_j)))
                 // where LL is the UNTEMPERED complete-data log-likelihood.
-                let log_alpha = (betas[i] - betas[j]) * (rung_ll[i] - rung_ll[j]);
+                let log_alpha = (betas[i] - betas[j]) * (rungs[i].ll - rungs[j].ll);
 
                 if log_alpha >= 0.0 || rng.uniform().ln() < log_alpha {
                     swap_accepted[i] += 1;
 
                     // Swap all state between rungs i and j
-                    rung_params.swap(i, j);
-                    rung_transformed.swap(i, j);
-                    rung_ll.swap(i, j);
-                    rung_trajectory.swap(i, j);
+                    rungs.swap(i, j);
                     rung_accepted.swap(i, j);
-
-                    // Adaptation state swaps WITH the parameters (it belongs
-                    // to the parameter state, not the temperature).
-                    rung_nuts_mass.swap(i, j);
-                    rung_nuts_step_size.swap(i, j);
-                    rung_log_proposal_sd.swap(i, j);
-                    rung_total_accepted.swap(i, j);
-                    rung_nuts_dual_avg.swap(i, j);
-                    rung_welford_n.swap(i, j);
-                    rung_welford_mean.swap(i, j);
-                    rung_welford_m2.swap(i, j);
-                    rung_welford_cov.swap(i, j);
                 }
 
                 i += 2;
@@ -1554,9 +1548,9 @@ pub fn run_pgas(
         if sweep + 1 == adapt_end {
             eprintln!("  proposal SD adapted (end of burn-in):");
             for (i, spec) in if2_params.iter().enumerate() {
-                let acc_rate = rung_total_accepted[0][i] as f64 / (sweep + 1) as f64;
+                let acc_rate = rungs[0].total_accepted[i] as f64 / (sweep + 1) as f64;
                 eprintln!("    {:12} sd={:.6} acc={:.0}%",
-                    spec.name, rung_log_proposal_sd[0][i].exp(), acc_rate * 100.0);
+                    spec.name, rungs[0].log_proposal_sd[i].exp(), acc_rate * 100.0);
             }
             eprintln!("  trajectory renewal: {:.1}%", rung_csmc_diag[0].trajectory_renewal * 100.0);
 
@@ -1599,13 +1593,13 @@ pub fn run_pgas(
             eprintln!("  sweep {}: swap rates [{}]", sweep, rates.join(", "));
         }
 
-        let cold_proposal_sd: Vec<f64> = rung_log_proposal_sd[0].iter()
+        let cold_proposal_sd: Vec<f64> = rungs[0].log_proposal_sd.iter()
             .map(|&ls| ls.exp())
             .collect();
 
         let sweep_result = PGASSweep {
-            params: rung_params[0].clone(),
-            log_complete_data_ll: rung_ll[0],
+            params: rungs[0].params.clone(),
+            log_complete_data_ll: rungs[0].ll,
             accepted: rung_accepted[0].clone(),
             csmc_diag: rung_csmc_diag[0].clone(),
             proposal_sds: cold_proposal_sd,
@@ -1614,7 +1608,7 @@ pub fn run_pgas(
         };
 
         if let Some(cb) = on_sweep {
-            cb(sweep, &sweep_result, &rung_trajectory[0]);
+            cb(sweep, &sweep_result, &rungs[0].trajectory);
         }
 
         // Record (respecting burn-in and thinning)
@@ -1623,27 +1617,27 @@ pub fn run_pgas(
         }
     }
 
-    let acceptance_rates: Vec<f64> = rung_total_accepted[0].iter()
+    let acceptance_rates: Vec<f64> = rungs[0].total_accepted.iter()
         .map(|&n| n as f64 / config.n_sweeps as f64)
         .collect();
 
     let resume_state = ChainResumeState {
         config_hash,
         completed_sweeps: config.n_sweeps,
-        params: rung_params[0].clone(),
-        transformed: rung_transformed[0].clone(),
+        params: rungs[0].params.clone(),
+        transformed: rungs[0].transformed.clone(),
         param_names: if2_params.iter().map(|p| p.name.clone()).collect(),
-        trajectory: rung_trajectory[0].clone(),
-        mass_matrix: rung_nuts_mass[0].clone(),
-        nuts_step_size: rung_nuts_step_size[0],
-        log_proposal_sd: rung_log_proposal_sd[0].clone(),
-        total_accepted: rung_total_accepted[0].clone(),
-        current_ll: rung_ll[0],
+        trajectory: rungs[0].trajectory.clone(),
+        mass_matrix: rungs[0].nuts_mass.clone(),
+        nuts_step_size: rungs[0].nuts_step_size,
+        log_proposal_sd: rungs[0].log_proposal_sd.clone(),
+        total_accepted: rungs[0].total_accepted.clone(),
+        current_ll: rungs[0].ll,
     };
 
     Ok(PGASResult {
         sweeps,
-        final_trajectory: rung_trajectory[0].clone(),
+        final_trajectory: rungs[0].trajectory.clone(),
         acceptance_rates,
         resume_state,
     })
