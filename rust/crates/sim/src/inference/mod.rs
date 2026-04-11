@@ -11,12 +11,15 @@
 //!   IF2               — iterated filtering (MLE via perturbed PF)
 //!   PMMH              — Bayesian posterior via MCMC with PF likelihood
 
+pub mod traits;
 pub mod obs_loglik;
 pub mod resampling;
 pub mod particle_filter;
 pub mod if2;
 pub mod types;
 pub mod obs_model;
+pub mod multi_stream_obs;
+pub mod chain_binomial_process;
 pub mod pmmh;
 pub mod correlated_pf;
 pub mod pgas;
@@ -29,6 +32,9 @@ pub mod diagnostic;
 pub use types::{ParticleState, ParticleSwarm, ObsStreamSpec, joint_obs_weight, joint_obs_weight_particle};
 pub use obs_loglik::{negbin_logpmf, normal_logpdf, discretized_normal_logpmf, normal_cdf};
 pub use particle_filter::bootstrap_filter;
+pub use traits::{ProcessModel, DensityProcess, ObservationModel, Resettable, SMCConfig};
+pub use chain_binomial_process::ChainBinomialProcess;
+pub use multi_stream_obs::MultiStreamObsModel;
 
 /// Required for all inference. Every model can do this.
 /// The "plug-and-play" property: simulate forward, don't need densities.

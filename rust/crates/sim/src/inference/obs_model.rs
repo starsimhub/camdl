@@ -47,7 +47,7 @@ pub fn compile_obs_loglik_pf(
 }
 
 /// Resolve a Likelihood using the compiled model's index maps.
-fn resolve_likelihood_from_model(
+pub(crate) fn resolve_likelihood_from_model(
     likelihood: &ir::observation::Likelihood,
     compiled: &CompiledModel,
 ) -> ResolvedLikelihood {
@@ -70,7 +70,7 @@ fn resolve_likelihood_from_model(
 }
 
 /// Evaluate a resolved likelihood at (projected, observed, params).
-fn eval_likelihood_resolved(
+pub(crate) fn eval_likelihood_resolved(
     likelihood: &ResolvedLikelihood,
     projected: f64,
     observed: f64,
@@ -154,7 +154,7 @@ pub fn compile_obs_mean_pf(
 }
 
 /// Draw one sample from the resolved observation model.
-fn sample_obs_resolved(
+pub(crate) fn sample_obs_resolved(
     likelihood: &ResolvedLikelihood,
     projected: f64,
     params: &[f64],
@@ -201,7 +201,7 @@ fn sample_obs_resolved(
 }
 
 /// Compute E[y | projected, params] — the observation model mean, no sampling.
-fn eval_obs_mean_resolved(
+pub(crate) fn eval_obs_mean_resolved(
     likelihood: &ResolvedLikelihood,
     projected: f64,
     params: &[f64],

@@ -3,6 +3,8 @@
 //! Flat array layout for cache-friendly resampling — copying a particle's
 //! state is one contiguous memcpy, not a pointer chase through Vec<Vec<...>>.
 
+use super::traits::Resettable;
+
 /// State of one particle: compartment counts + flow accumulators.
 #[derive(Clone, Debug)]
 pub struct ParticleState {
@@ -26,6 +28,15 @@ impl ParticleState {
         for f in &mut self.flow_accumulators { *f = 0; }
     }
 
+}
+
+impl Resettable for ParticleState {
+    fn reset_accumulators(&mut self) {
+        for f in &mut self.flow_accumulators { *f = 0; }
+    }
+}
+
+impl ParticleState {
     /// Clamp negative compartment values to zero.
     pub fn clamp_nonneg(&mut self) {
         for c in &mut self.counts {
