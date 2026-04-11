@@ -26,7 +26,7 @@ type context = {
   mutable event_decls     : intervention_decl list;
   mutable diags           : Diagnostics.t;  (* collected errors/warnings *)
   mutable source_dir      : string;         (* directory of the source file *)
-  mutable expanded_comp_cache : string list option;
+  mutable expanded_comp_cache : string list;
   mutable dim_decls       : dimensions_entry list;
   mutable dim_registry    : (string * string list) list;
   (* dim name → ordered levels; populated by resolve_dimensions pass *)
@@ -63,7 +63,7 @@ let empty_context ?(source_dir = "") () = {
   event_decls          = [];
   diags                = Diagnostics.create ();
   source_dir;
-  expanded_comp_cache  = None;
+  expanded_comp_cache  = [];
   dim_decls            = [];
   dim_registry         = [];
   origin               = None;
@@ -555,13 +555,6 @@ let expand_compartment_name ctx cname =
 let all_expanded_compartments ctx =
   List.concat_map (fun cd -> expand_compartment_name ctx cd.cname) ctx.comp_decls
 
-let get_expanded_compartments ctx =
-  match ctx.expanded_comp_cache with
-  | Some c -> c
-  | None ->
-    let c = all_expanded_compartments ctx in
-    ctx.expanded_comp_cache <- Some c; c
-
 (** Build O(1) lookup tables from the declaration lists and dim_registry.
     Call after resolve_dimensions so expanded indexed param names are known. *)
 let build_lookup_tables ctx =
@@ -600,7 +593,7 @@ let build_lookup_tables ctx =
   let expanded = all_expanded_compartments ctx in
   List.iter (fun n -> Hashtbl.replace ec n ()) expanded;
   ctx.expanded_comp_tbl <- ec;
-  ctx.expanded_comp_cache <- Some expanded
+  ctx.expanded_comp_cache <- expanded
 
 (* ── Table helpers ───────────────────────────────────────────────────────── *)
 
