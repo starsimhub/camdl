@@ -2,7 +2,7 @@
 //! derivative expressions) against finite-difference approximations.
 
 use sim::compiled_model::CompiledModel;
-use sim::inference::pgas::{IVPMapping, simulate_reference, complete_data_loglik};
+use sim::inference::pgas::{IVPMapping, simulate_reference, complete_data_loglik, build_obs_at_substep};
 use sim::inference::pgas_grad::complete_data_loglik_grad;
 use sim::inference::particle_filter::Observation;
 use sim::rng::StatefulRng;
@@ -64,11 +64,13 @@ fn test_gradient_vs_finite_differences_sir() {
 
     let obs_streams: Vec<sim::inference::ObsStreamSpec> = vec![];
 
+    let oas = build_obs_at_substep(&observations, compiled.model.simulation.t_start, dt);
+
     // Analytical gradient
     let (ll, grad) = complete_data_loglik_grad(
         &compiled, &trajectory, &params, &observations, dt,
         &obs_streams, &ivp_mappings,
-        &param_names, &param_indices,
+        &param_names, &param_indices, &oas,
     ).unwrap();
 
     eprintln!("  log-likelihood: {:.4}", ll);
@@ -85,11 +87,11 @@ fn test_gradient_vs_finite_differences_sir() {
 
         let ll_plus = complete_data_loglik(
             &compiled, &trajectory, &p_plus, &observations, dt,
-            &obs_streams, &ivp_mappings,
+            &obs_streams, &ivp_mappings, &oas,
         ).unwrap().total;
         let ll_minus = complete_data_loglik(
             &compiled, &trajectory, &p_minus, &observations, dt,
-            &obs_streams, &ivp_mappings,
+            &obs_streams, &ivp_mappings, &oas,
         ).unwrap().total;
 
         let fd = (ll_plus - ll_minus) / (2.0 * eps);

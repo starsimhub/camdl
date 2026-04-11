@@ -271,10 +271,10 @@ pub fn complete_data_loglik_grad(
     observations: &[Observation],
     dt: f64,
     obs_streams: &[super::types::ObsStreamSpec],
-    
     ivp_mappings: &[IVPMapping],
     param_names: &[String],
     param_indices: &[usize],
+    obs_at_substep: &super::pgas::ObsAtSubstep,
 ) -> Result<(f64, Vec<f64>), SimError> {
     let t_start = model.model.simulation.t_start;
     let n_substeps = trajectory.substeps.len();
@@ -297,13 +297,6 @@ pub fn complete_data_loglik_grad(
                 - (patch_pop as u64 - count) as f64 / (1.0 - frac);
             grad[ivp.param_idx] += dbinom_dfrac;
         }
-    }
-
-    // Precompute observation substep indices
-    let mut obs_at_substep = std::collections::HashMap::new();
-    for (obs_idx, obs) in observations.iter().enumerate() {
-        let s = ((obs.time - t_start) / dt).round() as usize;
-        if s > 0 { obs_at_substep.insert(s - 1, obs_idx); }
     }
 
     let mut cum_flows = vec![0u64; n_tr];
