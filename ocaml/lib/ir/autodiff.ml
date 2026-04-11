@@ -119,7 +119,8 @@ let rec differentiate (e : expr) (param : string) : expr =
 
 (** Algebraic simplification: constant folding and identity elimination.
     Reduces expression size after differentiation (product rule creates many
-    multiply-by-zero and add-zero terms). Applied to fixed point. *)
+    multiply-by-zero and add-zero terms). Applied to fixed point — repeated
+    until the expression stops changing. *)
 let rec simplify (e : expr) : expr =
   let e = match e with
     (* Recurse first, then simplify *)
@@ -182,6 +183,14 @@ let rec simplify (e : expr) : expr =
   e
 
 
+(** Apply simplify to a fixed point — repeat until the expression stops changing. *)
+let simplify_fixpoint (e : expr) : expr =
+  let rec go e =
+    let e' = simplify e in
+    if e' = e then e' else go e'
+  in
+  go e
+
 (** Differentiate a rate expression w.r.t. each estimated parameter.
     Returns an association list [(param_name, derivative_expr)].
     Zero derivatives (Const 0.0) are included for completeness. *)
@@ -189,6 +198,6 @@ let differentiate_rate (rate : expr) (param_names : string list) :
     (string * expr) list =
   List.map (fun p ->
     let d = differentiate rate p in
-    let d = simplify d in
+    let d = simplify_fixpoint d in
     (p, d)
   ) param_names
