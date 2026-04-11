@@ -386,3 +386,32 @@ fn test_resume_param_names_mismatch_detected() {
     assert_eq!(missing, vec![&"new_param"],
         "should detect that 'new_param' is not in saved state");
 }
+
+/// T11: DiagnosticCollector round-trip and severity classification.
+#[test]
+fn test_diagnostic_collector_basics() {
+    use sim::inference::diagnostic::{DiagnosticCollector, DiagnosticKind, Severity};
+
+    let c = DiagnosticCollector::new("test");
+
+    c.push(DiagnosticKind::RhatHigh { param: "R0".into(), rhat: 1.2, threshold: 1.1 });
+    c.push(DiagnosticKind::RhatHigh { param: "sigma".into(), rhat: 1.8, threshold: 1.1 });
+    c.push(DiagnosticKind::AutoRwSd { param: "beta".into(), rw_sd: 0.05 });
+    c.push(DiagnosticKind::InitialLoglikInfinite);
+
+    assert!(c.has_errors(), "rhat=1.8 and -inf should be errors");
+    assert!(c.has_warnings());
+
+    let diags = c.drain();
+    assert_eq!(diags.len(), 4);
+    assert_eq!(diags[0].severity, Severity::Warning); // rhat 1.2
+    assert_eq!(diags[1].severity, Severity::Error);   // rhat 1.8
+    assert_eq!(diags[2].severity, Severity::Info);     // auto rw_sd
+    assert_eq!(diags[3].severity, Severity::Error);    // -inf
+
+    // JSON round-trip
+    let json = serde_json::to_string(&diags).unwrap();
+    let decoded: Vec<sim::inference::diagnostic::Diagnostic> = serde_json::from_str(&json).unwrap();
+    assert_eq!(decoded.len(), 4);
+    assert_eq!(decoded[0].stage, "test");
+}
