@@ -55,6 +55,77 @@ statistical problems:
    where different parameter combinations produce similar dynamics.
 
 
+## How the algorithms relate
+
+All four inference algorithms in camdl are built on Sequential Monte
+Carlo (SMC) — the particle filter. They differ in what they do with
+the particles and what they produce.
+
+```
+            Bootstrap Particle Filter
+            (forward simulate, resample to match data)
+                         │
+                         │ used as a subroutine by:
+                         │
+            ┌────────────┼────────────┐
+            │            │            │
+           IF2         PMMH         PGAS
+        (find MLE)   (posterior)  (posterior + trajectories)
+```
+
+**IF2** (Iterated Filtering) perturbs parameters inside the particle
+filter and cools toward the MLE. It's a stochastic optimization
+algorithm, not a sampler — it finds the best-fit parameters but
+doesn't characterize uncertainty. Fast, robust, good for finding
+the right basin.
+
+**PMMH** (Particle Marginal Metropolis-Hastings) uses the particle
+filter's log-likelihood estimate as the acceptance ratio in a
+Metropolis sampler. It **marginalizes out trajectories** — the PF
+integrates over all possible latent state paths, and PMMH only sees
+the marginal likelihood number $\hat{p}(y|\theta)$. Any process
+model works (plug-and-play), but the PF likelihood estimate is noisy,
+which slows mixing.
+
+**PGAS** (Particle Gibbs with Ancestor Sampling) **conditions on a
+specific trajectory**. It holds one complete latent trajectory $X$
+fixed and evaluates the exact complete-data likelihood
+$p(y, X | \theta)$ — no estimation noise. Parameters are updated
+via NUTS or MH using this exact likelihood. The trajectory is then
+refreshed via CSMC-AS (a particle filter conditioned on the old
+trajectory). The Gibbs alternation ($\theta | X$ then $X | \theta$)
+samples from the full joint posterior $p(\theta, X | y)$.
+
+### Marginalizing vs conditioning on trajectories
+
+This is the fundamental design choice:
+
+| | PMMH | PGAS |
+|---|---|---|
+| **Trajectories** | Marginalized out by PF | Conditioned on, explicitly sampled |
+| **Likelihood** | Estimated (noisy) | Exact (no PF variance) |
+| **Process model** | Any (plug-and-play) | Chain-binomial only (needs transition density) |
+| **Output** | Posterior $p(\theta | y)$ | Posterior $p(\theta, X | y)$ jointly |
+| **Bottleneck** | PF variance → slow mixing | Trajectory convergence → slow on long series |
+
+PMMH is more general (works with any simulator) but pays for it with
+noisy likelihood estimates. PGAS is more efficient (exact likelihood)
+but requires the ability to evaluate transition densities — currently
+only the chain-binomial (Euler-multinomial) backend supports this.
+
+### The recommended workflow
+
+```
+IF2 (scout → refine) → PGAS (--starts-from refine/)
+```
+
+IF2 finds the right basin quickly (global exploration via many
+particles). PGAS characterizes the posterior within that basin
+(exact likelihood, NUTS gradient proposals, posterior trajectory
+samples). Starting PGAS from IF2 results avoids the trajectory
+convergence problem that plagues random starts.
+
+
 ## The particle filter
 
 The particle filter (sequential Monte Carlo) estimates the likelihood
