@@ -942,36 +942,30 @@ pub fn patch_population(
 }
 
 /// Prior log-density AND its gradient on the z (unconstrained) scale.
-/// Each variant handles its own chain rule — the caller just sums.
+///
+/// Delegates the density computation to `Prior::log_density` and computes
+/// only the gradient part here. The chain rule converts d(log prior)/dθ
+/// to d/dz via `param.transform_deriv(z)`.
 fn prior_log_density_and_grad_z(
     prior: &Prior, param: &EstimatedParam, theta: f64, z: f64,
 ) -> (f64, f64) {
-    match prior {
-        Prior::Flat => (0.0, 0.0),
+    let lp = prior.log_density(theta, z);
+    let dlp_dz = match prior {
+        Prior::Flat => 0.0,
         Prior::Normal { mean, sd } => {
-            let lp = -0.5 * ((theta - mean) / sd).powi(2) - sd.ln();
             let dlp_dtheta = -(theta - mean) / (sd * sd);
-            let dlp_dz = dlp_dtheta * param.transform_deriv(z);
-            (lp, dlp_dz)
+            dlp_dtheta * param.transform_deriv(z)
         }
         Prior::TransformedNormal { mean, sd } => {
-            let lp = -0.5 * ((z - mean) / sd).powi(2) - sd.ln();
-            let dlp_dz = -(z - mean) / (sd * sd);
-            (lp, dlp_dz)
+            -(z - mean) / (sd * sd)
         }
         Prior::Beta { alpha, beta } => {
-            // log Beta(θ; a, b) = (a-1)ln(θ) + (b-1)ln(1-θ) - lnB(a,b)
-            // d/dθ = (a-1)/θ - (b-1)/(1-θ)
-            // d/dz = d/dθ × dθ/dz
-            if theta <= 0.0 || theta >= 1.0 { return (f64::NEG_INFINITY, 0.0); }
-            use crate::inference::obs_loglik::lgamma;
-            let lp = (alpha - 1.0) * theta.ln() + (beta - 1.0) * (1.0 - theta).ln()
-                - (lgamma(*alpha) + lgamma(*beta) - lgamma(alpha + beta));
+            if theta <= 0.0 || theta >= 1.0 { return (lp, 0.0); }
             let dlp_dtheta = (alpha - 1.0) / theta - (beta - 1.0) / (1.0 - theta);
-            let dlp_dz = dlp_dtheta * param.transform_deriv(z);
-            (lp, dlp_dz)
+            dlp_dtheta * param.transform_deriv(z)
         }
-    }
+    };
+    (lp, dlp_dz)
 }
 
 // ═══════════════════════════════════════════════════════════════════
