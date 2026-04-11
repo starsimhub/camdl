@@ -667,7 +667,7 @@
             "left": {
               "bin_op": {
                 "op": "mul",
-                "left": { "un_op": { "op": "neg", "arg": { "const": 1.0 } } },
+                "left": { "const": -1.0 },
                 "right": { "param": "tau_L" }
               }
             },
@@ -1547,7 +1547,7 @@
             "left": {
               "bin_op": {
                 "op": "mul",
-                "left": { "un_op": { "op": "neg", "arg": { "const": 1.0 } } },
+                "left": { "const": -1.0 },
                 "right": { "param": "tau_L" }
               }
             },

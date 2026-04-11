@@ -263,12 +263,7 @@
                             "right": {
                               "bin_op": {
                                 "op": "add",
-                                "left": {
-                                  "un_op": {
-                                    "op": "neg",
-                                    "arg": { "const": 1.0 }
-                                  }
-                                },
+                                "left": { "const": -1.0 },
                                 "right": {
                                   "bin_op": {
                                     "op": "mul",
@@ -616,12 +611,7 @@
                             "right": {
                               "bin_op": {
                                 "op": "add",
-                                "left": {
-                                  "un_op": {
-                                    "op": "neg",
-                                    "arg": { "const": 1.0 }
-                                  }
-                                },
+                                "left": { "const": -1.0 },
                                 "right": {
                                   "bin_op": {
                                     "op": "mul",
@@ -969,12 +959,7 @@
                             "right": {
                               "bin_op": {
                                 "op": "add",
-                                "left": {
-                                  "un_op": {
-                                    "op": "neg",
-                                    "arg": { "const": 1.0 }
-                                  }
-                                },
+                                "left": { "const": -1.0 },
                                 "right": {
                                   "bin_op": {
                                     "op": "mul",
@@ -1322,12 +1307,7 @@
                             "right": {
                               "bin_op": {
                                 "op": "add",
-                                "left": {
-                                  "un_op": {
-                                    "op": "neg",
-                                    "arg": { "const": 1.0 }
-                                  }
-                                },
+                                "left": { "const": -1.0 },
                                 "right": {
                                   "bin_op": {
                                     "op": "mul",
@@ -1675,12 +1655,7 @@
                             "right": {
                               "bin_op": {
                                 "op": "add",
-                                "left": {
-                                  "un_op": {
-                                    "op": "neg",
-                                    "arg": { "const": 1.0 }
-                                  }
-                                },
+                                "left": { "const": -1.0 },
                                 "right": {
                                   "bin_op": {
                                     "op": "mul",
