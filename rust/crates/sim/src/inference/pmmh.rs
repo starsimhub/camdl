@@ -233,9 +233,9 @@ impl AdaptiveProposal {
             a[i * d + i] += eps;
         }
 
-        // Cholesky decomposition (in-place, lower triangular)
-        if cholesky_lower(&mut a, d) {
-            self.chol.copy_from_slice(&a);
+        // Cholesky decomposition
+        if let Some(l) = super::linalg::cholesky_lower(&a, d) {
+            self.chol.copy_from_slice(&l);
             self.chol_valid = true;
         }
         // If Cholesky fails (shouldn't with eps regularization), keep old factor.
@@ -264,31 +264,6 @@ impl AdaptiveProposal {
             z.iter().zip(fallback_sd).map(|(&zi, &sd)| zi * sd).collect()
         }
     }
-}
-
-/// In-place Cholesky decomposition of a symmetric positive-definite matrix.
-/// Overwrites `a` with the lower-triangular factor L (row-major).
-/// Returns false if the matrix is not positive definite.
-fn cholesky_lower(a: &mut [f64], d: usize) -> bool {
-    for i in 0..d {
-        for j in 0..=i {
-            let mut sum = a[i * d + j];
-            for k in 0..j {
-                sum -= a[i * d + k] * a[j * d + k];
-            }
-            if i == j {
-                if sum <= 0.0 { return false; }
-                a[i * d + j] = sum.sqrt();
-            } else {
-                a[i * d + j] = sum / a[j * d + j];
-            }
-        }
-        // Zero out upper triangle
-        for j in (i + 1)..d {
-            a[i * d + j] = 0.0;
-        }
-    }
-    true
 }
 
 // ── Core PMMH algorithm ────────────────────────────────────────────

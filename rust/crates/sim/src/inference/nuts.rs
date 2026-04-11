@@ -151,23 +151,22 @@ fn solve_upper_triangular_from_lower(l: &[f64], b: &[f64], d: usize) -> Vec<f64>
 }
 
 /// Cholesky decomposition: A = L L^T. Returns L (lower triangular, row-major).
+/// Uses shared `linalg::cholesky_lower`; falls back to identity-scaled factor
+/// if the matrix is not positive definite.
 fn cholesky_lower(a: &[f64], d: usize) -> Vec<f64> {
-    let mut l = vec![0.0; d * d];
-    for i in 0..d {
-        for j in 0..=i {
-            let mut sum = 0.0;
-            for k in 0..j {
-                sum += l[i * d + k] * l[j * d + k];
+    match super::linalg::cholesky_lower(a, d) {
+        Some(l) => l,
+        None => {
+            // Fallback: use a small diagonal factor so NUTS doesn't crash.
+            // The mass matrix geometry will be wrong, but the sampler will
+            // self-correct via step-size adaptation.
+            let mut l = vec![0.0; d * d];
+            for i in 0..d {
+                l[i * d + i] = 1e-5;
             }
-            if i == j {
-                let diag = a[i * d + i] - sum;
-                l[i * d + j] = if diag > 0.0 { diag.sqrt() } else { 1e-10 };
-            } else {
-                l[i * d + j] = (a[i * d + j] - sum) / l[j * d + j];
-            }
+            l
         }
     }
-    l
 }
 
 

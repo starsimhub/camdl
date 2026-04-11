@@ -22,6 +22,7 @@ pub mod correlated_pf;
 pub mod pgas;
 pub mod pgas_grad;
 pub mod nuts;
+pub mod linalg;
 
 // Re-exports
 pub use types::{ParticleState, ParticleSwarm, ObsStreamSpec, joint_obs_weight, joint_obs_weight_particle};
