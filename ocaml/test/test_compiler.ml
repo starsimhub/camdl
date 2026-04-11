@@ -30,12 +30,12 @@ let test_golden model_name () =
     | Error e -> Alcotest.failf "compile failed: %s" e
   in
   let expected_json = read_file ir_path in
-  let expected_m = match Deserialize.model_of_string expected_json with
+  let expected_m = match Serde.model_of_string expected_json with
     | Ok m    -> m
     | Error e -> Alcotest.failf "bad golden JSON: %s" e
   in
   if ir <> expected_m then begin
-    let actual_json = Serialize.model_to_string ir in
+    let actual_json = Serde.model_to_string ir in
     Alcotest.failf "IR mismatch for %s\nExpected:\n%s\n\nActual:\n%s"
       model_name expected_json actual_json
   end
@@ -269,7 +269,7 @@ let test_parameterised_table () =
           ()  (* pass *)
         | other ->
           Alcotest.failf "expected Ir.Param \"beta_mf\", got: %s"
-            (Serialize.model_to_string
+            (Serde.model_to_string
                { m with Ir.tables = [{tbl with Ir.source = Ir.Inline [other]}] })))
 
 (* ── DESIGN-2: Intervention expansion ───────────────────────────────────────
@@ -1079,7 +1079,7 @@ let test_time_func_param_arg () =
         | Ir.Const 0.0     -> Alcotest.fail "amplitude was silently converted to 0.0 (param not preserved)"
         | other ->
           Alcotest.failf "expected Ir.Param \"alpha\", got: %s"
-            (Serialize.model_to_string { m with Ir.time_functions =
+            (Serde.model_to_string { m with Ir.time_functions =
                [{ tf with Ir.kind = Ir.Sinusoidal { s with Ir.amplitude = other } }] }))
      | _ -> Alcotest.fail "expected Sinusoidal kind")
 

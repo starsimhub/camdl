@@ -128,5 +128,5 @@ let () =
                ) m.Ir.parameters
            }
          in
-         print_string (Serialize.model_to_string m);
+         print_string (Serde.model_to_string m);
          print_newline ())

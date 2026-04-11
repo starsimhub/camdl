@@ -45,7 +45,7 @@ let roundtrip_test name () =
   let json_in = read_golden name in
 
   (* 1. Deserialise *)
-  let m1 = match Deserialize.model_of_string json_in with
+  let m1 = match Serde.model_of_string json_in with
     | Ok m    -> m
     | Error e -> Alcotest.failf "deserialise failed for %s: %s" name e
   in
@@ -54,10 +54,10 @@ let roundtrip_test name () =
   Alcotest.(check string) (name ^ " version") "0.3" m1.version;
 
   (* 3. Re-serialise *)
-  let json2 = Serialize.model_to_string m1 in
+  let json2 = Serde.model_to_string m1 in
 
   (* 4. Deserialise again *)
-  let m2 = match Deserialize.model_of_string json2 with
+  let m2 = match Serde.model_of_string json2 with
     | Ok m    -> m
     | Error e -> Alcotest.failf "round-trip re-deserialise failed for %s: %s" name e
   in
