@@ -8,6 +8,7 @@
 //! Test 6: ESS computation sanity.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 use ir::{
     expr::{BinOpExpr, BinOpWrap, BinOp, Expr, ParamExpr, PopExpr},
     model::{Compartment, CompartmentKind, InitialConditions, OutputConfig, OutputSchedule, SimulationConfig},
@@ -17,16 +18,35 @@ use ir::{
 };
 use sim::{
     compiled_model::CompiledModel,
-    chain_binomial::{step_one, StepScratch},
     inference::{
         obs_loglik::poisson_logpmf,
-        particle_filter::{bootstrap_filter, Observation},
+        particle_filter::bootstrap_filter,
         if2::{EstimatedParam, Transform},
         pmmh::{run_pmmh, Prior, PMMHConfig, mcmc_ess},
+        ChainBinomialProcess,
+        traits::{ObservationModel, SMCConfig},
         ParticleState,
     },
     rng::StatefulRng,
 };
+
+/// Test-only observation model: observes compartment 0 (prevalence) with Poisson likelihood.
+struct PoissonPrevalenceObs {
+    observations: Vec<f64>,
+    obs_times: Vec<f64>,
+}
+
+impl ObservationModel<ParticleState> for PoissonPrevalenceObs {
+    fn log_likelihood(&self, state: &ParticleState, obs_idx: usize, _params: &[f64]) -> f64 {
+        let projected = state.counts[0] as f64;
+        poisson_logpmf(self.observations[obs_idx], projected.max(0.1))
+    }
+    fn n_observations(&self) -> usize { self.observations.len() }
+    fn obs_time(&self, obs_idx: usize) -> f64 { self.obs_times[obs_idx] }
+    fn n_streams(&self) -> usize { 1 }
+    fn sample(&self, _state: &ParticleState, _obs_idx: usize, _params: &[f64], _rng: &mut StatefulRng) -> Vec<f64> { vec![] }
+    fn mean(&self, _state: &ParticleState, _obs_idx: usize, _params: &[f64]) -> Vec<f64> { vec![] }
+}
 
 /// Build a pure death model: N → ∅ at rate μ*N.
 /// Same model used in particle_filter.rs tests.
@@ -92,35 +112,33 @@ fn pure_death_model() -> (CompiledModel, Vec<f64>) {
 }
 
 /// Synthetic observations from the pure death model at true μ=0.01.
-fn pure_death_observations() -> Vec<Observation> {
-    (1..=10)
+fn pure_death_observations() -> PoissonPrevalenceObs {
+    let obs: Vec<(f64, f64)> = (1..=10)
         .map(|k| {
             let t = k as f64 * 10.0;
             let expected = 100.0 * (-0.01 * t).exp();
-            Observation { time: t, value: expected.round() }
+            (t, expected.round())
         })
-        .collect()
+        .collect();
+    PoissonPrevalenceObs {
+        obs_times: obs.iter().map(|o| o.0).collect(),
+        observations: obs.iter().map(|o| o.1).collect(),
+    }
 }
 
 /// Build the PF-based loglik evaluator for the pure death model.
 /// Returns a closure: (full_params, seed) → log L̂(θ).
-fn make_eval_loglik<'a>(
-    compiled: &'a CompiledModel,
-    observations: &'a [Observation],
+fn make_eval_loglik(
+    compiled: Arc<CompiledModel>,
     n_particles: usize,
-) -> impl Fn(&[f64], u64) -> f64 + 'a {
+) -> impl Fn(&[f64], u64) -> f64 {
     move |params: &[f64], pf_seed: u64| -> f64 {
-        let step_fn = |state: &mut ParticleState, t: f64, dt: f64, rng: &mut StatefulRng, scratch: &mut StepScratch| {
-            step_one(compiled, &mut state.counts, &mut state.flow_accumulators, params, t, dt, rng, scratch)
-        };
-        let project_fn = |state: &ParticleState| -> f64 { state.counts[0] as f64 };
-        let obs_loglik_fn = |projected: f64, observed: f64| -> f64 {
-            poisson_logpmf(observed, projected.max(0.1))
-        };
+        let process = ChainBinomialProcess::new(compiled.clone());
+        let obs_model = pure_death_observations();
+        let config = SMCConfig { n_particles, dt: 1.0, t_start: 0.0 };
 
         let result = bootstrap_filter(
-            compiled, params, observations, n_particles, 1.0,
-            &step_fn, &project_fn, &obs_loglik_fn, None, None, pf_seed, None,
+            &process, &obs_model, params, &config, pf_seed,
         );
         match result {
             Ok(r) => r.log_likelihood,
@@ -147,9 +165,9 @@ fn mu_param() -> EstimatedParam {
 #[test]
 fn test_pmmh_posterior_covers_truth() {
     let (compiled, _params) = pure_death_model();
-    let observations = pure_death_observations();
+    let compiled = Arc::new(compiled);
     let n_particles = 200;
-    let eval_loglik = make_eval_loglik(&compiled, &observations, n_particles);
+    let eval_loglik = make_eval_loglik(compiled.clone(), n_particles);
 
     let if2_params = vec![mu_param()];
     let priors = vec![Prior::Normal { mean: 0.01, sd: 0.01 }];
@@ -191,9 +209,9 @@ fn test_pmmh_posterior_covers_truth() {
 #[test]
 fn test_pmmh_determinism() {
     let (compiled, _params) = pure_death_model();
-    let observations = pure_death_observations();
+    let compiled = Arc::new(compiled);
     let n_particles = 100;
-    let eval_loglik = make_eval_loglik(&compiled, &observations, n_particles);
+    let eval_loglik = make_eval_loglik(compiled.clone(), n_particles);
 
     let if2_params = vec![mu_param()];
     let priors = vec![Prior::Flat];
@@ -224,9 +242,9 @@ fn test_pmmh_determinism() {
 #[test]
 fn test_pmmh_acceptance_rate() {
     let (compiled, _params) = pure_death_model();
-    let observations = pure_death_observations();
+    let compiled = Arc::new(compiled);
     let n_particles = 200;
-    let eval_loglik = make_eval_loglik(&compiled, &observations, n_particles);
+    let eval_loglik = make_eval_loglik(compiled.clone(), n_particles);
 
     let if2_params = vec![mu_param()];
     let priors = vec![Prior::Flat];
@@ -254,9 +272,9 @@ fn test_pmmh_acceptance_rate() {
 #[test]
 fn test_pmmh_flat_prior_finds_near_mle() {
     let (compiled, _params) = pure_death_model();
-    let observations = pure_death_observations();
+    let compiled = Arc::new(compiled);
     let n_particles = 200;
-    let eval_loglik = make_eval_loglik(&compiled, &observations, n_particles);
+    let eval_loglik = make_eval_loglik(compiled.clone(), n_particles);
 
     let if2_params = vec![mu_param()];
     let priors = vec![Prior::Flat];
@@ -284,9 +302,9 @@ fn test_pmmh_flat_prior_finds_near_mle() {
 #[test]
 fn test_pmmh_adaptive_improves_acceptance() {
     let (compiled, _params) = pure_death_model();
-    let observations = pure_death_observations();
+    let compiled = Arc::new(compiled);
     let n_particles = 200;
-    let eval_loglik = make_eval_loglik(&compiled, &observations, n_particles);
+    let eval_loglik = make_eval_loglik(compiled.clone(), n_particles);
 
     let if2_params = vec![mu_param()];
     let priors = vec![Prior::Flat];
@@ -344,9 +362,9 @@ fn test_mcmc_ess_sanity() {
 #[test]
 fn test_pmmh_different_seeds_differ() {
     let (compiled, _params) = pure_death_model();
-    let observations = pure_death_observations();
+    let compiled = Arc::new(compiled);
     let n_particles = 100;
-    let eval_loglik = make_eval_loglik(&compiled, &observations, n_particles);
+    let eval_loglik = make_eval_loglik(compiled.clone(), n_particles);
 
     let if2_params = vec![mu_param()];
     let priors = vec![Prior::Flat];

@@ -5,6 +5,7 @@
 //! Test 3: No-cooling mode explores without contracting.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 use ir::{
     expr::{BinOpExpr, BinOpWrap, BinOp, Expr, ParamExpr, PopExpr, PopSumExpr},
     model::{Compartment, CompartmentKind, InitialConditions, OutputConfig, OutputSchedule, SimulationConfig},
@@ -17,11 +18,33 @@ use sim::{
     chain_binomial::{step_one, StepScratch},
     inference::{
         obs_loglik::negbin_logpmf,
-        if2::{run_if2, IF2Config, EstimatedParam, Observation, Transform},
+        if2::{run_if2, IF2Config, EstimatedParam, Transform},
+        ChainBinomialProcess,
+        traits::ObservationModel,
         ParticleState,
     },
     rng::StatefulRng,
 };
+
+/// Test-only observation model: observes flow_accumulators[1] (recovery flow)
+/// with NegBin(obs, projected, k=10) likelihood.
+struct NegBinFlowObs {
+    observations: Vec<f64>,
+    obs_times: Vec<f64>,
+    flow_index: usize,
+}
+
+impl ObservationModel<ParticleState> for NegBinFlowObs {
+    fn log_likelihood(&self, state: &ParticleState, obs_idx: usize, _params: &[f64]) -> f64 {
+        let projected = state.flow_accumulators[self.flow_index] as f64;
+        negbin_logpmf(self.observations[obs_idx], projected.max(0.1), 10.0)
+    }
+    fn n_observations(&self) -> usize { self.observations.len() }
+    fn obs_time(&self, obs_idx: usize) -> f64 { self.obs_times[obs_idx] }
+    fn n_streams(&self) -> usize { 1 }
+    fn sample(&self, _state: &ParticleState, _obs_idx: usize, _params: &[f64], _rng: &mut StatefulRng) -> Vec<f64> { vec![] }
+    fn mean(&self, _state: &ParticleState, _obs_idx: usize, _params: &[f64]) -> Vec<f64> { vec![] }
+}
 
 fn sir_model() -> (CompiledModel, Vec<f64>) {
     let model = Model {
@@ -113,7 +136,8 @@ fn sir_model() -> (CompiledModel, Vec<f64>) {
 }
 
 /// Generate synthetic weekly data from a single simulation.
-fn generate_data(compiled: &CompiledModel, params: &[f64]) -> Vec<Observation> {
+/// Returns (obs_times, obs_values) for the recovery flow.
+fn generate_data(compiled: &CompiledModel, params: &[f64]) -> (Vec<f64>, Vec<f64>) {
     let mut rng = StatefulRng::new(42);
     let n_int = compiled.int_local_to_global.len();
     let n_tr = compiled.model.transitions.len();
@@ -122,7 +146,8 @@ fn generate_data(compiled: &CompiledModel, params: &[f64]) -> Vec<Observation> {
     state.counts.copy_from_slice(&init.counts);
 
     let mut scratch = StepScratch::new(compiled);
-    let mut obs = Vec::new();
+    let mut obs_times = Vec::new();
+    let mut obs_values = Vec::new();
     let mut t = 0.0;
     while t < 77.0 {
         for _ in 0..7 {
@@ -131,16 +156,25 @@ fn generate_data(compiled: &CompiledModel, params: &[f64]) -> Vec<Observation> {
         }
         // Project: recovery flow (index 1)
         let cases = state.flow_accumulators[1] as f64;
-        obs.push(Observation { time: t, value: cases });
+        obs_times.push(t);
+        obs_values.push(cases);
         state.reset_flows();
     }
-    obs
+    (obs_times, obs_values)
 }
 
 #[test]
 fn test_if2_converges_from_dispersed_start() {
     let (compiled, true_params) = sir_model();
-    let data = generate_data(&compiled, &true_params);
+    let (obs_times, obs_values) = generate_data(&compiled, &true_params);
+
+    let compiled = Arc::new(compiled);
+    let process = ChainBinomialProcess::new(compiled.clone());
+    let obs_model = NegBinFlowObs {
+        observations: obs_values,
+        obs_times,
+        flow_index: 1,
+    };
 
     // Start from dispersed parameters (beta=0.8, gamma=0.3 — wrong by 2-3×)
     let mut start_params = true_params.clone();
@@ -164,19 +198,11 @@ fn test_if2_converges_from_dispersed_start() {
         cooling_fraction: 0.90,
         cooling_target_iters: 50, simplex_groups: vec![],
         dt: 1.0,
-    };
-
-    let step_fn = |state: &mut ParticleState, p: &[f64], t: f64, dt: f64, rng: &mut StatefulRng, scratch: &mut StepScratch| {
-        step_one(&compiled, &mut state.counts, &mut state.flow_accumulators, p, t, dt, rng, scratch)
-    };
-    let project_fn = |state: &ParticleState| state.flow_accumulators[1] as f64;
-    let obs_loglik_fn = |proj: f64, obs: f64, _p: &[f64]| {
-        negbin_logpmf(obs, proj.max(0.1), 10.0)
+        t_start: 0.0,
     };
 
     let result = run_if2(
-        &compiled, &start_params, &if2_params, &data, &config,
-        &step_fn, &project_fn, &obs_loglik_fn, 42,
+        &process, &obs_model, &start_params, &if2_params, &config, 42,
     ).unwrap();
 
     let final_beta = result.mle[0];
@@ -186,10 +212,6 @@ fn test_if2_converges_from_dispersed_start() {
         final_beta, final_gamma, result.final_loglik);
 
     // Should converge toward true values.
-    // Tolerances: beta within ±0.15 of 0.3 AND gamma within ±0.05 of 0.1
-    // AND loglik improves. Under fully random params, the joint probability
-    // of all three is <0.5% (parameter space is [0.01,2]×[0.01,1] and
-    // random loglik doesn't improve monotonically).
     assert!((final_beta - 0.3).abs() < 0.15,
         "IF2 beta={:.3}, expected ~0.3 (started at 0.8)", final_beta);
     assert!((final_gamma - 0.1).abs() < 0.05,
@@ -216,7 +238,15 @@ fn test_if2_converges_from_dispersed_start() {
 #[test]
 fn test_if2_respects_bounds() {
     let (compiled, true_params) = sir_model();
-    let data = generate_data(&compiled, &true_params);
+    let (obs_times, obs_values) = generate_data(&compiled, &true_params);
+
+    let compiled = Arc::new(compiled);
+    let process = ChainBinomialProcess::new(compiled.clone());
+    let obs_model = NegBinFlowObs {
+        observations: obs_values,
+        obs_times,
+        flow_index: 1,
+    };
 
     // Use tight bounds to test enforcement
     let if2_params = vec![
@@ -238,17 +268,11 @@ fn test_if2_respects_bounds() {
         cooling_fraction: 0.95,
         cooling_target_iters: 50, simplex_groups: vec![],
         dt: 1.0,
+        t_start: 0.0,
     };
-
-    let step_fn = |state: &mut ParticleState, p: &[f64], t: f64, dt: f64, rng: &mut StatefulRng, scratch: &mut StepScratch| {
-        step_one(&compiled, &mut state.counts, &mut state.flow_accumulators, p, t, dt, rng, scratch)
-    };
-    let project_fn = |state: &ParticleState| state.flow_accumulators[1] as f64;
-    let obs_loglik_fn = |proj: f64, obs: f64, _p: &[f64]| negbin_logpmf(obs, proj.max(0.1), 10.0);
 
     let result = run_if2(
-        &compiled, &true_params, &if2_params, &data, &config,
-        &step_fn, &project_fn, &obs_loglik_fn, 42,
+        &process, &obs_model, &true_params, &if2_params, &config, 42,
     ).unwrap();
 
     // All iterations should have beta in [0.1, 0.5] and gamma in [0.05, 0.2]
@@ -265,7 +289,15 @@ fn test_if2_respects_bounds() {
 #[test]
 fn test_if2_no_cooling_explores() {
     let (compiled, true_params) = sir_model();
-    let data = generate_data(&compiled, &true_params);
+    let (obs_times, obs_values) = generate_data(&compiled, &true_params);
+
+    let compiled = Arc::new(compiled);
+    let process = ChainBinomialProcess::new(compiled.clone());
+    let obs_model = NegBinFlowObs {
+        observations: obs_values,
+        obs_times,
+        flow_index: 1,
+    };
 
     let if2_params = vec![
         EstimatedParam {
@@ -281,17 +313,11 @@ fn test_if2_no_cooling_explores() {
         cooling_fraction: 1.0,
         cooling_target_iters: 50, simplex_groups: vec![],
         dt: 1.0,
+        t_start: 0.0,
     };
-
-    let step_fn = |state: &mut ParticleState, p: &[f64], t: f64, dt: f64, rng: &mut StatefulRng, scratch: &mut StepScratch| {
-        step_one(&compiled, &mut state.counts, &mut state.flow_accumulators, p, t, dt, rng, scratch)
-    };
-    let project_fn = |state: &ParticleState| state.flow_accumulators[1] as f64;
-    let obs_loglik_fn = |proj: f64, obs: f64, _p: &[f64]| negbin_logpmf(obs, proj.max(0.1), 10.0);
 
     let result = run_if2(
-        &compiled, &true_params, &if2_params, &data, &config,
-        &step_fn, &project_fn, &obs_loglik_fn, 42,
+        &process, &obs_model, &true_params, &if2_params, &config, 42,
     ).unwrap();
 
     // With no cooling, beta should still be wandering (not converged tight)
@@ -388,35 +414,23 @@ fn scaled_logit_round_trip() {
 // ── Cooling schedule regression tests ──────────────────────────────────
 
 /// Verify cooling schedule matches pomp's cooling.fraction.50 semantics.
-/// cf50 is reached at the HALFWAY point of target iterations; cf50² at the end.
-///
-/// The IF2 engine computes:
-///   per_step = cf50^(2.0 / (target_iters * n_obs))
-///   global_step increments by (1 + n_obs) per iteration (1 at t=0, n_obs at obs times)
-///   effective = per_step^global_step
 #[test]
 fn cooling_cf50_matches_pomp_semantics() {
     let cf50 = 0.05_f64;
     let target_iters = 50_usize;
     let n_obs = 100_usize;
 
-    // This is the formula from the IF2 engine (if2.rs line ~301)
     let total_target_steps = target_iters as f64 * n_obs as f64;
     let per_step = cf50.powf(2.0 / total_target_steps);
 
-    // After target_iters/2 iterations, with (1 + n_obs) steps per iteration:
     let steps_halfway = (target_iters / 2) * (1 + n_obs);
     let cooling_halfway = per_step.powi(steps_halfway as i32);
 
-    // The +1 from t=0 perturbation makes the halfway slightly lower than cf50.
-    // With n_obs=100, the ratio is (1+n_obs)/n_obs = 1.01, so it's close.
-    // Check it's within a reasonable tolerance of cf50.
     let ratio = cooling_halfway / cf50;
     assert!(ratio > 0.8 && ratio < 1.0,
         "halfway cooling should be close to cf50={}: got {:.6} (ratio={:.4})",
         cf50, cooling_halfway, ratio);
 
-    // After full target_iters: should be close to cf50²
     let steps_full = target_iters * (1 + n_obs);
     let cooling_full = per_step.powi(steps_full as i32);
     let expected_full = cf50 * cf50;
@@ -426,7 +440,6 @@ fn cooling_cf50_matches_pomp_semantics() {
         expected_full, cooling_full, ratio_full);
 }
 
-/// Verify per_step cooling is strictly between 0 and 1 for valid cf50 values.
 #[test]
 fn cooling_per_step_valid_range() {
     for &cf50 in &[0.01_f64, 0.05, 0.10, 0.50, 0.90, 0.95, 0.99] {
@@ -437,7 +450,6 @@ fn cooling_per_step_valid_range() {
                 assert!(per_step > 0.0 && per_step < 1.0,
                     "per_step={} for cf50={}, n_obs={}, target_iters={}",
                     per_step, cf50, n_obs, target_iters);
-                // Sanity: per_step shouldn't be extremely aggressive
                 assert!(per_step > 0.9,
                     "per_step={} suspiciously aggressive for cf50={}, n_obs={}, target_iters={}",
                     per_step, cf50, n_obs, target_iters);
@@ -446,14 +458,12 @@ fn cooling_per_step_valid_range() {
     }
 }
 
-/// Verify that no-cooling (cf50=1.0) gives per_step=1.0 exactly.
 #[test]
 fn cooling_fraction_1_means_no_cooling() {
     let per_step = 1.0_f64.powf(2.0 / (50.0 * 100.0));
     assert_eq!(per_step, 1.0, "cf50=1.0 should give per_step=1.0");
 }
 
-/// Verify cooling is monotonically decreasing across iterations.
 #[test]
 fn cooling_decreases_monotonically() {
     let cf50 = 0.05_f64;

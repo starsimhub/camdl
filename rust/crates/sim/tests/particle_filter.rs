@@ -9,6 +9,7 @@
 //! Test 3: More particles → lower variance of the estimate.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 use ir::{
     expr::{BinOpExpr, BinOpWrap, BinOp, Expr, ParamExpr, PopExpr},
     model::{Compartment, CompartmentKind, InitialConditions, OutputConfig, OutputSchedule, SimulationConfig},
@@ -18,14 +19,33 @@ use ir::{
 };
 use sim::{
     compiled_model::CompiledModel,
-    chain_binomial::{step_one, StepScratch},
     inference::{
         obs_loglik::poisson_logpmf,
-        particle_filter::{bootstrap_filter, Observation},
+        particle_filter::bootstrap_filter,
+        ChainBinomialProcess,
+        traits::{ObservationModel, SMCConfig},
         ParticleState,
     },
     rng::StatefulRng,
 };
+
+/// Test-only observation model: observes compartment 0 (prevalence) with Poisson likelihood.
+struct PoissonPrevalenceObs {
+    observations: Vec<f64>,
+    obs_times: Vec<f64>,
+}
+
+impl ObservationModel<ParticleState> for PoissonPrevalenceObs {
+    fn log_likelihood(&self, state: &ParticleState, obs_idx: usize, _params: &[f64]) -> f64 {
+        let projected = state.counts[0] as f64;
+        poisson_logpmf(self.observations[obs_idx], projected.max(0.1))
+    }
+    fn n_observations(&self) -> usize { self.observations.len() }
+    fn obs_time(&self, obs_idx: usize) -> f64 { self.obs_times[obs_idx] }
+    fn n_streams(&self) -> usize { 1 }
+    fn sample(&self, _state: &ParticleState, _obs_idx: usize, _params: &[f64], _rng: &mut StatefulRng) -> Vec<f64> { vec![] }
+    fn mean(&self, _state: &ParticleState, _obs_idx: usize, _params: &[f64]) -> Vec<f64> { vec![] }
+}
 
 fn pure_death_model() -> (CompiledModel, Vec<f64>) {
     let model = Model {
@@ -88,37 +108,32 @@ fn pure_death_model() -> (CompiledModel, Vec<f64>) {
     (compiled, params)
 }
 
-/// Run the particle filter on a pure death model with Poisson observations.
-fn run_pf(n_particles: usize, seed: u64) -> f64 {
-    let (compiled, params) = pure_death_model();
-
-    // Fake observations: N(t) observed with Poisson noise at t=10, 20, ..., 100
-    // True N(t) ≈ 100 * exp(-0.01 * t)
-    let observations: Vec<Observation> = (1..=10)
+/// Build observations and obs model for the pure death model.
+fn pure_death_obs() -> PoissonPrevalenceObs {
+    let obs: Vec<(f64, f64)> = (1..=10)
         .map(|k| {
             let t = k as f64 * 10.0;
             let expected = 100.0 * (-0.01 * t).exp();
-            Observation { time: t, value: expected.round() }
+            (t, expected.round())
         })
         .collect();
+    PoissonPrevalenceObs {
+        obs_times: obs.iter().map(|o| o.0).collect(),
+        observations: obs.iter().map(|o| o.1).collect(),
+    }
+}
 
-    let step_fn = |state: &mut ParticleState, t: f64, dt: f64, rng: &mut StatefulRng, scratch: &mut StepScratch| {
-        step_one(&compiled, &mut state.counts, &mut state.flow_accumulators, &params, t, dt, rng, scratch)
-    };
+/// Run the particle filter on a pure death model with Poisson observations.
+fn run_pf(n_particles: usize, seed: u64) -> f64 {
+    let (compiled, params) = pure_death_model();
+    let compiled = Arc::new(compiled);
+    let process = ChainBinomialProcess::new(compiled.clone());
+    let obs_model = pure_death_obs();
 
-    // Project: observe N directly (prevalence, not incidence)
-    let project_fn = |state: &ParticleState| -> f64 {
-        state.counts[0] as f64
-    };
-
-    // Poisson observation model: y ~ Poisson(N)
-    let obs_loglik_fn = |projected: f64, observed: f64| -> f64 {
-        poisson_logpmf(observed, projected.max(0.1))
-    };
+    let config = SMCConfig { n_particles, dt: 1.0, t_start: 0.0 };
 
     let result = bootstrap_filter(
-        &compiled, &params, &observations, n_particles, 1.0,
-        &step_fn, &project_fn, &obs_loglik_fn, None, None, seed, None,
+        &process, &obs_model, &params, &config, seed,
     ).unwrap();
 
     result.log_likelihood
@@ -173,23 +188,14 @@ fn test_pf_more_particles_lower_variance() {
 #[test]
 fn test_pf_ess_reasonable() {
     let (compiled, params) = pure_death_model();
-    let observations: Vec<Observation> = (1..=10)
-        .map(|k| {
-            let t = k as f64 * 10.0;
-            let expected = 100.0 * (-0.01 * t).exp();
-            Observation { time: t, value: expected.round() }
-        })
-        .collect();
+    let compiled = Arc::new(compiled);
+    let process = ChainBinomialProcess::new(compiled.clone());
+    let obs_model = pure_death_obs();
 
-    let step_fn = |state: &mut ParticleState, t: f64, dt: f64, rng: &mut StatefulRng, scratch: &mut StepScratch| {
-        step_one(&compiled, &mut state.counts, &mut state.flow_accumulators, &params, t, dt, rng, scratch)
-    };
-    let project_fn = |state: &ParticleState| state.counts[0] as f64;
-    let obs_loglik_fn = |projected: f64, observed: f64| poisson_logpmf(observed, projected.max(0.1));
+    let config = SMCConfig { n_particles: 500, dt: 1.0, t_start: 0.0 };
 
     let result = bootstrap_filter(
-        &compiled, &params, &observations, 500, 1.0,
-        &step_fn, &project_fn, &obs_loglik_fn, None, None, 42, None,
+        &process, &obs_model, &params, &config, 42,
     ).unwrap();
 
     // ESS should be reasonable — not collapsed to 1 or full N
