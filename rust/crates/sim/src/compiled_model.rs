@@ -174,7 +174,14 @@ fn expr_has_time_func(expr: &Expr) -> bool {
 }
 
 /// Evaluate a table value expression using only params (no compartment state).
-/// Table values may only reference constants and parameters.
+///
+/// This is a construction-time evaluator used before `CompiledModel` is fully
+/// built — `eval_expr` cannot be used here because it requires an `EvalCtx`
+/// with a completed model. Table value expressions are guaranteed to contain
+/// only `Const`, `Param`, `BinOp`, and `UnOp` nodes (no `Pop`, `PopSum`,
+/// `Time`, `TimeFunc`, or `TableLookup`). The `BinOp`/`UnOp` arms MUST match
+/// the semantics in `eval_expr` — if a new operator is added there, it must
+/// be added here too.
 fn eval_table_expr(
     expr: &Expr,
     param_index: &HashMap<String, usize>,
