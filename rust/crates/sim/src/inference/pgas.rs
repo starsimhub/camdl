@@ -393,30 +393,13 @@ pub fn complete_data_loglik(
     // not the global population across all patches. We compute it as the
     // sum of initial counts in the same stratification group.
     if !ivp_mappings.is_empty() {
-        // For each IVP compartment, find the patch population by summing
-        // all compartments that share the same patch suffix. For unstratified
-        // models, this is just the total population.
-        let total_pop: i64 = trajectory.initial_counts.iter().sum();
         for ivp in ivp_mappings {
             let count = trajectory.initial_counts[ivp.compartment_idx] as u64;
             let frac = params[ivp.model_param_idx].clamp(1e-10, 1.0 - 1e-10);
-            // Determine the per-patch population for this IVP compartment.
-            // In a stratified model, only compartments in the same patch
-            // contribute to N₀. Detect by matching the patch suffix.
-            let comp_name = &model.model.compartments[ivp.compartment_idx].name;
-            let patch_suffix = comp_name.rsplit('_').next().unwrap_or("");
-            let patch_pop: i64 = if patch_suffix.is_empty() || !comp_name.contains('_') {
-                // Unstratified: use total population
-                total_pop
-            } else {
-                // Stratified: sum all compartments with matching patch suffix
-                model.model.compartments.iter().enumerate()
-                    .filter(|(_, c)| c.name.ends_with(&format!("_{}", patch_suffix)))
-                    .map(|(i, _)| trajectory.initial_counts[i])
-                    .sum()
-            };
+            let patch_pop = patch_population(model, &trajectory.initial_counts, ivp.compartment_idx);
             let this_ivp_ll = binom_logpmf(count, patch_pop as u64, frac);
             if !this_ivp_ll.is_finite() {
+                let comp_name = &model.model.compartments[ivp.compartment_idx].name;
                 eprintln!("  IVP density -inf: Binom({}, {}, {:.6e}) for {} (comp={}, patch_pop={})",
                     count, patch_pop, frac,
                     comp_name, ivp.compartment_idx, patch_pop);
@@ -606,18 +589,9 @@ pub fn csmc_as(
 
     // Precompute per-IVP patch populations (for stratified models, N₀ is the
     // patch population, not the global population).
-    let ivp_patch_pops: Vec<i64> = ivp_mappings.iter().map(|ivp| {
-        let comp_name = &model.model.compartments[ivp.compartment_idx].name;
-        let patch_suffix = comp_name.rsplit('_').next().unwrap_or("");
-        if patch_suffix.is_empty() || !comp_name.contains('_') {
-            total_pop
-        } else {
-            model.model.compartments.iter().enumerate()
-                .filter(|(_, c)| c.name.ends_with(&format!("_{}", patch_suffix)))
-                .map(|(i, _)| init_int.counts[i])
-                .sum()
-        }
-    }).collect();
+    let ivp_patch_pops: Vec<i64> = ivp_mappings.iter()
+        .map(|ivp| patch_population(model, &init_int.counts, ivp.compartment_idx))
+        .collect();
 
     // Per-particle RNGs (needed early for stochastic init)
     let mut rngs: Vec<StatefulRng> = (0..n_particles)
@@ -924,6 +898,30 @@ pub fn csmc_as(
         initial_counts,
         substeps: trajectory_substeps,
     }, diag))
+}
+
+/// Compute the population of the patch containing `compartment_idx`.
+///
+/// In a stratified model, compartments in the same patch share a suffix
+/// (e.g., `S_patch1`, `I_patch1`). The patch population is the sum of
+/// initial counts for all compartments with matching suffix.
+/// For unstratified models (no `_` in the name), returns total population.
+pub fn patch_population(
+    model: &CompiledModel,
+    initial_counts: &[i64],
+    compartment_idx: usize,
+) -> i64 {
+    let total: i64 = initial_counts.iter().sum();
+    let comp_name = &model.model.compartments[compartment_idx].name;
+    let patch_suffix = comp_name.rsplit('_').next().unwrap_or("");
+    if patch_suffix.is_empty() || !comp_name.contains('_') {
+        total
+    } else {
+        model.model.compartments.iter().enumerate()
+            .filter(|(_, c)| c.name.ends_with(&format!("_{}", patch_suffix)))
+            .map(|(i, _)| initial_counts[i])
+            .sum()
+    }
 }
 
 /// Derivative of the transform θ(z) w.r.t. z.
