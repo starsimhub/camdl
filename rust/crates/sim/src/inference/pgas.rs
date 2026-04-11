@@ -751,36 +751,13 @@ pub fn csmc_as(
                 ancestor_log_w[j] = log_weights[j] + td;
             }
 
-            // Sample from categorical(softmax(ancestor_log_w))
-            let max_w = ancestor_log_w.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
-            let ref_ancestor = if max_w.is_finite() {
-                let weights: Vec<f64> = ancestor_log_w.iter()
-                    .map(|&w| (w - max_w).exp())
-                    .collect();
-                let sum: f64 = weights.iter().sum();
-                if sum > 0.0 {
-                    let u = resample_rng.uniform() * sum;
-                    let mut cum = 0.0;
-                    let mut selected = 0;
-                    for (j, &w) in weights.iter().enumerate() {
-                        cum += w;
-                        if cum >= u { selected = j; break; }
-                    }
-                    selected
-                } else {
-                    // Degenerate: no particle can reach the reference state.
-                    // Keep the reference's own history to maintain internal
-                    // consistency (the reference's flows at substep s were
-                    // produced from the reference's state at substep s-1).
-                    // Picking a random particle here causes splice-point
-                    // inconsistencies → -inf in complete_data_loglik.
-                    n_degenerate += 1;
-                    j_ref
-                }
-            } else {
-                // All ancestor weights are -inf: reference unreachable
-                n_degenerate += 1;
-                j_ref
+            // Sample ancestor from categorical(softmax(ancestor_log_w)).
+            // Degenerate case (all -inf): keep reference's own history to
+            // maintain internal consistency — the reference's flows at
+            // substep s were produced from the reference's state at s-1.
+            let ref_ancestor = match sample_categorical_log(&ancestor_log_w, &mut resample_rng) {
+                Some(j) => j,
+                None => { n_degenerate += 1; j_ref }
             };
 
             // Record ancestor for reference particle
@@ -829,26 +806,7 @@ pub fn csmc_as(
     }
 
     // ── Select final trajectory ──
-    // Sample from final weights
-    let k = {
-        let max_w = log_weights.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
-        if max_w.is_finite() {
-            let weights: Vec<f64> = log_weights.iter()
-                .map(|&w| (w - max_w).exp())
-                .collect();
-            let sum: f64 = weights.iter().sum();
-            let u = resample_rng.uniform() * sum;
-            let mut cum = 0.0;
-            let mut selected = 0;
-            for (j, &w) in weights.iter().enumerate() {
-                cum += w;
-                if cum >= u { selected = j; break; }
-            }
-            selected
-        } else {
-            j_ref // fallback to reference
-        }
-    };
+    let k = sample_categorical_log(&log_weights, &mut resample_rng).unwrap_or(j_ref);
 
     // Trace back through ancestry and compute trajectory renewal
     let mut trajectory_substeps = Vec::with_capacity(n_substeps);
@@ -933,6 +891,30 @@ pub fn restore_z_values(
             spec.to_transformed(current_params[spec.index])
         }
     }).collect()
+}
+
+/// Sample from a categorical distribution parameterized by unnormalized log-weights.
+///
+/// Applies the log-sum-exp trick for numerical stability: subtracts the max
+/// log-weight before exponentiating, then draws from the resulting categorical.
+/// Returns `None` if all weights are -inf (degenerate case).
+fn sample_categorical_log(log_weights: &[f64], rng: &mut StatefulRng) -> Option<usize> {
+    let max_w = log_weights.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+    if !max_w.is_finite() {
+        return None;
+    }
+    let weights: Vec<f64> = log_weights.iter().map(|&w| (w - max_w).exp()).collect();
+    let sum: f64 = weights.iter().sum();
+    if sum <= 0.0 {
+        return None;
+    }
+    let u = rng.uniform() * sum;
+    let mut cum = 0.0;
+    for (j, &w) in weights.iter().enumerate() {
+        cum += w;
+        if cum >= u { return Some(j); }
+    }
+    Some(weights.len() - 1)
 }
 
 /// Compute the population of the patch containing `compartment_idx`.
