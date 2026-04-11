@@ -396,7 +396,7 @@ pub fn complete_data_loglik(
     model: &CompiledModel,
     trajectory: &PGASTrajectory,
     params: &[f64],
-    observations: &[Observation],
+    _observations: &[Observation],
     dt: f64,
     obs_streams: &[super::types::ObsStreamSpec],
     ivp_mappings: &[IVPMapping],
@@ -575,7 +575,7 @@ pub fn simulate_reference(
 pub fn csmc_as(
     model: &CompiledModel,
     params: &[f64],
-    observations: &[Observation],
+    _observations: &[Observation],
     reference: &PGASTrajectory,
     n_particles: usize,
     dt: f64,

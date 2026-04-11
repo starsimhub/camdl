@@ -268,7 +268,7 @@ pub fn complete_data_loglik_grad(
     model: &CompiledModel,
     trajectory: &PGASTrajectory,
     params: &[f64],
-    observations: &[Observation],
+    _observations: &[Observation],
     dt: f64,
     obs_streams: &[super::types::ObsStreamSpec],
     ivp_mappings: &[IVPMapping],

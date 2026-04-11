@@ -148,6 +148,7 @@ fn test_nuts_target_gradient_on_z_scale() {
     let observations: Vec<Observation> = vec![];
     let ivp_mappings: Vec<IVPMapping> = vec![];
     let obs_streams: Vec<sim::inference::ObsStreamSpec> = vec![];
+    let oas = build_obs_at_substep(&observations, compiled.model.simulation.t_start, dt);
 
     // Build EstimatedParams with Log transforms (like real inference)
     let if2_params: Vec<EstimatedParam> = compiled.model.parameters.iter().enumerate()
@@ -185,7 +186,7 @@ fn test_nuts_target_gradient_on_z_scale() {
         let (ll, ll_grad_theta) = sim::inference::pgas_grad::complete_data_loglik_grad(
             &compiled, &trajectory, &params, &observations, dt,
             &obs_streams, &ivp_mappings,
-            &param_names, &param_indices,
+            &param_names, &param_indices, &oas,
         ).unwrap_or((f64::NEG_INFINITY, vec![0.0; d]));
 
         let mut log_p = ll;
