@@ -105,7 +105,7 @@ This is the fundamental design choice:
 | **Trajectories** | Marginalized out by PF | Conditioned on, explicitly sampled |
 | **Likelihood** | Estimated (noisy) | Exact (no PF variance) |
 | **Process model** | Any (plug-and-play) | Chain-binomial only (needs transition density) |
-| **Output** | Posterior $p(\theta | y)$ | Posterior $p(\theta, X | y)$ jointly |
+| **Output** | Posterior $p(\theta | y)$ (trajectories available but low-quality due to path degeneracy) | Posterior $p(\theta, X | y)$ jointly (high-quality trajectory samples via CSMC) |
 | **Bottleneck** | PF variance → slow mixing | Trajectory convergence → slow on long series |
 
 PMMH is more general (works with any simulator) but pays for it with
