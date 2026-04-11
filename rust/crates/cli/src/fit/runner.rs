@@ -868,24 +868,12 @@ pub fn auto_rw_sd(
             mads.push(0.0);
             continue;
         }
-        values.sort_by(|a, b| a.total_cmp(b));
 
-        let median = if values.len() % 2 == 0 {
-            (values[values.len() / 2 - 1] + values[values.len() / 2]) / 2.0
-        } else {
-            values[values.len() / 2]
-        };
+        let med = median(&mut values);
+        let m = mad(&values, med);
 
-        let mut abs_devs: Vec<f64> = values.iter().map(|&v| (v - median).abs()).collect();
-        abs_devs.sort_by(|a, b| a.total_cmp(b));
-        let mad = if abs_devs.len() % 2 == 0 {
-            (abs_devs[abs_devs.len() / 2 - 1] + abs_devs[abs_devs.len() / 2]) / 2.0
-        } else {
-            abs_devs[abs_devs.len() / 2]
-        };
-
-        medians.push(median);
-        mads.push(mad);
+        medians.push(med);
+        mads.push(m);
     }
 
     // Classify chains as "good" (all params within 3×MAD of median)
@@ -931,15 +919,7 @@ pub fn auto_rw_sd(
             .map(|c| chain_params[c][spec.index])
             .collect();
 
-        let mut abs_devs: Vec<f64> = good_values.iter()
-            .map(|&v| (v - medians[pi]).abs())
-            .collect();
-        abs_devs.sort_by(|a, b| a.total_cmp(b));
-        let good_mad = if abs_devs.len() % 2 == 0 {
-            (abs_devs[abs_devs.len() / 2 - 1] + abs_devs[abs_devs.len() / 2]) / 2.0
-        } else {
-            abs_devs[abs_devs.len() / 2]
-        };
+        let good_mad = mad(&good_values, medians[pi]);
 
         let rw = 0.5 * good_mad;
         // Floor: don't let rw_sd go below 1% of the median (prevents convergence stall)
@@ -948,6 +928,24 @@ pub fn auto_rw_sd(
     }
 
     Ok((rw_sd_map, n_good))
+}
+
+/// Median of a mutable slice (sorts in place).
+fn median(v: &mut [f64]) -> f64 {
+    v.sort_by(|a, b| a.total_cmp(b));
+    let n = v.len();
+    if n == 0 { return 0.0; }
+    if n % 2 == 0 {
+        (v[n / 2 - 1] + v[n / 2]) / 2.0
+    } else {
+        v[n / 2]
+    }
+}
+
+/// Median absolute deviation from a given center.
+fn mad(v: &[f64], center: f64) -> f64 {
+    let mut abs_devs: Vec<f64> = v.iter().map(|&x| (x - center).abs()).collect();
+    median(&mut abs_devs)
 }
 
 /// Write per-chain output files: parameter_traces.tsv and final_params.toml.
