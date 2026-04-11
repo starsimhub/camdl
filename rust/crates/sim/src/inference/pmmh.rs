@@ -348,26 +348,9 @@ pub fn run_pmmh(
         map_loglik = state.map_loglik;
         map_log_posterior = state.map_log_posterior;
 
-        // Restore z-values with name-based reordering (same pattern as PGAS)
-        if !state.param_names.is_empty() && state.param_names.len() == state.transformed.len() {
-            let saved_z: std::collections::HashMap<&str, f64> = state.param_names.iter()
-                .zip(state.transformed.iter())
-                .map(|(name, &z)| (name.as_str(), z))
-                .collect();
-            current_transformed = if2_params.iter().map(|spec| {
-                if let Some(&z) = saved_z.get(spec.name.as_str()) {
-                    z
-                } else {
-                    eprintln!("  warning: param '{}' not found in resume state, computing from theta", spec.name);
-                    spec.to_transformed(current_params[spec.index])
-                }
-            }).collect();
-        } else {
-            eprintln!("  warning: resume state lacks param_names — recomputing z from params.");
-            current_transformed = if2_params.iter()
-                .map(|spec| spec.to_transformed(current_params[spec.index]))
-                .collect();
-        }
+        current_transformed = super::pgas::restore_z_values(
+            &state.param_names, &state.transformed, if2_params, &current_params,
+        );
 
         // Enforce bounds on restored params
         for (i, spec) in if2_params.iter().enumerate() {

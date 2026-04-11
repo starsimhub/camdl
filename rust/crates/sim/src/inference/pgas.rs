@@ -900,6 +900,41 @@ pub fn csmc_as(
     }, diag))
 }
 
+/// Restore transformed z-values from a resume state, matching by parameter name.
+///
+/// The resume state stores `param_names` alongside `transformed` z-values. Because
+/// HashMap iteration order is non-deterministic, the current run's `if2_params` may
+/// be in a different order than when the state was saved. This function reorders
+/// z-values to match the current parameter ordering. Parameters missing from the
+/// saved state are recomputed from `current_params` with a warning.
+pub fn restore_z_values(
+    saved_names: &[String],
+    saved_z: &[f64],
+    if2_params: &[EstimatedParam],
+    current_params: &[f64],
+) -> Vec<f64> {
+    if saved_names.is_empty() || saved_names.len() != saved_z.len() {
+        eprintln!("  warning: resume state lacks param_names — recomputing z from params.");
+        return if2_params.iter()
+            .map(|spec| spec.to_transformed(current_params[spec.index]))
+            .collect();
+    }
+
+    let saved: std::collections::HashMap<&str, f64> = saved_names.iter()
+        .zip(saved_z.iter())
+        .map(|(name, &z)| (name.as_str(), z))
+        .collect();
+
+    if2_params.iter().map(|spec| {
+        if let Some(&z) = saved.get(spec.name.as_str()) {
+            z
+        } else {
+            eprintln!("  warning: param '{}' not found in resume state, computing from theta", spec.name);
+            spec.to_transformed(current_params[spec.index])
+        }
+    }).collect()
+}
+
 /// Compute the population of the patch containing `compartment_idx`.
 ///
 /// In a stratified model, compartments in the same patch share a suffix
@@ -1024,34 +1059,9 @@ pub fn run_pgas(
         trajectory = state.trajectory;
         start_sweep = state.completed_sweeps;
 
-        // Restore z-values with name-based reordering.
-        // The resume state stores param_names alongside transformed values.
-        // HashMap iteration order is non-deterministic, so the current run's
-        // if2_params may be in a different order than when the state was saved.
-        if !state.param_names.is_empty() && state.param_names.len() == state.transformed.len() {
-            // Build name→z lookup from saved state
-            let saved_z: std::collections::HashMap<&str, f64> = state.param_names.iter()
-                .zip(state.transformed.iter())
-                .map(|(name, &z)| (name.as_str(), z))
-                .collect();
-
-            current_transformed = if2_params.iter().map(|spec| {
-                if let Some(&z) = saved_z.get(spec.name.as_str()) {
-                    z
-                } else {
-                    // Param not in saved state — compute from theta
-                    eprintln!("  warning: param '{}' not found in resume state, computing from theta", spec.name);
-                    spec.to_transformed(current_params[spec.index])
-                }
-            }).collect();
-        } else {
-            // Legacy resume state without param_names — recompute from params.
-            // This is the safe fallback: z = to_transformed(theta).
-            eprintln!("  warning: resume state lacks param_names — recomputing z from params.");
-            current_transformed = if2_params.iter()
-                .map(|spec| spec.to_transformed(current_params[spec.index]))
-                .collect();
-        }
+        current_transformed = restore_z_values(
+            &state.param_names, &state.transformed, if2_params, &current_params,
+        );
 
         // Enforce bounds on restored params
         for (i, spec) in if2_params.iter().enumerate() {
