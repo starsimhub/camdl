@@ -136,7 +136,9 @@
     {
       "name": "weekly_cases",
       "data_stream": "weekly_cases",
-      "schedule": { "regular": { "start": 0.0, "step": 7.0, "end": 365.25 } },
+      "schedule": {
+        "regular": { "start": 0.0, "step": 7.0, "end": 365.2425 }
+      },
       "projection": { "cumulative_flow": "infection" },
       "likelihood": {
         "neg_binomial": {
@@ -155,7 +157,7 @@
       "name": "detection",
       "data_stream": "detection",
       "schedule": {
-        "regular": { "start": 0.0, "step": 14.0, "end": 365.25 }
+        "regular": { "start": 0.0, "step": 14.0, "end": 365.2425 }
       },
       "projection": { "current_pop": "I" },
       "likelihood": { "bernoulli": { "p": { "param": "p_detect" } } }
@@ -250,14 +252,14 @@
   },
   "data_contract": null,
   "output": {
-    "times": { "regular": { "start": 0.0, "step": 1.0, "end": 365.25 } },
+    "times": { "regular": { "start": 0.0, "step": 1.0, "end": 365.2425 } },
     "format": "tsv",
     "trajectory": true,
     "observations": true
   },
   "simulation": {
     "t_start": 0.0,
-    "t_end": 365.25,
+    "t_end": 365.2425,
     "time_semantics": "continuous",
     "dt": null,
     "rng_seed": null

@@ -93,21 +93,20 @@ let parse_iso_date s =
      with _ -> failwith (Printf.sprintf "invalid date literal '%s'" s))
   | _ -> failwith (Printf.sprintf "date literal must be YYYY-MM-DD, got '%s'" s)
 
-let days_per_unit = function
-  | Days      -> 1.0
-  | Weeks     -> 7.0
-  | Months    -> 365.2425 /. 12.0
-  | Years     -> 365.2425
-  | PerDay    -> 1.0
-  | PerWeek   -> 7.0
-  | PerMonth  -> 365.2425 /. 12.0
-  | PerYear   -> 365.2425
-
 let parse_date_to_float origin_str date_str time_unit =
   let (oy, om, od) = parse_iso_date origin_str in
   let (ty, tm, td) = parse_iso_date date_str in
   let delta = days_of_date ty tm td - days_of_date oy om od in
-  float_of_int delta /. days_per_unit time_unit
+  (* days_per is defined below; forward-declare not needed since
+     parse_date_to_float is only called after full initialization.
+     Use the same Gregorian constant (365.2425) everywhere. *)
+  let days = function
+    | Days | PerDay -> 1.0
+    | Weeks | PerWeek -> 7.0
+    | Months | PerMonth -> 365.2425 /. 12.0
+    | Years | PerYear -> 365.2425
+  in
+  float_of_int delta /. days time_unit
 
 (* ── Data loading helpers ─────────────────────────────────────────────────── *)
 
@@ -480,11 +479,13 @@ let resolve_dimensions ctx =
 
 (* Number of days represented by each unit literal. Used as the universal
    intermediate: to convert between any two units, go via days. *)
+(* Gregorian average year = 365.2425 days. Used as the universal intermediate
+   for all unit conversions. Must match parse_date_to_float above. *)
 let days_per = function
-  | Days     -> 1.0    | PerDay   -> 1.0
-  | Weeks    -> 7.0    | PerWeek  -> 7.0
-  | Months   -> 30.4375| PerMonth -> 30.4375  (* 365.25 / 12 *)
-  | Years    -> 365.25 | PerYear  -> 365.25
+  | Days     -> 1.0              | PerDay   -> 1.0
+  | Weeks    -> 7.0              | PerWeek  -> 7.0
+  | Months   -> 365.2425 /. 12.0 | PerMonth -> 365.2425 /. 12.0
+  | Years    -> 365.2425          | PerYear  -> 365.2425
 
 (* Convert a unit literal expression to a float in the model's declared
    time_unit.  The computation goes through days as the universal intermediate:
