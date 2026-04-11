@@ -195,6 +195,7 @@ pub fn log_transition_density_grad(
 ///
 /// For each overdispersed source group, evaluates
 /// log Gamma(g; dt/σ², σ²/dt) and its gradient through σ².
+#[allow(dead_code)] // Disabled alongside gamma density in complete_data_loglik
 fn log_gamma_density_grad_substep(
     model: &CompiledModel,
     counts_before: &[i64],
@@ -317,14 +318,13 @@ pub fn complete_data_loglik_grad(
         log_p += td;
         for i in 0..d { grad[i] += td_grad[i]; }
 
-        // Gamma multiplier density gradient (for sigma_se estimation)
-        if !rec.gammas.is_empty() {
-            let (gd, gd_grad) = log_gamma_density_grad_substep(
-                model, counts_before, &rec.gammas, params, t, dt, param_indices,
-            )?;
-            log_p += gd;
-            for i in 0..d { grad[i] += gd_grad[i]; }
-        }
+        // Gamma multiplier density gradient — DISABLED to match
+        // complete_data_loglik which has the gamma density disabled due to
+        // gamma_idx alignment issues on spatial models. The gradient and
+        // objective MUST agree — if LL doesn't include the gamma term,
+        // the gradient must not either. See:
+        // docs/dev/incidents/2026-04-07-spatial-pgas-neg-inf.md
+        // Re-enable both together when gamma indexing is fixed.
 
         // Accumulate flows
         for (i, &f) in rec.flows.iter().enumerate() {
