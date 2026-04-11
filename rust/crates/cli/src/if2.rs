@@ -18,39 +18,29 @@ use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use rayon::prelude::*;
 use sim::{
     compiled_model::CompiledModel,
-    chain_binomial::step_one,
     inference::{
-        obs_loglik::{negbin_logpmf, discretized_normal_logpmf_tol, DEFAULT_TOL},
         if2::{run_if2_with_progress, IF2Config, EstimatedParam, IF2Result, Observation, Transform},
         ParticleState,
+        ChainBinomialProcess, MultiStreamObsModel,
+        multi_stream_obs::StreamSpec,
+        traits::{SMCConfig, ObservationModel},
     },
-    rng::StatefulRng,
 };
 use std::collections::HashMap;
 use std::sync::Arc;
 
 fn run_one_chain(
     chain_id: usize,
-    compiled: &CompiledModel,
+    process: &ChainBinomialProcess,
+    obs_model: &(dyn ObservationModel<ParticleState> + Sync),
     params: &[f64],
     if2_params: &[EstimatedParam],
-    observations: &[Observation],
     config: &IF2Config,
-    flow_indices: &[usize],
-    obs_loglik_fn: &(dyn Fn(f64, f64, &[f64]) -> f64 + Send + Sync),
     base_seed: u64,
     pb: Option<&ProgressBar>,
 ) -> IF2Result {
     let chain_seed = base_seed ^ (chain_id as u64).wrapping_mul(0x9e3779b97f4a7c15);
 
-    let step_fn = |state: &mut ParticleState, p: &[f64], t: f64, step_dt: f64, rng: &mut StatefulRng, scratch: &mut sim::chain_binomial::StepScratch| {
-        step_one(compiled, &mut state.counts, &mut state.flow_accumulators, p, t, step_dt, rng, scratch)
-    };
-    let project_fn = |state: &ParticleState| -> f64 {
-        flow_indices.iter().map(|&i| state.flow_accumulators[i] as f64).sum()
-    };
-
-    // Progress callback that updates the indicatif bar
     let progress_cb = |iter: usize, loglik: f64| {
         if let Some(bar) = pb {
             bar.set_position((iter + 1) as u64);
@@ -63,8 +53,7 @@ fn run_one_chain(
     };
 
     let result = run_if2_with_progress(
-        compiled, params, if2_params, observations, config,
-        &step_fn, &project_fn, &*obs_loglik_fn, chain_seed,
+        process, obs_model, params, if2_params, config, chain_seed,
         Some(&progress_cb),
     ).unwrap_or_else(|e| {
         eprintln!("chain {} error: {:?}", chain_id + 1, e);
@@ -90,8 +79,8 @@ pub fn cmd_if2(args: &[String]) {
     let mut overrides: HashMap<String, f64> = HashMap::new();
     let mut scenario_name: Option<String> = None;
     let mut adhoc_enable: Vec<String> = Vec::new();
-    let mut obs_model = "negbin".to_string();
-    let mut tol = DEFAULT_TOL;
+    let mut _obs_model = "negbin".to_string();
+    let mut _tol = 0.0_f64;
     let mut flow_name: Option<String> = None;
     let mut rw_sd_str: Option<String> = None;
     let mut fixed_str: Option<String> = None;
@@ -115,8 +104,8 @@ pub fn cmd_if2(args: &[String]) {
             "--seed"       => { i += 1; seed = args[i].parse().unwrap_or_else(|_| { eprintln!("error: --seed needs integer"); std::process::exit(1); }); }
             "--scenario"   => { i += 1; scenario_name = Some(args[i].clone()); }
             "--enable"     => { i += 1; adhoc_enable.push(args[i].clone()); }
-            "--obs-model"  => { i += 1; obs_model = args[i].clone(); }
-            "--tol"        => { i += 1; tol = args[i].parse().unwrap_or_else(|_| { eprintln!("error: --tol needs number"); std::process::exit(1); }); }
+            "--obs-model"  => { i += 1; _obs_model = args[i].clone(); }
+            "--tol"        => { i += 1; _tol = args[i].parse().unwrap_or_else(|_| { eprintln!("error: --tol needs number"); std::process::exit(1); }); }
             "--flow"       => { i += 1; flow_name = Some(args[i].clone()); }
             "--rw-sd"      => { i += 1; rw_sd_str = Some(args[i].clone()); }
             "--fixed"      => { i += 1; fixed_str = Some(args[i].clone()); }
@@ -358,51 +347,39 @@ pub fn cmd_if2(args: &[String]) {
         }
     }
 
+    let compiled = Arc::new(compiled);
+
     let config = IF2Config {
         n_particles,
         n_iterations,
         cooling_fraction: cooling,
         cooling_target_iters: n_iterations, simplex_groups: vec![],
         dt,
+        t_start: compiled.model.simulation.t_start,
     };
 
-    let compiled = Arc::new(compiled);
+    // Build process + observation model via traits
+    let process = ChainBinomialProcess::new(compiled.clone());
+    let obs_times: Vec<f64> = observations.iter().map(|o| o.time).collect();
+    let obs_values: Vec<f64> = observations.iter().map(|o| o.value).collect();
 
-    // Build obs_loglik: prefer IR observation model, fall back to --obs-model
-    let obs_loglik_fn: Box<dyn Fn(f64, f64, &[f64]) -> f64 + Send + Sync> = {
-        // Try to find observation block (first one, or by --flow name match)
-        let obs_block = model.observations.first();
-        if let Some(obs) = obs_block {
-            eprintln!("if2: using observation model '{}' from IR", obs.name);
-            sim::inference::obs_model::compile_obs_loglik_if2(obs, compiled.clone())
-        } else if obs_model != "negbin" || model.observations.is_empty() {
-            // Deprecated fallback: hardcoded --obs-model
-            eprintln!("\x1b[33mwarning: using --obs-model '{}' (deprecated). Add an observations {{}} block to your model.\x1b[0m", obs_model);
-            let _rho_idx = compiled.param_index.get("rho").copied();
-            let _k_idx = compiled.param_index.get("k").copied();
-            let _psi_idx = compiled.param_index.get("psi").copied();
-            match obs_model.as_str() {
-                "negbin" => Box::new(move |proj: f64, obs: f64, p: &[f64]| {
-                    let rho = rho_idx.map_or(1.0, |i| p[i]);
-                    let k = k_idx.map_or(10.0, |i| p[i]);
-                    negbin_logpmf(obs, rho * proj, k)
-                }),
-                _ => Box::new(move |proj: f64, obs: f64, p: &[f64]| {
-                    let rho = rho_idx.map_or(1.0, |i| p[i]);
-                    let psi = psi_idx.map_or(0.116, |i| p[i]);
-                    let mu = rho * proj;
-                    discretized_normal_logpmf_tol(obs, mu, mu * (1.0 - rho + psi * psi * mu), tol)
-                }),
-            }
-        } else {
-            eprintln!("error: model has no observations block and --obs-model not specified");
-            std::process::exit(1);
-        }
+    let obs_model_obj: Box<dyn ObservationModel<ParticleState> + Sync> = if let Some(obs_block) = model.observations.first() {
+        eprintln!("if2: using observation model '{}' from IR", obs_block.name);
+        Box::new(MultiStreamObsModel::new(
+            vec![StreamSpec {
+                flow_indices: flow_indices.clone(),
+                ir_model: obs_block.clone(),
+                observations: obs_values,
+                obs_times,
+            }],
+            compiled.clone(),
+        ))
+    } else {
+        eprintln!("error: model has no observations block");
+        std::process::exit(1);
     };
 
     let if2_params = Arc::new(if2_params);
-    let observations = Arc::new(observations);
-    let flow_indices = Arc::new(flow_indices);
 
     // ── Multi-chain execution with indicatif progress ──────────────────────
     let mp = MultiProgress::new();
@@ -429,8 +406,8 @@ pub fn cmd_if2(args: &[String]) {
     let chain_results: Vec<(usize, IF2Result)> = (0..n_chains)
         .into_par_iter()
         .map(|chain_id| {
-            let result = run_one_chain(chain_id, &compiled, &params, &if2_params,
-                &observations, &config, &flow_indices, &*obs_loglik_fn,
+            let result = run_one_chain(chain_id, &process, &*obs_model_obj,
+                &params, &if2_params, &config,
                 seed, Some(&bars[chain_id]));
             (chain_id, result)
         })
@@ -441,38 +418,20 @@ pub fn cmd_if2(args: &[String]) {
     {
         let eval_interval = 10;
         let n_eval_particles = n_particles.min(500);
-        let pf_observations: Vec<sim::inference::particle_filter::Observation> = observations.iter()
-            .map(|o| sim::inference::particle_filter::Observation { time: o.time, value: o.value })
-            .collect();
+        let smc_config = SMCConfig {
+            n_particles: n_eval_particles,
+            dt,
+            t_start: compiled.model.simulation.t_start,
+        };
 
         eprintln!("\nevaluating loglik (every {} iterations, all {} chains)...", eval_interval, n_chains);
         for (chain_id, result) in chain_results.iter_mut() {
             for it in &mut result.iterations {
                 if it.iteration % eval_interval == 0 || it.iteration == n_iterations - 1 {
-                    // Build params at this iteration's filter mean
                     let eval_params = &it.param_means;
-                    let step_fn = |state: &mut ParticleState, t: f64, step_dt: f64, rng: &mut StatefulRng, scratch: &mut sim::chain_binomial::StepScratch| {
-                        step_one(&compiled, &mut state.counts, &mut state.flow_accumulators, eval_params, t, step_dt, rng, scratch)
-                    };
-                    let fi = &*flow_indices;
-                    let project_fn = |state: &ParticleState| -> f64 {
-                        fi.iter().map(|&i| state.flow_accumulators[i] as f64).sum()
-                    };
-                    // Build PF obs_loglik from IR obs model (fixed params)
-                    let obs_block = model.observations.first();
-                    let pf_obs_ll: Box<dyn Fn(f64, f64) -> f64> = if let Some(obs) = obs_block {
-                        sim::inference::obs_model::compile_obs_loglik_pf(obs, compiled.clone(), eval_params)
-                    } else {
-                        // Fallback: wrap IF2 dmeasure with fixed params
-                        let p = eval_params.to_vec();
-                        let dm = &*obs_loglik_fn;
-                        Box::new(move |proj: f64, obs: f64| dm(proj, obs, &p))
-                    };
-
                     let pf_seed = seed + *chain_id as u64 * 1000 + it.iteration as u64;
                     match sim::inference::bootstrap_filter(
-                        &compiled, eval_params, &pf_observations, n_eval_particles, dt,
-                        &step_fn, &project_fn, &*pf_obs_ll, None, None, pf_seed, None,
+                        &process, &*obs_model_obj, eval_params, &smc_config, pf_seed,
                     ) {
                         Ok(r) => it.loglik = r.log_likelihood,
                         Err(_) => it.loglik = f64::NEG_INFINITY,

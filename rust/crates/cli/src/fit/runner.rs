@@ -10,12 +10,10 @@ use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use rayon::prelude::*;
 use sim::{
     compiled_model::CompiledModel,
-    chain_binomial::step_one,
     inference::{
         if2::{run_if2_with_progress, IF2Config, EstimatedParam, IF2Result, Observation, Transform},
         pmmh::Prior,
         diagnostic::{DiagnosticCollector, DiagnosticKind},
-        ParticleState,
     },
     rng::StatefulRng,
 };
@@ -192,6 +190,7 @@ impl FitRunConfig {
             cooling_fraction: cooling,
             cooling_target_iters: n_iterations, simplex_groups: vec![],
             dt,
+            t_start: compiled.model.simulation.t_start,
         };
 
         Ok(FitRunConfig {
@@ -275,46 +274,25 @@ fn build_if2_params(
 /// Run a quick pfilter at given params and return the loglik.
 /// Used by scout for initial_loglik baseline.
 pub fn run_quick_pfilter(config: &FitRunConfig, params: &[f64], n_particles: usize, seed: u64) -> f64 {
-    use sim::inference::particle_filter::{self, Observation as PfObs};
-    use sim::inference::types::{ObsStreamSpec, joint_obs_weight_particle};
+    use sim::inference::{ChainBinomialProcess, MultiStreamObsModel, multi_stream_obs::StreamSpec, traits::SMCConfig};
 
-    let compiled = &*config.compiled;
-    let observations: Vec<PfObs> = config.observations.iter()
-        .map(|o| PfObs { time: o.time, value: o.value })
-        .collect();
-
-    let step_fn = |state: &mut ParticleState, t: f64, step_dt: f64, rng: &mut StatefulRng, scratch: &mut sim::chain_binomial::StepScratch| {
-        step_one(compiled, &mut state.counts, &mut state.flow_accumulators, params, t, step_dt, rng, scratch)
-    };
-
-    // Build multi-stream observation specs — handles both single and multi-stream models.
-    let obs_stream_specs: Vec<ObsStreamSpec> = config.streams.iter()
-        .map(|s| ObsStreamSpec {
+    let process = ChainBinomialProcess::new(config.compiled.clone());
+    let obs_model = MultiStreamObsModel::new(
+        config.streams.iter().map(|s| StreamSpec {
             flow_indices: s.flow_indices.clone(),
-            obs_loglik_fn: sim::inference::obs_model::compile_obs_loglik_pf(
-                &s.obs_model_ir, config.compiled.clone(), params,
-            ),
+            ir_model: s.obs_model_ir.clone(),
             observations: s.data.iter().map(|o| o.value).collect(),
-        })
-        .collect();
-
-    let joint_obs_fn = move |state: &ParticleState, obs_idx: usize| -> f64 {
-        joint_obs_weight_particle(&obs_stream_specs, state, obs_idx)
-    };
-
-    // Single-stream fallback for project_fn/obs_loglik_fn (required by bootstrap_filter signature)
-    let flow_indices = &config.flow_indices;
-    let project_fn = |state: &ParticleState| -> f64 {
-        flow_indices.iter().map(|&i| state.flow_accumulators[i] as f64).sum()
-    };
-    let obs_loglik_fn = sim::inference::obs_model::compile_obs_loglik_pf(
-        &config.streams[0].obs_model_ir, config.compiled.clone(), params,
+            obs_times: config.observations.iter().map(|o| o.time).collect(),
+        }).collect(),
+        config.compiled.clone(),
     );
+    let smc_config = SMCConfig {
+        n_particles,
+        dt: config.if2_config.dt,
+        t_start: config.compiled.model.simulation.t_start,
+    };
 
-    match particle_filter::bootstrap_filter(
-        compiled, params, &observations, n_particles, config.if2_config.dt,
-        &step_fn, &project_fn, &*obs_loglik_fn, None, None, seed, Some(&joint_obs_fn),
-    ) {
+    match sim::inference::bootstrap_filter(&process, &obs_model, params, &smc_config, seed) {
         Ok(result) => result.log_likelihood,
         Err(_) => f64::NEG_INFINITY,
     }
@@ -619,15 +597,17 @@ fn run_one_chain(
     let chain_seed = config.seed ^ (chain_id as u64).wrapping_mul(0x9e3779b97f4a7c15);
     let if2_params = per_chain_params.unwrap_or(&config.estimated_params);
 
-    let step_fn = |state: &mut ParticleState, p: &[f64], t: f64, step_dt: f64, rng: &mut StatefulRng, scratch: &mut sim::chain_binomial::StepScratch| {
-        step_one(&config.compiled, &mut state.counts, &mut state.flow_accumulators, p, t, step_dt, rng, scratch)
-    };
-    let project_fn = |state: &ParticleState| -> f64 {
-        config.flow_indices.iter().map(|&i| state.flow_accumulators[i] as f64).sum()
-    };
-    // Compile dmeasure from the IR observation model
-    let obs_loglik_fn = sim::inference::obs_model::compile_obs_loglik_if2(
-        &config.obs_model_ir, config.compiled.clone(),
+    use sim::inference::{ChainBinomialProcess, MultiStreamObsModel, multi_stream_obs::StreamSpec};
+
+    let process = ChainBinomialProcess::new(config.compiled.clone());
+    let obs_model = MultiStreamObsModel::new(
+        config.streams.iter().map(|s| StreamSpec {
+            flow_indices: s.flow_indices.clone(),
+            ir_model: s.obs_model_ir.clone(),
+            observations: s.data.iter().map(|o| o.value).collect(),
+            obs_times: config.observations.iter().map(|o| o.time).collect(),
+        }).collect(),
+        config.compiled.clone(),
     );
 
     let progress_cb = |iter: usize, loglik: f64| {
@@ -642,8 +622,8 @@ fn run_one_chain(
     };
 
     let result = run_if2_with_progress(
-        &config.compiled, &config.base_params, if2_params, &config.observations,
-        &config.if2_config, &step_fn, &project_fn, &*obs_loglik_fn, chain_seed,
+        &process, &obs_model, &config.base_params, if2_params,
+        &config.if2_config, chain_seed,
         Some(&progress_cb),
     ).unwrap_or_else(|e| {
         eprintln!("chain {} error: {:?}", chain_id + 1, e);

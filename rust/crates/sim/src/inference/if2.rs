@@ -16,9 +16,9 @@
 use rayon::prelude::*;
 
 use crate::chain_binomial::StepScratch;
-use crate::compiled_model::CompiledModel;
 use crate::rng::StatefulRng;
 use crate::error::SimError;
+use super::traits::{ProcessModel, ObservationModel};
 use super::types::{ParticleState, log_sum_exp};
 use super::resampling::systematic_resample;
 
@@ -228,6 +228,8 @@ pub struct IF2Config {
     /// pomp default: 50 (cooling.fraction.50).
     pub cooling_target_iters: usize,
     pub dt: f64,
+    /// Simulation start time (before first observation).
+    pub t_start: f64,
     /// Simplex parameter groups (barycentric transform). Members are
     /// perturbed jointly in log-ratio space with softmax inverse.
     pub simplex_groups: Vec<SimplexGroup>,
@@ -284,6 +286,7 @@ pub struct IF2Result {
 }
 
 /// Observation for IF2 (same as particle_filter::Observation).
+/// Kept for backward compatibility with CLI code that constructs observations.
 #[derive(Clone)]
 pub struct Observation {
     pub time: f64,
@@ -306,36 +309,31 @@ pub struct Observation {
 /// Arguments: (iteration_index, log_likelihood).
 pub type ProgressCallback<'a> = Option<&'a dyn Fn(usize, f64)>;
 
-pub fn run_if2(
-    model: &CompiledModel,
+pub fn run_if2<P: ProcessModel<State = ParticleState, Scratch = StepScratch>>(
+    process: &P,
+    obs_model: &(dyn ObservationModel<ParticleState> + Sync),
     base_params: &[f64],
     if2_params: &[EstimatedParam],
-    observations: &[Observation],
     config: &IF2Config,
-    step_fn: &(dyn Fn(&mut ParticleState, &[f64], f64, f64, &mut StatefulRng, &mut StepScratch) -> Result<(), SimError> + Send + Sync),
-    project_fn: &dyn Fn(&ParticleState) -> f64,
-    obs_loglik_fn: &dyn Fn(f64, f64, &[f64]) -> f64,
     seed: u64,
 ) -> Result<IF2Result, SimError> {
-    run_if2_with_progress(model, base_params, if2_params, observations, config,
-        step_fn, project_fn, obs_loglik_fn, seed, None)
+    run_if2_with_progress(process, obs_model, base_params, if2_params, config,
+        seed, None)
 }
 
-pub fn run_if2_with_progress(
-    model: &CompiledModel,
+pub fn run_if2_with_progress<P: ProcessModel<State = ParticleState, Scratch = StepScratch>>(
+    process: &P,
+    obs_model: &(dyn ObservationModel<ParticleState> + Sync),
     base_params: &[f64],
     if2_params: &[EstimatedParam],
-    observations: &[Observation],
     config: &IF2Config,
-    step_fn: &(dyn Fn(&mut ParticleState, &[f64], f64, f64, &mut StatefulRng, &mut StepScratch) -> Result<(), SimError> + Send + Sync),
-    project_fn: &dyn Fn(&ParticleState) -> f64,
-    obs_loglik_fn: &dyn Fn(f64, f64, &[f64]) -> f64,
     seed: u64,
     on_iteration: ProgressCallback,
 ) -> Result<IF2Result, SimError> {
     let n = config.n_particles;
-    let n_int = model.int_local_to_global.len();
-    let n_tr = model.model.transitions.len();
+    let n_int = process.n_compartments();
+    let n_tr = process.n_transitions();
+    let n_obs = obs_model.n_observations();
 
     // Mutable copy of params — updated each iteration with the filter mean
     let mut current_params = base_params.to_vec();
@@ -347,7 +345,6 @@ pub fn run_if2_with_progress(
     //
     // Per-step factor: c = cooling_fraction ^ (2 / (target_iters × n_obs))
     // The "2" makes the fraction apply at the midpoint, not the endpoint.
-    let n_obs = observations.len();
     let total_target_steps = config.cooling_target_iters as f64 * n_obs as f64;
     let per_step_cooling = config.cooling_fraction.powf(2.0 / total_target_steps);
 
@@ -361,7 +358,7 @@ pub fn run_if2_with_progress(
         .collect();
     let mut particle_params: Vec<Vec<f64>> = vec![vec![0.0; base_params.len()]; n];
     let mut scratches: Vec<StepScratch> = (0..n)
-        .map(|_| StepScratch::new(model))
+        .map(|_| process.new_scratch())
         .collect();
     // Double-buffers for resampling (avoids clone allocation)
     let mut states_buf: Vec<ParticleState> = (0..n)
@@ -372,9 +369,9 @@ pub fn run_if2_with_progress(
     for iter in 0..config.n_iterations {
 
         // Re-initialize particles from model's initial state
-        let (init_int, _) = model.initial_state(&current_params)?;
+        let init_state = process.initial_state(&current_params)?;
         for s in &mut states {
-            s.counts.copy_from_slice(&init_int.counts);
+            s.counts.copy_from_slice(&init_state.counts);
             s.reset_flows();
         }
 
@@ -437,11 +434,11 @@ pub fn run_if2_with_progress(
 
         let mut log_weights = vec![0.0_f64; n];
         let mut total_loglik = 0.0;
-        let mut t = model.model.simulation.t_start;
+        let mut t = config.t_start;
 
-        for obs in observations {
+        for obs_idx in 0..n_obs {
             // Propagate — batched parallel dispatch per observation interval.
-            let obs_time = obs.time;
+            let obs_time = obs_model.obs_time(obs_idx);
             let t_start = t;
             let dt = config.dt;
             let errors: Vec<Result<(), SimError>> = states.par_iter_mut()
@@ -452,14 +449,14 @@ pub fn run_if2_with_progress(
                     let mut t_local = t_start;
                     while t_local < obs_time - 1e-10 {
                         let step_dt = dt.min(obs_time - t_local);
-                        step_fn(state, pp, t_local, step_dt, rng, scratch)?;
+                        process.step(state, pp, t_local, step_dt, rng, scratch)?;
                         t_local += step_dt;
                     }
                     Ok(())
                 })
                 .collect();
             for r in errors { r?; }
-            while t < obs.time - 1e-10 { t += config.dt.min(obs.time - t); }
+            while t < obs_time - 1e-10 { t += config.dt.min(obs_time - t); }
 
             // Perturb parameters at observation time (per-step cooling).
             // IVP params and simplex members are skipped — IVP perturbed at t=0 only,
@@ -485,8 +482,7 @@ pub fn run_if2_with_progress(
 
             // Weight by observation likelihood
             for i in 0..n {
-                let projected = project_fn(&states[i]);
-                log_weights[i] = obs_loglik_fn(projected, obs.value, &particle_params[i]);
+                log_weights[i] = obs_model.log_likelihood(&states[i], obs_idx, &particle_params[i]);
             }
 
             // Per-parameter diagnostics (before resampling, using continuous weights):
@@ -565,9 +561,9 @@ pub fn run_if2_with_progress(
         }
 
         // Per-parameter diagnostics for this iteration
-        let cooling_at_iter = per_step_cooling.powf((iter * observations.len()) as f64);
+        let cooling_at_iter = per_step_cooling.powf((iter * n_obs) as f64);
         // Total perturbation attempts: n particles × (1 t=0 step + n_obs observation steps)
-        let total_perturb_steps = n * (1 + observations.len());
+        let total_perturb_steps = n * (1 + n_obs);
         let param_diag: Vec<ParamIterDiag> = if2_params.iter().enumerate().map(|(pi, spec)| {
             let cnt = diag_count[pi].max(1) as f64;
             ParamIterDiag {

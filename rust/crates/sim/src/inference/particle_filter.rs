@@ -1,18 +1,18 @@
 //! Bootstrap particle filter (Gordon, Salmond & Smith 1993).
 //!
 //! Estimates log p(y_{1:T} | θ) via sequential importance sampling
-//! with systematic resampling. Uses the ProcessSimulator trait to
+//! with systematic resampling. Uses the ProcessModel trait to
 //! advance particles — any simulation backend works (chain-binomial,
 //! tau-leap, etc.).
 
 use rayon::prelude::*;
 
-use crate::chain_binomial::StepScratch;
-use crate::compiled_model::CompiledModel;
 use crate::rng::StatefulRng;
 use crate::error::SimError;
+use super::traits::{ProcessModel, ObservationModel, SMCConfig};
 use super::types::{ParticleState, ParticleSwarm, log_sum_exp};
 use super::resampling::systematic_resample;
+use crate::chain_binomial::StepScratch;
 
 /// Observation: one data point at a specific time.
 #[derive(Clone)]
@@ -46,71 +46,39 @@ pub struct PFilterResult {
     /// Log-likelihood increment at each observation time.
     pub ll_increments: Vec<f64>,
     /// One-step-ahead prediction diagnostics at each observation time.
-    /// Only populated when obs_sample_fn and obs_mean_fn are provided.
+    /// Only populated when obs model supports sample/mean.
     pub predictions: Option<Vec<PredictionDiag>>,
     /// Final particle states after the last observation (post-resampling).
     /// Only populated when `save_final_state` is true.
     pub final_states: Option<Vec<ParticleState>>,
 }
 
-/// Signature for a single-step function that advances particle state.
-/// This is what the ProcessSimulator trait provides, but we use a closure
-/// for flexibility (allows capturing the CompiledModel and params).
-/// Takes a `&mut StepScratch` to avoid per-call heap allocations.
-/// `Send + Sync` required for rayon parallel particle propagation.
-pub type StepFn<'a> = dyn Fn(&mut ParticleState, f64, f64, &mut StatefulRng, &mut StepScratch) -> Result<(), SimError> + Send + Sync + 'a;
-
-/// Signature for the observation log-likelihood (dmeasure).
-/// Takes (projected_value, observed_value) → log p(y | projected, θ).
-pub type ObsLoglikFn<'a> = dyn Fn(f64, f64) -> f64 + 'a;
-
-/// Signature for observation model sampler (rmeasure).
-/// Takes (projected_value, rng) → observation draw.
-pub type ObsSampleFn<'a> = dyn Fn(f64, &mut StatefulRng) -> f64 + 'a;
-
-/// Joint observation weight function for multi-stream models.
-/// Takes (particle_state, observation_time_index) → total log-likelihood
-/// across all streams. When provided, overrides project_fn + obs_loglik_fn.
-pub type JointObsFn<'a> = dyn Fn(&ParticleState, usize) -> f64 + Send + Sync + 'a;
-
-/// Signature for observation model mean (no sampling).
-/// Takes (projected_value) → E[y | projected, θ].
-pub type ObsMeanFn<'a> = dyn Fn(f64) -> f64 + 'a;
-
 /// Run the bootstrap particle filter.
 ///
 /// # Arguments
-/// * `model` — compiled model (for initial state, structure)
+/// * `process` — process model (advance state by dt)
+/// * `obs_model` — observation model (log-likelihood, sample, mean)
 /// * `params` — parameter values
-/// * `observations` — data, sorted by time
-/// * `n_particles` — number of particles
-/// * `dt` — sub-step size (e.g., 1.0 for daily steps)
-/// * `step_fn` — advances one particle by dt
-/// * `project_fn` — extracts the projected quantity from a particle (e.g., cumulative infection flow)
-/// * `obs_loglik_fn` — observation log-likelihood
+/// * `config` — SMC config (n_particles, dt)
 /// * `seed` — RNG seed
-pub fn bootstrap_filter(
-    model: &CompiledModel,
+pub fn bootstrap_filter<P: ProcessModel<State = ParticleState, Scratch = StepScratch>>(
+    process: &P,
+    obs_model: &(dyn ObservationModel<ParticleState> + Sync),
     params: &[f64],
-    observations: &[Observation],
-    n_particles: usize,
-    dt: f64,
-    step_fn: &StepFn,
-    project_fn: &dyn Fn(&ParticleState) -> f64,
-    obs_loglik_fn: &ObsLoglikFn,
-    obs_sample_fn: Option<&ObsSampleFn>,
-    obs_mean_fn: Option<&ObsMeanFn>,
+    config: &SMCConfig,
     seed: u64,
-    joint_obs_fn: Option<&JointObsFn>,
 ) -> Result<PFilterResult, SimError> {
-    let n_int = model.int_local_to_global.len();
-    let n_tr = model.model.transitions.len();
+    let n_particles = config.n_particles;
+    let dt = config.dt;
+    let n_obs = obs_model.n_observations();
+    let n_int = process.n_compartments();
+    let n_tr = process.n_transitions();
 
     // Initialize particles from model init
-    let (init_int, _init_real) = model.initial_state(params)?;
+    let init = process.initial_state(params)?;
     let mut swarm = ParticleSwarm::new(n_particles, n_int, n_tr);
     for p in &mut swarm.states {
-        p.counts.copy_from_slice(&init_int.counts);
+        p.counts.copy_from_slice(&init.counts);
     }
 
     // Per-particle RNG streams (deterministic, derived from seed)
@@ -131,89 +99,77 @@ pub fn bootstrap_filter(
 
     // Per-particle scratch buffers (allocated once, reused across all steps)
     let mut scratches: Vec<StepScratch> = (0..n_particles)
-        .map(|_| StepScratch::new(model))
+        .map(|_| process.new_scratch())
         .collect();
 
     let mut total_loglik = 0.0;
-    let mut ess_trace = Vec::with_capacity(observations.len());
-    let mut ll_increments = Vec::with_capacity(observations.len());
-    let has_obs_model = obs_sample_fn.is_some() && obs_mean_fn.is_some();
-    let mut predictions: Vec<PredictionDiag> = if has_obs_model {
-        Vec::with_capacity(observations.len())
+    let mut ess_trace = Vec::with_capacity(n_obs);
+    let mut ll_increments = Vec::with_capacity(n_obs);
+    let has_predictions = obs_model.n_streams() > 0 && !obs_model.mean(&init, 0, params).is_empty();
+    let mut predictions: Vec<PredictionDiag> = if has_predictions {
+        Vec::with_capacity(n_obs)
     } else {
         Vec::new()
     };
-    let mut t = model.model.simulation.t_start;
+
+    let mut t = config.t_start;
 
     // Resampling RNG (separate from particle RNGs)
     let mut resample_rng = StatefulRng::new(seed.wrapping_add(0xdeadbeef));
 
-    for (obs_idx, obs) in observations.iter().enumerate() {
-        // Propagate all particles from t to obs.time.
-        // Batched: one rayon dispatch per observation interval. Each thread
-        // runs all sub-steps for its particles, keeping state in L1/L2.
-        let obs_time = obs.time;
-        let t_start = t;
+    for obs_idx in 0..n_obs {
+        let obs_time = obs_model.obs_time(obs_idx);
+
+        // Propagate all particles from t to obs_time.
+        let t_start_interval = t;
         let errors: Vec<Result<(), SimError>> = swarm.states.par_iter_mut()
             .zip(rngs.par_iter_mut())
             .zip(scratches.par_iter_mut())
             .map(|((state, rng), scratch)| {
-                let mut t_local = t_start;
+                let mut t_local = t_start_interval;
                 while t_local < obs_time - 1e-10 {
                     let step_dt = dt.min(obs_time - t_local);
-                    step_fn(state, t_local, step_dt, rng, scratch)?;
+                    process.step(state, params, t_local, step_dt, rng, scratch)?;
                     t_local += step_dt;
                 }
                 Ok(())
             })
             .collect();
-        // Check for errors from any particle
         for r in errors { r?; }
-        // Advance shared time to match
-        while t < obs.time - 1e-10 { t += dt.min(obs.time - t); }
+        while t < obs_time - 1e-10 { t += dt.min(obs_time - t); }
 
-        // Prediction diagnostics (only when rmeasure + obs_mean are provided)
-        if let (Some(rmfn), Some(omfn)) = (obs_sample_fn, obs_mean_fn) {
-            let projections: Vec<f64> = swarm.states.iter().map(|s| project_fn(s)).collect();
+        // Prediction diagnostics
+        if has_predictions {
+            let means: Vec<f64> = swarm.states.iter()
+                .map(|s| obs_model.mean(s, obs_idx, params).into_iter().sum::<f64>())
+                .collect();
             let equal_lw = vec![0.0_f64; n_particles];
+            let (state_mean, state_q05, state_q50, state_q95) = weighted_quantiles(&means, &equal_lw);
 
-            // State quantiles: E[y|x_i] across particles (process uncertainty, obs scale)
-            let obs_means: Vec<f64> = projections.iter().map(|&p| omfn(p)).collect();
-            let (state_mean, state_q05, state_q50, state_q95) = weighted_quantiles(&obs_means, &equal_lw);
-
-            // Obs quantiles: y_i ~ p(y|x_i) draws (process + observation noise)
-            let obs_draws: Vec<f64> = projections.iter().enumerate()
-                .map(|(i, &proj)| rmfn(proj, &mut diag_rngs[i]))
+            let obs_draws: Vec<f64> = swarm.states.iter().enumerate()
+                .map(|(i, s)| obs_model.sample(s, obs_idx, params, &mut diag_rngs[i]).into_iter().sum())
                 .collect();
             let (_, obs_q05, obs_q50, obs_q95) = weighted_quantiles(&obs_draws, &equal_lw);
 
-            let obs_mean = obs_means.iter().sum::<f64>() / n_particles as f64;
-
+            let obs_mean = means.iter().sum::<f64>() / n_particles as f64;
             predictions.push(PredictionDiag {
                 obs_mean, obs_q05, obs_q50, obs_q95,
                 state_mean, state_q05, state_q50, state_q95,
             });
         }
 
-        // Compute log-weights: joint obs loglik (multi-stream) or single-stream
-        if let Some(jfn) = joint_obs_fn {
-            for (i, state) in swarm.states.iter().enumerate() {
-                swarm.log_weights[i] = jfn(state, obs_idx);
-            }
-        } else {
-            for (i, state) in swarm.states.iter().enumerate() {
-                let projected = project_fn(state);
-                swarm.log_weights[i] = obs_loglik_fn(projected, obs.value);
-            }
+        // Compute log-weights via observation model
+        for (i, state) in swarm.states.iter().enumerate() {
+            swarm.log_weights[i] = obs_model.log_likelihood(state, obs_idx, params);
         }
 
-        // Log-marginal increment: log(1/N × Σ exp(log_w))
+        // Log-marginal increment
         let ll_increment = log_sum_exp(&swarm.log_weights) - (n_particles as f64).ln();
         total_loglik += ll_increment;
         ll_increments.push(ll_increment);
         ess_trace.push(swarm.ess());
 
-        // Resample via double-buffer (no allocation)
+        // Resample via double-buffer
         let indices = systematic_resample(&swarm.log_weights, &mut resample_rng);
         for (i, &src) in indices.iter().enumerate() {
             states_buf[i].counts.copy_from_slice(&swarm.states[src].counts);
@@ -226,13 +182,13 @@ pub fn bootstrap_filter(
             state.reset_flows();
         }
 
-        // Reset weights (after resampling, all particles are equally weighted)
+        // Reset weights
         for lw in &mut swarm.log_weights { *lw = 0.0; }
     }
 
     Ok(PFilterResult {
         log_likelihood: total_loglik,
-        predictions: if has_obs_model { Some(predictions) } else { None },
+        predictions: if has_predictions { Some(predictions) } else { None },
         ess_trace,
         ll_increments,
         final_states: Some(swarm.states),

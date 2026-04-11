@@ -14,7 +14,13 @@ use crate::compiled_model::CompiledModel;
 use crate::rng::StatefulRng;
 use crate::error::SimError;
 use super::types::{ParticleState, ParticleSwarm, log_sum_exp};
-use super::particle_filter::{StepFn, ObsLoglikFn, Observation, PFilterResult};
+use super::particle_filter::{Observation, PFilterResult};
+
+/// Step function closure type (used by correlated PF).
+pub type StepFn<'a> = dyn Fn(&mut ParticleState, f64, f64, &mut StatefulRng, &mut StepScratch) -> Result<(), SimError> + Send + Sync + 'a;
+
+/// Observation log-likelihood closure type (used by correlated PF).
+pub type ObsLoglikFn<'a> = dyn Fn(f64, f64) -> f64 + 'a;
 
 /// Pre-drawn random state for one PF evaluation.
 ///

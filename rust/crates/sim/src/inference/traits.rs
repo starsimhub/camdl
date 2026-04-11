@@ -156,4 +156,6 @@ pub trait DensityProcess: ProcessModel {
 pub struct SMCConfig {
     pub n_particles: usize,
     pub dt: f64,
+    /// Simulation start time (before first observation).
+    pub t_start: f64,
 }

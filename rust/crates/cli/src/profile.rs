@@ -20,13 +20,13 @@ use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use rayon::prelude::*;
 use sim::{
     compiled_model::CompiledModel,
-    chain_binomial::step_one,
     inference::{
-        obs_loglik::{negbin_logpmf, discretized_normal_logpmf_tol, DEFAULT_TOL},
         if2::{run_if2, IF2Config, Observation},
         ParticleState,
+        ChainBinomialProcess, MultiStreamObsModel,
+        multi_stream_obs::StreamSpec,
+        traits::ObservationModel,
     },
-    rng::StatefulRng,
 };
 use std::collections::HashMap;
 use std::io::Write;
@@ -49,8 +49,8 @@ pub fn cmd_profile(args: &[String]) {
     let mut parallel = 0_usize; // 0 = rayon default (num_cpus)
     let mut overrides: HashMap<String, f64> = HashMap::new();
     let mut scenario_name: Option<String> = None;
-    let mut obs_model = "negbin".to_string();
-    let mut tol = DEFAULT_TOL;
+    let mut _obs_model = "negbin".to_string();
+    let mut _tol = 0.0_f64;
     let mut flow_name: Option<String> = None;
     let mut rw_sd_str: Option<String> = None;
     let mut fixed_str: Option<String> = None;
@@ -76,8 +76,8 @@ pub fn cmd_profile(args: &[String]) {
             "--seed"       => { i += 1; seed = args[i].parse().unwrap_or_else(|_| { eprintln!("error: needs integer"); std::process::exit(1); }); }
             "--parallel"   => { i += 1; parallel = args[i].parse().unwrap_or_else(|_| { eprintln!("error: needs integer"); std::process::exit(1); }); }
             "--scenario"   => { i += 1; scenario_name = Some(args[i].clone()); }
-            "--obs-model"  => { i += 1; obs_model = args[i].clone(); }
-            "--tol"        => { i += 1; tol = args[i].parse().unwrap_or_else(|_| { eprintln!("error: needs number"); std::process::exit(1); }); }
+            "--obs-model"  => { i += 1; _obs_model = args[i].clone(); }
+            "--tol"        => { i += 1; _tol = args[i].parse().unwrap_or_else(|_| { eprintln!("error: needs number"); std::process::exit(1); }); }
             "--flow"       => { i += 1; flow_name = Some(args[i].clone()); }
             "--rw-sd"      => { i += 1; rw_sd_str = Some(args[i].clone()); }
             "--fixed"      => { i += 1; fixed_str = Some(args[i].clone()); }
@@ -222,30 +222,24 @@ pub fn cmd_profile(args: &[String]) {
     });
     let if2_params = Arc::new(if2_params);
 
-    // Build obs_loglik: prefer IR observation model, fall back to --obs-model
-    let obs_loglik_fn: Arc<dyn Fn(f64, f64, &[f64]) -> f64 + Send + Sync> = {
+    // Build process + observation model via traits
+    let process = Arc::new(ChainBinomialProcess::new(compiled.clone()));
+    let obs_model_obj: Arc<dyn ObservationModel<ParticleState> + Send + Sync> = {
         let obs_block = model.observations.first();
         if let Some(obs) = obs_block {
             eprintln!("profile: using observation model '{}' from IR", obs.name);
-            Arc::from(sim::inference::obs_model::compile_obs_loglik_if2(obs, compiled.clone()))
+            Arc::new(MultiStreamObsModel::new(
+                vec![StreamSpec {
+                    flow_indices: flow_indices.to_vec(),
+                    ir_model: obs.clone(),
+                    observations: observations.iter().map(|o| o.value).collect(),
+                    obs_times: observations.iter().map(|o| o.time).collect(),
+                }],
+                compiled.clone(),
+            ))
         } else {
-            eprintln!("\x1b[33mwarning: using --obs-model '{}' (deprecated). Add an observations {{}} block to your model.\x1b[0m", obs_model);
-            let rho_idx = compiled.param_index.get("rho").copied();
-            let k_idx = compiled.param_index.get("k").copied();
-            let psi_idx = compiled.param_index.get("psi").copied();
-            match obs_model.as_str() {
-                "negbin" => Arc::new(move |proj: f64, obs: f64, p: &[f64]| {
-                    let rho = rho_idx.map_or(1.0, |i| p[i]);
-                    let k = k_idx.map_or(10.0, |i| p[i]);
-                    negbin_logpmf(obs, rho * proj, k)
-                }),
-                _ => Arc::new(move |proj: f64, obs: f64, p: &[f64]| {
-                    let rho = rho_idx.map_or(1.0, |i| p[i]);
-                    let psi = psi_idx.map_or(0.116, |i| p[i]);
-                    let mu = rho * proj;
-                    discretized_normal_logpmf_tol(obs, mu, mu * (1.0 - rho + psi * psi * mu), tol)
-                }),
-            }
+            eprintln!("error: model has no observations block");
+            std::process::exit(1);
         }
     };
 
@@ -292,11 +286,9 @@ pub fn cmd_profile(args: &[String]) {
 
     let results: Vec<(usize, Vec<f64>, f64, Vec<f64>)> = {
         jobs.par_iter().map(|&(grid_idx, start_idx)| {
-            let compiled = Arc::clone(&compiled);
-            let observations = Arc::clone(&observations);
-            let flow_indices = Arc::clone(&flow_indices);
+            let process = Arc::clone(&process);
+            let obs_model_obj = Arc::clone(&obs_model_obj);
             let if2_params = Arc::clone(&if2_params);
-            let obs_loglik_fn = Arc::clone(&obs_loglik_fn);
             let focal_values: Vec<f64> = grid_points[grid_idx].iter().map(|&(_, v)| v).collect();
 
             // Set focal parameters
@@ -307,19 +299,14 @@ pub fn cmd_profile(args: &[String]) {
 
             let config = IF2Config {
                 n_particles, n_iterations,
-                cooling_fraction: cooling, cooling_target_iters: n_iterations, dt, simplex_groups: vec![],
+                cooling_fraction: cooling, cooling_target_iters: n_iterations, dt,
+                t_start: process.compiled.model.simulation.t_start,
+                simplex_groups: vec![],
             };
             let job_seed = seed ^ (grid_idx as u64 * 1000 + start_idx as u64);
 
-            let step_fn = |state: &mut ParticleState, p: &[f64], t: f64, step_dt: f64, rng: &mut StatefulRng, scratch: &mut sim::chain_binomial::StepScratch| {
-                step_one(&compiled, &mut state.counts, &mut state.flow_accumulators, p, t, step_dt, rng, scratch)
-            };
-            let project_fn = |state: &ParticleState| -> f64 {
-                flow_indices.iter().map(|&i| state.flow_accumulators[i] as f64).sum()
-            };
             let result = run_if2(
-                &compiled, &params, &if2_params, &observations, &config,
-                &step_fn, &project_fn, &*obs_loglik_fn, job_seed,
+                &*process, &*obs_model_obj, &params, &if2_params, &config, job_seed,
             );
 
             overall_pb.inc(1);

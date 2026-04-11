@@ -10,10 +10,9 @@ use sim::inference::{
     bootstrap_filter,
     if2::{IF2Config, EstimatedParam, run_if2},
     diagnostic::{DiagnosticCollector, DiagnosticKind},
-    ParticleState,
+    ChainBinomialProcess, MultiStreamObsModel, multi_stream_obs::StreamSpec,
+    traits::{SMCConfig, ObservationModel},
 };
-use sim::chain_binomial::step_one;
-use sim::rng::StatefulRng;
 use std::collections::HashMap;
 
 const VALIDATE_CHAINS: usize = 4;
@@ -317,36 +316,28 @@ fn run_pfilter_at_mle(
 fn run_pfilter_with_obs(
     config: &FitRunConfig,
     params: &[f64],
-    obs: &[sim::inference::if2::Observation],
+    _obs: &[sim::inference::if2::Observation],
     n_particles: usize,
     seed: u64,
 ) -> Result<PfilterResult, String> {
-    let compiled = &*config.compiled;
-    let observations: Vec<sim::inference::particle_filter::Observation> = obs.iter()
-        .map(|o| sim::inference::particle_filter::Observation { time: o.time, value: o.value })
-        .collect();
-
-    let step_fn = |state: &mut ParticleState, t: f64, step_dt: f64, rng: &mut StatefulRng, scratch: &mut sim::chain_binomial::StepScratch| {
-        step_one(compiled, &mut state.counts, &mut state.flow_accumulators, params, t, step_dt, rng, scratch)
+    let process = ChainBinomialProcess::new(config.compiled.clone());
+    let obs_model_trait = MultiStreamObsModel::new(
+        config.streams.iter().map(|s| StreamSpec {
+            flow_indices: s.flow_indices.clone(),
+            ir_model: s.obs_model_ir.clone(),
+            observations: s.data.iter().map(|o| o.value).collect(),
+            obs_times: config.observations.iter().map(|o| o.time).collect(),
+        }).collect(),
+        config.compiled.clone(),
+    );
+    let smc_config = SMCConfig {
+        n_particles,
+        dt: config.if2_config.dt,
+        t_start: config.compiled.model.simulation.t_start,
     };
-    let flow_indices = &config.flow_indices;
-    let project_fn = |state: &ParticleState| -> f64 {
-        flow_indices.iter().map(|&i| state.flow_accumulators[i] as f64).sum()
-    };
-    let obs_loglik_fn = sim::inference::obs_model::compile_obs_loglik_pf(
-        &config.obs_model_ir, config.compiled.clone(), params,
-    );
-    let obs_sample_fn = sim::inference::obs_model::compile_obs_sample_pf(
-        &config.obs_model_ir, config.compiled.clone(), params,
-    );
-    let obs_mean_fn = sim::inference::obs_model::compile_obs_mean_pf(
-        &config.obs_model_ir, config.compiled.clone(), params,
-    );
 
     let result = bootstrap_filter(
-        compiled, params, &observations, n_particles, config.if2_config.dt,
-        &step_fn, &project_fn, &*obs_loglik_fn,
-        Some(&*obs_sample_fn), Some(&*obs_mean_fn), seed, None,
+        &process, &obs_model_trait, params, &smc_config, seed,
     ).map_err(|e| format!("pfilter error: {:?}", e))?;
 
     let ess_mean = result.ess_trace.iter().sum::<f64>() / result.ess_trace.len() as f64;
@@ -360,7 +351,7 @@ fn run_pfilter_with_obs(
         ess_min,
         ess_trace: result.ess_trace,
         ll_increments: result.ll_increments,
-        obs_times: observations.iter().map(|o| o.time).collect(),
+        obs_times: (0..obs_model_trait.n_observations()).map(|i| obs_model_trait.obs_time(i)).collect(),
         predictions: result.predictions,
     })
 }
@@ -494,24 +485,24 @@ fn run_profiles(
                 cooling_fraction: 0.95,
                 cooling_target_iters: 30,
                 dt: config.if2_config.dt,
+                t_start: config.compiled.model.simulation.t_start,
                 simplex_groups: vec![],
             };
 
-            let step_fn = |state: &mut ParticleState, p: &[f64], t: f64, step_dt: f64, rng: &mut StatefulRng, scratch: &mut sim::chain_binomial::StepScratch| {
-                step_one(&config.compiled, &mut state.counts, &mut state.flow_accumulators, p, t, step_dt, rng, scratch)
-            };
-            let flow_indices = &config.flow_indices;
-            let project_fn = |state: &ParticleState| -> f64 {
-                flow_indices.iter().map(|&i| state.flow_accumulators[i] as f64).sum()
-            };
-            let obs_loglik_fn = sim::inference::obs_model::compile_obs_loglik_if2(
-                &config.obs_model_ir, config.compiled.clone(),
+            let process = ChainBinomialProcess::new(config.compiled.clone());
+            let obs_model_profile = MultiStreamObsModel::new(
+                config.streams.iter().map(|s| StreamSpec {
+                    flow_indices: s.flow_indices.clone(),
+                    ir_model: s.obs_model_ir.clone(),
+                    observations: s.data.iter().map(|o| o.value).collect(),
+                    obs_times: config.observations.iter().map(|o| o.time).collect(),
+                }).collect(),
+                config.compiled.clone(),
             );
 
             let chain_seed = seed ^ focal.index as u64 ^ (focal_value.to_bits());
             let result = run_if2(
-                &config.compiled, &base, &fixed_params, &config.observations,
-                &profile_config, &step_fn, &project_fn, &*obs_loglik_fn, chain_seed,
+                &process, &obs_model_profile, &base, &fixed_params, &profile_config, chain_seed,
             );
 
             match result {

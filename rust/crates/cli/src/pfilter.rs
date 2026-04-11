@@ -9,10 +9,13 @@
 
 use sim::{
     compiled_model::CompiledModel,
-    chain_binomial::step_one,
     inference::{
         bootstrap_filter,
         particle_filter::Observation,
+        traits::SMCConfig,
+        ChainBinomialProcess,
+        MultiStreamObsModel,
+        multi_stream_obs::StreamSpec,
     },
 };
 use std::collections::HashMap;
@@ -214,27 +217,27 @@ pub fn cmd_pfilter(args: &[String]) {
             ir::observation::Likelihood::Bernoulli(_) => "bernoulli",
         });
 
-    // Compile obs_loglik from IR observation model
+    // Build process + observation model via traits
     let compiled = std::sync::Arc::new(compiled);
+    let process = ChainBinomialProcess::new(compiled.clone());
 
-    // Run particle filter
-    let step_fn = |state: &mut sim::inference::ParticleState, t: f64, step_dt: f64, rng: &mut sim::rng::StatefulRng, scratch: &mut sim::chain_binomial::StepScratch| -> Result<(), sim::error::SimError> {
-        step_one(&compiled, &mut state.counts, &mut state.flow_accumulators, &params, t, step_dt, rng, scratch)
+    let obs_times: Vec<f64> = observations.iter().map(|o| o.time).collect();
+    let obs_values: Vec<f64> = observations.iter().map(|o| o.value).collect();
+    let obs_model = MultiStreamObsModel::new(
+        vec![StreamSpec {
+            flow_indices: flow_indices.clone(),
+            ir_model: obs_model_ir.clone(),
+            observations: obs_values,
+            obs_times,
+        }],
+        compiled.clone(),
+    );
+
+    let smc_config = SMCConfig {
+        n_particles,
+        dt,
+        t_start: compiled.model.simulation.t_start,
     };
-
-    let project_fn = |state: &sim::inference::ParticleState| -> f64 {
-        flow_indices.iter().map(|&i| state.flow_accumulators[i] as f64).sum()
-    };
-
-    let obs_loglik_fn = sim::inference::obs_model::compile_obs_loglik_pf(
-        &obs_model_ir, compiled.clone(), &params,
-    );
-    let obs_sample_fn = sim::inference::obs_model::compile_obs_sample_pf(
-        &obs_model_ir, compiled.clone(), &params,
-    );
-    let obs_mean_fn = sim::inference::obs_model::compile_obs_mean_pf(
-        &obs_model_ir, compiled.clone(), &params,
-    );
 
     // ── Replicates mode: run N independent pfilters, output loglik summary ──
     if n_replicates > 1 {
@@ -243,8 +246,7 @@ pub fn cmd_pfilter(args: &[String]) {
         for rep in 0..n_replicates {
             let rep_seed = seed + rep as u64;
             let result = bootstrap_filter(
-                &compiled, &params, &observations, n_particles, dt,
-                &step_fn, &project_fn, &*obs_loglik_fn, None, None, rep_seed, None,
+                &process, &obs_model, &params, &smc_config, rep_seed,
             ).unwrap_or_else(|e| {
                 eprintln!("pfilter replicate {} error: {:?}", rep + 1, e);
                 std::process::exit(1);
@@ -285,10 +287,7 @@ pub fn cmd_pfilter(args: &[String]) {
 
     // ── Single pfilter run ─────────────────────────────────────────────────
     let result = bootstrap_filter(
-        &compiled, &params, &observations, n_particles, dt,
-        &step_fn, &project_fn, &*obs_loglik_fn,
-        Some(&*obs_sample_fn), Some(&*obs_mean_fn),
-        seed, None,
+        &process, &obs_model, &params, &smc_config, seed,
     ).unwrap_or_else(|e| {
         eprintln!("pfilter error: {:?}", e);
         std::process::exit(1);
