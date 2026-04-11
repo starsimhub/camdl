@@ -507,7 +507,19 @@ fn run_profiles(
             );
 
             match result {
-                Ok(r) => profile_points.push((focal_value, r.final_loglik)),
+                Ok(r) => {
+                    // Evaluate true loglik via a quick particle filter at the
+                    // profile point's MLE, rather than using the IF2 perturbed
+                    // loglik (which inflates profile confidence intervals).
+                    let mut pf_params = base.clone();
+                    for p in &fixed_params {
+                        pf_params[p.index] = r.mle[p.index];
+                    }
+                    let pf_ll = runner::run_quick_pfilter(
+                        config, &pf_params, profile_particles, chain_seed,
+                    );
+                    profile_points.push((focal_value, pf_ll));
+                }
                 Err(e) => {
                     eprintln!("warning: profile point {}={:.4} failed: {:?}", focal.name, focal_value, e);
                     profile_points.push((focal_value, f64::NEG_INFINITY));
