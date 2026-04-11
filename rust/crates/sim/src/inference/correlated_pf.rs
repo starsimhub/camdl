@@ -146,18 +146,9 @@ fn normal_to_gamma(z: f64, shape: f64, scale: f64) -> f64 {
     x * scale // scale from Gamma(shape, 1) to Gamma(shape, scale)
 }
 
-/// Standard normal CDF (same as obs_loglik::normal_cdf).
+/// Standard normal CDF — delegates to `obs_loglik::normal_cdf`.
 pub fn phi(x: f64) -> f64 {
-    let z = x / std::f64::consts::SQRT_2;
-    let t = 1.0 / (1.0 + 0.3275911 * z.abs());
-    let poly = t * (0.254829592
-        + t * (-0.284496736
-        + t * (1.421413741
-        + t * (-1.453152027
-        + t * 1.061405429))));
-    let erf_abs = 1.0 - poly * (-z * z).exp();
-    let erf_val = if z >= 0.0 { erf_abs } else { -erf_abs };
-    0.5 * (1.0 + erf_val)
+    super::obs_loglik::normal_cdf(x)
 }
 
 /// Run the bootstrap particle filter with pre-drawn correlated randoms.
@@ -207,7 +198,9 @@ pub fn bootstrap_filter_correlated(
     let mut ll_increments = Vec::with_capacity(observations.len());
     let mut t = model.model.simulation.t_start;
 
-    // Compute steps per observation interval
+    // Compute steps per observation interval.
+    // CPM requires uniform observation spacing because the noise arrays are
+    // sized assuming a fixed number of substeps per observation interval.
     let obs_dt = if observations.len() > 1 {
         observations[1].time - observations[0].time
     } else {
@@ -215,7 +208,27 @@ pub fn bootstrap_filter_correlated(
     };
     let steps_per_obs = (obs_dt / dt).round() as usize;
 
-    // Gamma shape/scale for the overdispersed transition (precompute)
+    // Validate uniform spacing
+    if observations.len() > 2 {
+        for w in observations.windows(2) {
+            let gap = w[1].time - w[0].time;
+            if (gap - obs_dt).abs() > dt * 0.5 {
+                return Err(SimError::Validation(format!(
+                    "correlated PF requires uniformly-spaced observations, \
+                     but found gap {:.4} (expected {:.4}) between t={:.4} and t={:.4}",
+                    gap, obs_dt, w[0].time, w[1].time,
+                )));
+            }
+        }
+    }
+
+    // Gamma shape/scale for the overdispersed transition (precompute).
+    //
+    // ASSUMPTION: σ² is state-independent (typically a bare parameter like
+    // `sigma_se`). We evaluate at a zero state because the expression is
+    // precomputed once for all particles and substeps. If σ² ever depends
+    // on compartment counts, this must be changed to per-particle per-substep
+    // evaluation (as step_one does).
     let sigma_sq = model.resolved.overdispersion.iter()
         .find_map(|od| {
             od.as_ref().map(|re| {
