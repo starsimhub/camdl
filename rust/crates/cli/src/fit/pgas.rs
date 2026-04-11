@@ -12,6 +12,7 @@ use sim::inference::{
     if2::EstimatedParam,
     pmmh::Prior,
     pgas::{PGASConfig, ChainResumeState, run_pgas, PGASSweep, PGASTrajectory},
+    diagnostic::{DiagnosticCollector, DiagnosticKind},
 };
 use std::collections::HashMap;
 
@@ -50,6 +51,8 @@ pub fn run_pgas_cli(
 
     std::fs::create_dir_all(&stage_dir)
         .map_err(|e| format!("cannot create {}: {}", stage_dir, e))?;
+
+    let collector = DiagnosticCollector::new("pgas");
 
     // Load prior state if --starts-from provided
     let starts_from = starts_from
@@ -386,6 +389,11 @@ pub fn run_pgas_cli(
                 let status = if r < 0.10 { "\x1b[31m" }
                     else if r > 0.50 { "\x1b[33m" }
                     else { "\x1b[32m" };
+                if r < 0.10 || r > 0.50 {
+                    collector.push(DiagnosticKind::AcceptanceRateUnhealthy {
+                        rate: r, param: Some(p.name.clone()),
+                    });
+                }
                 format!("  {}={}{:.0}%\x1b[0m", p.name, status, r * 100.0)
             })
             .collect();
@@ -401,6 +409,12 @@ pub fn run_pgas_cli(
                     else { "\x1b[31m✗\x1b[0m" };
                 let ess = diagnostics.ess.get(&spec.name).copied().unwrap_or(0.0);
                 eprintln!("  {:12} Rhat={:.3} {} ESS={:.0}", spec.name, rhat, status, ess);
+
+                if rhat > 1.1 {
+                    collector.push(DiagnosticKind::RhatHigh {
+                        param: spec.name.clone(), rhat, threshold: 1.1,
+                    });
+                }
             }
         }
     }
@@ -454,6 +468,10 @@ pub fn run_pgas_cli(
             .sum::<f64>() / best_chain.1.len().max(1) as f64),
     };
     state.save(&stage_dir)?;
+
+    // Render and persist diagnostics
+    collector.render_to_stderr();
+    let _ = collector.write_json(&format!("{}/diagnostics.json", stage_dir));
 
     let wall_secs = elapsed.as_secs_f64();
     eprintln!("\npgas complete in {:.1}s: {}/", wall_secs, stage_dir);

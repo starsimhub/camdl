@@ -12,6 +12,7 @@ use rayon::prelude::*;
 use sim::inference::{
     if2::EstimatedParam,
     pmmh::{run_pmmh, Prior, PMMHConfig, PMMHResult, PMMHResumeState},
+    diagnostic::{DiagnosticCollector, DiagnosticKind},
 };
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -36,6 +37,8 @@ pub fn run_pmmh_cli(
     eprintln!("\x1b[33m  Correlated pseudo-marginal (rho config) helps but has limits\x1b[0m");
     eprintln!("\x1b[33m  on discrete-state models. PGAS is planned for production use.\x1b[0m");
     eprintln!();
+
+    let collector = DiagnosticCollector::new("pmmh");
 
     let stage_dir = format!("{}/pmmh", fit.fit.output_dir);
     let sc = fit.pmmh.as_ref();
@@ -443,6 +446,11 @@ pub fn run_pmmh_cli(
             "\x1b[32m✓\x1b[0m"
         };
         eprintln!("  chain {}: {:.1}% {}", chain_id + 1, result.acceptance_rate * 100.0, status);
+        if result.acceptance_rate < 0.10 || result.acceptance_rate > 0.50 {
+            collector.push(DiagnosticKind::AcceptanceRateUnhealthy {
+                rate: result.acceptance_rate, param: None,
+            });
+        }
     }
 
     if n_chains > 1 {
@@ -452,6 +460,11 @@ pub fn run_pmmh_cli(
                 let status = if rhat < 1.1 { "\x1b[32m✓\x1b[0m" } else if rhat < 1.5 { "\x1b[33m~\x1b[0m" } else { "\x1b[31m✗\x1b[0m" };
                 let ess = diagnostics.ess.get(&spec.name).copied().unwrap_or(0.0);
                 eprintln!("  {:12} Rhat={:.3} {} ESS={:.0}", spec.name, rhat, status, ess);
+                if rhat > 1.1 {
+                    collector.push(DiagnosticKind::RhatHigh {
+                        param: spec.name.clone(), rhat, threshold: 1.1,
+                    });
+                }
             }
         }
     }
@@ -495,6 +508,10 @@ pub fn run_pmmh_cli(
         acceptance_rate: Some(map_result.acceptance_rate),
     };
     state.save(&stage_dir)?;
+
+    // Render and persist diagnostics
+    collector.render_to_stderr();
+    let _ = collector.write_json(&format!("{}/diagnostics.json", stage_dir));
 
     let wall_secs = elapsed.as_secs_f64();
     let total_pf_calls = n_chains * n_steps;

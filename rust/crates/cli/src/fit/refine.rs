@@ -6,6 +6,7 @@ use crate::fit::runner::{self, FitRunConfig};
 use crate::fit::provenance::{self, MleMetadata};
 use crate::hashing;
 use sha2::Digest;
+use sim::inference::diagnostic::{DiagnosticCollector, DiagnosticKind};
 use std::collections::HashMap;
 
 const REFINE_CHAINS: usize = 4;
@@ -67,8 +68,10 @@ pub fn run_refine(fit: &FitToml, starts_from: &str, seed: u64, force: bool) -> R
     std::fs::create_dir_all(&stage_dir)
         .map_err(|e| format!("cannot create {}: {}", stage_dir, e))?;
 
+    let collector = DiagnosticCollector::new("refine");
+
     let t0 = std::time::Instant::now();
-    let chain_results = runner::run_chains(&config);
+    let chain_results = runner::run_chains_with_diagnostics(&config, &collector);
     let elapsed = t0.elapsed();
 
     // Check convergence
@@ -81,11 +84,14 @@ pub fn run_refine(fit: &FitToml, starts_from: &str, seed: u64, force: bool) -> R
     };
 
     if !all_converged {
-        eprintln!("\nwarning: not all parameters converged (Rhat > 1.1)");
-        eprintln!("  consider running with more iterations or particles");
+        let max_rhat = chain_results.rhat.values().cloned().fold(0.0_f64, f64::max);
+        let n_unconverged = chain_results.rhat.values().filter(|&&r| r > 1.1).count();
+        let n_total = chain_results.rhat.len();
+        collector.push(DiagnosticKind::ConvergenceIncomplete { max_rhat, n_unconverged, n_total });
     }
     if loglik_spread > 10.0 {
-        eprintln!("\nwarning: loglik spread across chains = {:.1} (> 10)", loglik_spread);
+        let max_rhat = chain_results.rhat.values().cloned().fold(0.0_f64, f64::max);
+        collector.push(DiagnosticKind::MultimodalLikelihood { ll_spread: loglik_spread, max_rhat });
     }
 
     // Best chain's MLE
@@ -170,6 +176,10 @@ pub fn run_refine(fit: &FitToml, starts_from: &str, seed: u64, force: bool) -> R
 
     // Write summary
     write_summary(&stage_dir, &chain_results, &config, all_converged, loglik_spread)?;
+
+    // Render and persist diagnostics
+    collector.render_to_stderr();
+    let _ = collector.write_json(&format!("{}/diagnostics.json", stage_dir));
 
     let wall_secs = elapsed.as_secs_f64();
     eprintln!("\nrefine complete in {:.1}s: {}/", wall_secs, stage_dir);

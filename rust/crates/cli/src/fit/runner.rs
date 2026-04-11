@@ -14,6 +14,7 @@ use sim::{
     inference::{
         if2::{run_if2_with_progress, IF2Config, EstimatedParam, IF2Result, Observation, Transform},
         pmmh::Prior,
+        diagnostic::{DiagnosticCollector, DiagnosticKind},
         ParticleState,
     },
     rng::StatefulRng,
@@ -319,9 +320,8 @@ pub fn run_quick_pfilter(config: &FitRunConfig, params: &[f64], n_particles: usi
     }
 }
 
-/// Print preflight transform report to stderr.
-/// `explicit_rw_sd` maps param names that had explicit rw_sd in fit.toml.
-pub fn print_preflight(config: &FitRunConfig) {
+/// Print preflight transform report to stderr, pushing diagnostics to collector.
+pub fn print_preflight(config: &FitRunConfig, collector: Option<&DiagnosticCollector>) {
     let n_auto = config.estimated_params.iter()
         .filter(|s| s.rw_sd_auto)
         .count();
@@ -337,6 +337,13 @@ pub fn print_preflight(config: &FitRunConfig) {
                 let p = ((spec.initial - lo) / (hi - lo)).clamp(1e-10, 1.0 - 1e-10);
                 let z = (p / (1.0 - p)).ln();
                 let compressed = z.abs() > 2.0;
+                if compressed {
+                    if let Some(c) = collector {
+                        c.push(DiagnosticKind::CompressedLogitPosition {
+                            param: spec.name.clone(), z,
+                        });
+                    }
+                }
                 let mark = if compressed { " \x1b[33m⚠ compressed\x1b[0m" } else { "" };
                 (format!("logit   [{}, {}]", lo, hi), format!("logit = {:.2}{}", z, mark))
             }
@@ -348,6 +355,15 @@ pub fn print_preflight(config: &FitRunConfig) {
         let transformed_sd = spec.transformed_sd(spec.rw_sd, spec.initial);
         eprintln!("  {:12} {}  {}  rw_sd={:.4} ({:.3}/step, {})",
             spec.name, tname, pos, spec.rw_sd, transformed_sd, source);
+
+        // Push auto rw_sd info diagnostic
+        if spec.rw_sd_auto {
+            if let Some(c) = collector {
+                c.push(DiagnosticKind::AutoRwSd {
+                    param: spec.name.clone(), rw_sd: spec.rw_sd,
+                });
+            }
+        }
     }
 
     if n_auto > 0 {
@@ -356,9 +372,6 @@ pub fn print_preflight(config: &FitRunConfig) {
     }
 
     // Cooling schedule preview
-    // The IF2 engine computes: per_step = cf50^(2.0 / (target_iters * n_obs))
-    // Each iteration has (1 + n_obs) perturbation steps (1 at t=0, n_obs at observations).
-    // After m iterations: rw_sd_fraction = per_step^(m * (1 + n_obs))
     let frac = config.if2_config.cooling_fraction;
     let iters = config.if2_config.n_iterations;
     let target_iters = config.if2_config.cooling_target_iters;
@@ -377,14 +390,21 @@ pub fn print_preflight(config: &FitRunConfig) {
     eprintln!("  iter {:3}: rw_sd at {:.1}%", iters, rw_at(iters) * 100.0);
 
     // Warn if cooling exhausts well before the run ends
-    // (rw_sd < 1% at 2/3 through means last third is wasted)
     let two_thirds = (iters * 2 / 3).max(1);
     let rw_at_two_thirds = rw_at(two_thirds);
     if rw_at_two_thirds < 0.01 {
-        eprintln!("  \x1b[33m⚠ rw_sd drops below 1% at iteration {} — last {} iterations may be wasted.\x1b[0m",
-            two_thirds, iters - two_thirds);
-        eprintln!("    Consider fewer iterations or milder cooling (e.g., cooling = {:.2}).",
-            0.10_f64.sqrt()); // cf50 that gives 10% at end
+        if let Some(c) = collector {
+            c.push(DiagnosticKind::CoolingExhausted {
+                exhausted_at_iter: two_thirds,
+                total_iters: iters,
+                rw_fraction_at_exhaustion: rw_at_two_thirds,
+            });
+        } else {
+            eprintln!("  \x1b[33m⚠ rw_sd drops below 1% at iteration {} — last {} iterations may be wasted.\x1b[0m",
+                two_thirds, iters - two_thirds);
+            eprintln!("    Consider fewer iterations or milder cooling (e.g., cooling = {:.2}).",
+                0.10_f64.sqrt());
+        }
     }
     eprintln!();
 }
@@ -637,15 +657,16 @@ fn run_one_chain(
     result
 }
 
-/// Run N chains in parallel, compute Rhat, find best.
-pub fn run_chains(config: &FitRunConfig) -> ChainResults {
-    run_chains_with_per_chain_params(config, None)
+/// Run N chains with a diagnostic collector.
+pub fn run_chains_with_diagnostics(config: &FitRunConfig, collector: &DiagnosticCollector) -> ChainResults {
+    run_chains_with_per_chain_params(config, None, Some(collector))
 }
 
 /// Run N chains with optional per-chain EstimatedParam overrides (for scout random starts).
 pub fn run_chains_with_per_chain_params(
     config: &FitRunConfig,
     per_chain_params: Option<&[Vec<EstimatedParam>]>,
+    collector: Option<&DiagnosticCollector>,
 ) -> ChainResults {
     eprintln!("running {} chains × {} particles × {} iterations, cooling={}, dt={}",
         config.n_chains, config.if2_config.n_particles, config.if2_config.n_iterations,
@@ -665,7 +686,7 @@ pub fn run_chains_with_per_chain_params(
     }).collect();
 
     // Preflight transform report
-    print_preflight(config);
+    print_preflight(config, collector);
 
     let results: Vec<(usize, IF2Result)> = (0..config.n_chains)
         .into_par_iter()
@@ -738,16 +759,22 @@ pub fn run_chains_with_per_chain_params(
 
         // Diagnostic: high Rhat + large loglik spread → chains in different basins
         if max_rhat > 1.5 && ll_spread > 50.0 {
-            eprintln!("\n\x1b[33mwarning: chains may have found different likelihood basins.\x1b[0m");
-            eprintln!("  Rhat max = {:.2}, loglik spread = {:.1}", max_rhat, ll_spread);
-            eprintln!("  This suggests the likelihood surface is multimodal.");
-            eprintln!("  Options:");
-            eprintln!("    - Run more chains to sample both basins");
-            eprintln!("    - Set start values near the known basin in fit.toml");
-            eprintln!("    - Narrow parameter bounds to exclude the wrong basin");
+            if let Some(c) = collector {
+                c.push(DiagnosticKind::MultimodalLikelihood { ll_spread, max_rhat });
+            } else {
+                eprintln!("\n\x1b[33mwarning: chains may have found different likelihood basins.\x1b[0m");
+                eprintln!("  Rhat max = {:.2}, loglik spread = {:.1}", max_rhat, ll_spread);
+                eprintln!("  This suggests the likelihood surface is multimodal.");
+            }
         } else if max_rhat > 1.1 {
-            eprintln!("\n\x1b[33mwarning: not all parameters converged (max Rhat = {:.2}).\x1b[0m", max_rhat);
-            eprintln!("  Consider more iterations or particles.");
+            let n_unconverged = rhat.values().filter(|&&r| r > 1.1).count();
+            let n_total = rhat.len();
+            if let Some(c) = collector {
+                c.push(DiagnosticKind::ConvergenceIncomplete { max_rhat, n_unconverged, n_total });
+            } else {
+                eprintln!("\n\x1b[33mwarning: not all parameters converged (max Rhat = {:.2}).\x1b[0m", max_rhat);
+                eprintln!("  Consider more iterations or particles.");
+            }
         }
     }
 
@@ -905,10 +932,10 @@ pub fn auto_rw_sd(
     }
 
     if n_good < n_chains {
-        let diverged: Vec<usize> = good_chains.iter().enumerate()
+        let _diverged: Vec<usize> = good_chains.iter().enumerate()
             .filter(|(_, &g)| !g).map(|(i, _)| i + 1).collect();
         eprintln!("warning: {}/{} chains diverged ({:?}), excluded from rw_sd calibration",
-            n_chains - n_good, n_chains, diverged);
+            n_chains - n_good, n_chains, _diverged);
     }
 
     // rw_sd = 0.5 × MAD of good chains

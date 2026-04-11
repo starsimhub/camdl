@@ -5,6 +5,7 @@ use crate::fit::state::FitState;
 use crate::fit::provenance;
 use crate::fit::runner::{self, FitRunConfig};
 use sim::inference::if2::EstimatedParam;
+use sim::inference::diagnostic::{DiagnosticCollector, DiagnosticKind};
 use std::collections::HashMap;
 
 const SCOUT_CHAINS: usize = 8;
@@ -91,10 +92,12 @@ pub fn run_scout(fit: &FitToml, seed: u64, force: bool) -> Result<(), String> {
         }).collect()
     }).collect();
 
+    let collector = DiagnosticCollector::new("scout");
+
     eprintln!("scout: {} chains ({} seeded, {} random) × {} particles × {} iterations, cooling={}, rw_sd×{:.1}",
         n_chains, start_chains.min(n_chains), n_random, n_particles, n_iterations, cooling, rw_sd_scale);
     let t0 = std::time::Instant::now();
-    let chain_results = runner::run_chains_with_per_chain_params(&config, Some(&per_chain_params));
+    let chain_results = runner::run_chains_with_per_chain_params(&config, Some(&per_chain_params), Some(&collector));
     let elapsed = t0.elapsed();
 
     // Check for degenerate filter: if best chain's loglik at early iterations is -inf,
@@ -104,6 +107,7 @@ pub fn run_scout(fit: &FitToml, seed: u64, force: bool) -> Result<(), String> {
         .filter_map(|(_, r)| r.iterations.get(early_check_iter).map(|it| it.if2_perturbed_loglik))
         .fold(f64::NEG_INFINITY, f64::max);
     if !best_early_ll.is_finite() {
+        collector.push(DiagnosticKind::InitialLoglikInfinite);
         eprintln!("\n\x1b[31mscout: filter degenerate — all chains have -inf loglik at iteration {}.\x1b[0m", early_check_iter);
         eprintln!("  The particle count ({}) is likely too low for {} estimated parameters.", n_particles, config.estimated_params.len());
         eprintln!("  Add to fit.toml:");
@@ -178,6 +182,10 @@ pub fn run_scout(fit: &FitToml, seed: u64, force: bool) -> Result<(), String> {
 
     // Write scout_summary.json
     write_summary(&stage_dir, &chain_results, &config, initial_loglik, &input_hash)?;
+
+    // Render and persist diagnostics
+    collector.render_to_stderr();
+    let _ = collector.write_json(&format!("{}/diagnostics.json", stage_dir));
 
     let wall_secs = elapsed.as_secs_f64();
     let per_iter = wall_secs / (n_chains as f64 * n_iterations as f64);

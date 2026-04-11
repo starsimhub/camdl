@@ -9,6 +9,7 @@ use sha2::Digest;
 use sim::inference::{
     bootstrap_filter,
     if2::{IF2Config, EstimatedParam, run_if2},
+    diagnostic::{DiagnosticCollector, DiagnosticKind},
     ParticleState,
 };
 use sim::chain_binomial::step_one;
@@ -74,14 +75,19 @@ pub fn run_validate(fit: &FitToml, starts_from: &str, seed: u64, force: bool) ->
     std::fs::create_dir_all(&stage_dir)
         .map_err(|e| format!("cannot create {}: {}", stage_dir, e))?;
 
+    let collector = DiagnosticCollector::new("validate");
+
     // ── Phase 1: Run IF2 chains ──────────────────────────────────────────────
     let t0_if2 = std::time::Instant::now();
-    let chain_results = runner::run_chains(&config);
+    let chain_results = runner::run_chains_with_diagnostics(&config, &collector);
     let if2_elapsed = t0_if2.elapsed();
 
     let all_converged = chain_results.rhat.values().all(|&r| r < 1.1);
     if !all_converged {
-        eprintln!("\nwarning: not all parameters converged in validate stage");
+        let max_rhat = chain_results.rhat.values().cloned().fold(0.0_f64, f64::max);
+        let n_unconverged = chain_results.rhat.values().filter(|&&r| r > 1.1).count();
+        let n_total = chain_results.rhat.len();
+        collector.push(DiagnosticKind::ConvergenceIncomplete { max_rhat, n_unconverged, n_total });
     }
 
     let best = &chain_results.results.iter()
@@ -164,11 +170,9 @@ pub fn run_validate(fit: &FitToml, starts_from: &str, seed: u64, force: bool) ->
     eprintln!("  ESS at MLE: mean={:.0}, min={:.0}", ess_mean, ess_min);
 
     if ess_min < pfilter_particles as f64 / 4.0 {
-        eprintln!("\n\x1b[33mwarning: low ESS at MLE (min={:.0})\x1b[0m", ess_min);
-        eprintln!("  Possible causes:");
-        eprintln!("    - Observation model too tight (estimate psi, or increase it)");
-        eprintln!("    - Process noise too low (estimate sigma_se, or increase it)");
-        eprintln!("    - Model structure cannot reproduce observed dynamics");
+        collector.push(DiagnosticKind::LowESSAtMLE {
+            ess_mean, ess_min, n_particles: pfilter_particles,
+        });
     }
 
     // Write ESS trace
@@ -273,6 +277,10 @@ pub fn run_validate(fit: &FitToml, starts_from: &str, seed: u64, force: bool) ->
 
     // Summary JSON
     write_summary(&stage_dir, &chain_results, &config, &metadata, &profiles, train_ll, holdout_ll)?;
+
+    // Render and persist diagnostics
+    collector.render_to_stderr();
+    let _ = collector.write_json(&format!("{}/diagnostics.json", stage_dir));
 
     let total_elapsed = t0_if2.elapsed();
     eprintln!("\nvalidate complete in {:.1}s (IF2: {:.1}s): {}/",
