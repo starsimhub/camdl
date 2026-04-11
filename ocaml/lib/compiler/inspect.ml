@@ -49,22 +49,9 @@ let pp_guard ~ascii ppf g =
   in
   pp ppf g
 
-(** Render index bindings in [a in age, b in patch] form. *)
+(** Render index bindings in [v in dim, ...] form. *)
 let pp_indices ppf ibs =
   let pp_one ppf ib = match ib with
-    | IBind (v, d) ->
-      Term_style.dimension Fmt.string ppf d;
-      Fmt.pf ppf " in ";
-      Term_style.param Fmt.string ppf v;
-      (* Actually: [v in d] — let's show correctly *)
-      ignore (v, d)
-    | IConsec (v, vn, d) ->
-      Fmt.pf ppf "(%s, %s) in consecutive(%s)" v vn d
-    | IComp v ->
-      Fmt.pf ppf "%s in compartments" v
-  in
-  (* Print as [v in dim, ...] *)
-  let pp_one_correct ppf ib = match ib with
     | IBind (v, d) ->
       Fmt.pf ppf "%s in " v;
       Term_style.dimension Fmt.string ppf d
@@ -76,11 +63,10 @@ let pp_indices ppf ibs =
       Fmt.pf ppf "%s in " v;
       Term_style.dim_style Fmt.string ppf "compartments"
   in
-  ignore pp_one;
   Fmt.pf ppf "[";
   List.iteri (fun i ib ->
     if i > 0 then Fmt.pf ppf ", ";
-    pp_one_correct ppf ib
+    pp_one ppf ib
   ) ibs;
   Fmt.pf ppf "]"
 
@@ -528,7 +514,6 @@ let run_transition_rate ppf (model : Ir.model) ctx name =
 (* ── --transition PATTERN --count ───────────────────────────────────────── *)
 
 let run_transition_count ppf (model : Ir.model) ctx (pattern : string option) ~ascii =
-  let neq = if ascii then "!=" else "\xe2\x89\xa0" in
   List.iter (fun (orig_tr : transition_decl) ->
     let base = orig_tr.trname in
     let all_expanded = transitions_for_base model.transitions base in
@@ -588,8 +573,7 @@ let run_transition_count ppf (model : Ir.model) ctx (pattern : string option) ~a
          pat (fmt_number matching_n)
      | None -> ());
     Fmt.pf ppf "@\n"
-  ) ctx.Expander.orig_transitions;
-  ignore neq
+  ) ctx.Expander.orig_transitions
 
 (* ── --let NAME ──────────────────────────────────────────────────────────── *)
 
