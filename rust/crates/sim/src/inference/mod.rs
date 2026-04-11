@@ -23,6 +23,7 @@ pub mod pgas;
 pub mod pgas_grad;
 pub mod nuts;
 pub mod linalg;
+pub mod diagnostic;
 
 // Re-exports
 pub use types::{ParticleState, ParticleSwarm, ObsStreamSpec, joint_obs_weight, joint_obs_weight_particle};
