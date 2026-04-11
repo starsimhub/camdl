@@ -127,12 +127,12 @@ let split_by sep line =
   parts := Buffer.contents buf :: !parts;
   List.rev !parts
 
-(** Load a `read(path, ...)` file → list of n_values float arrays (row-major).
-    The file must have a header row.
-    dims is the list of table_dim_entry (TDim/TDimUnit) for index columns.
-    n_values is the number of value columns (= List.length tnames).
-    default_val = Some f → sparse (missing cells get f); None → dense (all cells required). *)
-let load_table_data ctx path ~dims ~n_values ~default_val =
+(** Read a CSV/TSV file, calling [on_header] with the header fields and
+    [on_row] with each data row's fields (trimmed, non-empty, non-comment lines).
+    Handles path resolution, extension-based separator detection, and error
+    reporting. Returns [None] if the file is missing; [Some result] from
+    [on_done] otherwise. [on_done] is called after all rows, before close. *)
+let read_csv_rows ctx path ~on_header ~on_row ~on_done =
   let abs_path = resolve_data_path ctx path in
   if not (Sys.file_exists abs_path) then begin
     Diagnostics.error ctx.diags
@@ -141,7 +141,7 @@ let load_table_data ctx path ~dims ~n_values ~default_val =
       ~message:(Printf.sprintf "data file not found: %s" path)
       ~hint:"check the path is relative to the .camdl source file"
       ();
-    List.init n_values (fun _ -> [||])
+    None
   end else begin
     let ext = String.lowercase_ascii (Filename.extension path) in
     let sep = match ext with
@@ -155,139 +155,156 @@ let load_table_data ctx path ~dims ~n_values ~default_val =
           ();
         '\t'
     in
-    let n_dims = List.length dims in
-    (* Compute dimension sizes and level lists *)
-    let dim_info = List.map (fun de ->
-      let dname = match de with
-        | TDim d | TDimUnit (d, _) -> d
-      in
-      let levels = match List.assoc_opt dname ctx.dim_registry with
-        | Some vs -> vs
-        | None    -> []
-      in
-      (dname, levels)
-    ) dims in
-    let dim_sizes = List.map (fun (_, lvs) -> List.length lvs) dim_info in
-    let total = List.fold_left ( * ) 1 dim_sizes in
-    (* Allocate arrays; use nan as sentinel for dense-check *)
-    let sentinel = match default_val with
-      | Some f -> f
-      | None   -> Float.nan
-    in
-    let arrays = Array.init n_values (fun _ -> Array.make total sentinel) in
-    (* Keep track of which cells were set, for duplicate detection *)
-    let set_flags = Array.make total false in
-    (* Precompute strides: dim 0 has stride = product of all later dim sizes *)
-    let strides = Array.make n_dims 1 in
-    for i = n_dims - 2 downto 0 do
-      strides.(i) <- strides.(i + 1) * (List.nth dim_sizes (i + 1))
-    done;
-    let dim_names = List.map fst dim_info in
     let ic = open_in abs_path in
-    (try
-      (* Read and validate header row *)
+    let result = (try
       let header_line = input_line ic in
-      let header_cols = split_by sep header_line in
-      let header_dims =
-        List.init (min n_dims (List.length header_cols))
-          (fun i -> String.trim (List.nth header_cols i))
-      in
-      if header_dims <> dim_names then begin
-        let header_sorted = List.sort compare header_dims in
-        let expected_sorted = List.sort compare dim_names in
-        if header_sorted = expected_sorted then
-          Diagnostics.error ctx.diags
-            ~code:"E216"
-            ~loc:Diagnostics.no_loc
-            ~message:(Printf.sprintf
-              "%s: dimension columns appear reordered; expected %s, got %s"
-              path
-              (String.concat ", " dim_names)
-              (String.concat ", " header_dims))
-            ()
-        else
-          List.iteri (fun i (expected, actual) ->
-            if expected <> actual then
-              Diagnostics.warning ctx.diags
-                ~code:"W201"
-                ~loc:Diagnostics.no_loc
-                ~message:(Printf.sprintf
-                  "%s: column %d is named '%s' but maps to dimension '%s'"
-                  path (i + 1) actual expected)
-                ()
-          ) (List.combine dim_names header_dims)
-      end;
+      let header_cols = List.map String.trim (split_by sep header_line) in
+      on_header header_cols;
       let row_num = ref 1 in
       (try while true do
         let raw_line = input_line ic in
         incr row_num;
         let line = String.trim raw_line in
-        if line = "" || (String.length line > 0 && line.[0] = '#') then ()
-        else begin
+        if line <> "" && not (String.length line > 0 && line.[0] = '#') then begin
           let cols = split_by sep line in
-          let ncols = List.length cols in
-          let expected = n_dims + n_values in
-          if ncols <> expected then begin
-            Diagnostics.error ctx.diags
-              ~code:"E206"
-              ~loc:Diagnostics.no_loc
-              ~message:(Printf.sprintf "%s row %d: expected %d columns (%d dim + %d value), got %d"
-                path !row_num expected n_dims n_values ncols)
-              ()
-          end else begin
-            (* Compute flat index from dim columns *)
-            let flat_idx = ref 0 in
-            let ok = ref true in
-            List.iteri (fun i de ->
-              let dname, levels = List.nth dim_info i in
-              let cell = String.trim (List.nth cols i) in
-              (match List.find_index (fun v -> v = cell) levels with
-               | Some idx ->
-                 flat_idx := !flat_idx + idx * strides.(i)
-               | None ->
-                 Diagnostics.error ctx.diags
-                   ~code:"E207"
-                   ~loc:Diagnostics.no_loc
-                   ~message:(Printf.sprintf "'%s' in column %d of %s is not a valid '%s' level"
-                     cell (i + 1) path dname)
-                   ();
-                 ok := false);
-              ignore de
-            ) dims;
-            if !ok then begin
-              let idx = !flat_idx in
-              if set_flags.(idx) then begin
-                Diagnostics.error ctx.diags
-                  ~code:"E208"
-                  ~loc:Diagnostics.no_loc
-                  ~message:(Printf.sprintf "%s row %d: duplicate key" path !row_num)
-                  ()
-              end else begin
-                set_flags.(idx) <- true;
-                for j = 0 to n_values - 1 do
-                  let cell = String.trim (List.nth cols (n_dims + j)) in
-                  match float_of_string_opt cell with
-                  | Some f -> arrays.(j).(idx) <- f
-                  | None ->
-                    Diagnostics.error ctx.diags
-                      ~code:"E209"
-                      ~loc:Diagnostics.no_loc
-                      ~message:(Printf.sprintf "%s row %d column %d: expected a number, got '%s'"
-                        path !row_num (n_dims + j + 1) cell)
-                      ()
-                done
-              end
-            end
-          end
+          on_row !row_num cols
         end
-      done with End_of_file -> ())
+      done with End_of_file -> ());
+      on_done ()
     with End_of_file ->
       Diagnostics.error ctx.diags
         ~code:"E210"
         ~loc:Diagnostics.no_loc
         ~message:(Printf.sprintf "%s: file is empty (no header row)" path)
-        ());
+        ();
+      on_done ()
+    ) in
     close_in ic;
+    Some result
+  end
+
+(** Load a `read(path, ...)` file → list of n_values float arrays (row-major).
+    The file must have a header row.
+    dims is the list of table_dim_entry (TDim/TDimUnit) for index columns.
+    n_values is the number of value columns (= List.length tnames).
+    default_val = Some f → sparse (missing cells get f); None → dense (all cells required). *)
+let load_table_data ctx path ~dims ~n_values ~default_val =
+  let n_dims = List.length dims in
+  (* Compute dimension sizes and level lists *)
+  let dim_info = List.map (fun de ->
+    let dname = match de with
+      | TDim d | TDimUnit (d, _) -> d
+    in
+    let levels = match List.assoc_opt dname ctx.dim_registry with
+      | Some vs -> vs
+      | None    -> []
+    in
+    (dname, levels)
+  ) dims in
+  let dim_sizes = List.map (fun (_, lvs) -> List.length lvs) dim_info in
+  let total = List.fold_left ( * ) 1 dim_sizes in
+  (* Allocate arrays; use nan as sentinel for dense-check *)
+  let sentinel = match default_val with
+    | Some f -> f
+    | None   -> Float.nan
+  in
+  let arrays = Array.init n_values (fun _ -> Array.make total sentinel) in
+  (* Keep track of which cells were set, for duplicate detection *)
+  let set_flags = Array.make total false in
+  (* Precompute strides: dim 0 has stride = product of all later dim sizes *)
+  let strides = Array.make n_dims 1 in
+  for i = n_dims - 2 downto 0 do
+    strides.(i) <- strides.(i + 1) * (List.nth dim_sizes (i + 1))
+  done;
+  let dim_names = List.map fst dim_info in
+  let on_header header_cols =
+    let header_dims =
+      List.init (min n_dims (List.length header_cols))
+        (fun i -> String.trim (List.nth header_cols i))
+    in
+    if header_dims <> dim_names then begin
+      let header_sorted = List.sort compare header_dims in
+      let expected_sorted = List.sort compare dim_names in
+      if header_sorted = expected_sorted then
+        Diagnostics.error ctx.diags
+          ~code:"E216"
+          ~loc:Diagnostics.no_loc
+          ~message:(Printf.sprintf
+            "%s: dimension columns appear reordered; expected %s, got %s"
+            path
+            (String.concat ", " dim_names)
+            (String.concat ", " header_dims))
+          ()
+      else
+        List.iteri (fun i (expected, actual) ->
+          if expected <> actual then
+            Diagnostics.warning ctx.diags
+              ~code:"W201"
+              ~loc:Diagnostics.no_loc
+              ~message:(Printf.sprintf
+                "%s: column %d is named '%s' but maps to dimension '%s'"
+                path (i + 1) actual expected)
+              ()
+        ) (List.combine dim_names header_dims)
+    end
+  in
+  let on_row row_num cols =
+    let ncols = List.length cols in
+    let expected = n_dims + n_values in
+    if ncols <> expected then begin
+      Diagnostics.error ctx.diags
+        ~code:"E206"
+        ~loc:Diagnostics.no_loc
+        ~message:(Printf.sprintf "%s row %d: expected %d columns (%d dim + %d value), got %d"
+          path row_num expected n_dims n_values ncols)
+        ()
+    end else begin
+      (* Compute flat index from dim columns *)
+      let flat_idx = ref 0 in
+      let ok = ref true in
+      List.iteri (fun i de ->
+        let dname, levels = List.nth dim_info i in
+        let cell = String.trim (List.nth cols i) in
+        (match List.find_index (fun v -> v = cell) levels with
+         | Some idx ->
+           flat_idx := !flat_idx + idx * strides.(i)
+         | None ->
+           Diagnostics.error ctx.diags
+             ~code:"E207"
+             ~loc:Diagnostics.no_loc
+             ~message:(Printf.sprintf "'%s' in column %d of %s is not a valid '%s' level"
+               cell (i + 1) path dname)
+             ();
+           ok := false);
+        ignore de
+      ) dims;
+      if !ok then begin
+        let idx = !flat_idx in
+        if set_flags.(idx) then begin
+          Diagnostics.error ctx.diags
+            ~code:"E208"
+            ~loc:Diagnostics.no_loc
+            ~message:(Printf.sprintf "%s row %d: duplicate key" path row_num)
+            ()
+        end else begin
+          set_flags.(idx) <- true;
+          for j = 0 to n_values - 1 do
+            let cell = String.trim (List.nth cols (n_dims + j)) in
+            match float_of_string_opt cell with
+            | Some f -> arrays.(j).(idx) <- f
+            | None ->
+              Diagnostics.error ctx.diags
+                ~code:"E209"
+                ~loc:Diagnostics.no_loc
+                ~message:(Printf.sprintf "%s row %d column %d: expected a number, got '%s'"
+                  path row_num (n_dims + j + 1) cell)
+                ()
+          done
+        end
+      end
+    end
+  in
+  let on_done () =
     (* Dense check: if no default_val, all cells must have been set *)
     if default_val = None then begin
       for idx = 0 to total - 1 do
@@ -312,7 +329,10 @@ let load_table_data ctx path ~dims ~n_values ~default_val =
       done
     end;
     Array.to_list arrays
-  end
+  in
+  match read_csv_rows ctx path ~on_header ~on_row ~on_done with
+  | Some result -> result
+  | None -> List.init n_values (fun _ -> [||])
 
 let reserved_time_names = ["t"; "t_start"; "t_end"]
 
@@ -379,70 +399,41 @@ let collect_declarations ctx decls =
 (** Read unique values from a named column in a file, preserving first-occurrence order.
     Returns (levels, n_rows, n_duplicates). *)
 let read_dim_column_from_file ctx path col_name =
-  let abs_path = resolve_data_path ctx path in
-  if not (Sys.file_exists abs_path) then begin
-    Diagnostics.error ctx.diags
-      ~code:"E200"
-      ~loc:Diagnostics.no_loc
-      ~message:(Printf.sprintf "data file not found: %s" path)
-      ~hint:"check the path is relative to the .camdl source file"
-      ();
-    ([], 0, 0)
-  end else begin
-    let ext = String.lowercase_ascii (Filename.extension path) in
-    let sep = match ext with
-      | ".csv" -> ','
-      | ".tsv" -> '\t'
-      | _ ->
-        Diagnostics.error ctx.diags
-          ~code:"E205"
-          ~loc:Diagnostics.no_loc
-          ~message:(Printf.sprintf "unrecognized extension '%s' in %s; use .csv or .tsv" ext path)
-          ();
-        '\t'
-    in
-    let ic = open_in abs_path in
-    let col_pos = ref (-1) in
-    let seen = Hashtbl.create 16 in
-    let order = ref [] in
-    let n_rows = ref 0 in
-    let n_dups = ref 0 in
-    (try
-      let hdr = input_line ic in
-      let headers = List.map String.trim (split_by sep hdr) in
-      (match List.find_index (fun h -> h = col_name) headers with
-       | Some i -> col_pos := i
-       | None ->
-         Diagnostics.error ctx.diags
-           ~code:"E218"
-           ~loc:Diagnostics.no_loc
-           ~message:(Printf.sprintf "column '%s' not found in %s (headers: %s)"
-             col_name path (String.concat ", " headers))
-           ());
-      (try while true do
-        let raw = input_line ic in
-        let line = String.trim raw in
-        if line <> "" && not (String.length line > 0 && line.[0] = '#') then begin
-          incr n_rows;
-          let cols = split_by sep line in
-          if !col_pos >= 0 then
-            match List.nth_opt cols !col_pos with
-            | None -> ()
-            | Some cell ->
-              let v = String.trim cell in
-              if v <> "" then begin
-                if Hashtbl.mem seen v then incr n_dups
-                else begin
-                  Hashtbl.add seen v ();
-                  order := v :: !order
-                end
-              end
+  let col_pos = ref (-1) in
+  let seen = Hashtbl.create 16 in
+  let order = ref [] in
+  let n_rows = ref 0 in
+  let n_dups = ref 0 in
+  let on_header headers =
+    (match List.find_index (fun h -> h = col_name) headers with
+     | Some i -> col_pos := i
+     | None ->
+       Diagnostics.error ctx.diags
+         ~code:"E218"
+         ~loc:Diagnostics.no_loc
+         ~message:(Printf.sprintf "column '%s' not found in %s (headers: %s)"
+           col_name path (String.concat ", " headers))
+         ())
+  in
+  let on_row _row_num cols =
+    incr n_rows;
+    if !col_pos >= 0 then
+      match List.nth_opt cols !col_pos with
+      | None -> ()
+      | Some cell ->
+        let v = String.trim cell in
+        if v <> "" then begin
+          if Hashtbl.mem seen v then incr n_dups
+          else begin
+            Hashtbl.add seen v ();
+            order := v :: !order
+          end
         end
-      done with End_of_file -> ())
-    with End_of_file -> ());
-    close_in ic;
-    (List.rev !order, !n_rows, !n_dups)
-  end
+  in
+  let on_done () = (List.rev !order, !n_rows, !n_dups) in
+  match read_csv_rows ctx path ~on_header ~on_row ~on_done with
+  | Some result -> result
+  | None -> ([], 0, 0)
 
 (** Pass 1: process DDimensions declarations, build dim_registry.
     Emits info messages for file-derived dimensions. *)
@@ -1408,51 +1399,39 @@ let resolve_comp_name ctx env e =
     Reads the file, finds columns by name from header, filters rows where the
     key column equals key_val. Returns (times, values) as float lists. *)
 let load_interpolated_for_level ctx path ~key_col ~key_val ~time_col ~value_col =
-  let abs_path = resolve_data_path ctx path in
-  if not (Sys.file_exists abs_path) then begin
-    Diagnostics.error ctx.diags ~code:"E200" ~loc:Diagnostics.no_loc
-      ~message:(Printf.sprintf "data file not found: %s" path) ();
-    ([], [])
-  end else begin
-    let ext = String.lowercase_ascii (Filename.extension path) in
-    let sep = match ext with ".csv" -> ',' | _ -> '\t' in
-    let ic = open_in abs_path in
-    let result = (try
-      let header_line = input_line ic in
-      let headers = List.map String.trim (split_by sep header_line) in
-      let find_col name =
-        match List.find_index (fun h -> h = name) headers with
-        | Some i -> i
-        | None ->
-          Diagnostics.error ctx.diags ~code:"E219" ~loc:Diagnostics.no_loc
-            ~message:(Printf.sprintf "%s: column '%s' not found in header" path name) ();
-          0
-      in
-      let key_ci   = if key_col = "" then -1 else find_col key_col in
-      let time_ci  = find_col time_col in
-      let value_ci = find_col value_col in
-      let times  = ref [] in
-      let values = ref [] in
-      (try while true do
-        let line = String.trim (input_line ic) in
-        if line <> "" && not (line.[0] = '#') then begin
-          let cols = split_by sep line in
-          let get i = String.trim (try List.nth cols i with _ -> "") in
-          if key_ci < 0 || get key_ci = key_val then begin
-            (match float_of_string_opt (get time_ci) with
-             | Some t -> times  := !times  @ [t]
-             | None   -> ());
-            (match float_of_string_opt (get value_ci) with
-             | Some v -> values := !values @ [v]
-             | None   -> ())
-          end
-        end
-      done with End_of_file -> ());
-      (!times, !values)
-    with e -> close_in ic; raise e) in
-    close_in ic;
-    result
-  end
+  let key_ci   = ref (-1) in
+  let time_ci  = ref 0 in
+  let value_ci = ref 0 in
+  let times  = ref [] in
+  let values = ref [] in
+  let on_header headers =
+    let find_col name =
+      match List.find_index (fun h -> h = name) headers with
+      | Some i -> i
+      | None ->
+        Diagnostics.error ctx.diags ~code:"E219" ~loc:Diagnostics.no_loc
+          ~message:(Printf.sprintf "%s: column '%s' not found in header" path name) ();
+        0
+    in
+    key_ci   := if key_col = "" then -1 else find_col key_col;
+    time_ci  := find_col time_col;
+    value_ci := find_col value_col
+  in
+  let on_row _row_num cols =
+    let get i = String.trim (try List.nth cols i with _ -> "") in
+    if !key_ci < 0 || get !key_ci = key_val then begin
+      (match float_of_string_opt (get !time_ci) with
+       | Some t -> times  := t :: !times
+       | None   -> ());
+      (match float_of_string_opt (get !value_ci) with
+       | Some v -> values := v :: !values
+       | None   -> ())
+    end
+  in
+  let on_done () = (List.rev !times, List.rev !values) in
+  match read_csv_rows ctx path ~on_header ~on_row ~on_done with
+  | Some result -> result
+  | None -> ([], [])
 
 (** Resolve a func_decl kwarg to an Ir.expr, preserving Param references.
     Raises if the key is missing. *)
