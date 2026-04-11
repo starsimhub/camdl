@@ -700,16 +700,18 @@ type inspect_opts = {
   no_color : bool;   (* --no-color *)
 }
 
+(** Read the entire contents of a file into a string. *)
+let read_file path =
+  let ic = open_in path in
+  let n  = in_channel_length ic in
+  let s  = Bytes.create n in
+  really_input ic s 0 n;
+  close_in ic;
+  Bytes.to_string s
+
 let run_inspect path opts =
   let name = Filename.basename path |> Filename.remove_extension in
-  let src  =
-    let ic = open_in path in
-    let n  = in_channel_length ic in
-    let s  = Bytes.create n in
-    really_input ic s 0 n;
-    close_in ic;
-    Bytes.to_string s
-  in
+  let src  = read_file path in
   if opts.no_color then (
     Fmt.set_style_renderer Fmt.stdout `None;
     Fmt.set_style_renderer Fmt.stderr `None
@@ -747,14 +749,7 @@ let run_inspect path opts =
 (** Run 'camdl check': validate + show summary. *)
 let run_check path =
   let name = Filename.basename path |> Filename.remove_extension in
-  let src  =
-    let ic = open_in path in
-    let n  = in_channel_length ic in
-    let s  = Bytes.create n in
-    really_input ic s 0 n;
-    close_in ic;
-    Bytes.to_string s
-  in
+  let src  = read_file path in
   Fmt.set_style_renderer Fmt.stdout `Ansi_tty;
   Fmt.set_style_renderer Fmt.stderr `Ansi_tty;
   match Compiler.compile_detail_result ~name ~filename:path src with
