@@ -1,117 +1,111 @@
 # Inference in camdl
 
-How the particle filter, IF2, PGAS, and NUTS work, what the
-diagnostics mean, and how the inference pipeline fits together.
+How the particle filter, IF2, PGAS, and NUTS work, what the diagnostics mean,
+and how the inference pipeline fits together.
 
 ---
 
 ## The inference problem
 
-A compartmental model defines a stochastic process over a **latent
-state** — the compartment populations (S, E, I, R) evolving through
-time via stochastic transitions. You never observe this state
-directly. What you observe is a noisy, incomplete projection: weekly
-case reports, which are some fraction of recoveries plus measurement
-noise.
+A compartmental model defines a stochastic process over a **latent state** — the
+compartment populations (S, E, I, R) evolving through time via stochastic
+transitions. You never observe this state directly. What you observe is a noisy,
+incomplete projection: weekly case reports, which are some fraction of
+recoveries plus measurement noise.
 
-The goal of inference is to estimate model parameters (transmission
-rate, recovery rate, reporting probability, etc.) from the observed
-data. This requires evaluating the **likelihood** — the probability
-of the observed data given the parameters:
+The goal of inference is to estimate model parameters (transmission rate,
+recovery rate, reporting probability, etc.) from the observed data. This
+requires evaluating the **likelihood** — the probability of the observed data
+given the parameters:
 
 $$p(y_{1:T} \mid \theta) = \int p(y_{1:T} \mid x_{0:T}, \theta) \, p(x_{0:T} \mid \theta) \, dx_{0:T}$$
 
-This integral is over all possible latent state trajectories
-$x_{0:T}$. For a compartmental model with thousands of individuals
-tracked over hundreds of weekly observations, this integral is
-intractable — you can't evaluate it analytically.
+This integral is over all possible latent state trajectories $x_{0:T}$. For a
+compartmental model with thousands of individuals tracked over hundreds of
+weekly observations, this integral is intractable — you can't evaluate it
+analytically.
 
-But you *can* simulate trajectories from $p(x_{0:T} \mid \theta)$.
-That's what camdl does: given parameters, generate a stochastic
-realization of (S, E, I, R) over time. The particle filter exploits
-this simulation ability to estimate the intractable integral via
-Monte Carlo.
+But you _can_ simulate trajectories from $p(x_{0:T} \mid \theta)$. That's what
+camdl does: given parameters, generate a stochastic realization of (S, E, I, R)
+over time. The particle filter exploits this simulation ability to estimate the
+intractable integral via Monte Carlo.
 
 ### Why this is hard
 
-Three things make compartmental model inference harder than standard
-statistical problems:
+Three things make compartmental model inference harder than standard statistical
+problems:
 
 1. **Intractable likelihood.** The stochastic process (chain-binomial,
-   Gillespie) doesn't have an analytic transition density. You can
-   simulate from it but you can't evaluate $p(x_t \mid x_{t-1},
-   \theta)$ in closed form. This rules out MCMC methods that require
-   pointwise likelihood evaluation.
+   Gillespie) doesn't have an analytic transition density. You can simulate from
+   it but you can't evaluate $p(x_t \mid x_{t-1},
+   \theta)$ in closed form. This rules out MCMC methods that require pointwise
+   likelihood evaluation.
 
-2. **High-dimensional latent state.** The state at each timepoint is
-   the full vector of compartment populations. Over $T$ observations,
-   the latent trajectory is $T$-dimensional. The likelihood integral
-   is over this entire path space.
+2. **High-dimensional latent state.** The state at each timepoint is the full
+   vector of compartment populations. Over $T$ observations, the latent
+   trajectory is $T$-dimensional. The likelihood integral is over this entire
+   path space.
 
-3. **Nonlinear dynamics.** Small parameter changes can produce
-   qualitatively different behavior — biennial vs annual epidemic
-   cycles, fadeout vs persistence, early vs late peak timing. The
-   likelihood surface has ridges, local optima, and flat regions
-   where different parameter combinations produce similar dynamics.
-
+3. **Nonlinear dynamics.** Small parameter changes can produce qualitatively
+   different behavior — biennial vs annual epidemic cycles, fadeout vs
+   persistence, early vs late peak timing. The likelihood surface has ridges,
+   local optima, and flat regions where different parameter combinations produce
+   similar dynamics.
 
 ## How the algorithms relate
 
-All four inference algorithms in camdl are built on Sequential Monte
-Carlo (SMC) — the particle filter. They differ in what they do with
-the particles and what they produce.
+All four inference algorithms in camdl are built on Sequential Monte Carlo (SMC)
+— the particle filter. They differ in what they do with the particles and what
+they produce.
 
 ```
-            Bootstrap Particle Filter
-            (forward simulate, resample to match data)
-                         │
-                         │ used as a subroutine by:
-                         │
-            ┌────────────┼────────────┐
-            │            │            │
-           IF2         PMMH         PGAS
-        (find MLE)   (posterior)  (posterior + trajectories)
+    Bootstrap Particle Filter
+    (forward simulate, resample to match data)
+                 │
+                 │ used as a subroutine by:
+                 │
+    ┌────────────┼────────────┐
+    │            │            │
+   IF2         PMMH         PGAS
+(find MLE)   (posterior)  (posterior + trajectories)
 ```
 
-**IF2** (Iterated Filtering) perturbs parameters inside the particle
-filter and cools toward the MLE. It's a stochastic optimization
-algorithm, not a sampler — it finds the best-fit parameters but
-doesn't characterize uncertainty. Fast, robust, good for finding
-the right basin.
+**IF2** (Iterated Filtering) perturbs parameters inside the particle filter and
+cools toward the MLE. It's a stochastic optimization algorithm, not a sampler —
+it finds the best-fit parameters but doesn't characterize uncertainty. Fast,
+robust, good for finding the right basin.
 
-**PMMH** (Particle Marginal Metropolis-Hastings) uses the particle
-filter's log-likelihood estimate as the acceptance ratio in a
-Metropolis sampler. It **marginalizes out trajectories** — the PF
-integrates over all possible latent state paths, and PMMH only sees
-the marginal likelihood number $\hat{p}(y|\theta)$. Any process
-model works (plug-and-play), but the PF likelihood estimate is noisy,
-which slows mixing.
+**PMMH** (Particle Marginal Metropolis-Hastings) uses the particle filter's
+log-likelihood estimate as the acceptance ratio in a Metropolis sampler. It
+**marginalizes out trajectories** — the PF integrates over all possible latent
+state paths, and PMMH only sees the marginal likelihood number
+$\hat{p}(y|\theta)$. Any process model works (plug-and-play), but the PF
+likelihood estimate is noisy, which slows mixing.
 
-**PGAS** (Particle Gibbs with Ancestor Sampling) **conditions on a
-specific trajectory**. It holds one complete latent trajectory $X$
-fixed and evaluates the exact complete-data likelihood
-$p(y, X | \theta)$ — no estimation noise. Parameters are updated
-via NUTS or MH using this exact likelihood. The trajectory is then
-refreshed via CSMC-AS (a particle filter conditioned on the old
-trajectory). The Gibbs alternation ($\theta | X$ then $X | \theta$)
-samples from the full joint posterior $p(\theta, X | y)$.
+**PGAS** (Particle Gibbs with Ancestor Sampling) **conditions on a specific
+trajectory**. It holds one complete latent trajectory $X$ fixed and evaluates
+the exact complete-data likelihood $p(y, X | \theta)$ — no estimation noise.
+Parameters are updated via NUTS or MH using this exact likelihood. The
+trajectory is then refreshed via CSMC-AS (a particle filter conditioned on the
+old trajectory). The Gibbs alternation ($\theta | X$ then $X | \theta$) samples
+from the full joint posterior $p(\theta, X | y)$.
 
 ### Marginalizing vs conditioning on trajectories
 
 This is the fundamental design choice:
 
-| | PMMH | PGAS |
-|---|---|---|
-| **Trajectories** | Marginalized out by PF | Conditioned on, explicitly sampled |
-| **Likelihood** | Estimated (noisy) | Exact (no PF variance) |
-| **Process model** | Any (plug-and-play) | Chain-binomial only (needs transition density) |
-| **Output** | Posterior $p(\theta | y)$ (trajectories available but low-quality due to path degeneracy) | Posterior $p(\theta, X | y)$ jointly (high-quality trajectory samples via CSMC) |
-| **Bottleneck** | PF variance → slow mixing | Trajectory convergence → slow on long series |
+|                   | PMMH                      | PGAS                                                                |
+| ----------------- | ------------------------- | ------------------------------------------------------------------- |
+| **Trajectories**  | Marginalized out by PF    | Conditioned on, explicitly sampled                                  |
+| **Likelihood**    | Estimated (noisy)         | Exact (no PF variance)                                              |
+| **Process model** | Any (plug-and-play)       | Chain-binomial only (needs transition density)                      |
+| **Output**        | Posterior $p(\theta       | y)$ (trajectories available but low-quality due to path degeneracy) |
+| **Bottleneck**    | PF variance → slow mixing | Trajectory convergence → slow on long series                        |
 
-PMMH is more general (works with any simulator) but pays for it with
-noisy likelihood estimates. PGAS is more efficient (exact likelihood)
-but requires the ability to evaluate transition densities — currently
-only the chain-binomial (Euler-multinomial) backend supports this.
+PMMH is more general (works with any simulator) but pays for it with noisy
+likelihood estimates. PGAS is more efficient (exact likelihood) but requires the
+ability to evaluate transition densities — currently only the chain-binomial
+(Euler-multinomial) backend supports this.
 
 ### The recommended workflow
 
@@ -119,65 +113,57 @@ only the chain-binomial (Euler-multinomial) backend supports this.
 IF2 (scout → refine) → PGAS (--starts-from refine/)
 ```
 
-IF2 finds the right basin quickly (global exploration via many
-particles). PGAS characterizes the posterior within that basin
-(exact likelihood, NUTS gradient proposals, posterior trajectory
-samples). Starting PGAS from IF2 results avoids the trajectory
-convergence problem that plagues random starts.
-
+IF2 finds the right basin quickly (global exploration via many particles). PGAS
+characterizes the posterior within that basin (exact likelihood, NUTS gradient
+proposals, posterior trajectory samples). Starting PGAS from IF2 results avoids
+the trajectory convergence problem that plagues random starts.
 
 ## The particle filter
 
-The particle filter (sequential Monte Carlo) estimates the likelihood
-by running many parallel simulations and letting the data select
-which ones survive.
+The particle filter (sequential Monte Carlo) estimates the likelihood by running
+many parallel simulations and letting the data select which ones survive.
 
-The key insight: instead of integrating over all possible state
-trajectories at once, do it **sequentially** — one observation at a
-time. At each observation, use importance sampling to focus
-computational effort on trajectories that are consistent with the
-data seen so far.
+The key insight: instead of integrating over all possible state trajectories at
+once, do it **sequentially** — one observation at a time. At each observation,
+use importance sampling to focus computational effort on trajectories that are
+consistent with the data seen so far.
 
 ### Particles are state trajectories
 
-Each of the $N$ particles is an independent stochastic simulation of
-the full compartmental model. At any time $t$, particle $i$ has its
-own state vector $(S_i, E_i, I_i, R_i)_t$ — its own realization of
-the epidemic. The particles all share the same parameters $\theta$
-but differ in their random draws (which individuals get infected,
-when they recover, etc.).
+Each of the $N$ particles is an independent stochastic simulation of the full
+compartmental model. At any time $t$, particle $i$ has its own state vector
+$(S_i, E_i, I_i, R_i)_t$ — its own realization of the epidemic. The particles
+all share the same parameters $\theta$ but differ in their random draws (which
+individuals get infected, when they recover, etc.).
 
-The ensemble of $N$ particles approximates the **filtering
-distribution** $p(x_t \mid y_{1:t}, \theta)$ — the posterior over
-the latent state given all data up to time $t$.
+The ensemble of $N$ particles approximates the **filtering distribution**
+$p(x_t \mid y_{1:t}, \theta)$ — the posterior over the latent state given all
+data up to time $t$.
 
 ### Weights score particles against data
 
-At each observation time $t$, each particle $i$ gets a **weight**
-proportional to how well it predicts the observed data:
+At each observation time $t$, each particle $i$ gets a **weight** proportional
+to how well it predicts the observed data:
 
 $$w_i^{(t)} = p(y_t \mid x_i^{(t)}, \theta)$$
 
-This is the observation model likelihood — for example, the
-discretized Normal probability of seeing 500 reported cases given
-that particle $i$'s projected recoveries (scaled by reporting rate
-$\rho$) predicted 490.
+This is the observation model likelihood — for example, the discretized Normal
+probability of seeing 500 reported cases given that particle $i$'s projected
+recoveries (scaled by reporting rate $\rho$) predicted 490.
 
-If particle $i$ predicted well, $w_i$ is large. If it predicted
-poorly (e.g., projected 50 cases when 500 were observed), $w_i$ is
-tiny.
+If particle $i$ predicted well, $w_i$ is large. If it predicted poorly (e.g.,
+projected 50 cases when 500 were observed), $w_i$ is tiny.
 
 ### Resampling focuses effort
 
-After weighting, **bootstrap resampling** draws $N$ new particles
-from the current $N$, with probability proportional to weights.
-Particles that predicted well get duplicated. Particles that
-predicted poorly are discarded.
+After weighting, **bootstrap resampling** draws $N$ new particles from the
+current $N$, with probability proportional to weights. Particles that predicted
+well get duplicated. Particles that predicted poorly are discarded.
 
-After resampling, all particles have equal weight, but they cluster
-around state trajectories that are consistent with the data. The
-filter has used the observation to update its belief about the
-latent state — this is Bayesian updating via Monte Carlo.
+After resampling, all particles have equal weight, but they cluster around state
+trajectories that are consistent with the data. The filter has used the
+observation to update its belief about the latent state — this is Bayesian
+updating via Monte Carlo.
 
 ### The likelihood estimate
 
@@ -190,43 +176,40 @@ The total log-likelihood is the sum over all observations:
 $$\hat{\ell}(\theta) = \sum_{t=1}^{T} \log \hat{p}(y_t \mid y_{1:t-1}, \theta)$$
 
 This estimate is **unbiased** (in expectation, it equals the true
-log-likelihood). With more particles, the variance decreases. The
-estimate is always a lower bound on the true log-likelihood — more
-particles can only improve it.
+log-likelihood). With more particles, the variance decreases. The estimate is
+always a lower bound on the true log-likelihood — more particles can only
+improve it.
 
 ### Effective sample size (ESS)
 
-After weighting but before resampling, the weights are unequal. The
-**effective sample size** measures how many particles are actually
-contributing useful information:
+After weighting but before resampling, the weights are unequal. The **effective
+sample size** measures how many particles are actually contributing useful
+information:
 
 $$\text{ESS}_t = \frac{\left(\sum_i w_i^{(t)}\right)^2}{\sum_i \left(w_i^{(t)}\right)^2}$$
 
-- $\text{ESS} \approx N$: all weights are similar — every particle
-  is useful. The observation is unsurprising given the model.
-- $\text{ESS} \approx 1$: one particle has almost all the weight —
-  the filter has **degenerated**. Only one trajectory out of $N$ is
-  consistent with the data. The log-likelihood estimate is
-  unreliable.
+- $\text{ESS} \approx N$: all weights are similar — every particle is useful.
+  The observation is unsurprising given the model.
+- $\text{ESS} \approx 1$: one particle has almost all the weight — the filter
+  has **degenerated**. Only one trajectory out of $N$ is consistent with the
+  data. The log-likelihood estimate is unreliable.
 
-ESS is the primary diagnostic. It drops during epidemic peaks (where
-the data is most informative and small differences in predicted
-incidence produce large weight differences) and recovers during
-inter-epidemic troughs (where all particles predict similar low
-incidence).
+ESS is the primary diagnostic. It drops during epidemic peaks (where the data is
+most informative and small differences in predicted incidence produce large
+weight differences) and recovers during inter-epidemic troughs (where all
+particles predict similar low incidence).
 
 ### One-step-ahead predictions
 
-Before resampling, the weighted particle ensemble gives the
-**one-step-ahead prediction**: what the filter expected to see at
-time $t$ before observing $y_t$. The weighted mean and quantiles of
-$\rho \times \text{projected}_i$ across particles give prediction
-intervals.
+Before resampling, the weighted particle ensemble gives the **one-step-ahead
+prediction**: what the filter expected to see at time $t$ before observing
+$y_t$. The weighted mean and quantiles of $\rho \times \text{projected}_i$
+across particles give prediction intervals.
 
-If 90% of data falls within the 90% prediction interval, the model
-is **well-calibrated** — its uncertainty is neither too wide nor too
-narrow. Systematic prediction bias (always overshooting peaks,
-always undershooting troughs) indicates model misspecification.
+If 90% of data falls within the 90% prediction interval, the model is
+**well-calibrated** — its uncertainty is neither too wide nor too narrow.
+Systematic prediction bias (always overshooting peaks, always undershooting
+troughs) indicates model misspecification.
 
 ### What happens at each observation time
 
@@ -491,51 +474,47 @@ independently.
 
 ## PGAS (Particle Gibbs with Ancestor Sampling)
 
-IF2 finds the MLE. PGAS characterizes the full posterior — credible
-intervals, parameter correlations, posterior trajectory samples.
+IF2 finds the MLE. PGAS characterizes the full posterior — credible intervals,
+parameter correlations, posterior trajectory samples.
 
 ### How it works
 
 PGAS is a Gibbs sampler alternating two steps per sweep:
 
-**Step 1: θ | X, y (parameter update).** With the full latent
-trajectory X known, the complete-data log-likelihood is exact:
+**Step 1: θ | X, y (parameter update).** With the full latent trajectory X
+known, the complete-data log-likelihood is exact:
 
 $$\log p(y, X \mid \theta) = \sum_s \log p(x_{s+1} \mid x_s, \theta) + \sum_t \log p(y_t \mid x_t, \theta)$$
 
-No particle filter, no estimation noise. The transition density at
-each substep is a product of Binomial log-PMFs mirroring the
-Euler-multinomial decomposition in the simulation. Parameters are
-proposed via NUTS (gradient-based) or one-at-a-time MH.
+No particle filter, no estimation noise. The transition density at each substep
+is a product of Binomial log-PMFs mirroring the Euler-multinomial decomposition
+in the simulation. Parameters are proposed via NUTS (gradient-based) or
+one-at-a-time MH.
 
-**Step 2: X | θ, y (trajectory update).** CSMC-AS (Conditional SMC
-with Ancestor Sampling) produces a new trajectory sample from
-$p(X \mid \theta, y)$. One particle slot is clamped to the reference
-trajectory; ancestor sampling at each substep reconnects the
-reference to the free-particle cloud via the transition density.
-Trajectory renewal (fraction of the traceback from non-reference
-particles) measures CSMC health — near 0% means path degeneracy,
-above 50% means healthy mixing.
+**Step 2: X | θ, y (trajectory update).** CSMC-AS (Conditional SMC with Ancestor
+Sampling) produces a new trajectory sample from $p(X \mid \theta, y)$. One
+particle slot is clamped to the reference trajectory; ancestor sampling at each
+substep reconnects the reference to the free-particle cloud via the transition
+density. Trajectory renewal (fraction of the traceback from non-reference
+particles) measures CSMC health — near 0% means path degeneracy, above 50% means
+healthy mixing.
 
 ### NUTS gradient proposals
 
-The complete-data log-likelihood is differentiable with respect to
-parameters: the Binomial log-PMF depends on rates via
-$p = 1 - \exp(-\text{rate} \cdot dt)$, and the rates are
-differentiable expressions from the model.
+The complete-data log-likelihood is differentiable with respect to parameters:
+the Binomial log-PMF depends on rates via $p = 1 - \exp(-\text{rate} \cdot dt)$,
+and the rates are differentiable expressions from the model.
 
-The OCaml compiler performs source-to-source symbolic differentiation
-of rate expressions (`autodiff.ml`), emitting `rate_grad` fields in
-the IR JSON. The Rust backend evaluates these derivative expressions
-via the same `eval_expr` interpreter — no runtime autodiff, no finite
-differences.
+The OCaml compiler performs source-to-source symbolic differentiation of rate
+expressions (`autodiff.ml`), emitting `rate_grad` fields in the IR JSON. The
+Rust backend evaluates these derivative expressions via the same `eval_expr`
+interpreter — no runtime autodiff, no finite differences.
 
-NUTS (No-U-Turn Sampler, Hoffman & Gelman 2014) uses these gradients
-to propose all parameters jointly via Hamiltonian dynamics. A two-phase
-warmup adapts both the step size (dual averaging) and the diagonal mass
-matrix (empirical variance from burn-in). The mass matrix rescales each
-parameter by its posterior variance, so NUTS takes appropriately-sized
-steps in every direction.
+NUTS (No-U-Turn Sampler, Hoffman & Gelman 2014) uses these gradients to propose
+all parameters jointly via Hamiltonian dynamics. A two-phase warmup adapts both
+the step size (dual averaging) and the diagonal mass matrix (empirical variance
+from burn-in). The mass matrix rescales each parameter by its posterior
+variance, so NUTS takes appropriately-sized steps in every direction.
 
 ### Running PGAS
 
@@ -559,7 +538,7 @@ sweeps = 10000
 particles = 100
 burn_in = 2000
 thin = 5
-n_trajectories = 200   # posterior trajectory samples per chain
+n_trajectories = 200 # posterior trajectory samples per chain
 ```
 
 Output per chain: `trace.tsv` (parameters + log-likelihood per sweep),
@@ -567,47 +546,71 @@ Output per chain: `trace.tsv` (parameters + log-likelihood per sweep),
 
 ### IVP parameters (s0, e0)
 
-Parameters that determine the initial state (like the initial
-susceptible fraction s0) require special treatment. The complete-data
-log-likelihood is invariant to them because the trajectory's initial
-state is stored, not recomputed.
+Parameters that determine the initial state (like the initial susceptible
+fraction s0) require special treatment. The complete-data log-likelihood is
+invariant to them because the trajectory's initial state is stored, not
+recomputed.
 
-PGAS handles IVPs by making the initial state stochastic: each CSMC
-particle draws $S_0 \sim \text{Binomial}(N_0, s_0)$ independently,
-giving the CSMC diverse initial states to select among. A Binomial
-density term is added to the complete-data LL to constrain s0 via the
-MH ratio. IVP parameters are auto-detected at startup.
+PGAS handles IVPs by making the initial state stochastic: each CSMC particle
+draws $S_0 \sim \text{Binomial}(N_0, s_0)$ independently, giving the CSMC
+diverse initial states to select among. A Binomial density term is added to the
+complete-data LL to constrain s0 via the MH ratio. IVP parameters are
+auto-detected at startup.
 
 ### Spatial models and seeding (iota)
 
-Spatial models with inter-patch coupling need care to ensure inference
-works correctly. Two issues arise that don't affect single-patch models:
+Spatial models with inter-patch coupling need care to ensure inference works
+correctly. Two issues arise that don't affect single-patch models:
 
 **Seeding terms.** If the infection rate for patch $i$ is
-$\beta \cdot S_i \cdot I_i / N_i$, it goes to exactly zero when
-$I_i = 0$. The stochastic simulator can still draw events from
-near-zero floating-point rates (importation coupling creates tiny
-nonzero values), but the density evaluator computes the rate as
-exactly zero and rejects the trajectory.
+$\beta \cdot S_i \cdot I_i / N_i$, it goes to exactly zero when $I_i = 0$. The
+stochastic simulator can still draw events from near-zero floating-point rates
+(importation coupling creates tiny nonzero values), but the density evaluator
+computes the rate as exactly zero and rejects the trajectory.
 
 Fix: add a small seeding term to the infection rate:
-$\beta \cdot S_i \cdot (I_i + \iota) / N_i$ where $\iota \approx 10^{-6}$.
-This ensures the infection rate is never exactly zero, allowing
-importation-driven infections to have finite (though very small)
-density. pomp spatial models use the same pattern. If camdl detects
-a zero-rate transition with nonzero flow during PGAS, it emits a
-warning suggesting this fix.
+$\beta \cdot S_i \cdot (I_i + \iota) / N_i$ where $\iota \approx 10^{-6}$. This
+ensures the infection rate is never exactly zero, allowing importation-driven
+infections to have finite (though very small) density. pomp spatial models use
+the same pattern. If camdl detects a zero-rate transition with nonzero flow
+during PGAS, it emits a warning suggesting this fix.
 
-Not all spatial models need iota. Models with constant importation
-via `events {}` blocks, or models where the rate expression already
-includes an additive term, are fine without it.
+Not all spatial models need iota. Models with constant importation via
+`events {}` blocks, or models where the rate expression already includes an
+additive term, are fine without it.
 
 **Time step size.** The Euler-multinomial approximation assumes exit
-probabilities are small per substep. In spatial models with high
-$R_0$ and $dt = 1$, $p_{\text{total}}$ can approach 1, causing
-overdrafts where total withdrawals from a compartment exceed its
-population (resolved by clamping). Use a smaller dt (e.g., 0.25)
-to keep $p_{\text{total}} < 0.3$ and avoid approximation breakdown.
+probabilities are small per substep. In spatial models with high $R_0$ and
+$dt = 1$, $p_{\text{total}}$ can approach 1, causing overdrafts where total
+withdrawals from a compartment exceed its population (resolved by clamping). Use
+a smaller dt (e.g., 0.25) to keep $p_{\text{total}} < 0.3$ and avoid
+approximation breakdown.
+
+### MCMC initialization strategy
+
+PGAS chains should be initialized at or near a known high-likelihood region,
+not from random or diffuse starting points. The recommended workflow:
+
+1. **IF2 scout:** Run 8–16 chains with random starts to map the likelihood
+   basins. More chains are needed for spatial models where the surface is
+   multimodal (R0–sigma–amplitude ridges create multiple basins).
+2. **Profile likelihood:** Run a 1D profile over R0 (the parameter most prone
+   to basin structure) to confirm which basin has the highest likelihood.
+3. **Initialize PGAS:** Start all chains at the best IF2 MLE ± small jitter
+   (e.g., ±5% per parameter). This avoids wasting burn-in searching for a
+   basin that IF2 already found.
+
+Starting chains near the mode is standard MCMC practice (Gelman et al., BDA3;
+Stan's default workflow optimizes first, then samples). MCMC convergence
+guarantees are asymptotic — initialization affects only burn-in length, not the
+target distribution. Starting from a good point reduces wasted computation; it
+does not bias the posterior.
+
+**When initialization matters most:** Spatial models with seasonal forcing.
+The R0–sigma trade-off creates basins separated by 50+ log-likelihood units.
+IF2 with only 4 chains can land in the wrong basin (e.g., R0≈28 instead of
+the true R0≈20), and PGAS initialized there may never cross the barrier. More
+IF2 scout chains is the fix — tempering can't bridge 50+ nat gaps either.
 
 ---
 
@@ -683,20 +686,19 @@ fit.toml + model.camdl + data.tsv
 ```
 
 **Scout** (8 chains, 200 particles, no cooling): random starts across the
-parameter space, MAD-based auto-calibration of rw_sd. Identifies the
-likelihood basin and filters out divergent chains.
+parameter space, MAD-based auto-calibration of rw_sd. Identifies the likelihood
+basin and filters out divergent chains.
 
-**Refine** (4 chains, 1000 particles, cooling=0.95): convergent IF2 from
-scout's best parameters and auto-calibrated rw_sd. Produces an initial MLE.
+**Refine** (4 chains, 1000 particles, cooling=0.95): convergent IF2 from scout's
+best parameters and auto-calibrated rw_sd. Produces an initial MLE.
 
 **Validate** (4 chains, 5000 particles, cooling=0.95): final IF2 + profile
 likelihoods for all estimated parameters + precise pfilter at the MLE for
 log-likelihood and ESS measurement.
 
-Each stage reads the previous stage's `fit_state.toml` and writes its own.
-The final output is `mle_params.toml` — a standard params file with
-provenance hashing that feeds directly into `camdl simulate` and
-`camdl experiment run`.
+Each stage reads the previous stage's `fit_state.toml` and writes its own. The
+final output is `mle_params.toml` — a standard params file with provenance
+hashing that feeds directly into `camdl simulate` and `camdl experiment run`.
 
 ```bash
 # Full pipeline
@@ -718,9 +720,9 @@ weekly_cases = "data/cases_train.tsv"
 weekly_cases = "data/cases_holdout.tsv"
 ```
 
-Scout and refine only see `[data]` — holdout is structurally
-unreachable during parameter estimation. Validate runs the particle
-filter on train + holdout and reports separate logliks:
+Scout and refine only see `[data]` — holdout is structurally unreachable during
+parameter estimation. Validate runs the particle filter on train + holdout and
+reports separate logliks:
 
 ```
 train loglik:   -4200.3 (780 obs)
@@ -735,19 +737,18 @@ camdl data split data/cases.tsv --at-time 5474
 
 ### Prediction quantiles
 
-The pfilter trace includes both observation-space and state-space
-prediction quantiles:
+The pfilter trace includes both observation-space and state-space prediction
+quantiles:
 
-- `obs_mean`, `obs_q05`, `obs_q50`, `obs_q95` — full predictive
-  distribution (process + observation noise). Data should fall inside
-  the 5-95 ribbon ~90% of the time.
-- `state_mean`, `state_q05`, `state_q50`, `state_q95` — latent state
-  quantiles mapped through the observation model mean. Process
-  uncertainty only.
+- `obs_mean`, `obs_q05`, `obs_q50`, `obs_q95` — full predictive distribution
+  (process + observation noise). Data should fall inside the 5-95 ribbon ~90% of
+  the time.
+- `state_mean`, `state_q05`, `state_q50`, `state_q95` — latent state quantiles
+  mapped through the observation model mean. Process uncertainty only.
 
-Both are on the observation scale (reported cases, not latent
-recoveries). The gap between the obs and state ribbons shows the
-observation model's contribution to uncertainty.
+Both are on the observation scale (reported cases, not latent recoveries). The
+gap between the obs and state ribbons shows the observation model's contribution
+to uncertainty.
 
 ### Pfilter replicates
 
@@ -763,14 +764,14 @@ See `docs/camdl-inference-spec.md` for the full specification.
 
 ### Saving final particle states
 
-For prediction workflows, `camdl pfilter --save-final-state` writes the
-particle ensemble at the last observation time:
+For prediction workflows, `camdl pfilter --save-final-state` writes the particle
+ensemble at the last observation time:
 
 ```bash
 camdl pfilter model.camdl --data train.tsv --params mle.toml \
     --particles 5000 --save-final-state final_particles.tsv
 ```
 
-Output is a TSV with one row per particle, columns for each compartment
-and flow accumulator. This enables forward simulation from the filtered
-state without re-running the particle filter.
+Output is a TSV with one row per particle, columns for each compartment and flow
+accumulator. This enables forward simulation from the filtered state without
+re-running the particle filter.
