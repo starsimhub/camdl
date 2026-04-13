@@ -1,8 +1,11 @@
 # camdl Dimensional Analysis: Design Document
 
-**Status:** Ready to implement\
+**Status:** Implemented (Phase 1 + Phase 2)\
 **Author:** Vince Buffalo + Claude\
-**Date:** 2026-04-12
+**Date:** 2026-04-12\
+**Implemented:** 2026-04-12 — `dimcheck.ml` (658 lines), 64 tests, 6 negative
+golden files, `[dim]` annotation syntax. Phase 3 (compound unit literals)
+deferred — existing `'days`/`'per_day` lexer coverage is sufficient.
 
 ## Motivation
 

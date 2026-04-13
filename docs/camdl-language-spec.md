@@ -119,6 +119,46 @@ Invalid operations:
 Mixed-unit values in tables that aren't compatible are compile errors.
 Dimensionless zero (`0.0`) is compatible with any unit context.
 
+### 2.2.1 Transition Rate Dimensional Analysis
+
+The compiler checks that every transition rate expression has dimension
+**P·T⁻¹** (population per unit time). This catches the most common modeling
+bug: writing a per-capita rate where a total propensity is needed.
+
+The checker infers dimensions from:
+- Compartment references (`Pop`, `PopSum`) → dimension **P**
+- `Time` → dimension **T**
+- Parameter types: `rate` → **T⁻¹**, `probability` → **1**, `count` → **P**
+- Unit literals: `'days` → **T**, `'per_day` → **T⁻¹**
+- Arithmetic rules: multiplication adds exponents, division subtracts
+
+```
+# ✓ Correct: beta:T⁻¹ * S:P * I:P / N:P = P·T⁻¹
+infection : S --> I @ beta * S * I / N
+
+# ✗ Error E300: beta:T⁻¹ * I:P / N:P = T⁻¹ (missing S)
+infection : S --> I @ beta * I / N
+#   error[E300]: transition 'infection' rate has wrong dimension
+#     expected: P·T⁻¹ (population-level rate)
+#     got:      T⁻¹ (per-capita rate)
+```
+
+Parameters with `kind = positive` or `kind = real` have unknown dimension —
+the checker infers it from context. If inference is ambiguous, use a `[dim]`
+annotation (see §4.1.1). If a parameter is used inconsistently across
+transitions, the compiler emits E303.
+
+Additional checks:
+- **E301**: argument to `exp()` / `log()` must be dimensionless
+- **E302**: addition/subtraction of mismatched dimensions
+- **E304**: `sqrt()` of odd-exponent dimension
+- **E305**: balance expression must have dimension P
+- **E306**: ODE derivative must have dimension P·T⁻¹
+- **E308**: overdispersion σ² must be dimensionless
+
+Disable with `--no-dim-check` if a false positive is encountered (and file
+a bug).
+
 ### 2.3 Date Literals
 
 The `date("YYYY-MM-DD")` expression converts an ISO 8601 date to a float offset
@@ -217,7 +257,45 @@ real        : unconstrained (default if omitted).
 ```
 
 Types enable: validation of supplied values, default inference transforms,
-dimensional checking in rate expressions.
+and dimensional analysis of rate expressions.
+
+### 4.1.1 Dimension Annotations
+
+When a parameter's type doesn't fully determine its dimension (e.g.,
+`positive` could be a rate, a count, or dimensionless), you can add an
+explicit dimension annotation:
+
+```
+parameters {
+  beta      : rate                    # dimension T⁻¹ (inferred from type)
+  gamma     : rate                    # T⁻¹
+  amplitude : real [1]                # explicitly dimensionless
+  mu        : positive [1/T]          # per-capita rate
+  coupling  : positive [P/T]          # population-level rate
+  R0        : positive [1]            # dimensionless
+}
+```
+
+The annotation goes in square brackets after the type, before optional
+bounds. Supported dimension literals:
+
+| Annotation  | Dimension              | Domain name              |
+| ----------- | ---------------------- | ------------------------ |
+| `[1]`       | dimensionless          | probability, ratio, R₀   |
+| `[P]`       | population             | count                    |
+| `[T]`       | time                   | duration                 |
+| `[1/T]`     | T⁻¹                   | per-capita rate          |
+| `[T^-1]`    | T⁻¹ (alternate)       | per-capita rate          |
+| `[P/T]`     | P·T⁻¹                 | population-level rate    |
+| `[P*T^-1]`  | P·T⁻¹ (alternate)     | population-level rate    |
+
+When present, the annotation overrides type-based inference. If the
+annotation conflicts with how the parameter is used in rate expressions,
+the compiler emits a dimension error.
+
+Annotations are optional. The compiler infers dimensions from context for
+most models — annotations are only needed when inference is ambiguous
+(reported as info I300).
 
 ### 4.2 External parameter values
 
