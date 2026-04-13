@@ -719,6 +719,9 @@ pub fn csmc_as(
     // (no particle can reach the reference state → reference stays self-connected)
     let mut n_degenerate: usize = 0;
 
+    // Pre-allocated buffer for ancestor sampling weights (reused each substep)
+    let mut ancestor_log_w = vec![f64::NEG_INFINITY; n_particles];
+
     for s in 0..n_substeps {
         let t = t_start + s as f64 * dt;
 
@@ -768,14 +771,15 @@ pub fn csmc_as(
                 params, t, dt, &mut rngs[j], &mut scratches[j],
             )?;
 
-            substep_gammas[j] = scratches[j].gamma_used.clone();
+            std::mem::swap(&mut substep_gammas[j], &mut scratches[j].gamma_used);
         }
 
         // ── 3. Clamp reference particle ──
         let ref_rec = &reference.substeps[s];
         counts[j_ref].copy_from_slice(&ref_rec.counts_after);
         substep_flows[j_ref].copy_from_slice(&ref_rec.flows);
-        substep_gammas[j_ref] = ref_rec.gammas.clone();
+        substep_gammas[j_ref].clear();
+        substep_gammas[j_ref].extend_from_slice(&ref_rec.gammas);
         // Fix: prev_counts[j_ref] was saved at step 2 from the post-resample
         // state (which could be any particle's state). But ref_rec.flows were
         // drawn from ref_rec.counts_before. The history must pair the correct
@@ -788,7 +792,7 @@ pub fn csmc_as(
         // The gamma from the reference is used because we're asking:
         // "given this gamma noise, what's P(reaching ref state from particle j?)"
         {
-            let mut ancestor_log_w = vec![f64::NEG_INFINITY; n_particles];
+            ancestor_log_w.fill(f64::NEG_INFINITY);
             for j in 0..n_particles {
                 let td = log_transition_density_substep(
                     model,
