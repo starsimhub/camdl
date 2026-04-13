@@ -75,9 +75,9 @@ let empty_model
 
 let mk_compartment name : compartment = { name; kind = Integer }
 
-let mk_param ?(kind = None) ?(value = None) name : parameter =
+let mk_param ?(kind = None) ?(dim = None) ?(value = None) name : parameter =
   { name; value; bounds = None; prior = None; transform = None;
-    initial_value = None; param_kind = kind }
+    initial_value = None; param_kind = kind; param_dim = dim }
 
 let mk_transition ?(stoich = []) name rate : transition =
   { name; stoichiometry = stoich; rate; event_key = None;
@@ -505,6 +505,70 @@ let test_sqrt_odd_powers_fail () =
   let r = Dimcheck.check_model m in
   Alcotest.(check bool) "E304 sqrt odd" true (has_error "E304" r)
 
+(* ── Explicit Dimension Annotations ───────────────────────────────────── *)
+
+let test_dim_annotation_dimensionless () =
+  (* amplitude : real [1] — explicitly dimensionless, used as multiplier *)
+  let m = empty_model
+    ~compartments:[mk_compartment "S"]
+    ~parameters:[mk_param ~kind:(Some "rate") "beta";
+                 mk_param ~kind:(Some "real") ~dim:(Some (0, 0)) "amplitude"]
+    ~transitions:[mk_transition "t1"
+        (param "amplitude" *. param "beta" *. pop "S")]
+    () in
+  let r = Dimcheck.check_model m in
+  Alcotest.(check bool) "dim annotation [1] OK" true (no_errors r);
+  let amp_dim = List.assoc_opt "amplitude" r.param_dims in
+  (match amp_dim with
+   | Some d -> Alcotest.(check bool) "amplitude is dimensionless"
+       true (d.(0) = 0 && d.(1) = 0)
+   | None -> Alcotest.fail "amplitude dim not resolved")
+
+let test_dim_annotation_pop_rate () =
+  (* mu : positive [P/T] — population-level rate, used alone as transition rate *)
+  let m = empty_model
+    ~compartments:[mk_compartment "S"]
+    ~parameters:[mk_param ~kind:(Some "positive") ~dim:(Some (1, -1)) "mu"]
+    ~transitions:[mk_transition "t1" (param "mu")]
+    () in
+  let r = Dimcheck.check_model m in
+  Alcotest.(check bool) "dim annotation [P/T] OK" true (no_errors r);
+  let mu_dim = List.assoc_opt "mu" r.param_dims in
+  (match mu_dim with
+   | Some d -> Alcotest.(check bool) "mu is P*T^-1"
+       true (d.(0) = 1 && d.(1) = -1)
+   | None -> Alcotest.fail "mu dim not resolved")
+
+let test_dim_annotation_resolves_i300 () =
+  (* Two positive params: alpha * beta_p * I would be I300 (undetermined).
+     With annotation [1] on alpha, it becomes determined. *)
+  let m = empty_model
+    ~compartments:[mk_compartment "I"]
+    ~parameters:[mk_param ~kind:(Some "positive") ~dim:(Some (0, 0)) "alpha";
+                 mk_param ~kind:(Some "positive") "beta_p"]
+    ~transitions:[mk_transition "t1"
+        (param "alpha" *. param "beta_p" *. pop "I")]
+    () in
+  let r = Dimcheck.check_model m in
+  Alcotest.(check bool) "annotation resolves undetermined" true (no_errors r);
+  (* beta_p should be inferred as T^-1 *)
+  let bp_dim = List.assoc_opt "beta_p" r.param_dims in
+  (match bp_dim with
+   | Some d -> Alcotest.(check bool) "beta_p inferred T^-1"
+       true (d.(0) = 0 && d.(1) = -1)
+   | None -> ())
+
+let test_dim_annotation_conflict () =
+  (* mu : positive [1] used as mu * S — gives 1 * P = P, not P*T^-1 → E300 *)
+  let m = empty_model
+    ~compartments:[mk_compartment "S"]
+    ~parameters:[mk_param ~kind:(Some "positive") ~dim:(Some (0, 0)) "mu"]
+    ~transitions:[mk_transition "t1" (param "mu" *. pop "S")]
+    () in
+  let r = Dimcheck.check_model m in
+  Alcotest.(check bool) "E300 annotation wins over usage"
+    true (has_error "E300" r)
+
 (* ── Golden File Dimension Checks ──────────────────────────────────────── *)
 (* Compile real .camdl files and assert zero dimension errors.
    This is the most important class of test — no false positives on valid models. *)
@@ -644,6 +708,12 @@ let () =
       Alcotest.test_case "even powers ok"           `Quick test_sqrt_even_powers;
       Alcotest.test_case "odd powers fail"          `Quick test_sqrt_odd_powers_fail;
     ];
+    "dim_annotations", [
+      Alcotest.test_case "annotation [1] dimensionless" `Quick test_dim_annotation_dimensionless;
+      Alcotest.test_case "annotation [P/T] pop rate"    `Quick test_dim_annotation_pop_rate;
+      Alcotest.test_case "annotation resolves I300"     `Quick test_dim_annotation_resolves_i300;
+      Alcotest.test_case "annotation conflict E300"     `Quick test_dim_annotation_conflict;
+    ];
     "golden_no_false_positives", [
       Alcotest.test_case "sir_basic"                `Quick (test_golden_no_dim_errors "sir_basic");
       Alcotest.test_case "sir_demography"           `Quick (test_golden_no_dim_errors "sir_demography");
@@ -666,6 +736,7 @@ let () =
       Alcotest.test_case "polio_age"                `Quick (test_golden_no_dim_errors "polio_age");
       Alcotest.test_case "polio_spatial_5"          `Quick (test_golden_no_dim_errors "polio_spatial_5");
       Alcotest.test_case "malaria_two_species"      `Quick (test_golden_no_dim_errors "malaria_two_species");
+      Alcotest.test_case "sir_dim_annotated"        `Quick (test_golden_no_dim_errors "sir_dim_annotated");
     ];
     "negative_golden", [
       Alcotest.test_case "e300_missing_susceptible" `Quick

@@ -143,6 +143,7 @@ type parameter = {
   transform:     transform option;
   initial_value: float option;
   param_kind:    string option;  (* DSL type: "rate", "probability", "positive", "count", "real", "simplex_member" *)
+  param_dim:     (int * int) option;  (* explicit dimension annotation: (P exponent, T exponent) *)
 }
 
 type parameter_group = {

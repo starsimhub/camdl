@@ -136,14 +136,55 @@ param_list:
   | ps = list(param_decl) { ps }
 
 param_decl:
-  | name = IDENT COLON pk = param_kind
-      { PScalar { pname = name; pkind = pk; pbounds = None } }
-  | name = IDENT COLON pk = param_kind IN LBRACKET lo = expr COMMA hi = expr RBRACKET
-      { PScalar { pname = name; pkind = pk; pbounds = Some (lo, hi) } }
-  | name = IDENT LBRACKET dim = IDENT RBRACKET COLON pk = param_kind
-      { PIndexed { pname = name; pdims = [dim]; pkind = pk; pbounds = None } }
-  | name = IDENT LBRACKET dim = IDENT RBRACKET COLON pk = param_kind IN LBRACKET lo = expr COMMA hi = expr RBRACKET
-      { PIndexed { pname = name; pdims = [dim]; pkind = pk; pbounds = Some (lo, hi) } }
+  | name = IDENT COLON pk = param_kind da = dim_annotation_opt
+      { PScalar { pname = name; pkind = pk; pdim = da; pbounds = None } }
+  | name = IDENT COLON pk = param_kind da = dim_annotation_opt IN LBRACKET lo = expr COMMA hi = expr RBRACKET
+      { PScalar { pname = name; pkind = pk; pdim = da; pbounds = Some (lo, hi) } }
+  | name = IDENT LBRACKET dim = IDENT RBRACKET COLON pk = param_kind da = dim_annotation_opt
+      { PIndexed { pname = name; pdims = [dim]; pkind = pk; pdim = da; pbounds = None } }
+  | name = IDENT LBRACKET dim = IDENT RBRACKET COLON pk = param_kind da = dim_annotation_opt IN LBRACKET lo = expr COMMA hi = expr RBRACKET
+      { PIndexed { pname = name; pdims = [dim]; pkind = pk; pdim = da; pbounds = Some (lo, hi) } }
+
+dim_annotation_opt:
+  | (* empty *) { None }
+  | LBRACKET da = dim_literal RBRACKET { Some da }
+
+dim_literal:
+  (* [1] — dimensionless *)
+  | n = INT { if n = 1 then (0, 0) else failwith (Printf.sprintf "unknown dimension literal: %d" n) }
+  (* [P] — population *)
+  | id = IDENT { match id with
+      | "P" -> (1, 0)
+      | "T" -> (0, 1)
+      | _ -> failwith (Printf.sprintf "unknown dimension: %s (expected P or T)" id) }
+  (* [T^-1] — per-capita rate *)
+  | id = IDENT CARET MINUS m = INT
+      { match id with
+      | "P" -> (- m, 0)
+      | "T" -> (0, - m)
+      | _ -> failwith (Printf.sprintf "unknown dimension: %s" id) }
+  (* [P*T^-1] — population-level rate *)
+  | id1 = IDENT STAR id2 = IDENT CARET MINUS m = INT
+      { match (id1, id2) with
+      | ("P", "T") -> (1, - m)
+      | ("T", "P") -> (- m, 1)
+      | _ -> failwith (Printf.sprintf "unknown dimension product: %s*%s" id1 id2) }
+  (* [P/T] — population-level rate (alternative syntax) *)
+  | id1 = IDENT SLASH id2 = IDENT
+      { match (id1, id2) with
+      | ("P", "T") -> (1, -1)
+      | ("T", "P") -> (-1, 1)
+      | ("P", "P") -> (0, 0)
+      | ("T", "T") -> (0, 0)
+      | _ -> failwith (Printf.sprintf "unknown dimension ratio: %s/%s" id1 id2) }
+  (* [1/T] — per-capita rate (alternative syntax) *)
+  | n = INT SLASH id = IDENT
+      { if n = 1 then
+        match id with
+        | "P" -> (-1, 0)
+        | "T" -> (0, -1)
+        | _ -> failwith (Printf.sprintf "unknown dimension: %s" id)
+      else failwith (Printf.sprintf "unknown dimension literal: %d/%s" n id) }
 
 param_kind:
   | RATE        { PRate }

@@ -1,0 +1,46 @@
+# SIR model with explicit dimension annotations on parameters.
+# Tests Phase 2 of dimensional analysis: [dim] syntax.
+
+time_unit = 'days
+
+compartments { S, I, R }
+
+let N = S + I + R
+
+parameters {
+    beta      : rate                    # inferred T^-1 (no annotation needed)
+    gamma     : rate in [0.01, 1.0]     # rate with bounds, no annotation
+    amplitude : real [1]                # explicitly dimensionless
+    mu        : positive [P*T^-1]       # population-level rate via annotation
+    coupling  : positive [1]            # dimensionless positive
+}
+
+transitions {
+    infection : S --> I @ amplitude * beta * S * I / N
+    recovery  : I --> R @ gamma * I
+    import    : --> I   @ mu
+    loss      : S -->   @ coupling * beta * S
+}
+
+init {
+    S = 999
+    I = 1
+}
+
+simulate {
+    from = 0 'days
+    to   = 100 'days
+}
+
+scenarios {
+    baseline {
+        label = "default"
+        set = {
+            beta      = 0.3
+            gamma     = 0.1
+            amplitude = 1.0
+            mu        = 0.5
+            coupling  = 0.01
+        }
+    }
+}

@@ -682,6 +682,7 @@ let parameter_to_json (p : parameter) : Yojson.Safe.t =
     ("transform",     match p.transform     with None -> null | Some tr -> transform_to_json tr);
     ("initial_value", match p.initial_value with None -> null | Some v  -> flt v);
     ("param_kind",    match p.param_kind    with None -> null | Some k  -> str k);
+    ("param_dim",     match p.param_dim     with None -> null | Some (p_exp, t_exp) -> arr [int p_exp; int t_exp]);
   ]
 
 let parameter_of_json j =
@@ -695,6 +696,9 @@ let parameter_of_json j =
     transform     = (match member_opt "transform"     j with Some `Null | None -> None | Some t -> Some (transform_of_json  t));
     initial_value = (match member_opt "initial_value" j with Some `Null | None -> None | Some v -> Some (as_float v));
     param_kind    = (match member_opt "param_kind"    j with Some `Null | None -> None | Some k -> Some (as_string k));
+    param_dim     = (match member_opt "param_dim"     j with
+      | Some (`List [p; t]) -> Some (as_int p, as_int t)
+      | _ -> None);
   }
 
 let parameter_group_to_json (g : parameter_group) : Yojson.Safe.t =

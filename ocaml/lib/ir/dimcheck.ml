@@ -185,7 +185,11 @@ let param_dim_of_kind st kind =
 
 let init_params st (params : parameter list) =
   List.iter (fun (p : parameter) ->
-    let d = param_dim_of_kind st p.param_kind in
+    (* Explicit [dim] annotation takes highest priority over kind-based inference *)
+    let d = match p.param_dim with
+      | Some (p_exp, t_exp) -> Known (make p_exp t_exp)
+      | None -> param_dim_of_kind st p.param_kind
+    in
     Hashtbl.replace st.param_map p.name { stable_dim = d; inferred = None }
   ) params
 

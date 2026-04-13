@@ -59,9 +59,12 @@ type compartment_decl = { cname: string; ckind: compartment_kind }
 
 type param_type = PRate | PProbability | PPositive | PCount | PReal
 
+(** Explicit dimension annotation: (P exponent, T exponent) *)
+type dim_annotation = int * int
+
 type param_decl =
-  | PScalar  of { pname: string; pkind: param_type; pbounds: (expr * expr) option }
-  | PIndexed of { pname: string; pdims: string list; pkind: param_type; pbounds: (expr * expr) option }
+  | PScalar  of { pname: string; pkind: param_type; pdim: dim_annotation option; pbounds: (expr * expr) option }
+  | PIndexed of { pname: string; pdims: string list; pkind: param_type; pdim: dim_annotation option; pbounds: (expr * expr) option }
 
 (** Table dimension entry: bare dim name, or dim + unit *)
 type table_dim_entry =

@@ -1199,7 +1199,7 @@ let param_kind_to_string = function
 let expand_parameters ctx =
   List.concat_map (fun pd ->
     match pd with
-    | PScalar { pname; pbounds; pkind; _ } ->
+    | PScalar { pname; pbounds; pkind; pdim; _ } ->
       let bounds = resolve_bounds ctx pbounds in
       let pk = Some (param_kind_to_string pkind) in
       [{ Ir.name          = pname;
@@ -1209,8 +1209,9 @@ let expand_parameters ctx =
          Ir.transform     = None;
          Ir.initial_value = None;
          Ir.param_kind    = pk;
+         Ir.param_dim     = pdim;
        }]
-    | PIndexed { pname; pdims = [dim]; pbounds; pkind; _ } ->
+    | PIndexed { pname; pdims = [dim]; pbounds; pkind; pdim; _ } ->
       let vals = dim_values ctx dim in
       let bounds = resolve_bounds ctx pbounds in
       let pk = Some (param_kind_to_string pkind) in
@@ -1222,6 +1223,7 @@ let expand_parameters ctx =
           Ir.transform     = None;
           Ir.initial_value = None;
           Ir.param_kind    = pk;
+          Ir.param_dim     = pdim;
         }
       ) vals
     | PIndexed { pname; _ } ->
@@ -1233,6 +1235,7 @@ let expand_parameters ctx =
          Ir.transform     = None;
          Ir.initial_value = None;
          Ir.param_kind    = None;
+         Ir.param_dim     = None;
        }]
   ) ctx.param_decls
 
