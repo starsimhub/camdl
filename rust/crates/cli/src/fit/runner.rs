@@ -39,13 +39,9 @@ pub struct FitRunConfig {
     pub observations: Vec<Observation>,
     /// Per-stream data. For single-stream models, len() == 1.
     pub streams: Vec<ObsStream>,
-    /// Flow indices for the FIRST stream (backward compat convenience).
-    pub flow_indices: Vec<usize>,
     pub if2_config: IF2Config,
     pub n_chains: usize,
     pub seed: u64,
-    /// Observation model for the first stream (backward compat convenience).
-    pub obs_model_ir: ir::observation::ObservationModel,
 }
 
 /// Result of running multiple IF2 chains.
@@ -174,9 +170,6 @@ impl FitRunConfig {
 
         // Canonical observations (from first stream)
         let observations = streams[0].data.clone();
-        // Backward compat convenience fields (from first stream)
-        let flow_indices = streams[0].flow_indices.clone();
-        let obs_model_ir = streams[0].obs_model_ir.clone();
 
         if streams.len() > 1 {
             eprintln!("  {} observation streams: {}",
@@ -201,11 +194,9 @@ impl FitRunConfig {
             estimated_params: if2_params,
             observations,
             streams,
-            flow_indices,
             if2_config: config,
             n_chains,
             seed,
-            obs_model_ir,
         })
     }
 

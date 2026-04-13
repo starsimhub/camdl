@@ -109,27 +109,13 @@ pub fn run_pmmh_cli(
             let steps_per_obs = (obs_spacing / dt).round() as usize;
             let mut corr_rng = sim::rng::StatefulRng::new(seed + 999);
 
-            let compiled = config.compiled.clone();
-            let obs_model = config.obs_model_ir.clone();
-            let flow_idx = config.flow_indices.clone();
-            let obs: Vec<sim::inference::particle_filter::Observation> = config.observations.iter()
-                .map(|o| sim::inference::particle_filter::Observation { time: o.time, value: o.value })
-                .collect();
+            let process = config.build_process();
+            let obs_model_trait = config.build_obs_model();
+            let smc_config = config.smc_config();
 
             let eval_corr = |params: &[f64], randoms: &sim::inference::correlated_pf::PFRandomState| -> f64 {
-                let step_fn = |state: &mut sim::inference::ParticleState, t: f64, step_dt: f64, rng: &mut sim::rng::StatefulRng, scratch: &mut sim::chain_binomial::StepScratch| {
-                    sim::chain_binomial::step_one(&compiled, &mut state.counts, &mut state.flow_accumulators, params, t, step_dt, rng, scratch)
-                };
-                let fi = &flow_idx;
-                let project_fn = |state: &sim::inference::ParticleState| -> f64 {
-                    fi.iter().map(|&i| state.flow_accumulators[i] as f64).sum()
-                };
-                let obs_ll = sim::inference::obs_model::compile_obs_loglik_pf(
-                    &obs_model, compiled.clone(), params,
-                );
                 match sim::inference::correlated_pf::bootstrap_filter_correlated(
-                    &compiled, params, &obs, n_particles, dt,
-                    &step_fn, &project_fn, &*obs_ll, randoms, seed,
+                    &process, &obs_model_trait, params, &smc_config, randoms, seed,
                 ) {
                     Ok(r) => r.log_likelihood,
                     Err(_) => f64::NEG_INFINITY,
@@ -315,28 +301,14 @@ pub fn run_pmmh_cli(
             };
 
             // Correlated PF evaluator (when rho is set)
+            let process = config.build_process();
+            let obs_model_trait = config.build_obs_model();
+            let smc_cfg = config.smc_config();
             let eval_correlated: Option<Box<dyn Fn(&[f64], &sim::inference::correlated_pf::PFRandomState) -> f64>> =
                 if pmmh_config.rho.is_some() {
-                    let compiled = config.compiled.clone();
-                    let obs_model = config.obs_model_ir.clone();
-                    let flow_idx = config.flow_indices.clone();
-                    let obs: Vec<sim::inference::particle_filter::Observation> = config.observations.iter()
-                        .map(|o| sim::inference::particle_filter::Observation { time: o.time, value: o.value })
-                        .collect();
                     Some(Box::new(move |params: &[f64], randoms: &sim::inference::correlated_pf::PFRandomState| -> f64 {
-                        let step_fn = |state: &mut sim::inference::ParticleState, t: f64, step_dt: f64, rng: &mut sim::rng::StatefulRng, scratch: &mut sim::chain_binomial::StepScratch| {
-                            sim::chain_binomial::step_one(&compiled, &mut state.counts, &mut state.flow_accumulators, params, t, step_dt, rng, scratch)
-                        };
-                        let fi = &flow_idx;
-                        let project_fn = |state: &sim::inference::ParticleState| -> f64 {
-                            fi.iter().map(|&i| state.flow_accumulators[i] as f64).sum()
-                        };
-                        let obs_ll = sim::inference::obs_model::compile_obs_loglik_pf(
-                            &obs_model, compiled.clone(), params,
-                        );
                         match sim::inference::correlated_pf::bootstrap_filter_correlated(
-                            &compiled, params, &obs, n_particles, dt,
-                            &step_fn, &project_fn, &*obs_ll, randoms, chain_seed,
+                            &process, &obs_model_trait, params, &smc_cfg, randoms, chain_seed,
                         ) {
                             Ok(r) => r.log_likelihood,
                             Err(_) => f64::NEG_INFINITY,

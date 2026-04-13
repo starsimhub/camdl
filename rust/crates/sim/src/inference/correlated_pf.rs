@@ -10,17 +10,12 @@
 use rayon::prelude::*;
 use serde::{Serialize, Deserialize};
 use crate::chain_binomial::StepScratch;
-use crate::compiled_model::CompiledModel;
 use crate::rng::StatefulRng;
 use crate::error::SimError;
 use super::types::{ParticleState, ParticleSwarm, log_sum_exp};
-use super::particle_filter::{Observation, PFilterResult};
-
-/// Step function closure type (used by correlated PF).
-pub type StepFn<'a> = dyn Fn(&mut ParticleState, f64, f64, &mut StatefulRng, &mut StepScratch) -> Result<(), SimError> + Send + Sync + 'a;
-
-/// Observation log-likelihood closure type (used by correlated PF).
-pub type ObsLoglikFn<'a> = dyn Fn(f64, f64) -> f64 + 'a;
+use super::particle_filter::PFilterResult;
+use super::chain_binomial_process::ChainBinomialProcess;
+use super::traits::{ObservationModel, SMCConfig};
 
 /// Pre-drawn random state for one PF evaluation.
 ///
@@ -165,17 +160,17 @@ pub fn phi(x: f64) -> f64 {
 /// uniform via Phi). All other draws (binomial in reulermultinom) use
 /// per-particle RNGs seeded from the gamma noise for partial correlation.
 pub fn bootstrap_filter_correlated(
-    model: &CompiledModel,
+    process: &ChainBinomialProcess,
+    obs_model: &dyn ObservationModel<ParticleState>,
     params: &[f64],
-    observations: &[Observation],
-    n_particles: usize,
-    dt: f64,
-    step_fn: &StepFn,
-    project_fn: &dyn Fn(&ParticleState) -> f64,
-    obs_loglik_fn: &ObsLoglikFn,
+    config: &SMCConfig,
     randoms: &PFRandomState,
     seed: u64,
 ) -> Result<PFilterResult, SimError> {
+    let model = &*process.compiled;
+    let n_particles = config.n_particles;
+    let dt = config.dt;
+
     let n_int = model.int_local_to_global.len();
     let n_tr = model.model.transitions.len();
 
@@ -199,30 +194,33 @@ pub fn bootstrap_filter_correlated(
         .map(|_| StepScratch::new(model))
         .collect();
 
+    let n_obs = obs_model.n_observations();
     let mut total_loglik = 0.0;
-    let mut ess_trace = Vec::with_capacity(observations.len());
-    let mut ll_increments = Vec::with_capacity(observations.len());
-    let mut t = model.model.simulation.t_start;
+    let mut ess_trace = Vec::with_capacity(n_obs);
+    let mut ll_increments = Vec::with_capacity(n_obs);
+    let mut t = config.t_start;
 
     // Compute steps per observation interval.
     // CPM requires uniform observation spacing because the noise arrays are
     // sized assuming a fixed number of substeps per observation interval.
-    let obs_dt = if observations.len() > 1 {
-        observations[1].time - observations[0].time
+    let obs_dt = if n_obs > 1 {
+        obs_model.obs_time(1) - obs_model.obs_time(0)
+    } else if n_obs == 1 {
+        obs_model.obs_time(0) - config.t_start
     } else {
-        observations.first().map_or(1.0, |o| o.time - model.model.simulation.t_start)
+        1.0
     };
     let steps_per_obs = (obs_dt / dt).round() as usize;
 
     // Validate uniform spacing
-    if observations.len() > 2 {
-        for w in observations.windows(2) {
-            let gap = w[1].time - w[0].time;
+    if n_obs > 2 {
+        for i in 0..n_obs - 1 {
+            let gap = obs_model.obs_time(i + 1) - obs_model.obs_time(i);
             if (gap - obs_dt).abs() > dt * 0.5 {
                 return Err(SimError::Validation(format!(
                     "correlated PF requires uniformly-spaced observations, \
                      but found gap {:.4} (expected {:.4}) between t={:.4} and t={:.4}",
-                    gap, obs_dt, w[0].time, w[1].time,
+                    gap, obs_dt, obs_model.obs_time(i), obs_model.obs_time(i + 1),
                 )));
             }
         }
@@ -264,8 +262,8 @@ pub fn bootstrap_filter_correlated(
     let gamma_shape = dt / sigma_sq;
     let gamma_scale = sigma_sq / dt;
 
-    for (obs_idx, obs) in observations.iter().enumerate() {
-        let obs_time = obs.time;
+    for obs_idx in 0..n_obs {
+        let obs_time = obs_model.obs_time(obs_idx);
         let t_start = t;
 
         // Propagate particles with pre-drawn correlated noise (parallel)
@@ -301,7 +299,10 @@ pub fn bootstrap_filter_correlated(
                         }
                     }
 
-                    step_fn(state, t_local, step_dt, rng, scratch)?;
+                    crate::chain_binomial::step_one(
+                        model, &mut state.counts, &mut state.flow_accumulators,
+                        params, t_local, step_dt, rng, scratch,
+                    )?;
                     t_local += step_dt;
                     substep += 1;
                 }
@@ -309,12 +310,11 @@ pub fn bootstrap_filter_correlated(
             })
             .collect();
         for r in errors { r?; }
-        while t < obs.time - 1e-10 { t += dt.min(obs.time - t); }
+        while t < obs_time - 1e-10 { t += dt.min(obs_time - t); }
 
         // Compute log-weights
         for (i, state) in swarm.states.iter().enumerate() {
-            let projected = project_fn(state);
-            swarm.log_weights[i] = obs_loglik_fn(projected, obs.value);
+            swarm.log_weights[i] = obs_model.log_likelihood(state, obs_idx, params);
         }
 
         let ll_increment = log_sum_exp(&swarm.log_weights) - (n_particles as f64).ln();
@@ -323,10 +323,14 @@ pub fn bootstrap_filter_correlated(
         ess_trace.push(swarm.ess());
 
         // Sorted systematic resampling with correlated uniform
-        // Sort particles by projected value for correlation preservation
+        // Sort particles by projected value for correlation preservation.
+        // Use the first flow accumulator sum as a sorting key — this is a
+        // heuristic for correlation preservation during resampling.
         let mut sort_order: Vec<usize> = (0..n_particles).collect();
         {
-            let projections: Vec<f64> = swarm.states.iter().map(|s| project_fn(s)).collect();
+            let projections: Vec<f64> = swarm.states.iter()
+                .map(|s| s.flow_accumulators.iter().map(|&v| v as f64).sum())
+                .collect();
             sort_order.sort_by(|&a, &b| projections[a].total_cmp(&projections[b]));
         }
 
