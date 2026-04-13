@@ -58,6 +58,12 @@ pub struct Parameter {
     /// "simplex_member". Used by inference to choose the default transform.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub param_kind:    Option<String>,
+    /// Explicit dimension annotation from the DSL `[dim]` syntax.
+    /// Two-element array: `[P_exponent, T_exponent]`.
+    /// E.g., `[0, -1]` = per-capita rate (T⁻¹), `[1, -1]` = population rate (P·T⁻¹).
+    /// `None` = no annotation (dimension inferred by compiler).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub param_dim:     Option<(i32, i32)>,
 }
 
 /// A group of parameters with a joint constraint.
