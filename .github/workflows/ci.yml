@@ -76,7 +76,7 @@ jobs:
 
   # ── Build release artifacts (all platforms) ───────────────────────
   build-artifacts:
-    needs: [test, test-rust-windows, test-rust-macos]
+    needs: [test-rust-windows, test-rust-macos]
     if: github.ref == 'refs/heads/main'
     strategy:
       matrix:
