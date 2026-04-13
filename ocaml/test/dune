@@ -9,5 +9,5 @@
 
 (test
  (name test_dimcheck)
- (libraries compiler ir alcotest)
+ (libraries compiler ir alcotest qcheck-core qcheck-alcotest)
  (deps (source_tree ../golden)))
