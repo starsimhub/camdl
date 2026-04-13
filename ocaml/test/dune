@@ -6,3 +6,8 @@
  (name test_compiler)
  (libraries compiler ir alcotest)
  (deps (source_tree ../golden)))
+
+(test
+ (name test_dimcheck)
+ (libraries compiler ir alcotest)
+ (deps (source_tree ../golden)))
