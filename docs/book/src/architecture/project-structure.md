@@ -1,0 +1,1 @@
+/Users/vsb/projects/work/camdl/docs/project-structure.md

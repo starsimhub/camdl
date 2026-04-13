@@ -1,0 +1,19 @@
+[book]
+title = "camdl"
+description = "Compartmental Model Description Language"
+authors = ["Vince Buffalo"]
+language = "en"
+src = "src"
+
+[build]
+build-dir = "../../target/book"
+
+# KaTeX math rendering — disabled until mdbook-katex supports mdbook 0.5.x
+# [preprocessor.katex]
+# after = ["links"]
+
+[output.html]
+default-theme = "light"
+preferred-dark-theme = "ayu"
+git-repository-url = "https://github.com/idm-tools/camdl"
+edit-url-template = "https://github.com/idm-tools/camdl/edit/main/docs/book/src/{path}"
