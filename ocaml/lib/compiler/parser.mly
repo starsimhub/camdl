@@ -151,24 +151,24 @@ dim_annotation_opt:
 
 dim_literal:
   (* [1] — dimensionless *)
-  | n = INT { if n = 1 then (0, 0) else failwith (Printf.sprintf "unknown dimension literal: %d" n) }
+  | n = INT { if n = 1 then (0, 0) else failwith (Printf.sprintf "unknown dimension '[%d]' — expected one of: [1], [P], [T], [T^-1], [1/T], [P/T], [P*T^-1]" n) }
   (* [P] — population *)
   | id = IDENT { match id with
       | "P" -> (1, 0)
       | "T" -> (0, 1)
-      | _ -> failwith (Printf.sprintf "unknown dimension: %s (expected P or T)" id) }
+      | _ -> failwith (Printf.sprintf "unknown dimension '[%s]' — expected one of: [1], [P], [T], [T^-1], [1/T], [P/T], [P*T^-1]" id) }
   (* [T^-1] — per-capita rate *)
   | id = IDENT CARET MINUS m = INT
       { match id with
       | "P" -> (- m, 0)
       | "T" -> (0, - m)
-      | _ -> failwith (Printf.sprintf "unknown dimension: %s" id) }
+      | _ -> failwith (Printf.sprintf "unknown dimension '[%s^-%d]' — expected one of: [1], [P], [T], [T^-1], [1/T], [P/T], [P*T^-1]" id m) }
   (* [P*T^-1] — population-level rate *)
   | id1 = IDENT STAR id2 = IDENT CARET MINUS m = INT
       { match (id1, id2) with
       | ("P", "T") -> (1, - m)
       | ("T", "P") -> (- m, 1)
-      | _ -> failwith (Printf.sprintf "unknown dimension product: %s*%s" id1 id2) }
+      | _ -> failwith (Printf.sprintf "unknown dimension '[%s*%s^-%d]' — expected one of: [1], [P], [T], [T^-1], [1/T], [P/T], [P*T^-1]" id1 id2 m) }
   (* [P/T] — population-level rate (alternative syntax) *)
   | id1 = IDENT SLASH id2 = IDENT
       { match (id1, id2) with
@@ -176,15 +176,15 @@ dim_literal:
       | ("T", "P") -> (-1, 1)
       | ("P", "P") -> (0, 0)
       | ("T", "T") -> (0, 0)
-      | _ -> failwith (Printf.sprintf "unknown dimension ratio: %s/%s" id1 id2) }
+      | _ -> failwith (Printf.sprintf "unknown dimension '[%s/%s]' — expected one of: [1], [P], [T], [T^-1], [1/T], [P/T], [P*T^-1]" id1 id2) }
   (* [1/T] — per-capita rate (alternative syntax) *)
   | n = INT SLASH id = IDENT
       { if n = 1 then
         match id with
         | "P" -> (-1, 0)
         | "T" -> (0, -1)
-        | _ -> failwith (Printf.sprintf "unknown dimension: %s" id)
-      else failwith (Printf.sprintf "unknown dimension literal: %d/%s" n id) }
+        | _ -> failwith (Printf.sprintf "unknown dimension '[1/%s]' — expected one of: [1], [P], [T], [T^-1], [1/T], [P/T], [P*T^-1]" id)
+      else failwith (Printf.sprintf "unknown dimension '[%d/%s]' — expected one of: [1], [P], [T], [T^-1], [1/T], [P/T], [P*T^-1]" n id) }
 
 param_kind:
   | RATE        { PRate }

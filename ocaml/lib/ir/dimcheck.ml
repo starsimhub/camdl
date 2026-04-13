@@ -94,6 +94,7 @@ type param_dim_entry = {
 type state = {
   mutable next_var : int;
   resolved : (int, dim_vec) Hashtbl.t;
+  links : (int, int) Hashtbl.t;  (* union-find: child -> parent *)
   mutable diags : diagnostic list;
   (* Stable param dim map *)
   param_map : (string, param_dim_entry) Hashtbl.t;
@@ -101,15 +102,19 @@ type state = {
   table_dims : (string, dim) Hashtbl.t;
   (* Pre-computed time function dims *)
   tf_dims : (string, dim) Hashtbl.t;
+  (* Cache of per-transition rate dims after inference rounds *)
+  rate_cache : (string, dim) Hashtbl.t;
 }
 
 let create_state () = {
   next_var = 0;
   resolved = Hashtbl.create 32;
+  links = Hashtbl.create 32;
   diags = [];
   param_map = Hashtbl.create 32;
   table_dims = Hashtbl.create 16;
   tf_dims = Hashtbl.create 16;
+  rate_cache = Hashtbl.create 16;
 }
 
 let fresh_var st =
@@ -125,17 +130,28 @@ let emit_info st ~code ~message ?detail ?hint () =
 
 (* ── Resolution ─────────────────────────────────────────────────────────── *)
 
+(* Follow the union-find chain to the root variable *)
+let rec find_root st id =
+  match Hashtbl.find_opt st.links id with
+  | None -> id
+  | Some parent ->
+    let root = find_root st parent in
+    if root <> parent then Hashtbl.replace st.links id root;  (* path compression *)
+    root
+
 let resolve st = function
   | Known v -> Known v
   | Any -> Any
   | Unknown id ->
-    match Hashtbl.find_opt st.resolved id with
+    let root = find_root st id in
+    match Hashtbl.find_opt st.resolved root with
     | Some v -> Known v
-    | None -> Unknown id
+    | None -> Unknown root
 
 let bind st id v =
-  if not (Hashtbl.mem st.resolved id) then
-    Hashtbl.replace st.resolved id v
+  let root = find_root st id in
+  if not (Hashtbl.mem st.resolved root) then
+    Hashtbl.replace st.resolved root v
 
 (* Unify two dimensions. On mismatch with two Known values, emit E302. *)
 let unify st ~loc d1 d2 =
@@ -156,8 +172,13 @@ let unify st ~loc d1 d2 =
   | Known v, Unknown id | Unknown id, Known v ->
     bind st id v; Known v
   | Unknown id1, Unknown id2 ->
-    if id1 = id2 then Unknown id1
-    else Unknown id1  (* can't link yet *)
+    let r1 = find_root st id1 in
+    let r2 = find_root st id2 in
+    if r1 = r2 then Unknown r1
+    else begin
+      Hashtbl.replace st.links r2 r1;  (* link r2 -> r1 *)
+      Unknown r1
+    end
 
 let constrain_known st ~code ~message d expected =
   let d = resolve st d in
@@ -471,6 +492,86 @@ let init_tf_dims st (tfs : time_function list) =
     Hashtbl.replace st.tf_dims tf.name dim
   ) tfs
 
+(* ── Read-only dimension query (no fresh vars, no diagnostics) ─────────── *)
+
+(* Walk an expression and resolve its dimension from already-known state.
+   Returns None if any part is unresolved. Used in the check phase to avoid
+   side effects from re-running infer. *)
+let rec read_dim st (e : expr) : dim =
+  match e with
+  | Const 0.0 -> Any
+  | Const _   -> Known dimensionless
+  | Param name ->
+    (match Hashtbl.find_opt st.param_map name with
+     | Some entry -> resolve st entry.stable_dim
+     | None -> Unknown (-1))  (* sentinel: unknown, but don't allocate *)
+  | Pop _ | PopSum _ -> Known population
+  | Time -> Known (make 0 1)
+  | TimeFunc name ->
+    (match Hashtbl.find_opt st.tf_dims name with
+     | Some d -> resolve st d
+     | None -> Unknown (-1))
+  | TableLookup (name, _) ->
+    (match Hashtbl.find_opt st.table_dims name with
+     | Some d -> resolve st d
+     | None -> Unknown (-1))
+  | Projected -> Known population
+  | BinOp b -> read_dim_binop st b
+  | UnOp u -> read_dim_unop st u
+  | Cond c ->
+    let dt = read_dim st c.then_ in
+    let _de = read_dim st c.else_ in
+    dt  (* branches already unified during inference *)
+
+and read_dim_binop st (b : bin_op_expr) : dim =
+  let dl = read_dim st b.left in
+  let dr = read_dim st b.right in
+  match b.op with
+  | Add | Sub | Min | Max | Mod ->
+    (* Already unified; return whichever is known *)
+    (match dl, dr with
+     | Any, d | d, Any -> d
+     | Known _, _ -> dl
+     | _, Known _ -> dr
+     | _ -> dl)
+  | Mul ->
+    (match resolve st dl, resolve st dr with
+     | Any, d | d, Any -> d
+     | Known v1, Known v2 -> Known (dim_mul v1 v2)
+     | _ -> Unknown (-1))
+  | Div ->
+    if is_bare_const b.left && is_bare_const b.right then
+      Unknown (-1)
+    else
+      (match resolve st dl, resolve st dr with
+       | Any, _ -> Any
+       | _, Any -> dl
+       | Known v1, Known v2 -> Known (dim_div v1 v2)
+       | _ -> Unknown (-1))
+  | Pow ->
+    (match resolve st dl with
+     | Any -> Any
+     | Known v when dim_is_zero v -> Known dimensionless
+     | Known v ->
+       (match b.right with
+        | Const n when Float.is_integer n -> Known (dim_scale (Float.to_int n) v)
+        | _ -> Known dimensionless)
+     | _ -> Unknown (-1))
+  | Eq | Neq | Lt | Gt | Le | Ge -> Known dimensionless
+
+and read_dim_unop st (u : un_op_expr) : dim =
+  let da = read_dim st u.arg in
+  match u.op with
+  | Neg | Abs | Floor | Ceil -> da
+  | Exp | Log -> Known dimensionless
+  | Sqrt ->
+    (match resolve st da with
+     | Any -> Any
+     | Known v ->
+       if dim_is_even v then Known (dim_half v)
+       else Known dimensionless
+     | _ -> Unknown (-1))
+
 (* ── Expression printer (for error messages) ────────────────────────────── *)
 
 let rec expr_to_short_string (e : expr) : string =
@@ -572,12 +673,20 @@ let check_model (m : model) : result =
     ) m.observations
   done;
 
-  (* Pass 2: check constraints and emit errors *)
+  (* Cache inferred rate dims for use in the read-only check phase *)
+  List.iter (fun (tr : transition) ->
+    let d = read_dim st tr.rate in
+    Hashtbl.replace st.rate_cache tr.name d
+  ) m.transitions;
+
+  (* Pass 2: check constraints and emit errors (read-only — no fresh vars) *)
 
   (* Transition rates must be P*T^-1 *)
   List.iter (fun (tr : transition) ->
-    let ctx = Printf.sprintf "transition '%s'" tr.name in
-    let d = resolve st (infer st ~ctx tr.rate) in
+    let d = resolve st
+      (match Hashtbl.find_opt st.rate_cache tr.name with
+       | Some cached -> cached
+       | None -> read_dim st tr.rate) in
     (match d with
      | Known v when not (dim_eq v rate_total) ->
        emit_error st ~code:"E300"
@@ -591,7 +700,7 @@ let check_model (m : model) : result =
     (* Overdispersion sigma^2 must be dimensionless *)
     (match tr.draw_method with
      | DrawOverdispersed sigma_sq ->
-       let sd = resolve st (infer st ~ctx sigma_sq) in
+       let sd = resolve st (read_dim st sigma_sq) in
        (match sd with
         | Known v when not (dim_is_zero v) ->
           emit_error st ~code:"E308"
@@ -604,8 +713,7 @@ let check_model (m : model) : result =
   (* Balance *)
   (match m.balance with
    | Some bal ->
-     let ctx = Printf.sprintf "balance '%s'" bal.balance_target in
-     let d = resolve st (infer st ~ctx bal.balance_expr) in
+     let d = resolve st (read_dim st bal.balance_expr) in
      (match d with
       | Known v when not (dim_eq v population) ->
         emit_error st ~code:"E305"
@@ -617,8 +725,7 @@ let check_model (m : model) : result =
 
   (* ODE *)
   List.iter (fun (eq : ode_equation) ->
-    let ctx = Printf.sprintf "ODE d(%s)/dt" eq.compartment in
-    let d = resolve st (infer st ~ctx eq.derivative) in
+    let d = resolve st (read_dim st eq.derivative) in
     (match d with
      | Known v when not (dim_eq v rate_total) ->
        emit_error st ~code:"E306"
@@ -630,10 +737,9 @@ let check_model (m : model) : result =
 
   (* Observation dispersion *)
   List.iter (fun (obs : observation_model) ->
-    let ctx = Printf.sprintf "observation '%s'" obs.name in
     (match obs.likelihood with
      | NegBinomial nb ->
-       let dd = resolve st (infer st ~ctx nb.dispersion) in
+       let dd = resolve st (read_dim st nb.dispersion) in
        (match dd with
         | Known v when not (dim_is_zero v) ->
           emit_error st ~code:"E307"
@@ -642,6 +748,129 @@ let check_model (m : model) : result =
         | _ -> ())
      | _ -> ())
   ) m.observations;
+
+  (* E303: cross-transition parameter consistency.
+     For each parameter, determine what dimension each transition's rate
+     context implies, independently of global resolution. If a parameter
+     requires dim A in one transition and dim B in another, emit E303. *)
+  let param_transition_dims : (string, (string * dim_vec) list) Hashtbl.t = Hashtbl.create 16 in
+
+  (* Compute the implied dimension of a named parameter in an expression,
+     given that the overall expression must have dimension [target].
+     Uses read_dim for all sub-expressions except occurrences of [param_name],
+     which are treated as the single unknown.
+     Returns Some dim_vec if uniquely determined, None otherwise. *)
+  let rec implied_param_dim st param_name (e : expr) (target : dim_vec) : dim_vec option =
+    match e with
+    | Param name when name = param_name -> Some target
+    | BinOp { op = Add; left; right; _ }
+    | BinOp { op = Sub; left; right; _ }
+    | BinOp { op = Min; left; right; _ }
+    | BinOp { op = Max; left; right; _ } ->
+      (* Both sides must match target *)
+      let from_l = implied_param_dim st param_name left target in
+      let from_r = implied_param_dim st param_name right target in
+      (match from_l, from_r with
+       | Some d, None | None, Some d -> Some d
+       | Some _, Some _ -> from_l  (* both paths give same answer *)
+       | None, None -> None)
+    | BinOp { op = Mul; _ } | BinOp { op = Div; _ } ->
+      (* Flatten product, find param as the single unknown, compute residual.
+         If the param is inside a non-leaf factor (e.g. Add), treat that factor
+         as the "unknown" and recurse into it with the residual dim. *)
+      let (num, den) = collect_product_factors e in
+      let known_dim = ref dimensionless in
+      let param_factors = ref [] in  (* (factor, is_num) for factors containing param *)
+      let other_unknown = ref 0 in
+      let classify_factor factor is_num =
+        let has_param = ref false in
+        let rec check = function
+          | Param name when name = param_name -> has_param := true
+          | BinOp b -> check b.left; check b.right
+          | UnOp u -> check u.arg
+          | Cond c -> check c.pred; check c.then_; check c.else_
+          | _ -> ()
+        in
+        check factor;
+        if !has_param then
+          param_factors := (factor, is_num) :: !param_factors
+        else begin
+          let d = resolve st (read_dim st factor) in
+          match d with
+          | Known v ->
+            if is_num then known_dim := dim_mul !known_dim v
+            else known_dim := dim_div !known_dim v
+          | Any -> ()
+          | Unknown _ -> incr other_unknown
+        end
+      in
+      List.iter (fun f -> classify_factor f true) num;
+      List.iter (fun f -> classify_factor f false) den;
+      if List.length !param_factors = 1 && !other_unknown = 0 then begin
+        let (sub_expr, is_num) = List.hd !param_factors in
+        let residual = dim_div target !known_dim in
+        let sub_target = if is_num then residual else dim_scale (-1) residual in
+        (* If the sub_expr is the param itself, we're done *)
+        (match sub_expr with
+         | Param name when name = param_name -> Some sub_target
+         | _ -> implied_param_dim st param_name sub_expr sub_target)
+      end else
+        None
+    | Cond { then_; else_; _ } ->
+      let from_t = implied_param_dim st param_name then_ target in
+      let from_e = implied_param_dim st param_name else_ target in
+      (match from_t, from_e with
+       | Some d, None | None, Some d -> Some d
+       | Some _, Some _ -> from_t
+       | None, None -> None)
+    | UnOp { op = Neg; arg; _ } | UnOp { op = Abs; arg; _ }
+    | UnOp { op = Floor; arg; _ } | UnOp { op = Ceil; arg; _ } ->
+      implied_param_dim st param_name arg target
+    | UnOp { op = Sqrt; arg; _ } ->
+      implied_param_dim st param_name arg (dim_scale 2 target)
+    | _ -> None
+  in
+
+  (* Collect param names used in each transition *)
+  let rec params_in (e : expr) acc =
+    match e with
+    | Param name -> if List.mem name acc then acc else name :: acc
+    | BinOp b -> params_in b.left (params_in b.right acc)
+    | UnOp u -> params_in u.arg acc
+    | Cond c -> params_in c.pred (params_in c.then_ (params_in c.else_ acc))
+    | TableLookup (_, idxs) -> List.fold_left (fun a e -> params_in e a) acc idxs
+    | _ -> acc
+  in
+
+  List.iter (fun (tr : transition) ->
+    let pnames = params_in tr.rate [] in
+    List.iter (fun pname ->
+      match implied_param_dim st pname tr.rate rate_total with
+      | Some implied ->
+        let existing = match Hashtbl.find_opt param_transition_dims pname with
+          | Some l -> l | None -> [] in
+        if not (List.exists (fun (tn, _) -> tn = tr.name) existing) then
+          Hashtbl.replace param_transition_dims pname ((tr.name, implied) :: existing)
+      | None -> ()
+    ) pnames
+  ) m.transitions;
+
+  Hashtbl.iter (fun name entries ->
+    match entries with
+    | [] | [_] -> ()
+    | first :: rest ->
+      let (first_tr, first_dim) = first in
+      List.iter (fun (other_tr, other_dim) ->
+        if not (dim_eq first_dim other_dim) then
+          emit_error st ~code:"E303"
+            ~message:(Printf.sprintf "parameter '%s' has conflicting dimensions" name)
+            ~detail:(Printf.sprintf
+              "In transition '%s': inferred %s (%s)\n  In transition '%s': inferred %s (%s)"
+              first_tr (formal_dim first_dim) (display_dim first_dim)
+              other_tr (formal_dim other_dim) (display_dim other_dim))
+            ()
+      ) rest
+  ) param_transition_dims;
 
   (* Collect resolved param dims; emit I300 for undetermined *)
   let param_dims = ref [] in

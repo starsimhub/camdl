@@ -283,9 +283,9 @@ let test_param_inconsistent () =
     ]
     () in
   let r = Dimcheck.check_model m in
-  (* Either E300 (wrong rate dim) or E303 (inconsistent param) *)
+  (* E303 (cross-transition inconsistency) or E300/E302 from unification *)
   Alcotest.(check bool) "inconsistent param error"
-    true (has_error "E300" r || has_error "E303" r)
+    true (has_error "E300" r || has_error "E302" r || has_error "E303" r)
 
 (* ── Transcendental Functions ──────────────────────────────────────────── *)
 
@@ -653,6 +653,104 @@ let test_error_golden expected_code model_name () =
       end
   end
 
+(* ── Union-Find Linking ────────────────────────────────────────────────── *)
+
+let test_unknown_unknown_linking_conflict () =
+  (* Two unknown params: alpha and kappa, used in two transitions.
+     t1: alpha * S  — alpha needs T^-1
+     t2: kappa * I  — kappa needs T^-1
+     t3: (alpha + kappa) * S — alpha and kappa are linked, both T^-1.
+     This should work fine — no conflict. *)
+  let m = empty_model
+    ~compartments:[mk_compartment "S"; mk_compartment "I"]
+    ~parameters:[mk_param ~kind:(Some "positive") "alpha";
+                 mk_param ~kind:(Some "positive") "kappa"]
+    ~transitions:[
+      mk_transition "t1" (param "alpha" *. pop "S");
+      mk_transition "t2" (param "kappa" *. pop "I");
+      mk_transition "t3" ((param "alpha" +. param "kappa") *. pop "S");
+    ]
+    () in
+  let r = Dimcheck.check_model m in
+  Alcotest.(check bool) "linked unknowns consistent" true (no_errors r)
+
+let test_unknown_unknown_linking_catches_conflict () =
+  (* alpha and kappa linked via addition (must be same dim).
+     t1: alpha * S — alpha needs T^-1
+     t2: kappa alone — kappa needs P*T^-1
+     t3: (alpha + kappa) — links them, but they need different dims.
+     Should produce E302 or E303. *)
+  let m = empty_model
+    ~compartments:[mk_compartment "S"]
+    ~parameters:[mk_param ~kind:(Some "positive") "alpha";
+                 mk_param ~kind:(Some "positive") "kappa"]
+    ~transitions:[
+      mk_transition "t1" (param "alpha" *. pop "S");
+      mk_transition "t2" (param "kappa");
+      mk_transition "t3" ((param "alpha" +. param "kappa") *. pop "S");
+    ]
+    () in
+  let r = Dimcheck.check_model m in
+  Alcotest.(check bool) "linked unknowns conflict detected"
+    true (has_error "E300" r || has_error "E302" r || has_error "E303" r)
+
+(* ── E303 Cross-Transition Diagnostic ─────────────────────────────────── *)
+
+let test_e303_cross_transition () =
+  (* alpha used as rate (T^-1) in t1 via alpha * S,
+     but needs to be population (P) in t2 via gamma * (alpha + I).
+     Should produce E303 specifically. *)
+  let m = empty_model
+    ~compartments:[mk_compartment "S"; mk_compartment "I"; mk_compartment "R";
+                   mk_compartment "N"]
+    ~parameters:[mk_param ~kind:(Some "positive") "alpha";
+                 mk_param ~kind:(Some "rate") "gamma"]
+    ~transitions:[
+      mk_transition "infection"
+        (param "alpha" *. pop "S" *. pop "I" /. pop "N");
+      mk_transition "waning"
+        (param "gamma" *. (param "alpha" +. pop "I"));
+    ]
+    () in
+  let r = Dimcheck.check_model m in
+  Alcotest.(check bool) "E303 cross-transition conflict"
+    true (has_error "E303" r)
+
+(* ── Check Phase No Duplicate Errors ──────────────────────────────────── *)
+
+let test_check_phase_no_duplicates () =
+  (* A simple valid model should have exactly 0 errors.
+     This tests that the read-only check phase doesn't create spurious errors. *)
+  let m = empty_model
+    ~compartments:[mk_compartment "S"; mk_compartment "I";
+                   mk_compartment "R"; mk_compartment "N"]
+    ~parameters:[mk_param ~kind:(Some "rate") "beta";
+                 mk_param ~kind:(Some "rate") "gamma"]
+    ~transitions:[
+      mk_transition "infection"
+        (param "beta" *. pop "S" *. pop "I" /. pop "N");
+      mk_transition "recovery"
+        (param "gamma" *. pop "I");
+    ]
+    () in
+  let r = Dimcheck.check_model m in
+  Alcotest.(check bool) "no errors" true (no_errors r);
+  Alcotest.(check int) "exactly 0 errors" 0 (error_count r)
+
+let test_check_phase_single_error () =
+  (* A model with one clear error should report it exactly once. *)
+  let m = empty_model
+    ~compartments:[mk_compartment "S"]
+    ~parameters:[mk_param ~kind:(Some "rate") "beta"]
+    ~transitions:[mk_transition "t1" (param "beta")]
+    () in
+  let r = Dimcheck.check_model m in
+  (* beta alone is T^-1, not P*T^-1 — exactly one E300 *)
+  let e300_count = List.length (List.filter (fun (d : Dimcheck.diagnostic) ->
+    d.severity = Dimcheck.Error && d.code = "E300"
+  ) r.diagnostics) in
+  Alcotest.(check int) "exactly one E300" 1 e300_count
+
 (* ── Test Registration ─────────────────────────────────────────────────── *)
 
 let () =
@@ -738,6 +836,17 @@ let () =
       Alcotest.test_case "malaria_two_species"      `Quick (test_golden_no_dim_errors "malaria_two_species");
       Alcotest.test_case "sir_dim_annotated"        `Quick (test_golden_no_dim_errors "sir_dim_annotated");
     ];
+    "union_find", [
+      Alcotest.test_case "linked unknowns consistent"  `Quick test_unknown_unknown_linking_conflict;
+      Alcotest.test_case "linked unknowns conflict"    `Quick test_unknown_unknown_linking_catches_conflict;
+    ];
+    "e303_diagnostic", [
+      Alcotest.test_case "E303 cross-transition"       `Quick test_e303_cross_transition;
+    ];
+    "check_phase", [
+      Alcotest.test_case "no duplicate errors"         `Quick test_check_phase_no_duplicates;
+      Alcotest.test_case "single error reported once"  `Quick test_check_phase_single_error;
+    ];
     "negative_golden", [
       Alcotest.test_case "e300_missing_susceptible" `Quick
         (test_error_golden "E300" "e300_missing_susceptible");
@@ -749,12 +858,8 @@ let () =
         (test_error_golden "E302" "e302_add_count_and_rate");
       Alcotest.test_case "e302_iota_bare_const"     `Quick
         (test_error_golden "E302" "e302_iota_bare_const");
-      (* E303 manifests as E302 in the current checker: alpha is inferred as
-         T^-1 from transition 1, then alpha + I in transition 2 triggers E302
-         when unifying T^-1 with P. The global constraint approach catches
-         the inconsistency, just via a different error code. *)
       Alcotest.test_case "e303_param_inconsistent"  `Quick
-        (test_error_golden "E302" "e303_param_inconsistent");
+        (test_error_golden "E303" "e303_param_inconsistent");
     ];
 
     (* ── Property-based tests (QCheck) ─────────────────────────────── *)
