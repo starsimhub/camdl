@@ -97,14 +97,12 @@ impl MultiStreamObsModel {
     pub fn log_likelihood_from_flows(
         &self, cum_flows: &[u64], obs_idx: usize, params: &[f64],
     ) -> f64 {
-        let int_s = IntState::new(self.compiled.int_local_to_global.len());
-        let real_s = RealState::new(self.compiled.real_local_to_global.len());
         self.streams.iter().map(|s| {
             let projected: f64 = s.flow_indices.iter()
                 .map(|&i| cum_flows[i] as f64).sum();
             eval_likelihood_resolved(
                 &s.resolved, projected, s.observations[obs_idx],
-                params, &self.compiled, &int_s, &real_s,
+                params, &self.compiled, &self.int_s, &self.real_s,
             )
         }).sum()
     }
