@@ -1113,16 +1113,26 @@ let check_guards ctx =
 
 (* ── Transition expansion ────────────────────────────────────────────────── *)
 
+let guard_to_string g =
+  let rec pp = function
+    | GEq  (a, b) -> Printf.sprintf "%s == %s" a b
+    | GNeq (a, b) -> Printf.sprintf "%s != %s" a b
+    | GAnd (g1, g2) -> Printf.sprintf "%s and %s" (pp g1) (pp g2)
+    | GOr  (g1, g2) -> Printf.sprintf "%s or %s"  (pp g1) (pp g2)
+  in
+  pp g
+
 let expand_transitions_counted ctx =
   let filtered = ref 0 in
   let expanded = List.concat_map (fun tr ->
     let combos = cartesian_product tr.trindices ctx in
-    List.filter_map (fun env ->
+    let tr_filtered = ref 0 in
+    let results = List.filter_map (fun env ->
       let pass_guard = match tr.trguard with
         | None   -> true
         | Some g -> eval_guard env g
       in
-      if not pass_guard then (incr filtered; None)
+      if not pass_guard then (incr filtered; incr tr_filtered; None)
       else begin
         let src_name = Option.map (resolve_stoich_ref ctx env) tr.trsrc in
         let dst_name = Option.map (resolve_stoich_ref ctx env) tr.trdst in
@@ -1166,7 +1176,22 @@ let expand_transitions_counted ctx =
           Ir.rate_grad       = [];  (* populated later by autodiff pass *)
         }
       end
-    ) combos
+    ) combos in
+    (* Warn if a where guard filtered ALL combinations to zero transitions *)
+    (match tr.trguard with
+     | Some g when results = [] && combos <> [] ->
+       Diagnostics.warning ctx.diags
+         ~code:"W200" ~loc:Diagnostics.no_loc
+         ~message:(Printf.sprintf
+           "'where' guard in transition '%s' produced 0 transitions"
+           tr.trname)
+         ~detail:(Printf.sprintf
+           "The guard `where %s` filtered all %d combinations."
+           (guard_to_string g) (List.length combos))
+         ~hint:"Check that the guard variable names match the loop variables."
+         ()
+     | _ -> ());
+    results
   ) ctx.transitions in
   (expanded, !filtered)
 

@@ -682,6 +682,80 @@ let run_let ppf (model : Ir.model) ctx name =
 let run_expansion ppf _ctx _name =
   Fmt.pf ppf "note: coupling sugar has been removed; --expansion is no longer applicable.@\n"
 
+(* ── --dims ─────────────────────────────────────────────────────────────── *)
+
+let run_dims ppf (model : Ir.model) ctx =
+  let dc_result = Dimcheck.check_model model in
+  (* Build a lookup: param name → (kind, has_explicit_dim) from AST *)
+  let param_info = List.filter_map (fun (p : Ir.parameter) ->
+    let ast_decl = List.find_opt (fun pd ->
+      match pd with
+      | Ast.PScalar s -> s.pname = p.name
+      | Ast.PIndexed ix ->
+        let prefix = ix.pname ^ "_" in
+        p.name = ix.pname ||
+        (String.length p.name > String.length prefix &&
+         String.sub p.name 0 (String.length prefix) = prefix)
+    ) ctx.Expander.param_decls in
+    let kind_str = match ast_decl with
+      | Some (Ast.PScalar pd) -> Ast.(match pd.pkind with
+          | PRate -> "rate" | PProbability -> "probability"
+          | PPositive -> "positive" | PCount -> "count" | PReal -> "real")
+      | Some (Ast.PIndexed pd) -> Ast.(match pd.pkind with
+          | PRate -> "rate" | PProbability -> "probability"
+          | PPositive -> "positive" | PCount -> "count" | PReal -> "real")
+      | None -> "?"
+    in
+    (* A dimension is "declared" if the param_kind gives it a known dimension
+       (rate, probability, count) or there's an explicit [dim] annotation.
+       "positive" and "real" don't declare a dimension — they are inferred. *)
+    let declared = match ast_decl with
+      | Some (Ast.PScalar pd) ->
+        pd.pdim <> None || Ast.(match pd.pkind with
+          | PRate | PProbability | PCount -> true
+          | PPositive | PReal -> false)
+      | Some (Ast.PIndexed pd) ->
+        pd.pdim <> None || Ast.(match pd.pkind with
+          | PRate | PProbability | PCount -> true
+          | PPositive | PReal -> false)
+      | None -> false
+    in
+    Some (p.name, kind_str, declared)
+  ) model.parameters in
+  (* Header *)
+  Term_style.bold Fmt.string ppf "parameters (inferred dimensions):";
+  Fmt.pf ppf "@\n";
+  (* Find the maximum param name length for alignment *)
+  let max_name = List.fold_left (fun acc (p : Ir.parameter) ->
+    max acc (String.length p.name)
+  ) 0 model.parameters in
+  let max_kind = List.fold_left (fun acc (_, kind, _) ->
+    max acc (String.length kind)
+  ) 0 param_info in
+  (* Display each parameter *)
+  List.iter (fun (p : Ir.parameter) ->
+    let name_pad = String.make (max max_name (String.length p.name) - String.length p.name) ' ' in
+    let (_, kind_str, declared) = match List.find_opt (fun (n, _, _) -> n = p.name) param_info with
+      | Some x -> x | None -> (p.name, "?", false) in
+    let kind_pad = String.make (max max_kind (String.length kind_str) - String.length kind_str) ' ' in
+    Fmt.pf ppf "  ";
+    Term_style.param Fmt.string ppf p.name;
+    Fmt.pf ppf "%s" name_pad;
+    Term_style.dim_style Fmt.string ppf " : ";
+    Fmt.pf ppf "%s%s" kind_str kind_pad;
+    (* Look up resolved dimension *)
+    (match List.assoc_opt p.name dc_result.param_dims with
+     | Some dv ->
+       Term_style.dim_style Fmt.string ppf (Printf.sprintf " \xe2\x86\x92 %s" (Dimcheck.formal_dim dv));
+       Fmt.pf ppf " (%s)" (Dimcheck.display_dim dv);
+       if not declared then
+         Term_style.dim_style Fmt.string ppf "  [inferred from context]"
+     | None ->
+       Term_style.dim_style Fmt.string ppf " \xe2\x86\x92 ?";
+       Fmt.pf ppf " (undetermined)");
+    Fmt.pf ppf "@\n"
+  ) model.parameters
+
 (* ── Main entry point ────────────────────────────────────────────────────── *)
 
 type inspect_cmd =
@@ -692,6 +766,7 @@ type inspect_cmd =
   | TransitionCount of string option    (* pattern *)
   | LetBinding of string
   | Expansion of string
+  | Dims
 
 type inspect_opts = {
   cmd      : inspect_cmd;
@@ -744,7 +819,9 @@ let run_inspect path opts =
      | LetBinding name ->
        run_let ppf model ctx name
      | Expansion name ->
-       run_expansion ppf ctx name)
+       run_expansion ppf ctx name
+     | Dims ->
+       run_dims ppf model ctx)
 
 (** Run 'camdl check': validate + show summary. *)
 let run_check path =

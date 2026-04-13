@@ -759,6 +759,36 @@ produce an error.
 `periodic` is primarily useful in v0.2 reporting pipelines for day-of-week
 effects on case reporting.
 
+### Seasonal forcing and dimensional analysis
+
+There are two common parameterizations for seasonal forcing in compartmental
+models, and they differ dimensionally:
+
+1. **camdl style (sinusoidal IS the rate):** The `sinusoidal` construct produces
+   a value with the same dimension as the `baseline` parameter. When the
+   baseline has dimension T^-1 (i.e., when it references a `rate` parameter),
+   the forcing function itself carries the rate dimension:
+   ```
+   infection : S --> I  @ seasonal * S * I / N
+   ```
+   Here `seasonal` already has dimension T^-1, so the full rate expression is
+   P * T^-1 as required.
+
+2. **pomp style (sinusoidal is a dimensionless multiplier):** In some
+   frameworks, the sinusoidal function is a pure multiplier around 1.0
+   (dimensionless), and the rate parameter appears separately:
+   ```
+   infection : S --> I  @ beta * (1 + amplitude * sin(...)) * S * I / N
+   ```
+   Here `beta` carries the T^-1 dimension and the sinusoidal part is
+   dimensionless.
+
+Both patterns are valid. camdl's `sinusoidal(baseline = beta, ...)` produces a
+value whose dimension matches `baseline`, so it naturally follows pattern (1).
+To use pattern (2), set `baseline = 1.0` (dimensionless) and multiply by the
+rate parameter explicitly. The dimensional analysis checker handles both
+correctly.
+
 ---
 
 ## 8. Let Bindings

@@ -27,9 +27,11 @@ let () =
     let ir_mode   = ref false in
     let ascii     = ref false in
     let no_color  = ref false in
+    let dims      = ref false in
     let rec parse = function
       | [] -> ()
       | "--summary"      :: tl -> summary := true;         parse tl
+      | "--dims"         :: tl -> dims    := true;         parse tl
       | "--compartments" :: tl -> comps   := true;         parse tl
       | "--transitions"  :: tl ->
         do_transitions := true;
@@ -61,7 +63,8 @@ let () =
       | p :: _ -> p
     in
     let cmd =
-      if !comps             then Inspect.Compartments
+      if !dims              then Inspect.Dims
+      else if !comps             then Inspect.Compartments
       else if !do_transitions then Inspect.Transitions !transitions_pat
       else if !tr_count then (
         match !tr_rate with
