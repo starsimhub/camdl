@@ -1,11 +1,11 @@
 ---
-status: new
+status: complete
 date: 2026-04-13
 reviewer: external
 items_total: 8
-items_done: 0
-items_deferred: 0
-note: "Round 2 inference CLI review. Covers trait migration gaps, DRY issues, runner.rs structure."
+items_done: 6
+items_deferred: 2
+note: "Round 2 inference CLI review. Done: #1/#2/#3 correlated PF + PMMH trait migration + compat fields deleted, #4 build helpers, #6 collector non-optional, #8 auto_rw_sd dedup. Deferred: #5 runner.rs split (mechanical, not blocking), #7 eval interval (configurable, low priority)."
 ---
 
 ## Inference CLI Review (Round 2)
