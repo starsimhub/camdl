@@ -199,6 +199,28 @@ something, it must either mean exactly that or produce a clear error. Examples:
 to "works but wrong." If the compiler accepts it, the behavior must be fully
 specified and intentional.
 
+### Error messages are a feature, not polish
+
+Error quality is a first-class design goal. A bad error message is a bug —
+it means the compiler detected a problem but failed to help the user fix it.
+
+Every diagnostic should:
+- Show what went wrong (the mismatch, the constraint violation)
+- Show where (source location, transition name, parameter name)
+- Show why (the expected vs actual value, with domain-specific names)
+- Suggest a fix when possible (hint text, corrected code)
+
+When two possible error codes could fire for the same root cause, prefer the
+one that points closest to the actual mistake. E.g., a parameter used
+inconsistently across transitions should produce E303 ("conflicting
+dimensions in transition A vs B") not E302 ("dimension mismatch in
+addition") — even though E302 is technically correct, E303 gives the user
+the cross-transition context they need.
+
+Never use `failwith` or `assert false` for user-facing errors. These produce
+stack traces instead of diagnostics. Use the Diagnostics module with error
+codes, source locations, and hint text.
+
 ### Backwards compatibility is a non-goal
 
 This is unreleased software. Do not add backwards-compatibility shims, `alias`
