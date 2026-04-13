@@ -12,8 +12,6 @@ use crate::error::SimError;
 use super::traits::{ProcessModel, ObservationModel, SMCConfig};
 use super::types::{ParticleState, ParticleSwarm, log_sum_exp};
 use super::resampling::systematic_resample;
-use crate::chain_binomial::StepScratch;
-
 /// Observation: one data point at a specific time.
 #[derive(Clone)]
 pub struct Observation {
@@ -61,7 +59,7 @@ pub struct PFilterResult {
 /// * `params` — parameter values
 /// * `config` — SMC config (n_particles, dt)
 /// * `seed` — RNG seed
-pub fn bootstrap_filter<P: ProcessModel<State = ParticleState, Scratch = StepScratch>>(
+pub fn bootstrap_filter<P: ProcessModel<State = ParticleState>>(
     process: &P,
     obs_model: &(dyn ObservationModel<ParticleState> + Sync),
     params: &[f64],
@@ -98,7 +96,7 @@ pub fn bootstrap_filter<P: ProcessModel<State = ParticleState, Scratch = StepScr
         .collect();
 
     // Per-particle scratch buffers (allocated once, reused across all steps)
-    let mut scratches: Vec<StepScratch> = (0..n_particles)
+    let mut scratches: Vec<P::Scratch> = (0..n_particles)
         .map(|_| process.new_scratch())
         .collect();
 

@@ -75,29 +75,6 @@ impl StepScratch {
     }
 }
 
-/// Chain-binomial process simulator for inference (particle filter, IF2).
-/// Wraps a CompiledModel reference and implements ProcessSimulator.
-pub struct ChainBinomialProcess<'a> {
-    pub model: &'a CompiledModel,
-}
-
-impl<'a> crate::inference::ProcessSimulator for ChainBinomialProcess<'a> {
-    fn step(
-        &self,
-        state: &mut crate::inference::ParticleState,
-        params: &[f64],
-        t: f64,
-        dt: f64,
-        rng: &mut crate::rng::StatefulRng,
-    ) -> Result<(), crate::error::SimError> {
-        // NOTE: this trait method can't use scratch buffers (signature is fixed).
-        // Hot inference paths call step_one directly with scratch instead.
-        let mut scratch = StepScratch::new(self.model);
-        step_one(self.model, &mut state.counts, &mut state.flow_accumulators,
-                 params, t, dt, rng, &mut scratch)
-    }
-}
-
 impl Simulate for ChainBinomialSim {
     fn run(
         &self,

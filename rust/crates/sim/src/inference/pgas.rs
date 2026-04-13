@@ -512,6 +512,12 @@ pub fn complete_data_loglik(
                     }
                 }
             }
+            if gamma_idx_local != rec.gammas.len() {
+                log::warn!(
+                    "gamma index mismatch at substep {}: tracked {} but trajectory recorded {} gammas",
+                    s, gamma_idx_local, rec.gammas.len()
+                );
+            }
         }
 
         // Accumulate flows

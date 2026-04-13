@@ -25,7 +25,7 @@ impl ParticleState {
 
     /// Reset flow accumulators to zero (called after each observation).
     pub fn reset_flows(&mut self) {
-        for f in &mut self.flow_accumulators { *f = 0; }
+        self.reset_accumulators();
     }
 
 }

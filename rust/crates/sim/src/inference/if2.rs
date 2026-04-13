@@ -15,7 +15,6 @@
 
 use rayon::prelude::*;
 
-use crate::chain_binomial::StepScratch;
 use crate::rng::StatefulRng;
 use crate::error::SimError;
 use super::traits::{ProcessModel, ObservationModel};
@@ -309,7 +308,7 @@ pub struct Observation {
 /// Arguments: (iteration_index, log_likelihood).
 pub type ProgressCallback<'a> = Option<&'a dyn Fn(usize, f64)>;
 
-pub fn run_if2<P: ProcessModel<State = ParticleState, Scratch = StepScratch>>(
+pub fn run_if2<P: ProcessModel<State = ParticleState>>(
     process: &P,
     obs_model: &(dyn ObservationModel<ParticleState> + Sync),
     base_params: &[f64],
@@ -321,7 +320,7 @@ pub fn run_if2<P: ProcessModel<State = ParticleState, Scratch = StepScratch>>(
         seed, None)
 }
 
-pub fn run_if2_with_progress<P: ProcessModel<State = ParticleState, Scratch = StepScratch>>(
+pub fn run_if2_with_progress<P: ProcessModel<State = ParticleState>>(
     process: &P,
     obs_model: &(dyn ObservationModel<ParticleState> + Sync),
     base_params: &[f64],
@@ -357,7 +356,7 @@ pub fn run_if2_with_progress<P: ProcessModel<State = ParticleState, Scratch = St
         .map(|_| ParticleState::new(n_int, n_tr))
         .collect();
     let mut particle_params: Vec<Vec<f64>> = vec![vec![0.0; base_params.len()]; n];
-    let mut scratches: Vec<StepScratch> = (0..n)
+    let mut scratches: Vec<P::Scratch> = (0..n)
         .map(|_| process.new_scratch())
         .collect();
     // Double-buffers for resampling (avoids clone allocation)

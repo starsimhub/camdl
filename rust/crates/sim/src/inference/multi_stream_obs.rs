@@ -56,6 +56,8 @@ impl MultiStreamObsModel {
     /// Create an empty observation model (no streams, no data).
     /// Used when only the transition density is needed (e.g., gradient tests
     /// with no observation data). `log_likelihood_from_flows` returns 0.0.
+    /// For trait-generic contexts (PF, IF2) that don't need `log_likelihood_from_flows`,
+    /// prefer `NullObsModel` which requires no `CompiledModel`.
     pub fn empty(compiled: Arc<CompiledModel>) -> Self {
         let int_s = IntState::new(compiled.int_local_to_global.len());
         let real_s = RealState::new(compiled.real_local_to_global.len());
@@ -149,4 +151,18 @@ impl ObservationModel<ParticleState> for MultiStreamObsModel {
             )
         }).collect()
     }
+}
+
+/// No-op observation model for contexts that only need transition density
+/// (e.g., gradient tests with no observation data). Returns 0.0 log-likelihood,
+/// empty samples/means, zero observations.
+pub struct NullObsModel;
+
+impl ObservationModel<ParticleState> for NullObsModel {
+    fn log_likelihood(&self, _state: &ParticleState, _obs_idx: usize, _params: &[f64]) -> f64 {
+        0.0
+    }
+    fn n_observations(&self) -> usize { 0 }
+    fn obs_time(&self, _obs_idx: usize) -> f64 { 0.0 }
+    fn n_streams(&self) -> usize { 0 }
 }
