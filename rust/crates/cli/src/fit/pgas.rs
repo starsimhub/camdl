@@ -236,15 +236,7 @@ pub fn run_pgas_cli(
 
             // Build multi-stream observation model (evaluates with params at call time)
             let compiled = &*config.compiled;
-            let obs_model = sim::inference::MultiStreamObsModel::new(
-                config.streams.iter().map(|s| sim::inference::multi_stream_obs::StreamSpec {
-                    flow_indices: s.flow_indices.clone(),
-                    ir_model: s.obs_model_ir.clone(),
-                    observations: s.data.iter().map(|o| o.value).collect(),
-                    obs_times: config.observations.iter().map(|o| o.time).collect(),
-                }).collect(),
-                config.compiled.clone(),
-            );
+            let obs_model = config.build_obs_model();
 
             let observations: Vec<sim::inference::particle_filter::Observation> =
                 config.observations.iter()

@@ -97,7 +97,7 @@ pub fn run_scout(fit: &FitToml, seed: u64, force: bool) -> Result<(), String> {
     eprintln!("scout: {} chains ({} seeded, {} random) × {} particles × {} iterations, cooling={}, rw_sd×{:.1}",
         n_chains, start_chains.min(n_chains), n_random, n_particles, n_iterations, cooling, rw_sd_scale);
     let t0 = std::time::Instant::now();
-    let chain_results = runner::run_chains_with_per_chain_params(&config, Some(&per_chain_params), Some(&collector));
+    let chain_results = runner::run_chains_with_per_chain_params(&config, Some(&per_chain_params), &collector);
     let elapsed = t0.elapsed();
 
     // Check for degenerate filter: if best chain's loglik at early iterations is -inf,

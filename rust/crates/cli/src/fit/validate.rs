@@ -10,7 +10,6 @@ use sim::inference::{
     bootstrap_filter,
     if2::{IF2Config, EstimatedParam, run_if2},
     diagnostic::{DiagnosticCollector, DiagnosticKind},
-    ChainBinomialProcess, MultiStreamObsModel, multi_stream_obs::StreamSpec,
     traits::{SMCConfig, ObservationModel},
 };
 use std::collections::HashMap;
@@ -320,20 +319,11 @@ fn run_pfilter_with_obs(
     n_particles: usize,
     seed: u64,
 ) -> Result<PfilterResult, String> {
-    let process = ChainBinomialProcess::new(config.compiled.clone());
-    let obs_model_trait = MultiStreamObsModel::new(
-        config.streams.iter().map(|s| StreamSpec {
-            flow_indices: s.flow_indices.clone(),
-            ir_model: s.obs_model_ir.clone(),
-            observations: s.data.iter().map(|o| o.value).collect(),
-            obs_times: config.observations.iter().map(|o| o.time).collect(),
-        }).collect(),
-        config.compiled.clone(),
-    );
+    let process = config.build_process();
+    let obs_model_trait = config.build_obs_model();
     let smc_config = SMCConfig {
         n_particles,
-        dt: config.if2_config.dt,
-        t_start: config.compiled.model.simulation.t_start,
+        ..config.smc_config()
     };
 
     let result = bootstrap_filter(
@@ -489,16 +479,8 @@ fn run_profiles(
                 simplex_groups: vec![],
             };
 
-            let process = ChainBinomialProcess::new(config.compiled.clone());
-            let obs_model_profile = MultiStreamObsModel::new(
-                config.streams.iter().map(|s| StreamSpec {
-                    flow_indices: s.flow_indices.clone(),
-                    ir_model: s.obs_model_ir.clone(),
-                    observations: s.data.iter().map(|o| o.value).collect(),
-                    obs_times: config.observations.iter().map(|o| o.time).collect(),
-                }).collect(),
-                config.compiled.clone(),
-            );
+            let process = config.build_process();
+            let obs_model_profile = config.build_obs_model();
 
             let chain_seed = seed ^ focal.index as u64 ^ (focal_value.to_bits());
             let result = run_if2(

@@ -208,6 +208,28 @@ impl FitRunConfig {
             obs_model_ir,
         })
     }
+
+    pub fn build_process(&self) -> sim::inference::ChainBinomialProcess {
+        sim::inference::ChainBinomialProcess::new(self.compiled.clone())
+    }
+    pub fn build_obs_model(&self) -> sim::inference::MultiStreamObsModel {
+        sim::inference::MultiStreamObsModel::new(
+            self.streams.iter().map(|s| sim::inference::multi_stream_obs::StreamSpec {
+                flow_indices: s.flow_indices.clone(),
+                ir_model: s.obs_model_ir.clone(),
+                observations: s.data.iter().map(|o| o.value).collect(),
+                obs_times: self.observations.iter().map(|o| o.time).collect(),
+            }).collect(),
+            self.compiled.clone(),
+        )
+    }
+    pub fn smc_config(&self) -> sim::inference::traits::SMCConfig {
+        sim::inference::traits::SMCConfig {
+            n_particles: self.if2_config.n_particles,
+            dt: self.if2_config.dt,
+            t_start: self.compiled.model.simulation.t_start,
+        }
+    }
 }
 
 // load_model is now in util.rs
@@ -274,22 +296,11 @@ fn build_if2_params(
 /// Run a quick pfilter at given params and return the loglik.
 /// Used by scout for initial_loglik baseline.
 pub fn run_quick_pfilter(config: &FitRunConfig, params: &[f64], n_particles: usize, seed: u64) -> f64 {
-    use sim::inference::{ChainBinomialProcess, MultiStreamObsModel, multi_stream_obs::StreamSpec, traits::SMCConfig};
-
-    let process = ChainBinomialProcess::new(config.compiled.clone());
-    let obs_model = MultiStreamObsModel::new(
-        config.streams.iter().map(|s| StreamSpec {
-            flow_indices: s.flow_indices.clone(),
-            ir_model: s.obs_model_ir.clone(),
-            observations: s.data.iter().map(|o| o.value).collect(),
-            obs_times: config.observations.iter().map(|o| o.time).collect(),
-        }).collect(),
-        config.compiled.clone(),
-    );
-    let smc_config = SMCConfig {
+    let process = config.build_process();
+    let obs_model = config.build_obs_model();
+    let smc_config = sim::inference::traits::SMCConfig {
         n_particles,
-        dt: config.if2_config.dt,
-        t_start: config.compiled.model.simulation.t_start,
+        ..config.smc_config()
     };
 
     match sim::inference::bootstrap_filter(&process, &obs_model, params, &smc_config, seed) {
@@ -299,7 +310,7 @@ pub fn run_quick_pfilter(config: &FitRunConfig, params: &[f64], n_particles: usi
 }
 
 /// Print preflight transform report to stderr, pushing diagnostics to collector.
-pub fn print_preflight(config: &FitRunConfig, collector: Option<&DiagnosticCollector>) {
+pub fn print_preflight(config: &FitRunConfig, collector: &DiagnosticCollector) {
     let n_auto = config.estimated_params.iter()
         .filter(|s| s.rw_sd_auto)
         .count();
@@ -316,11 +327,9 @@ pub fn print_preflight(config: &FitRunConfig, collector: Option<&DiagnosticColle
                 let z = (p / (1.0 - p)).ln();
                 let compressed = z.abs() > 2.0;
                 if compressed {
-                    if let Some(c) = collector {
-                        c.push(DiagnosticKind::CompressedLogitPosition {
-                            param: spec.name.clone(), z,
-                        });
-                    }
+                    collector.push(DiagnosticKind::CompressedLogitPosition {
+                        param: spec.name.clone(), z,
+                    });
                 }
                 let mark = if compressed { " \x1b[33m⚠ compressed\x1b[0m" } else { "" };
                 (format!("logit   [{}, {}]", lo, hi), format!("logit = {:.2}{}", z, mark))
@@ -336,11 +345,9 @@ pub fn print_preflight(config: &FitRunConfig, collector: Option<&DiagnosticColle
 
         // Push auto rw_sd info diagnostic
         if spec.rw_sd_auto {
-            if let Some(c) = collector {
-                c.push(DiagnosticKind::AutoRwSd {
-                    param: spec.name.clone(), rw_sd: spec.rw_sd,
-                });
-            }
+            collector.push(DiagnosticKind::AutoRwSd {
+                param: spec.name.clone(), rw_sd: spec.rw_sd,
+            });
         }
     }
 
@@ -371,18 +378,11 @@ pub fn print_preflight(config: &FitRunConfig, collector: Option<&DiagnosticColle
     let two_thirds = (iters * 2 / 3).max(1);
     let rw_at_two_thirds = rw_at(two_thirds);
     if rw_at_two_thirds < 0.01 {
-        if let Some(c) = collector {
-            c.push(DiagnosticKind::CoolingExhausted {
-                exhausted_at_iter: two_thirds,
-                total_iters: iters,
-                rw_fraction_at_exhaustion: rw_at_two_thirds,
-            });
-        } else {
-            eprintln!("  \x1b[33m⚠ rw_sd drops below 1% at iteration {} — last {} iterations may be wasted.\x1b[0m",
-                two_thirds, iters - two_thirds);
-            eprintln!("    Consider fewer iterations or milder cooling (e.g., cooling = {:.2}).",
-                0.10_f64.sqrt());
-        }
+        collector.push(DiagnosticKind::CoolingExhausted {
+            exhausted_at_iter: two_thirds,
+            total_iters: iters,
+            rw_fraction_at_exhaustion: rw_at_two_thirds,
+        });
     }
     eprintln!();
 }
@@ -487,12 +487,6 @@ pub fn build_if2_params_from_specs(
     Ok(params)
 }
 
-/// Public wrapper for use by `camdl if2 --rw-sd auto`.
-#[allow(dead_code)]
-pub fn auto_rw_sd_from_value_pub(current_value: f64, lower: f64, upper: f64, transform: &Transform) -> f64 {
-    auto_rw_sd_from_value(current_value, lower, upper, transform)
-}
-
 /// Auto-compute rw_sd from bounds on the transformed scale.
 ///
 /// Returns a natural-scale rw_sd value. At each IF2 perturbation step,
@@ -515,7 +509,7 @@ pub fn auto_rw_sd_from_value_pub(current_value: f64, lower: f64, upper: f64, tra
 /// This is a starting heuristic, not a solution. Scout's MAD-based
 /// calibration replaces it for refine. The modeler can override with
 /// explicit rw_sd in fit.toml or --rw-sd on the CLI.
-fn auto_rw_sd_from_value(_current_value: f64, lower: f64, upper: f64, transform: &Transform) -> f64 {
+pub fn auto_rw_sd_from_value(_current_value: f64, lower: f64, upper: f64, transform: &Transform) -> f64 {
     match transform {
         Transform::Log { lo, hi } => {
             let lo = lo.max(1e-300);
@@ -597,18 +591,8 @@ fn run_one_chain(
     let chain_seed = config.seed ^ (chain_id as u64).wrapping_mul(0x9e3779b97f4a7c15);
     let if2_params = per_chain_params.unwrap_or(&config.estimated_params);
 
-    use sim::inference::{ChainBinomialProcess, MultiStreamObsModel, multi_stream_obs::StreamSpec};
-
-    let process = ChainBinomialProcess::new(config.compiled.clone());
-    let obs_model = MultiStreamObsModel::new(
-        config.streams.iter().map(|s| StreamSpec {
-            flow_indices: s.flow_indices.clone(),
-            ir_model: s.obs_model_ir.clone(),
-            observations: s.data.iter().map(|o| o.value).collect(),
-            obs_times: config.observations.iter().map(|o| o.time).collect(),
-        }).collect(),
-        config.compiled.clone(),
-    );
+    let process = config.build_process();
+    let obs_model = config.build_obs_model();
 
     let progress_cb = |iter: usize, loglik: f64| {
         if let Some(bar) = pb {
@@ -639,14 +623,14 @@ fn run_one_chain(
 
 /// Run N chains with a diagnostic collector.
 pub fn run_chains_with_diagnostics(config: &FitRunConfig, collector: &DiagnosticCollector) -> ChainResults {
-    run_chains_with_per_chain_params(config, None, Some(collector))
+    run_chains_with_per_chain_params(config, None, collector)
 }
 
 /// Run N chains with optional per-chain EstimatedParam overrides (for scout random starts).
 pub fn run_chains_with_per_chain_params(
     config: &FitRunConfig,
     per_chain_params: Option<&[Vec<EstimatedParam>]>,
-    collector: Option<&DiagnosticCollector>,
+    collector: &DiagnosticCollector,
 ) -> ChainResults {
     eprintln!("running {} chains × {} particles × {} iterations, cooling={}, dt={}",
         config.n_chains, config.if2_config.n_particles, config.if2_config.n_iterations,
@@ -739,22 +723,11 @@ pub fn run_chains_with_per_chain_params(
 
         // Diagnostic: high Rhat + large loglik spread → chains in different basins
         if max_rhat > 1.5 && ll_spread > 50.0 {
-            if let Some(c) = collector {
-                c.push(DiagnosticKind::MultimodalLikelihood { ll_spread, max_rhat });
-            } else {
-                eprintln!("\n\x1b[33mwarning: chains may have found different likelihood basins.\x1b[0m");
-                eprintln!("  Rhat max = {:.2}, loglik spread = {:.1}", max_rhat, ll_spread);
-                eprintln!("  This suggests the likelihood surface is multimodal.");
-            }
+            collector.push(DiagnosticKind::MultimodalLikelihood { ll_spread, max_rhat });
         } else if max_rhat > 1.1 {
             let n_unconverged = rhat.values().filter(|&&r| r > 1.1).count();
             let n_total = rhat.len();
-            if let Some(c) = collector {
-                c.push(DiagnosticKind::ConvergenceIncomplete { max_rhat, n_unconverged, n_total });
-            } else {
-                eprintln!("\n\x1b[33mwarning: not all parameters converged (max Rhat = {:.2}).\x1b[0m", max_rhat);
-                eprintln!("  Consider more iterations or particles.");
-            }
+            collector.push(DiagnosticKind::ConvergenceIncomplete { max_rhat, n_unconverged, n_total });
         }
     }
 
