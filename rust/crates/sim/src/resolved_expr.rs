@@ -67,6 +67,25 @@ pub enum ResolvedExpr {
     Projected,
 }
 
+/// Returns true if the expression references compartment state (Pop, PopSum).
+/// Used to check whether an expression can be evaluated at a fixed state
+/// or needs per-particle evaluation.
+pub fn references_state(expr: &ResolvedExpr) -> bool {
+    match expr {
+        ResolvedExpr::IntPop(_)
+        | ResolvedExpr::RealPop(_)
+        | ResolvedExpr::IntPopSum(_)
+        | ResolvedExpr::MixedPopSum { .. } => true,
+        ResolvedExpr::BinOp { left, right, .. } =>
+            references_state(left) || references_state(right),
+        ResolvedExpr::UnOp { arg, .. } => references_state(arg),
+        ResolvedExpr::Cond { pred, then_, else_ } =>
+            references_state(pred) || references_state(then_) || references_state(else_),
+        ResolvedExpr::TableLookup { index, .. } => references_state(index),
+        _ => false,
+    }
+}
+
 // ── Resolution context ───────────────────────────────────────────────────────
 
 /// Borrows all index maps needed to resolve an `Expr` → `ResolvedExpr`.

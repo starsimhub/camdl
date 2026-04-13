@@ -232,9 +232,21 @@ pub fn bootstrap_filter_correlated(
     //
     // ASSUMPTION: σ² is state-independent (typically a bare parameter like
     // `sigma_se`). We evaluate at a zero state because the expression is
-    // precomputed once for all particles and substeps. If σ² ever depends
-    // on compartment counts, this must be changed to per-particle per-substep
-    // evaluation (as step_one does).
+    // precomputed once for all particles and substeps.
+    //
+    // Check: if σ² depends on compartment counts, CPM can't handle it correctly
+    // (would need per-particle per-substep evaluation). Emit an error.
+    for od in &model.resolved.overdispersion {
+        if let Some(re) = od {
+            if crate::resolved_expr::references_state(re) {
+                return Err(SimError::Validation(
+                    "Correlated pseudo-marginal (CPM) does not support state-dependent \
+                     overdispersion (σ² references compartment counts). Use vanilla PMMH \
+                     (rho = None) or make σ² a parameter instead.".into()
+                ));
+            }
+        }
+    }
     let sigma_sq = model.resolved.overdispersion.iter()
         .find_map(|od| {
             od.as_ref().map(|re| {

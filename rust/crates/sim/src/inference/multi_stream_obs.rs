@@ -37,9 +37,12 @@ pub struct MultiStreamObsModel {
     streams: Vec<Stream>,
     obs_times: Vec<f64>,
     compiled: Arc<CompiledModel>,
-    /// Pre-allocated state objects for expression evaluation context.
-    /// These are dummies (zeroed) — the obs model only reads params
-    /// and the projected value, not compartment counts.
+    /// Dummy zeroed state objects required by `EvalCtx`. The obs model
+    /// likelihood expressions only read `params` and `projected` — never
+    /// compartment counts. These exist solely because `EvalCtx` requires
+    /// `&IntState`/`&RealState` references (it's shared with propensity
+    /// evaluation which does read state). Refactoring EvalCtx to accept
+    /// Option would touch 13 files for zero behavioral change.
     int_s: IntState,
     real_s: RealState,
 }

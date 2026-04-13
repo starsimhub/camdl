@@ -270,6 +270,14 @@ impl AdaptiveProposal {
 
 /// Run PMMH.
 ///
+/// Unlike PF/IF2/PGAS, PMMH intentionally uses a closure-based API rather
+/// than `ProcessModel`/`ObservationModel` traits. This is the right design:
+/// PMMH wraps a Metropolis-Hastings loop around a black-box likelihood
+/// estimator. It doesn't need to know how the PF is constructed — only that
+/// `eval_loglik(params, seed) -> log L̂(θ)` returns an unbiased estimate.
+/// This decoupling means PMMH works with any likelihood estimator (vanilla
+/// PF, correlated PF, importance sampling, etc.) without code changes.
+///
 /// `eval_loglik` runs a particle filter at the given params and returns log L̂(θ).
 /// Built in the CLI layer from `run_quick_pfilter`. Takes `(full_params, pf_seed) → log L̂`.
 ///
