@@ -2277,7 +2277,7 @@
       "prior": null,
       "transform": null,
       "initial_value": null,
-      "param_kind": "rate"
+      "param_kind": "positive"
     },
     {
       "name": "mu_H",
@@ -2385,7 +2385,7 @@
       "prior": null,
       "transform": null,
       "initial_value": null,
-      "param_kind": "rate"
+      "param_kind": "positive"
     },
     {
       "name": "phi_B",
@@ -2394,7 +2394,7 @@
       "prior": null,
       "transform": null,
       "initial_value": null,
-      "param_kind": "rate"
+      "param_kind": "probability"
     },
     {
       "name": "mu_B",
@@ -2457,7 +2457,7 @@
       "prior": null,
       "transform": null,
       "initial_value": null,
-      "param_kind": "rate"
+      "param_kind": "positive"
     },
     {
       "name": "phi_A",
@@ -2466,7 +2466,7 @@
       "prior": null,
       "transform": null,
       "initial_value": null,
-      "param_kind": "rate"
+      "param_kind": "probability"
     },
     {
       "name": "mu_A",

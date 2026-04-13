@@ -63,9 +63,27 @@ let compile_detail_result ?(name = "model") ?(filename = "<input>") (src : strin
   | Failure msg -> Error msg
   | exn -> Error (Printexc.to_string exn)
 
+let no_dim_check = ref false
+
 let compile ?(name = "model") ?(filename = "<input>") (src : string) : (Ir.model, string) result =
   match compile_detail_result ~name ~filename src with
   | Ok d ->
+    (* Dimensional analysis pass — runs before autodiff.
+       Phase 1: dimension errors are warnings (visible but non-blocking).
+       Will be promoted to errors once the checker is fully stable. *)
+    if not !no_dim_check then begin
+      let dc_result = Dimcheck.check_model d.model in
+      List.iter (fun (dc : Dimcheck.diagnostic) ->
+        Diagnostics.warning d.ctx.diags
+          ~code:dc.code ~loc:Diagnostics.no_loc
+          ~message:dc.message ?detail:dc.detail ?hint:dc.hint ()
+      ) dc_result.diagnostics;
+      (* Render any dim-check warnings (no-op if none) *)
+      if dc_result.diagnostics <> [] then begin
+        Fmt.set_style_renderer Fmt.stderr `Ansi_tty;
+        Diagnostics.render_all d.ctx.diags d.source Fmt.stderr
+      end
+    end;
     (* Autodiff pass: differentiate transition rates w.r.t. all parameters *)
     let param_names = List.map (fun (p : Ir.parameter) -> p.name) d.model.Ir.parameters in
     let m = { d.model with Ir.transitions =

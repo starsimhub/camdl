@@ -100,6 +100,9 @@ let () =
       ("--json-errors", Arg.Unit (fun () ->
         Diagnostics.json_errors_mode := true
        ), " emit diagnostics as JSON array to stderr instead of ANSI text");
+      ("--no-dim-check", Arg.Unit (fun () ->
+        Compiler.no_dim_check := true
+       ), " disable dimensional analysis checking");
     ] in
     Arg.parse_argv (Array.of_list ("camdlc" :: args))
       spec (fun f -> files := f :: !files) usage;
