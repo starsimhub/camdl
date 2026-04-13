@@ -69,17 +69,27 @@ let compile ?(name = "model") ?(filename = "<input>") (src : string) : (Ir.model
   match compile_detail_result ~name ~filename src with
   | Ok d ->
     (* Dimensional analysis pass — runs before autodiff.
-       Phase 1: dimension errors are warnings (visible but non-blocking).
-       Will be promoted to errors once the checker is fully stable. *)
+       Dimension errors block compilation (like type errors).
+       Info diagnostics (I300: undetermined dimension) are non-blocking.
+       Use --no-dim-check to disable entirely. *)
     if not !no_dim_check then begin
       let dc_result = Dimcheck.check_model d.model in
       List.iter (fun (dc : Dimcheck.diagnostic) ->
-        Diagnostics.warning d.ctx.diags
-          ~code:dc.code ~loc:Diagnostics.no_loc
-          ~message:dc.message ?detail:dc.detail ?hint:dc.hint ()
+        match dc.severity with
+        | Dimcheck.Error ->
+          Diagnostics.error d.ctx.diags
+            ~code:dc.code ~loc:Diagnostics.no_loc
+            ~message:dc.message ?detail:dc.detail ?hint:dc.hint ()
+        | Dimcheck.Info ->
+          Diagnostics.warning d.ctx.diags
+            ~code:dc.code ~loc:Diagnostics.no_loc
+            ~message:dc.message ?detail:dc.detail ?hint:dc.hint ()
       ) dc_result.diagnostics;
-      (* Render any dim-check warnings (no-op if none) *)
-      if dc_result.diagnostics <> [] then begin
+      (* Dimension errors block compilation — render and exit *)
+      if Diagnostics.has_errors d.ctx.diags then
+        Diagnostics.report_and_exit d.ctx.diags d.source
+      else if dc_result.diagnostics <> [] then begin
+        (* Render non-blocking warnings/infos *)
         Fmt.set_style_renderer Fmt.stderr `Ansi_tty;
         Diagnostics.render_all d.ctx.diags d.source Fmt.stderr
       end

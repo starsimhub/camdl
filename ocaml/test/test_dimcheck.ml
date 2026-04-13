@@ -567,11 +567,14 @@ let test_error_golden expected_code model_name () =
     Alcotest.skip ()
   else begin
     let src = read_file camdl_path in
-    match Compiler.compile ~name:model_name src with
+    (* Disable dimcheck during compile so the model compiles to IR,
+       then run dimcheck separately to verify the expected error. *)
+    let saved = !Compiler.no_dim_check in
+    Compiler.no_dim_check := true;
+    let result = Compiler.compile ~name:model_name src in
+    Compiler.no_dim_check := saved;
+    match result with
     | Error _e ->
-      (* Compile error before we even get to dimcheck — that's OK for
-         some negative tests (parse errors etc), but we expected a dim error.
-         The model should at least compile. *)
       Alcotest.failf "%s: compile failed before dimcheck: %s" model_name _e
     | Ok ir ->
       let r = Dimcheck.check_model ir in
