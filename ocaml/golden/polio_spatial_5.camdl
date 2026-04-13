@@ -63,11 +63,11 @@ interventions {
 }
 
 init {
-  S[north]  = N0_north  - I0
-  S[south]  = N0_south
-  S[east]   = N0_east
-  S[west]   = N0_west
-  S[center] = N0_center
+  S[north]  = N0[north]  - I0
+  S[south]  = N0[south]
+  S[east]   = N0[east]
+  S[west]   = N0[west]
+  S[center] = N0[center]
   I[north]  = I0
 }
 
@@ -85,16 +85,16 @@ scenarios {
       omega        = 0.003
       kappa        = 0.01
       vacc_frac    = 0.8
-      R0_north     = 2.5
-      R0_south     = 2.2
-      R0_east      = 1.9
-      R0_west      = 2.0
-      R0_center    = 3.0
-      N0_north     = 150000
-      N0_south     = 200000
-      N0_east      = 120000
-      N0_west      = 100000
-      N0_center    = 500000
+      R0[north]    = 2.5
+      R0[south]    = 2.2
+      R0[east]     = 1.9
+      R0[west]     = 2.0
+      R0[center]   = 3.0
+      N0[north]    = 150000
+      N0[south]    = 200000
+      N0[east]     = 120000
+      N0[west]     = 100000
+      N0[center]   = 500000
       I0           = 5
     }
   }

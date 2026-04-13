@@ -580,4 +580,6 @@ scenario_field:
         | _         -> Ast.ScSet [(k, v)] }
 
 scenario_kv_item:
+  | k = IDENT LBRACKET idxs = separated_nonempty_list(COMMA, IDENT) RBRACKET EQ v = expr
+      { (String.concat "_" (k :: idxs), v) }
   | k = IDENT EQ v = expr { (k, v) }

@@ -356,6 +356,11 @@ let urban = 1.0   # W103: let binding 'urban' shadows stratum value 'urban'
                   #   in dimension 'patch'. This is allowed but consider renaming.
 ```
 
+**Consistent indexed syntax everywhere.** The `N0[urban]` form works in all
+contexts where a parameter name can appear: expressions (§9.6), init blocks
+(§16.2), and scenario set/scale blocks (§18.1). The compiler always mangles to
+`N0_urban` in the IR.
+
 **IR representation.** Indexed parameter declarations expand to flat scalar
 parameters:
 
@@ -1750,6 +1755,16 @@ init {
 }
 ```
 
+**Indexed parameter references** work in init RHS expressions. If `N0[patch]`
+is an indexed parameter, both the mangled form and the indexed form are accepted:
+
+```
+init {
+  S[urban] = N0[urban] - I0   # indexed syntax — preferred
+  S[rural] = N0_rural         # mangled form — still accepted
+}
+```
+
 Named indexing works in init:
 
 ```
@@ -1911,6 +1926,20 @@ set     = { PARAM = EXPR, ... }    override parameter values
 scale   = { PARAM = FACTOR, ... }  multiply (compiler checks domain validity)
 compose = [SCENARIO, ...]          apply patches in sequence
 ```
+
+**Indexed parameter syntax in set/scale.** For indexed parameters declared as
+`N0[patch]`, the `set` and `scale` blocks accept either the mangled name or the
+indexed form:
+
+```
+set = {
+  N0[urban] = 100000    # indexed — preferred, mirrors declaration syntax
+  N0_rural  = 50000     # mangled — still accepted
+}
+```
+
+The compiler mangles `N0[urban]` to `N0_urban` in the IR. Multi-dimensional
+indices are supported: `amp[urban, child]` mangles to `amp_urban_child`.
 
 **Family-based enable resolution.** `enable` entries are matched against
 intervention `base_name` as well as exact names. If `"sia"` is the `base_name`

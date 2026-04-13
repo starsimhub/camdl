@@ -38,11 +38,11 @@ scenarios {
   baseline {
     label = "default"
     set = {
-      gamma    = 0.1
-      N_urban  = 1000
-      N_rural  = 1000
-      R0_urban = 2.5
-      R0_rural = 1.8
+      gamma      = 0.1
+      N[urban]   = 1000
+      N[rural]   = 1000
+      R0[urban]  = 2.5
+      R0[rural]  = 1.8
     }
   }
 }
