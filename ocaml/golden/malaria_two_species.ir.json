@@ -2277,7 +2277,8 @@
       "prior": null,
       "transform": null,
       "initial_value": null,
-      "param_kind": "positive"
+      "param_kind": "positive",
+      "param_dim": null
     },
     {
       "name": "mu_H",
@@ -2286,7 +2287,8 @@
       "prior": null,
       "transform": null,
       "initial_value": null,
-      "param_kind": "rate"
+      "param_kind": "rate",
+      "param_dim": null
     },
     {
       "name": "tau",
@@ -2295,7 +2297,8 @@
       "prior": null,
       "transform": null,
       "initial_value": null,
-      "param_kind": "rate"
+      "param_kind": "rate",
+      "param_dim": null
     },
     {
       "name": "eps_H",
@@ -2304,7 +2307,8 @@
       "prior": null,
       "transform": null,
       "initial_value": null,
-      "param_kind": "rate"
+      "param_kind": "rate",
+      "param_dim": null
     },
     {
       "name": "gamma",
@@ -2313,7 +2317,8 @@
       "prior": null,
       "transform": null,
       "initial_value": null,
-      "param_kind": "rate"
+      "param_kind": "rate",
+      "param_dim": null
     },
     {
       "name": "omega",
@@ -2322,7 +2327,8 @@
       "prior": null,
       "transform": null,
       "initial_value": null,
-      "param_kind": "rate"
+      "param_kind": "rate",
+      "param_dim": null
     },
     {
       "name": "beta_BH",
@@ -2331,7 +2337,8 @@
       "prior": null,
       "transform": null,
       "initial_value": null,
-      "param_kind": "rate"
+      "param_kind": "rate",
+      "param_dim": null
     },
     {
       "name": "beta_AH",
@@ -2340,7 +2347,8 @@
       "prior": null,
       "transform": null,
       "initial_value": null,
-      "param_kind": "rate"
+      "param_kind": "rate",
+      "param_dim": null
     },
     {
       "name": "beta_HB",
@@ -2349,7 +2357,8 @@
       "prior": null,
       "transform": null,
       "initial_value": null,
-      "param_kind": "rate"
+      "param_kind": "rate",
+      "param_dim": null
     },
     {
       "name": "beta_HA",
@@ -2358,7 +2367,8 @@
       "prior": null,
       "transform": null,
       "initial_value": null,
-      "param_kind": "rate"
+      "param_kind": "rate",
+      "param_dim": null
     },
     {
       "name": "mu_L",
@@ -2367,7 +2377,8 @@
       "prior": null,
       "transform": null,
       "initial_value": null,
-      "param_kind": "rate"
+      "param_kind": "rate",
+      "param_dim": null
     },
     {
       "name": "tau_L",
@@ -2376,7 +2387,8 @@
       "prior": null,
       "transform": null,
       "initial_value": null,
-      "param_kind": "rate"
+      "param_kind": "rate",
+      "param_dim": null
     },
     {
       "name": "pi_B",
@@ -2385,7 +2397,8 @@
       "prior": null,
       "transform": null,
       "initial_value": null,
-      "param_kind": "positive"
+      "param_kind": "positive",
+      "param_dim": null
     },
     {
       "name": "phi_B",
@@ -2394,7 +2407,8 @@
       "prior": null,
       "transform": null,
       "initial_value": null,
-      "param_kind": "probability"
+      "param_kind": "probability",
+      "param_dim": null
     },
     {
       "name": "mu_B",
@@ -2403,7 +2417,8 @@
       "prior": null,
       "transform": null,
       "initial_value": null,
-      "param_kind": "rate"
+      "param_kind": "rate",
+      "param_dim": null
     },
     {
       "name": "mu_R",
@@ -2412,7 +2427,8 @@
       "prior": null,
       "transform": null,
       "initial_value": null,
-      "param_kind": "rate"
+      "param_kind": "rate",
+      "param_dim": null
     },
     {
       "name": "eps_B",
@@ -2421,7 +2437,8 @@
       "prior": null,
       "transform": null,
       "initial_value": null,
-      "param_kind": "rate"
+      "param_kind": "rate",
+      "param_dim": null
     },
     {
       "name": "eps_R",
@@ -2430,7 +2447,8 @@
       "prior": null,
       "transform": null,
       "initial_value": null,
-      "param_kind": "rate"
+      "param_kind": "rate",
+      "param_dim": null
     },
     {
       "name": "sigma_B",
@@ -2439,7 +2457,8 @@
       "prior": null,
       "transform": null,
       "initial_value": null,
-      "param_kind": "rate"
+      "param_kind": "rate",
+      "param_dim": null
     },
     {
       "name": "sigma_R",
@@ -2448,7 +2467,8 @@
       "prior": null,
       "transform": null,
       "initial_value": null,
-      "param_kind": "rate"
+      "param_kind": "rate",
+      "param_dim": null
     },
     {
       "name": "pi_A",
@@ -2457,7 +2477,8 @@
       "prior": null,
       "transform": null,
       "initial_value": null,
-      "param_kind": "positive"
+      "param_kind": "positive",
+      "param_dim": null
     },
     {
       "name": "phi_A",
@@ -2466,7 +2487,8 @@
       "prior": null,
       "transform": null,
       "initial_value": null,
-      "param_kind": "probability"
+      "param_kind": "probability",
+      "param_dim": null
     },
     {
       "name": "mu_A",
@@ -2475,7 +2497,8 @@
       "prior": null,
       "transform": null,
       "initial_value": null,
-      "param_kind": "rate"
+      "param_kind": "rate",
+      "param_dim": null
     },
     {
       "name": "mu_r",
@@ -2484,7 +2507,8 @@
       "prior": null,
       "transform": null,
       "initial_value": null,
-      "param_kind": "rate"
+      "param_kind": "rate",
+      "param_dim": null
     },
     {
       "name": "eps_A",
@@ -2493,7 +2517,8 @@
       "prior": null,
       "transform": null,
       "initial_value": null,
-      "param_kind": "rate"
+      "param_kind": "rate",
+      "param_dim": null
     },
     {
       "name": "eps_r",
@@ -2502,7 +2527,8 @@
       "prior": null,
       "transform": null,
       "initial_value": null,
-      "param_kind": "rate"
+      "param_kind": "rate",
+      "param_dim": null
     },
     {
       "name": "sigma_A",
@@ -2511,7 +2537,8 @@
       "prior": null,
       "transform": null,
       "initial_value": null,
-      "param_kind": "rate"
+      "param_kind": "rate",
+      "param_dim": null
     },
     {
       "name": "sigma_r",
@@ -2520,7 +2547,8 @@
       "prior": null,
       "transform": null,
       "initial_value": null,
-      "param_kind": "rate"
+      "param_kind": "rate",
+      "param_dim": null
     }
   ],
   "parameter_groups": [],

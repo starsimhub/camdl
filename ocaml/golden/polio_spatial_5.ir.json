@@ -3551,7 +3551,8 @@
       "prior": null,
       "transform": null,
       "initial_value": null,
-      "param_kind": "rate"
+      "param_kind": "rate",
+      "param_dim": null
     },
     {
       "name": "gamma",
@@ -3560,7 +3561,8 @@
       "prior": null,
       "transform": null,
       "initial_value": null,
-      "param_kind": "rate"
+      "param_kind": "rate",
+      "param_dim": null
     },
     {
       "name": "omega",
@@ -3569,7 +3571,8 @@
       "prior": null,
       "transform": null,
       "initial_value": null,
-      "param_kind": "rate"
+      "param_kind": "rate",
+      "param_dim": null
     },
     {
       "name": "kappa",
@@ -3578,7 +3581,8 @@
       "prior": null,
       "transform": null,
       "initial_value": null,
-      "param_kind": "rate"
+      "param_kind": "rate",
+      "param_dim": null
     },
     {
       "name": "vacc_frac",
@@ -3587,7 +3591,8 @@
       "prior": null,
       "transform": null,
       "initial_value": null,
-      "param_kind": "probability"
+      "param_kind": "probability",
+      "param_dim": null
     },
     {
       "name": "R0_north",
@@ -3596,7 +3601,8 @@
       "prior": null,
       "transform": null,
       "initial_value": null,
-      "param_kind": "positive"
+      "param_kind": "positive",
+      "param_dim": null
     },
     {
       "name": "R0_south",
@@ -3605,7 +3611,8 @@
       "prior": null,
       "transform": null,
       "initial_value": null,
-      "param_kind": "positive"
+      "param_kind": "positive",
+      "param_dim": null
     },
     {
       "name": "R0_east",
@@ -3614,7 +3621,8 @@
       "prior": null,
       "transform": null,
       "initial_value": null,
-      "param_kind": "positive"
+      "param_kind": "positive",
+      "param_dim": null
     },
     {
       "name": "R0_west",
@@ -3623,7 +3631,8 @@
       "prior": null,
       "transform": null,
       "initial_value": null,
-      "param_kind": "positive"
+      "param_kind": "positive",
+      "param_dim": null
     },
     {
       "name": "R0_center",
@@ -3632,7 +3641,8 @@
       "prior": null,
       "transform": null,
       "initial_value": null,
-      "param_kind": "positive"
+      "param_kind": "positive",
+      "param_dim": null
     },
     {
       "name": "N0_north",
@@ -3641,7 +3651,8 @@
       "prior": null,
       "transform": null,
       "initial_value": null,
-      "param_kind": "count"
+      "param_kind": "count",
+      "param_dim": null
     },
     {
       "name": "N0_south",
@@ -3650,7 +3661,8 @@
       "prior": null,
       "transform": null,
       "initial_value": null,
-      "param_kind": "count"
+      "param_kind": "count",
+      "param_dim": null
     },
     {
       "name": "N0_east",
@@ -3659,7 +3671,8 @@
       "prior": null,
       "transform": null,
       "initial_value": null,
-      "param_kind": "count"
+      "param_kind": "count",
+      "param_dim": null
     },
     {
       "name": "N0_west",
@@ -3668,7 +3681,8 @@
       "prior": null,
       "transform": null,
       "initial_value": null,
-      "param_kind": "count"
+      "param_kind": "count",
+      "param_dim": null
     },
     {
       "name": "N0_center",
@@ -3677,7 +3691,8 @@
       "prior": null,
       "transform": null,
       "initial_value": null,
-      "param_kind": "count"
+      "param_kind": "count",
+      "param_dim": null
     },
     {
       "name": "I0",
@@ -3686,7 +3701,8 @@
       "prior": null,
       "transform": null,
       "initial_value": null,
-      "param_kind": "count"
+      "param_kind": "count",
+      "param_dim": null
     }
   ],
   "parameter_groups": [],

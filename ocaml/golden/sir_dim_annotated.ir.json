@@ -1,0 +1,295 @@
+{
+  "name": "sir_dim_annotated",
+  "version": "0.3",
+  "time_unit": "days",
+  "description": null,
+  "compartments": [
+    { "name": "S", "kind": "integer" },
+    { "name": "I", "kind": "integer" },
+    { "name": "R", "kind": "integer" }
+  ],
+  "transitions": [
+    {
+      "name": "infection",
+      "stoichiometry": [ [ "S", -1 ], [ "I", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "div",
+          "left": {
+            "bin_op": {
+              "op": "mul",
+              "left": {
+                "bin_op": {
+                  "op": "mul",
+                  "left": {
+                    "bin_op": {
+                      "op": "mul",
+                      "left": { "param": "amplitude" },
+                      "right": { "param": "beta" }
+                    }
+                  },
+                  "right": { "pop": "S" }
+                }
+              },
+              "right": { "pop": "I" }
+            }
+          },
+          "right": { "pop_sum": [ "S", "I", "R" ] }
+        }
+      },
+      "event_key": "infection:{firing_index}",
+      "metadata": {
+        "origin_kind": "transmission",
+        "source_compartment": "S",
+        "dest_compartment": "I"
+      },
+      "rate_grad": {
+        "beta": {
+          "bin_op": {
+            "op": "div",
+            "left": {
+              "bin_op": {
+                "op": "mul",
+                "left": {
+                  "bin_op": {
+                    "op": "mul",
+                    "left": {
+                      "bin_op": {
+                        "op": "mul",
+                        "left": { "param": "amplitude" },
+                        "right": { "pop": "S" }
+                      }
+                    },
+                    "right": { "pop": "I" }
+                  }
+                },
+                "right": { "pop_sum": [ "S", "I", "R" ] }
+              }
+            },
+            "right": {
+              "bin_op": {
+                "op": "mul",
+                "left": { "pop_sum": [ "S", "I", "R" ] },
+                "right": { "pop_sum": [ "S", "I", "R" ] }
+              }
+            }
+          }
+        },
+        "gamma": { "const": 0.0 },
+        "amplitude": {
+          "bin_op": {
+            "op": "div",
+            "left": {
+              "bin_op": {
+                "op": "mul",
+                "left": {
+                  "bin_op": {
+                    "op": "mul",
+                    "left": {
+                      "bin_op": {
+                        "op": "mul",
+                        "left": { "param": "beta" },
+                        "right": { "pop": "S" }
+                      }
+                    },
+                    "right": { "pop": "I" }
+                  }
+                },
+                "right": { "pop_sum": [ "S", "I", "R" ] }
+              }
+            },
+            "right": {
+              "bin_op": {
+                "op": "mul",
+                "left": { "pop_sum": [ "S", "I", "R" ] },
+                "right": { "pop_sum": [ "S", "I", "R" ] }
+              }
+            }
+          }
+        },
+        "mu": { "const": 0.0 },
+        "coupling": { "const": 0.0 }
+      }
+    },
+    {
+      "name": "recovery",
+      "stoichiometry": [ [ "I", -1 ], [ "R", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": { "param": "gamma" },
+          "right": { "pop": "I" }
+        }
+      },
+      "event_key": "recovery:{firing_index}",
+      "metadata": {
+        "origin_kind": "intrinsic",
+        "source_compartment": "I",
+        "dest_compartment": "R"
+      },
+      "rate_grad": {
+        "beta": { "const": 0.0 },
+        "gamma": { "pop": "I" },
+        "amplitude": { "const": 0.0 },
+        "mu": { "const": 0.0 },
+        "coupling": { "const": 0.0 }
+      }
+    },
+    {
+      "name": "import",
+      "stoichiometry": [ [ "I", 1 ] ],
+      "rate": { "param": "mu" },
+      "event_key": "import:{firing_index}",
+      "metadata": {
+        "origin_kind": "inflow",
+        "source_compartment": null,
+        "dest_compartment": "I"
+      },
+      "rate_grad": {
+        "beta": { "const": 0.0 },
+        "gamma": { "const": 0.0 },
+        "amplitude": { "const": 0.0 },
+        "mu": { "const": 1.0 },
+        "coupling": { "const": 0.0 }
+      }
+    },
+    {
+      "name": "loss",
+      "stoichiometry": [ [ "S", -1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": {
+            "bin_op": {
+              "op": "mul",
+              "left": { "param": "coupling" },
+              "right": { "param": "beta" }
+            }
+          },
+          "right": { "pop": "S" }
+        }
+      },
+      "event_key": "loss:{firing_index}",
+      "metadata": {
+        "origin_kind": "outflow",
+        "source_compartment": "S",
+        "dest_compartment": null
+      },
+      "rate_grad": {
+        "beta": {
+          "bin_op": {
+            "op": "mul",
+            "left": { "param": "coupling" },
+            "right": { "pop": "S" }
+          }
+        },
+        "gamma": { "const": 0.0 },
+        "amplitude": { "const": 0.0 },
+        "mu": { "const": 0.0 },
+        "coupling": {
+          "bin_op": {
+            "op": "mul",
+            "left": { "param": "beta" },
+            "right": { "pop": "S" }
+          }
+        }
+      }
+    }
+  ],
+  "ode_equations": [],
+  "time_functions": [],
+  "tables": [],
+  "interventions": [],
+  "observations": [],
+  "parameters": [
+    {
+      "name": "beta",
+      "value": null,
+      "bounds": null,
+      "prior": null,
+      "transform": null,
+      "initial_value": null,
+      "param_kind": "rate",
+      "param_dim": null
+    },
+    {
+      "name": "gamma",
+      "value": null,
+      "bounds": [ 0.01, 1.0 ],
+      "prior": null,
+      "transform": null,
+      "initial_value": null,
+      "param_kind": "rate",
+      "param_dim": null
+    },
+    {
+      "name": "amplitude",
+      "value": null,
+      "bounds": null,
+      "prior": null,
+      "transform": null,
+      "initial_value": null,
+      "param_kind": "real",
+      "param_dim": [ 0, 0 ]
+    },
+    {
+      "name": "mu",
+      "value": null,
+      "bounds": null,
+      "prior": null,
+      "transform": null,
+      "initial_value": null,
+      "param_kind": "positive",
+      "param_dim": [ 1, -1 ]
+    },
+    {
+      "name": "coupling",
+      "value": null,
+      "bounds": null,
+      "prior": null,
+      "transform": null,
+      "initial_value": null,
+      "param_kind": "positive",
+      "param_dim": [ 0, 0 ]
+    }
+  ],
+  "parameter_groups": [],
+  "initial_conditions": { "explicit": { "S": 999.0, "I": 1.0 } },
+  "data_contract": null,
+  "output": {
+    "times": { "regular": { "start": 0.0, "step": 1.0, "end": 100.0 } },
+    "format": "tsv",
+    "trajectory": true,
+    "observations": true
+  },
+  "simulation": {
+    "t_start": 0.0,
+    "t_end": 100.0,
+    "time_semantics": "continuous",
+    "dt": null,
+    "rng_seed": null
+  },
+  "scenarios": [
+    {
+      "name": "baseline",
+      "label": "default",
+      "params": {
+        "beta": 0.3,
+        "gamma": 0.1,
+        "amplitude": 1.0,
+        "mu": 0.5,
+        "coupling": 0.01
+      },
+      "enable": [],
+      "disable": [],
+      "t_end": null
+    }
+  ],
+  "model_structure": {
+    "dimensions": [],
+    "compartment_dims": { "S": [], "I": [], "R": [] },
+    "base_compartments": [ "S", "I", "R" ],
+    "transmission_transitions": [ "infection" ],
+    "infectious_compartments": [ "I" ]
+  }
+}

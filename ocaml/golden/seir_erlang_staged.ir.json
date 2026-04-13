@@ -213,7 +213,8 @@
       "prior": null,
       "transform": null,
       "initial_value": null,
-      "param_kind": "rate"
+      "param_kind": "rate",
+      "param_dim": null
     },
     {
       "name": "gamma",
@@ -222,7 +223,8 @@
       "prior": null,
       "transform": null,
       "initial_value": null,
-      "param_kind": "rate"
+      "param_kind": "rate",
+      "param_dim": null
     },
     {
       "name": "sigma_e1",
@@ -231,7 +233,8 @@
       "prior": null,
       "transform": null,
       "initial_value": null,
-      "param_kind": "rate"
+      "param_kind": "rate",
+      "param_dim": null
     },
     {
       "name": "sigma_e2",
@@ -240,7 +243,8 @@
       "prior": null,
       "transform": null,
       "initial_value": null,
-      "param_kind": "rate"
+      "param_kind": "rate",
+      "param_dim": null
     },
     {
       "name": "sigma_e3",
@@ -249,7 +253,8 @@
       "prior": null,
       "transform": null,
       "initial_value": null,
-      "param_kind": "rate"
+      "param_kind": "rate",
+      "param_dim": null
     }
   ],
   "parameter_groups": [],

@@ -179,7 +179,8 @@
       "prior": null,
       "transform": null,
       "initial_value": null,
-      "param_kind": "rate"
+      "param_kind": "rate",
+      "param_dim": null
     },
     {
       "name": "sigma",
@@ -188,7 +189,8 @@
       "prior": null,
       "transform": null,
       "initial_value": null,
-      "param_kind": "rate"
+      "param_kind": "rate",
+      "param_dim": null
     },
     {
       "name": "gamma",
@@ -197,7 +199,8 @@
       "prior": null,
       "transform": null,
       "initial_value": null,
-      "param_kind": "rate"
+      "param_kind": "rate",
+      "param_dim": null
     },
     {
       "name": "omega",
@@ -206,7 +209,8 @@
       "prior": null,
       "transform": null,
       "initial_value": null,
-      "param_kind": "rate"
+      "param_kind": "rate",
+      "param_dim": null
     },
     {
       "name": "vacc_frac",
@@ -215,7 +219,8 @@
       "prior": null,
       "transform": null,
       "initial_value": null,
-      "param_kind": "probability"
+      "param_kind": "probability",
+      "param_dim": null
     },
     {
       "name": "N0",
@@ -224,7 +229,8 @@
       "prior": null,
       "transform": null,
       "initial_value": null,
-      "param_kind": "count"
+      "param_kind": "count",
+      "param_dim": null
     },
     {
       "name": "I0",
@@ -233,7 +239,8 @@
       "prior": null,
       "transform": null,
       "initial_value": null,
-      "param_kind": "count"
+      "param_kind": "count",
+      "param_dim": null
     }
   ],
   "parameter_groups": [],

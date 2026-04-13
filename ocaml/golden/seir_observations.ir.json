@@ -171,7 +171,8 @@
       "prior": null,
       "transform": null,
       "initial_value": null,
-      "param_kind": "rate"
+      "param_kind": "rate",
+      "param_dim": null
     },
     {
       "name": "sigma",
@@ -180,7 +181,8 @@
       "prior": null,
       "transform": null,
       "initial_value": null,
-      "param_kind": "rate"
+      "param_kind": "rate",
+      "param_dim": null
     },
     {
       "name": "gamma",
@@ -189,7 +191,8 @@
       "prior": null,
       "transform": null,
       "initial_value": null,
-      "param_kind": "rate"
+      "param_kind": "rate",
+      "param_dim": null
     },
     {
       "name": "rho",
@@ -198,7 +201,8 @@
       "prior": null,
       "transform": null,
       "initial_value": null,
-      "param_kind": "probability"
+      "param_kind": "probability",
+      "param_dim": null
     },
     {
       "name": "k",
@@ -207,7 +211,8 @@
       "prior": null,
       "transform": null,
       "initial_value": null,
-      "param_kind": "real"
+      "param_kind": "real",
+      "param_dim": null
     },
     {
       "name": "p_detect",
@@ -216,7 +221,8 @@
       "prior": null,
       "transform": null,
       "initial_value": null,
-      "param_kind": "probability"
+      "param_kind": "probability",
+      "param_dim": null
     },
     {
       "name": "N0",
@@ -225,7 +231,8 @@
       "prior": null,
       "transform": null,
       "initial_value": null,
-      "param_kind": "count"
+      "param_kind": "count",
+      "param_dim": null
     },
     {
       "name": "I0",
@@ -234,7 +241,8 @@
       "prior": null,
       "transform": null,
       "initial_value": null,
-      "param_kind": "count"
+      "param_kind": "count",
+      "param_dim": null
     }
   ],
   "parameter_groups": [],
