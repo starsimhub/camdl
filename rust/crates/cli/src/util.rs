@@ -55,6 +55,70 @@ pub fn parse_experiment_toml(src: &str) -> Result<ExperimentInfo, String> {
     })
 }
 
+// ─── Compiler discovery ─────────────────────────────────────────────────────
+
+fn camdlc_name() -> &'static str {
+    if cfg!(windows) { "camdlc.exe" } else { "camdlc" }
+}
+
+/// Find the camdlc compiler binary via a priority chain:
+/// 1. Same directory as the running binary (release zip layout)
+/// 2. CAMDLC_PATH or CAMDLC environment variable
+/// 3. On system PATH
+fn find_camdlc() -> Result<std::path::PathBuf, String> {
+    use std::path::PathBuf;
+
+    // 1. Same directory as the running binary
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            let candidate = dir.join(camdlc_name());
+            if candidate.exists() { return Ok(candidate); }
+        }
+    }
+
+    // 2. Environment variable override
+    for var in &["CAMDLC_PATH", "CAMDLC"] {
+        if let Ok(path) = std::env::var(var) {
+            let p = PathBuf::from(&path);
+            if p.exists() { return Ok(p); }
+        }
+    }
+
+    // 3. System PATH
+    // Try running it to see if it exists
+    if std::process::Command::new(camdlc_name())
+        .arg("--version")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .is_ok()
+    {
+        return Ok(PathBuf::from(camdlc_name()));
+    }
+
+    Err(format!(
+        "camdlc not found.\n\
+         Place it next to camdl{} or add it to PATH.\n\
+         Set CAMDLC_PATH to override.",
+        if cfg!(windows) { ".exe" } else { "" }
+    ))
+}
+
+/// Run camdlc on a .camdl file and return the IR JSON as a string.
+fn run_camdlc(camdl_path: &str) -> Result<String, String> {
+    let camdlc = find_camdlc()?;
+    let output = std::process::Command::new(&camdlc)
+        .arg(camdl_path)
+        .output()
+        .map_err(|e| format!("cannot run {}: {}", camdlc.display(), e))?;
+    if !output.status.success() {
+        // camdlc prints errors to stderr — pass them through
+        return Err(String::from_utf8_lossy(&output.stderr).to_string());
+    }
+    String::from_utf8(output.stdout)
+        .map_err(|e| format!("camdlc output not UTF-8: {}", e))
+}
+
 // ─── IR path resolver ────────────────────────────────────────────────────────
 
 /// If path ends with `.camdl`, compile it via camdlc and write to a temp file.
@@ -63,17 +127,10 @@ pub fn resolve_ir_path(path: &str) -> Result<(String, Option<std::path::PathBuf>
     if !path.ends_with(".camdl") {
         return Ok((path.to_string(), None));
     }
+    let json = run_camdlc(path)?;
     let tmp = std::env::temp_dir()
         .join(format!("camdl_{}.ir.json", std::process::id()));
-    let camdlc = std::env::var("CAMDLC").unwrap_or_else(|_| "camdlc".to_string());
-    let out = std::process::Command::new(&camdlc)
-        .arg(path)
-        .output()
-        .map_err(|e| format!("could not run camdlc: {}", e))?;
-    if !out.status.success() {
-        return Err(format!("camdlc failed: {}", String::from_utf8_lossy(&out.stderr)));
-    }
-    std::fs::write(&tmp, &out.stdout)
+    std::fs::write(&tmp, &json)
         .map_err(|e| format!("error writing temp IR: {}", e))?;
     Ok((tmp.to_string_lossy().into_owned(), Some(tmp)))
 }
@@ -81,25 +138,29 @@ pub fn resolve_ir_path(path: &str) -> Result<(String, Option<std::path::PathBuf>
 /// Load a .camdl or .ir.json model, returning the parsed model and raw IR JSON.
 /// The JSON is needed for provenance hashing. Compiles via camdlc if needed.
 pub fn load_model(path: &str) -> Result<(ir::Model, String), String> {
-    if path.ends_with(".camdl") {
-        let camdlc = std::env::var("CAMDLC").unwrap_or_else(|_| "camdlc".into());
-        let output = std::process::Command::new(&camdlc).arg(path).output()
-            .map_err(|e| format!("cannot run camdlc: {}", e))?;
-        if !output.status.success() {
-            return Err(String::from_utf8_lossy(&output.stderr).to_string());
-        }
-        let json = String::from_utf8(output.stdout)
-            .map_err(|e| format!("camdlc output not UTF-8: {}", e))?;
-        let model: ir::Model = serde_json::from_str(&json)
-            .map_err(|e| format!("parse error: {}", e))?;
-        Ok((model, json))
+    let json = if path.ends_with(".camdl") {
+        run_camdlc(path)?
     } else {
-        let json = std::fs::read_to_string(path)
-            .map_err(|e| format!("cannot read {}: {}", path, e))?;
-        let model: ir::Model = serde_json::from_str(&json)
-            .map_err(|e| format!("parse error: {}", e))?;
-        Ok((model, json))
-    }
+        std::fs::read_to_string(path)
+            .map_err(|e| format!("cannot read {}: {}", path, e))?
+    };
+    let model: ir::Model = serde_json::from_str(&json)
+        .map_err(|e| format!("parse error: {}", e))?;
+    Ok((model, json))
+}
+
+/// Delegate a subcommand directly to camdlc, passing through all args.
+/// Used for compile, check, inspect which are purely compiler operations.
+pub fn delegate_to_camdlc(args: &[&str]) -> Result<(), String> {
+    let camdlc = find_camdlc()?;
+    let status = std::process::Command::new(&camdlc)
+        .args(args)
+        .stdin(std::process::Stdio::inherit())
+        .stdout(std::process::Stdio::inherit())
+        .stderr(std::process::Stdio::inherit())
+        .status()
+        .map_err(|e| format!("cannot run camdlc: {}", e))?;
+    std::process::exit(status.code().unwrap_or(1));
 }
 
 /// Resolve flow indices for a named transition (or all transmission transitions).

@@ -1,0 +1,14 @@
+# Ensure consistent LF line endings for all text files
+*.tsv     text eol=lf
+*.json    text eol=lf
+*.camdl   text eol=lf
+*.toml    text eol=lf
+*.md      text eol=lf
+*.rs      text eol=lf
+*.ml      text eol=lf
+*.mli     text eol=lf
+*.mly     text eol=lf
+*.mll     text eol=lf
+*.yml     text eol=lf
+*.yaml    text eol=lf
+*.sh      text eol=lf

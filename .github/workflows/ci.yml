@@ -7,6 +7,7 @@ on:
     branches: [main]
 
 jobs:
+  # ── Full build + test (Linux, existing pipeline) ──────────────────
   test:
     runs-on: ubuntu-latest
     steps:
@@ -52,3 +53,62 @@ jobs:
 
       - name: Integration tests
         run: opam exec -- make test
+
+  # ── Rust tests on Windows ─────────────────────────────────────────
+  test-rust-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Rust tests
+        run: cargo test --release
+        working-directory: rust
+
+  # ── Rust tests on macOS ───────────────────────────────────────────
+  test-rust-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Rust tests
+        run: cargo test --release
+        working-directory: rust
+
+  # ── Build release artifacts (all platforms) ───────────────────────
+  build-artifacts:
+    needs: [test, test-rust-windows, test-rust-macos]
+    if: github.ref == 'refs/heads/main'
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            suffix: linux-x64
+            exe: camdl-sim
+          - os: macos-latest
+            suffix: macos-arm64
+            exe: camdl-sim
+          - os: windows-latest
+            suffix: windows-x64
+            exe: camdl-sim.exe
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo build --release
+        working-directory: rust
+
+      - name: Package
+        shell: bash
+        run: |
+          mkdir -p dist
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            cp "rust/target/release/${{ matrix.exe }}" dist/camdl.exe
+          else
+            cp "rust/target/release/${{ matrix.exe }}" dist/camdl
+            chmod +x dist/camdl
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: camdl-${{ matrix.suffix }}
+          path: dist/

@@ -99,6 +99,27 @@ fn main() {
                 }
             }
         }
+        // ── Compiler delegation (transparent camdlc invocation) ──
+        "compile" => {
+            let args: Vec<&str> = all_args[1..].iter().map(|s| s.as_str()).collect();
+            util::delegate_to_camdlc(&args).unwrap_or_else(|e| {
+                eprintln!("error: {}", e); std::process::exit(1);
+            });
+        }
+        "check" => {
+            let mut args = vec!["check"];
+            args.extend(all_args[1..].iter().map(|s| s.as_str()));
+            util::delegate_to_camdlc(&args).unwrap_or_else(|e| {
+                eprintln!("error: {}", e); std::process::exit(1);
+            });
+        }
+        "inspect" => {
+            let mut args = vec!["inspect"];
+            args.extend(all_args[1..].iter().map(|s| s.as_str()));
+            util::delegate_to_camdlc(&args).unwrap_or_else(|e| {
+                eprintln!("error: {}", e); std::process::exit(1);
+            });
+        }
         "eval" => {
             eval::cmd_eval(&all_args[1..]);
         }
