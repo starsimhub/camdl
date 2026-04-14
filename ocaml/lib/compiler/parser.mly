@@ -517,8 +517,8 @@ expr:
        | EUnit _ -> failwith
            "ambiguous unit literal after '/'. \
             The unit suffix binds to the adjacent number, not the whole expression.\n\
-            \n  Pre-compute the fraction: 0.0002 'per_year\n\
-            \  Or use a typed let:       let mu : rate = 0.0002 'per_year"
+            \n  Use parentheses:    (20 / 100_000) 'per_year\n\
+            \  Or pre-compute:    0.0002 'per_year"
        | _ -> ());
       EBinOp (Div, e1, e2)
     }
@@ -552,6 +552,12 @@ atom_expr:
         in
         EIdent (name, l) }
   | LPAREN e = expr RPAREN     { e }
+  | LPAREN e = expr RPAREN u = unit_lit
+      (* (20 / 100_000) 'per_year — unit applies to the whole expression.
+         For durations: multiply by days_per(u). For rates: divide by days_per(u).
+         The expander normalizes to the model time unit later. We encode it as
+         expr * EUnit(1.0, u) so the expander handles unit conversion. *)
+      { EBinOp (Mul, e, EUnit (1.0, u)) }
   | LBRACKET es = separated_list(COMMA, list_element) RBRACKET
       { EList es }
 
