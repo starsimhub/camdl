@@ -730,9 +730,10 @@ let shape_index ctx shape items env =
   List.fold_left (fun acc (i, (idx, _)) -> acc + idx * strides.(i))
     0 (List.mapi (fun i p -> (i, p)) pairs)
 
-let is_const_expr = function
+let rec is_const_expr = function
   | EConst _ | EUnit _ -> true
-  | EUnOp (Neg, EConst _) | EUnOp (Neg, EUnit _) -> true
+  | EUnOp (_, e) -> is_const_expr e
+  | EBinOp (_, l, r) -> is_const_expr l && is_const_expr r
   | _ -> false
 
 let rec resolve_expr ctx (env : (string * string) list) (e : expr) : Ir.expr =
@@ -1242,11 +1243,21 @@ let param_kind_to_string = function
   | PCount       -> "count"
   | PReal        -> "real"
 
-let eval_const_expr ctx = function
+let rec eval_const_expr ctx = function
   | EConst f -> f
   | EUnit (f, u) -> unit_to_model_time ctx f u
-  | EUnOp (Neg, EConst f) -> -. f
-  | EUnOp (Neg, EUnit (f, u)) -> -. (unit_to_model_time ctx f u)
+  | EUnOp (Neg, e) -> -. (eval_const_expr ctx e)
+  | EUnOp (Exp, e) -> exp (eval_const_expr ctx e)
+  | EUnOp (Log, e) -> log (eval_const_expr ctx e)
+  | EUnOp (Sqrt, e) -> sqrt (eval_const_expr ctx e)
+  | EUnOp (Abs, e) -> abs_float (eval_const_expr ctx e)
+  | EUnOp (Floor, e) -> floor (eval_const_expr ctx e)
+  | EUnOp (Ceil, e) -> ceil (eval_const_expr ctx e)
+  | EBinOp (Add, l, r) -> eval_const_expr ctx l +. eval_const_expr ctx r
+  | EBinOp (Sub, l, r) -> eval_const_expr ctx l -. eval_const_expr ctx r
+  | EBinOp (Mul, l, r) -> eval_const_expr ctx l *. eval_const_expr ctx r
+  | EBinOp (Div, l, r) -> eval_const_expr ctx l /. eval_const_expr ctx r
+  | EBinOp (Pow, l, r) -> eval_const_expr ctx l ** eval_const_expr ctx r
   | _ -> 0.0  (* unreachable — guarded by is_const_expr *)
 
 let expand_parameters ctx =
