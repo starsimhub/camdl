@@ -1,6 +1,6 @@
 #!/bin/bash
 # Pre-push hook: catch compile errors before they hit CI.
-# Runs cargo check (fast, ~2s on warm cache) and OCaml build.
+# Runs cargo check + clippy, OCaml build + tests.
 # Skip with: git push --no-verify
 
 set -e
@@ -11,9 +11,21 @@ echo "pre-push: checking Rust..."
     exit 1
 }
 
+echo "pre-push: clippy..."
+(cd rust && cargo clippy --all-targets -- -D warnings 2>&1) || {
+    echo "error: clippy failed. Fix before pushing."
+    exit 1
+}
+
 echo "pre-push: checking OCaml..."
 (cd ocaml && dune build 2>&1) || {
     echo "error: OCaml build failed. Fix before pushing."
+    exit 1
+}
+
+echo "pre-push: OCaml tests..."
+(cd ocaml && dune runtest 2>&1) || {
+    echo "error: OCaml tests failed. Fix before pushing."
     exit 1
 }
 
