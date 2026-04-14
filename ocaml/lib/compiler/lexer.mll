@@ -11,11 +11,16 @@
   let pending_warnings
     : (Lexing.position * Lexing.position * string) list ref = ref []
 
-  (* Warn if digit groups after the first underscore separator are not all the
-     same width — e.g. 10_00_000 (groups 2,2,3) is almost certainly a typo.
-     Single trailing groups (1_000) are always fine. *)
+  (* Warn on suspicious digit grouping with underscores.
+     Fires on:
+       10_00       — groups (2,2), trailing group not 3 digits
+       10_00_000   — groups (2,2,3), inconsistent widths
+       1_00        — groups (1,2), trailing group not 3 digits
+     Does NOT fire on:
+       1_000       — standard thousands separator
+       1_000_000   — consistent 3-digit groups
+       10_000_000  — leading group can differ, trailing must be 3 *)
   let check_int_grouping lexbuf (raw : string) =
-    (* Only inspect the integer part — ignore anything after '.' or 'e'/'E'. *)
     let int_part =
       let stop =
         let dot = try String.index raw '.'  with Not_found -> max_int in
@@ -31,11 +36,11 @@
       | [] | [_] -> ()
       | _ :: rest ->
         let sizes = List.map String.length rest in
-        let inconsistent = match sizes with
-          | [] | [_] -> false
-          | hd :: tl -> List.exists (fun s -> s <> hd) tl
-        in
-        if inconsistent then begin
+        (* Trailing groups should all be 3 digits (thousands separator).
+           Flag if any trailing group is not 3, or if trailing groups
+           are inconsistent with each other. *)
+        let bad = List.exists (fun s -> s <> 3) sizes in
+        if bad then begin
           let all_sizes = List.map String.length groups in
           let sizes_str =
             String.concat ", " (List.map string_of_int all_sizes)
@@ -44,9 +49,10 @@
           let ep = Lexing.lexeme_end_p lexbuf in
           pending_warnings := (sp, ep,
             Printf.sprintf
-              "inconsistent digit grouping in '%s' (group widths: %s) — \
-               possible typo; consistent examples: 1_000_000 or 10_000_000"
+              "suspicious digit grouping in '%s' (group widths: %s) — \
+               did you mean %s? Use 3-digit groups: 1_000, 10_000, 1_000_000"
               raw sizes_str
+              (String.concat "" (List.map (fun g -> g) groups))
           ) :: !pending_warnings
         end
     end
