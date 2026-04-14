@@ -176,15 +176,23 @@ let render_all t cache ppf =
   in
   List.iter (render_one ppf cache) (List.rev sorted)
 
-(** Render diagnostics to stderr and exit 1. Respects [json_errors_mode]. *)
+(** Raised by [report_and_exit] instead of calling [exit 1] directly.
+    This allows callers (tests, library users) to catch compilation failures
+    without terminating the process. The CLI catches this at the top level
+    and calls [exit 1]. *)
+exception Compile_error of string
+
+(** Render diagnostics to stderr and raise [Compile_error].
+    Respects [json_errors_mode]. *)
 let report_and_exit t cache =
   if !json_errors_mode then (
-    Printf.eprintf "%s\n" (to_json_string t);
-    exit 1
+    let msg = to_json_string t in
+    Printf.eprintf "%s\n" msg;
+    raise (Compile_error msg)
   ) else (
     Fmt.set_style_renderer Fmt.stderr `Ansi_tty;
     render_all t cache Fmt.stderr;
-    exit 1
+    raise (Compile_error "compilation failed")
   )
 
 (* ── Shorthand constructors ──────────────────────────────────────────────── *)

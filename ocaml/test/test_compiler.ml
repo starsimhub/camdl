@@ -1,5 +1,10 @@
 (* Compiler golden tests: parse+expand camdl source → match expected IR JSON *)
 
+(* Disable dimcheck for compiler tests — these test expansion/codegen,
+   not dimensional analysis. Some test models have rates that dimcheck
+   can't infer (table lookups, time functions with ambiguous dimension). *)
+let () = Compiler.no_dim_check := true
+
 let golden_dir =
   (* The dune test runner sets cwd to the project root (_build/default/test).
      We walk up to find the ocaml/golden directory. *)

@@ -29,7 +29,6 @@ jobs:
 
       - name: Test OCaml
         run: opam exec -- bash -c "cd ocaml && dune runtest"
-        continue-on-error: true  # Some golden tests exit(1) on missing external data files
 
       # ── Rust ───────────────────────────────────────────
       - uses: actions-rust-lang/setup-rust-toolchain@v1
