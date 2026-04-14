@@ -58,7 +58,7 @@ fn pure_death_model() -> (Arc<CompiledModel>, Vec<f64>) {
         interventions: vec![],
         observations: vec![],
         parameters: vec![
-            Parameter { name: "mu".into(), value: Some(0.01), bounds: None, prior: None, transform: None, initial_value: None, param_kind: None },
+            Parameter { name: "mu".into(), value: Some(0.01), bounds: None, prior: None, transform: None, initial_value: None, param_kind: None, param_dim: None },
         ],
         parameter_groups: vec![],
         initial_conditions: InitialConditions::Explicit({

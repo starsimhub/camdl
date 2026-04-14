@@ -61,7 +61,7 @@ fn int_comp(name: &str) -> Compartment {
 }
 
 fn param(name: &str, value: f64) -> Parameter {
-    Parameter { name: name.into(), value: Some(value), bounds: None, prior: None, transform: None, initial_value: None, param_kind: None }
+    Parameter { name: name.into(), value: Some(value), bounds: None, prior: None, transform: None, initial_value: None, param_kind: None, param_dim: None }
 }
 
 #[test]

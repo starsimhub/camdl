@@ -139,8 +139,8 @@ fn birth_death_model(birth_rate: f64, death_rate: f64) -> Model {
         interventions: vec![],
         observations: vec![],
         parameters: vec![
-            Parameter { name: "lambda".into(), value: Some(birth_rate), bounds: None, prior: None, transform: None, initial_value: None, param_kind: None },
-            Parameter { name: "mu_times_n".into(), value: Some(death_rate), bounds: None, prior: None, transform: None, initial_value: None, param_kind: None },
+            Parameter { name: "lambda".into(), value: Some(birth_rate), bounds: None, prior: None, transform: None, initial_value: None, param_kind: None, param_dim: None },
+            Parameter { name: "mu_times_n".into(), value: Some(death_rate), bounds: None, prior: None, transform: None, initial_value: None, param_kind: None, param_dim: None },
         ],
         parameter_groups: vec![],
         initial_conditions: InitialConditions::Explicit({
@@ -264,8 +264,8 @@ fn test_overdispersion_variance_tau_leap() {
         interventions: vec![],
         observations: vec![],
         parameters: vec![
-            Parameter { name: "beta".into(), value: Some(0.01), bounds: None, prior: None, transform: None, initial_value: None, param_kind: None },
-            Parameter { name: "sigma_sq".into(), value: Some(0.5), bounds: None, prior: None, transform: None, initial_value: None, param_kind: None },
+            Parameter { name: "beta".into(), value: Some(0.01), bounds: None, prior: None, transform: None, initial_value: None, param_kind: None, param_dim: None },
+            Parameter { name: "sigma_sq".into(), value: Some(0.5), bounds: None, prior: None, transform: None, initial_value: None, param_kind: None, param_dim: None },
         ],
         parameter_groups: vec![],
         // Start with S=10000, I=0. After one dt=1 step, about 100 events.
