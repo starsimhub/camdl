@@ -509,7 +509,19 @@ expr:
   | e1 = expr PLUS  e2 = expr { EBinOp (Add, e1, e2) }
   | e1 = expr MINUS e2 = expr { EBinOp (Sub, e1, e2) }
   | e1 = expr STAR  e2 = expr { EBinOp (Mul, e1, e2) }
-  | e1 = expr SLASH e2 = expr { EBinOp (Div, e1, e2) }
+  | e1 = expr SLASH e2 = expr {
+      (* E103: unit literal as right operand of / is always ambiguous.
+         20 / 100_000 'per_year — does 'per_year bind to 100_000 or the whole expr?
+         The parser binds it to 100_000, which is almost never what the user wants. *)
+      (match e2 with
+       | EUnit _ -> failwith
+           "ambiguous unit literal after '/'. \
+            The unit suffix binds to the adjacent number, not the whole expression.\n\
+            \n  Pre-compute the fraction: 0.0002 'per_year\n\
+            \  Or use a typed let:       let mu : rate = 0.0002 'per_year"
+       | _ -> ());
+      EBinOp (Div, e1, e2)
+    }
   | e1 = expr CROSS e2 = expr { EBinOp (Mul, e1, e2) }
   | e1 = expr CARET e2 = expr { EBinOp (Pow, e1, e2) }
   | MINUS e = expr %prec UMINUS { EUnOp (Neg, e) }
