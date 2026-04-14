@@ -162,10 +162,21 @@ let unify st ~loc d1 d2 =
   | Known v1, Known v2 ->
     if dim_eq v1 v2 then Known v1
     else begin
+      (* When one side is population and the other dimensionless, hint about
+         typed let bindings — this is the iota / obs_floor pattern *)
+      let hint =
+        if (dim_eq v1 population && dim_eq v2 dimensionless)
+        || (dim_eq v1 dimensionless && dim_eq v2 population) then
+          Some "if a constant represents a small count (seeding term), declare it with a type:\n\
+          \        let iota : count = 1e-6\n\
+          \      then use: I + iota"
+        else None
+      in
       emit_error st ~code:"E302"
         ~message:(Printf.sprintf "dimension mismatch in %s" loc)
         ~detail:(Printf.sprintf "left has dimension %s, right has dimension %s — cannot combine"
                    (dim_display v1) (dim_display v2))
+        ?hint
         ();
       Known v1
     end

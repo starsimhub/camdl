@@ -95,6 +95,7 @@ type let_binding = {
   lname    : string;
   lindices : index_binding list;
   lshape   : string list option;  (* Some dims → shaped literal, None → scalar/indexed *)
+  lkind    : param_type option;   (* optional type annotation: count, rate, etc. *)
   lbody    : expr;
 }
 

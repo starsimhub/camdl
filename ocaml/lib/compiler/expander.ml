@@ -730,10 +730,27 @@ let shape_index ctx shape items env =
   List.fold_left (fun acc (i, (idx, _)) -> acc + idx * strides.(i))
     0 (List.mapi (fun i p -> (i, p)) pairs)
 
+let is_const_expr = function
+  | EConst _ | EUnit _ -> true
+  | EUnOp (Neg, EConst _) | EUnOp (Neg, EUnit _) -> true
+  | _ -> false
+
 let rec resolve_expr ctx (env : (string * string) list) (e : expr) : Ir.expr =
   match e with
   | EConst f     -> Ir.Const f
-  | EUnit (f, u) -> Ir.Const (unit_to_model_time ctx f u)
+  | EUnit (f, u) ->
+    (* For rate units (per_day, per_year, etc.), emit Const(f) / Const(days)
+       instead of a pre-computed Const. This preserves the Const/Const division
+       structure that dimcheck recognizes as dimensionally ambiguous (inferred
+       from context as T⁻¹). For duration units, pre-compute is fine since
+       duration constants are typically used where P is expected. *)
+    (match u with
+     | PerDay | PerWeek | PerMonth | PerYear ->
+       let tu = days_per ctx.time_unit in
+       let divisor = days_per u /. tu in
+       if divisor = 1.0 then Ir.Const f
+       else Ir.BinOp { op = Div; left = Ir.Const f; right = Ir.Const divisor }
+     | _ -> Ir.Const (unit_to_model_time ctx f u))
   | EIdent (name, l) -> (
     let loc = diag_loc_of_ast l in
     match List.assoc_opt name env with
@@ -913,10 +930,14 @@ let rec resolve_expr ctx (env : (string * string) list) (e : expr) : Ir.expr =
   | ERange _    -> Ir.Const 0.0  (* ranges only valid inside periodic on = [...] *)
 
 and resolve_ident_name ctx name ~loc =
-  (* 1. Let binding? Inline it. *)
+  (* 1. Let binding? Inline it — unless it's a typed const (emitted as Param). *)
   match Hashtbl.find_opt ctx.let_tbl name with
   | Some lb ->
-    normalize_expr (resolve_expr ctx [] lb.lbody)
+    if lb.lkind <> None && is_const_expr lb.lbody then
+      (* Typed const let → treat as parameter (dimcheck will see param_kind) *)
+      Ir.Param name
+    else
+      normalize_expr (resolve_expr ctx [] lb.lbody)
   | None ->
   (* 2. Known expanded compartment? *)
   if Hashtbl.mem ctx.expanded_comp_tbl name then Ir.Pop name
@@ -1221,8 +1242,15 @@ let param_kind_to_string = function
   | PCount       -> "count"
   | PReal        -> "real"
 
+let eval_const_expr ctx = function
+  | EConst f -> f
+  | EUnit (f, u) -> unit_to_model_time ctx f u
+  | EUnOp (Neg, EConst f) -> -. f
+  | EUnOp (Neg, EUnit (f, u)) -> -. (unit_to_model_time ctx f u)
+  | _ -> 0.0  (* unreachable — guarded by is_const_expr *)
+
 let expand_parameters ctx =
-  List.concat_map (fun pd ->
+  let from_params = List.concat_map (fun pd ->
     match pd with
     | PScalar { pname; pbounds; pkind; pdim; _ } ->
       let bounds = resolve_bounds ctx pbounds in
@@ -1262,7 +1290,24 @@ let expand_parameters ctx =
          Ir.param_kind    = None;
          Ir.param_dim     = None;
        }]
-  ) ctx.param_decls
+  ) ctx.param_decls in
+  (* Typed const let bindings → fixed-value parameters *)
+  let from_lets = List.filter_map (fun (lb : let_binding) ->
+    match lb.lkind with
+    | Some pk when is_const_expr lb.lbody ->
+      let v = eval_const_expr ctx lb.lbody in
+      Some { Ir.name          = lb.lname;
+             Ir.value         = Some v;
+             Ir.bounds        = None;
+             Ir.prior         = None;
+             Ir.transform     = None;
+             Ir.initial_value = None;
+             Ir.param_kind    = Some (param_kind_to_string pk);
+             Ir.param_dim     = None;
+           }
+    | _ -> None
+  ) ctx.let_bindings in
+  from_params @ from_lets
 
 (* ── Compartment expansion ───────────────────────────────────────────────── *)
 

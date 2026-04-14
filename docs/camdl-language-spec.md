@@ -871,6 +871,31 @@ infection[a in age] : S[a] --> I[a]
 Both paths produce the same IR. The first uses sugar (§10); the second is the
 primitive.
 
+### 8.4 Typed Let Bindings
+
+A `let` binding may carry a type annotation from the same set of kinds used for
+parameters: `rate`, `probability`, `positive`, `count`, `real`.
+
+```
+let iota : count = 1e-6
+let obs_floor : count = 0.01
+let mu_annual : rate = 0.0002 'per_year
+```
+
+When a typed `let` has a constant body (`EConst`, `EUnit`, or their negation),
+the compiler emits it as a fixed-value parameter in the IR with `param_kind` set
+and `value` populated. This means the dimensional analysis checker sees the
+declared dimension rather than treating the constant as dimensionless.
+
+Without the type annotation, a bare constant like `1e-6` is dimensionless and
+adding it to a population compartment (`I + 1e-6`) triggers E302. The typed form
+(`I + iota` where `iota : count`) resolves this because `iota` carries the
+population dimension.
+
+For non-constant bodies (e.g., `let N = S + I + R`), the type annotation is
+accepted syntactically but the binding is still inlined as usual. The dimension
+of such expressions is inferred from their structure.
+
 ---
 
 ## 9. Transitions

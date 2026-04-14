@@ -252,6 +252,67 @@ let test_iota_typed_param_ok () =
   let r = Dimcheck.check_model m in
   Alcotest.(check bool) "iota count OK" true (no_errors r)
 
+let test_typed_let_count_accepted () =
+  (* Simulates what the compiler emits for: let iota : count = 1e-6
+     → Param("iota") with param_kind="count", value=Some 1e-6 *)
+  let m = empty_model
+    ~compartments:[mk_compartment "S"; mk_compartment "I";
+                   mk_compartment "N"]
+    ~parameters:[mk_param ~kind:(Some "rate") "beta";
+                 mk_param ~kind:(Some "count") ~value:(Some 1e-6) "iota"]
+    ~transitions:[mk_transition "infection"
+        (param "beta" *. (pop "I" +. param "iota") *. pop "S" /. pop "N")]
+    () in
+  let r = Dimcheck.check_model m in
+  Alcotest.(check bool) "typed let count OK" true (no_errors r)
+
+let test_typed_let_rate_accepted () =
+  (* Simulates: let mu : rate = 0.0002
+     → Param("mu") with param_kind="rate", value=Some 0.0002 *)
+  let m = empty_model
+    ~compartments:[mk_compartment "S"]
+    ~parameters:[mk_param ~kind:(Some "rate") ~value:(Some 0.0002) "mu"]
+    ~transitions:[mk_transition "death" (param "mu" *. pop "S")]
+    () in
+  let r = Dimcheck.check_model m in
+  Alcotest.(check bool) "typed let rate OK" true (no_errors r)
+
+let test_untyped_const_rejected () =
+  (* Untyped let iota = 1e-6 is inlined as Const(1e-6) → dimensionless.
+     I + Const(1e-6) → P + dimensionless → E302 *)
+  let m = empty_model
+    ~compartments:[mk_compartment "S"; mk_compartment "I";
+                   mk_compartment "N"]
+    ~parameters:[mk_param ~kind:(Some "rate") "beta"]
+    ~transitions:[mk_transition "infection"
+        (param "beta" *. (pop "I" +. const 1e-6) *. pop "S" /. pop "N")]
+    () in
+  let r = Dimcheck.check_model m in
+  Alcotest.(check bool) "untyped const E302" true (has_error "E302" r)
+
+let test_e302_hint_for_pop_plus_const () =
+  (* E302 on P + dimensionless should include hint about typed let bindings *)
+  let m = empty_model
+    ~compartments:[mk_compartment "S"; mk_compartment "I";
+                   mk_compartment "N"]
+    ~parameters:[mk_param ~kind:(Some "rate") "beta"]
+    ~transitions:[mk_transition "infection"
+        (param "beta" *. (pop "I" +. const 1e-6) *. pop "S" /. pop "N")]
+    () in
+  let r = Dimcheck.check_model m in
+  let has_iota_hint = List.exists (fun (d : Dimcheck.diagnostic) ->
+    d.code = "E302" && match d.hint with
+    | Some h -> let sub = "let iota : count" in
+      let sl = String.length sub in
+      let hl = String.length h in
+      sl <= hl && (let found = ref false in
+        for i = 0 to hl - sl do
+          if String.sub h i sl = sub then found := true
+        done; !found)
+    | None -> false
+  ) r.diagnostics in
+  Alcotest.(check bool) "E302 hint mentions typed let" true has_iota_hint
+
 (* ── Cross-Transition Consistency ──────────────────────────────────────── *)
 
 let test_param_consistent () =
@@ -773,6 +834,12 @@ let () =
     "iota_seeding", [
       Alcotest.test_case "bare const rejected"      `Quick test_iota_bare_const_rejected;
       Alcotest.test_case "typed param ok"           `Quick test_iota_typed_param_ok;
+    ];
+    "typed_let_bindings", [
+      Alcotest.test_case "typed let count accepted"  `Quick test_typed_let_count_accepted;
+      Alcotest.test_case "typed let rate accepted"   `Quick test_typed_let_rate_accepted;
+      Alcotest.test_case "untyped const rejected"    `Quick test_untyped_const_rejected;
+      Alcotest.test_case "E302 hint for pop+const"   `Quick test_e302_hint_for_pop_plus_const;
     ];
     "cross_transition", [
       Alcotest.test_case "param consistent"         `Quick test_param_consistent;
