@@ -673,11 +673,71 @@ pub fn cmd_fit_run_v2(args: &[String]) {
                 }
             }
             Stage::PFilter { particles, replicates, .. } => {
-                // PFilter at fixed params — run a bootstrap particle filter
-                // This is what validate's "pfilter at MLE" does
-                eprintln!("  PFilter evaluation: {} particles, {} replicates",
-                    particles, replicates.unwrap_or(1));
-                eprintln!("  (pfilter dispatch not yet implemented — use camdl pfilter directly)");
+                let n_reps = replicates.unwrap_or(1);
+                let prior_state = effective_starts.as_ref().and_then(|dir| {
+                    state::FitState::load(dir).ok()
+                });
+                if prior_state.is_none() && !effective_starts.as_ref().map_or(true, |s| s.is_empty()) {
+                    eprintln!("warning: could not load fit_state from starts_from");
+                }
+
+                // Build run config (reuse IF2 builder with 1 chain, N particles)
+                let run_config = runner::FitRunConfig::build(
+                    &sweep_legacy,
+                    prior_state.as_ref(),
+                    1, *particles, 1, 1.0, seed, false,
+                ).unwrap_or_else(|e| {
+                    eprintln!("error building pfilter config: {}", e);
+                    std::process::exit(1);
+                });
+
+                std::fs::create_dir_all(&stage_dir).unwrap_or_else(|e| {
+                    eprintln!("error creating {}: {}", stage_dir.display(), e);
+                    std::process::exit(1);
+                });
+
+                // Run PF at MLE params
+                let mle_params = run_config.base_params.clone();
+                let t0 = std::time::Instant::now();
+
+                let mut logliks = Vec::new();
+                for r in 0..n_reps {
+                    let pf_seed = seed ^ ((r as u64).wrapping_mul(0x7f4a7c15_u64));
+                    let process = run_config.build_process();
+                    let obs_model = run_config.build_obs_model();
+                    let smc_config = run_config.smc_config();
+                    let result = sim::inference::bootstrap_filter(
+                        &process, &obs_model, &mle_params, &smc_config, pf_seed,
+                    ).unwrap_or_else(|e| {
+                        eprintln!("pfilter error: {:?}", e);
+                        std::process::exit(1);
+                    });
+                    logliks.push(result.log_likelihood);
+                    if n_reps <= 10 || r % (n_reps / 10) == 0 {
+                        eprintln!("  pfilter rep {}/{}: loglik={:.1}", r + 1, n_reps, result.log_likelihood);
+                    }
+                }
+                let elapsed = t0.elapsed();
+
+                let mean_ll = logliks.iter().sum::<f64>() / logliks.len() as f64;
+                let sd_ll = if logliks.len() > 1 {
+                    let var = logliks.iter().map(|l| (l - mean_ll).powi(2)).sum::<f64>() / (logliks.len() - 1) as f64;
+                    var.sqrt()
+                } else { 0.0 };
+
+                eprintln!("\n  loglik = {:.1} ± {:.1} ({} reps, {} particles, {:.1}s)",
+                    mean_ll, sd_ll, n_reps, particles, elapsed.as_secs_f64());
+
+                // Write logliks.tsv
+                {
+                    use std::io::Write;
+                    let path = format!("{}/logliks.tsv", stage_dir.display());
+                    let mut f = std::fs::File::create(&path).unwrap();
+                    writeln!(f, "replicate\tloglik").unwrap();
+                    for (i, ll) in logliks.iter().enumerate() {
+                        writeln!(f, "{}\t{:.4}", i + 1, ll).unwrap();
+                    }
+                }
             }
         }
     } // end stages
