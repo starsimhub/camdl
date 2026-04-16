@@ -127,11 +127,115 @@ pub fn cmd_fit_pgas(args: &[String]) {
 }
 
 pub fn cmd_fit_status(args: &[String]) {
+    // Try v2 first: if the argument is a directory or v2 .toml, use v2 status
+    if let Some(path) = args.first() {
+        if !path.starts_with("--") {
+            let p = std::path::Path::new(path);
+            if p.is_dir() {
+                run_status_v2_dir(path);
+                return;
+            }
+            // If it's a v2 .toml, load and use its output_dir
+            if let Ok(config) = config_v2::FitConfigV2::load(path) {
+                let fit_dir = config.fit_dir(path);
+                if fit_dir.exists() {
+                    run_status_v2_dir(&fit_dir.to_string_lossy());
+                } else {
+                    eprintln!("no results found at {}", fit_dir.display());
+                }
+                return;
+            }
+        }
+    }
+    // Fall back to v1
     let (fit, _, _) = parse_fit_args(args, false);
     status::run_status(&fit).unwrap_or_else(|e| {
         eprintln!("error: {}", e);
         std::process::exit(1);
     });
+}
+
+/// Walk a results directory and report status of all stages found.
+fn run_status_v2_dir(dir: &str) {
+    let path = std::path::Path::new(dir);
+    if !path.exists() {
+        eprintln!("no results at {}", dir);
+        return;
+    }
+
+    println!("{}/", dir);
+
+    // Check for sweep subdirectories (contain stage dirs)
+    // or direct stage dirs
+    let mut found_stages = false;
+    let mut entries: Vec<_> = std::fs::read_dir(path)
+        .unwrap_or_else(|e| { eprintln!("cannot read {}: {}", dir, e); std::process::exit(1); })
+        .filter_map(|e| e.ok())
+        .collect();
+    entries.sort_by_key(|e| e.file_name());
+
+    for entry in &entries {
+        let name = entry.file_name().to_string_lossy().to_string();
+        let entry_path = entry.path();
+
+        if entry_path.is_dir() {
+            // Check if this is a stage dir (has fit_state.toml or provenance.json)
+            let has_fit_state = entry_path.join("fit_state.toml").exists();
+            let has_provenance = entry_path.join("provenance.json").exists();
+
+            if has_fit_state || has_provenance {
+                // Direct stage
+                print_stage_status(&name, &entry_path.to_string_lossy());
+                found_stages = true;
+            } else {
+                // Might be a sweep point dir — check children
+                let mut child_entries: Vec<_> = std::fs::read_dir(&entry_path)
+                    .into_iter().flatten().flatten().collect();
+                child_entries.sort_by_key(|e| e.file_name());
+                let has_child_stages = child_entries.iter().any(|c| {
+                    c.path().join("fit_state.toml").exists() || c.path().join("provenance.json").exists()
+                });
+                if has_child_stages {
+                    println!("\n  \x1b[1m{}/\x1b[0m", name);
+                    for child in &child_entries {
+                        let child_name = child.file_name().to_string_lossy().to_string();
+                        if child.path().is_dir() {
+                            let child_has = child.path().join("fit_state.toml").exists()
+                                || child.path().join("provenance.json").exists();
+                            if child_has {
+                                print_stage_status(&child_name, &child.path().to_string_lossy());
+                            }
+                        }
+                    }
+                    found_stages = true;
+                }
+            }
+        }
+    }
+
+    if !found_stages {
+        println!("  (no completed stages found)");
+    }
+}
+
+fn print_stage_status(name: &str, stage_dir: &str) {
+    use crate::fit::state::FitState;
+    use crate::fit::provenance;
+
+    // Try provenance.json first (v2), then fit_state.toml (v1)
+    if let Ok(prov) = provenance::read_provenance_json(stage_dir) {
+        let ll = prov.best_loglik.map(|l| format!("{:.1}", l)).unwrap_or_else(|| "—".into());
+        let chain = prov.best_chain.map(|c| format!(" (chain {})", c + 1)).unwrap_or_default();
+        let method = &prov.algorithm.get("method")
+            .and_then(|v| v.as_str())
+            .unwrap_or("?");
+        println!("    {:12} \x1b[32m✓\x1b[0m {} — loglik={}{}, {:.0}s",
+            name, method, ll, chain, prov.wall_time_seconds);
+    } else if let Ok(state) = FitState::load(stage_dir) {
+        let n_good = state.n_good_chains.unwrap_or(state.n_chains);
+        println!("    {:12} \x1b[32m✓\x1b[0m {} chains, loglik={:.1}, {}/{} good",
+            name, state.n_chains, state.best_loglik, n_good, state.n_chains);
+    }
 }
 
 // ─── New `camdl fit run` entry point (config_v2) ────────────────────────────
