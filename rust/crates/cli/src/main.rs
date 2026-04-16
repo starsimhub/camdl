@@ -197,9 +197,10 @@ fn run_simulate(args: &[String]) {
     let mut overrides: HashMap<String, f64> = HashMap::new();
     let mut table_files: HashMap<String, String> = HashMap::new();
     let mut params_files: Vec<String> = Vec::new();
-    let mut scenario_name: Option<String> = None;
+    let mut scenario_names: Vec<String> = Vec::new();
     let mut adhoc_enable: Vec<String> = Vec::new();
     let mut adhoc_disable: Vec<String> = Vec::new();
+    let mut seeds_spec: Option<String> = None;
     let mut output_path: Option<String> = None;
     let mut obs_path: Option<String> = None;
     let mut obs_dir: Option<String> = None;
@@ -217,7 +218,8 @@ fn run_simulate(args: &[String]) {
             "--dt"       => { i += 1; dt      = args[i].parse().unwrap_or_else(|_| { eprintln!("error: --dt needs a number"); std::process::exit(1); }); }
             "--seed"     => { i += 1; seed    = args[i].parse().unwrap_or_else(|_| { eprintln!("error: --seed needs an integer"); std::process::exit(1); }); }
             "--params"   => { i += 1; params_files.push(args[i].clone()); }
-            "--scenario" => { i += 1; scenario_name = Some(args[i].clone()); }
+            "--scenario" => { i += 1; scenario_names.extend(args[i].split(',').map(|s| s.trim().to_string())); }
+            "--seeds"   => { i += 1; seeds_spec = Some(args[i].clone()); }
             "--enable"   => { i += 1; adhoc_enable.push(args[i].clone()); }
             "--disable"  => { i += 1; adhoc_disable.push(args[i].clone()); }
             "--param"     => {
@@ -280,8 +282,26 @@ fn run_simulate(args: &[String]) {
 
     let want_obs = obs_path.is_some() || obs_dir.is_some();
 
+    // Parse --seeds spec
+    let seeds: Vec<u64> = if let Some(ref spec) = seeds_spec {
+        parse_seeds_spec(spec).unwrap_or_else(|e| {
+            eprintln!("error: --seeds: {}", e);
+            std::process::exit(1);
+        })
+    } else {
+        vec![seed]
+    };
+    if seeds_spec.is_some() && replicates > 1 {
+        eprintln!("error: --seeds and --replicates are mutually exclusive.\n  \
+                   --seeds provides explicit seed values.\n  \
+                   --replicates generates N deterministic seeds from --seed.");
+        std::process::exit(1);
+    }
+    // If using --seeds, replicates tracks seed count
+    let replicates = if seeds_spec.is_some() { seeds.len() } else { replicates };
+
     // Validate mutually exclusive σ flags
-    if scenario_name.is_some() && (!adhoc_enable.is_empty() || !adhoc_disable.is_empty()) {
+    if !scenario_names.is_empty() && (!adhoc_enable.is_empty() || !adhoc_disable.is_empty()) {
         eprintln!("error: --scenario and --enable/--disable are mutually exclusive.");
         eprintln!("  --scenario selects a named scenario from the model file.");
         eprintln!("  --enable/--disable compose an ad-hoc scenario.");
@@ -289,13 +309,20 @@ fn run_simulate(args: &[String]) {
         std::process::exit(1);
     }
 
+    // If no scenarios specified, use a single None (baseline)
+    let scenario_list: Vec<Option<String>> = if scenario_names.is_empty() {
+        vec![None]
+    } else {
+        scenario_names.iter().map(|s| Some(s.clone())).collect()
+    };
+
     let base_sim_run = util::SimRun {
         ir_path: ir_path.clone(),
         params_files,
         overrides,
         set_vec_entries,
         table_files,
-        scenario_name,
+        scenario_name: None, // set per-scenario in the loop
         adhoc_enable,
         adhoc_disable,
         backend,
@@ -369,10 +396,15 @@ fn run_simulate(args: &[String]) {
         vec![HashMap::new()]
     };
     let n_draws = draws.len();
-    let total_runs = n_draws * replicates;
-    if n_draws > 1 {
-        eprintln!("draws: {} parameter vectors × {} replicates = {} runs",
-            n_draws, replicates, total_runs);
+    let n_scenarios = scenario_list.len();
+    let total_runs = n_draws * replicates * n_scenarios;
+    if total_runs > 1 {
+        let parts: Vec<String> = [
+            if n_draws > 1 { Some(format!("{} draws", n_draws)) } else { None },
+            if n_scenarios > 1 { Some(format!("{} scenarios", n_scenarios)) } else { None },
+            if replicates > 1 { Some(format!("{} replicates", replicates)) } else { None },
+        ].iter().flatten().cloned().collect();
+        eprintln!("{} = {} runs", parts.join(" × "), total_runs);
     }
 
     // ── Observation accumulators ────────────────────────────────────────────
@@ -381,14 +413,16 @@ fn run_simulate(args: &[String]) {
     let mut obs_stream_names: Vec<String> = Vec::new();
     let mut obs_times_cache: Vec<Vec<f64>> = Vec::new();
 
-    // ── Main loop: draws × replicates ──────────────────────────────────────
+    // ── Main loop: scenarios × draws × replicates ─────────────────────────
     let mut run_idx = 0usize;
+    for scenario in &scenario_list {
     for (draw_idx, draw_overrides) in draws.iter().enumerate() {
         for rep in 0..replicates {
-            let process_seed = if total_runs == 1 {
+            let process_seed = if seeds_spec.is_some() {
+                seeds[rep] // explicit seeds
+            } else if total_runs == 1 {
                 seed
             } else {
-                // Unique seed per (draw, replicate) pair
                 seed ^ ((draw_idx as u64).wrapping_mul(0x9e3779b97f4a7c15))
                      ^ ((rep as u64).wrapping_mul(0x517cc1b727220a95))
             };
@@ -404,7 +438,7 @@ fn run_simulate(args: &[String]) {
             sim_run.overrides = combined_overrides;
             sim_run.set_vec_entries = base_sim_run.set_vec_entries.clone();
             sim_run.table_files = base_sim_run.table_files.clone();
-            sim_run.scenario_name = base_sim_run.scenario_name.clone();
+            sim_run.scenario_name = scenario.clone();
             sim_run.adhoc_enable = base_sim_run.adhoc_enable.clone();
             sim_run.adhoc_disable = base_sim_run.adhoc_disable.clone();
             sim_run.backend = base_sim_run.backend.clone();
@@ -504,6 +538,7 @@ fn run_simulate(args: &[String]) {
             run_idx += 1;
         } // end replicates
     } // end draws
+    } // end scenarios
 
     // Flush trajectory output
     drop(traj_out);
@@ -726,6 +761,38 @@ fn read_comp(snap: &sim::Snapshot, loc: &CompLoc) -> f64 {
     match loc {
         CompLoc::Int(i) => snap.int_state.counts[*i] as f64,
         CompLoc::Real(i) => snap.real_state.values[*i],
+    }
+}
+
+/// Parse a seeds spec: "1:100" (range), "42" (single), "1,2,3,42" (list).
+fn parse_seeds_spec(spec: &str) -> Result<Vec<u64>, String> {
+    // Range: "1:100"
+    if spec.contains(':') {
+        let parts: Vec<&str> = spec.split(':').collect();
+        if parts.len() != 2 {
+            return Err(format!("invalid range '{}', expected FROM:TO", spec));
+        }
+        let from: u64 = parts[0].trim().parse()
+            .map_err(|_| format!("cannot parse '{}' as integer", parts[0]))?;
+        let to: u64 = parts[1].trim().parse()
+            .map_err(|_| format!("cannot parse '{}' as integer", parts[1]))?;
+        if from > to {
+            return Err(format!("empty range {}:{}", from, to));
+        }
+        Ok((from..=to).collect())
+    }
+    // Comma-separated list: "1,2,3,42"
+    else if spec.contains(',') {
+        spec.split(',')
+            .map(|s| s.trim().parse::<u64>()
+                .map_err(|_| format!("cannot parse '{}' as integer", s.trim())))
+            .collect()
+    }
+    // Single: "42"
+    else {
+        let n: u64 = spec.trim().parse()
+            .map_err(|_| format!("cannot parse '{}' as integer", spec))?;
+        Ok(vec![n])
     }
 }
 
