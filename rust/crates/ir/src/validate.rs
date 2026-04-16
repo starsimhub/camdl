@@ -46,11 +46,6 @@ pub enum ValidationError {
     #[error("observation '{obs}' cumulative_flow references unknown transition '{transition}'")]
     UnknownTransitionInObservation { obs: String, transition: String },
 
-    #[error("initial_conditions references unknown compartment '{0}'")]
-    UnknownCompartmentInInitialConditions(String),
-
-    #[error("table '{table}' table_lookup has {n} indices; exactly 1 is required")]
-    WrongIndexCount { table: String, n: usize },
 }
 
 pub fn validate(model: &Model) -> Result<(), Vec<ValidationError>> {
