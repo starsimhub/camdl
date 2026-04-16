@@ -1222,6 +1222,106 @@ mod tests {
     /// Cover every distribution supported in fit.toml `prior = ...` strings.
     /// Regression guard for the asymmetry bug where fit.toml could only override
     /// 4 of the 7 IR distributions.
+    /// End-to-end: priors declared in a .camdl file survive compilation to
+    /// IR JSON, deserialization back into ir::Model, and the resolve_prior
+    /// pipeline that pgas.rs / pmmh.rs use to build the Prior vector.
+    ///
+    /// This is the integration counterpart to resolve_prior_precedence_chain
+    /// (which uses a hand-constructed ir::Model). Regression guard for any
+    /// serde field rename or IR<->compiler drift.
+    #[test]
+    fn resolve_prior_end_to_end_from_golden_ir() {
+        // sir_priors golden has: beta~LogNormal, gamma~HalfNormal,
+        // rho~Beta, N0~LogNormal, I0~Exponential.
+        let manifest = std::env::var("CARGO_MANIFEST_DIR").unwrap();
+        let ir_path = format!("{}/../../../ocaml/golden/sir_priors.ir.json", manifest);
+        let (model, _) = crate::util::load_model(&ir_path).expect("load golden");
+
+        fn empty_fit() -> FitToml {
+            toml::from_str(r#"
+                [fit]
+                model = "unused"
+                output_dir = "unused"
+                [config]
+                backend = "gillespie"
+                dt = 1.0
+                [data]
+                [fixed]
+                [estimate]
+            "#).unwrap()
+        }
+
+        // beta: LogNormal in IR → TransformedNormal at the Prior layer.
+        let (p, src) = resolve_prior("beta", &empty_fit(), &model);
+        assert_eq!(src, "model", "beta's IR prior should be picked up");
+        match p {
+            Prior::TransformedNormal { mean, sd } => {
+                assert!((mean - (-1.0)).abs() < 1e-9, "mean {}", mean);
+                assert!((sd - 0.5).abs() < 1e-9, "sd {}", sd);
+            }
+            other => panic!("beta expected TransformedNormal, got {:?}", other),
+        }
+
+        // gamma: HalfNormal round-trip
+        let (p, src) = resolve_prior("gamma", &empty_fit(), &model);
+        assert_eq!(src, "model");
+        assert!(matches!(p, Prior::HalfNormal { .. }), "gamma: {:?}", p);
+
+        // rho: Beta round-trip
+        let (p, src) = resolve_prior("rho", &empty_fit(), &model);
+        assert_eq!(src, "model");
+        match p {
+            Prior::Beta { alpha, beta } => {
+                assert!((alpha - 2.0).abs() < 1e-9);
+                assert!((beta - 5.0).abs() < 1e-9);
+            }
+            other => panic!("rho expected Beta, got {:?}", other),
+        }
+
+        // I0: Exponential round-trip
+        let (p, src) = resolve_prior("I0", &empty_fit(), &model);
+        assert_eq!(src, "model");
+        assert!(matches!(p, Prior::Exponential { .. }), "I0: {:?}", p);
+    }
+
+    /// End-to-end: fit.toml [estimate] prior overrides the model IR prior.
+    /// Same golden model, but fit.toml specifies a different distribution
+    /// for beta — the override must win over what's in the .camdl.
+    #[test]
+    fn fit_toml_override_beats_golden_ir_prior() {
+        let manifest = std::env::var("CARGO_MANIFEST_DIR").unwrap();
+        let ir_path = format!("{}/../../../ocaml/golden/sir_priors.ir.json", manifest);
+        let (model, _) = crate::util::load_model(&ir_path).expect("load golden");
+
+        // Override beta with a much narrower normal prior; leave gamma alone.
+        let fit: FitToml = toml::from_str(r#"
+            [fit]
+            model = "unused"
+            output_dir = "unused"
+            [config]
+            backend = "gillespie"
+            dt = 1.0
+            [data]
+            [fixed]
+            [estimate.beta]
+            prior = "normal(0.25, 0.05)"
+        "#).unwrap();
+
+        let (p, src) = resolve_prior("beta", &fit, &model);
+        assert_eq!(src, "fit.toml", "override should take precedence");
+        match p {
+            Prior::Normal { mean, sd } => {
+                assert_eq!(mean, 0.25); assert_eq!(sd, 0.05);
+            }
+            other => panic!("override should be Normal(0.25, 0.05), got {:?}", other),
+        }
+
+        // gamma is not overridden → still uses the IR's HalfNormal.
+        let (p, src) = resolve_prior("gamma", &fit, &model);
+        assert_eq!(src, "model");
+        assert!(matches!(p, Prior::HalfNormal { .. }));
+    }
+
     #[test]
     fn parse_prior_covers_all_distributions() {
         // Flat — no args
