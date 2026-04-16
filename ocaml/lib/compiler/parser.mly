@@ -16,6 +16,7 @@
 (* ── Punctuation ────────────────────────────────────────────────────────── *)
 %token ARROW       (* --> *)
 %token AT          (* @ *)
+%token TILDE       (* ~ *)
 %token EQ          (* = *)
 %token COLON       (* : *)
 %token COMMA       (* , *)
@@ -138,14 +139,37 @@ param_list:
   | ps = list(param_decl) { ps }
 
 param_decl:
+  (* scalar, no bounds, no prior *)
   | name = IDENT COLON pk = param_kind da = dim_annotation_opt
-      { PScalar { pname = name; pkind = pk; pdim = da; pbounds = None } }
+      { PScalar { pname = name; pkind = pk; pdim = da; pbounds = None; pprior = None } }
+  (* scalar, no bounds, with prior *)
+  | name = IDENT COLON pk = param_kind da = dim_annotation_opt TILDE pr = prior_clause
+      { PScalar { pname = name; pkind = pk; pdim = da; pbounds = None; pprior = Some pr } }
+  (* scalar, with bounds, no prior *)
   | name = IDENT COLON pk = param_kind da = dim_annotation_opt IN LBRACKET lo = expr COMMA hi = expr RBRACKET
-      { PScalar { pname = name; pkind = pk; pdim = da; pbounds = Some (lo, hi) } }
+      { PScalar { pname = name; pkind = pk; pdim = da; pbounds = Some (lo, hi); pprior = None } }
+  (* scalar, with bounds, with prior *)
+  | name = IDENT COLON pk = param_kind da = dim_annotation_opt IN LBRACKET lo = expr COMMA hi = expr RBRACKET TILDE pr = prior_clause
+      { PScalar { pname = name; pkind = pk; pdim = da; pbounds = Some (lo, hi); pprior = Some pr } }
+  (* indexed, no bounds, no prior *)
   | name = IDENT LBRACKET dim = IDENT RBRACKET COLON pk = param_kind da = dim_annotation_opt
-      { PIndexed { pname = name; pdims = [dim]; pkind = pk; pdim = da; pbounds = None } }
+      { PIndexed { pname = name; pdims = [dim]; pkind = pk; pdim = da; pbounds = None; pprior = None } }
+  (* indexed, no bounds, with prior *)
+  | name = IDENT LBRACKET dim = IDENT RBRACKET COLON pk = param_kind da = dim_annotation_opt TILDE pr = prior_clause
+      { PIndexed { pname = name; pdims = [dim]; pkind = pk; pdim = da; pbounds = None; pprior = Some pr } }
+  (* indexed, with bounds, no prior *)
   | name = IDENT LBRACKET dim = IDENT RBRACKET COLON pk = param_kind da = dim_annotation_opt IN LBRACKET lo = expr COMMA hi = expr RBRACKET
-      { PIndexed { pname = name; pdims = [dim]; pkind = pk; pdim = da; pbounds = Some (lo, hi) } }
+      { PIndexed { pname = name; pdims = [dim]; pkind = pk; pdim = da; pbounds = Some (lo, hi); pprior = None } }
+  (* indexed, with bounds, with prior *)
+  | name = IDENT LBRACKET dim = IDENT RBRACKET COLON pk = param_kind da = dim_annotation_opt IN LBRACKET lo = expr COMMA hi = expr RBRACKET TILDE pr = prior_clause
+      { PIndexed { pname = name; pdims = [dim]; pkind = pk; pdim = da; pbounds = Some (lo, hi); pprior = Some pr } }
+
+prior_clause:
+  | name = IDENT LPAREN args = separated_list(COMMA, prior_kwarg) RPAREN
+      { { ps_name = name; ps_args = args } }
+
+prior_kwarg:
+  | k = IDENT EQ v = expr { (k, v) }
 
 dim_annotation_opt:
   | (* empty *) { None }

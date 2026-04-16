@@ -1279,42 +1279,94 @@ let resolve_float_expr ctx e =
         ();
       0.0
 
+(* ── Prior distribution resolution ─────────────────────────────────────── *)
+
+let resolve_prior_spec ctx (ps : prior_spec) : Ir.prior_dist =
+  let get_float key =
+    match List.assoc_opt key ps.ps_args with
+    | Some e ->
+      if is_const_expr e then eval_const_expr ctx e
+      else begin
+        Diagnostics.error ctx.diags
+          ~code:"E230" ~loc:Diagnostics.no_loc
+          ~message:(Printf.sprintf "prior argument '%s' must be a compile-time constant" key)
+          ~detail:(Printf.sprintf "In ~ %s(...), the argument '%s' is not a constant expression. \
+                                   Prior arguments must be numeric literals or arithmetic of literals." ps.ps_name key)
+          ~hint:"Use a numeric literal, e.g. mu = -1.0"
+          ();
+        0.0
+      end
+    | None ->
+      Diagnostics.error ctx.diags
+        ~code:"E231" ~loc:Diagnostics.no_loc
+        ~message:(Printf.sprintf "prior '%s' missing required argument '%s'" ps.ps_name key)
+        ~detail:(Printf.sprintf "The distribution %s requires a '%s' argument." ps.ps_name key)
+        ~hint:(Printf.sprintf "Add '%s = <value>' to the prior arguments." key)
+        ();
+      0.0
+  in
+  match ps.ps_name with
+  | "uniform" ->
+    Ir.Uniform { Ir.lower = get_float "lower"; Ir.upper = get_float "upper" }
+  | "normal" ->
+    Ir.Normal_p { Ir.mean = get_float "mu"; Ir.sd = get_float "sigma" }
+  | "log_normal" ->
+    Ir.LogNormal { Ir.mu = get_float "mu"; Ir.sigma = get_float "sigma" }
+  | "half_normal" ->
+    Ir.HalfNormal { Ir.sigma = get_float "sigma" }
+  | "beta" ->
+    Ir.Beta { Ir.alpha = get_float "alpha"; Ir.beta = get_float "beta" }
+  | "gamma" ->
+    Ir.Gamma { Ir.shape = get_float "shape"; Ir.rate = get_float "rate" }
+  | "exponential" ->
+    Ir.Exponential { Ir.rate = get_float "rate" }
+  | s ->
+    Diagnostics.error ctx.diags
+      ~code:"E232" ~loc:Diagnostics.no_loc
+      ~message:(Printf.sprintf "unknown prior distribution '%s'" s)
+      ~detail:"Valid distributions: uniform, normal, log_normal, half_normal, beta, gamma, exponential."
+      ~hint:"Check the spelling and available distributions."
+      ();
+    Ir.Uniform { Ir.lower = 0.0; Ir.upper = 1.0 } (* placeholder after error *)
+
 let expand_parameters ctx =
   let from_params = List.concat_map (fun pd ->
     match pd with
-    | PScalar { pname; pbounds; pkind; pdim; _ } ->
+    | PScalar { pname; pbounds; pkind; pdim; pprior } ->
       let bounds = resolve_bounds ctx pbounds in
       let pk = Some (param_kind_to_string pkind) in
+      let prior = Option.map (resolve_prior_spec ctx) pprior in
       [{ Ir.name          = pname;
          Ir.value         = None;
          Ir.bounds        = bounds;
-         Ir.prior         = None;
+         Ir.prior         = prior;
          Ir.transform     = None;
          Ir.initial_value = None;
          Ir.param_kind    = pk;
          Ir.param_dim     = pdim;
        }]
-    | PIndexed { pname; pdims = [dim]; pbounds; pkind; pdim; _ } ->
+    | PIndexed { pname; pdims = [dim]; pbounds; pkind; pdim; pprior } ->
       let vals = dim_values ctx dim in
       let bounds = resolve_bounds ctx pbounds in
       let pk = Some (param_kind_to_string pkind) in
+      let prior = Option.map (resolve_prior_spec ctx) pprior in
       List.map (fun v ->
         { Ir.name          = pname ^ "_" ^ v;
           Ir.value         = None;
           Ir.bounds        = bounds;
-          Ir.prior         = None;
+          Ir.prior         = prior;
           Ir.transform     = None;
           Ir.initial_value = None;
           Ir.param_kind    = pk;
           Ir.param_dim     = pdim;
         }
       ) vals
-    | PIndexed { pname; _ } ->
-      (* Multi-dim indexed params not yet supported — emit single scalar *)
+    | PIndexed { pname; pprior; _ } ->
+      let prior = Option.map (resolve_prior_spec ctx) pprior in
       [{ Ir.name          = pname;
          Ir.value         = None;
          Ir.bounds        = None;
-         Ir.prior         = None;
+         Ir.prior         = prior;
          Ir.transform     = None;
          Ir.initial_value = None;
          Ir.param_kind    = None;

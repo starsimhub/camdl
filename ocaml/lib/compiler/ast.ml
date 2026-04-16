@@ -62,9 +62,15 @@ type param_type = PRate | PProbability | PPositive | PCount | PReal
 (** Explicit dimension annotation: (P exponent, T exponent) *)
 type dim_annotation = int * int
 
+(** Prior distribution specification: ~ name(key = val, ...) *)
+type prior_spec = {
+  ps_name: string;                    (** distribution name: "log_normal", "beta", etc. *)
+  ps_args: (string * expr) list;      (** keyword arguments *)
+}
+
 type param_decl =
-  | PScalar  of { pname: string; pkind: param_type; pdim: dim_annotation option; pbounds: (expr * expr) option }
-  | PIndexed of { pname: string; pdims: string list; pkind: param_type; pdim: dim_annotation option; pbounds: (expr * expr) option }
+  | PScalar  of { pname: string; pkind: param_type; pdim: dim_annotation option; pbounds: (expr * expr) option; pprior: prior_spec option }
+  | PIndexed of { pname: string; pdims: string list; pkind: param_type; pdim: dim_annotation option; pbounds: (expr * expr) option; pprior: prior_spec option }
 
 (** Table dimension entry: bare dim name, or dim + unit *)
 type table_dim_entry =

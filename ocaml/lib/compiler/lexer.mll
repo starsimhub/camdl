@@ -193,6 +193,7 @@ rule token = parse
   | '/'     { SLASH }
   | '^'     { CARET }
   | '@'     { AT }
+  | '~'     { TILDE }
   | '<'     { LT }
   | '>'     { GT }
 
