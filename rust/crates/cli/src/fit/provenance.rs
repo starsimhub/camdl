@@ -370,3 +370,179 @@ pub struct StartsFromProv {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source_hash: Option<String>,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn content_hash_stable() {
+        let params: HashMap<String, f64> = [
+            ("beta".to_string(), 0.3),
+            ("gamma".to_string(), 0.1),
+        ].into();
+        let h1 = compute_content_hash(&params);
+        let h2 = compute_content_hash(&params);
+        assert_eq!(h1, h2, "same params must produce same hash");
+        assert_eq!(h1.len(), 8, "content hash is 8 hex chars");
+    }
+
+    #[test]
+    fn content_hash_changes_on_value_change() {
+        let params1: HashMap<String, f64> = [("beta".to_string(), 0.3)].into();
+        let params2: HashMap<String, f64> = [("beta".to_string(), 0.31)].into();
+        assert_ne!(
+            compute_content_hash(&params1),
+            compute_content_hash(&params2),
+            "different values must produce different hashes"
+        );
+    }
+
+    #[test]
+    fn config_hash_v2_stable() {
+        use indexmap::IndexMap;
+        let obs: IndexMap<String, String> = IndexMap::new();
+        let est: IndexMap<String, super::super::config_v2::EstimateSpecV2> = IndexMap::new();
+        let fixed: IndexMap<String, f64> = IndexMap::new();
+        let stage = super::super::config_v2::Stage::IF2 {
+            chains: 4, particles: 1000, iterations: 50,
+            cooling: 0.7,
+            starts_from: super::super::config_v2::StartsFrom::Random,
+        };
+        let h1 = compute_config_hash_v2("model", &obs, &est, &fixed, "mle", &stage, 1).unwrap();
+        let h2 = compute_config_hash_v2("model", &obs, &est, &fixed, "mle", &stage, 1).unwrap();
+        assert_eq!(h1, h2);
+        assert_eq!(h1.len(), 64, "config hash is 64 hex chars");
+    }
+
+    #[test]
+    fn config_hash_v2_changes_on_model() {
+        use indexmap::IndexMap;
+        let obs: IndexMap<String, String> = IndexMap::new();
+        let est: IndexMap<String, super::super::config_v2::EstimateSpecV2> = IndexMap::new();
+        let fixed: IndexMap<String, f64> = IndexMap::new();
+        let stage = super::super::config_v2::Stage::IF2 {
+            chains: 4, particles: 1000, iterations: 50,
+            cooling: 0.7,
+            starts_from: super::super::config_v2::StartsFrom::Random,
+        };
+        let h1 = compute_config_hash_v2("model_a", &obs, &est, &fixed, "mle", &stage, 1).unwrap();
+        let h2 = compute_config_hash_v2("model_b", &obs, &est, &fixed, "mle", &stage, 1).unwrap();
+        assert_ne!(h1, h2, "different model must produce different hash");
+    }
+
+    #[test]
+    fn config_hash_v2_changes_on_seed() {
+        use indexmap::IndexMap;
+        let obs: IndexMap<String, String> = IndexMap::new();
+        let est: IndexMap<String, super::super::config_v2::EstimateSpecV2> = IndexMap::new();
+        let fixed: IndexMap<String, f64> = IndexMap::new();
+        let stage = super::super::config_v2::Stage::IF2 {
+            chains: 4, particles: 1000, iterations: 50,
+            cooling: 0.7,
+            starts_from: super::super::config_v2::StartsFrom::Random,
+        };
+        let h1 = compute_config_hash_v2("model", &obs, &est, &fixed, "mle", &stage, 1).unwrap();
+        let h2 = compute_config_hash_v2("model", &obs, &est, &fixed, "mle", &stage, 2).unwrap();
+        assert_ne!(h1, h2, "different seed must produce different hash");
+    }
+
+    #[test]
+    fn config_hash_v2_changes_on_stage_settings() {
+        use indexmap::IndexMap;
+        let obs: IndexMap<String, String> = IndexMap::new();
+        let est: IndexMap<String, super::super::config_v2::EstimateSpecV2> = IndexMap::new();
+        let fixed: IndexMap<String, f64> = IndexMap::new();
+        let stage1 = super::super::config_v2::Stage::IF2 {
+            chains: 4, particles: 1000, iterations: 50,
+            cooling: 0.7,
+            starts_from: super::super::config_v2::StartsFrom::Random,
+        };
+        let stage2 = super::super::config_v2::Stage::IF2 {
+            chains: 8, particles: 1000, iterations: 50,
+            cooling: 0.7,
+            starts_from: super::super::config_v2::StartsFrom::Random,
+        };
+        let h1 = compute_config_hash_v2("model", &obs, &est, &fixed, "mle", &stage1, 1).unwrap();
+        let h2 = compute_config_hash_v2("model", &obs, &est, &fixed, "mle", &stage2, 1).unwrap();
+        assert_ne!(h1, h2, "different stage settings must produce different hash");
+    }
+
+    #[test]
+    fn provenance_json_roundtrip() {
+        let dir = tempfile::tempdir().unwrap();
+        let stage_dir = dir.path().to_str().unwrap();
+        let prov = StageProvenance {
+            camdl_version: "test".into(),
+            timestamp: "2026-04-16T00:00:00Z".into(),
+            config_hash: "abc123".into(),
+            fit_config: "fit.toml".into(),
+            stage: "mle".into(),
+            model: "sir.camdl".into(),
+            model_hash: "def456".into(),
+            data_hashes: [("cases".into(), "aaa".into())].into(),
+            estimated: vec!["beta".into()],
+            fixed: [("N0".into(), 1e6)].into(),
+            algorithm: serde_json::json!({"method": "if2"}),
+            starts_from: None,
+            derived_from: None,
+            seed: 42,
+            wall_time_seconds: 1.5,
+            best_loglik: Some(-100.0),
+            best_chain: Some(2),
+        };
+        write_provenance_json(stage_dir, &prov).unwrap();
+        let loaded = read_provenance_json(stage_dir).unwrap();
+        assert_eq!(loaded.config_hash, "abc123");
+        assert_eq!(loaded.stage, "mle");
+        assert_eq!(loaded.seed, 42);
+        assert_eq!(loaded.best_loglik, Some(-100.0));
+    }
+
+    #[test]
+    fn staleness_detection() {
+        let dir = tempfile::tempdir().unwrap();
+        let stage_dir = dir.path().to_str().unwrap();
+        let prov = StageProvenance {
+            camdl_version: "test".into(),
+            timestamp: "2026-04-16T00:00:00Z".into(),
+            config_hash: "abc123".into(),
+            fit_config: "fit.toml".into(),
+            stage: "mle".into(),
+            model: "sir.camdl".into(),
+            model_hash: "def456".into(),
+            data_hashes: HashMap::new(),
+            estimated: vec![],
+            fixed: HashMap::new(),
+            algorithm: serde_json::json!({}),
+            starts_from: None,
+            derived_from: None,
+            seed: 1,
+            wall_time_seconds: 0.0,
+            best_loglik: None,
+            best_chain: None,
+        };
+        write_provenance_json(stage_dir, &prov).unwrap();
+
+        // Same hash → match
+        match check_config_hash(stage_dir, "abc123") {
+            ConfigCacheStatus::Match => {}
+            other => panic!("expected Match, got {:?}", std::mem::discriminant(&other)),
+        }
+
+        // Different hash → stale
+        match check_config_hash(stage_dir, "xyz789") {
+            ConfigCacheStatus::Stale { stored, current } => {
+                assert_eq!(stored, "abc123");
+                assert_eq!(current, "xyz789");
+            }
+            other => panic!("expected Stale, got {:?}", std::mem::discriminant(&other)),
+        }
+
+        // Nonexistent dir → not found
+        match check_config_hash("/nonexistent/path", "abc123") {
+            ConfigCacheStatus::NotFound => {}
+            other => panic!("expected NotFound, got {:?}", std::mem::discriminant(&other)),
+        }
+    }
+}

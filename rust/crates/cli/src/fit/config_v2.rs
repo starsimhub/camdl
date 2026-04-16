@@ -1094,4 +1094,268 @@ cooling = 0.70
         assert!(err.contains("bounds"));
         assert!(err.contains("empty"));
     }
+
+    #[test]
+    fn validate_bad_backend() {
+        let config = parse(r#"
+[model]
+camdl = "models/sir.camdl"
+
+[data.observations]
+weekly_cases = "data/cases.tsv"
+
+[config]
+backend = "gilelspie"
+dt = 1.0
+
+[estimate]
+beta = { bounds = [0.01, 2.0] }
+
+[fixed]
+N0 = 1000000
+
+[stages.mle]
+method = "if2"
+chains = 4
+particles = 1000
+iterations = 50
+cooling = 0.70
+        "#).unwrap();
+
+        let model_params = vec!["beta".to_string(), "N0".to_string()];
+        let err = config.validate(&model_params).unwrap_err();
+        assert!(err.contains("unknown backend"));
+        assert!(err.contains("gilelspie"));
+    }
+
+    #[test]
+    fn validate_holdout_mutual_exclusivity() {
+        let err = parse(r#"
+[model]
+camdl = "models/sir.camdl"
+
+[data]
+holdout_after = 100.0
+
+[data.observations]
+weekly_cases = "data/cases.tsv"
+
+[data.holdout]
+weekly_cases = "data/holdout.tsv"
+
+[config]
+backend = "chain_binomial"
+dt = 1.0
+
+[estimate]
+beta = { bounds = [0.01, 2.0] }
+
+[fixed]
+N0 = 1000000
+
+[stages.mle]
+method = "if2"
+chains = 4
+particles = 1000
+iterations = 50
+cooling = 0.70
+        "#).unwrap();
+
+        let model_params = vec!["beta".to_string(), "N0".to_string()];
+        let err_msg = err.validate(&model_params).unwrap_err();
+        assert!(err_msg.contains("mutually exclusive"));
+    }
+
+    #[test]
+    fn config_optional_defaults() {
+        // [config] section omitted entirely — should use defaults
+        let config = parse(r#"
+[model]
+camdl = "models/sir.camdl"
+
+[data.observations]
+weekly_cases = "data/cases.tsv"
+
+[estimate]
+beta = { bounds = [0.01, 2.0] }
+
+[fixed]
+N0 = 1000000
+
+[stages.mle]
+method = "if2"
+chains = 4
+particles = 1000
+iterations = 50
+cooling = 0.70
+        "#).unwrap();
+
+        assert_eq!(config.config.backend, "chain_binomial");
+        assert_eq!(config.config.dt, 1.0);
+    }
+
+    #[test]
+    fn starts_from_directory_detection() {
+        let config = parse(r#"
+[model]
+camdl = "models/sir.camdl"
+
+[data.observations]
+weekly_cases = "data/cases.tsv"
+
+[estimate]
+beta = { bounds = [0.01, 2.0] }
+
+[fixed]
+N0 = 1000000
+
+[stages.mle]
+method = "if2"
+chains = 4
+particles = 1000
+iterations = 50
+cooling = 0.70
+starts_from = "results/fits/01/mle"
+        "#).unwrap();
+
+        match config.stages["mle"].starts_from() {
+            StartsFrom::Directory(p) => assert_eq!(p, Path::new("results/fits/01/mle")),
+            other => panic!("expected Directory, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn starts_from_stage_ref() {
+        let config = parse(r#"
+[model]
+camdl = "models/sir.camdl"
+
+[data.observations]
+weekly_cases = "data/cases.tsv"
+
+[estimate]
+beta = { bounds = [0.01, 2.0] }
+
+[fixed]
+N0 = 1000000
+
+[stages.mle]
+method = "if2"
+chains = 4
+particles = 1000
+iterations = 50
+cooling = 0.70
+
+[stages.refine]
+method = "if2"
+chains = 2
+particles = 2000
+iterations = 30
+cooling = 0.95
+starts_from = "mle"
+        "#).unwrap();
+
+        match config.stages["refine"].starts_from() {
+            StartsFrom::Stage(s) => assert_eq!(s, "mle"),
+            other => panic!("expected Stage, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn starts_from_default_is_random() {
+        let config = parse(r#"
+[model]
+camdl = "models/sir.camdl"
+
+[data.observations]
+weekly_cases = "data/cases.tsv"
+
+[estimate]
+beta = { bounds = [0.01, 2.0] }
+
+[fixed]
+N0 = 1000000
+
+[stages.mle]
+method = "if2"
+chains = 4
+particles = 1000
+iterations = 50
+cooling = 0.70
+        "#).unwrap();
+
+        assert!(config.stages["mle"].starts_from().is_random());
+    }
+
+    #[test]
+    fn fixed_from_file_resolves() {
+        // Write a temp params file
+        let dir = tempfile::tempdir().unwrap();
+        let params_path = dir.path().join("fixed.toml");
+        std::fs::write(&params_path, "N0 = 1000000\nI0 = 10\n").unwrap();
+
+        let toml_str = format!(r#"
+[model]
+camdl = "models/sir.camdl"
+
+[data.observations]
+weekly_cases = "data/cases.tsv"
+
+[estimate]
+beta = {{ bounds = [0.01, 2.0] }}
+
+[fixed]
+from_file = "{}"
+
+[stages.mle]
+method = "if2"
+chains = 4
+particles = 1000
+iterations = 50
+cooling = 0.70
+        "#, params_path.display());
+
+        let config: FitConfigV2 = toml::from_str(&toml_str).unwrap();
+        let resolved = config.fixed.resolve().unwrap();
+        assert_eq!(resolved["N0"], 1000000.0);
+        assert_eq!(resolved["I0"], 10.0);
+
+        // Validate with correct model params
+        let model_params = vec!["beta".to_string(), "N0".to_string(), "I0".to_string()];
+        assert!(config.validate(&model_params).is_ok());
+    }
+
+    #[test]
+    fn fixed_from_file_with_inline_override() {
+        let dir = tempfile::tempdir().unwrap();
+        let params_path = dir.path().join("fixed.toml");
+        std::fs::write(&params_path, "N0 = 1000000\nI0 = 10\n").unwrap();
+
+        let toml_str = format!(r#"
+[model]
+camdl = "models/sir.camdl"
+
+[data.observations]
+weekly_cases = "data/cases.tsv"
+
+[estimate]
+beta = {{ bounds = [0.01, 2.0] }}
+
+[fixed]
+from_file = "{}"
+I0 = 50
+
+[stages.mle]
+method = "if2"
+chains = 4
+particles = 1000
+iterations = 50
+cooling = 0.70
+        "#, params_path.display());
+
+        let config: FitConfigV2 = toml::from_str(&toml_str).unwrap();
+        let resolved = config.fixed.resolve().unwrap();
+        assert_eq!(resolved["N0"], 1000000.0);
+        assert_eq!(resolved["I0"], 50.0); // inline overrides from_file
+    }
 }

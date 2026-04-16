@@ -1169,3 +1169,101 @@ fn load_draws_tsv(path: &str) -> Result<Vec<HashMap<String, f64>>, String> {
     }
     Ok(draws)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn draws_tsv_roundtrip() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test_draws.tsv");
+
+        // Write a draws file
+        std::fs::write(&path, "beta\tgamma\tN0\n\
+            3.00000000000000000e-01\t1.00000000000000000e-01\t1.00000000000000000e+06\n\
+            5.00000000000000000e-01\t1.50000000000000000e-01\t1.00000000000000000e+06\n").unwrap();
+
+        let draws = load_draws_tsv(path.to_str().unwrap()).unwrap();
+        assert_eq!(draws.len(), 2);
+        assert!((draws[0]["beta"] - 0.3).abs() < 1e-15);
+        assert!((draws[0]["gamma"] - 0.1).abs() < 1e-15);
+        assert!((draws[0]["N0"] - 1e6).abs() < 1e-5);
+        assert!((draws[1]["beta"] - 0.5).abs() < 1e-15);
+    }
+
+    #[test]
+    fn draws_tsv_tolerates_trailing_tabs() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test_trailing.tsv");
+
+        // File with trailing tabs (the bug we fixed)
+        std::fs::write(&path, "beta\tgamma\t\n0.3\t0.1\t\n0.5\t0.15\t\n").unwrap();
+
+        let draws = load_draws_tsv(path.to_str().unwrap()).unwrap();
+        assert_eq!(draws.len(), 2);
+        assert!((draws[0]["beta"] - 0.3).abs() < 1e-15);
+    }
+
+    #[test]
+    fn draws_tsv_rejects_missing_columns() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test_short.tsv");
+
+        std::fs::write(&path, "beta\tgamma\tN0\n0.3\t0.1\n").unwrap();
+        let err = load_draws_tsv(path.to_str().unwrap()).unwrap_err();
+        assert!(err.contains("expected 3 columns"));
+    }
+
+    #[test]
+    fn draws_tsv_rejects_empty_body() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test_empty.tsv");
+
+        std::fs::write(&path, "beta\tgamma\n").unwrap();
+        let err = load_draws_tsv(path.to_str().unwrap()).unwrap_err();
+        assert!(err.contains("no data rows"));
+    }
+
+    #[test]
+    fn parse_seeds_spec_range() {
+        let seeds = parse_seeds_spec("1:5").unwrap();
+        assert_eq!(seeds, vec![1, 2, 3, 4, 5]);
+    }
+
+    #[test]
+    fn parse_seeds_spec_list() {
+        let seeds = parse_seeds_spec("42,137,256").unwrap();
+        assert_eq!(seeds, vec![42, 137, 256]);
+    }
+
+    #[test]
+    fn parse_seeds_spec_single() {
+        let seeds = parse_seeds_spec("42").unwrap();
+        assert_eq!(seeds, vec![42]);
+    }
+
+    #[test]
+    fn parse_seeds_spec_empty_range() {
+        let err = parse_seeds_spec("5:1").unwrap_err();
+        assert!(err.contains("empty range"));
+    }
+
+    #[test]
+    fn seed_derivation_deterministic() {
+        let seed = 42u64;
+        let draw_idx = 3u64;
+        let rep = 7u64;
+        let s1 = seed ^ draw_idx.wrapping_mul(SEED_MIX_DRAW) ^ rep.wrapping_mul(SEED_MIX_REP);
+        let s2 = seed ^ draw_idx.wrapping_mul(SEED_MIX_DRAW) ^ rep.wrapping_mul(SEED_MIX_REP);
+        assert_eq!(s1, s2, "same inputs must produce same seed");
+
+        // Different draw_idx → different seed
+        let s3 = seed ^ 4u64.wrapping_mul(SEED_MIX_DRAW) ^ rep.wrapping_mul(SEED_MIX_REP);
+        assert_ne!(s1, s3);
+
+        // Obs seed independent
+        let obs1 = s1 ^ SEED_MIX_OBS;
+        assert_ne!(s1, obs1);
+    }
+}
