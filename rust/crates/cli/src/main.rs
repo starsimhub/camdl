@@ -84,6 +84,8 @@ fn main() {
     // Dispatch on first argument
     match all_args[0].as_str() {
         "experiment" => {
+            eprintln!("\x1b[33mnote: `camdl experiment` is deprecated. Use `camdl simulate --batch FILE.toml` instead.\x1b[0m");
+            eprintln!();
             match all_args.get(1).map(|s| s.as_str()) {
                 Some("run")       => experiment::cmd_experiment_run(&all_args[2..]),
                 Some("status")    => experiment::cmd_experiment_status(&all_args[2..]),
@@ -135,6 +137,8 @@ fn main() {
             if2::cmd_if2(&all_args[1..]);
         }
         "profile" => {
+            eprintln!("\x1b[33mnote: `camdl profile` is deprecated. Use `camdl fit run FIT.toml --sweep \"PARAM=V1,V2,...\"` instead.\x1b[0m");
+            eprintln!();
             profile::cmd_profile(&all_args[1..]);
         }
         "fit" => {
