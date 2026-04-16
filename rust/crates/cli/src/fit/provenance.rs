@@ -224,6 +224,10 @@ pub enum ContentVerification {
 /// Compute the config hash for a fit stage. Covers all inputs that affect
 /// the stage's output: model IR, data files, estimate specs, fixed values,
 /// stage algorithm settings, and camdl version. Change any of these → different hash.
+/// Compute the config hash for a fit stage. Covers all inputs that affect
+/// the stage's output. Returns an error if any data file is missing.
+///
+/// Hash is full 64-char hex (256 bits). Truncated to 16 chars for display.
 pub fn compute_config_hash_v2(
     model_ir_json: &str,
     observations: &indexmap::IndexMap<String, String>,
@@ -232,7 +236,7 @@ pub fn compute_config_hash_v2(
     stage_name: &str,
     stage: &super::config_v2::Stage,
     seed: u64,
-) -> String {
+) -> Result<String, String> {
     let mut h = Sha256::new();
 
     // Model
@@ -246,9 +250,9 @@ pub fn compute_config_hash_v2(
     for (name, path) in &data_entries {
         h.update(name.as_bytes());
         h.update(b"\x00");
-        if let Ok(bytes) = std::fs::read(path) {
-            h.update(&bytes);
-        }
+        let bytes = std::fs::read(path)
+            .map_err(|e| format!("cannot read data file '{}' ({}): {}", name, path, e))?;
+        h.update(&bytes);
         h.update(b"\x00");
     }
 
@@ -288,7 +292,7 @@ pub fn compute_config_hash_v2(
     h.update(b"\x00version\x00");
     h.update(version::VERSION_SHORT.as_bytes());
 
-    hex::encode(h.finalize())
+    Ok(hex::encode(h.finalize()))
 }
 
 /// Write provenance.json for a completed stage.

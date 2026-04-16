@@ -344,6 +344,16 @@ fn main() {
     }
 }
 
+// Seed derivation constants for independent RNG streams.
+// These are arbitrary coprime constants used to derive per-(draw, replicate)
+// seeds from the base seed via XOR mixing. The specific values don't matter
+// as long as they're distinct and nonzero — they ensure different (draw, rep)
+// pairs get non-overlapping RNG streams.
+const SEED_MIX_DRAW: u64 = 0x9e3779b97f4a7c15; // golden ratio fractional bits
+const SEED_MIX_REP: u64  = 0x517cc1b727220a95; // more golden ratio mixing
+const SEED_MIX_OBS: u64  = 0xa5a5a5a5a5a5;     // obs RNG independence from process
+const SEED_MIX_UNIFORM: u64 = 0xd4a5_b1ce;      // uniform draws RNG
+
 fn run_simulate(args: &[String]) {
     let mut ir_path:     Option<String> = None;
     let mut backend    = "gillespie".to_string();
@@ -592,10 +602,10 @@ fn run_simulate(args: &[String]) {
             } else if total_runs == 1 {
                 seed
             } else {
-                seed ^ ((draw_idx as u64).wrapping_mul(0x9e3779b97f4a7c15))
-                     ^ ((rep as u64).wrapping_mul(0x517cc1b727220a95))
+                seed ^ ((draw_idx as u64).wrapping_mul(SEED_MIX_DRAW))
+                     ^ ((rep as u64).wrapping_mul(SEED_MIX_REP))
             };
-            let obs_seed = process_seed ^ 0xa5a5a5a5a5a5;
+            let obs_seed = process_seed ^ SEED_MIX_OBS;
 
             // Merge draw overrides with CLI --param overrides
             let mut combined_overrides = base_sim_run.overrides.clone();
@@ -940,7 +950,7 @@ fn generate_uniform_draws(
     seed: u64,
 ) -> Result<Vec<HashMap<String, f64>>, String> {
     let (model, _) = util::load_model(ir_path)?;
-    let mut rng = sim::rng::StatefulRng::new(seed ^ 0xd4a5_b1ce_u64);
+    let mut rng = sim::rng::StatefulRng::new(seed ^ SEED_MIX_UNIFORM);
 
     let mut draws = Vec::with_capacity(n);
     for _ in 0..n {

@@ -389,14 +389,8 @@ pub fn cmd_fit_run_v2(args: &[String]) {
     });
     eprintln!("  output:   {}", fit_dir.display());
 
-    // Seed: CLI > random
-    let seed = if has_seed_flag {
-        seed
-    } else {
-        use std::time::SystemTime;
-        let dur = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap();
-        dur.as_nanos() as u64 % 1_000_000
-    };
+    // Seed: CLI --seed > default (1). Deterministic by default for reproducibility.
+    let seed = if has_seed_flag { seed } else { 1 };
 
     // Execute stages: sweep_point × stage
     for (pt_idx, sweep_point) in sweep_points.iter().enumerate() {
@@ -436,7 +430,10 @@ pub fn cmd_fit_run_v2(args: &[String]) {
         let config_hash = provenance::compute_config_hash_v2(
             &model_json, &sweep_config.data.observations, &sweep_config.estimate,
             &fixed_resolved, stage_name, stage, seed,
-        );
+        ).unwrap_or_else(|e| {
+            eprintln!("error: {}", e);
+            std::process::exit(1);
+        });
         if !_force {
             match provenance::check_config_hash(&stage_dir.to_string_lossy(), &config_hash) {
                 provenance::ConfigCacheStatus::Match => {
