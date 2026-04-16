@@ -10,6 +10,10 @@ type compile_detail = {
 let compile_detail_result ?(name = "model") ?(filename = "<input>") (src : string)
     : (compile_detail, string) result =
   let source = Source_cache.of_string ~filename src in
+  (* Drain any stale lex-phase warnings from a previous compilation in the
+     same process.  pending_warnings is a mutable global ref; clearing it
+     here ensures we never replay warnings from a prior run. *)
+  Lexer.pending_warnings := [];
   try
     let lexbuf = Lexing.from_string src in
     Lexing.set_filename lexbuf filename;
