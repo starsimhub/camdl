@@ -1218,6 +1218,86 @@ mod tests {
         assert_eq!(src, "flat (default)");
         assert!(matches!(p, Prior::Flat));
     }
+
+    /// Cover every distribution supported in fit.toml `prior = ...` strings.
+    /// Regression guard for the asymmetry bug where fit.toml could only override
+    /// 4 of the 7 IR distributions.
+    #[test]
+    fn parse_prior_covers_all_distributions() {
+        // Flat — no args
+        assert!(matches!(parse_prior("flat"), Some(Prior::Flat)));
+
+        // Two-arg distributions
+        match parse_prior("uniform(0.1, 2.0)") {
+            Some(Prior::Uniform { lower, upper }) => {
+                assert_eq!(lower, 0.1); assert_eq!(upper, 2.0);
+            }
+            other => panic!("uniform: {:?}", other),
+        }
+        match parse_prior("normal(0.3, 0.1)") {
+            Some(Prior::Normal { mean, sd }) => {
+                assert_eq!(mean, 0.3); assert_eq!(sd, 0.1);
+            }
+            other => panic!("normal: {:?}", other),
+        }
+        // Both legacy compact and DSL names resolve to TransformedNormal.
+        for name in ["lognormal", "log_normal"] {
+            let s = format!("{}(-1.0, 0.5)", name);
+            match parse_prior(&s) {
+                Some(Prior::TransformedNormal { mean, sd }) => {
+                    assert_eq!(mean, -1.0); assert_eq!(sd, 0.5);
+                }
+                other => panic!("{}: {:?}", name, other),
+            }
+        }
+        match parse_prior("beta(2.0, 5.0)") {
+            Some(Prior::Beta { alpha, beta }) => {
+                assert_eq!(alpha, 2.0); assert_eq!(beta, 5.0);
+            }
+            other => panic!("beta: {:?}", other),
+        }
+        match parse_prior("gamma(3.0, 0.5)") {
+            Some(Prior::Gamma { shape, rate }) => {
+                assert_eq!(shape, 3.0); assert_eq!(rate, 0.5);
+            }
+            other => panic!("gamma: {:?}", other),
+        }
+
+        // One-arg distributions
+        for name in ["half_normal", "halfnormal"] {
+            let s = format!("{}(0.3)", name);
+            match parse_prior(&s) {
+                Some(Prior::HalfNormal { sigma }) => assert_eq!(sigma, 0.3),
+                other => panic!("{}: {:?}", name, other),
+            }
+        }
+        match parse_prior("exponential(2.5)") {
+            Some(Prior::Exponential { rate }) => assert_eq!(rate, 2.5),
+            other => panic!("exponential: {:?}", other),
+        }
+
+        // log(x) eval in argument — documented in the docstring.
+        match parse_prior("log_normal(log(50), 0.4)") {
+            Some(Prior::TransformedNormal { mean, sd }) => {
+                assert!((mean - 50f64.ln()).abs() < 1e-12);
+                assert_eq!(sd, 0.4);
+            }
+            other => panic!("log_normal with log(): {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_prior_rejects_invalid_input() {
+        // Wrong arg count
+        assert!(parse_prior("normal(0.3)").is_none(), "normal needs 2 args");
+        assert!(parse_prior("half_normal(0.3, 1.0)").is_none(), "half_normal takes 1 arg");
+        assert!(parse_prior("exponential()").is_none(), "exponential needs 1 arg");
+        // Unknown distribution
+        assert!(parse_prior("weibull(2.0, 1.0)").is_none());
+        // Malformed syntax
+        assert!(parse_prior("normal 0.3, 0.1").is_none(), "missing parens");
+        assert!(parse_prior("normal(abc, 0.1)").is_none(), "non-numeric arg");
+    }
 }
 
 /// Compute input hash for provenance (shared by refine and validate).

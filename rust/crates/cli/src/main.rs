@@ -1668,6 +1668,165 @@ mod tests {
         assert!(err.contains("~ prior(...)"), "error should hint at prior syntax: {}", err);
     }
 
+    /// Write a minimal IR JSON string to a tempfile and return its path.
+    /// Lets tests exercise the prior-draws code paths without spinning up
+    /// the compiler or committing hand-crafted fixtures.
+    fn write_ir_fixture(json: &str) -> (tempfile::TempDir, String) {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("model.ir.json");
+        std::fs::write(&path, json).unwrap();
+        (dir, path.to_string_lossy().into_owned())
+    }
+
+    /// Minimal IR with a single scalar parameter carrying the supplied
+    /// bounds and prior JSON. Used by the bounds-rejection and scenario
+    /// tests that need tight control over the IR.
+    fn ir_with_prior(name: &str, bounds: &str, prior_json: &str, extras: &str) -> String {
+        format!(r#"{{
+            "name": "t", "version": "0.3", "time_unit": "days",
+            "description": null, "origin": null,
+            "compartments": [{{ "name": "S", "kind": "integer" }}],
+            "transitions": [], "ode_equations": [], "time_functions": [],
+            "tables": [], "interventions": [], "observations": [],
+            "parameters": [
+              {{ "name": "{name}", "value": null, "bounds": {bounds},
+                 "prior": {prior_json}, "transform": null, "initial_value": null,
+                 "param_kind": "rate", "param_dim": null }}
+              {extras}
+            ],
+            "parameter_groups": [],
+            "initial_conditions": {{ "explicit": {{ "S": 1.0 }} }},
+            "data_contract": null,
+            "output": {{ "times": {{ "at_times": [0.0, 1.0] }},
+                         "format": "tsv", "trajectory": true, "observations": false }},
+            "simulation": {{ "t_start": 0.0, "t_end": 1.0, "time_semantics": "continuous",
+                             "dt": null, "rng_seed": null }},
+            "presets": [], "model_structure": null, "balance": null
+        }}"#)
+    }
+
+    #[test]
+    fn prior_draws_well_calibrated_no_rejections() {
+        // log_normal(mu=-1, sigma=0.5) centered at median ~0.37 with tails
+        // well inside [0.01, 2.0]. Should produce draws with 0 rejections.
+        let ir = ir_with_prior("beta", "[0.01, 2.0]",
+            r#"{ "log_normal": { "mu": -1.0, "sigma": 0.5 } }"#, "");
+        let (_dir, path) = write_ir_fixture(&ir);
+        let draws = generate_prior_draws_from_ir(&path, 100, 42, &[]).unwrap();
+        assert_eq!(draws.len(), 100);
+        for row in &draws {
+            let v = row["beta"];
+            assert!(v >= 0.01 && v <= 2.0, "{} out of bounds", v);
+        }
+    }
+
+    #[test]
+    fn prior_draws_pathological_mismatch_errors() {
+        // log_normal(mu=5, sigma=0.1) is concentrated near exp(5) ≈ 148,
+        // far above the bound [0.01, 2.0]. Rejection sampling hits the
+        // 256-attempt cap and errors.
+        let ir = ir_with_prior("beta", "[0.01, 2.0]",
+            r#"{ "log_normal": { "mu": 5.0, "sigma": 0.1 } }"#, "");
+        let (_dir, path) = write_ir_fixture(&ir);
+        let err = generate_prior_draws_from_ir(&path, 1, 42, &[]).unwrap_err();
+        assert!(err.contains("beta"), "error should name 'beta': {}", err);
+        assert!(err.contains("[0.01, 2]") || err.contains("[0.01, 2.0]"),
+            "error should cite bounds: {}", err);
+        assert!(err.contains("256 attempts"), "error should cite attempt cap: {}", err);
+        assert!(err.contains("outside the parameter bounds"),
+            "error should explain the mismatch: {}", err);
+    }
+
+    #[test]
+    fn prior_draws_respect_bounds_after_truncation() {
+        // Moderate mismatch: normal(0, 1) with bounds [0, 1] rejects ~half.
+        // Every accepted sample must still be in bounds.
+        let ir = ir_with_prior("beta", "[0.0, 1.0]",
+            r#"{ "normal": { "mean": 0.0, "sd": 1.0 } }"#, "");
+        let (_dir, path) = write_ir_fixture(&ir);
+        let draws = generate_prior_draws_from_ir(&path, 50, 42, &[]).unwrap();
+        for row in &draws {
+            let v = row["beta"];
+            assert!(v >= 0.0 && v <= 1.0,
+                "truncation must keep all draws in bounds, got {}", v);
+        }
+    }
+
+    #[test]
+    fn prior_draws_scenario_pins_missing_param() {
+        // beta has a prior; N0 has no prior and no default — but a scenario
+        // called 'baseline' sets N0. With --scenario baseline, the draws
+        // should succeed (sampled beta + fixed N0).
+        let json = r#"{
+            "name": "t", "version": "0.3", "time_unit": "days",
+            "description": null, "origin": null,
+            "compartments": [{ "name": "S", "kind": "integer" }],
+            "transitions": [], "ode_equations": [], "time_functions": [],
+            "tables": [], "interventions": [], "observations": [],
+            "parameters": [
+              { "name": "beta", "value": null, "bounds": [0.01, 2.0],
+                "prior": { "log_normal": { "mu": -1.0, "sigma": 0.3 } },
+                "transform": null, "initial_value": null,
+                "param_kind": "rate", "param_dim": null },
+              { "name": "N0", "value": null, "bounds": [100.0, 10000.0],
+                "prior": null, "transform": null, "initial_value": null,
+                "param_kind": "count", "param_dim": null }
+            ],
+            "parameter_groups": [],
+            "initial_conditions": { "explicit": { "S": 1.0 } },
+            "data_contract": null,
+            "output": { "times": { "at_times": [0.0, 1.0] },
+                        "format": "tsv", "trajectory": true, "observations": false },
+            "simulation": { "t_start": 0.0, "t_end": 1.0,
+                            "time_semantics": "continuous", "dt": null, "rng_seed": null },
+            "scenarios": [
+              { "name": "baseline", "label": "default",
+                "params": { "N0": 1000.0 },
+                "scale": {}, "enable": [], "disable": [], "compose": [] }
+            ],
+            "model_structure": null, "balance": null
+        }"#;
+        let (_dir, path) = write_ir_fixture(json);
+
+        // Without scenario: errors naming N0
+        let err = generate_prior_draws_from_ir(&path, 3, 42, &[]).unwrap_err();
+        assert!(err.contains("N0"), "should name 'N0': {}", err);
+        assert!(err.contains("--scenario"), "hint should mention --scenario: {}", err);
+
+        // With scenario: succeeds, N0 is pinned to 1000
+        let draws = generate_prior_draws_from_ir(&path, 5, 42, &["baseline"]).unwrap();
+        assert_eq!(draws.len(), 5);
+        for row in &draws {
+            assert_eq!(row["N0"], 1000.0, "scenario should pin N0");
+            let b = row["beta"];
+            assert!(b >= 0.01 && b <= 2.0, "beta out of bounds: {}", b);
+        }
+    }
+
+    #[test]
+    fn prior_draws_unknown_scenario_errors() {
+        let ir = ir_with_prior("beta", "[0.01, 2.0]",
+            r#"{ "log_normal": { "mu": -1.0, "sigma": 0.5 } }"#, "");
+        let (_dir, path) = write_ir_fixture(&ir);
+        let err = generate_prior_draws_from_ir(&path, 3, 42, &["nonesuch"]).unwrap_err();
+        assert!(err.contains("scenario 'nonesuch' not found"),
+            "error should name the bad scenario: {}", err);
+    }
+
+    #[test]
+    fn prior_draws_different_seeds_produce_different_draws() {
+        let ir = ir_with_prior("beta", "[0.01, 10.0]",
+            r#"{ "log_normal": { "mu": 0.0, "sigma": 1.0 } }"#, "");
+        let (_dir, path) = write_ir_fixture(&ir);
+        let a = generate_prior_draws_from_ir(&path, 5, 42, &[]).unwrap();
+        let b = generate_prior_draws_from_ir(&path, 5, 137, &[]).unwrap();
+        // At least one row must differ — the probability of two independent
+        // 5-draw sequences from a continuous prior being bit-identical is
+        // vanishingly small (and would indicate a seeding bug).
+        assert!(a.iter().zip(b.iter()).any(|(x, y)| x["beta"] != y["beta"]),
+            "different seeds should produce different draws");
+    }
+
     #[test]
     fn seed_derivation_deterministic() {
         let seed = 42u64;
