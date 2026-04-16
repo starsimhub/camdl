@@ -1947,7 +1947,9 @@ if I use a wider prior on beta?" without editing the model file.
 
 **When are priors required?** Bayesian sampling methods (PGAS, PMMH) use the
 prior density in their acceptance ratios. MLE methods (IF2) ignore priors.
-For `--draws prior`, every parameter needs one.
+For `--draws prior`, every parameter must have *either* a prior (to sample
+from) *or* a concrete value — either declared in the IR or pinned by a
+selected `--scenario`.
 
 **Supported distributions**: `uniform`, `normal`, `log_normal`, `half_normal`,
 `beta`, `gamma`, `exponential`. See the language spec for parameterization

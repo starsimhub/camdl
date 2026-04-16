@@ -2240,7 +2240,8 @@ parameters {
     beta  : rate in [0.01, 2.0] ~ log_normal(mu = -1.0, sigma = 0.5)
     gamma : rate in [0.05, 1.0] ~ half_normal(sigma = 0.3)
     rho   : probability in [0.001, 1.0] ~ beta(alpha = 2.0, beta = 5.0)
-    N0    : count in [100, 1_000_000]  # no prior — fixed in inference
+    N0    : count in [100, 1_000_000]  # no prior — must be supplied via
+                                       # --params, --scenario, or [fixed] in fit.toml
 }
 ```
 

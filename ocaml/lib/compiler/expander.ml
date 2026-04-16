@@ -1465,17 +1465,14 @@ let expand_parameters ctx =
           Ir.param_dim     = pdim;
         }
       ) vals
-    | PIndexed { pname; pprior; _ } ->
-      let prior = Option.map (resolve_prior_spec ctx ~pname) pprior in
-      [{ Ir.name          = pname;
-         Ir.value         = None;
-         Ir.bounds        = None;
-         Ir.prior         = prior;
-         Ir.transform     = None;
-         Ir.initial_value = None;
-         Ir.param_kind    = None;
-         Ir.param_dim     = None;
-       }]
+    | PIndexed { pname; pdims; _ } ->
+      (* The parser only produces single-dim indexed params (pdims = [dim]).
+         Multi-dim (pdims with len != 1) would be an internal parser/AST
+         mismatch, not user-reachable. *)
+      failwith (Printf.sprintf
+        "internal: indexed parameter '%s' has %d dimensions; only single-dim \
+         is supported (compiler bug — parser/expander out of sync)"
+        pname (List.length pdims))
   ) ctx.param_decls in
   (* Typed const let bindings → fixed-value parameters *)
   let from_lets = List.filter_map (fun (lb : let_binding) ->
