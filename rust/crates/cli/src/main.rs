@@ -213,6 +213,7 @@ fn run_simulate(args: &[String]) {
     let mut obs_only: Option<String> = None;
     let mut replicates: usize = 1;
     let mut draws_path: Option<String> = None;
+    let mut n_draws_arg: Option<usize> = None;
 
     // Collect --param-vec PREFIX=FILE entries for deferred validation after model load
     let mut set_vec_entries: Vec<(String, String)> = Vec::new();
@@ -259,6 +260,7 @@ fn run_simulate(args: &[String]) {
             "--obs-only" => { i += 1; obs_only = Some(args[i].clone()); }
             "--replicates" => { i += 1; replicates = args[i].parse().unwrap_or_else(|_| { eprintln!("error: --replicates needs a positive integer"); std::process::exit(1); }); }
             "--draws" => { i += 1; draws_path = Some(args[i].clone()); }
+            "-n" | "--n-draws" => { i += 1; n_draws_arg = Some(args[i].parse().unwrap_or_else(|_| { eprintln!("error: -n needs a positive integer"); std::process::exit(1); })); }
             s if s.starts_with("--") => { eprintln!("unknown flag: {}", s); usage(); }
             path => { ir_path = Some(path.to_string()); }
         }
@@ -392,11 +394,23 @@ fn run_simulate(args: &[String]) {
     let mut traj_header_written = false;
 
     // ── Load draws if --draws is specified ─────────────────────────────────
-    let draws: Vec<HashMap<String, f64>> = if let Some(ref path) = draws_path {
-        load_draws_tsv(path).unwrap_or_else(|e| {
-            eprintln!("error loading draws: {}", e);
-            std::process::exit(1);
-        })
+    let draws: Vec<HashMap<String, f64>> = if let Some(ref source) = draws_path {
+        if source == "uniform" {
+            let n = n_draws_arg.unwrap_or_else(|| {
+                eprintln!("error: --draws uniform requires -n N");
+                std::process::exit(1);
+            });
+            generate_uniform_draws(&ir_path, n, seed).unwrap_or_else(|e| {
+                eprintln!("error: {}", e);
+                std::process::exit(1);
+            })
+        } else {
+            // File path
+            load_draws_tsv(source).unwrap_or_else(|e| {
+                eprintln!("error loading draws: {}", e);
+                std::process::exit(1);
+            })
+        }
     } else {
         // No draws — single point (parameters come from --params / --param)
         vec![HashMap::new()]
@@ -768,6 +782,40 @@ fn read_comp(snap: &sim::Snapshot, loc: &CompLoc) -> f64 {
         CompLoc::Int(i) => snap.int_state.counts[*i] as f64,
         CompLoc::Real(i) => snap.real_state.values[*i],
     }
+}
+
+/// Generate N uniform random draws from model parameter bounds.
+fn generate_uniform_draws(
+    ir_path: &str,
+    n: usize,
+    seed: u64,
+) -> Result<Vec<HashMap<String, f64>>, String> {
+    let (model, _) = util::load_model(ir_path)?;
+    let mut rng = sim::rng::StatefulRng::new(seed ^ 0xd4a5_b1ce_u64);
+
+    let mut draws = Vec::with_capacity(n);
+    for _ in 0..n {
+        let mut row = HashMap::new();
+        for p in &model.parameters {
+            let val = if let Some((lo, hi)) = p.bounds {
+                lo + (hi - lo) * rng.uniform()
+            } else if let Some(v) = p.value {
+                // No bounds — use the default value (constant)
+                v
+            } else {
+                return Err(format!(
+                    "parameter '{}' has no bounds and no default value.\n  \
+                     --draws uniform requires bounds on all parameters.",
+                    p.name
+                ));
+            };
+            row.insert(p.name.clone(), val);
+        }
+        draws.push(row);
+    }
+    eprintln!("generated {} uniform draws from parameter bounds ({} params)",
+        n, model.parameters.len());
+    Ok(draws)
 }
 
 /// Parse a seeds spec: "1:100" (range), "42" (single), "1,2,3,42" (list).
