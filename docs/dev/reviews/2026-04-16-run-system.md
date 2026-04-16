@@ -1,11 +1,11 @@
 ---
-status: open
+status: complete
 date: 2026-04-16
 reviewer: external
 items_total: 25
-items_done: 0
-items_deferred: 0
-note: "Review of the new run system: config_v2.rs, fit_mod.rs, provenance.rs, cli_main.rs, pgas.rs, pmmh.rs. 21 commits in one session. Mix of critical bugs, design issues, and UX polish."
+items_done: 23
+items_deferred: 2
+note: "All critical and should-fix items resolved. Deferred: #9 to_legacy_toml stage name mapping (known limitation, needs Stage enum extension), #19 PGAS-specific fields in legacy bridge (needs runner refactor). All 25 items addressed."
 ---
 
 ## Run System Review
