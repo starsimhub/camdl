@@ -658,3 +658,240 @@ pub fn write_traj_tsv(path: &str, model: &ir::Model, traj: &Trajectory, emit_flo
     }
     Ok(())
 }
+
+// ─── Tests ──────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Helper: path to the sir_vaccination golden IR (has 4 params:
+    /// beta=0.3, gamma=0.1, vaccine_coverage=0.5, rho=10.0).
+    /// Resolves relative to the repo root (tests run from rust/).
+    fn sir_model() -> String {
+        // Resolve relative to the crate manifest dir (rust/crates/cli/)
+        let manifest = env!("CARGO_MANIFEST_DIR");
+        let path = std::path::PathBuf::from(manifest)
+            .join("../../../ir/golden/sir_vaccination.ir.json");
+        let path = path.canonicalize()
+            .unwrap_or_else(|_| panic!(
+                "cannot find sir_vaccination.ir.json (tried {})", path.display()));
+        path.to_str().unwrap().to_string()
+    }
+
+    fn write_toml(dir: &std::path::Path, name: &str, content: &str) -> String {
+        let path = dir.join(name);
+        std::fs::write(&path, content).unwrap();
+        path.to_str().unwrap().to_string()
+    }
+
+    fn base_sim_run(ir_path: &str) -> SimRun {
+        SimRun {
+            ir_path: ir_path.to_string(),
+            backend: "chain_binomial".to_string(),
+            dt: 1.0,
+            seed: 1,
+            ..Default::default()
+        }
+    }
+
+    /// Extract final param values from a successful simulation.
+    fn resolved_params(run: &SimRun) -> Result<HashMap<String, f64>, String> {
+        let (_, model) = run_simulation(run)?;
+        let compiled = sim::CompiledModel::new(model.clone())
+            .map_err(|e| format!("{:?}", e))?;
+        Ok(model.parameters.iter().map(|p| {
+            let idx = compiled.param_index[p.name.as_str()];
+            (p.name.clone(), compiled.default_params[idx])
+        }).collect())
+    }
+
+    // ── Params file loading ─────────────────────────────────────────────────
+
+    #[test]
+    fn single_params_file_sets_values() {
+        let dir = tempfile::tempdir().unwrap();
+        let pf = write_toml(dir.path(), "params.toml",
+            "beta = 0.5\ngamma = 0.2\nvaccine_coverage = 0.8\nrho = 5.0\n");
+        let run = SimRun { params_files: vec![pf], ..base_sim_run(&sir_model()) };
+        let params = resolved_params(&run).unwrap();
+        assert!((params["beta"] - 0.5).abs() < 1e-10);
+        assert!((params["gamma"] - 0.2).abs() < 1e-10);
+        assert!((params["rho"] - 5.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn unknown_param_in_file_errors() {
+        let dir = tempfile::tempdir().unwrap();
+        let pf = write_toml(dir.path(), "params.toml", "betta = 0.5\n");
+        let run = SimRun { params_files: vec![pf], ..base_sim_run(&sir_model()) };
+        let err = run_simulation(&run).unwrap_err();
+        assert!(err.contains("unknown parameter 'betta'"));
+        assert!(err.contains("Available parameters"));
+    }
+
+    // ── Stacked params files (later overrides earlier) ──────────────────────
+
+    #[test]
+    fn stacked_params_later_overrides_earlier() {
+        let dir = tempfile::tempdir().unwrap();
+        let pf1 = write_toml(dir.path(), "base.toml",
+            "beta = 0.3\ngamma = 0.1\nvaccine_coverage = 0.5\nrho = 10.0\n");
+        let pf2 = write_toml(dir.path(), "override.toml",
+            "beta = 0.7\ngamma = 0.2\n");
+        let run = SimRun {
+            params_files: vec![pf1, pf2],
+            ..base_sim_run(&sir_model())
+        };
+        let params = resolved_params(&run).unwrap();
+        assert!((params["beta"] - 0.7).abs() < 1e-10, "beta should be 0.7, got {}", params["beta"]);
+        assert!((params["gamma"] - 0.2).abs() < 1e-10, "gamma should be 0.2");
+        assert!((params["rho"] - 10.0).abs() < 1e-10);
+        assert!((params["vaccine_coverage"] - 0.5).abs() < 1e-10);
+    }
+
+    #[test]
+    fn three_stacked_params_last_wins() {
+        let dir = tempfile::tempdir().unwrap();
+        let pf1 = write_toml(dir.path(), "a.toml",
+            "beta = 0.1\ngamma = 0.1\nvaccine_coverage = 0.5\nrho = 10.0\n");
+        let pf2 = write_toml(dir.path(), "b.toml", "beta = 0.2\n");
+        let pf3 = write_toml(dir.path(), "c.toml", "beta = 0.9\n");
+        let run = SimRun {
+            params_files: vec![pf1, pf2, pf3],
+            ..base_sim_run(&sir_model())
+        };
+        let params = resolved_params(&run).unwrap();
+        assert!((params["beta"] - 0.9).abs() < 1e-10, "third file should win");
+    }
+
+    #[test]
+    fn unknown_param_in_second_file_errors() {
+        let dir = tempfile::tempdir().unwrap();
+        let pf1 = write_toml(dir.path(), "base.toml",
+            "beta = 0.3\ngamma = 0.1\nvaccine_coverage = 0.5\nrho = 10.0\n");
+        let pf2 = write_toml(dir.path(), "bad.toml", "typo_param = 0.5\n");
+        let run = SimRun {
+            params_files: vec![pf1, pf2],
+            ..base_sim_run(&sir_model())
+        };
+        let err = run_simulation(&run).unwrap_err();
+        assert!(err.contains("unknown parameter 'typo_param'"));
+    }
+
+    // ── --param CLI overrides ───────────────────────────────────────────────
+
+    #[test]
+    fn cli_param_overrides_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let pf = write_toml(dir.path(), "params.toml",
+            "beta = 0.3\ngamma = 0.1\nvaccine_coverage = 0.5\nrho = 10.0\n");
+        let run = SimRun {
+            params_files: vec![pf],
+            overrides: [("beta".to_string(), 0.99)].into(),
+            ..base_sim_run(&sir_model())
+        };
+        let params = resolved_params(&run).unwrap();
+        assert!((params["beta"] - 0.99).abs() < 1e-10, "CLI --param should override file");
+        assert!((params["gamma"] - 0.1).abs() < 1e-10, "gamma unchanged");
+    }
+
+    #[test]
+    fn cli_param_overrides_stacked_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let pf1 = write_toml(dir.path(), "base.toml",
+            "beta = 0.3\ngamma = 0.1\nvaccine_coverage = 0.5\nrho = 10.0\n");
+        let pf2 = write_toml(dir.path(), "override.toml", "beta = 0.7\n");
+        let run = SimRun {
+            params_files: vec![pf1, pf2],
+            overrides: [("beta".to_string(), 1.5)].into(),
+            ..base_sim_run(&sir_model())
+        };
+        let params = resolved_params(&run).unwrap();
+        assert!((params["beta"] - 1.5).abs() < 1e-10, "CLI --param beats stacked files");
+    }
+
+    #[test]
+    fn unknown_cli_param_errors() {
+        let run = SimRun {
+            overrides: [("nonexistent".to_string(), 0.5)].into(),
+            ..base_sim_run(&sir_model())
+        };
+        let err = run_simulation(&run).unwrap_err();
+        assert!(err.contains("unknown parameter 'nonexistent'"));
+    }
+
+    // ── Model defaults (no params file, no overrides) ───────────────────────
+
+    #[test]
+    fn model_defaults_used_when_no_params() {
+        let run = base_sim_run(&sir_model());
+        let params = resolved_params(&run).unwrap();
+        assert!((params["beta"] - 0.3).abs() < 1e-10);
+        assert!((params["gamma"] - 0.1).abs() < 1e-10);
+        assert!((params["vaccine_coverage"] - 0.5).abs() < 1e-10);
+        assert!((params["rho"] - 10.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn cli_param_without_file_overrides_model_default() {
+        let run = SimRun {
+            overrides: [("beta".to_string(), 2.0)].into(),
+            ..base_sim_run(&sir_model())
+        };
+        let params = resolved_params(&run).unwrap();
+        assert!((params["beta"] - 2.0).abs() < 1e-10);
+        assert!((params["gamma"] - 0.1).abs() < 1e-10);
+    }
+
+    // ── Partial params files ────────────────────────────────────────────────
+
+    #[test]
+    fn partial_params_file_leaves_others_at_defaults() {
+        let dir = tempfile::tempdir().unwrap();
+        let pf = write_toml(dir.path(), "partial.toml", "beta = 0.99\n");
+        let run = SimRun {
+            params_files: vec![pf],
+            ..base_sim_run(&sir_model())
+        };
+        let params = resolved_params(&run).unwrap();
+        assert!((params["beta"] - 0.99).abs() < 1e-10);
+        assert!((params["gamma"] - 0.1).abs() < 1e-10);
+        assert!((params["rho"] - 10.0).abs() < 1e-10);
+    }
+
+    // ── Edge cases ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn same_value_override_is_noop() {
+        let dir = tempfile::tempdir().unwrap();
+        let pf = write_toml(dir.path(), "params.toml",
+            "beta = 0.3\ngamma = 0.1\nvaccine_coverage = 0.5\nrho = 10.0\n");
+        let run = SimRun {
+            params_files: vec![pf],
+            overrides: [("beta".to_string(), 0.3)].into(),
+            ..base_sim_run(&sir_model())
+        };
+        let params = resolved_params(&run).unwrap();
+        assert!((params["beta"] - 0.3).abs() < 1e-10);
+    }
+
+    #[test]
+    fn load_params_toml_basic() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_toml(dir.path(), "test.toml", "x = 1.5\ny = 2\n");
+        let vals = load_params_toml(&path).unwrap();
+        assert!((vals["x"] - 1.5).abs() < 1e-10);
+        assert!((vals["y"] - 2.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn load_params_toml_handles_comments() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_toml(dir.path(), "test.toml",
+            "# This is a comment\nx = 1.5\n# Another comment\ny = 2.0\n");
+        let vals = load_params_toml(&path).unwrap();
+        assert_eq!(vals.len(), 2);
+        assert!((vals["x"] - 1.5).abs() < 1e-10);
+    }
+}
