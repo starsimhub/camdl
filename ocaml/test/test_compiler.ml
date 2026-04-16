@@ -1429,6 +1429,119 @@ let test_e235_half_normal_zero_sigma () =
   compile_expect_error_code ~code:"E235" ~contains:"sigma"
     (src_with_prior "half_normal(sigma = 0.0)")
 
+(* ── Additional distributions: parse + value round-trip ────────────────── *)
+
+let test_prior_uniform () =
+  let src = {|
+    time_unit = 'days
+    parameters {
+      beta : rate in [0.0, 10.0] ~ uniform(lower = 0.1, upper = 2.0)
+    }
+    compartments { S }
+    init { S = 1 }
+    simulate { from = 0 'days  to = 1 'days }
+  |} in
+  let m = compile_expect_ok src in
+  match (find_param m "beta").prior with
+  | Some (Ir.Uniform { lower; upper }) ->
+    Alcotest.(check (float 1e-10)) "lower" 0.1 lower;
+    Alcotest.(check (float 1e-10)) "upper" 2.0 upper
+  | _ -> Alcotest.fail "expected Uniform prior"
+
+let test_prior_normal () =
+  let src = {|
+    time_unit = 'days
+    parameters {
+      beta : rate in [0.0, 10.0] ~ normal(mu = 0.3, sigma = 0.1)
+    }
+    compartments { S }
+    init { S = 1 }
+    simulate { from = 0 'days  to = 1 'days }
+  |} in
+  let m = compile_expect_ok src in
+  match (find_param m "beta").prior with
+  | Some (Ir.Normal_p { mean; sd }) ->
+    Alcotest.(check (float 1e-10)) "mean" 0.3 mean;
+    Alcotest.(check (float 1e-10)) "sd" 0.1 sd
+  | _ -> Alcotest.fail "expected Normal prior"
+
+let test_prior_exponential () =
+  let src = {|
+    time_unit = 'days
+    parameters {
+      lambda : rate in [0.0, 100.0] ~ exponential(rate = 2.5)
+    }
+    compartments { S }
+    init { S = 1 }
+    simulate { from = 0 'days  to = 1 'days }
+  |} in
+  let m = compile_expect_ok src in
+  match (find_param m "lambda").prior with
+  | Some (Ir.Exponential { rate }) ->
+    Alcotest.(check (float 1e-10)) "rate" 2.5 rate
+  | _ -> Alcotest.fail "expected Exponential prior"
+
+(* ── Compile-time arithmetic in prior arguments ────────────────────────── *)
+
+let test_prior_arg_arithmetic () =
+  (* Users often encode priors via arithmetic of literals — e.g. when a
+     review paper reports a 95% CI that translates to mu ± 1.96*sigma,
+     or when combining multiple constants. The const-evaluator should
+     handle +, -, *, /, ^ on literals transparently. *)
+  let src = {|
+    time_unit = 'days
+    parameters {
+      beta : rate in [0.01, 10.0] ~ log_normal(mu = -1.0 * 2.0 + 0.5, sigma = 1.0 / 4.0)
+    }
+    compartments { S }
+    init { S = 1 }
+    simulate { from = 0 'days  to = 1 'days }
+  |} in
+  let m = compile_expect_ok src in
+  match (find_param m "beta").prior with
+  | Some (Ir.LogNormal { mu; sigma }) ->
+    Alcotest.(check (float 1e-12)) "mu = -1.5" (-1.5) mu;
+    Alcotest.(check (float 1e-12)) "sigma = 0.25" 0.25 sigma
+  | _ -> Alcotest.fail "expected LogNormal prior"
+
+let test_prior_arg_log_function () =
+  (* `mu = log(0.3)` is the canonical way to encode a log_normal with
+     a named median. Regression test for the EFuncCall const-eval fix. *)
+  let src = {|
+    time_unit = 'days
+    parameters {
+      beta : rate in [0.01, 10.0] ~ log_normal(mu = log(0.3), sigma = 0.5)
+    }
+    compartments { S }
+    init { S = 1 }
+    simulate { from = 0 'days  to = 1 'days }
+  |} in
+  let m = compile_expect_ok src in
+  match (find_param m "beta").prior with
+  | Some (Ir.LogNormal { mu; sigma }) ->
+    Alcotest.(check (float 1e-12)) "mu = log(0.3)" (log 0.3) mu;
+    Alcotest.(check (float 1e-12)) "sigma" 0.5 sigma
+  | _ -> Alcotest.fail "expected LogNormal prior"
+
+let test_prior_arg_exp_and_sqrt () =
+  (* Exercise exp() and sqrt() in const position — less common than log
+     but same path through is_const_expr/eval_const_expr. *)
+  let src = {|
+    time_unit = 'days
+    parameters {
+      beta : rate in [0.01, 10.0] ~ gamma(shape = sqrt(9.0), rate = exp(0.0))
+    }
+    compartments { S }
+    init { S = 1 }
+    simulate { from = 0 'days  to = 1 'days }
+  |} in
+  let m = compile_expect_ok src in
+  match (find_param m "beta").prior with
+  | Some (Ir.Gamma { shape; rate }) ->
+    Alcotest.(check (float 1e-12)) "shape = sqrt(9)" 3.0 shape;
+    Alcotest.(check (float 1e-12)) "rate = exp(0)" 1.0 rate
+  | _ -> Alcotest.fail "expected Gamma prior"
+
 let () =
   Alcotest.run "compiler" [
     "golden", [
@@ -1517,6 +1630,16 @@ let () =
       Alcotest.test_case "no prior clause → prior = None"                `Quick test_no_prior_is_none;
       Alcotest.test_case "indexed param shares prior across expansion"   `Quick test_indexed_param_shares_prior;
       Alcotest.test_case "E232 unknown distribution — carries param name" `Quick test_unknown_prior_errors;
+    ];
+    "prior_distributions", [
+      Alcotest.test_case "~ uniform(lower, upper) parses + round-trips"  `Quick test_prior_uniform;
+      Alcotest.test_case "~ normal(mu, sigma) parses + round-trips"      `Quick test_prior_normal;
+      Alcotest.test_case "~ exponential(rate) parses + round-trips"      `Quick test_prior_exponential;
+    ];
+    "prior_const_args", [
+      Alcotest.test_case "arithmetic of literals evaluates correctly"    `Quick test_prior_arg_arithmetic;
+      Alcotest.test_case "log(0.3) is a const arg"                       `Quick test_prior_arg_log_function;
+      Alcotest.test_case "exp() and sqrt() as const args"                `Quick test_prior_arg_exp_and_sqrt;
     ];
     "prior_validation", [
       Alcotest.test_case "E230 non-const prior arg"                      `Quick test_e230_non_const_arg;
