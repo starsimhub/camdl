@@ -31,6 +31,10 @@ fn usage() -> ! {
     eprintln!("  --param    NAME=VALUE    override a parameter value");
     eprintln!("  --param-vec PREFIX=FILE  override indexed params from a keyed TSV (name<TAB>value)");
     eprintln!("  --table    NAME=FILE     supply a runtime external() table from CSV/TSV/JSON");
+    eprintln!("  --obs      FILE          generate synthetic observations (wide-format TSV)");
+    eprintln!("  --obs-dir  DIR           generate one TSV per observation stream in DIR");
+    eprintln!("  --obs-only FILE|DIR      like --obs/--obs-dir but suppress trajectory output");
+    eprintln!("  --replicates N           run N independent simulations (adds replicate column)");
     std::process::exit(1);
 }
 
@@ -183,6 +187,10 @@ fn run_simulate(args: &[String]) {
     let mut adhoc_enable: Vec<String> = Vec::new();
     let mut adhoc_disable: Vec<String> = Vec::new();
     let mut output_path: Option<String> = None;
+    let mut obs_path: Option<String> = None;
+    let mut obs_dir: Option<String> = None;
+    let mut obs_only: Option<String> = None;
+    let mut replicates: usize = 1;
 
     // Collect --param-vec PREFIX=FILE entries for deferred validation after model load
     let mut set_vec_entries: Vec<(String, String)> = Vec::new();
@@ -223,6 +231,10 @@ fn run_simulate(args: &[String]) {
                 table_files.insert(k, v);
             }
             "--output" | "-o" => { i += 1; output_path = Some(args[i].clone()); }
+            "--obs"      => { i += 1; obs_path = Some(args[i].clone()); }
+            "--obs-dir"  => { i += 1; obs_dir = Some(args[i].clone()); }
+            "--obs-only" => { i += 1; obs_only = Some(args[i].clone()); }
+            "--replicates" => { i += 1; replicates = args[i].parse().unwrap_or_else(|_| { eprintln!("error: --replicates needs a positive integer"); std::process::exit(1); }); }
             s if s.starts_with("--") => { eprintln!("unknown flag: {}", s); usage(); }
             path => { ir_path = Some(path.to_string()); }
         }
@@ -230,6 +242,27 @@ fn run_simulate(args: &[String]) {
     }
 
     let ir_path = ir_path.unwrap_or_else(|| { eprintln!("missing IR file argument"); usage(); });
+
+    // --obs-only implies --obs or --obs-dir (infer from path: trailing / or existing dir → obs-dir)
+    if let Some(ref path) = obs_only {
+        if obs_path.is_some() || obs_dir.is_some() {
+            eprintln!("error: --obs-only cannot be combined with --obs or --obs-dir");
+            std::process::exit(1);
+        }
+        if path.ends_with('/') || std::path::Path::new(path).is_dir() {
+            obs_dir = Some(path.clone());
+        } else {
+            obs_path = Some(path.clone());
+        }
+    }
+    let suppress_trajectory = obs_only.is_some();
+
+    if replicates < 1 {
+        eprintln!("error: --replicates must be >= 1");
+        std::process::exit(1);
+    }
+
+    let want_obs = obs_path.is_some() || obs_dir.is_some();
 
     // Validate mutually exclusive σ flags
     if scenario_name.is_some() && (!adhoc_enable.is_empty() || !adhoc_disable.is_empty()) {
@@ -240,7 +273,7 @@ fn run_simulate(args: &[String]) {
         std::process::exit(1);
     }
 
-    let sim_run = util::SimRun {
+    let base_sim_run = util::SimRun {
         ir_path: ir_path.clone(),
         params_files,
         overrides,
@@ -251,62 +284,405 @@ fn run_simulate(args: &[String]) {
         adhoc_disable,
         backend,
         dt,
-        seed,
+        seed, // overridden per-replicate below
     };
 
-    let (traj, model) = util::run_simulation(&sim_run).unwrap_or_else(|e| {
-        eprintln!("error: {}", e);
-        std::process::exit(1);
-    });
-
-    // Write diagnostics.tsv unconditionally
-    if !traj.transition_diagnostics.is_empty() {
-        match write_diagnostics_tsv("diagnostics.tsv", &traj.transition_diagnostics) {
-            Ok(zero_count) => {
-                if zero_count > 0 {
-                    warn_zero_firings(&traj.transition_diagnostics);
-                }
+    // ── Pre-flight: validate obs model availability ─────────────────────────
+    // We need the model to check observation blocks, but we don't want to
+    // run simulation twice. Do a dry load to validate, then run in the loop.
+    if want_obs {
+        let (model_check, _) = util::load_model(&ir_path).unwrap_or_else(|e| {
+            eprintln!("error: {}", e);
+            std::process::exit(1);
+        });
+        if model_check.observations.is_empty() {
+            eprintln!("error: --obs/--obs-dir requested but model has no observations blocks");
+            std::process::exit(1);
+        }
+        // Validate schedule compatibility for --obs (single file)
+        if obs_path.is_some() && model_check.observations.len() > 1 {
+            let schedules: Vec<_> = model_check.observations.iter()
+                .map(|o| obs_schedule_times(&o.schedule, model_check.simulation.t_start, model_check.simulation.t_end))
+                .collect();
+            let all_same = schedules.windows(2).all(|w| w[0] == w[1]);
+            if !all_same {
+                let descs: Vec<String> = model_check.observations.iter()
+                    .map(|o| format!("{}: {:?}", o.name, o.schedule))
+                    .collect();
+                eprintln!("error: observation streams have different schedules ({}).\n\
+                           Use --obs-dir to produce one file per stream.",
+                    descs.join(", "));
+                std::process::exit(1);
             }
-            Err(e) => eprintln!("warning: could not write diagnostics.tsv: {}", e),
         }
     }
 
-    // TSV output
-    let int_names: Vec<&str> = model.compartments.iter()
-        .filter(|c| c.kind == ir::model::CompartmentKind::Integer)
-        .map(|c| c.name.as_str()).collect();
-    let real_names: Vec<&str> = model.compartments.iter()
-        .filter(|c| c.kind == ir::model::CompartmentKind::Real)
-        .map(|c| c.name.as_str()).collect();
-    let tr_names: Vec<&str> = model.transitions.iter().map(|t| t.name.as_str()).collect();
+    // ── Prepare obs-dir output directory ────────────────────────────────────
+    if let Some(ref dir) = obs_dir {
+        std::fs::create_dir_all(dir).unwrap_or_else(|e| {
+            eprintln!("error: cannot create obs directory '{}': {}", dir, e);
+            std::process::exit(1);
+        });
+    }
 
     use std::io::Write;
-    let mut out: Box<dyn Write> = match &output_path {
-        Some(path) => {
-            let f = std::fs::File::create(path)
-                .unwrap_or_else(|e| { eprintln!("cannot create {}: {}", path, e); std::process::exit(1); });
-            Box::new(std::io::BufWriter::new(f))
-        }
-        None => Box::new(std::io::BufWriter::new(std::io::stdout().lock())),
+
+    // ── Trajectory output setup ─────────────────────────────────────────────
+    let mut traj_out: Option<Box<dyn Write>> = if !suppress_trajectory {
+        Some(match &output_path {
+            Some(path) => {
+                let f = std::fs::File::create(path)
+                    .unwrap_or_else(|e| { eprintln!("cannot create {}: {}", path, e); std::process::exit(1); });
+                Box::new(std::io::BufWriter::new(f))
+            }
+            None => Box::new(std::io::BufWriter::new(std::io::stdout().lock())),
+        })
+    } else {
+        None
     };
+    let mut traj_header_written = false;
 
-    writeln!(out, "# {}", version::VERSION).unwrap();
-    write!(out, "t").unwrap();
-    for n in &int_names  { write!(out, "\t{}", n).unwrap(); }
-    for n in &real_names { write!(out, "\t{}", n).unwrap(); }
-    for n in &tr_names   { write!(out, "\tflow_{}", n).unwrap(); }
-    writeln!(out).unwrap();
+    // ── Observation accumulators ────────────────────────────────────────────
+    // obs_rows[stream_idx] = Vec<(obs_time, Vec<(replicate, value)>)>
+    // Built up across replicates, written at the end.
+    struct ObsRow { time: f64, replicate: usize, value: f64 }
+    let mut obs_data: Vec<Vec<ObsRow>> = Vec::new(); // per-stream
+    let mut obs_stream_names: Vec<String> = Vec::new();
+    let mut obs_times_cache: Vec<Vec<f64>> = Vec::new();
 
-    for snap in &traj.snapshots {
-        write!(out, "{}", snap.t).unwrap();
-        for &c in &snap.int_state.counts  { write!(out, "\t{}", c).unwrap(); }
-        for &v in &snap.real_state.values { write!(out, "\t{:.4}", v).unwrap(); }
-        for &f in &snap.flows.counts      { write!(out, "\t{}", f).unwrap(); }
-        writeln!(out).unwrap();
+    // ── Replicate loop ────────────────────────────────────────��─────────────
+    for rep in 0..replicates {
+        let process_seed = if replicates == 1 {
+            seed
+        } else {
+            seed ^ ((rep as u64).wrapping_mul(0x517cc1b727220a95))
+        };
+        let obs_seed = process_seed ^ 0xa5a5a5a5a5a5;
+
+        let mut sim_run = util::SimRun { seed: process_seed, ..Default::default() };
+        sim_run.ir_path = base_sim_run.ir_path.clone();
+        sim_run.params_files = base_sim_run.params_files.clone();
+        sim_run.overrides = base_sim_run.overrides.clone();
+        sim_run.set_vec_entries = base_sim_run.set_vec_entries.clone();
+        sim_run.table_files = base_sim_run.table_files.clone();
+        sim_run.scenario_name = base_sim_run.scenario_name.clone();
+        sim_run.adhoc_enable = base_sim_run.adhoc_enable.clone();
+        sim_run.adhoc_disable = base_sim_run.adhoc_disable.clone();
+        sim_run.backend = base_sim_run.backend.clone();
+        sim_run.dt = base_sim_run.dt;
+
+        let (traj, model) = util::run_simulation(&sim_run).unwrap_or_else(|e| {
+            eprintln!("error: {}", e);
+            std::process::exit(1);
+        });
+
+        // Write diagnostics (first replicate only)
+        if rep == 0 && !traj.transition_diagnostics.is_empty() {
+            match write_diagnostics_tsv("diagnostics.tsv", &traj.transition_diagnostics) {
+                Ok(zero_count) => {
+                    if zero_count > 0 { warn_zero_firings(&traj.transition_diagnostics); }
+                }
+                Err(e) => eprintln!("warning: could not write diagnostics.tsv: {}", e),
+            }
+        }
+
+        // ── Trajectory output ───────────────────────────────────────────────
+        if let Some(ref mut out) = traj_out {
+            let int_names: Vec<&str> = model.compartments.iter()
+                .filter(|c| c.kind == ir::model::CompartmentKind::Integer)
+                .map(|c| c.name.as_str()).collect();
+            let real_names: Vec<&str> = model.compartments.iter()
+                .filter(|c| c.kind == ir::model::CompartmentKind::Real)
+                .map(|c| c.name.as_str()).collect();
+            let tr_names: Vec<&str> = model.transitions.iter().map(|t| t.name.as_str()).collect();
+
+            if !traj_header_written {
+                writeln!(out, "# {}", version::VERSION).unwrap();
+                if replicates > 1 { write!(out, "replicate\t").unwrap(); }
+                write!(out, "t").unwrap();
+                for n in &int_names  { write!(out, "\t{}", n).unwrap(); }
+                for n in &real_names { write!(out, "\t{}", n).unwrap(); }
+                for n in &tr_names   { write!(out, "\tflow_{}", n).unwrap(); }
+                writeln!(out).unwrap();
+                traj_header_written = true;
+            }
+
+            for snap in &traj.snapshots {
+                if replicates > 1 { write!(out, "{}\t", rep + 1).unwrap(); }
+                write!(out, "{}", snap.t).unwrap();
+                for &c in &snap.int_state.counts  { write!(out, "\t{}", c).unwrap(); }
+                for &v in &snap.real_state.values { write!(out, "\t{:.4}", v).unwrap(); }
+                for &f in &snap.flows.counts      { write!(out, "\t{}", f).unwrap(); }
+                writeln!(out).unwrap();
+            }
+        }
+
+        // ── Observation sampling ───────────��────────────────────────────────
+        if want_obs {
+            let compiled = std::sync::Arc::new(
+                sim::CompiledModel::new(model.clone()).unwrap_or_else(|e| {
+                    eprintln!("error compiling model for obs: {:?}", e);
+                    std::process::exit(1);
+                })
+            );
+            let params = compiled.default_params.clone();
+            let mut obs_rng = sim::rng::StatefulRng::new(obs_seed);
+
+            // Initialize stream names and obs data on first replicate
+            if rep == 0 {
+                for obs_model in &model.observations {
+                    obs_stream_names.push(obs_model.name.clone());
+                    obs_data.push(Vec::new());
+                    let times = obs_schedule_times(
+                        &obs_model.schedule,
+                        model.simulation.t_start,
+                        model.simulation.t_end,
+                    );
+                    obs_times_cache.push(times);
+                }
+            }
+
+            for (si, obs_ir) in model.observations.iter().enumerate() {
+                let sampler = sim::inference::obs_model::compile_obs_sample_pf(
+                    obs_ir, compiled.clone(), &params,
+                );
+                let obs_times = &obs_times_cache[si];
+                let projected_values = project_all_obs_times(
+                    &traj, obs_ir, &model, obs_times,
+                );
+
+                for (ti, &obs_t) in obs_times.iter().enumerate() {
+                    let draw = sampler(projected_values[ti], &mut obs_rng);
+                    obs_data[si].push(ObsRow {
+                        time: obs_t,
+                        replicate: rep + 1,
+                        value: draw,
+                    });
+                }
+            }
+        }
     }
-    drop(out); // flush BufWriter
 
+    // Flush trajectory output
+    drop(traj_out);
     if let Some(ref path) = output_path {
         eprintln!("trajectory written to {}", path);
+    }
+
+    // ── Write observation output ────────────���───────────────────────────────
+    if want_obs && !obs_data.is_empty() {
+        let multi_rep = replicates > 1;
+
+        // --obs: single wide-format file
+        if let Some(ref path) = obs_path {
+            let f = std::fs::File::create(path)
+                .unwrap_or_else(|e| { eprintln!("cannot create {}: {}", path, e); std::process::exit(1); });
+            let mut out = std::io::BufWriter::new(f);
+
+            // Header
+            if multi_rep { write!(out, "replicate\t").unwrap(); }
+            write!(out, "time").unwrap();
+            for name in &obs_stream_names { write!(out, "\t{}", name).unwrap(); }
+            writeln!(out).unwrap();
+
+            // All streams share the same schedule (validated above).
+            // Rows: iterate over (replicate, time), collect values across streams.
+            let n_times = obs_times_cache[0].len();
+            for rep in 0..replicates {
+                for ti in 0..n_times {
+                    let row_idx = rep * n_times + ti;
+                    if multi_rep { write!(out, "{}\t", rep + 1).unwrap(); }
+                    write!(out, "{}", obs_data[0][row_idx].time).unwrap();
+                    for si in 0..obs_stream_names.len() {
+                        let val = obs_data[si][row_idx].value;
+                        if val == val.round() && val.abs() < 1e15 {
+                            write!(out, "\t{}", val as i64).unwrap();
+                        } else {
+                            write!(out, "\t{:.6}", val).unwrap();
+                        }
+                    }
+                    writeln!(out).unwrap();
+                }
+            }
+            drop(out);
+            eprintln!("observations written to {}", path);
+        }
+
+        // --obs-dir: one file per stream
+        if let Some(ref dir) = obs_dir {
+            for (si, name) in obs_stream_names.iter().enumerate() {
+                let path = format!("{}/{}.tsv", dir, name);
+                let f = std::fs::File::create(&path)
+                    .unwrap_or_else(|e| { eprintln!("cannot create {}: {}", path, e); std::process::exit(1); });
+                let mut out = std::io::BufWriter::new(f);
+
+                if multi_rep { write!(out, "replicate\t").unwrap(); }
+                writeln!(out, "time\t{}", name).unwrap();
+
+                for row in &obs_data[si] {
+                    if multi_rep { write!(out, "{}\t", row.replicate).unwrap(); }
+                    let val = row.value;
+                    if val == val.round() && val.abs() < 1e15 {
+                        writeln!(out, "{}\t{}", row.time, val as i64).unwrap();
+                    } else {
+                        writeln!(out, "{}\t{:.6}", row.time, val).unwrap();
+                    }
+                }
+                drop(out);
+                eprintln!("observations written to {}", path);
+            }
+        }
+    }
+}
+
+// ── Observation helpers ─────────────────────────────────────��───────────────
+
+/// Generate observation times from an IR schedule.
+fn obs_schedule_times(
+    schedule: &ir::observation::ObservationSchedule,
+    t_start: f64,
+    t_end: f64,
+) -> Vec<f64> {
+    match schedule {
+        ir::observation::ObservationSchedule::Regular(reg) => {
+            let mut times = Vec::new();
+            let mut t = reg.start;
+            while t <= reg.end + 1e-9 {
+                times.push(t);
+                t += reg.step;
+            }
+            times
+        }
+        ir::observation::ObservationSchedule::AtTimes(times) => times.clone(),
+        ir::observation::ObservationSchedule::FromData => {
+            // In simulate mode there's no data — generate a reasonable grid
+            // using the simulation output times (every dt from t_start to t_end).
+            eprintln!("warning: observation schedule is 'from_data' but no data provided; \
+                       using simulation output grid (every 1 unit from {} to {})", t_start, t_end);
+            let mut times = Vec::new();
+            let mut t = t_start + 1.0;
+            while t <= t_end + 1e-9 {
+                times.push(t);
+                t += 1.0;
+            }
+            times
+        }
+    }
+}
+
+/// Project observable quantities from a trajectory at all observation times.
+///
+/// For CumulativeFlow: accumulate per-snapshot flows, difference between
+/// consecutive observation times to get per-interval flow counts.
+/// For CurrentPop/CurrentPopSum: read state at snapshot closest to each obs time.
+fn project_all_obs_times(
+    traj: &sim::Trajectory,
+    obs_ir: &ir::observation::ObservationModel,
+    model: &ir::Model,
+    obs_times: &[f64],
+) -> Vec<f64> {
+    match &obs_ir.projection {
+        ir::observation::Projection::CumulativeFlow(flow_name) => {
+            let flow_indices: Vec<usize> = model.transitions.iter().enumerate()
+                .filter(|(_, tr)| tr.name == *flow_name || tr.name.starts_with(&format!("{}_", flow_name)))
+                .map(|(i, _)| i)
+                .collect();
+
+            // Build running cumulative flow at each snapshot time
+            let mut cum_at_snap: Vec<(f64, u64)> = Vec::with_capacity(traj.snapshots.len());
+            let mut running = 0u64;
+            for snap in &traj.snapshots {
+                for &fi in &flow_indices {
+                    running += snap.flows.counts[fi];
+                }
+                cum_at_snap.push((snap.t, running));
+            }
+
+            // For each obs time, find cumulative flow up to that time.
+            // Then difference consecutive obs times.
+            let mut cum_at_obs = Vec::with_capacity(obs_times.len());
+            let mut snap_idx = 0;
+            for &obs_t in obs_times {
+                // Advance to last snapshot at or before obs_t
+                while snap_idx + 1 < cum_at_snap.len()
+                    && cum_at_snap[snap_idx + 1].0 <= obs_t + 1e-9
+                {
+                    snap_idx += 1;
+                }
+                cum_at_obs.push(if snap_idx < cum_at_snap.len() && cum_at_snap[snap_idx].0 <= obs_t + 1e-9 {
+                    cum_at_snap[snap_idx].1
+                } else {
+                    0
+                });
+            }
+
+            // Difference: flow in interval (prev_obs_t, obs_t]
+            let mut result = Vec::with_capacity(obs_times.len());
+            let mut prev_cum = 0u64;
+            for &cum in &cum_at_obs {
+                result.push((cum - prev_cum) as f64);
+                prev_cum = cum;
+            }
+            result
+        }
+        ir::observation::Projection::CurrentPop(comp_name) => {
+            let loc = resolve_comp_local(model, &obs_ir.name, comp_name);
+            obs_times.iter().map(|&obs_t| {
+                let snap = snap_at(traj, obs_t);
+                read_comp(snap, &loc)
+            }).collect()
+        }
+        ir::observation::Projection::CurrentPopSum(names) => {
+            let locs: Vec<_> = names.iter()
+                .map(|name| resolve_comp_local(model, &obs_ir.name, name))
+                .collect();
+            obs_times.iter().map(|&obs_t| {
+                let snap = snap_at(traj, obs_t);
+                locs.iter().map(|loc| read_comp(snap, loc)).sum()
+            }).collect()
+        }
+        ir::observation::Projection::DerivedExpr(_) => {
+            eprintln!("error: DerivedExpr projection not yet supported for synthetic observations");
+            std::process::exit(1);
+        }
+    }
+}
+
+/// Resolved compartment location: integer (local index) or real (local index).
+enum CompLoc { Int(usize), Real(usize) }
+
+fn resolve_comp_local(model: &ir::Model, obs_name: &str, comp_name: &str) -> CompLoc {
+    let mut int_idx = 0usize;
+    let mut real_idx = 0usize;
+    for c in &model.compartments {
+        if c.name == comp_name {
+            return match c.kind {
+                ir::model::CompartmentKind::Integer => CompLoc::Int(int_idx),
+                ir::model::CompartmentKind::Real => CompLoc::Real(real_idx),
+            };
+        }
+        match c.kind {
+            ir::model::CompartmentKind::Integer => int_idx += 1,
+            ir::model::CompartmentKind::Real => real_idx += 1,
+        }
+    }
+    eprintln!("error: observation '{}' projects compartment '{}' which doesn't exist",
+        obs_name, comp_name);
+    std::process::exit(1);
+}
+
+fn snap_at(traj: &sim::Trajectory, obs_t: f64) -> &sim::Snapshot {
+    traj.snapshots.iter().rev()
+        .find(|s| s.t <= obs_t + 1e-9)
+        .unwrap_or_else(|| {
+            eprintln!("error: no snapshot at or before t={}", obs_t);
+            std::process::exit(1);
+        })
+}
+
+fn read_comp(snap: &sim::Snapshot, loc: &CompLoc) -> f64 {
+    match loc {
+        CompLoc::Int(i) => snap.int_state.counts[*i] as f64,
+        CompLoc::Real(i) => snap.real_state.values[*i],
     }
 }
