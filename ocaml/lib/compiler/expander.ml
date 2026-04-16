@@ -1848,11 +1848,18 @@ let expand_observations ctx =
            Ir.CurrentPop (String.concat "_" (n :: List.map (index_item_to_str env) idxs))
          | _ -> Ir.CurrentPop "?")
       | ProjDerived (EIdent (name, _)) ->
-        Ir.CumulativeFlow name
+        (* Disambiguate: is this a compartment (prevalence) or transition (flow)? *)
+        if Hashtbl.mem ctx.expanded_comp_tbl name then
+          Ir.CurrentPop name
+        else
+          Ir.CumulativeFlow name
       | ProjDerived (EIndex (name, idxs)) ->
         let idx_vals = List.map (index_item_to_str env) idxs in
         let concrete = String.concat "_" (name :: idx_vals) in
-        Ir.CumulativeFlow concrete
+        if Hashtbl.mem ctx.expanded_comp_tbl concrete then
+          Ir.CurrentPop concrete
+        else
+          Ir.CumulativeFlow concrete
       | ProjDerived e ->
         Ir.DerivedExpr (resolve_expr ctx env e)
     in
