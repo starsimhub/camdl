@@ -1301,53 +1301,137 @@ let resolve_float_expr ctx e =
 
 (* ── Prior distribution resolution ─────────────────────────────────────── *)
 
-let resolve_prior_spec ctx (ps : prior_spec) : Ir.prior_dist =
-  let get_float key =
-    match List.assoc_opt key ps.ps_args with
-    | Some e ->
-      if is_const_expr e then eval_const_expr ctx e
-      else begin
-        Diagnostics.error ctx.diags
-          ~code:"E230" ~loc:Diagnostics.no_loc
-          ~message:(Printf.sprintf "prior argument '%s' must be a compile-time constant" key)
-          ~detail:(Printf.sprintf "In ~ %s(...), the argument '%s' is not a constant expression. \
-                                   Prior arguments must be numeric literals or arithmetic of literals." ps.ps_name key)
-          ~hint:"Use a numeric literal, e.g. mu = -1.0"
-          ();
-        0.0
-      end
+(** Expected keyword arguments for each supported prior distribution.
+    The first element of each pair is the arg name, the second is a
+    value-validator returning [Some error_msg] on failure. *)
+let prior_arg_signature = function
+  | "uniform"     -> Some ["lower"; "upper"]
+  | "normal"      -> Some ["mu"; "sigma"]
+  | "log_normal"  -> Some ["mu"; "sigma"]
+  | "half_normal" -> Some ["sigma"]
+  | "beta"        -> Some ["alpha"; "beta"]
+  | "gamma"       -> Some ["shape"; "rate"]
+  | "exponential" -> Some ["rate"]
+  | _             -> None
+
+(** Per-distribution value validation. Returns [Some msg] if the
+    argument bundle violates a distributional constraint. *)
+let validate_prior_values dist_name vals =
+  let find k = List.assoc_opt k vals in
+  let pos_check key =
+    match find key with
+    | Some v when v <= 0.0 ->
+      Some (Printf.sprintf "argument '%s' must be positive (got %g)" key v)
+    | _ -> None
+  in
+  match dist_name with
+  | "uniform" ->
+    (match find "lower", find "upper" with
+     | Some lo, Some hi when lo >= hi ->
+       Some (Printf.sprintf "uniform requires lower < upper (got lower=%g, upper=%g)" lo hi)
+     | _ -> None)
+  | "normal" | "log_normal" -> pos_check "sigma"
+  | "half_normal" -> pos_check "sigma"
+  | "beta" ->
+    (match pos_check "alpha" with Some _ as e -> e | None -> pos_check "beta")
+  | "gamma" ->
+    (match pos_check "shape" with Some _ as e -> e | None -> pos_check "rate")
+  | "exponential" -> pos_check "rate"
+  | _ -> None
+
+let resolve_prior_spec ctx ~pname (ps : prior_spec) : Ir.prior_dist =
+  (* Prefix every diagnostic message with the parameter name so users
+     can locate bad priors in models with many parameters. *)
+  let qualify msg = Printf.sprintf "parameter '%s': %s" pname msg in
+  let err_invalid_placeholder = Ir.Uniform { Ir.lower = 0.0; Ir.upper = 1.0 } in
+
+  (* Signature check: distribution name must be known. *)
+  let expected_args = match prior_arg_signature ps.ps_name with
+    | Some args -> args
     | None ->
       Diagnostics.error ctx.diags
-        ~code:"E231" ~loc:Diagnostics.no_loc
-        ~message:(Printf.sprintf "prior '%s' missing required argument '%s'" ps.ps_name key)
-        ~detail:(Printf.sprintf "The distribution %s requires a '%s' argument." ps.ps_name key)
-        ~hint:(Printf.sprintf "Add '%s = <value>' to the prior arguments." key)
+        ~code:"E232" ~loc:Diagnostics.no_loc
+        ~message:(qualify (Printf.sprintf "unknown prior distribution '%s'" ps.ps_name))
+        ~detail:"Valid distributions: uniform, normal, log_normal, half_normal, beta, gamma, exponential."
+        ~hint:"Check the spelling and available distributions."
         ();
-      0.0
+      []
   in
-  match ps.ps_name with
-  | "uniform" ->
-    Ir.Uniform { Ir.lower = get_float "lower"; Ir.upper = get_float "upper" }
-  | "normal" ->
-    Ir.Normal_p { Ir.mean = get_float "mu"; Ir.sd = get_float "sigma" }
-  | "log_normal" ->
-    Ir.LogNormal { Ir.mu = get_float "mu"; Ir.sigma = get_float "sigma" }
-  | "half_normal" ->
-    Ir.HalfNormal { Ir.sigma = get_float "sigma" }
-  | "beta" ->
-    Ir.Beta { Ir.alpha = get_float "alpha"; Ir.beta = get_float "beta" }
-  | "gamma" ->
-    Ir.Gamma { Ir.shape = get_float "shape"; Ir.rate = get_float "rate" }
-  | "exponential" ->
-    Ir.Exponential { Ir.rate = get_float "rate" }
-  | s ->
-    Diagnostics.error ctx.diags
-      ~code:"E232" ~loc:Diagnostics.no_loc
-      ~message:(Printf.sprintf "unknown prior distribution '%s'" s)
-      ~detail:"Valid distributions: uniform, normal, log_normal, half_normal, beta, gamma, exponential."
-      ~hint:"Check the spelling and available distributions."
-      ();
-    Ir.Uniform { Ir.lower = 0.0; Ir.upper = 1.0 } (* placeholder after error *)
+  if expected_args = [] && prior_arg_signature ps.ps_name = None then
+    err_invalid_placeholder
+  else begin
+    (* Signature check: duplicate kwargs. *)
+    let seen = Hashtbl.create 4 in
+    List.iter (fun (k, _) ->
+      if Hashtbl.mem seen k then
+        Diagnostics.error ctx.diags
+          ~code:"E234" ~loc:Diagnostics.no_loc
+          ~message:(qualify (Printf.sprintf "duplicate argument '%s' in prior '%s'" k ps.ps_name))
+          ~hint:"Keyword arguments may appear at most once."
+          ()
+      else
+        Hashtbl.add seen k ()
+    ) ps.ps_args;
+
+    (* Signature check: unknown kwargs. *)
+    List.iter (fun (k, _) ->
+      if not (List.mem k expected_args) then
+        Diagnostics.error ctx.diags
+          ~code:"E233" ~loc:Diagnostics.no_loc
+          ~message:(qualify (Printf.sprintf "unknown argument '%s' for prior '%s'" k ps.ps_name))
+          ~detail:(Printf.sprintf "Distribution '%s' accepts: %s." ps.ps_name (String.concat ", " expected_args))
+          ~hint:"Remove the unknown argument or check the spelling."
+          ()
+    ) ps.ps_args;
+
+    (* Resolve each expected arg to a constant float. *)
+    let get_float key =
+      match List.assoc_opt key ps.ps_args with
+      | Some e ->
+        if is_const_expr e then eval_const_expr ctx e
+        else begin
+          Diagnostics.error ctx.diags
+            ~code:"E230" ~loc:Diagnostics.no_loc
+            ~message:(qualify (Printf.sprintf "prior argument '%s' must be a compile-time constant" key))
+            ~detail:(Printf.sprintf "In ~ %s(...), the argument '%s' is not a constant expression. \
+                                     Prior arguments must be numeric literals, arithmetic of literals, \
+                                     or pure math functions (log, exp, sqrt, ...)." ps.ps_name key)
+            ~hint:"Use a numeric literal or literal arithmetic, e.g. mu = log(0.3)"
+            ();
+          0.0
+        end
+      | None ->
+        Diagnostics.error ctx.diags
+          ~code:"E231" ~loc:Diagnostics.no_loc
+          ~message:(qualify (Printf.sprintf "prior '%s' missing required argument '%s'" ps.ps_name key))
+          ~detail:(Printf.sprintf "The distribution %s requires a '%s' argument." ps.ps_name key)
+          ~hint:(Printf.sprintf "Add '%s = <value>' to the prior arguments." key)
+          ();
+        0.0
+    in
+    let vals = List.map (fun k -> (k, get_float k)) expected_args in
+
+    (* Value validation: per-distribution constraints. *)
+    (match validate_prior_values ps.ps_name vals with
+     | None -> ()
+     | Some msg ->
+       Diagnostics.error ctx.diags
+         ~code:"E235" ~loc:Diagnostics.no_loc
+         ~message:(qualify (Printf.sprintf "invalid prior '%s': %s" ps.ps_name msg))
+         ~hint:"Check the distribution's domain: shapes/rates/sigmas must be positive, uniform lower < upper."
+         ());
+
+    let v k = List.assoc k vals in
+    match ps.ps_name with
+    | "uniform"     -> Ir.Uniform { Ir.lower = v "lower"; Ir.upper = v "upper" }
+    | "normal"      -> Ir.Normal_p { Ir.mean = v "mu"; Ir.sd = v "sigma" }
+    | "log_normal"  -> Ir.LogNormal { Ir.mu = v "mu"; Ir.sigma = v "sigma" }
+    | "half_normal" -> Ir.HalfNormal { Ir.sigma = v "sigma" }
+    | "beta"        -> Ir.Beta { Ir.alpha = v "alpha"; Ir.beta = v "beta" }
+    | "gamma"       -> Ir.Gamma { Ir.shape = v "shape"; Ir.rate = v "rate" }
+    | "exponential" -> Ir.Exponential { Ir.rate = v "rate" }
+    | _ -> err_invalid_placeholder (* unreachable — name was validated above *)
+  end
 
 let expand_parameters ctx =
   let from_params = List.concat_map (fun pd ->
@@ -1355,7 +1439,7 @@ let expand_parameters ctx =
     | PScalar { pname; pbounds; pkind; pdim; pprior } ->
       let bounds = resolve_bounds ctx pbounds in
       let pk = Some (param_kind_to_string pkind) in
-      let prior = Option.map (resolve_prior_spec ctx) pprior in
+      let prior = Option.map (resolve_prior_spec ctx ~pname) pprior in
       [{ Ir.name          = pname;
          Ir.value         = None;
          Ir.bounds        = bounds;
@@ -1369,7 +1453,7 @@ let expand_parameters ctx =
       let vals = dim_values ctx dim in
       let bounds = resolve_bounds ctx pbounds in
       let pk = Some (param_kind_to_string pkind) in
-      let prior = Option.map (resolve_prior_spec ctx) pprior in
+      let prior = Option.map (resolve_prior_spec ctx ~pname) pprior in
       List.map (fun v ->
         { Ir.name          = pname ^ "_" ^ v;
           Ir.value         = None;
@@ -1382,7 +1466,7 @@ let expand_parameters ctx =
         }
       ) vals
     | PIndexed { pname; pprior; _ } ->
-      let prior = Option.map (resolve_prior_spec ctx) pprior in
+      let prior = Option.map (resolve_prior_spec ctx ~pname) pprior in
       [{ Ir.name          = pname;
          Ir.value         = None;
          Ir.bounds        = None;
