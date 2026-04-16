@@ -525,19 +525,16 @@ pub fn run_pmmh_cli(
                 for line in lines {
                     if line.trim().is_empty() { continue; }
                     let fields: Vec<&str> = line.split('\t').collect();
-                    for &col_idx in &param_col_indices {
+                    let mut vals: Vec<String> = param_col_indices.iter().map(|&col_idx| {
                         if col_idx < fields.len() {
-                            write!(f, "{}", fields[col_idx]).unwrap();
+                            fields[col_idx].to_string()
                         } else {
-                            write!(f, "NaN").unwrap();
+                            eprintln!("warning: trace.tsv missing column at index {}", col_idx);
+                            "NaN".to_string()
                         }
-                        write!(f, "\t").unwrap();
-                    }
-                    for (j, val) in fixed_vals.iter().enumerate() {
-                        if j > 0 { write!(f, "\t").unwrap(); }
-                        write!(f, "{:.17e}", val).unwrap();
-                    }
-                    writeln!(f).unwrap();
+                    }).collect();
+                    vals.extend(fixed_vals.iter().map(|v| format!("{:.17e}", v)));
+                    writeln!(f, "{}", vals.join("\t")).unwrap();
                     n_draws += 1;
                 }
             }

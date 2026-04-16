@@ -493,17 +493,11 @@ pub fn run_pgas_cli(
             for (i, sweep) in sweeps.iter().enumerate() {
                 if i < burn_in { continue; }
                 if (i - burn_in) % thin != 0 { continue; }
-                // Estimated param values
-                for spec in &config.estimated_params {
-                    write!(f, "{:.17e}", sweep.params[spec.index]).unwrap();
-                    write!(f, "\t").unwrap();
-                }
-                // Fixed param values
-                for (j, val) in fixed_vals.iter().enumerate() {
-                    if j > 0 { write!(f, "\t").unwrap(); }
-                    write!(f, "{:.17e}", val).unwrap();
-                }
-                writeln!(f).unwrap();
+                let mut vals: Vec<String> = config.estimated_params.iter()
+                    .map(|spec| format!("{:.17e}", sweep.params[spec.index]))
+                    .collect();
+                vals.extend(fixed_vals.iter().map(|v| format!("{:.17e}", v)));
+                writeln!(f, "{}", vals.join("\t")).unwrap();
                 n_draws += 1;
             }
         }

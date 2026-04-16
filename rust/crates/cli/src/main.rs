@@ -1008,7 +1008,11 @@ fn load_draws_tsv(path: &str) -> Result<Vec<HashMap<String, f64>>, String> {
     let mut lines = content.lines();
     let header = lines.next()
         .ok_or_else(|| format!("empty draws file: {}", path))?;
-    let col_names: Vec<&str> = header.split('\t').collect();
+    // Strip trailing empty columns (from trailing tabs)
+    let col_names: Vec<&str> = header.split('\t')
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .collect();
     if col_names.len() < 2 {
         return Err(format!("draws file needs at least 2 columns, got {}", col_names.len()));
     }
@@ -1016,8 +1020,11 @@ fn load_draws_tsv(path: &str) -> Result<Vec<HashMap<String, f64>>, String> {
     let mut draws = Vec::new();
     for (line_num, line) in lines.enumerate() {
         if line.trim().is_empty() { continue; }
-        let fields: Vec<&str> = line.split('\t').collect();
-        if fields.len() != col_names.len() {
+        // Split and trim; take only as many fields as we have column names
+        let fields: Vec<&str> = line.split('\t')
+            .map(|s| s.trim())
+            .collect();
+        if fields.len() < col_names.len() {
             return Err(format!(
                 "draws file line {}: expected {} columns, got {}",
                 line_num + 2, col_names.len(), fields.len()
@@ -1025,7 +1032,7 @@ fn load_draws_tsv(path: &str) -> Result<Vec<HashMap<String, f64>>, String> {
         }
         let mut row = HashMap::new();
         for (col, field) in col_names.iter().zip(fields.iter()) {
-            let val: f64 = field.trim().parse()
+            let val: f64 = field.parse()
                 .map_err(|_| format!(
                     "draws file line {}, column '{}': cannot parse '{}' as number",
                     line_num + 2, col, field
