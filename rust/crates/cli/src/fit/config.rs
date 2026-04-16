@@ -163,6 +163,7 @@ impl FitToml {
     }
 
     /// Exhaustive partition check: every model parameter must be in [estimate] or [fixed].
+    #[allow(dead_code)]
     pub fn validate_partition(&self, model_params: &[String]) -> Result<(), String> {
         let estimated: std::collections::HashSet<&str> =
             self.estimate.keys().map(|s| s.as_str()).collect();
@@ -217,6 +218,7 @@ impl FitToml {
     }
 
     /// Check that fit bounds are within model bounds.
+    #[allow(dead_code)]
     pub fn validate_bounds(&self, model: &ir::Model) -> Result<(), String> {
         for (name, spec) in &self.estimate {
             if let Some((fit_lo, fit_hi)) = spec.bounds {

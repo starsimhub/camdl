@@ -1,19 +1,22 @@
 mod util;
 mod hashing;
 mod sampling;
-mod experiment;
 #[allow(dead_code)]
-mod analyze;
+mod experiment; // used by --batch delegation
 mod serve;
-mod summarize;
-mod voi;
 mod eval;
-mod pfilter;
-mod if2;
-mod profile;
+#[allow(dead_code)]
+mod pfilter; // used internally by fit runner for data loading
 mod data;
 mod fit;
 pub mod version;
+
+// Modules kept for internal use but with no direct CLI entry points:
+#[allow(dead_code)] mod analyze;
+#[allow(dead_code)] mod summarize;
+#[allow(dead_code)] mod voi;
+#[allow(dead_code)] mod if2;
+#[allow(dead_code)] mod profile;
 
 use sim::{write_diagnostics_tsv, warn_zero_firings};
 use std::collections::HashMap;
@@ -84,34 +87,6 @@ fn main() {
 
     // Dispatch on first argument
     match all_args[0].as_str() {
-        "experiment" => {
-            eprintln!("\x1b[33mnote: `camdl experiment` is deprecated. Use `camdl simulate --batch FILE.toml` instead.\x1b[0m");
-            eprintln!();
-            match all_args.get(1).map(|s| s.as_str()) {
-                Some("run")       => experiment::cmd_experiment_run(&all_args[2..]),
-                Some("status")    => experiment::cmd_experiment_status(&all_args[2..]),
-                Some("summarize") => summarize::cmd_experiment_summarize(&all_args[2..]),
-                Some("analyze")   => {
-                    eprintln!("error: `camdl experiment analyze` has been removed.");
-                    eprintln!("  Use R or Python for sensitivity analysis (e.g., the sensitivity R package");
-                    eprintln!("  with camdl simulation output).");
-                    std::process::exit(1);
-                }
-                _ => {
-                    eprintln!("usage: camdl experiment <run|status|summarize|analyze> ...");
-                    std::process::exit(1);
-                }
-            }
-        }
-        "voi" => {
-            match all_args.get(1).map(|s| s.as_str()) {
-                Some("run") => voi::cmd_voi_run(&all_args[2..]),
-                _ => {
-                    eprintln!("usage: camdl voi run VOI.toml");
-                    std::process::exit(1);
-                }
-            }
-        }
         // ── Compiler delegation (transparent camdlc invocation) ──
         "compile" => {
             let args: Vec<&str> = all_args[1..].iter().map(|s| s.as_str()).collect();
@@ -133,36 +108,36 @@ fn main() {
                 eprintln!("error: {}", e); std::process::exit(1);
             });
         }
-        "eval" => {
-            eval::cmd_eval(&all_args[1..]);
+        // ── Simulation ──
+        "simulate" | "sim" => {
+            let args = &all_args[1..];
+            if args.is_empty() { usage(); }
+            if args.iter().any(|a| a == "--batch") {
+                let batch_args: Vec<String> = args.iter()
+                    .filter(|a| *a != "--batch")
+                    .cloned()
+                    .collect();
+                experiment::cmd_experiment_run(&batch_args);
+            } else {
+                run_simulate(args);
+            }
         }
-        "pfilter" => {
-            pfilter::cmd_pfilter(&all_args[1..]);
-        }
-        "if2" | "mif2" => {
-            if2::cmd_if2(&all_args[1..]);
-        }
-        "profile" => {
-            eprintln!("\x1b[33mnote: `camdl profile` is deprecated. Use `camdl fit run FIT.toml --sweep \"PARAM=V1,V2,...\"` instead.\x1b[0m");
-            eprintln!();
-            profile::cmd_profile(&all_args[1..]);
-        }
+        // ── Inference ──
         "fit" => {
             match all_args.get(1).map(|s| s.as_str()) {
-                Some("run")      => fit::cmd_fit_run_v2(&all_args[2..]),
-                Some("scout")    => fit::cmd_fit_scout(&all_args[2..]),
-                Some("refine")   => fit::cmd_fit_refine(&all_args[2..]),
-                Some("validate") => fit::cmd_fit_validate(&all_args[2..]),
-                Some("status")   => fit::cmd_fit_status(&all_args[2..]),
-                Some("pmmh")     => fit::cmd_fit_pmmh(&all_args[2..]),
-                Some("pgas")     => fit::cmd_fit_pgas(&all_args[2..]),
-                Some("diff")     => fit::cmd_fit_diff(&all_args[2..]),
-                Some("new")      => fit::cmd_fit_new(&all_args[2..]),
+                Some("run")    => fit::cmd_fit_run_v2(&all_args[2..]),
+                Some("status") => fit::cmd_fit_status(&all_args[2..]),
+                Some("diff")   => fit::cmd_fit_diff(&all_args[2..]),
+                Some("new")    => fit::cmd_fit_new(&all_args[2..]),
                 _ => {
-                    eprintln!("usage: camdl fit <run|status|diff|new|scout|refine|validate|pmmh|pgas> FIT.toml");
+                    eprintln!("usage: camdl fit <run|status|diff|new> FIT.toml");
                     std::process::exit(1);
                 }
             }
+        }
+        // ── Utilities ──
+        "eval" => {
+            eval::cmd_eval(&all_args[1..]);
         }
         "data" => {
             match all_args.get(1).map(|s| s.as_str()) {
@@ -175,20 +150,6 @@ fn main() {
         }
         "serve" => {
             serve::cmd_serve(&all_args[1..]);
-        }
-        "simulate" | "sim" => {
-            let args = &all_args[1..];
-            if args.is_empty() { usage(); }
-            // Check for --batch flag → delegate to experiment runner
-            if args.iter().any(|a| a == "--batch") {
-                let batch_args: Vec<String> = args.iter()
-                    .filter(|a| *a != "--batch")
-                    .cloned()
-                    .collect();
-                experiment::cmd_experiment_run(&batch_args);
-            } else {
-                run_simulate(args);
-            }
         }
         _ => {
             // Accept bare "camdl FILE ..." for simulation

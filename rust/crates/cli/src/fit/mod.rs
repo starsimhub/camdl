@@ -14,8 +14,11 @@ pub mod config_v2;
 pub mod state;
 pub mod provenance;
 pub mod runner;
+#[allow(dead_code)]
 pub mod scout;
+#[allow(dead_code)]
 pub mod refine;
+#[allow(dead_code)]
 pub mod validate;
 pub mod status;
 pub mod pmmh;
@@ -24,6 +27,9 @@ pub mod trace_writer;
 
 use config::FitToml;
 
+// Old per-stage CLI entry points. Superseded by cmd_fit_run_v2 but kept
+// because the legacy bridge and internal runners still reference FitToml.
+#[allow(dead_code)]
 pub fn cmd_fit_scout(args: &[String]) {
     let (fit, seed, force) = parse_fit_args(args, false);
 
@@ -45,6 +51,7 @@ pub fn cmd_fit_scout(args: &[String]) {
     });
 }
 
+#[allow(dead_code)]
 pub fn cmd_fit_refine(args: &[String]) {
     let (fit, seed, force) = parse_fit_args(args, true);
     let starts_from = parse_starts_from(args);
@@ -62,6 +69,7 @@ pub fn cmd_fit_refine(args: &[String]) {
     });
 }
 
+#[allow(dead_code)]
 pub fn cmd_fit_validate(args: &[String]) {
     let (fit, seed, force) = parse_fit_args(args, true);
     let starts_from = parse_starts_from(args);
@@ -79,6 +87,7 @@ pub fn cmd_fit_validate(args: &[String]) {
     });
 }
 
+#[allow(dead_code)]
 pub fn cmd_fit_pmmh(args: &[String]) {
     let (fit, seed, force) = parse_fit_args(args, false);
     let starts_from = parse_optional_starts_from(args);
@@ -102,6 +111,7 @@ pub fn cmd_fit_pmmh(args: &[String]) {
     });
 }
 
+#[allow(dead_code)]
 pub fn cmd_fit_pgas(args: &[String]) {
     let (fit, seed, force) = parse_fit_args(args, false);
     let starts_from = parse_optional_starts_from(args);
@@ -960,6 +970,7 @@ fn parse_fit_args(args: &[String], _needs_starts_from: bool) -> (FitToml, u64, b
     (fit, seed, force)
 }
 
+#[allow(dead_code)]
 fn parse_optional_starts_from(args: &[String]) -> Option<String> {
     for (i, arg) in args.iter().enumerate() {
         if arg == "--starts-from" {
@@ -972,6 +983,7 @@ fn parse_optional_starts_from(args: &[String]) -> Option<String> {
     None
 }
 
+#[allow(dead_code)]
 fn parse_starts_from(args: &[String]) -> String {
     for (i, arg) in args.iter().enumerate() {
         if arg == "--starts-from" {
@@ -986,6 +998,7 @@ fn parse_starts_from(args: &[String]) -> String {
     std::process::exit(1);
 }
 
+#[allow(dead_code)]
 fn load_model_for_validation(fit: &FitToml) -> (ir::Model, String) {
     crate::util::load_model(&fit.fit.model).unwrap_or_else(|e| {
         eprintln!("error: {}", e);
