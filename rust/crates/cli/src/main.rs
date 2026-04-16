@@ -1142,6 +1142,8 @@ fn generate_prior_draws_from_ir(
     let mut draws = Vec::with_capacity(n);
     let mut n_sampled = 0;
     let mut n_fixed = 0;
+    // Per-parameter rejection counts for bounds-truncation diagnostics.
+    let mut reject_counts: HashMap<&str, u64> = HashMap::new();
 
     for i in 0..n {
         let mut row = HashMap::new();
@@ -1149,7 +1151,11 @@ fn generate_prior_draws_from_ir(
             let value = match &p.prior {
                 Some(pd) => {
                     if i == 0 { n_sampled += 1; }
-                    sample_from_prior_dist(pd, p.bounds, &mut rng)
+                    let (v, rejected) = sample_with_bounds(pd, p.bounds, &mut rng, &p.name)?;
+                    if rejected > 0 {
+                        *reject_counts.entry(p.name.as_str()).or_insert(0) += rejected;
+                    }
+                    v
                 }
                 None => {
                     if i == 0 { n_fixed += 1; }
@@ -1161,19 +1167,67 @@ fn generate_prior_draws_from_ir(
         draws.push(row);
     }
 
+    // Warn on high truncation rates — a strong signal that the prior is
+    // mis-calibrated for the declared bounds.
+    let mut report: Vec<(&str, u64)> = reject_counts.into_iter().collect();
+    report.sort_by(|a, b| b.1.cmp(&a.1));
+    for (name, rej) in &report {
+        let accept = n as u64;
+        let total = accept + rej;
+        let pct = 100.0 * (*rej as f64) / (total as f64);
+        if pct >= 10.0 {
+            eprintln!(
+                "warning: prior for '{}' placed {:.1}% mass outside declared bounds \
+                 ({} rejected / {} accepted). Consider widening bounds or tightening \
+                 the prior.",
+                name, pct, rej, accept
+            );
+        }
+    }
+
     eprintln!("generated {} prior draws from model IR ({} sampled + {} fixed params)",
         n, n_sampled, n_fixed);
     Ok(draws)
 }
 
-/// Sample one value from an IR PriorDist.
-fn sample_from_prior_dist(
+/// Sample from a prior and truncate to parameter bounds via rejection.
+/// Returns (value, n_rejected). Errors if the prior is so mis-calibrated
+/// that it fails to produce a bounds-satisfying sample within the retry cap.
+fn sample_with_bounds(
     pd: &ir::parameter::PriorDist,
     bounds: Option<(f64, f64)>,
     rng: &mut sim::rng::StatefulRng,
+    param_name: &str,
+) -> Result<(f64, u64), String> {
+    const MAX_ATTEMPTS: u32 = 256;
+    let (lo, hi) = match bounds {
+        Some(b) => b,
+        None => return Ok((sample_from_prior_raw(pd, rng), 0)),
+    };
+    let mut rejected = 0u64;
+    for _ in 0..MAX_ATTEMPTS {
+        let v = sample_from_prior_raw(pd, rng);
+        if v >= lo && v <= hi {
+            return Ok((v, rejected));
+        }
+        rejected += 1;
+    }
+    Err(format!(
+        "prior for parameter '{}' failed to produce a value within bounds [{}, {}] \
+         after {} attempts — the declared prior places essentially all its mass \
+         outside the parameter bounds. Check that the distribution and its \
+         arguments match the parameter's natural scale.",
+        param_name, lo, hi, MAX_ATTEMPTS
+    ))
+}
+
+/// Draw a single value from an IR PriorDist, ignoring bounds.
+fn sample_from_prior_raw(
+    pd: &ir::parameter::PriorDist,
+    rng: &mut sim::rng::StatefulRng,
 ) -> f64 {
     use ir::parameter::PriorDist;
-    let raw = match pd {
+    match pd {
         PriorDist::Uniform(u) => u.lower + (u.upper - u.lower) * rng.uniform(),
         PriorDist::Normal(p) => p.mean + p.sd * rng.normal(),
         PriorDist::LogNormal(p) => (p.mu + p.sigma * rng.normal()).exp(),
@@ -1196,10 +1250,6 @@ fn sample_from_prior_dist(
             -u.ln() / p.rate
         }
         PriorDist::Fixed(v) => *v,
-    };
-    match bounds {
-        Some((lo, hi)) => raw.clamp(lo, hi),
-        None => raw,
     }
 }
 
