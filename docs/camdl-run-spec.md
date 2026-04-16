@@ -313,9 +313,9 @@ pub struct SimulateJob {
     #[serde(default)]
     pub seeds: Seeds,
 
-    /// Generate synthetic observations from the observations block
+    /// Synthetic observation output mode.
     #[serde(default)]
-    pub obs: bool,
+    pub obs: ObsOutput,
 
     /// Parallelism (Rayon thread count)
     #[serde(default = "default_parallel")]
@@ -324,6 +324,35 @@ pub struct SimulateJob {
     /// GeoJSON file to copy into output for web visualization
     pub geo: Option<PathBuf>,
 }
+```
+
+### 3.1.1 ObsOutput — synthetic observation output
+
+```rust
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub enum ObsOutput {
+    /// No synthetic observations (default).
+    #[default]
+    None,
+    /// Write all streams to a single wide-format TSV.
+    /// Errors if streams have different schedules.
+    File(PathBuf),
+    /// Write one TSV per observation stream in the given directory.
+    Dir(PathBuf),
+    /// Like File, but suppress trajectory output entirely.
+    OnlyFile(PathBuf),
+    /// Like Dir, but suppress trajectory output entirely.
+    OnlyDir(PathBuf),
+}
+```
+
+CLI mapping:
+
+```
+--obs cases.tsv          → ObsOutput::File("cases.tsv")
+--obs-dir obs/           → ObsOutput::Dir("obs/")
+--obs-only cases.tsv     → ObsOutput::OnlyFile("cases.tsv")
+--obs-only-dir obs/      → ObsOutput::OnlyDir("obs/")
 ```
 
 ### 3.2 ParamSource — where parameter vectors come from
@@ -653,13 +682,16 @@ camdl simulate model.camdl --params p.toml --scenario with_sia --param beta=0.5 
 
 ```bash
 # Generate synthetic observations from the observations block
-camdl simulate model.camdl --params p.toml --seed 42 --obs
+camdl simulate model.camdl --params p.toml --seed 42 --obs cases.tsv
+
+# One file per observation stream (multi-stream / mixed-schedule models)
+camdl simulate model.camdl --params p.toml --seed 42 --obs-dir obs/
 
 # Multiple independent replicates
-camdl simulate model.camdl --params p.toml --seed 42 --replicates 100 --obs
+camdl simulate model.camdl --params p.toml --seed 42 --replicates 100 --obs cases.tsv
 
 # Suppress trajectory, only emit observations (SBC workflows)
-camdl simulate model.camdl --seed 42 --replicates 1000 --obs-only
+camdl simulate model.camdl --seed 42 --replicates 1000 --obs-only cases.tsv
 ```
 
 The observation RNG is independent of the process RNG — adding `--obs` does not
@@ -688,21 +720,21 @@ camdl simulate model.camdl --params p.toml \
 # ── Posterior predictive ─────────────────────────────────
 camdl simulate model.camdl \
     --draws results/fits/02_fix_beta/posterior/draws.tsv \
-    --replicates 10 --obs
+    --replicates 10 --obs ppc.tsv
 
 # ── Prior predictive (requires declared priors) ──────────
 camdl simulate model.camdl \
     --draws prior --fit fits/02_fix_beta.toml --n 500 \
-    --replicates 5 --obs
+    --replicates 5 --obs prior_pred.tsv
 
 # ── Uniform space-filling (no Bayesian pretension) ───────
 camdl simulate model.camdl \
-    --draws uniform --n 500 --replicates 5 --obs
+    --draws uniform --n 500 --replicates 5 --obs uniform_pred.tsv
 
 # ── Scenario prediction under posterior uncertainty ──────
 camdl simulate model.camdl \
     --draws results/fits/02_fix_beta/posterior/draws.tsv \
-    --scenario baseline,with_sia --replicates 10 --obs
+    --scenario baseline,with_sia --replicates 10 --obs-dir obs/
 
 # ── From a batch file ────────────────────────────────────
 camdl simulate --batch batches/ppc.toml
@@ -772,7 +804,16 @@ pub struct SimulateCli {
 
     // ── Observation generation ──
     #[arg(long)]
-    pub obs: bool,
+    pub obs: Option<PathBuf>,
+
+    #[arg(long)]
+    pub obs_dir: Option<PathBuf>,
+
+    #[arg(long)]
+    pub obs_only: Option<PathBuf>,
+
+    #[arg(long)]
+    pub obs_only_dir: Option<PathBuf>,
 
     #[arg(long)]
     pub parallel: Option<usize>,
@@ -886,7 +927,7 @@ gamma = { logspace = { min = 0.01, max = 1.0, n = 5 } }
 ```toml
 # batches/ppc.toml — posterior predictive check
 model = "models/sir.camdl"
-obs = true
+obs = "results/ppc/obs.tsv"
 
 [draws]
 source = "file"
@@ -897,7 +938,7 @@ replicates = 10
 ```toml
 # batches/policy_eval.toml — scenario prediction under uncertainty
 model = "models/sir.camdl"
-obs = true
+obs_dir = "results/policy_eval/obs"
 seeds = { n = 10 }
 
 [draws]
@@ -1582,7 +1623,7 @@ pub struct ConfigHasher;
 impl ConfigHasher {
     pub fn compute(
         ir: &CompiledModel,
-        data_path: &Path,
+        observations: &IndexMap<String, PathBuf>,
         estimate: &IndexMap<String, EstimateSpec>,
         fixed: &IndexMap<String, f64>,
         stage_name: &str,
@@ -1590,7 +1631,11 @@ impl ConfigHasher {
     ) -> String {
         let mut hasher = Sha256::new();
         hasher.update(ir.to_canonical_bytes());
-        hasher.update(&hash_file(data_path));
+        // Hash all data files, sorted by stream name for stability
+        for (name, path) in observations.iter() {
+            hasher.update(name.as_bytes());
+            hasher.update(&hash_file(path));
+        }
         for (name, spec) in estimate.iter() {
             hasher.update(name.as_bytes());
             hasher.update(&serde_json::to_vec(spec).unwrap());
@@ -1770,7 +1815,7 @@ impl FitConfig {
                 .map(|name| {
                     draw.get(*name)
                         .or_else(|| fixed.get(*name))
-                        .map(|v| format!("{}", v))
+                        .map(|v| format!("{:.17e}", v))
                         .unwrap_or_default()
                 })
                 .collect();
@@ -1792,7 +1837,7 @@ impl FitConfig {
 ```bash
 camdl simulate models/sir.camdl \
     --draws prior --fit fits/02_fix_beta.toml --n 500 \
-    --replicates 5 --obs
+    --replicates 5 --obs prior_pred.tsv
 ```
 
 Samples 500 parameter vectors from the joint prior declared in fit.toml's
@@ -1814,7 +1859,7 @@ error: --draws prior requires priors for all estimated parameters.
 ```bash
 camdl simulate models/sir.camdl \
     --draws results/fits/02_fix_beta/posterior/draws.tsv \
-    --replicates 10 --obs
+    --replicates 10 --obs ppc.tsv
 ```
 
 ### 11.3 Scenario Prediction Under Posterior Uncertainty
@@ -1825,7 +1870,7 @@ camdl simulate models/sir.camdl \
 camdl simulate models/sir.camdl \
     --draws results/fits/02_fix_beta/posterior/draws.tsv \
     --scenario baseline,with_sia \
-    --replicates 10 --obs
+    --replicates 10 --obs-dir obs/
 ```
 
 For each (draw, seed) pair, both scenarios are simulated with the same EKRNG
@@ -1847,21 +1892,11 @@ space-filling exploration for model debugging.
 
 ### 11.5 Simulation-Based Calibration (SBC)
 
-*"Does my inference pipeline recover known parameters?"*
-
-```bash
-# Step 1: Generate synthetic datasets at known parameters
-camdl simulate models/sir.camdl \
-    --draws prior --fit fits/02.toml --n 200 \
-    --replicates 1 --obs --output-dir results/sbc/synthetic
-
-# Step 2: Fit each (shell loop for now)
-for dir in results/sbc/synthetic/*/; do
-    camdl fit run fits/sbc_template.toml \
-        --override-data "$dir/synthetic.tsv" \
-        --output-dir "results/sbc/fits/$(basename $dir)"
-done
-```
+**Simulation-based calibration** — generating synthetic data at known
+parameters, fitting each dataset, and checking parameter recovery — is planned
+as a future `camdl sbc` command. The infrastructure for it (prior predictive
+via `--draws prior`, the fit pipeline, `draws.tsv` output) is in place; the
+orchestration layer that connects them is not yet built.
 
 ---
 
@@ -1968,8 +2003,10 @@ camdl simulate MODEL [OPTIONS]
   --fit FILE                fit.toml for --draws prior
   -n N                      Number of draws (prior/uniform)
   --replicates N            Stochastic replicates per draw
-  --obs                     Generate synthetic observations
-  --obs-only                Suppress trajectory, only emit observations
+  --obs FILE                Write synthetic observations (wide-format TSV)
+  --obs-dir DIR             Write one TSV per observation stream
+  --obs-only FILE           Like --obs, suppress trajectory output
+  --obs-only-dir DIR        Like --obs-dir, suppress trajectory output
   --parallel N              Concurrent runs
   --output-dir DIR          Output root (default: results/)
   --batch FILE              Load all settings from TOML
@@ -1992,6 +2029,15 @@ camdl fit new --from A B       Create derived fit config with lineage
 camdl summarize DIR            Compute summary statistics from trajectories
 
 camdl simulate --batch FILE    Equivalent to camdl experiment run (deprecated)
+
+Migration from experiment.toml v0.6:
+  [config]       → top-level fields in batch TOML or CLI args
+  [sweep]        → [sweep] (unchanged)
+  [[scenario]]   → [[scenario]] (unchanged)
+  [design.*]     → removed. Use R or Python for sensitivity analysis
+                   (e.g., the sensitivity R package with camdl simulation output)
+  camdl experiment analyze → removed (Sobol computation was niche; external
+                   tooling is the right answer)
 ```
 
 ---
