@@ -103,7 +103,7 @@ let parse_iso_date s =
   match String.split_on_char '-' s with
   | [ys; ms; ds] ->
     (try (int_of_string ys, int_of_string ms, int_of_string ds)
-     with _ -> failwith (Printf.sprintf "invalid date literal '%s'" s))
+     with _ -> failwith (Printf.sprintf "invalid date literal '%s': components must be integers" s))
   | _ -> failwith (Printf.sprintf "date literal must be YYYY-MM-DD, got '%s'" s)
 
 let parse_date_to_float origin_str date_str time_unit =
@@ -1435,7 +1435,7 @@ let is_all_const e =
     | _           -> false
   in walk e
 
-let eval_const e =
+let eval_const ctx e =
   let rec eval = function
     | Ir.Const f -> f
     | Ir.BinOp { op = Ir.Add; left; right } -> eval left +. eval right
@@ -1443,7 +1443,12 @@ let eval_const e =
     | Ir.BinOp { op = Ir.Mul; left; right } -> eval left *. eval right
     | Ir.BinOp { op = Ir.Div; left; right } -> eval left /. eval right
     | Ir.BinOp { op = Ir.Pow; left; right } -> eval left ** eval right
-    | _ -> failwith "not a constant expression"
+    | _ ->
+      Diagnostics.error ctx.diags ~code:"E402" ~loc:Diagnostics.no_loc
+        ~message:"initial condition value is not a constant expression"
+        ~hint:"Use numeric literals or arithmetic of constants for init values."
+        ();
+      0.0
   in eval e
 
 let expand_init ctx =
@@ -1489,7 +1494,7 @@ let expand_init ctx =
     acc @ [(name, Hashtbl.find tbl name)]
   ) [] order in
   if List.for_all (fun (_, e) -> is_all_const e) entries then
-    Ir.Explicit (List.map (fun (k, e) -> (k, eval_const e)) entries)
+    Ir.Explicit (List.map (fun (k, e) -> (k, eval_const ctx e)) entries)
   else
     Ir.Parameterized entries
 
@@ -1577,15 +1582,25 @@ let load_interpolated_for_level ctx path ~key_col ~key_val ~time_col ~value_col 
   | None -> ([], [])
 
 (** Resolve a func_decl kwarg to an Ir.expr, preserving Param references.
-    Raises if the key is missing. *)
+    Emits a diagnostic and returns Const 0.0 if the key is missing. *)
 let get_expr_kwarg ctx kwargs key =
   match List.assoc_opt key kwargs with
-  | None   -> failwith (Printf.sprintf "time function missing required argument '%s'" key)
+  | None   ->
+    Diagnostics.error ctx.diags ~code:"E403" ~loc:Diagnostics.no_loc
+      ~message:(Printf.sprintf "time function missing required argument '%s'" key)
+      ~hint:(Printf.sprintf "Add '%s = <value>' to the forcing function body." key)
+      ();
+    Ir.Const 0.0
   | Some e -> resolve_expr ctx [] e
 
 let get_expr_list_kwarg ctx kwargs key =
   match List.assoc_opt key kwargs with
-  | None   -> failwith (Printf.sprintf "time function missing required argument '%s'" key)
+  | None   ->
+    Diagnostics.error ctx.diags ~code:"E403" ~loc:Diagnostics.no_loc
+      ~message:(Printf.sprintf "time function missing required argument '%s'" key)
+      ~hint:(Printf.sprintf "Add '%s = <value>' to the forcing function body." key)
+      ();
+    []
   | Some e -> match e with
     | EList es -> List.map (resolve_expr ctx []) es
     | _ -> [resolve_expr ctx [] e]
@@ -1593,12 +1608,22 @@ let get_expr_list_kwarg ctx kwargs key =
 let expand_time_function_one ctx fname (env : (string * string) list) fkind fargs =
   let get_kw key =
     match List.assoc_opt key fargs with
-    | None   -> failwith (Printf.sprintf "time function missing required argument '%s'" key)
+    | None   ->
+      Diagnostics.error ctx.diags ~code:"E403" ~loc:Diagnostics.no_loc
+        ~message:(Printf.sprintf "time function '%s' missing required argument '%s'" fname key)
+        ~hint:(Printf.sprintf "Add '%s = <value>' to the forcing function body." key)
+        ();
+      Ir.Const 0.0
     | Some e -> resolve_expr ctx env e
   in
   let get_kw_list key =
     match List.assoc_opt key fargs with
-    | None   -> failwith (Printf.sprintf "time function missing required argument '%s'" key)
+    | None   ->
+      Diagnostics.error ctx.diags ~code:"E403" ~loc:Diagnostics.no_loc
+        ~message:(Printf.sprintf "time function '%s' missing required argument '%s'" fname key)
+        ~hint:(Printf.sprintf "Add '%s = <value>' to the forcing function body." key)
+        ();
+      []
     | Some e -> match e with
       | EList es -> List.map (resolve_expr ctx env) es
       | _ -> [resolve_expr ctx env e]
@@ -1664,28 +1689,56 @@ let expand_time_function_one ctx fname (env : (string * string) list) fkind farg
              Generates a binary values array: 1.0 for bins in ranges, 0.0 otherwise. *)
           let step_expr = match List.assoc_opt "step" fargs with
             | Some e -> resolve_expr ctx env e
-            | None -> failwith "periodic with 'on' requires 'step' (bin width)"
+            | None ->
+              Diagnostics.error ctx.diags ~code:"E404" ~loc:Diagnostics.no_loc
+                ~message:(Printf.sprintf "periodic time function '%s' with 'on' requires 'step' (bin width)" fname)
+                ~hint:"Add 'step = <number>' to specify the bin width for range-based periodic forcing."
+                ();
+              Ir.Const 1.0
           in
           let period_f = match period_expr with Ir.Const f -> f | _ ->
-            failwith "periodic 'period' must be a constant when using 'on'" in
+            Diagnostics.error ctx.diags ~code:"E405" ~loc:Diagnostics.no_loc
+              ~message:(Printf.sprintf "periodic time function '%s': 'period' must be a constant when using 'on'" fname)
+              ~hint:"Use a numeric literal for 'period', e.g. period = 365"
+              ();
+            1.0 in
           let step_f = match step_expr with Ir.Const f -> f | _ ->
-            failwith "periodic 'step' must be a constant when using 'on'" in
+            Diagnostics.error ctx.diags ~code:"E405" ~loc:Diagnostics.no_loc
+              ~message:(Printf.sprintf "periodic time function '%s': 'step' must be a constant when using 'on'" fname)
+              ~hint:"Use a numeric literal for 'step', e.g. step = 1"
+              ();
+            1.0 in
           let n_bins = (period_f /. step_f +. 0.5) |> int_of_float in
           let arr = Array.make n_bins 0.0 in
           (* Extract ranges from the on = [...] expression *)
           let ranges = match on_expr with
             | EList items -> items
-            | _ -> failwith "periodic 'on' must be a list of ranges [lo:hi, ...]"
+            | _ ->
+              Diagnostics.error ctx.diags ~code:"E406" ~loc:Diagnostics.no_loc
+                ~message:(Printf.sprintf "periodic time function '%s': 'on' must be a list of ranges" fname)
+                ~hint:"Use on = [lo:hi, lo:hi, ...] to specify active ranges."
+                ();
+              []
           in
           List.iter (fun range ->
             match range with
             | ERange (lo_e, hi_e) ->
               let lo = match lo_e with EConst f -> int_of_float f
                 | EUnit (f, u) -> int_of_float (unit_to_model_time ctx f u)
-                | _ -> failwith "range lower bound must be a constant" in
+                | _ ->
+                  Diagnostics.error ctx.diags ~code:"E407" ~loc:Diagnostics.no_loc
+                    ~message:(Printf.sprintf "periodic time function '%s': range lower bound must be a constant" fname)
+                    ~hint:"Use a numeric literal, e.g. 7:100"
+                    ();
+                  0 in
               let hi = match hi_e with EConst f -> int_of_float f
                 | EUnit (f, u) -> int_of_float (unit_to_model_time ctx f u)
-                | _ -> failwith "range upper bound must be a constant" in
+                | _ ->
+                  Diagnostics.error ctx.diags ~code:"E407" ~loc:Diagnostics.no_loc
+                    ~message:(Printf.sprintf "periodic time function '%s': range upper bound must be a constant" fname)
+                    ~hint:"Use a numeric literal, e.g. 7:100"
+                    ();
+                  0 in
               let step_int = int_of_float step_f in
               if step_int > 1 && (lo mod step_int <> 0 || (hi + 1) mod step_int <> 0) then
                 Diagnostics.warning ctx.diags ~code:"W301" ~loc:Diagnostics.no_loc
@@ -1698,7 +1751,11 @@ let expand_time_function_one ctx fname (env : (string * string) list) fkind farg
               for i = lo to (min hi (n_bins - 1)) do
                 arr.(i) <- 1.0
               done
-            | _ -> failwith "periodic 'on' elements must be ranges (lo:hi)"
+            | _ ->
+              Diagnostics.error ctx.diags ~code:"E406" ~loc:Diagnostics.no_loc
+                ~message:(Printf.sprintf "periodic time function '%s': 'on' elements must be ranges (lo:hi)" fname)
+                ~hint:"Each element of the 'on' list must be a range, e.g. on = [7:100, 115:199]"
+                ()
           ) ranges;
           Array.to_list arr |> List.map (fun f -> Ir.Const f)
         | None ->
@@ -1706,7 +1763,13 @@ let expand_time_function_one ctx fname (env : (string * string) list) fkind farg
           get_kw_list "values"
       in
       Ir.Periodic { period = period_expr; values }
-    | k -> failwith (Printf.sprintf "unknown time function kind '%s'" k)
+    | k ->
+      Diagnostics.error ctx.diags ~code:"E408" ~loc:Diagnostics.no_loc
+        ~message:(Printf.sprintf "unknown time function kind '%s' in '%s'" k fname)
+        ~detail:"Supported kinds: sinusoidal, piecewise, interpolated, periodic."
+        ~hint:(Printf.sprintf "Change the kind to one of: sinusoidal, piecewise, interpolated, periodic.")
+        ();
+      Ir.Piecewise { breakpoints = []; values = [] }
   in
   { Ir.name = fname; Ir.kind }
 

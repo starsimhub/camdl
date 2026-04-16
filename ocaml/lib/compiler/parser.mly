@@ -64,7 +64,7 @@ declaration:
   | ORIGIN EQ e = expr
       { match e with
         | EFuncCall ("date", [("", EIdent (s, _))]) -> DOrigin s
-        | _ -> failwith "origin must be date(\"YYYY-MM-DD\")" }
+        | _ -> failwith "invalid origin declaration: expected origin = date(\"YYYY-MM-DD\")" }
   | DIMENSIONS LBRACE es = list(dim_entry) RBRACE
       { DDimensions es }
   | COMPARTMENTS LBRACE cs = compartment_list RBRACE
@@ -116,7 +116,7 @@ unit_lit:
     | "per_week"  -> PerWeek
     | "per_month" -> PerMonth
     | "per_year"  -> PerYear
-    | s -> failwith ("unknown unit: " ^ s) }
+    | s -> failwith (Printf.sprintf "unknown unit '%s': expected one of 'days, 'weeks, 'months, 'years, 'per_day, 'per_week, 'per_month, 'per_year" s) }
 
 (* ── Compartment block ──────────────────────────────────────────────────── *)
 
@@ -342,8 +342,8 @@ obs_kv:
             | "binomial"      -> LikBinomial     args
             | "beta_binomial" -> LikBetaBinomial args
             | "bernoulli"     -> LikBernoulli    args
-            | s -> failwith ("unknown likelihood: " ^ s))
-        | _ -> failwith "likelihood value must be a function call like neg_binomial(...)") }
+            | s -> failwith (Printf.sprintf "unknown likelihood '%s': expected one of neg_binomial, poisson, normal, binomial, beta_binomial, bernoulli" s))
+        | _ -> failwith "likelihood value must be a function call, e.g. likelihood = neg_binomial(mean = projected, dispersion = k)") }
 
 obs_projection:
   | e = expr { ProjDerived e }
@@ -431,7 +431,7 @@ output_kv:
                        | _ -> "tsv") in
           let rest  = List.filter (fun (k,_) -> k <> "format") kvs in
           `Summ { osquantities = rest; osformat = fmt }
-        | _ -> failwith ("unknown output section: " ^ $1) }
+        | _ -> failwith (Printf.sprintf "unknown output section '%s': expected one of trajectories, flows, summary" $1) }
 
 (* ── Simulate block ──────────────────────────────────────────────────────── *)
 
@@ -515,10 +515,9 @@ expr:
          The parser binds it to 100_000, which is almost never what the user wants. *)
       (match e2 with
        | EUnit _ -> failwith
-           "ambiguous unit literal after '/'. \
-            The unit suffix binds to the adjacent number, not the whole expression.\n\
-            \n  Use parentheses:    (20 / 100_000) 'per_year\n\
-            \  Or pre-compute:    0.0002 'per_year"
+           "ambiguous unit literal after '/': the unit suffix binds to the adjacent \
+            number, not the whole expression. \
+            Use parentheses: (20 / 100_000) 'per_year, or pre-compute: 0.0002 'per_year"
        | _ -> ());
       EBinOp (Div, e1, e2)
     }
@@ -592,7 +591,7 @@ scenario_field:
             | EIdent (s, _)    -> s   (* quoted string or bare identifier *)
             | EFuncCall (s, []) -> s  (* zero-arg call used as name *)
             | EConst f         -> string_of_float f
-            | _ -> failwith "scenario label must be a quoted string or identifier" in
+            | _ -> failwith "invalid scenario label: expected a quoted string or identifier, e.g. label = \"baseline\"" in
           Ast.ScLabel s
         | "enable"  -> Ast.ScEnable  (extract_ident_list v)
         | "disable" -> Ast.ScDisable (extract_ident_list v)
