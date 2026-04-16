@@ -57,61 +57,64 @@
         end
     end
 
-  let kw_table = [
-    "time_unit",     TIME_UNIT;
-    "compartments",  COMPARTMENTS;
-    "parameters",    PARAMETERS;
-    "tables",        TABLES;
-    "forcing",       FORCING;
-    "transitions",   TRANSITIONS;
-    "observations",  OBSERVATIONS;
-    "interventions", INTERVENTIONS;
-    "ode",           ODE;
-    "output",        OUTPUT;
-    "simulate",      SIMULATE;
-    "init",          INIT;
-    "timepoints",    TIMEPOINTS;
-    "scenarios",     SCENARIOS;
-    "stratify",      STRATIFY;
-    "let",           LET;
-    "from",          FROM;
-    "to",            TO;
-    "where",         WHERE;
-    "sum",           SUM;
-    "consecutive",   CONSECUTIVE;
-    "in",            IN;
-    "by",            BY;
-    "dimensions",    DIMENSIONS;
-    "only",          ONLY;
-    "real",          REAL;
-    "integer",       INTEGER;
-    "rate",          RATE;
-    "probability",   PROBABILITY;
-    "positive",      POSITIVE;
-    "count",         COUNT;
-    "and",           AND;
-    "or",            OR;
-    "not",           NOT;
-    "if",            IF;
-    "then",          THEN;
-    "else",          ELSE;
-    "every",         EVERY;
-    "at",            AT_KW;
-    "format",        FORMAT;
-    "description",   DESCRIPTION;
-    "tag",           TAG;
-    "null",          NULL;
-    "transfer",      TRANSFER;
-    "balance",       BALANCE;
-    "events",        EVENTS;
-    "add",           ADD;
-    "at_day",        AT_DAY;
-    "likelihood",    LIKELIHOOD;
-    "origin",        ORIGIN;
-  ]
+  let kw_table : (string, token) Hashtbl.t =
+    let t = Hashtbl.create 64 in
+    List.iter (fun (k, v) -> Hashtbl.add t k v) [
+      "time_unit",     TIME_UNIT;
+      "compartments",  COMPARTMENTS;
+      "parameters",    PARAMETERS;
+      "tables",        TABLES;
+      "forcing",       FORCING;
+      "transitions",   TRANSITIONS;
+      "observations",  OBSERVATIONS;
+      "interventions", INTERVENTIONS;
+      "ode",           ODE;
+      "output",        OUTPUT;
+      "simulate",      SIMULATE;
+      "init",          INIT;
+      "timepoints",    TIMEPOINTS;
+      "scenarios",     SCENARIOS;
+      "stratify",      STRATIFY;
+      "let",           LET;
+      "from",          FROM;
+      "to",            TO;
+      "where",         WHERE;
+      "sum",           SUM;
+      "consecutive",   CONSECUTIVE;
+      "in",            IN;
+      "by",            BY;
+      "dimensions",    DIMENSIONS;
+      "only",          ONLY;
+      "real",          REAL;
+      "integer",       INTEGER;
+      "rate",          RATE;
+      "probability",   PROBABILITY;
+      "positive",      POSITIVE;
+      "count",         COUNT;
+      "and",           AND;
+      "or",            OR;
+      "not",           NOT;
+      "if",            IF;
+      "then",          THEN;
+      "else",          ELSE;
+      "every",         EVERY;
+      "at",            AT_KW;
+      "format",        FORMAT;
+      "description",   DESCRIPTION;
+      "tag",           TAG;
+      "null",          NULL;
+      "transfer",      TRANSFER;
+      "balance",       BALANCE;
+      "events",        EVENTS;
+      "add",           ADD;
+      "at_day",        AT_DAY;
+      "likelihood",    LIKELIHOOD;
+      "origin",        ORIGIN;
+    ];
+    t
 
   let lookup_kw s =
-    match List.assoc_opt s kw_table with
+    match Hashtbl.find_opt kw_table s with
     | Some tok -> tok
     | None     -> IDENT s
 }
