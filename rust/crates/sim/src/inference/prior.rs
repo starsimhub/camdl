@@ -17,6 +17,9 @@
 
 use crate::inference::obs_loglik::lgamma;
 
+/// 0.5 · ln(2π), used in Gaussian log-densities.
+const HALF_LN_2PI: f64 = 0.918_938_533_204_672_74;
+
 /// Prior distribution for one estimated parameter.
 #[derive(Clone, Debug)]
 pub enum Prior {
@@ -54,18 +57,18 @@ impl Prior {
             }
             Prior::Normal { mean, sd } => {
                 let z = (natural - mean) / sd;
-                -0.5 * z * z - sd.ln()
+                // Full normal log-density: -0.5 ln(2π) - ln(σ) - 0.5 z²
+                -HALF_LN_2PI - sd.ln() - 0.5 * z * z
             }
             Prior::TransformedNormal { mean, sd } => {
                 let z = (transformed - mean) / sd;
-                -0.5 * z * z - sd.ln()
+                -HALF_LN_2PI - sd.ln() - 0.5 * z * z
             }
             Prior::HalfNormal { sigma } => {
                 if natural < 0.0 { return f64::NEG_INFINITY; }
                 let z = natural / sigma;
                 // log(2/(sigma * sqrt(2π))) - 0.5 z²
                 // = ln(2) - ln(sigma) - 0.5 * ln(2π) - 0.5 z²
-                const HALF_LN_2PI: f64 = 0.91893853320467274178; // 0.5 * ln(2π)
                 std::f64::consts::LN_2 - sigma.ln() - HALF_LN_2PI - 0.5 * z * z
             }
             Prior::Beta { alpha, beta } => {
@@ -137,6 +140,22 @@ mod tests {
         let at_mean = p.log_density(1.0, 0.0);
         let off = p.log_density(1.5, 0.0);
         assert!(at_mean > off);
+    }
+
+    #[test]
+    fn normal_log_density_is_normalized() {
+        // N(0, 1) at x=0: -0.5 ln(2π) ≈ -0.9189385
+        // N(0, 1) at x=1: -0.5 ln(2π) - 0.5 ≈ -1.4189385
+        let p = Prior::Normal { mean: 0.0, sd: 1.0 };
+        assert!(approx_eq(p.log_density(0.0, 0.0), -HALF_LN_2PI, 1e-10));
+        assert!(approx_eq(p.log_density(1.0, 0.0), -HALF_LN_2PI - 0.5, 1e-10));
+        // Unit integral check via trapezoidal quadrature on the density.
+        let dx = 0.001;
+        let total: f64 = (-5000..=5000).map(|i| {
+            let x = i as f64 * dx;
+            p.log_density(x, 0.0).exp() * dx
+        }).sum();
+        assert!((total - 1.0).abs() < 1e-4, "density should integrate to ~1, got {}", total);
     }
 
     #[test]

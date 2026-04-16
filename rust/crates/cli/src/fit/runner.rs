@@ -1257,21 +1257,31 @@ pub fn collect_all_params(
 
 /// Parse a prior specification string from fit.toml.
 ///
-/// Supported formats:
-///   "lognormal(mu, sigma)" → TransformedNormal { mean: mu, sd: sigma }
-///   "normal(mu, sigma)"    → Normal { mean: mu, sd: sigma }
-///   "beta(alpha, beta)"    → Beta { alpha, beta }
-///   "flat"                 → Flat
+/// Mirrors the seven distributions supported in DSL `~` syntax. Args are
+/// positional here (fit.toml strings) but named in the DSL. Both the DSL
+/// name (`log_normal`, `half_normal`) and the legacy compact form
+/// (`lognormal`, `halfnormal`) are accepted.
+///
+/// | fit.toml string                  | Prior variant                            |
+/// |----------------------------------|------------------------------------------|
+/// | `flat`                           | `Flat`                                   |
+/// | `uniform(lower, upper)`          | `Uniform { lower, upper }`               |
+/// | `normal(mu, sigma)`              | `Normal { mean: mu, sd: sigma }`         |
+/// | `log_normal(mu, sigma)`          | `TransformedNormal { mean: mu, sd: sigma }` |
+/// | `half_normal(sigma)`             | `HalfNormal { sigma }`                   |
+/// | `beta(alpha, beta)`              | `Beta { alpha, beta }`                   |
+/// | `gamma(shape, rate)`             | `Gamma { shape, rate }`                  |
+/// | `exponential(rate)`              | `Exponential { rate }`                   |
 ///
 /// Examples:
-///   "lognormal(log(50), 0.4)"   → LogNormal with median 50
-///   "lognormal(3.912, 0.4)"     → same (log(50) ≈ 3.912)
-///   "normal(0.08, 0.02)"        → Normal(0.08, 0.02) on natural scale
+///   "log_normal(log(50), 0.4)"   → LogNormal with median 50
+///   "log_normal(3.912, 0.4)"     → same (log(50) ≈ 3.912)
+///   "normal(0.08, 0.02)"         → Normal(0.08, 0.02) on natural scale
 pub fn parse_prior(s: &str) -> Option<Prior> {
     let s = s.trim();
     if s == "flat" { return Some(Prior::Flat); }
 
-    // Match "name(arg1, arg2)"
+    // Match "name(arg1, arg2, ...)"
     let open = s.find('(')?;
     let close = s.rfind(')')?;
     let name = s[..open].trim();
@@ -1280,12 +1290,23 @@ pub fn parse_prior(s: &str) -> Option<Prior> {
         .map(|a| eval_prior_arg(a.trim()))
         .collect::<Option<Vec<_>>>()?;
 
-    if args.len() != 2 { return None; }
-
-    match name {
-        "lognormal" => Some(Prior::TransformedNormal { mean: args[0], sd: args[1] }),
-        "normal" => Some(Prior::Normal { mean: args[0], sd: args[1] }),
-        "beta" => Some(Prior::Beta { alpha: args[0], beta: args[1] }),
+    // Accept both DSL names (log_normal, half_normal) and legacy compact
+    // names (lognormal) for fit.toml backward compatibility.
+    match (name, args.len()) {
+        ("lognormal", 2) | ("log_normal", 2) =>
+            Some(Prior::TransformedNormal { mean: args[0], sd: args[1] }),
+        ("normal", 2) =>
+            Some(Prior::Normal { mean: args[0], sd: args[1] }),
+        ("beta", 2) =>
+            Some(Prior::Beta { alpha: args[0], beta: args[1] }),
+        ("half_normal", 1) | ("halfnormal", 1) =>
+            Some(Prior::HalfNormal { sigma: args[0] }),
+        ("gamma", 2) =>
+            Some(Prior::Gamma { shape: args[0], rate: args[1] }),
+        ("exponential", 1) =>
+            Some(Prior::Exponential { rate: args[0] }),
+        ("uniform", 2) =>
+            Some(Prior::Uniform { lower: args[0], upper: args[1] }),
         _ => None,
     }
 }
