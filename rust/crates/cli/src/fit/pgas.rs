@@ -69,18 +69,9 @@ pub fn run_pgas_cli(
 
     let dt = config.if2_config.dt;
 
-    // Build priors from fit.toml [estimate] section
+    // Resolve priors: fit.toml override → model IR → Flat
     let priors: Vec<Prior> = config.estimated_params.iter()
-        .map(|spec| {
-            let est = fit.estimate.get(&spec.name);
-            match est.and_then(|e| e.prior.as_deref()) {
-                None => Prior::Flat,
-                Some(s) => super::runner::parse_prior(s).unwrap_or_else(|| {
-                    eprintln!("warning: cannot parse prior '{}' for {}, using Flat", s, spec.name);
-                    Prior::Flat
-                }),
-            }
-        })
+        .map(|spec| super::runner::resolve_prior(&spec.name, fit, &config.model).0)
         .collect();
 
     // Report priors

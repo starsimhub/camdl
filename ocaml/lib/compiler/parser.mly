@@ -165,11 +165,23 @@ param_decl:
       { PIndexed { pname = name; pdims = [dim]; pkind = pk; pdim = da; pbounds = Some (lo, hi); pprior = Some pr } }
 
 prior_clause:
-  | name = IDENT LPAREN args = separated_list(COMMA, prior_kwarg) RPAREN
+  | name = prior_name LPAREN args = separated_list(COMMA, prior_kwarg) RPAREN
       { { ps_name = name; ps_args = args } }
 
+(* Distribution names and keyword argument names accept identifiers AND
+   common keywords (rate, count, etc.) that conflict with DSL reserved
+   words but are natural in statistical contexts. *)
+prior_name:
+  | id = IDENT { id }
+  | RATE       { "rate" }
+  | COUNT      { "count" }
+  | PROBABILITY { "probability" }
+  | POSITIVE   { "positive" }
+  | REAL       { "real" }
+  | INTEGER    { "integer" }
+
 prior_kwarg:
-  | k = IDENT EQ v = expr { (k, v) }
+  | k = prior_name EQ v = expr { (k, v) }
 
 dim_annotation_opt:
   | (* empty *) { None }

@@ -1200,6 +1200,38 @@ pub fn parse_prior(s: &str) -> Option<Prior> {
     }
 }
 
+/// Resolve the prior for a parameter using the precedence chain:
+///
+///   1. fit.toml [estimate] prior string (override, for sensitivity analysis)
+///   2. model IR parameter.prior (from `~` syntax in .camdl)
+///   3. Prior::Flat (improper uniform, default for inference)
+///
+/// Returns the prior and a string describing the source (for logging).
+pub fn resolve_prior(
+    name: &str,
+    fit: &super::config::FitToml,
+    model: &ir::Model,
+) -> (Prior, &'static str) {
+    // 1. fit.toml override
+    if let Some(est) = fit.estimate.get(name) {
+        if let Some(ref s) = est.prior {
+            if let Some(p) = parse_prior(s) {
+                return (p, "fit.toml");
+            } else {
+                eprintln!("warning: cannot parse prior '{}' for {} in fit.toml, falling through", s, name);
+            }
+        }
+    }
+    // 2. model IR
+    if let Some(ir_param) = model.parameters.iter().find(|p| p.name == name) {
+        if let Some(ref pd) = ir_param.prior {
+            return (Prior::from_ir(pd), "model");
+        }
+    }
+    // 3. fallback
+    (Prior::Flat, "flat (default)")
+}
+
 /// Evaluate a prior argument — supports bare numbers and log(x).
 fn eval_prior_arg(s: &str) -> Option<f64> {
     if let Ok(v) = s.parse::<f64>() {

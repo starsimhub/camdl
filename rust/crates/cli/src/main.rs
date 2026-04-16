@@ -584,14 +584,22 @@ fn run_simulate(args: &[String]) {
                 eprintln!("error: --draws prior requires -n N");
                 std::process::exit(1);
             });
-            let fit_path = fit_path_for_draws.as_ref().unwrap_or_else(|| {
-                eprintln!("error: --draws prior requires --fit FIT.toml");
-                std::process::exit(1);
-            });
-            generate_prior_draws(fit_path, n, seed).unwrap_or_else(|e| {
-                eprintln!("error: {}", e);
-                std::process::exit(1);
-            })
+            match fit_path_for_draws.as_ref() {
+                Some(fit_path) => {
+                    // fit.toml prior source (overrides or supplements model priors)
+                    generate_prior_draws(fit_path, n, seed).unwrap_or_else(|e| {
+                        eprintln!("error: {}", e);
+                        std::process::exit(1);
+                    })
+                }
+                None => {
+                    // Use priors embedded in the model IR
+                    generate_prior_draws_from_ir(&ir_path, n, seed).unwrap_or_else(|e| {
+                        eprintln!("error: {}", e);
+                        std::process::exit(1);
+                    })
+                }
+            }
         } else {
             // File path
             load_draws_tsv(source).unwrap_or_else(|e| {
@@ -1102,6 +1110,97 @@ fn generate_prior_draws(
     eprintln!("generated {} prior draws from {} ({} estimated + {} fixed params)",
         n, fit_path, config.estimate.len(), fixed.len());
     Ok(draws)
+}
+
+/// Generate N draws from priors embedded in the model IR.
+/// Each parameter needs either a prior (sampled) or a value (used as-is).
+/// Parameters with neither produce an error — clear message to add ~ prior(...)
+/// to the model, supply --fit, or use --draws uniform.
+fn generate_prior_draws_from_ir(
+    ir_path: &str,
+    n: usize,
+    seed: u64,
+) -> Result<Vec<HashMap<String, f64>>, String> {
+    let (model, _) = util::load_model(ir_path)?;
+
+    // Check all params have either a prior or a default value
+    let missing: Vec<&str> = model.parameters.iter()
+        .filter(|p| p.prior.is_none() && p.value.is_none())
+        .map(|p| p.name.as_str())
+        .collect();
+    if !missing.is_empty() {
+        return Err(format!(
+            "parameter{} {} no prior and no default value.\n  \
+             Fix options: add `~ prior(...)` to the model, supply `--fit FIT.toml`,\n  \
+             or use `--draws uniform` for space-filling exploration.",
+            if missing.len() > 1 { "s" } else { "" },
+            missing.iter().map(|n| format!("'{}'", n)).collect::<Vec<_>>().join(", "),
+        ));
+    }
+
+    let mut rng = sim::rng::StatefulRng::new(seed ^ SEED_MIX_PRIOR);
+    let mut draws = Vec::with_capacity(n);
+    let mut n_sampled = 0;
+    let mut n_fixed = 0;
+
+    for i in 0..n {
+        let mut row = HashMap::new();
+        for p in &model.parameters {
+            let value = match &p.prior {
+                Some(pd) => {
+                    if i == 0 { n_sampled += 1; }
+                    sample_from_prior_dist(pd, p.bounds, &mut rng)
+                }
+                None => {
+                    if i == 0 { n_fixed += 1; }
+                    p.value.expect("missing check above guarantees value exists")
+                }
+            };
+            row.insert(p.name.clone(), value);
+        }
+        draws.push(row);
+    }
+
+    eprintln!("generated {} prior draws from model IR ({} sampled + {} fixed params)",
+        n, n_sampled, n_fixed);
+    Ok(draws)
+}
+
+/// Sample one value from an IR PriorDist.
+fn sample_from_prior_dist(
+    pd: &ir::parameter::PriorDist,
+    bounds: Option<(f64, f64)>,
+    rng: &mut sim::rng::StatefulRng,
+) -> f64 {
+    use ir::parameter::PriorDist;
+    let raw = match pd {
+        PriorDist::Uniform(u) => u.lower + (u.upper - u.lower) * rng.uniform(),
+        PriorDist::Normal(p) => p.mean + p.sd * rng.normal(),
+        PriorDist::LogNormal(p) => (p.mu + p.sigma * rng.normal()).exp(),
+        PriorDist::HalfNormal(p) => (p.sigma * rng.normal()).abs(),
+        PriorDist::Beta(p) => {
+            use rand::prelude::Distribution;
+            let x = rand_distr::Gamma::new(p.alpha, 1.0).unwrap().sample(rng.inner_mut());
+            let y = rand_distr::Gamma::new(p.beta, 1.0).unwrap().sample(rng.inner_mut());
+            x / (x + y)
+        }
+        PriorDist::Gamma(p) => {
+            use rand::prelude::Distribution;
+            // rand_distr uses scale parameter, not rate
+            let scale = 1.0 / p.rate;
+            rand_distr::Gamma::new(p.shape, scale).unwrap().sample(rng.inner_mut())
+        }
+        PriorDist::Exponential(p) => {
+            // Inverse CDF: -ln(U)/rate
+            let u = rng.uniform().max(1e-300);
+            -u.ln() / p.rate
+        }
+        PriorDist::Fixed(v) => *v,
+    };
+    match bounds {
+        Some((lo, hi)) => raw.clamp(lo, hi),
+        None => raw,
+    }
 }
 
 /// Parse a seeds spec: "1:100" (range), "42" (single), "1,2,3,42" (list).
