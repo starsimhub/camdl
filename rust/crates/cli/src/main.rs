@@ -138,6 +138,7 @@ fn main() {
         }
         "fit" => {
             match all_args.get(1).map(|s| s.as_str()) {
+                Some("run")      => fit::cmd_fit_run_v2(&all_args[2..]),
                 Some("scout")    => fit::cmd_fit_scout(&all_args[2..]),
                 Some("refine")   => fit::cmd_fit_refine(&all_args[2..]),
                 Some("validate") => fit::cmd_fit_validate(&all_args[2..]),
@@ -145,7 +146,7 @@ fn main() {
                 Some("pmmh")     => fit::cmd_fit_pmmh(&all_args[2..]),
                 Some("pgas")     => fit::cmd_fit_pgas(&all_args[2..]),
                 _ => {
-                    eprintln!("usage: camdl fit <scout|refine|validate|pmmh|pgas|status> FIT.toml");
+                    eprintln!("usage: camdl fit <run|scout|refine|validate|pmmh|pgas|status> FIT.toml");
                     std::process::exit(1);
                 }
             }

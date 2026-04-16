@@ -9,6 +9,8 @@
 //!   camdl fit status   fit.toml
 
 pub mod config;
+#[allow(dead_code)]
+pub mod config_v2;
 pub mod state;
 pub mod provenance;
 pub mod runner;
@@ -130,6 +132,256 @@ pub fn cmd_fit_status(args: &[String]) {
         eprintln!("error: {}", e);
         std::process::exit(1);
     });
+}
+
+// ─── New `camdl fit run` entry point (config_v2) ────────────────────────────
+
+pub fn cmd_fit_run_v2(args: &[String]) {
+    use config_v2::{FitConfigV2, Stage, StartsFrom};
+
+    let mut fit_path: Option<String> = None;
+    let mut seed = 1_u64;
+    let mut _force = false;
+    let mut stage_filter: Option<String> = None;
+    let mut starts_from_override: Option<String> = None;
+    let mut has_seed_flag = false;
+
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--seed" => { i += 1; seed = args[i].parse().expect("--seed needs integer"); has_seed_flag = true; }
+            "--force" => { _force = true; }
+            "--stage" => { i += 1; stage_filter = Some(args[i].clone()); }
+            "--starts-from" => { i += 1; starts_from_override = Some(args[i].clone()); }
+            "--resume" => { /* TODO: wire up */ }
+            s if s.starts_with("--") => {
+                eprintln!("unknown flag: {}", s);
+                eprintln!("usage: camdl fit run FIT.toml [--stage NAME] [--seed N] [--force]");
+                std::process::exit(1);
+            }
+            path => { fit_path = Some(path.to_string()); }
+        }
+        i += 1;
+    }
+
+    let fit_path = fit_path.unwrap_or_else(|| {
+        eprintln!("usage: camdl fit run FIT.toml [--stage NAME] [--seed N] [--force]");
+        std::process::exit(1);
+    });
+
+    // Load v2 config
+    let config = FitConfigV2::load(&fit_path).unwrap_or_else(|e| {
+        eprintln!("error: {}", e);
+        std::process::exit(1);
+    });
+
+    // Load model and validate completeness
+    let (model, _model_json) = crate::util::load_model(&config.model.camdl).unwrap_or_else(|e| {
+        eprintln!("error: {}", e);
+        std::process::exit(1);
+    });
+    let model_params: Vec<String> = model.parameters.iter().map(|p| p.name.clone()).collect();
+    config.validate(&model_params).unwrap_or_else(|e| {
+        eprintln!("error: {}", e);
+        std::process::exit(1);
+    });
+
+    // Determine which stages to run
+    let stages_to_run: Vec<(&str, &Stage)> = if let Some(ref name) = stage_filter {
+        match config.stages.get(name.as_str()) {
+            Some(stage) => vec![(name.as_str(), stage)],
+            None => {
+                let available: Vec<&str> = config.stages.keys().map(|s| s.as_str()).collect();
+                eprintln!("error: stage '{}' not found. Available: {}", name, available.join(", "));
+                std::process::exit(1);
+            }
+        }
+    } else {
+        config.stages.iter().map(|(k, v)| (k.as_str(), v)).collect()
+    };
+
+    let fit_dir = config.fit_dir(&fit_path);
+
+    eprintln!("fit: {} ({} stage{})",
+        fit_path,
+        stages_to_run.len(),
+        if stages_to_run.len() == 1 { "" } else { "s" },
+    );
+    eprintln!("  model:    {}", config.model.camdl);
+    eprintln!("  estimate: {}", config.estimate.keys()
+        .map(|s| s.as_str()).collect::<Vec<_>>().join(", "));
+    eprintln!("  fixed:    {}", {
+        let resolved = config.fixed.resolve().unwrap_or_default();
+        resolved.keys().map(|s| s.as_str()).collect::<Vec<_>>().join(", ")
+    });
+    eprintln!("  output:   {}", fit_dir.display());
+
+    // Convert to legacy FitToml for runner compatibility
+    let legacy = config.to_legacy_toml().unwrap_or_else(|e| {
+        eprintln!("error converting to legacy format: {}", e);
+        std::process::exit(1);
+    });
+
+    // Seed: CLI > random
+    let seed = if has_seed_flag {
+        seed
+    } else {
+        use std::time::SystemTime;
+        let dur = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap();
+        dur.as_nanos() as u64 % 1_000_000
+    };
+
+    // Execute stages in order
+    for (stage_name, stage) in &stages_to_run {
+        let stage_dir = fit_dir.join(stage_name);
+        eprintln!("\n── stage: {} (method={}) ──", stage_name, stage.method_name());
+
+        // Resolve starts_from: CLI override > stage config
+        let effective_starts = if let Some(ref cli_sf) = starts_from_override {
+            // CLI --starts-from applies to the target stage only
+            if stages_to_run.len() == 1 {
+                Some(cli_sf.clone())
+            } else {
+                None // only applies when running a single stage
+            }
+        } else {
+            match stage.starts_from() {
+                StartsFrom::Random => None,
+                StartsFrom::Stage(ref dep_name) => {
+                    // Resolve to the directory of a prior stage in this fit
+                    Some(fit_dir.join(dep_name).to_string_lossy().to_string())
+                }
+                StartsFrom::Directory(ref path) => {
+                    Some(path.to_string_lossy().to_string())
+                }
+            }
+        };
+
+        match stage {
+            Stage::IF2 { chains, particles, iterations, cooling, .. } => {
+                let prior_state = effective_starts.as_ref().and_then(|dir| {
+                    state::FitState::load(dir).ok()
+                });
+
+                let run_config = runner::FitRunConfig::build(
+                    &legacy,
+                    prior_state.as_ref(),
+                    *chains, *particles, *iterations,
+                    *cooling, seed, effective_starts.is_none(),
+                ).unwrap_or_else(|e| {
+                    eprintln!("error building run config: {}", e);
+                    std::process::exit(1);
+                });
+
+                std::fs::create_dir_all(&stage_dir).unwrap_or_else(|e| {
+                    eprintln!("error creating {}: {}", stage_dir.display(), e);
+                    std::process::exit(1);
+                });
+
+                let collector = sim::inference::diagnostic::DiagnosticCollector::new(stage_name);
+                let t0 = std::time::Instant::now();
+                let chain_results = runner::run_chains_with_diagnostics(&run_config, &collector);
+                let elapsed = t0.elapsed();
+
+                // Write outputs
+                let param_names: Vec<String> = model.parameters.iter().map(|p| p.name.clone()).collect();
+                runner::write_chain_outputs(
+                    &stage_dir.to_string_lossy(), &chain_results.results,
+                    &run_config.estimated_params, &param_names,
+                    &run_config.base_params, &run_config.compiled,
+                ).unwrap_or_else(|e| eprintln!("warning: {}", e));
+                runner::write_diagnostics(&stage_dir.to_string_lossy(), &chain_results.results)
+                    .unwrap_or_else(|e| eprintln!("warning: {}", e));
+
+                // Write fit_state.toml for downstream stages
+                let best = &chain_results.results.iter()
+                    .find(|(id, _)| *id == chain_results.best_chain)
+                    .unwrap().1;
+                let start_values = runner::collect_all_params(
+                    &best.mle, &run_config.estimated_params, &run_config.model,
+                    &run_config.base_params, &run_config.compiled,
+                );
+                let rw_sd = match runner::auto_rw_sd(&chain_results.results, &run_config.estimated_params) {
+                    Ok((rw, _)) => rw,
+                    Err(_) => run_config.estimated_params.iter()
+                        .map(|s| (s.name.clone(), s.rw_sd * 0.5))
+                        .collect(),
+                };
+                let fit_state = state::FitState {
+                    stage: stage_name.to_string(),
+                    seed,
+                    timestamp: scout::now_iso8601_pub(),
+                    input_hash: None,
+                    camdl_version: Some(crate::version::VERSION_SHORT.into()),
+                    best_loglik: chain_results.best_loglik,
+                    initial_loglik: f64::NEG_INFINITY,
+                    best_chain: chain_results.best_chain,
+                    n_chains: *chains,
+                    n_good_chains: None,
+                    start_values,
+                    rw_sd,
+                    loglik_type: Some("if2".into()),
+                    acceptance_rate: None,
+                };
+                fit_state.save(&stage_dir.to_string_lossy()).unwrap_or_else(|e| {
+                    eprintln!("warning: could not save fit_state: {}", e);
+                });
+
+                // Write mle_params.toml
+                let all_params = runner::collect_all_params(
+                    &best.mle, &run_config.estimated_params, &run_config.model,
+                    &run_config.base_params, &run_config.compiled,
+                );
+                let mle_path = format!("{}/mle_params.toml", stage_dir.display());
+                let model_hash = crate::hashing::model_hash(&run_config.model_ir_json);
+                let data_hashes: Vec<(String, String)> = config.data.observations.iter()
+                    .map(|(name, path)| {
+                        let bytes = std::fs::read(path).unwrap_or_default();
+                        let hash = {
+                            use sha2::{Sha256, Digest};
+                            let result = Sha256::digest(&bytes);
+                            hex::encode(&result[..4])
+                        };
+                        (format!("{} ({})", name, path), hash)
+                    })
+                    .collect();
+                let metadata = provenance::MleMetadata {
+                    input_hash: model_hash[..8].to_string(),
+                    model_path: config.model.camdl.clone(),
+                    model_hash,
+                    data_hashes,
+                    seed,
+                    stage: stage_name.to_string(),
+                    best_chain: chain_results.best_chain,
+                    loglik: chain_results.best_loglik,
+                    loglik_sd: 0.0,
+                    n_particles: *particles,
+                    ess_at_mle: None,
+                    timestamp: fit_state.timestamp.clone(),
+                };
+                provenance::write_mle_params(&mle_path, &all_params, &metadata)
+                    .unwrap_or_else(|e| eprintln!("warning: {}", e));
+
+                collector.render_to_stderr();
+
+                eprintln!("\n{} complete in {:.1}s: {}/", stage_name, elapsed.as_secs_f64(), stage_dir.display());
+                eprintln!("  best loglik: {:.1} (chain {})", chain_results.best_loglik, chain_results.best_chain + 1);
+            }
+            Stage::PGAS { .. } => {
+                eprintln!("  PGAS dispatch via `camdl fit run` not yet wired up.");
+                eprintln!("  Use: camdl fit pgas {} --starts-from {}", fit_path,
+                    effective_starts.as_deref().unwrap_or("..."));
+            }
+            Stage::PMMH { .. } => {
+                eprintln!("  PMMH dispatch via `camdl fit run` not yet wired up.");
+                eprintln!("  Use: camdl fit pmmh {} --starts-from {}", fit_path,
+                    effective_starts.as_deref().unwrap_or("..."));
+            }
+            Stage::PFilter { .. } => {
+                eprintln!("  PFilter dispatch via `camdl fit run` not yet wired up.");
+            }
+        }
+    }
 }
 
 fn parse_fit_args(args: &[String], _needs_starts_from: bool) -> (FitToml, u64, bool) {
