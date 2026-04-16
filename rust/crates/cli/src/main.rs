@@ -164,15 +164,23 @@ fn main() {
         "serve" => {
             serve::cmd_serve(&all_args[1..]);
         }
-        _ => {
-            // Accept "camdl simulate FILE ..." or bare "camdl FILE ..."
-            let args: &[String] = if all_args[0] == "simulate" || all_args[0] == "sim" {
-                &all_args[1..]
-            } else {
-                &all_args
-            };
+        "simulate" | "sim" => {
+            let args = &all_args[1..];
             if args.is_empty() { usage(); }
-            run_simulate(args);
+            // Check for --batch flag → delegate to experiment runner
+            if args.iter().any(|a| a == "--batch") {
+                let batch_args: Vec<String> = args.iter()
+                    .filter(|a| *a != "--batch")
+                    .cloned()
+                    .collect();
+                experiment::cmd_experiment_run(&batch_args);
+            } else {
+                run_simulate(args);
+            }
+        }
+        _ => {
+            // Accept bare "camdl FILE ..." for simulation
+            run_simulate(&all_args);
         }
     }
 }
