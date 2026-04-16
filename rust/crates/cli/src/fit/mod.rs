@@ -864,23 +864,58 @@ pub fn cmd_fit_diff(args: &[String]) {
         println!("  (no parameter changes)");
     }
 
+    // Prior changes
+    let mut _prior_changes = false;
+    for name in a_est.intersection(&b_est) {
+        let ap = &a.estimate[*name].prior;
+        let bp = &b.estimate[*name].prior;
+        let ap_str = format!("{:?}", ap);
+        let bp_str = format!("{:?}", bp);
+        if ap_str != bp_str {
+            println!("  {}: prior {:?} → {:?}", name, ap, bp);
+            _prior_changes = true;
+        }
+    }
+
     // Stage changes
     println!();
+    println!("Stages:");
     let a_stages: std::collections::BTreeSet<&str> = a.stages.keys().map(|s| s.as_str()).collect();
     let b_stages: std::collections::BTreeSet<&str> = b.stages.keys().map(|s| s.as_str()).collect();
+    let mut stage_changes = false;
     for name in b_stages.difference(&a_stages) {
         let s = &b.stages[*name];
         println!("  stage '{}': (new) {}", name, s.method_name());
+        stage_changes = true;
     }
     for name in a_stages.difference(&b_stages) {
         println!("  stage '{}': (removed)", name);
+        stage_changes = true;
     }
     for name in a_stages.intersection(&b_stages) {
         let sa = &a.stages[*name];
         let sb = &b.stages[*name];
-        if sa.method_name() != sb.method_name() {
-            println!("  stage '{}': method {} → {}", name, sa.method_name(), sb.method_name());
+        let sa_json = serde_json::to_string(sa).unwrap_or_default();
+        let sb_json = serde_json::to_string(sb).unwrap_or_default();
+        if sa_json != sb_json {
+            // Show detailed changes
+            let mut details = Vec::new();
+            if sa.method_name() != sb.method_name() {
+                details.push(format!("method {}→{}", sa.method_name(), sb.method_name()));
+            }
+            if sa.chains() != sb.chains() {
+                details.push(format!("chains {}→{}", sa.chains(), sb.chains()));
+            }
+            // Compare serialized for catch-all
+            if details.is_empty() {
+                details.push("settings changed".to_string());
+            }
+            println!("  stage '{}': {}", name, details.join(", "));
+            stage_changes = true;
         }
+    }
+    if !stage_changes {
+        println!("  (no stage changes)");
     }
 }
 

@@ -19,17 +19,23 @@ pub mod version;
 #[allow(dead_code)] mod profile;
 
 /// Terminal formatting helpers. Pure ANSI SGR codes, no dependencies.
+/// Respects NO_COLOR (https://no-color.org/) — when set, all formatting
+/// is stripped and strings are returned unchanged.
 mod term {
-    pub fn dim(s: &str) -> String { format!("\x1b[2m{}\x1b[0m", s) }
-    pub fn bold(s: &str) -> String { format!("\x1b[1m{}\x1b[0m", s) }
+    fn enabled() -> bool { std::env::var("NO_COLOR").is_err() }
+    fn wrap(code: &str, s: &str) -> String {
+        if enabled() { format!("\x1b[{}m{}\x1b[0m", code, s) } else { s.to_string() }
+    }
+    pub fn dim(s: &str) -> String { wrap("2", s) }
+    pub fn bold(s: &str) -> String { wrap("1", s) }
     #[allow(dead_code)]
-    pub fn green(s: &str) -> String { format!("\x1b[32m{}\x1b[0m", s) }
+    pub fn green(s: &str) -> String { wrap("32", s) }
     #[allow(dead_code)]
-    pub fn yellow(s: &str) -> String { format!("\x1b[33m{}\x1b[0m", s) }
+    pub fn yellow(s: &str) -> String { wrap("33", s) }
     #[allow(dead_code)]
-    pub fn red(s: &str) -> String { format!("\x1b[31m{}\x1b[0m", s) }
+    pub fn red(s: &str) -> String { wrap("31", s) }
     #[allow(dead_code)]
-    pub fn cyan(s: &str) -> String { format!("\x1b[36m{}\x1b[0m", s) }
+    pub fn cyan(s: &str) -> String { wrap("36", s) }
 }
 
 use sim::{write_diagnostics_tsv, warn_zero_firings};
@@ -373,6 +379,7 @@ fn run_simulate(args: &[String]) {
     let mut replicates: usize = 1;
     let mut draws_path: Option<String> = None;
     let mut n_draws_arg: Option<usize> = None;
+    let mut fit_path_for_draws: Option<String> = None;
 
     // Collect --param-vec PREFIX=FILE entries for deferred validation after model load
     let mut set_vec_entries: Vec<(String, String)> = Vec::new();
@@ -420,6 +427,7 @@ fn run_simulate(args: &[String]) {
             "--replicates" => { i += 1; replicates = args[i].parse().unwrap_or_else(|_| { eprintln!("error: --replicates needs a positive integer"); std::process::exit(1); }); }
             "--draws" => { i += 1; draws_path = Some(args[i].clone()); }
             "-n" | "--n-draws" => { i += 1; n_draws_arg = Some(args[i].parse().unwrap_or_else(|_| { eprintln!("error: -n needs a positive integer"); std::process::exit(1); })); }
+            "--fit" => { i += 1; fit_path_for_draws = Some(args[i].clone()); }
             s if s.starts_with("--") => { eprintln!("unknown flag: {}", s); simulate_help(); }
             path => { ir_path = Some(path.to_string()); }
         }
@@ -560,6 +568,19 @@ fn run_simulate(args: &[String]) {
                 std::process::exit(1);
             });
             generate_uniform_draws(&ir_path, n, seed).unwrap_or_else(|e| {
+                eprintln!("error: {}", e);
+                std::process::exit(1);
+            })
+        } else if source == "prior" {
+            let n = n_draws_arg.unwrap_or_else(|| {
+                eprintln!("error: --draws prior requires -n N");
+                std::process::exit(1);
+            });
+            let fit_path = fit_path_for_draws.as_ref().unwrap_or_else(|| {
+                eprintln!("error: --draws prior requires --fit FIT.toml");
+                std::process::exit(1);
+            });
+            generate_prior_draws(fit_path, n, seed).unwrap_or_else(|e| {
                 eprintln!("error: {}", e);
                 std::process::exit(1);
             })
@@ -988,6 +1009,78 @@ fn generate_uniform_draws(
     }
     eprintln!("generated {} uniform draws from parameter bounds ({} params)",
         n, model.parameters.len());
+    Ok(draws)
+}
+
+/// Generate N draws from declared priors in a fit.toml.
+/// Each draw is a complete parameter vector (estimated from priors + fixed).
+fn generate_prior_draws(
+    fit_path: &str,
+    n: usize,
+    seed: u64,
+) -> Result<Vec<HashMap<String, f64>>, String> {
+    use fit::config_v2::{FitConfigV2, PriorSpec};
+
+    let config = FitConfigV2::load(fit_path)?;
+    let fixed = config.fixed.resolve()?;
+
+    // Check all estimated params have priors
+    let missing: Vec<&str> = config.estimate.iter()
+        .filter(|(_, spec)| spec.prior.is_none())
+        .map(|(name, _)| name.as_str())
+        .collect();
+    if !missing.is_empty() {
+        return Err(format!(
+            "--draws prior requires priors for all estimated parameters.\n  \
+             Missing priors: {}\n  \
+             Add prior = {{ dist = \"...\", ... }} to [estimate.{}]",
+            missing.join(", "), missing[0]
+        ));
+    }
+
+    let mut rng = sim::rng::StatefulRng::new(seed ^ 0x0014_b1ce);
+    let mut draws = Vec::with_capacity(n);
+
+    for _ in 0..n {
+        let mut row = HashMap::new();
+        for (name, spec) in &config.estimate {
+            let value = match spec.prior.as_ref().unwrap() {
+                PriorSpec::LogNormal { mu, sigma } => {
+                    // z ~ N(mu, sigma), value = exp(z)
+                    let z = mu + sigma * rng.normal();
+                    z.exp()
+                }
+                PriorSpec::Normal { mu, sigma } => {
+                    mu + sigma * rng.normal()
+                }
+                PriorSpec::Beta { alpha, beta } => {
+                    // Beta via ratio of Gammas: X/(X+Y) where X~Gamma(a), Y~Gamma(b)
+                    use rand::prelude::Distribution;
+                    let x = rand_distr::Gamma::new(*alpha, 1.0).unwrap()
+                        .sample(rng.inner_mut());
+                    let y = rand_distr::Gamma::new(*beta, 1.0).unwrap()
+                        .sample(rng.inner_mut());
+                    x / (x + y)
+                }
+                PriorSpec::Uniform => {
+                    let (lo, hi) = spec.bounds;
+                    lo + (hi - lo) * rng.uniform()
+                }
+                PriorSpec::HalfNormal { sigma } => {
+                    (sigma * rng.normal()).abs()
+                }
+            };
+            let clamped = value.clamp(spec.bounds.0, spec.bounds.1);
+            row.insert(name.clone(), clamped);
+        }
+        for (name, val) in &fixed {
+            row.insert(name.clone(), *val);
+        }
+        draws.push(row);
+    }
+
+    eprintln!("generated {} prior draws from {} ({} estimated + {} fixed params)",
+        n, fit_path, config.estimate.len(), fixed.len());
     Ok(draws)
 }
 
