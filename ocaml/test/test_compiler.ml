@@ -1187,6 +1187,36 @@ let compile_expect_ok src =
   | Ok m -> m
   | Error e -> Alcotest.failf "compile failed: %s" e
 
+(** Substring check without the Str library. *)
+let contains_substring ~needle s =
+  let nl = String.length needle and sl = String.length s in
+  if nl = 0 then true
+  else if nl > sl then false
+  else
+    let rec loop i =
+      if i > sl - nl then false
+      else if String.sub s i nl = needle then true
+      else loop (i + 1)
+    in loop 0
+
+(** Compile with JSON-diagnostics mode so the Error variant carries the
+    structured error payload (codes + messages) rather than the generic
+    "compilation failed" string. Then assert the given error code and a
+    substring (typically the parameter name, to confirm diagnostics carry
+    enough context) both appear in the payload. *)
+let compile_expect_error_code ~code ~contains src =
+  Diagnostics.json_errors_mode := true;
+  let result = Compiler.compile ~name:"test_prior_err" src in
+  Diagnostics.json_errors_mode := false;
+  match result with
+  | Ok _ -> Alcotest.failf "expected error %s but compile succeeded" code
+  | Error e ->
+    if String.length e = 0 then Alcotest.failf "error text was empty";
+    if not (contains_substring ~needle:code e) then
+      Alcotest.failf "expected error code %s, got: %s" code e;
+    if not (contains_substring ~needle:contains e) then
+      Alcotest.failf "expected error to contain %S, got: %s" contains e
+
 let find_param (m : Ir.model) name =
   List.find (fun (p : Ir.parameter) -> p.name = name) m.parameters
 
@@ -1316,10 +1346,88 @@ let test_unknown_prior_errors () =
     init { S = 1 }
     simulate { from = 0 'days  to = 1 'days }
   |} in
-  match Compiler.compile ~name:"bad_prior" src with
-  | Ok _ -> Alcotest.fail "should have failed with unknown distribution"
-  | Error e -> Alcotest.(check bool) "error mentions unknown prior"
-                 true (String.length e > 0)
+  compile_expect_error_code ~code:"E232" ~contains:"parameter 'x'" src
+
+(* Wrapper — the prior-arg tests all need a minimal compile-clean model. *)
+let src_with_prior prior_expr = Printf.sprintf {|
+    time_unit = 'days
+    parameters {
+      beta : rate in [0.01, 2.0] ~ %s
+    }
+    compartments { S }
+    init { S = 1 }
+    simulate { from = 0 'days  to = 1 'days }
+  |} prior_expr
+
+(* ── E230: non-constant prior argument ──────────────────────────────────── *)
+
+let test_e230_non_const_arg () =
+  (* Reference a parameter in a prior arg — not a compile-time constant. *)
+  let src = {|
+    time_unit = 'days
+    parameters {
+      x    : rate in [0.01, 1.0]
+      beta : rate in [0.01, 2.0] ~ log_normal(mu = x, sigma = 0.5)
+    }
+    compartments { S }
+    init { S = 1 }
+    simulate { from = 0 'days  to = 1 'days }
+  |} in
+  compile_expect_error_code ~code:"E230" ~contains:"parameter 'beta'" src
+
+(* ── E231: missing required kwarg ──────────────────────────────────────── *)
+
+let test_e231_missing_kwarg () =
+  compile_expect_error_code ~code:"E231" ~contains:"parameter 'beta'"
+    (src_with_prior "log_normal(mu = -1.0)")
+
+let test_e231_missing_kwarg_half_normal () =
+  compile_expect_error_code ~code:"E231" ~contains:"sigma"
+    (src_with_prior "half_normal()")
+
+(* ── E233: unknown / extra kwarg ───────────────────────────────────────── *)
+
+let test_e233_unknown_kwarg () =
+  compile_expect_error_code ~code:"E233" ~contains:"extra"
+    (src_with_prior "log_normal(mu = -1.0, sigma = 0.5, extra = 99)")
+
+let test_e233_typo_kwarg () =
+  (* 'mean' instead of 'mu' — common mistake, good test of the error's
+     discoverability. *)
+  compile_expect_error_code ~code:"E233" ~contains:"log_normal"
+    (src_with_prior "log_normal(mean = -1.0, sigma = 0.5)")
+
+(* ── E234: duplicate kwarg ─────────────────────────────────────────────── *)
+
+let test_e234_duplicate_kwarg () =
+  compile_expect_error_code ~code:"E234" ~contains:"duplicate"
+    (src_with_prior "log_normal(mu = -1.0, mu = -5.0, sigma = 0.5)")
+
+(* ── E235: invalid distribution values ─────────────────────────────────── *)
+
+let test_e235_uniform_inverted () =
+  compile_expect_error_code ~code:"E235" ~contains:"lower < upper"
+    (src_with_prior "uniform(lower = 5.0, upper = 1.0)")
+
+let test_e235_beta_negative_alpha () =
+  compile_expect_error_code ~code:"E235" ~contains:"alpha"
+    (src_with_prior "beta(alpha = -1.0, beta = 2.0)")
+
+let test_e235_gamma_zero_shape () =
+  compile_expect_error_code ~code:"E235" ~contains:"shape"
+    (src_with_prior "gamma(shape = 0.0, rate = 1.0)")
+
+let test_e235_exponential_zero_rate () =
+  compile_expect_error_code ~code:"E235" ~contains:"rate"
+    (src_with_prior "exponential(rate = 0.0)")
+
+let test_e235_normal_negative_sigma () =
+  compile_expect_error_code ~code:"E235" ~contains:"sigma"
+    (src_with_prior "normal(mu = 0.0, sigma = -1.0)")
+
+let test_e235_half_normal_zero_sigma () =
+  compile_expect_error_code ~code:"E235" ~contains:"sigma"
+    (src_with_prior "half_normal(sigma = 0.0)")
 
 let () =
   Alcotest.run "compiler" [
@@ -1408,6 +1516,20 @@ let () =
       Alcotest.test_case "~ half_normal(sigma) parses"                   `Quick test_prior_half_normal;
       Alcotest.test_case "no prior clause → prior = None"                `Quick test_no_prior_is_none;
       Alcotest.test_case "indexed param shares prior across expansion"   `Quick test_indexed_param_shares_prior;
-      Alcotest.test_case "unknown distribution name errors"              `Quick test_unknown_prior_errors;
+      Alcotest.test_case "E232 unknown distribution — carries param name" `Quick test_unknown_prior_errors;
+    ];
+    "prior_validation", [
+      Alcotest.test_case "E230 non-const prior arg"                      `Quick test_e230_non_const_arg;
+      Alcotest.test_case "E231 missing required kwarg"                   `Quick test_e231_missing_kwarg;
+      Alcotest.test_case "E231 half_normal without sigma"                `Quick test_e231_missing_kwarg_half_normal;
+      Alcotest.test_case "E233 unknown / extra kwarg"                    `Quick test_e233_unknown_kwarg;
+      Alcotest.test_case "E233 typo'd kwarg ('mean' instead of 'mu')"    `Quick test_e233_typo_kwarg;
+      Alcotest.test_case "E234 duplicate kwarg"                          `Quick test_e234_duplicate_kwarg;
+      Alcotest.test_case "E235 uniform(lower>=upper)"                    `Quick test_e235_uniform_inverted;
+      Alcotest.test_case "E235 beta(alpha<=0)"                           `Quick test_e235_beta_negative_alpha;
+      Alcotest.test_case "E235 gamma(shape=0)"                           `Quick test_e235_gamma_zero_shape;
+      Alcotest.test_case "E235 exponential(rate=0)"                      `Quick test_e235_exponential_zero_rate;
+      Alcotest.test_case "E235 normal(sigma<0)"                          `Quick test_e235_normal_negative_sigma;
+      Alcotest.test_case "E235 half_normal(sigma=0)"                     `Quick test_e235_half_normal_zero_sigma;
     ];
   ]
