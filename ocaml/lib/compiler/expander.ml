@@ -1222,7 +1222,7 @@ let expand_transitions ctx =
 
 (* ── Parameter expansion ─────────────────────────────────────────────────── *)
 
-let resolve_float_expr ctx e =
+let resolve_float_expr_simple ctx e =
   let ir = normalize_expr (resolve_expr ctx [] e) in
   match ir with
   | Ir.Const f -> f
@@ -1232,8 +1232,8 @@ let resolve_bounds ctx pbounds =
   match pbounds with
   | None -> None
   | Some (lo_e, hi_e) ->
-    let lo = resolve_float_expr ctx lo_e in
-    let hi = resolve_float_expr ctx hi_e in
+    let lo = resolve_float_expr_simple ctx lo_e in
+    let hi = resolve_float_expr_simple ctx hi_e in
     Some (lo, hi)
 
 let param_kind_to_string = function
@@ -1259,6 +1259,25 @@ let rec eval_const_expr ctx = function
   | EBinOp (Div, l, r) -> eval_const_expr ctx l /. eval_const_expr ctx r
   | EBinOp (Pow, l, r) -> eval_const_expr ctx l ** eval_const_expr ctx r
   | _ -> 0.0  (* unreachable — guarded by is_const_expr *)
+
+(* Full resolve_float_expr: tries AST const-eval first, then IR reduction.
+   Errors if neither produces a constant. *)
+let resolve_float_expr ctx e =
+  if is_const_expr e then eval_const_expr ctx e
+  else
+    let ir = normalize_expr (resolve_expr ctx [] e) in
+    match ir with
+    | Ir.Const f -> f
+    | _ ->
+      Diagnostics.error ctx.diags
+        ~code:"E401" ~loc:Diagnostics.no_loc
+        ~message:"expected a constant expression"
+        ~detail:"This position requires a compile-time constant (number or \
+                 arithmetic of constants). Parameters and compartments are \
+                 not allowed here."
+        ~hint:"Use a numeric literal or arithmetic of literals."
+        ();
+      0.0
 
 let expand_parameters ctx =
   let from_params = List.concat_map (fun pd ->
@@ -1786,7 +1805,10 @@ let expand_interventions ctx =
 (* ── Observation model expansion ─────────────────────────────────────────── *)
 
 let expand_observations ctx =
-  List.map (fun od ->
+  List.concat_map (fun od ->
+    let combos = cartesian_product od.oindices ctx in
+    (* If no indices, combos = [[]] — one iteration with empty env *)
+    List.filter_map (fun env ->
     let t_start = match ctx.simulate with
       | None    -> 0.0
       | Some sd -> resolve_float_expr ctx sd.sim_from
@@ -1804,42 +1826,39 @@ let expand_observations ctx =
     in
     let projection = match od.oprojection with
       | ProjIncidence (name, idxs) ->
-        let idx_vals = List.map (index_item_to_str []) idxs in
+        let idx_vals = List.map (index_item_to_str env) idxs in
         let concrete = if idx_vals = [] then name
           else String.concat "_" (name :: idx_vals) in
         Ir.CumulativeFlow concrete
       | ProjPrevalence (name, idxs) ->
-        let idx_vals = List.map (index_item_to_str []) idxs in
+        let idx_vals = List.map (index_item_to_str env) idxs in
         let concrete = if idx_vals = [] then name
           else String.concat "_" (name :: idx_vals) in
         Ir.CurrentPop concrete
       | ProjDerived (EFuncCall ("incidence", args)) ->
-        (* incidence(transition) or incidence(transition[idx]) syntax *)
         (match List.assoc_opt "" args with
          | Some (EIdent (n, _))    -> Ir.CumulativeFlow n
          | Some (EIndex (n, idxs)) ->
-           Ir.CumulativeFlow (String.concat "_" (n :: List.map (index_item_to_str []) idxs))
+           Ir.CumulativeFlow (String.concat "_" (n :: List.map (index_item_to_str env) idxs))
          | _ -> Ir.CumulativeFlow "?")
       | ProjDerived (EFuncCall ("prevalence", args)) ->
-        (* prevalence(compartment) or prevalence(compartment[idx]) syntax *)
         (match List.assoc_opt "" args with
          | Some (EIdent (n, _))    -> Ir.CurrentPop n
          | Some (EIndex (n, idxs)) ->
-           Ir.CurrentPop (String.concat "_" (n :: List.map (index_item_to_str []) idxs))
+           Ir.CurrentPop (String.concat "_" (n :: List.map (index_item_to_str env) idxs))
          | _ -> Ir.CurrentPop "?")
       | ProjDerived (EIdent (name, _)) ->
-        (* bare compartment/transition name → cumulative flow *)
         Ir.CumulativeFlow name
       | ProjDerived (EIndex (name, idxs)) ->
-        let idx_vals = List.map (index_item_to_str []) idxs in
+        let idx_vals = List.map (index_item_to_str env) idxs in
         let concrete = String.concat "_" (name :: idx_vals) in
         Ir.CumulativeFlow concrete
       | ProjDerived e ->
-        Ir.DerivedExpr (resolve_expr ctx [] e)
+        Ir.DerivedExpr (resolve_expr ctx env e)
     in
     let resolve_kw kwargs name =
       match List.assoc_opt name kwargs with
-      | Some e -> resolve_expr ctx [] e
+      | Some e -> resolve_expr ctx env e
       | None   -> Ir.Const 0.0
     in
     let likelihood = match od.olikelihood with
@@ -1869,13 +1888,19 @@ let expand_observations ctx =
       | LikBernoulli kwargs ->
         Ir.Bernoulli { Ir.p = resolve_kw kwargs "p" }
     in
-    let data_stream = Option.value ~default:od.oname od.odata_stream in
-    { Ir.name        = od.oname;
+    let parts = name_parts_from_bindings od.oindices env in
+    let obs_name =
+      if parts = [] then od.oname
+      else od.oname ^ "_" ^ String.concat "_" parts
+    in
+    let data_stream = Option.value ~default:obs_name od.odata_stream in
+    Some { Ir.name        = obs_name;
       Ir.data_stream;
       Ir.schedule;
       Ir.projection;
       Ir.likelihood;
     }
+    ) combos
   ) ctx.obs_decls
 
 (* ── Shadowing check ──────────────────────────────────────────────────────── *)
