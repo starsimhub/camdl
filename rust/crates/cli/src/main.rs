@@ -18,34 +18,201 @@ pub mod version;
 #[allow(dead_code)] mod if2;
 #[allow(dead_code)] mod profile;
 
+/// Terminal formatting helpers. Pure ANSI SGR codes, no dependencies.
+mod term {
+    pub fn dim(s: &str) -> String { format!("\x1b[2m{}\x1b[0m", s) }
+    pub fn bold(s: &str) -> String { format!("\x1b[1m{}\x1b[0m", s) }
+    #[allow(dead_code)]
+    pub fn green(s: &str) -> String { format!("\x1b[32m{}\x1b[0m", s) }
+    #[allow(dead_code)]
+    pub fn yellow(s: &str) -> String { format!("\x1b[33m{}\x1b[0m", s) }
+    #[allow(dead_code)]
+    pub fn red(s: &str) -> String { format!("\x1b[31m{}\x1b[0m", s) }
+    #[allow(dead_code)]
+    pub fn cyan(s: &str) -> String { format!("\x1b[36m{}\x1b[0m", s) }
+}
+
 use sim::{write_diagnostics_tsv, warn_zero_firings};
 use std::collections::HashMap;
 
-fn usage() -> ! {
-    eprintln!("camdl simulate MODEL.ir.json [OPTIONS]");
+fn print_main_help() -> ! {
+    let d = term::dim;
+    let b = term::bold;
+    eprintln!("{}", b("camdl — compartmental model simulation and inference"));
+    eprintln!();
+    eprintln!("Commands:");
+    eprintln!("  {}    Run forward simulations (single or batch)", b("simulate"));
+    eprintln!("  {}         Inference pipeline (MLE, posterior sampling, evaluation)", b("fit"));
+    eprintln!("  {}     Standalone particle filter at fixed parameters", b("pfilter"));
+    eprintln!("  {}         Standalone iterated filtering (IF2)", b("if2"));
+    eprintln!("  {}     Compile .camdl → IR JSON", b("compile"));
+    eprintln!("  {}       Type-check a .camdl model", b("check"));
+    eprintln!("  {}     Print model structure", b("inspect"));
+    eprintln!("  {}        Evaluate expressions against a model", b("eval"));
+    eprintln!("  {}        Data utilities (split train/holdout)", b("data"));
+    eprintln!("  {}       Launch web visualization server", b("serve"));
+    eprintln!();
+    eprintln!("Run {} for details on any command.", d("camdl <command> --help"));
+    std::process::exit(0);
+}
+
+fn simulate_help() -> ! {
+    let d = term::dim;
+    let b = term::bold;
+    eprintln!("{}", b("camdl simulate — forward simulation"));
+    eprintln!();
+    eprintln!("Usage:  camdl simulate MODEL [OPTIONS]");
+    eprintln!();
+    eprintln!("Examples:");
+    eprintln!();
+    eprintln!("  {}", d("# Basic simulation, output to stdout"));
+    eprintln!("  camdl simulate sir.camdl --params p.toml --seed 42");
+    eprintln!();
+    eprintln!("  {}", d("# With a named scenario"));
+    eprintln!("  camdl simulate sir.camdl --params p.toml --scenario with_sia --seed 42");
+    eprintln!();
+    eprintln!("  {}", d("# Generate synthetic observations"));
+    eprintln!("  camdl simulate sir.camdl --params p.toml --obs cases.tsv --seed 42");
+    eprintln!();
+    eprintln!("  {}", d("# Posterior predictive check"));
+    eprintln!("  camdl simulate sir.camdl --draws posterior.tsv --replicates 10 --obs ppc.tsv");
+    eprintln!();
+    eprintln!("  {}", d("# Space-filling exploration from parameter bounds"));
+    eprintln!("  camdl simulate sir.camdl --draws uniform -n 500 --obs explore.tsv");
+    eprintln!();
+    eprintln!("  {}", d("# Batch: multiple scenarios × seeds"));
+    eprintln!("  camdl simulate sir.camdl --params p.toml --seeds 1:100 --scenario baseline,with_sia");
+    eprintln!();
+    eprintln!("  {}", d("# From a batch TOML file"));
+    eprintln!("  camdl simulate --batch batches/sweep.toml");
     eprintln!();
     eprintln!("Options:");
-    eprintln!("  --params   FILE.toml     load parameter values from TOML (repeatable, later overrides earlier)");
-    eprintln!("  --backend  gillespie|tau_leap|chain_binomial  (default: gillespie)");
-    eprintln!("  --dt       DT   step size for tau_leap / chain_binomial");
-    eprintln!("  --seed     N    RNG seed (default: 1)");
-    eprintln!("  --scenario NAME          select a named scenario from the model file");
-    eprintln!("  --enable   NAME          enable a named intervention (ad-hoc; mutually exclusive with --scenario)");
-    eprintln!("  --disable  NAME          disable a named intervention (ad-hoc; mutually exclusive with --scenario)");
-    eprintln!("  --param    NAME=VALUE    override a parameter value");
-    eprintln!("  --param-vec PREFIX=FILE  override indexed params from a keyed TSV (name<TAB>value)");
-    eprintln!("  --table    NAME=FILE     supply a runtime external() table from CSV/TSV/JSON");
-    eprintln!("  --obs      FILE          generate synthetic observations (wide-format TSV)");
-    eprintln!("  --obs-dir  DIR           generate one TSV per observation stream in DIR");
-    eprintln!("  --obs-only FILE|DIR      like --obs/--obs-dir but suppress trajectory output");
-    eprintln!("  --replicates N           run N independent simulations (adds replicate column)");
-    eprintln!("  --draws    FILE.tsv      simulate at each row of a draws file (posterior/prior predictive)");
-    std::process::exit(1);
+    eprintln!("  --params FILE             Load parameter values (repeatable)");
+    eprintln!("  --param NAME=VALUE        Override single parameter (repeatable)");
+    eprintln!("  --param-vec PREFIX=FILE   Override indexed params from keyed TSV");
+    eprintln!("  --table NAME=FILE         Supply external() table data");
+    eprintln!("  --backend BACKEND         gillespie|tau_leap|chain_binomial|ode (default: gillespie)");
+    eprintln!("  --dt DT                   Step size for discrete-time backends (default: 1.0)");
+    eprintln!("  --seed N                  RNG seed (default: 1)");
+    eprintln!("  --seeds SPEC              Multiple seeds: 1:100 or 1,2,42");
+    eprintln!("  --scenario NAME[,NAME]    Named scenarios (comma-separated)");
+    eprintln!("  --enable NAME             Enable intervention (mutually exclusive with --scenario)");
+    eprintln!("  --disable NAME            Disable intervention");
+    eprintln!("  --draws SOURCE            Parameter draws: path.tsv or uniform");
+    eprintln!("  -n N                      Number of draws (for --draws uniform)");
+    eprintln!("  --replicates N            Stochastic replicates per parameter point");
+    eprintln!("  --obs FILE                Write synthetic observations (wide-format TSV)");
+    eprintln!("  --obs-dir DIR             Write one TSV per observation stream");
+    eprintln!("  --obs-only FILE           Like --obs but suppress trajectory output");
+    eprintln!("  -o, --output FILE         Write trajectory to file (default: stdout)");
+    eprintln!("  --batch FILE              Load all settings from batch TOML");
+    eprintln!("  --parallel N              Concurrent runs");
+    eprintln!("  --force                   Re-run cached results");
+    std::process::exit(0);
+}
+
+fn fit_help() -> ! {
+    let d = term::dim;
+    let b = term::bold;
+    eprintln!("{}", b("camdl fit — inference pipeline"));
+    eprintln!();
+    eprintln!("Usage:  camdl fit <run|status|diff|new> [OPTIONS]");
+    eprintln!();
+    eprintln!("Commands:");
+    eprintln!("  {}       Execute inference stages from a fit.toml", b("run"));
+    eprintln!("  {}    Show completion status for a fit directory", b("status"));
+    eprintln!("  {}      Compare two fit.toml configs", b("diff"));
+    eprintln!("  {}       Create a derived fit.toml with provenance", b("new"));
+    eprintln!();
+    eprintln!("Examples:");
+    eprintln!();
+    eprintln!("  {}", d("# Run all stages in a fit config"));
+    eprintln!("  camdl fit run fits/01_all_free.toml");
+    eprintln!();
+    eprintln!("  {}", d("# Run a single stage with a specific seed"));
+    eprintln!("  camdl fit run fits/01.toml --stage mle --seed 42");
+    eprintln!();
+    eprintln!("  {}", d("# Profile likelihood: sweep a fixed parameter"));
+    eprintln!("  camdl fit run fits/01.toml --sweep \"rho=0.5,0.1,0.02\"");
+    eprintln!();
+    eprintln!("  {}", d("# Seed from a previous fit's results"));
+    eprintln!("  camdl fit run fits/02.toml --starts-from results/fits/01/mle");
+    eprintln!();
+    eprintln!("  {}", d("# Check what's done"));
+    eprintln!("  camdl fit status results/fits/01_all_free");
+    eprintln!();
+    eprintln!("  {}", d("# See what changed between two configs"));
+    eprintln!("  camdl fit diff fits/01.toml fits/02.toml");
+    eprintln!();
+    eprintln!("  {}", d("# Create a new config derived from an existing one"));
+    eprintln!("  camdl fit new --from fits/01.toml fits/02_fix_beta.toml");
+    eprintln!();
+    eprintln!("Options (camdl fit run):");
+    eprintln!("  --stage NAME            Run specific stage only");
+    eprintln!("  --starts-from DIR       Override starts_from for target stage");
+    eprintln!("  --seed N                RNG seed (default: random)");
+    eprintln!("  --sweep \"NAME=V1,V2\"    Sweep over fixed param (repeatable; Cartesian product)");
+    eprintln!("  --skip-chains N[,N]     Skip specific chain indices");
+    eprintln!("  --resume                Resume partially completed sampling stage");
+    eprintln!("  --parallel N            Concurrent sweep points");
+    eprintln!("  --force                 Re-run (overwrite stale results)");
+    std::process::exit(0);
+}
+
+fn pfilter_help() -> ! {
+    let d = term::dim;
+    let b = term::bold;
+    eprintln!("{}", b("camdl pfilter — bootstrap particle filter at fixed parameters"));
+    eprintln!();
+    eprintln!("Usage:  camdl pfilter MODEL --params P.toml --data cases.tsv [OPTIONS]");
+    eprintln!();
+    eprintln!("Examples:");
+    eprintln!();
+    eprintln!("  {}", d("# Evaluate loglik at MLE with 5000 particles"));
+    eprintln!("  camdl pfilter sir.camdl --params mle.toml --data cases.tsv --particles 5000");
+    eprintln!();
+    eprintln!("  {}", d("# With per-observation diagnostics"));
+    eprintln!("  camdl pfilter sir.camdl --params mle.toml --data cases.tsv --particles 10000 --trace");
+    eprintln!();
+    eprintln!("Options:");
+    eprintln!("  --params FILE           Parameter values");
+    eprintln!("  --data FILE             Observation data (TSV)");
+    eprintln!("  --particles N           Number of particles");
+    eprintln!("  --dt DT                 Step size (default: 1.0)");
+    eprintln!("  --seed N                RNG seed");
+    eprintln!("  --trace                 Write per-observation diagnostics");
+    eprintln!("  --flow NAME             Flow projection name");
+    std::process::exit(0);
+}
+
+fn if2_help() -> ! {
+    let d = term::dim;
+    let b = term::bold;
+    eprintln!("{}", b("camdl if2 — standalone iterated filtering"));
+    eprintln!();
+    eprintln!("Usage:  camdl if2 MODEL --params P.toml --data cases.tsv [OPTIONS]");
+    eprintln!();
+    eprintln!("Examples:");
+    eprintln!();
+    eprintln!("  {}", d("# Quick 8-chain scout with auto rw_sd"));
+    eprintln!("  camdl if2 sir.camdl --params p.toml --data cases.tsv \\");
+    eprintln!("      --rw-sd auto --chains 8 --particles 1000 --iterations 80");
+    eprintln!();
+    eprintln!("  {}", d("# With explicit rw_sd and fixed parameters"));
+    eprintln!("  camdl if2 sir.camdl --params p.toml --data cases.tsv \\");
+    eprintln!("      --rw-sd \"beta=0.01,gamma=0.005\" --fixed \"N0,mu\"");
+    eprintln!();
+    eprintln!("{}", d("Note: for structured pipelines, use `camdl fit run` with a fit.toml."));
+    eprintln!("{}", d("      Standalone if2 is for quick ad-hoc runs and scripted workflows."));
+    std::process::exit(0);
 }
 
 fn main() {
     let all_args: Vec<String> = std::env::args().skip(1).collect();
-    if all_args.is_empty() { usage(); }
+    if all_args.is_empty() { print_main_help(); }
+    if all_args[0] == "--help" || all_args[0] == "-h" || all_args[0] == "help" {
+        print_main_help();
+    }
 
     // --version / -V anywhere in args
     if all_args.iter().any(|a| a == "--version" || a == "-V") {
@@ -111,7 +278,7 @@ fn main() {
         // ── Simulation ──
         "simulate" | "sim" => {
             let args = &all_args[1..];
-            if args.is_empty() { usage(); }
+            if args.is_empty() || args.iter().any(|a| a == "--help" || a == "-h") { simulate_help(); }
             if args.iter().any(|a| a == "--batch") {
                 let batch_args: Vec<String> = args.iter()
                     .filter(|a| *a != "--batch")
@@ -129,15 +296,30 @@ fn main() {
                 Some("status") => fit::cmd_fit_status(&all_args[2..]),
                 Some("diff")   => fit::cmd_fit_diff(&all_args[2..]),
                 Some("new")    => fit::cmd_fit_new(&all_args[2..]),
+                _ => fit_help(),
+            }
+        }
+        // ── Standalone inference tools ──
+        "pfilter" => {
+            if all_args[1..].is_empty() || all_args.iter().any(|a| a == "--help" || a == "-h") {
+                pfilter_help();
+            }
+            pfilter::cmd_pfilter(&all_args[1..]);
+        }
+        "if2" | "mif2" => {
+            if all_args[1..].is_empty() || all_args.iter().any(|a| a == "--help" || a == "-h") {
+                if2_help();
+            }
+            if2::cmd_if2(&all_args[1..]);
+        }
+        "voi" => {
+            match all_args.get(1).map(|s| s.as_str()) {
+                Some("run") => voi::cmd_voi_run(&all_args[2..]),
                 _ => {
-                    eprintln!("usage: camdl fit <run|status|diff|new> FIT.toml");
+                    eprintln!("usage: camdl voi run VOI.toml");
                     std::process::exit(1);
                 }
             }
-        }
-        // ── Standalone particle filter ──
-        "pfilter" => {
-            pfilter::cmd_pfilter(&all_args[1..]);
         }
         // ── Utilities ──
         "eval" => {
@@ -228,13 +410,13 @@ fn run_simulate(args: &[String]) {
             "--replicates" => { i += 1; replicates = args[i].parse().unwrap_or_else(|_| { eprintln!("error: --replicates needs a positive integer"); std::process::exit(1); }); }
             "--draws" => { i += 1; draws_path = Some(args[i].clone()); }
             "-n" | "--n-draws" => { i += 1; n_draws_arg = Some(args[i].parse().unwrap_or_else(|_| { eprintln!("error: -n needs a positive integer"); std::process::exit(1); })); }
-            s if s.starts_with("--") => { eprintln!("unknown flag: {}", s); usage(); }
+            s if s.starts_with("--") => { eprintln!("unknown flag: {}", s); simulate_help(); }
             path => { ir_path = Some(path.to_string()); }
         }
         i += 1;
     }
 
-    let ir_path = ir_path.unwrap_or_else(|| { eprintln!("missing IR file argument"); usage(); });
+    let ir_path = ir_path.unwrap_or_else(|| { eprintln!("missing IR file argument"); simulate_help(); });
 
     // --obs-only implies --obs or --obs-dir (infer from path: trailing / or existing dir → obs-dir)
     if let Some(ref path) = obs_only {
