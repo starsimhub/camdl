@@ -176,7 +176,7 @@ pub fn cmd_fit_run_v2(args: &[String]) {
     });
 
     // Load model and validate completeness
-    let (model, _model_json) = crate::util::load_model(&config.model.camdl).unwrap_or_else(|e| {
+    let (model, model_json) = crate::util::load_model(&config.model.camdl).unwrap_or_else(|e| {
         eprintln!("error: {}", e);
         std::process::exit(1);
     });
@@ -235,6 +235,29 @@ pub fn cmd_fit_run_v2(args: &[String]) {
     for (stage_name, stage) in &stages_to_run {
         let stage_dir = fit_dir.join(stage_name);
         eprintln!("\n── stage: {} (method={}) ──", stage_name, stage.method_name());
+
+        // Config hash staleness check
+        let fixed_resolved = config.fixed.resolve().unwrap_or_default();
+        let config_hash = provenance::compute_config_hash_v2(
+            &model_json, &config.data.observations, &config.estimate,
+            &fixed_resolved, stage_name, stage, seed,
+        );
+        if !_force {
+            match provenance::check_config_hash(&stage_dir.to_string_lossy(), &config_hash) {
+                provenance::ConfigCacheStatus::Match => {
+                    eprintln!("  \x1b[33mskipped — results already exist for these inputs.\x1b[0m");
+                    eprintln!("  config_hash: {}", &config_hash[..16]);
+                    eprintln!("  Use --force to re-run.");
+                    continue;
+                }
+                provenance::ConfigCacheStatus::Stale { stored, current } => {
+                    eprintln!("  \x1b[33mstale results detected — config has changed. Re-running.\x1b[0m");
+                    eprintln!("  stored:  {}", &stored[..16.min(stored.len())]);
+                    eprintln!("  current: {}", &current[..16.min(current.len())]);
+                }
+                provenance::ConfigCacheStatus::NotFound => {}
+            }
+        }
 
         // Resolve starts_from: CLI override > stage config
         let effective_starts = if let Some(ref cli_sf) = starts_from_override {
@@ -348,8 +371,8 @@ pub fn cmd_fit_run_v2(args: &[String]) {
                 let metadata = provenance::MleMetadata {
                     input_hash: model_hash[..8].to_string(),
                     model_path: config.model.camdl.clone(),
-                    model_hash,
-                    data_hashes,
+                    model_hash: model_hash.clone(),
+                    data_hashes: data_hashes.clone(),
                     seed,
                     stage: stage_name.to_string(),
                     best_chain: chain_results.best_chain,
@@ -361,6 +384,46 @@ pub fn cmd_fit_run_v2(args: &[String]) {
                 };
                 provenance::write_mle_params(&mle_path, &all_params, &metadata)
                     .unwrap_or_else(|e| eprintln!("warning: {}", e));
+
+                // Write provenance.json
+                let starts_from_prov = effective_starts.as_ref().map(|s| {
+                    provenance::StartsFromProv {
+                        source: s.clone(),
+                        source_hash: None,
+                    }
+                });
+                let algo_json = serde_json::json!({
+                    "method": "if2",
+                    "chains": chains,
+                    "particles": particles,
+                    "iterations": iterations,
+                    "cooling": cooling,
+                });
+                let stage_prov = provenance::StageProvenance {
+                    camdl_version: crate::version::VERSION_SHORT.to_string(),
+                    timestamp: fit_state.timestamp.clone(),
+                    config_hash: config_hash.clone(),
+                    fit_config: fit_path.clone(),
+                    stage: stage_name.to_string(),
+                    model: config.model.camdl.clone(),
+                    model_hash: model_hash.clone(),
+                    data_hashes: data_hashes.iter()
+                        .map(|(n, h)| (n.clone(), h.clone())).collect(),
+                    estimated: config.estimate.keys().cloned().collect(),
+                    fixed: fixed_resolved.iter()
+                        .map(|(k, v)| (k.clone(), *v)).collect(),
+                    algorithm: algo_json,
+                    starts_from: starts_from_prov,
+                    derived_from: config.provenance.as_ref()
+                        .and_then(|p| p.derived_from.clone()),
+                    seed,
+                    wall_time_seconds: elapsed.as_secs_f64(),
+                    best_loglik: Some(chain_results.best_loglik),
+                    best_chain: Some(chain_results.best_chain),
+                };
+                provenance::write_provenance_json(
+                    &stage_dir.to_string_lossy(), &stage_prov,
+                ).unwrap_or_else(|e| eprintln!("warning: {}", e));
 
                 collector.render_to_stderr();
 

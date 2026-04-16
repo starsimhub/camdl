@@ -218,3 +218,152 @@ pub enum ContentVerification {
     },
     NoHash,
 }
+
+// ─── V2 provenance: config_hash + provenance.json ───────────────────────────
+
+/// Compute the config hash for a fit stage. Covers all inputs that affect
+/// the stage's output: model IR, data files, estimate specs, fixed values,
+/// stage algorithm settings, and camdl version. Change any of these → different hash.
+pub fn compute_config_hash_v2(
+    model_ir_json: &str,
+    observations: &indexmap::IndexMap<String, String>,
+    estimate: &indexmap::IndexMap<String, super::config_v2::EstimateSpecV2>,
+    fixed_resolved: &indexmap::IndexMap<String, f64>,
+    stage_name: &str,
+    stage: &super::config_v2::Stage,
+    seed: u64,
+) -> String {
+    let mut h = Sha256::new();
+
+    // Model
+    h.update(b"model\x00");
+    h.update(model_ir_json.as_bytes());
+
+    // Data files (sorted by stream name for stability)
+    h.update(b"\x00data\x00");
+    let mut data_entries: Vec<_> = observations.iter().collect();
+    data_entries.sort_by_key(|(k, _)| k.as_str());
+    for (name, path) in &data_entries {
+        h.update(name.as_bytes());
+        h.update(b"\x00");
+        if let Ok(bytes) = std::fs::read(path) {
+            h.update(&bytes);
+        }
+        h.update(b"\x00");
+    }
+
+    // Estimate specs (sorted by name)
+    h.update(b"\x00estimate\x00");
+    let mut est_entries: Vec<_> = estimate.iter().collect();
+    est_entries.sort_by_key(|(k, _)| k.as_str());
+    for (name, spec) in &est_entries {
+        h.update(name.as_bytes());
+        h.update(b"\x00");
+        h.update(&serde_json::to_vec(spec).unwrap_or_default());
+        h.update(b"\x00");
+    }
+
+    // Fixed values (sorted by name)
+    h.update(b"\x00fixed\x00");
+    let mut fix_entries: Vec<_> = fixed_resolved.iter().collect();
+    fix_entries.sort_by_key(|(k, _)| k.as_str());
+    for (name, val) in &fix_entries {
+        h.update(name.as_bytes());
+        h.update(b"=");
+        h.update(val.to_le_bytes());
+        h.update(b"\x00");
+    }
+
+    // Stage config
+    h.update(b"\x00stage\x00");
+    h.update(stage_name.as_bytes());
+    h.update(b"\x00");
+    h.update(&serde_json::to_vec(stage).unwrap_or_default());
+
+    // Seed
+    h.update(b"\x00seed\x00");
+    h.update(seed.to_le_bytes());
+
+    // Version
+    h.update(b"\x00version\x00");
+    h.update(version::VERSION_SHORT.as_bytes());
+
+    hex::encode(h.finalize())
+}
+
+/// Write provenance.json for a completed stage.
+pub fn write_provenance_json(
+    stage_dir: &str,
+    metadata: &StageProvenance,
+) -> Result<(), String> {
+    let path = format!("{}/provenance.json", stage_dir);
+    let json = serde_json::to_string_pretty(metadata)
+        .map_err(|e| format!("cannot serialize provenance: {}", e))?;
+    std::fs::write(&path, json)
+        .map_err(|e| format!("cannot write {}: {}", path, e))
+}
+
+/// Read provenance.json from a stage directory.
+pub fn read_provenance_json(stage_dir: &str) -> Result<StageProvenance, String> {
+    let path = format!("{}/provenance.json", stage_dir);
+    let contents = std::fs::read_to_string(&path)
+        .map_err(|e| format!("cannot read {}: {}", path, e))?;
+    serde_json::from_str(&contents)
+        .map_err(|e| format!("cannot parse {}: {}", path, e))
+}
+
+/// Check staleness: does the stage directory have results with a matching config_hash?
+pub fn check_config_hash(stage_dir: &str, current_hash: &str) -> ConfigCacheStatus {
+    match read_provenance_json(stage_dir) {
+        Ok(prov) => {
+            if prov.config_hash == current_hash {
+                ConfigCacheStatus::Match
+            } else {
+                ConfigCacheStatus::Stale {
+                    stored: prov.config_hash,
+                    current: current_hash.to_string(),
+                }
+            }
+        }
+        Err(_) => ConfigCacheStatus::NotFound,
+    }
+}
+
+pub enum ConfigCacheStatus {
+    Match,
+    Stale { stored: String, current: String },
+    NotFound,
+}
+
+/// Full provenance record for a stage.
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+pub struct StageProvenance {
+    pub camdl_version: String,
+    pub timestamp: String,
+    pub config_hash: String,
+    pub fit_config: String,
+    pub stage: String,
+    pub model: String,
+    pub model_hash: String,
+    pub data_hashes: HashMap<String, String>,
+    pub estimated: Vec<String>,
+    pub fixed: HashMap<String, f64>,
+    pub algorithm: serde_json::Value,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub starts_from: Option<StartsFromProv>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub derived_from: Option<String>,
+    pub seed: u64,
+    pub wall_time_seconds: f64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub best_loglik: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub best_chain: Option<usize>,
+}
+
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+pub struct StartsFromProv {
+    pub source: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_hash: Option<String>,
+}
