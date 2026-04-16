@@ -117,6 +117,7 @@ fn simulate_help() -> ! {
     eprintln!("  -o, --output FILE         Write trajectory to file (default: stdout)");
     eprintln!("  --batch FILE              Load all settings from batch TOML");
     eprintln!("  --parallel N              Concurrent runs");
+    eprintln!("  --dry-run                 Show resolved parameters and run plan, don't simulate");
     eprintln!("  --force                   Re-run cached results");
     std::process::exit(0);
 }
@@ -385,6 +386,7 @@ fn run_simulate(args: &[String]) {
     let mut draws_path: Option<String> = None;
     let mut n_draws_arg: Option<usize> = None;
     let mut fit_path_for_draws: Option<String> = None;
+    let mut dry_run = false;
 
     // Collect --param-vec PREFIX=FILE entries for deferred validation after model load
     let mut set_vec_entries: Vec<(String, String)> = Vec::new();
@@ -433,6 +435,7 @@ fn run_simulate(args: &[String]) {
             "--draws" => { i += 1; draws_path = Some(args[i].clone()); }
             "-n" | "--n-draws" => { i += 1; n_draws_arg = Some(args[i].parse().unwrap_or_else(|_| { eprintln!("error: -n needs a positive integer"); std::process::exit(1); })); }
             "--fit" => { i += 1; fit_path_for_draws = Some(args[i].clone()); }
+            "--dry-run" => { dry_run = true; }
             s if s.starts_with("--") => { eprintln!("unknown flag: {}", s); simulate_help(); }
             path => { ir_path = Some(path.to_string()); }
         }
@@ -610,6 +613,18 @@ fn run_simulate(args: &[String]) {
             if replicates > 1 { Some(format!("{} replicates", replicates)) } else { None },
         ].iter().flatten().cloned().collect();
         eprintln!("{} = {} runs", parts.join(" × "), total_runs);
+    }
+
+    // ── Dry run ─────────────────────────────────────────────────────────────
+    if dry_run {
+        print_dry_run(
+            &ir_path, &base_sim_run.backend, dt, seed,
+            &base_sim_run.params_files, &base_sim_run.overrides,
+            &scenario_list, &seeds, &draws_path,
+            n_draws, replicates, total_runs,
+            &obs_path, &obs_dir, &obs_only,
+        );
+        return;
     }
 
     // ── Observation accumulators ────────────────────────────────────────────
@@ -1168,6 +1183,185 @@ fn load_draws_tsv(path: &str) -> Result<Vec<HashMap<String, f64>>, String> {
         return Err(format!("draws file has header but no data rows: {}", path));
     }
     Ok(draws)
+}
+
+/// Print a dry run summary: resolved parameters with provenance.
+#[allow(clippy::too_many_arguments)]
+fn print_dry_run(
+    ir_path: &str,
+    backend: &str,
+    dt: f64,
+    seed: u64,
+    params_files: &[String],
+    cli_overrides: &HashMap<String, f64>,
+    scenario_list: &[Option<String>],
+    seeds: &[u64],
+    draws_path: &Option<String>,
+    n_draws: usize,
+    replicates: usize,
+    total_runs: usize,
+    obs_path: &Option<String>,
+    obs_dir: &Option<String>,
+    obs_only: &Option<String>,
+) {
+    let d = term::dim;
+    let b = term::bold;
+
+    eprintln!("{}", b("camdl simulate (dry run)"));
+    eprintln!();
+
+    // Header info
+    eprintln!("  {} {}", d("model:"), ir_path);
+    eprintln!("  {} {}", d("backend:"), backend);
+    eprintln!("  {} {}", d("dt:"), dt);
+
+    if seeds.len() > 1 {
+        eprintln!("  {} {}:{} ({} seeds)", d("seeds:"), seeds[0], seeds[seeds.len()-1], seeds.len());
+    } else {
+        eprintln!("  {} {}", d("seed:"), seed);
+    }
+
+    if let Some(ref dp) = draws_path {
+        eprintln!("  {} {}", d("draws:"), dp);
+    }
+    if replicates > 1 && draws_path.is_none() {
+        eprintln!("  {} {}", d("replicates:"), replicates);
+    }
+
+    let scenarios: Vec<&str> = scenario_list.iter()
+        .map(|s| s.as_deref().unwrap_or("(baseline)"))
+        .collect();
+    if scenarios.len() > 1 || scenarios[0] != "(baseline)" {
+        eprintln!("  {} {}", d("scenarios:"), scenarios.join(", "));
+    } else {
+        eprintln!("  {} {}", d("scenario:"), "(baseline)");
+    }
+
+    // Obs output
+    if let Some(ref p) = obs_path { eprintln!("  {} {}", d("obs:"), p); }
+    if let Some(ref p) = obs_dir { eprintln!("  {} {}", d("obs-dir:"), p); }
+    if let Some(ref p) = obs_only { eprintln!("  {} {}", d("obs-only:"), p); }
+
+    eprintln!();
+
+    // Parameter provenance — load model and trace where each value comes from
+    if draws_path.is_some() && n_draws > 1 {
+        // Draws mode: don't show per-parameter provenance (values vary per draw)
+        if let Some(ref dp) = draws_path {
+            if dp != "uniform" && dp != "prior" {
+                // Try to read the header to show column count
+                if let Ok(content) = std::fs::read_to_string(dp) {
+                    if let Some(header) = content.lines().next() {
+                        let cols: Vec<&str> = header.split('\t')
+                            .map(|s| s.trim())
+                            .filter(|s| !s.is_empty())
+                            .collect();
+                        let n_rows = content.lines().count() - 1;
+                        eprintln!("  {} {} rows × {} params",
+                            d("draws file:"), n_rows, cols.len());
+                    }
+                }
+            }
+        }
+    } else {
+        // Point/single mode: show resolved parameter values with provenance
+        match util::load_model(ir_path) {
+            Ok((model, _)) => {
+                // Track provenance: (param_name → (value, source, override_chain))
+                struct ParamProv {
+                    value: f64,
+                    source: String,
+                    overrides: Vec<(f64, String)>, // (old_value, old_source)
+                }
+                let mut provs: std::collections::BTreeMap<String, ParamProv> = std::collections::BTreeMap::new();
+
+                // Model defaults
+                for p in &model.parameters {
+                    if let Some(v) = p.value {
+                        provs.insert(p.name.clone(), ParamProv {
+                            value: v, source: "model default".to_string(), overrides: vec![],
+                        });
+                    }
+                }
+
+                // Params files (in order)
+                for path in params_files {
+                    if let Ok(toml_vals) = util::load_params_toml(path) {
+                        for (name, &v) in &toml_vals {
+                            if let Some(prov) = provs.get_mut(name) {
+                                if (prov.value - v).abs() > 1e-15 {
+                                    prov.overrides.push((prov.value, prov.source.clone()));
+                                    prov.value = v;
+                                    prov.source = path.clone();
+                                }
+                            } else {
+                                provs.insert(name.clone(), ParamProv {
+                                    value: v, source: path.clone(), overrides: vec![],
+                                });
+                            }
+                        }
+                    }
+                }
+
+                // CLI --param overrides
+                for (name, &v) in cli_overrides {
+                    if let Some(prov) = provs.get_mut(name) {
+                        if (prov.value - v).abs() > 1e-15 {
+                            prov.overrides.push((prov.value, prov.source.clone()));
+                            prov.value = v;
+                            prov.source = "--param".to_string();
+                        }
+                    } else {
+                        provs.insert(name.clone(), ParamProv {
+                            value: v, source: "--param".to_string(), overrides: vec![],
+                        });
+                    }
+                }
+
+                // Print
+                let max_name_len = provs.keys().map(|k| k.len()).max().unwrap_or(0);
+                eprintln!("Parameters ({}):", provs.len());
+                for (name, prov) in &provs {
+                    let val_str = b(&format_param_value(prov.value));
+                    let source_str = if prov.overrides.is_empty() {
+                        d(&prov.source)
+                    } else {
+                        let chain: Vec<String> = prov.overrides.iter()
+                            .map(|(v, s)| format!("{} in {}", format_param_value(*v), s))
+                            .collect();
+                        d(&format!("{} (was {})", prov.source, chain.join(" → ")))
+                    };
+                    eprintln!("  {:width$} = {:>14}  {}",
+                        name, val_str, source_str, width = max_name_len);
+                }
+            }
+            Err(e) => {
+                eprintln!("  {} {}", d("(could not load model for parameter resolution:"), e);
+            }
+        }
+    }
+
+    // Total runs
+    if total_runs > 1 {
+        eprintln!();
+        let parts: Vec<String> = [
+            if n_draws > 1 { Some(format!("{} draws", n_draws)) } else { None },
+            if scenarios.len() > 1 { Some(format!("{} scenarios", scenarios.len())) } else { None },
+            if seeds.len() > 1 { Some(format!("{} seeds", seeds.len())) } else { None },
+            if replicates > 1 && seeds.len() == 1 { Some(format!("{} replicates", replicates)) } else { None },
+        ].iter().flatten().cloned().collect();
+        eprintln!("  {} {} = {} runs", d("total:"), parts.join(" × "), total_runs);
+    }
+}
+
+fn format_param_value(v: f64) -> String {
+    if v == v.round() && v.abs() < 1e15 {
+        format!("{}", v as i64)
+    } else if v.abs() < 0.001 || v.abs() >= 1e6 {
+        format!("{:.4e}", v)
+    } else {
+        format!("{:.6}", v)
+    }
 }
 
 #[cfg(test)]
