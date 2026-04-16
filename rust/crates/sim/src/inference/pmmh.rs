@@ -19,46 +19,7 @@
 use serde::{Serialize, Deserialize};
 use crate::rng::StatefulRng;
 use super::if2::EstimatedParam;
-
-// ── Prior ──────────────────────────────────────────────────────────
-
-/// Prior distribution for one estimated parameter.
-#[derive(Clone, Debug)]
-pub enum Prior {
-    /// Flat (improper) prior — log-density = 0 everywhere within transform bounds.
-    Flat,
-    /// Normal(mean, sd) on the natural scale.
-    Normal { mean: f64, sd: f64 },
-    /// Normal(mean, sd) on the transformed (log/logit) scale.
-    TransformedNormal { mean: f64, sd: f64 },
-    /// Beta(alpha, beta) on [0, 1]. For probability parameters.
-    Beta { alpha: f64, beta: f64 },
-}
-
-impl Prior {
-    /// Log-density of the prior at a natural-scale value.
-    /// `transformed` is the value on the unconstrained scale (for TransformedNormal).
-    pub fn log_density(&self, natural: f64, transformed: f64) -> f64 {
-        match self {
-            Prior::Flat => 0.0,
-            Prior::Normal { mean, sd } => {
-                let z = (natural - mean) / sd;
-                -0.5 * z * z - sd.ln()
-            }
-            Prior::TransformedNormal { mean, sd } => {
-                let z = (transformed - mean) / sd;
-                -0.5 * z * z - sd.ln()
-            }
-            Prior::Beta { alpha, beta } => {
-                // log Beta(x; a, b) = (a-1)ln(x) + (b-1)ln(1-x) - lnB(a,b)
-                if natural <= 0.0 || natural >= 1.0 { return f64::NEG_INFINITY; }
-                use crate::inference::obs_loglik::lgamma;
-                (alpha - 1.0) * natural.ln() + (beta - 1.0) * (1.0 - natural).ln()
-                    - (lgamma(*alpha) + lgamma(*beta) - lgamma(alpha + beta))
-            }
-        }
-    }
-}
+pub use super::prior::Prior;
 
 // ── Configuration ──────────────────────────────────────────────────
 

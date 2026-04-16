@@ -1,0 +1,199 @@
+//! Prior distributions for Bayesian inference.
+//!
+//! The `Prior` enum carries distribution parameters; `log_density` evaluates
+//! log-density at a parameter value; `from_ir` converts from the IR's
+//! serialized form (populated from DSL `~` syntax or fit.toml).
+//!
+//! # Parameterization conventions
+//!
+//! - `log_normal(mu, sigma)`: mu and sigma on the **log scale**.
+//!   `log(X) ~ Normal(mu, sigma)`. Median of X is `exp(mu)`.
+//! - `half_normal(sigma)`: sigma is the SD of the underlying (unfolded) normal.
+//! - `gamma(shape, rate)`: rate parameterization. `E[X] = shape/rate`.
+//! - `exponential(rate)`: `E[X] = 1/rate`.
+//! - `beta(alpha, beta)`: shape parameters on [0, 1].
+//! - `normal(mean, sd)`: natural scale.
+//! - `uniform(lower, upper)`: uniform density on [lower, upper].
+
+use crate::inference::obs_loglik::lgamma;
+
+/// Prior distribution for one estimated parameter.
+#[derive(Clone, Debug)]
+pub enum Prior {
+    /// Flat (improper) prior — log-density = 0 everywhere within transform bounds.
+    Flat,
+    /// Uniform(lower, upper) on natural scale. Flat within bounds, -inf outside.
+    Uniform { lower: f64, upper: f64 },
+    /// Normal(mean, sd) on the natural scale.
+    Normal { mean: f64, sd: f64 },
+    /// Normal(mean, sd) on the transformed (log/logit) scale.
+    /// This is the "log_normal" when the param uses log transform.
+    TransformedNormal { mean: f64, sd: f64 },
+    /// Half-Normal(sigma): folded normal supported on [0, inf).
+    HalfNormal { sigma: f64 },
+    /// Beta(alpha, beta) on [0, 1]. For probability parameters.
+    Beta { alpha: f64, beta: f64 },
+    /// Gamma(shape, rate). Supported on (0, inf).
+    Gamma { shape: f64, rate: f64 },
+    /// Exponential(rate). Supported on [0, inf).
+    Exponential { rate: f64 },
+}
+
+impl Prior {
+    /// Log-density of the prior at a natural-scale value.
+    /// `transformed` is the value on the unconstrained scale (for TransformedNormal).
+    pub fn log_density(&self, natural: f64, transformed: f64) -> f64 {
+        match self {
+            Prior::Flat => 0.0,
+            Prior::Uniform { lower, upper } => {
+                if natural < *lower || natural > *upper {
+                    f64::NEG_INFINITY
+                } else {
+                    -((upper - lower).ln())
+                }
+            }
+            Prior::Normal { mean, sd } => {
+                let z = (natural - mean) / sd;
+                -0.5 * z * z - sd.ln()
+            }
+            Prior::TransformedNormal { mean, sd } => {
+                let z = (transformed - mean) / sd;
+                -0.5 * z * z - sd.ln()
+            }
+            Prior::HalfNormal { sigma } => {
+                if natural < 0.0 { return f64::NEG_INFINITY; }
+                let z = natural / sigma;
+                // log(2/(sigma * sqrt(2π))) - 0.5 z²
+                // = ln(2) - ln(sigma) - 0.5 * ln(2π) - 0.5 z²
+                const HALF_LN_2PI: f64 = 0.91893853320467274178; // 0.5 * ln(2π)
+                std::f64::consts::LN_2 - sigma.ln() - HALF_LN_2PI - 0.5 * z * z
+            }
+            Prior::Beta { alpha, beta } => {
+                if natural <= 0.0 || natural >= 1.0 { return f64::NEG_INFINITY; }
+                (alpha - 1.0) * natural.ln() + (beta - 1.0) * (1.0 - natural).ln()
+                    - (lgamma(*alpha) + lgamma(*beta) - lgamma(alpha + beta))
+            }
+            Prior::Gamma { shape, rate } => {
+                if natural <= 0.0 { return f64::NEG_INFINITY; }
+                // log Gamma(x; k, r) = k*ln(r) + (k-1)*ln(x) - r*x - lgamma(k)
+                shape * rate.ln() + (shape - 1.0) * natural.ln() - rate * natural - lgamma(*shape)
+            }
+            Prior::Exponential { rate } => {
+                if natural < 0.0 { return f64::NEG_INFINITY; }
+                rate.ln() - rate * natural
+            }
+        }
+    }
+
+    /// Convert from the IR's `PriorDist` representation (serialized from DSL
+    /// `~` syntax or fit.toml structured form).
+    ///
+    /// The IR uses `LogNormal` as a distribution name; in our runtime it maps
+    /// to `TransformedNormal` (Normal on the log-transformed scale), because
+    /// parameters with log_normal priors use log transforms for inference.
+    pub fn from_ir(pd: &ir::parameter::PriorDist) -> Self {
+        use ir::parameter::PriorDist;
+        match pd {
+            PriorDist::Uniform(u) => Prior::Uniform { lower: u.lower, upper: u.upper },
+            PriorDist::Normal(p) => Prior::Normal { mean: p.mean, sd: p.sd },
+            PriorDist::LogNormal(p) => Prior::TransformedNormal { mean: p.mu, sd: p.sigma },
+            PriorDist::HalfNormal(p) => Prior::HalfNormal { sigma: p.sigma },
+            PriorDist::Beta(p) => Prior::Beta { alpha: p.alpha, beta: p.beta },
+            PriorDist::Gamma(p) => Prior::Gamma { shape: p.shape, rate: p.rate },
+            PriorDist::Exponential(p) => Prior::Exponential { rate: p.rate },
+            // Fixed is not really a prior — it means the param has a known value.
+            // In inference contexts this parameter should be in [fixed], not
+            // [estimate]. Treat as Flat if we see it in a prior slot.
+            PriorDist::Fixed(_) => Prior::Flat,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn approx_eq(a: f64, b: f64, tol: f64) -> bool { (a - b).abs() < tol }
+
+    #[test]
+    fn flat_is_zero() {
+        assert_eq!(Prior::Flat.log_density(0.5, 0.5), 0.0);
+        assert_eq!(Prior::Flat.log_density(100.0, -100.0), 0.0);
+    }
+
+    #[test]
+    fn uniform_within_bounds() {
+        let p = Prior::Uniform { lower: 0.0, upper: 1.0 };
+        // Inside: log(1/1) = 0
+        assert!(approx_eq(p.log_density(0.5, 0.5), 0.0, 1e-10));
+        // Outside
+        assert_eq!(p.log_density(-0.1, 0.0), f64::NEG_INFINITY);
+        assert_eq!(p.log_density(1.1, 0.0), f64::NEG_INFINITY);
+    }
+
+    #[test]
+    fn normal_peak_at_mean() {
+        let p = Prior::Normal { mean: 1.0, sd: 0.5 };
+        let at_mean = p.log_density(1.0, 0.0);
+        let off = p.log_density(1.5, 0.0);
+        assert!(at_mean > off);
+    }
+
+    #[test]
+    fn half_normal_nonnegative() {
+        let p = Prior::HalfNormal { sigma: 1.0 };
+        assert_eq!(p.log_density(-0.5, 0.0), f64::NEG_INFINITY);
+        assert!(p.log_density(0.5, 0.0).is_finite());
+    }
+
+    #[test]
+    fn gamma_positive() {
+        let p = Prior::Gamma { shape: 2.0, rate: 1.0 };
+        assert_eq!(p.log_density(-0.1, 0.0), f64::NEG_INFINITY);
+        assert_eq!(p.log_density(0.0, 0.0), f64::NEG_INFINITY);
+        assert!(p.log_density(1.0, 0.0).is_finite());
+        // Gamma(2, 1) mode at (k-1)/r = 1. Density higher at 1 than far from it.
+        assert!(p.log_density(1.0, 0.0) > p.log_density(5.0, 0.0));
+    }
+
+    #[test]
+    fn exponential_decays() {
+        let p = Prior::Exponential { rate: 1.0 };
+        assert!(p.log_density(0.0, 0.0) > p.log_density(1.0, 0.0));
+        assert!(p.log_density(1.0, 0.0) > p.log_density(10.0, 0.0));
+    }
+
+    #[test]
+    fn beta_on_unit_interval() {
+        let p = Prior::Beta { alpha: 2.0, beta: 2.0 };
+        assert_eq!(p.log_density(0.0, 0.0), f64::NEG_INFINITY);
+        assert_eq!(p.log_density(1.0, 0.0), f64::NEG_INFINITY);
+        // Symmetric Beta(2,2) peak at 0.5
+        assert!(p.log_density(0.5, 0.0) > p.log_density(0.3, 0.0));
+    }
+
+    #[test]
+    fn from_ir_roundtrip() {
+        use ir::parameter::*;
+        let ir_prior = PriorDist::LogNormal(LogNormalPrior { mu: -1.0, sigma: 0.5 });
+        match Prior::from_ir(&ir_prior) {
+            Prior::TransformedNormal { mean, sd } => {
+                assert_eq!(mean, -1.0);
+                assert_eq!(sd, 0.5);
+            }
+            _ => panic!("expected TransformedNormal"),
+        }
+
+        let ir_beta = PriorDist::Beta(BetaPrior { alpha: 2.0, beta: 5.0 });
+        match Prior::from_ir(&ir_beta) {
+            Prior::Beta { alpha, beta } => {
+                assert_eq!(alpha, 2.0);
+                assert_eq!(beta, 5.0);
+            }
+            _ => panic!("expected Beta"),
+        }
+
+        let ir_fixed = PriorDist::Fixed(0.5);
+        assert!(matches!(Prior::from_ir(&ir_fixed), Prior::Flat));
+    }
+}

@@ -90,6 +90,9 @@ pub fn run_pgas_cli(
         for (spec, prior) in config.estimated_params.iter().zip(&priors) {
             match prior {
                 Prior::Flat => {},
+                Prior::Uniform { lower, upper } => {
+                    eprintln!("    {:12} Uniform({:.4}, {:.4})", spec.name, lower, upper);
+                }
                 Prior::Normal { mean, sd } => {
                     eprintln!("    {:12} Normal({:.4}, {:.4})", spec.name, mean, sd);
                 }
@@ -97,12 +100,22 @@ pub fn run_pgas_cli(
                     eprintln!("    {:12} LogNormal(mu={:.4}, sigma={:.4}) → median={:.1}",
                         spec.name, mean, sd, mean.exp());
                 }
+                Prior::HalfNormal { sigma } => {
+                    eprintln!("    {:12} HalfNormal(sigma={:.4})", spec.name, sigma);
+                }
                 Prior::Beta { alpha, beta } => {
                     let mode = if *alpha > 1.0 && *beta > 1.0 {
                         (alpha - 1.0) / (alpha + beta - 2.0)
                     } else { 0.5 };
                     eprintln!("    {:12} Beta({:.2}, {:.2}) → mode={:.3}",
                         spec.name, alpha, beta, mode);
+                }
+                Prior::Gamma { shape, rate } => {
+                    eprintln!("    {:12} Gamma(shape={:.4}, rate={:.4})",
+                        spec.name, shape, rate);
+                }
+                Prior::Exponential { rate } => {
+                    eprintln!("    {:12} Exponential(rate={:.4})", spec.name, rate);
                 }
             }
         }

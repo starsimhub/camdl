@@ -1013,6 +1013,10 @@ fn prior_log_density_and_grad_z(
     let lp = prior.log_density(theta, z);
     let dlp_dz = match prior {
         Prior::Flat => 0.0,
+        Prior::Uniform { lower, upper } => {
+            if theta < *lower || theta > *upper { return (lp, 0.0); }
+            0.0 // flat density → zero gradient inside support
+        }
         Prior::Normal { mean, sd } => {
             let dlp_dtheta = -(theta - mean) / (sd * sd);
             dlp_dtheta * param.transform_deriv(z)
@@ -1020,9 +1024,24 @@ fn prior_log_density_and_grad_z(
         Prior::TransformedNormal { mean, sd } => {
             -(z - mean) / (sd * sd)
         }
+        Prior::HalfNormal { sigma } => {
+            if theta < 0.0 { return (lp, 0.0); }
+            let dlp_dtheta = -theta / (sigma * sigma);
+            dlp_dtheta * param.transform_deriv(z)
+        }
         Prior::Beta { alpha, beta } => {
             if theta <= 0.0 || theta >= 1.0 { return (lp, 0.0); }
             let dlp_dtheta = (alpha - 1.0) / theta - (beta - 1.0) / (1.0 - theta);
+            dlp_dtheta * param.transform_deriv(z)
+        }
+        Prior::Gamma { shape, rate } => {
+            if theta <= 0.0 { return (lp, 0.0); }
+            let dlp_dtheta = (shape - 1.0) / theta - rate;
+            dlp_dtheta * param.transform_deriv(z)
+        }
+        Prior::Exponential { rate } => {
+            if theta < 0.0 { return (lp, 0.0); }
+            let dlp_dtheta = -rate;
             dlp_dtheta * param.transform_deriv(z)
         }
     };
