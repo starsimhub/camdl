@@ -2230,28 +2230,48 @@ N0 = 1000000
 I0 = 10
 ```
 
-### 21.2 Priors (v0.2+)
+### 21.2 Priors
 
-```toml
-# priors.toml
-[beta]
-value = 0.3
-prior = "log_normal"
-mu = 0.0
-sigma = 1.0
-transform = "log"
+Priors are declared with `~` syntax directly on parameters in the `.camdl`
+file — they are beliefs about parameters and belong with the declaration:
 
-[rho]
-value = 0.4
-prior = "beta"
-alpha = 2.0
-beta = 5.0
-transform = "logit"
-
-[mu]
-value = 0.0000548
-prior = "fixed"
 ```
+parameters {
+    beta  : rate in [0.01, 2.0] ~ log_normal(mu = -1.0, sigma = 0.5)
+    gamma : rate in [0.05, 1.0] ~ half_normal(sigma = 0.3)
+    rho   : probability in [0.001, 1.0] ~ beta(alpha = 2.0, beta = 5.0)
+    N0    : count in [100, 1_000_000]  # no prior — fixed in inference
+}
+```
+
+The `~` reads "distributed as" and is always optional. Parameters without
+a prior can still be fixed at a known value via `--params` files.
+
+**Supported distributions**:
+
+| Distribution    | Syntax                                    | Parameters            |
+|-----------------|-------------------------------------------|-----------------------|
+| `uniform`       | `~ uniform(lower = L, upper = U)`         | bounds                |
+| `normal`        | `~ normal(mu = M, sigma = S)`             | mean, sd (natural)    |
+| `log_normal`    | `~ log_normal(mu = M, sigma = S)`         | log-scale mu, sigma   |
+| `half_normal`   | `~ half_normal(sigma = S)`                | sd of underlying normal|
+| `beta`          | `~ beta(alpha = A, beta = B)`             | shape parameters      |
+| `gamma`         | `~ gamma(shape = K, rate = R)`            | shape, rate (NOT scale) |
+| `exponential`   | `~ exponential(rate = R)`                 | rate = 1/mean         |
+
+All arguments are keyword (named), never positional. All arguments must be
+compile-time constants.
+
+**Parameterization conventions** (these are load-bearing):
+
+- `log_normal(mu, sigma)`: parameters are on the **log scale**.
+  `log(X) ~ Normal(mu, sigma)`. Median of X is `exp(mu)`.
+- `half_normal(sigma)`: sigma is the SD of the underlying (unfolded) normal.
+- `gamma(shape, rate)`: rate parameterization (`E[X] = shape/rate`).
+
+Priors in the model are the primary source; `fit.toml [estimate]` priors
+override them for sensitivity analysis. See the run spec §12 for the full
+precedence chain.
 
 ### 21.3 Views (v0.2+)
 
@@ -2279,7 +2299,8 @@ partitioning and manipulating model inputs. camdl implements each concept:
 | **Scenario σ**           | `scenarios { }` — patch operations          |
 | **Baseline σ₀**          | Identity patch — model as defined           |
 | **View V**               | `view.toml` — free vs fixed                 |
-| **Transform T_V**        | Per-parameter `transform` in `priors.toml`  |
+| **Prior π(m)**           | `~` syntax on parameter declaration         |
+| **Transform T_V**        | Per-parameter `transform` (v0.2+)           |
 | **Reparameterization R** | Future: `reparam.toml`                      |
 | **Sim(m, c, s) → y**     | `camdl simulate`                            |
 | **Sim_σ,V,T(z, s) → y**  | `camdl fit` (v0.2+)                         |

@@ -1900,27 +1900,58 @@ orchestration layer that connects them is not yet built.
 
 ---
 
-## 12. Priors: Where They Live
+## 12. Priors: Beliefs Belong With Parameters
 
-Priors are declared in fit.toml's `[estimate]` block:
+Priors are declared in the model file with `~` syntax on the parameter:
 
-```toml
-[estimate]
-gamma = { bounds = [0.05, 1.0], prior = { dist = "log_normal", mu = -2.0, sigma = 1.0 } }
-rho   = { bounds = [0.001, 1.0], prior = { dist = "beta", alpha = 2.0, beta = 5.0 } }
+```
+parameters {
+    beta  : rate in [0.01, 2.0] ~ log_normal(mu = -1.0, sigma = 0.5)
+    gamma : rate in [0.05, 1.0] ~ half_normal(sigma = 0.3)
+    rho   : probability in [0.001, 1.0] ~ beta(alpha = 2.0, beta = 5.0)
+}
 ```
 
-**Why not in the model file?** Priors are analysis choices that vary between
-fits. Different researchers may use different priors for the same model.
-Following camdl's separation of concerns, the `.camdl` file defines structure;
-fit.toml defines the analysis.
+**Why in the model file?** Priors are beliefs about parameters — they answer
+"what do I think about beta before seeing data?" That belief belongs with the
+parameter declaration, where anyone reading the model can see it. This design
+follows Stan, PyMC, and Turing.jl.
+
+Camdl exists to support decisions about people's lives. Epidemiological
+models feed into vaccination campaigns, outbreak response, resource
+allocation. Getting uncertainty wrong means making confident-looking
+recommendations on shaky foundations. Prior predictive checks are the first
+line of defense: "do my stated beliefs produce data that looks plausible
+before I've seen any real data?" Making priors discoverable and declarative
+in the model file is part of doing uncertainty right.
+
+**`camdl simulate --draws prior -n 500` works with just a model file** — no
+fit.toml required. Every parameter must either have a prior (sampled from)
+or a default value (held constant). Parameters with neither produce a clear
+error pointing at the options: add `~ prior(...)`, supply `--fit FIT.toml`,
+or use `--draws uniform`.
+
+**fit.toml can override model priors for sensitivity analysis.** The
+precedence chain during inference:
+
+```
+fit.toml [estimate] prior override   (sensitivity analysis)
+  ↓ if absent
+model IR parameter.prior             (from ~ syntax in .camdl)
+  ↓ if absent
+Prior::Flat                          (improper uniform)
+```
+
+fit.toml overrides preserve the sensitivity-analysis workflow: "what happens
+if I use a wider prior on beta?" without editing the model file.
 
 **When are priors required?** Bayesian sampling methods (PGAS, PMMH) use the
 prior density in their acceptance ratios. MLE methods (IF2) ignore priors.
-The runner validates at load time.
+For `--draws prior`, every parameter needs one.
 
-**Priors do double duty.** The same prior declarations are used both by the
-inference algorithm and by `--draws prior` for prior predictive checks.
+**Supported distributions**: `uniform`, `normal`, `log_normal`, `half_normal`,
+`beta`, `gamma`, `exponential`. See the language spec for parameterization
+conventions.
 
 ---
 
