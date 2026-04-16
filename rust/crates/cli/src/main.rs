@@ -135,6 +135,10 @@ fn main() {
                 }
             }
         }
+        // ── Standalone particle filter ──
+        "pfilter" => {
+            pfilter::cmd_pfilter(&all_args[1..]);
+        }
         // ── Utilities ──
         "eval" => {
             eval::cmd_eval(&all_args[1..]);
