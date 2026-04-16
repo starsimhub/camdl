@@ -593,8 +593,13 @@ fn run_simulate(args: &[String]) {
                     })
                 }
                 None => {
-                    // Use priors embedded in the model IR
-                    generate_prior_draws_from_ir(&ir_path, n, seed).unwrap_or_else(|e| {
+                    // Use priors embedded in the model IR. Scenarios that
+                    // set parameter values fill in "default values" for
+                    // params without priors, matching the simulation runtime
+                    // semantics.
+                    let scenarios: Vec<&str> = scenario_names.iter()
+                        .map(|s| s.as_str()).collect();
+                    generate_prior_draws_from_ir(&ir_path, n, seed, &scenarios).unwrap_or_else(|e| {
                         eprintln!("error: {}", e);
                         std::process::exit(1);
                     })
@@ -1113,28 +1118,59 @@ fn generate_prior_draws(
 }
 
 /// Generate N draws from priors embedded in the model IR.
-/// Each parameter needs either a prior (sampled) or a value (used as-is).
-/// Parameters with neither produce an error — clear message to add ~ prior(...)
-/// to the model, supply --fit, or use --draws uniform.
+///
+/// Each parameter must be "covered" by one of:
+///   - a prior (sampled from)
+///   - a concrete value in the IR (held constant)
+///   - a scenario preset that sets its value (held constant)
+///
+/// Selected scenarios are applied to the model before the coverage check, so
+/// a workflow like "prior on beta/gamma, N0 pinned by --scenario baseline"
+/// works. Parameters with none of the above produce an error with actionable
+/// fix options.
 fn generate_prior_draws_from_ir(
     ir_path: &str,
     n: usize,
     seed: u64,
+    scenarios: &[&str],
 ) -> Result<Vec<HashMap<String, f64>>, String> {
-    let (model, _) = util::load_model(ir_path)?;
+    let (mut model, _) = util::load_model(ir_path)?;
 
-    // Check all params have either a prior or a default value
+    // Apply each selected scenario's params to the model. Later scenarios
+    // override earlier ones for the same parameter.
+    for name in scenarios {
+        let preset = model.presets.iter().find(|p| p.name == *name).cloned()
+            .ok_or_else(|| {
+                let available: Vec<&str> = model.presets.iter().map(|p| p.name.as_str()).collect();
+                format!("scenario '{}' not found in model. Available: {}",
+                    name,
+                    if available.is_empty() { "(none)".into() } else { available.join(", ") })
+            })?;
+        for (k, v) in &preset.params {
+            if let Some(p) = model.parameters.iter_mut().find(|p| p.name == *k) {
+                p.value = Some(*v);
+            }
+        }
+    }
+
+    // Check all params have either a prior or a (scenario-resolved) value.
     let missing: Vec<&str> = model.parameters.iter()
         .filter(|p| p.prior.is_none() && p.value.is_none())
         .map(|p| p.name.as_str())
         .collect();
     if !missing.is_empty() {
+        let scen_hint = if scenarios.is_empty() {
+            " supply `--scenario NAME` if a scenario pins these values,".to_string()
+        } else {
+            String::new()
+        };
         return Err(format!(
             "parameter{} {} no prior and no default value.\n  \
-             Fix options: add `~ prior(...)` to the model, supply `--fit FIT.toml`,\n  \
-             or use `--draws uniform` for space-filling exploration.",
+             Fix options: add `~ prior(...)` to the model,{}\n  \
+             supply `--fit FIT.toml`, or use `--draws uniform` for space-filling exploration.",
             if missing.len() > 1 { "s" } else { "" },
             missing.iter().map(|n| format!("'{}'", n)).collect::<Vec<_>>().join(", "),
+            scen_hint,
         ));
     }
 
@@ -1598,7 +1634,7 @@ mod tests {
         // should get 5 prior samples for each of the N draws.
         let manifest = std::env::var("CARGO_MANIFEST_DIR").unwrap();
         let path = format!("{}/../../../ocaml/golden/sir_priors.ir.json", manifest);
-        let draws = generate_prior_draws_from_ir(&path, 7, 42).unwrap();
+        let draws = generate_prior_draws_from_ir(&path, 7, 42, &[]).unwrap();
         assert_eq!(draws.len(), 7, "should produce N draws");
         for row in &draws {
             for name in ["beta", "gamma", "rho", "N0", "I0"] {
@@ -1612,7 +1648,7 @@ mod tests {
         }
 
         // Same seed → identical draws (reproducibility)
-        let draws2 = generate_prior_draws_from_ir(&path, 7, 42).unwrap();
+        let draws2 = generate_prior_draws_from_ir(&path, 7, 42, &[]).unwrap();
         for (a, b) in draws.iter().zip(draws2.iter()) {
             for (k, va) in a {
                 assert_eq!(va, &b[k], "seed={} {} should be reproducible", 42, k);
@@ -1626,7 +1662,7 @@ mod tests {
         // Expect a clear error naming the missing parameters.
         let manifest = std::env::var("CARGO_MANIFEST_DIR").unwrap();
         let path = format!("{}/../../../ocaml/golden/sir_basic.ir.json", manifest);
-        let err = generate_prior_draws_from_ir(&path, 3, 1).unwrap_err();
+        let err = generate_prior_draws_from_ir(&path, 3, 1, &[]).unwrap_err();
         assert!(err.contains("no prior and no default"), "got: {}", err);
         assert!(err.contains("beta"), "error should name 'beta': {}", err);
         assert!(err.contains("~ prior(...)"), "error should hint at prior syntax: {}", err);
