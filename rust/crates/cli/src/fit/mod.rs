@@ -494,6 +494,10 @@ pub fn cmd_fit_run_v2(args: &[String]) {
             }
         };
 
+        let stage_t0 = std::time::Instant::now();
+        let mut stage_best_loglik: Option<f64> = None;
+        let mut stage_best_chain: Option<usize> = None;
+
         match stage {
             Stage::IF2 { chains, particles, iterations, cooling, .. } => {
                 let prior_state = effective_starts.as_ref().and_then(|dir| {
@@ -599,47 +603,10 @@ pub fn cmd_fit_run_v2(args: &[String]) {
                 provenance::write_mle_params(&mle_path, &all_params, &metadata)
                     .unwrap_or_else(|e| eprintln!("warning: {}", e));
 
-                // Write provenance.json
-                let starts_from_prov = effective_starts.as_ref().map(|s| {
-                    provenance::StartsFromProv {
-                        source: s.clone(),
-                        source_hash: None,
-                    }
-                });
-                let algo_json = serde_json::json!({
-                    "method": "if2",
-                    "chains": chains,
-                    "particles": particles,
-                    "iterations": iterations,
-                    "cooling": cooling,
-                });
-                let stage_prov = provenance::StageProvenance {
-                    camdl_version: crate::version::VERSION_SHORT.to_string(),
-                    timestamp: fit_state.timestamp.clone(),
-                    config_hash: config_hash.clone(),
-                    fit_config: fit_path.clone(),
-                    stage: stage_name.to_string(),
-                    model: sweep_config.model.camdl.clone(),
-                    model_hash: model_hash.clone(),
-                    data_hashes: data_hashes.iter()
-                        .map(|(n, h)| (n.clone(), h.clone())).collect(),
-                    estimated: sweep_config.estimate.keys().cloned().collect(),
-                    fixed: fixed_resolved.iter()
-                        .map(|(k, v)| (k.clone(), *v)).collect(),
-                    algorithm: algo_json,
-                    starts_from: starts_from_prov,
-                    derived_from: sweep_config.provenance.as_ref()
-                        .and_then(|p| p.derived_from.clone()),
-                    seed,
-                    wall_time_seconds: elapsed.as_secs_f64(),
-                    best_loglik: Some(chain_results.best_loglik),
-                    best_chain: Some(chain_results.best_chain),
-                };
-                provenance::write_provenance_json(
-                    &stage_dir.to_string_lossy(), &stage_prov,
-                ).unwrap_or_else(|e| eprintln!("warning: {}", e));
-
                 collector.render_to_stderr();
+
+                stage_best_loglik = Some(chain_results.best_loglik);
+                stage_best_chain = Some(chain_results.best_chain);
 
                 eprintln!("\n{} complete in {:.1}s: {}/", stage_name, elapsed.as_secs_f64(), stage_dir.display());
                 eprintln!("  best loglik: {:.1} (chain {})", chain_results.best_loglik, chain_results.best_chain + 1);
@@ -667,10 +634,17 @@ pub fn cmd_fit_run_v2(args: &[String]) {
                 });
 
                 // Rename pgas/ → {stage_name}/ if they differ
+                // PGAS runner writes to {output_dir}/pgas/. If our stage has a
+                // different name, move the output to the correct stage directory.
                 let pgas_dir = sweep_fit_dir.join("pgas");
                 if stage_name != &"pgas" && pgas_dir.exists() {
+                    // Remove target if it exists (stale results from a previous run)
+                    if stage_dir.exists() {
+                        let _ = std::fs::remove_dir_all(&stage_dir);
+                    }
                     std::fs::rename(&pgas_dir, &stage_dir).unwrap_or_else(|e| {
-                        eprintln!("warning: could not rename pgas/ to {}: {}", stage_name, e);
+                        eprintln!("error: could not rename pgas/ to {}: {}", stage_name, e);
+                        std::process::exit(1);
                     });
                 }
             }
@@ -696,8 +670,12 @@ pub fn cmd_fit_run_v2(args: &[String]) {
 
                 let pmmh_dir = sweep_fit_dir.join("pmmh");
                 if stage_name != &"pmmh" && pmmh_dir.exists() {
+                    if stage_dir.exists() {
+                        let _ = std::fs::remove_dir_all(&stage_dir);
+                    }
                     std::fs::rename(&pmmh_dir, &stage_dir).unwrap_or_else(|e| {
-                        eprintln!("warning: could not rename pmmh/ to {}: {}", stage_name, e);
+                        eprintln!("error: could not rename pmmh/ to {}: {}", stage_name, e);
+                        std::process::exit(1);
                     });
                 }
             }
@@ -769,6 +747,53 @@ pub fn cmd_fit_run_v2(args: &[String]) {
                 }
             }
         }
+
+        // ── Shared provenance write (all stage types) ───────────────────────
+        let stage_elapsed = stage_t0.elapsed();
+        let starts_from_prov = effective_starts.as_ref().map(|s| {
+            provenance::StartsFromProv {
+                source: s.clone(),
+                source_hash: None,
+            }
+        });
+        let algo_json = match stage {
+            Stage::IF2 { chains, particles, iterations, cooling, .. } =>
+                serde_json::json!({ "method": "if2", "chains": chains, "particles": particles, "iterations": iterations, "cooling": cooling }),
+            Stage::PGAS { chains, particles, sweeps, .. } =>
+                serde_json::json!({ "method": "pgas", "chains": chains, "particles": particles, "sweeps": sweeps }),
+            Stage::PMMH { chains, particles, iterations, .. } =>
+                serde_json::json!({ "method": "pmmh", "chains": chains, "particles": particles, "iterations": iterations }),
+            Stage::PFilter { particles, replicates, .. } =>
+                serde_json::json!({ "method": "pfilter", "particles": particles, "replicates": replicates }),
+        };
+        let stage_prov = provenance::StageProvenance {
+            camdl_version: crate::version::VERSION_SHORT.to_string(),
+            timestamp: scout::now_iso8601_pub(),
+            config_hash: config_hash.clone(),
+            fit_config: fit_path.clone(),
+            stage: stage_name.to_string(),
+            model: sweep_config.model.camdl.clone(),
+            model_hash: crate::hashing::model_hash(&model_json),
+            data_hashes: sweep_config.data.observations.iter()
+                .map(|(name, path)| {
+                    let hash = provenance::file_content_hash(path).unwrap_or_default();
+                    (name.clone(), hash)
+                }).collect(),
+            estimated: sweep_config.estimate.keys().cloned().collect(),
+            fixed: fixed_resolved.iter().map(|(k, v)| (k.clone(), *v)).collect(),
+            algorithm: algo_json,
+            starts_from: starts_from_prov,
+            derived_from: sweep_config.provenance.as_ref()
+                .and_then(|p| p.derived_from.clone()),
+            seed,
+            wall_time_seconds: stage_elapsed.as_secs_f64(),
+            best_loglik: stage_best_loglik,
+            best_chain: stage_best_chain,
+        };
+        provenance::write_provenance_json(
+            &stage_dir.to_string_lossy(), &stage_prov,
+        ).unwrap_or_else(|e| eprintln!("warning: could not write provenance.json: {}", e));
+
     } // end stages
     } // end sweep_points
 }
