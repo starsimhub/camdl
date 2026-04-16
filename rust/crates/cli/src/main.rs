@@ -587,7 +587,7 @@ fn run_simulate(args: &[String]) {
     }
 
     // ── Observation accumulators ────────────────────────────────────────────
-    struct ObsRow { time: f64, replicate: usize, value: f64 }
+    struct ObsRow { time: f64, replicate: usize, draw: usize, scenario: String, value: f64 }
     let mut obs_data: Vec<Vec<ObsRow>> = Vec::new(); // per-stream
     let mut obs_stream_names: Vec<String> = Vec::new();
     let mut obs_times_cache: Vec<Vec<f64>> = Vec::new();
@@ -651,6 +651,8 @@ fn run_simulate(args: &[String]) {
             if !traj_header_written {
                 writeln!(out, "# {}", version::VERSION).unwrap();
                 if total_runs > 1 { write!(out, "replicate\t").unwrap(); }
+                if n_scenarios > 1 { write!(out, "scenario\t").unwrap(); }
+                if n_draws > 1 { write!(out, "draw\t").unwrap(); }
                 write!(out, "t").unwrap();
                 for n in &int_names  { write!(out, "\t{}", n).unwrap(); }
                 for n in &real_names { write!(out, "\t{}", n).unwrap(); }
@@ -661,6 +663,8 @@ fn run_simulate(args: &[String]) {
 
             for snap in &traj.snapshots {
                 if total_runs > 1 { write!(out, "{}\t", run_idx + 1).unwrap(); }
+                if n_scenarios > 1 { write!(out, "{}\t", scenario.as_deref().unwrap_or("baseline")).unwrap(); }
+                if n_draws > 1 { write!(out, "{}\t", draw_idx + 1).unwrap(); }
                 write!(out, "{}", snap.t).unwrap();
                 for &c in &snap.int_state.counts  { write!(out, "\t{}", c).unwrap(); }
                 for &v in &snap.real_state.values { write!(out, "\t{:.4}", v).unwrap(); }
@@ -708,6 +712,8 @@ fn run_simulate(args: &[String]) {
                     obs_data[si].push(ObsRow {
                         time: obs_t,
                         replicate: run_idx + 1,
+                        draw: draw_idx + 1,
+                        scenario: scenario.as_deref().unwrap_or("baseline").to_string(),
                         value: draw,
                     });
                 }
@@ -737,6 +743,8 @@ fn run_simulate(args: &[String]) {
 
             // Header
             if multi_rep { write!(out, "replicate\t").unwrap(); }
+            if n_scenarios > 1 { write!(out, "scenario\t").unwrap(); }
+            if n_draws > 1 { write!(out, "draw\t").unwrap(); }
             write!(out, "time").unwrap();
             for name in &obs_stream_names { write!(out, "\t{}", name).unwrap(); }
             writeln!(out).unwrap();
@@ -748,6 +756,8 @@ fn run_simulate(args: &[String]) {
                 for ti in 0..n_times {
                     let row_idx = run * n_times + ti;
                     if multi_rep { write!(out, "{}\t", run + 1).unwrap(); }
+                    if n_scenarios > 1 { write!(out, "{}\t", obs_data[0][row_idx].scenario).unwrap(); }
+                    if n_draws > 1 { write!(out, "{}\t", obs_data[0][row_idx].draw).unwrap(); }
                     write!(out, "{}", obs_data[0][row_idx].time).unwrap();
                     for si in 0..obs_stream_names.len() {
                         let val = obs_data[si][row_idx].value;
@@ -773,10 +783,14 @@ fn run_simulate(args: &[String]) {
                 let mut out = std::io::BufWriter::new(f);
 
                 if multi_rep { write!(out, "replicate\t").unwrap(); }
+                if n_scenarios > 1 { write!(out, "scenario\t").unwrap(); }
+                if n_draws > 1 { write!(out, "draw\t").unwrap(); }
                 writeln!(out, "time\t{}", name).unwrap();
 
                 for row in &obs_data[si] {
                     if multi_rep { write!(out, "{}\t", row.replicate).unwrap(); }
+                    if n_scenarios > 1 { write!(out, "{}\t", row.scenario).unwrap(); }
+                    if n_draws > 1 { write!(out, "{}\t", row.draw).unwrap(); }
                     let val = row.value;
                     if val == val.round() && val.abs() < 1e15 {
                         writeln!(out, "{}\t{}", row.time, val as i64).unwrap();

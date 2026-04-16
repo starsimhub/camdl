@@ -28,7 +28,8 @@ pub struct FitConfigV2 {
     /// Inference pipeline stages, executed in declaration order.
     pub stages: IndexMap<String, Stage>,
 
-    /// Backend and time step.
+    /// Backend and time step. Defaults: chain_binomial, dt=1.0.
+    #[serde(default)]
     pub config: FitBackendConfig,
 
     /// Optional lineage metadata (not used by the runner).
@@ -43,8 +44,15 @@ pub struct ModelRef {
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct FitBackendConfig {
+    #[serde(default = "default_backend")]
     pub backend: String,
+    #[serde(default = "default_dt")]
     pub dt: f64,
+}
+fn default_backend() -> String { "chain_binomial".to_string() }
+fn default_dt() -> f64 { 1.0 }
+impl Default for FitBackendConfig {
+    fn default() -> Self { FitBackendConfig { backend: default_backend(), dt: default_dt() } }
 }
 
 // ─── Data ───────────────────────────────────────────────────────────────────
@@ -150,8 +158,6 @@ impl FixedParams {
                     .map_err(|e| format!("parse error in '{}': {}", path, e))?;
                 let mut map = IndexMap::new();
                 for (k, v) in table {
-                    // Skip comment lines (keys starting with #)
-                    if k.starts_with('#') { continue; }
                     match v {
                         toml::Value::Float(f) => { map.insert(k, f); }
                         toml::Value::Integer(i) => { map.insert(k, i as f64); }
@@ -286,11 +292,12 @@ impl<'de> serde::Deserialize<'de> for StartsFrom {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where D: serde::Deserializer<'de> {
         let s = String::deserialize(deserializer)?;
-        if s == "random" {
-            Ok(StartsFrom::Random)
-        } else if s.contains('/') || s.contains('\\') {
+        // Contains path separator → directory path
+        if s.contains('/') || s.contains('\\') {
             Ok(StartsFrom::Directory(PathBuf::from(s)))
         } else {
+            // Bare name → stage reference (never interpreted as Random;
+            // Random is only the Default when starts_from is omitted)
             Ok(StartsFrom::Stage(s))
         }
     }
@@ -460,13 +467,6 @@ impl FitConfigV2 {
         let config: FitConfigV2 = toml::from_str(&contents)
             .map_err(|e| format!("parse error in {}: {}", path, e))?;
 
-        // Validate holdout_after and holdout are mutually exclusive
-        if config.data.holdout_after.is_some() && config.data.holdout.is_some() {
-            return Err("data.holdout_after and data.holdout are mutually exclusive.\n\
-                        Use holdout_after for temporal splits, holdout for explicit files."
-                .to_string());
-        }
-
         Ok(config)
     }
 
@@ -485,8 +485,15 @@ impl FitConfigV2 {
         self.fit_dir(config_path).join(stage_name)
     }
 
-    /// Exhaustive partition check + stage DAG validation.
+    /// Exhaustive partition check + stage DAG validation + data consistency.
     pub fn validate(&self, model_params: &[String]) -> Result<(), String> {
+        // holdout_after and holdout are mutually exclusive
+        if self.data.holdout_after.is_some() && self.data.holdout.is_some() {
+            return Err("data.holdout_after and data.holdout are mutually exclusive.\n  \
+                        Use holdout_after for temporal splits, holdout for explicit files."
+                .to_string());
+        }
+
         let model_set: BTreeSet<&str> = model_params.iter()
             .map(|s| s.as_str()).collect();
         let estimated: BTreeSet<&str> = self.estimate.keys()
@@ -540,6 +547,15 @@ impl FitConfigV2 {
                     ));
                 }
             }
+        }
+
+        // Validate backend
+        let valid_backends = ["gillespie", "tau_leap", "chain_binomial", "ode"];
+        if !valid_backends.contains(&self.config.backend.as_str()) {
+            return Err(format!(
+                "unknown backend '{}'. Valid backends: {}",
+                self.config.backend, valid_backends.join(", ")
+            ));
         }
 
         // Validate stage DAG: starts_from references must be valid

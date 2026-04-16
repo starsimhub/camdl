@@ -137,23 +137,35 @@ pub fn cmd_fit_pgas(args: &[String]) {
 }
 
 pub fn cmd_fit_status(args: &[String]) {
-    // Try v2 first: if the argument is a directory or v2 .toml, use v2 status
     if let Some(path) = args.first() {
         if !path.starts_with("--") {
             let p = std::path::Path::new(path);
+            // Directory → walk it directly
             if p.is_dir() {
                 run_status_v2_dir(path);
                 return;
             }
-            // If it's a v2 .toml, load and use its output_dir
-            if let Ok(config) = config_v2::FitConfigV2::load(path) {
-                let fit_dir = config.fit_dir(path);
-                if fit_dir.exists() {
-                    run_status_v2_dir(&fit_dir.to_string_lossy());
-                } else {
-                    eprintln!("no results found at {}", fit_dir.display());
+            // Try v2 config format
+            match config_v2::FitConfigV2::load(path) {
+                Ok(config) => {
+                    let fit_dir = config.fit_dir(path);
+                    if fit_dir.exists() {
+                        run_status_v2_dir(&fit_dir.to_string_lossy());
+                    } else {
+                        eprintln!("no results found at {}", fit_dir.display());
+                    }
+                    return;
                 }
-                return;
+                Err(e) => {
+                    // Check if it has [stages] (v2 marker) — if so, the error is real
+                    if let Ok(contents) = std::fs::read_to_string(path) {
+                        if contents.contains("[stages.") || contents.contains("[stages]") {
+                            eprintln!("error parsing v2 fit.toml: {}", e);
+                            std::process::exit(1);
+                        }
+                    }
+                    // Otherwise fall through to v1
+                }
             }
         }
     }
@@ -269,7 +281,11 @@ pub fn cmd_fit_run_v2(args: &[String]) {
             "--stage" => { i += 1; stage_filter = Some(args[i].clone()); }
             "--starts-from" => { i += 1; starts_from_override = Some(args[i].clone()); }
             "--sweep" => { i += 1; sweep_args.push(args[i].clone()); }
-            "--resume" => { /* TODO: wire up */ }
+            "--resume" => {
+                eprintln!("error: --resume is not yet implemented for `camdl fit run`.");
+                eprintln!("  Use the legacy `camdl fit pgas` or `camdl fit pmmh` with --resume.");
+                std::process::exit(1);
+            }
             s if s.starts_with("--") => {
                 eprintln!("unknown flag: {}", s);
                 eprintln!("usage: camdl fit run FIT.toml [--stage NAME] [--seed N] [--force] [--sweep \"NAME=V1,V2,...\"]");
@@ -357,6 +373,12 @@ pub fn cmd_fit_run_v2(args: &[String]) {
     let has_sweep = sweep_points.len() > 1;
     if has_sweep {
         eprintln!("sweep: {} points", sweep_points.len());
+    }
+
+    // Validate --starts-from requires --stage
+    if starts_from_override.is_some() && stage_filter.is_none() {
+        eprintln!("error: --starts-from requires --stage to disambiguate which stage it applies to.");
+        std::process::exit(1);
     }
 
     // Determine which stages to run
