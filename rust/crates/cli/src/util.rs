@@ -484,11 +484,29 @@ pub fn run_simulation(run: &SimRun) -> Result<(Trajectory, ir::Model), String> {
         let _ = scenario_compose; // compose is consumed above; suppress unused warning
     }
 
-    // Apply --params TOML files
+    // Apply --params TOML files (layered, later overrides earlier)
+    let model_param_set: std::collections::HashSet<String> = model.parameters.iter()
+        .map(|p| p.name.clone()).collect();
     for path in &run.params_files {
         let toml_overrides = load_params_toml(path)?;
+        // Check for unknown params in the file
+        for name in toml_overrides.keys() {
+            if !model_param_set.contains(name) {
+                return Err(format!(
+                    "unknown parameter '{}' in params file '{}'.\n  \
+                     Available parameters: {}",
+                    name, path,
+                    model.parameters.iter().map(|p| p.name.as_str()).collect::<Vec<_>>().join(", ")
+                ));
+            }
+        }
         for p in &mut model.parameters {
             if let Some(&v) = toml_overrides.get(&p.name) {
+                if let Some(old) = p.value {
+                    if (old - v).abs() > 1e-15 {
+                        log::info!("--params {}: {}={} overrides previous value {}", path, p.name, v, old);
+                    }
+                }
                 p.value = Some(v);
             }
         }
