@@ -2,6 +2,7 @@ mod util;
 mod hashing;
 mod sampling;
 mod experiment;
+#[allow(dead_code)]
 mod analyze;
 mod serve;
 mod summarize;
@@ -90,7 +91,12 @@ fn main() {
                 Some("run")       => experiment::cmd_experiment_run(&all_args[2..]),
                 Some("status")    => experiment::cmd_experiment_status(&all_args[2..]),
                 Some("summarize") => summarize::cmd_experiment_summarize(&all_args[2..]),
-                Some("analyze")   => analyze::cmd_experiment_analyze(&all_args[2..]),
+                Some("analyze")   => {
+                    eprintln!("error: `camdl experiment analyze` has been removed.");
+                    eprintln!("  Use R or Python for sensitivity analysis (e.g., the sensitivity R package");
+                    eprintln!("  with camdl simulation output).");
+                    std::process::exit(1);
+                }
                 _ => {
                     eprintln!("usage: camdl experiment <run|status|summarize|analyze> ...");
                     std::process::exit(1);
