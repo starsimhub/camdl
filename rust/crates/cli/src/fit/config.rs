@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 /// Top-level fit.toml structure.
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct FitToml {
     pub fit: FitSection,
@@ -26,7 +26,7 @@ pub struct FitToml {
     pub pgas: Option<PGASSampleConfig>,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct FitSection {
     pub model: String,
@@ -36,7 +36,7 @@ pub struct FitSection {
 }
 
 /// Per-stage configuration for scout and refine.
-#[derive(Debug, Default, Deserialize, Serialize)]
+#[derive(Debug, Default, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct StageConfig {
     pub chains: Option<usize>,
@@ -51,7 +51,7 @@ pub struct StageConfig {
 }
 
 /// Validate stage configuration (includes pfilter settings).
-#[derive(Debug, Default, Deserialize, Serialize)]
+#[derive(Debug, Default, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ValidateConfig {
     pub chains: Option<usize>,
@@ -63,14 +63,14 @@ pub struct ValidateConfig {
     pub pfilter_particles: Option<usize>,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct FitConfigSection {
     pub backend: String,
     pub dt: f64,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct EstimateSpec {
     /// Random walk SD on natural scale. If omitted, auto-computed from bounds.
     pub rw_sd: Option<f64>,
@@ -87,7 +87,7 @@ pub struct EstimateSpec {
 }
 
 /// PMMH posterior sampling configuration.
-#[derive(Debug, Default, Deserialize, Serialize)]
+#[derive(Debug, Default, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct PMMHSampleConfig {
     pub chains: Option<usize>,
@@ -106,7 +106,7 @@ pub struct PMMHSampleConfig {
 }
 
 /// PGAS (Particle Gibbs with Ancestor Sampling) configuration.
-#[derive(Debug, Default, Deserialize, Serialize)]
+#[derive(Debug, Default, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct PGASSampleConfig {
     pub chains: Option<usize>,

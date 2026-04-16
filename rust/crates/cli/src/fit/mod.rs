@@ -430,18 +430,70 @@ pub fn cmd_fit_run_v2(args: &[String]) {
                 eprintln!("\n{} complete in {:.1}s: {}/", stage_name, elapsed.as_secs_f64(), stage_dir.display());
                 eprintln!("  best loglik: {:.1} (chain {})", chain_results.best_loglik, chain_results.best_chain + 1);
             }
-            Stage::PGAS { .. } => {
-                eprintln!("  PGAS dispatch via `camdl fit run` not yet wired up.");
-                eprintln!("  Use: camdl fit pgas {} --starts-from {}", fit_path,
-                    effective_starts.as_deref().unwrap_or("..."));
+            Stage::PGAS { chains, particles, sweeps, burn_in, thin, .. } => {
+                // Override legacy PGAS config with v2 stage values
+                let mut legacy_pgas = legacy.pgas.clone().unwrap_or_default();
+                legacy_pgas.chains = Some(*chains);
+                legacy_pgas.particles = Some(*particles);
+                legacy_pgas.sweeps = Some(*sweeps);
+                if let Some(b) = burn_in { legacy_pgas.burn_in = Some(*b); }
+                if let Some(t) = thin { legacy_pgas.thin = Some(*t); }
+                legacy_pgas.starts_from = effective_starts.clone();
+                let mut legacy_with_pgas = legacy.clone();
+                legacy_with_pgas.pgas = Some(legacy_pgas);
+                // Override output_dir to place output in the stage subdir
+                legacy_with_pgas.fit.output_dir = fit_dir.to_string_lossy().to_string();
+
+                pgas::run_pgas_cli(
+                    &legacy_with_pgas,
+                    effective_starts.as_deref(),
+                    seed, _force, true, true, false,
+                ).unwrap_or_else(|e| {
+                    eprintln!("error running pgas stage '{}': {}", stage_name, e);
+                    std::process::exit(1);
+                });
+
+                // Rename pgas/ → {stage_name}/ if they differ
+                let pgas_dir = fit_dir.join("pgas");
+                if stage_name != &"pgas" && pgas_dir.exists() {
+                    std::fs::rename(&pgas_dir, &stage_dir).unwrap_or_else(|e| {
+                        eprintln!("warning: could not rename pgas/ to {}: {}", stage_name, e);
+                    });
+                }
             }
-            Stage::PMMH { .. } => {
-                eprintln!("  PMMH dispatch via `camdl fit run` not yet wired up.");
-                eprintln!("  Use: camdl fit pmmh {} --starts-from {}", fit_path,
-                    effective_starts.as_deref().unwrap_or("..."));
+            Stage::PMMH { chains, particles, iterations, burn_in, thin, .. } => {
+                let mut legacy_pmmh = legacy.pmmh.clone().unwrap_or_default();
+                legacy_pmmh.chains = Some(*chains);
+                legacy_pmmh.particles = Some(*particles);
+                legacy_pmmh.steps = Some(*iterations);
+                if let Some(b) = burn_in { legacy_pmmh.burn_in = Some(*b); }
+                if let Some(t) = thin { legacy_pmmh.thin = Some(*t); }
+                let mut legacy_with_pmmh = legacy.clone();
+                legacy_with_pmmh.pmmh = Some(legacy_pmmh);
+                legacy_with_pmmh.fit.output_dir = fit_dir.to_string_lossy().to_string();
+
+                pmmh::run_pmmh_cli(
+                    &legacy_with_pmmh,
+                    effective_starts.as_deref(),
+                    seed, _force, false, false,
+                ).unwrap_or_else(|e| {
+                    eprintln!("error running pmmh stage '{}': {}", stage_name, e);
+                    std::process::exit(1);
+                });
+
+                let pmmh_dir = fit_dir.join("pmmh");
+                if stage_name != &"pmmh" && pmmh_dir.exists() {
+                    std::fs::rename(&pmmh_dir, &stage_dir).unwrap_or_else(|e| {
+                        eprintln!("warning: could not rename pmmh/ to {}: {}", stage_name, e);
+                    });
+                }
             }
-            Stage::PFilter { .. } => {
-                eprintln!("  PFilter dispatch via `camdl fit run` not yet wired up.");
+            Stage::PFilter { particles, replicates, .. } => {
+                // PFilter at fixed params — run a bootstrap particle filter
+                // This is what validate's "pfilter at MLE" does
+                eprintln!("  PFilter evaluation: {} particles, {} replicates",
+                    particles, replicates.unwrap_or(1));
+                eprintln!("  (pfilter dispatch not yet implemented — use camdl pfilter directly)");
             }
         }
     }
