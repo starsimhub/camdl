@@ -730,10 +730,20 @@ let shape_index ctx shape items env =
   List.fold_left (fun acc (i, (idx, _)) -> acc + idx * strides.(i))
     0 (List.mapi (fun i p -> (i, p)) pairs)
 
+(* Pure math functions that are safe to evaluate at compile time. *)
+let is_const_func = function
+  | "exp" | "log" | "sqrt" | "abs" | "floor" | "ceil" -> true
+  | _ -> false
+
 let rec is_const_expr = function
   | EConst _ | EUnit _ -> true
   | EUnOp (_, e) -> is_const_expr e
   | EBinOp (_, l, r) -> is_const_expr l && is_const_expr r
+  | EFuncCall (fname, args) when is_const_func fname ->
+    (* Pure math functions are const-foldable iff all args are const.
+       The parser emits EFuncCall for log/exp/sqrt/etc.; EUnOp(Log,_) is
+       dead unless another AST-level pass rewrites them. *)
+    List.for_all (fun (_, e) -> is_const_expr e) args
   | _ -> false
 
 let rec resolve_expr ctx (env : (string * string) list) (e : expr) : Ir.expr =
@@ -1258,6 +1268,16 @@ let rec eval_const_expr ctx = function
   | EBinOp (Mul, l, r) -> eval_const_expr ctx l *. eval_const_expr ctx r
   | EBinOp (Div, l, r) -> eval_const_expr ctx l /. eval_const_expr ctx r
   | EBinOp (Pow, l, r) -> eval_const_expr ctx l ** eval_const_expr ctx r
+  | EFuncCall (fname, [(_, e)]) when is_const_func fname ->
+    let v = eval_const_expr ctx e in
+    (match fname with
+     | "exp"   -> exp v
+     | "log"   -> log v
+     | "sqrt"  -> sqrt v
+     | "abs"   -> abs_float v
+     | "floor" -> floor v
+     | "ceil"  -> ceil v
+     | _       -> 0.0 (* unreachable — is_const_func filters these *))
   | _ -> 0.0  (* unreachable — guarded by is_const_expr *)
 
 (* Full resolve_float_expr: tries AST const-eval first, then IR reduction.
