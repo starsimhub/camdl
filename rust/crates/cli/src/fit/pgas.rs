@@ -461,6 +461,56 @@ pub fn run_pgas_cli(
     };
     state.save(&stage_dir)?;
 
+    // Write draws.tsv: complete-M posterior draws (all params, estimated + fixed)
+    // Post-burn-in, thinned draws from all chains combined.
+    {
+        use std::io::Write;
+        let draws_path = format!("{}/draws.tsv", stage_dir);
+        let mut f = std::io::BufWriter::new(
+            std::fs::File::create(&draws_path)
+                .map_err(|e| format!("cannot create {}: {}", draws_path, e))?
+        );
+
+        // Header: all model parameter names (estimated first, then fixed)
+        let mut all_names: Vec<String> = config.estimated_params.iter()
+            .map(|s| s.name.clone()).collect();
+        let fixed_names: Vec<String> = config.model.parameters.iter()
+            .filter(|p| !config.estimated_params.iter().any(|e| e.name == p.name))
+            .map(|p| p.name.clone())
+            .collect();
+        all_names.extend(fixed_names.iter().cloned());
+        writeln!(f, "{}", all_names.join("\t")).unwrap();
+
+        // Fixed values (constant across all draws)
+        let fixed_vals: Vec<f64> = fixed_names.iter().map(|name| {
+            config.compiled.param_index.get(name.as_str())
+                .map(|&idx| config.base_params[idx])
+                .unwrap_or(0.0)
+        }).collect();
+
+        let mut n_draws = 0usize;
+        for (_, sweeps, _) in &all_results {
+            for (i, sweep) in sweeps.iter().enumerate() {
+                if i < burn_in { continue; }
+                if (i - burn_in) % thin != 0 { continue; }
+                // Estimated param values
+                for spec in &config.estimated_params {
+                    write!(f, "{:.17e}", sweep.params[spec.index]).unwrap();
+                    write!(f, "\t").unwrap();
+                }
+                // Fixed param values
+                for (j, val) in fixed_vals.iter().enumerate() {
+                    if j > 0 { write!(f, "\t").unwrap(); }
+                    write!(f, "{:.17e}", val).unwrap();
+                }
+                writeln!(f).unwrap();
+                n_draws += 1;
+            }
+        }
+        drop(f);
+        eprintln!("  draws.tsv: {} posterior samples (all {} params)", n_draws, all_names.len());
+    }
+
     // Render and persist diagnostics
     collector.render_to_stderr();
     let _ = collector.write_json(&format!("{}/diagnostics.json", stage_dir));

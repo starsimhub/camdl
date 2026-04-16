@@ -481,6 +481,71 @@ pub fn run_pmmh_cli(
     };
     state.save(&stage_dir)?;
 
+    // Write draws.tsv: complete-M posterior draws (all params, estimated + fixed)
+    // Reads the per-chain trace.tsv files (already burn-in/thin filtered) and
+    // adds fixed parameter columns.
+    {
+        use std::io::Write;
+        let draws_path = format!("{}/draws.tsv", stage_dir);
+        let mut f = std::io::BufWriter::new(
+            std::fs::File::create(&draws_path)
+                .map_err(|e| format!("cannot create {}: {}", draws_path, e))?
+        );
+
+        // Header: estimated params + fixed params
+        let est_names: Vec<String> = config.estimated_params.iter()
+            .map(|s| s.name.clone()).collect();
+        let fixed_names: Vec<String> = config.model.parameters.iter()
+            .filter(|p| !config.estimated_params.iter().any(|e| e.name == p.name))
+            .map(|p| p.name.clone())
+            .collect();
+        let mut all_names = est_names.clone();
+        all_names.extend(fixed_names.iter().cloned());
+        writeln!(f, "{}", all_names.join("\t")).unwrap();
+
+        let fixed_vals: Vec<f64> = fixed_names.iter().map(|name| {
+            config.compiled.param_index.get(name.as_str())
+                .map(|&idx| config.base_params[idx])
+                .unwrap_or(0.0)
+        }).collect();
+
+        // Read each chain's trace.tsv and extract param columns
+        let mut n_draws = 0usize;
+        for chain_id in 0..n_chains {
+            let trace_path = format!("{}/chain_{}/trace.tsv", stage_dir, chain_id + 1);
+            if let Ok(content) = std::fs::read_to_string(&trace_path) {
+                let mut lines = content.lines();
+                let header = lines.next().unwrap_or("");
+                let cols: Vec<&str> = header.split('\t').collect();
+                // Find column indices for estimated params
+                let param_col_indices: Vec<usize> = est_names.iter().map(|name| {
+                    cols.iter().position(|c| c == name).unwrap_or(usize::MAX)
+                }).collect();
+
+                for line in lines {
+                    if line.trim().is_empty() { continue; }
+                    let fields: Vec<&str> = line.split('\t').collect();
+                    for &col_idx in &param_col_indices {
+                        if col_idx < fields.len() {
+                            write!(f, "{}", fields[col_idx]).unwrap();
+                        } else {
+                            write!(f, "NaN").unwrap();
+                        }
+                        write!(f, "\t").unwrap();
+                    }
+                    for (j, val) in fixed_vals.iter().enumerate() {
+                        if j > 0 { write!(f, "\t").unwrap(); }
+                        write!(f, "{:.17e}", val).unwrap();
+                    }
+                    writeln!(f).unwrap();
+                    n_draws += 1;
+                }
+            }
+        }
+        drop(f);
+        eprintln!("  draws.tsv: {} posterior samples (all {} params)", n_draws, all_names.len());
+    }
+
     // Render and persist diagnostics
     collector.render_to_stderr();
     let _ = collector.write_json(&format!("{}/diagnostics.json", stage_dir));
