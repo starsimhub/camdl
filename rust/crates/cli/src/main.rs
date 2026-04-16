@@ -83,8 +83,8 @@ fn simulate_help() -> ! {
     eprintln!("  {}", d("# Posterior predictive check"));
     eprintln!("  camdl simulate sir.camdl --draws posterior.tsv --replicates 10 --obs ppc.tsv");
     eprintln!();
-    eprintln!("  {}", d("# Prior predictive check (requires priors in fit.toml)"));
-    eprintln!("  camdl simulate sir.camdl --draws prior --fit fits/02.toml -n 500 --obs prior_pred.tsv");
+    eprintln!("  {}", d("# Prior predictive check (priors declared with ~ in the model)"));
+    eprintln!("  camdl simulate sir.camdl --draws prior -n 500 --obs prior_pred.tsv");
     eprintln!();
     eprintln!("  {}", d("# Space-filling exploration from parameter bounds"));
     eprintln!("  camdl simulate sir.camdl --draws uniform -n 500 --obs explore.tsv");
@@ -108,7 +108,7 @@ fn simulate_help() -> ! {
     eprintln!("  --enable NAME             Enable intervention (mutually exclusive with --scenario)");
     eprintln!("  --disable NAME            Disable intervention");
     eprintln!("  --draws SOURCE            Parameter draws: path.tsv, uniform, or prior");
-    eprintln!("  --fit FILE                fit.toml for --draws prior (prior source)");
+    eprintln!("  --fit FILE                fit.toml to override model IR priors for --draws prior");
     eprintln!("  -n N                      Number of draws (for --draws uniform/prior)");
     eprintln!("  --replicates N            Stochastic replicates per parameter point");
     eprintln!("  --obs FILE                Write synthetic observations (wide-format TSV)");
@@ -1540,6 +1540,46 @@ mod tests {
     fn parse_seeds_spec_empty_range() {
         let err = parse_seeds_spec("5:1").unwrap_err();
         assert!(err.contains("empty range"));
+    }
+
+    #[test]
+    fn prior_draws_from_ir_sir_priors_golden() {
+        // Load the sir_priors golden IR — all 5 params have priors, so we
+        // should get 5 prior samples for each of the N draws.
+        let manifest = std::env::var("CARGO_MANIFEST_DIR").unwrap();
+        let path = format!("{}/../../../ocaml/golden/sir_priors.ir.json", manifest);
+        let draws = generate_prior_draws_from_ir(&path, 7, 42).unwrap();
+        assert_eq!(draws.len(), 7, "should produce N draws");
+        for row in &draws {
+            for name in ["beta", "gamma", "rho", "N0", "I0"] {
+                let v = row.get(name).unwrap_or_else(|| panic!("missing {}", name));
+                assert!(v.is_finite(), "{} must be finite, got {}", name, v);
+                assert!(*v >= 0.0, "{} must be non-negative, got {}", name, v);
+            }
+            // Bounds clamping: beta ∈ [0.01, 2.0], rho ∈ [0.001, 1.0]
+            assert!(row["beta"] >= 0.01 && row["beta"] <= 2.0);
+            assert!(row["rho"] >= 0.001 && row["rho"] <= 1.0);
+        }
+
+        // Same seed → identical draws (reproducibility)
+        let draws2 = generate_prior_draws_from_ir(&path, 7, 42).unwrap();
+        for (a, b) in draws.iter().zip(draws2.iter()) {
+            for (k, va) in a {
+                assert_eq!(va, &b[k], "seed={} {} should be reproducible", 42, k);
+            }
+        }
+    }
+
+    #[test]
+    fn prior_draws_from_ir_errors_when_no_prior() {
+        // sir_basic has no priors and no preset-applied values on params.
+        // Expect a clear error naming the missing parameters.
+        let manifest = std::env::var("CARGO_MANIFEST_DIR").unwrap();
+        let path = format!("{}/../../../ocaml/golden/sir_basic.ir.json", manifest);
+        let err = generate_prior_draws_from_ir(&path, 3, 1).unwrap_err();
+        assert!(err.contains("no prior and no default"), "got: {}", err);
+        assert!(err.contains("beta"), "error should name 'beta': {}", err);
+        assert!(err.contains("~ prior(...)"), "error should hint at prior syntax: {}", err);
     }
 
     #[test]

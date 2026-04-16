@@ -1128,6 +1128,96 @@ mod tests {
 
         let _ = std::fs::remove_dir_all(&dir);
     }
+
+    /// resolve_prior precedence chain: fit.toml override → model IR → Flat.
+    #[test]
+    fn resolve_prior_precedence_chain() {
+        use ir::parameter::{Parameter, PriorDist, LogNormalPrior};
+
+        fn fit_from(toml_src: &str) -> FitToml {
+            toml::from_str(toml_src).expect("fit.toml parse")
+        }
+
+        let beta_with_ir_prior = Parameter {
+            name: "beta".into(), value: None, bounds: Some((0.01, 2.0)),
+            prior: Some(PriorDist::LogNormal(LogNormalPrior { mu: -1.0, sigma: 0.5 })),
+            transform: None, initial_value: None, param_kind: None, param_dim: None,
+        };
+        let gamma_no_prior = Parameter {
+            name: "gamma".into(), value: None, bounds: Some((0.05, 1.0)),
+            prior: None, transform: None, initial_value: None, param_kind: None, param_dim: None,
+        };
+        let model = ir::Model {
+            name: "t".into(), version: "0.3".into(), time_unit: "days".into(),
+            description: None, origin: None,
+            compartments: vec![], transitions: vec![], ode_equations: vec![],
+            time_functions: vec![], tables: vec![], interventions: vec![], observations: vec![],
+            parameters: vec![beta_with_ir_prior, gamma_no_prior],
+            parameter_groups: vec![],
+            initial_conditions: ir::model::InitialConditions::Explicit(HashMap::new()),
+            data_contract: None,
+            output: ir::model::OutputConfig {
+                times: ir::model::OutputSchedule::AtTimes(vec![]),
+                format: "tsv".into(), trajectory: true, observations: false,
+            },
+            simulation: ir::model::SimulationConfig {
+                t_start: 0.0, t_end: 1.0, time_semantics: "continuous".into(),
+                dt: None, rng_seed: None,
+            },
+            presets: vec![], model_structure: None, balance: None,
+        };
+
+        // (1) fit.toml override beats IR prior
+        let fit_override = fit_from(r#"
+            [fit]
+            model = "unused"
+            output_dir = "unused"
+            [config]
+            backend = "gillespie"
+            dt = 1.0
+            [data]
+            [fixed]
+            [estimate.beta]
+            prior = "normal(0.3, 0.1)"
+        "#);
+        let (p, src) = resolve_prior("beta", &fit_override, &model);
+        assert_eq!(src, "fit.toml", "fit.toml override should take precedence");
+        match p {
+            Prior::Normal { mean, sd } => {
+                assert!((mean - 0.3).abs() < 1e-9);
+                assert!((sd - 0.1).abs() < 1e-9);
+            }
+            other => panic!("expected Normal from fit.toml, got {:?}", other),
+        }
+
+        // (2) IR prior used when fit.toml has no override
+        let fit_empty = fit_from(r#"
+            [fit]
+            model = "unused"
+            output_dir = "unused"
+            [config]
+            backend = "gillespie"
+            dt = 1.0
+            [data]
+            [fixed]
+            [estimate]
+        "#);
+        let (p, src) = resolve_prior("beta", &fit_empty, &model);
+        assert_eq!(src, "model", "model IR prior should apply when fit.toml is silent");
+        match p {
+            Prior::TransformedNormal { mean, sd } => {
+                // LogNormal(mu=-1.0, sigma=0.5) in IR → TransformedNormal on log scale
+                assert!((mean - (-1.0)).abs() < 1e-9);
+                assert!((sd - 0.5).abs() < 1e-9);
+            }
+            other => panic!("expected TransformedNormal from IR LogNormal, got {:?}", other),
+        }
+
+        // (3) Flat fallback when neither fit.toml nor IR provide a prior
+        let (p, src) = resolve_prior("gamma", &fit_empty, &model);
+        assert_eq!(src, "flat (default)");
+        assert!(matches!(p, Prior::Flat));
+    }
 }
 
 /// Compute input hash for provenance (shared by refine and validate).
