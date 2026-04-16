@@ -145,6 +145,7 @@ pub fn cmd_fit_run_v2(args: &[String]) {
     let mut stage_filter: Option<String> = None;
     let mut starts_from_override: Option<String> = None;
     let mut has_seed_flag = false;
+    let mut sweep_args: Vec<String> = Vec::new();
 
     let mut i = 0;
     while i < args.len() {
@@ -153,10 +154,11 @@ pub fn cmd_fit_run_v2(args: &[String]) {
             "--force" => { _force = true; }
             "--stage" => { i += 1; stage_filter = Some(args[i].clone()); }
             "--starts-from" => { i += 1; starts_from_override = Some(args[i].clone()); }
+            "--sweep" => { i += 1; sweep_args.push(args[i].clone()); }
             "--resume" => { /* TODO: wire up */ }
             s if s.starts_with("--") => {
                 eprintln!("unknown flag: {}", s);
-                eprintln!("usage: camdl fit run FIT.toml [--stage NAME] [--seed N] [--force]");
+                eprintln!("usage: camdl fit run FIT.toml [--stage NAME] [--seed N] [--force] [--sweep \"NAME=V1,V2,...\"]");
                 std::process::exit(1);
             }
             path => { fit_path = Some(path.to_string()); }
@@ -185,6 +187,63 @@ pub fn cmd_fit_run_v2(args: &[String]) {
         eprintln!("error: {}", e);
         std::process::exit(1);
     });
+
+    // ── Parse and validate sweeps ─────────────────────────────────────────
+    let sweep_specs: Vec<(String, Vec<f64>)> = sweep_args.iter().map(|arg| {
+        let mut parts = arg.splitn(2, '=');
+        let name = parts.next().unwrap().trim().to_string();
+        let values_str = parts.next().unwrap_or_else(|| {
+            eprintln!("error: --sweep requires NAME=V1,V2,...");
+            std::process::exit(1);
+        });
+        let values: Vec<f64> = values_str.split(',')
+            .map(|s| s.trim().parse().unwrap_or_else(|_| {
+                eprintln!("error: cannot parse sweep value '{}' for '{}'", s.trim(), name);
+                std::process::exit(1);
+            }))
+            .collect();
+        (name, values)
+    }).collect();
+
+    // Validate: swept params must be in [fixed], not [estimate]
+    let fixed_resolved = config.fixed.resolve().unwrap_or_default();
+    for (name, _) in &sweep_specs {
+        if config.estimate.contains_key(name) {
+            eprintln!("error: cannot sweep '{}' — it is in [estimate].\n  \
+                       Sweeps override [fixed] parameters. Move '{}' to [fixed] first.",
+                name, name);
+            std::process::exit(1);
+        }
+        if !fixed_resolved.contains_key(name) {
+            eprintln!("error: sweep parameter '{}' not found in [fixed].\n  \
+                       Available fixed params: {}",
+                name, fixed_resolved.keys().map(|s| s.as_str()).collect::<Vec<_>>().join(", "));
+            std::process::exit(1);
+        }
+    }
+
+    // Expand Cartesian product of sweep points
+    let sweep_points: Vec<Vec<(String, f64)>> = if sweep_specs.is_empty() {
+        vec![vec![]]
+    } else {
+        let mut points: Vec<Vec<(String, f64)>> = vec![vec![]];
+        for (name, values) in &sweep_specs {
+            let mut next = Vec::new();
+            for pt in &points {
+                for &v in values {
+                    let mut new_pt = pt.clone();
+                    new_pt.push((name.clone(), v));
+                    next.push(new_pt);
+                }
+            }
+            points = next;
+        }
+        points
+    };
+    let has_sweep = sweep_points.len() > 1;
+    if has_sweep {
+        eprintln!("sweep: {} points", sweep_points.len());
+    }
 
     // Determine which stages to run
     let stages_to_run: Vec<(&str, &Stage)> = if let Some(ref name) = stage_filter {
@@ -216,12 +275,6 @@ pub fn cmd_fit_run_v2(args: &[String]) {
     });
     eprintln!("  output:   {}", fit_dir.display());
 
-    // Convert to legacy FitToml for runner compatibility
-    let legacy = config.to_legacy_toml().unwrap_or_else(|e| {
-        eprintln!("error converting to legacy format: {}", e);
-        std::process::exit(1);
-    });
-
     // Seed: CLI > random
     let seed = if has_seed_flag {
         seed
@@ -231,15 +284,43 @@ pub fn cmd_fit_run_v2(args: &[String]) {
         dur.as_nanos() as u64 % 1_000_000
     };
 
-    // Execute stages in order
+    // Execute stages: sweep_point × stage
+    for (pt_idx, sweep_point) in sweep_points.iter().enumerate() {
+        // Build a config with swept values applied to [fixed]
+        let mut sweep_config = config.clone();
+        for (name, val) in sweep_point {
+            sweep_config.fixed.values.insert(name.clone(), *val);
+        }
+
+        // Recalculate the legacy bridge with swept values
+        let sweep_legacy = sweep_config.to_legacy_toml().unwrap_or_else(|e| {
+            eprintln!("error: {}", e);
+            std::process::exit(1);
+        });
+
+        // Base directory for this sweep point
+        let sweep_fit_dir = if has_sweep {
+            let slug: String = sweep_point.iter()
+                .map(|(k, v)| format!("{}_{:.3}", k, v))
+                .collect::<Vec<_>>()
+                .join("__");
+            if pt_idx == 0 {
+                eprintln!("");
+            }
+            eprintln!("═══ sweep point {}/{}: {} ═══", pt_idx + 1, sweep_points.len(), slug);
+            fit_dir.join(slug)
+        } else {
+            fit_dir.clone()
+        };
+
     for (stage_name, stage) in &stages_to_run {
-        let stage_dir = fit_dir.join(stage_name);
+        let stage_dir = sweep_fit_dir.join(stage_name);
         eprintln!("\n── stage: {} (method={}) ──", stage_name, stage.method_name());
 
         // Config hash staleness check
-        let fixed_resolved = config.fixed.resolve().unwrap_or_default();
+        let fixed_resolved = sweep_config.fixed.resolve().unwrap_or_default();
         let config_hash = provenance::compute_config_hash_v2(
-            &model_json, &config.data.observations, &config.estimate,
+            &model_json, &sweep_config.data.observations, &sweep_config.estimate,
             &fixed_resolved, stage_name, stage, seed,
         );
         if !_force {
@@ -272,7 +353,7 @@ pub fn cmd_fit_run_v2(args: &[String]) {
                 StartsFrom::Random => None,
                 StartsFrom::Stage(ref dep_name) => {
                     // Resolve to the directory of a prior stage in this fit
-                    Some(fit_dir.join(dep_name).to_string_lossy().to_string())
+                    Some(sweep_fit_dir.join(dep_name).to_string_lossy().to_string())
                 }
                 StartsFrom::Directory(ref path) => {
                     Some(path.to_string_lossy().to_string())
@@ -287,7 +368,7 @@ pub fn cmd_fit_run_v2(args: &[String]) {
                 });
 
                 let run_config = runner::FitRunConfig::build(
-                    &legacy,
+                    &sweep_legacy,
                     prior_state.as_ref(),
                     *chains, *particles, *iterations,
                     *cooling, seed, effective_starts.is_none(),
@@ -357,7 +438,7 @@ pub fn cmd_fit_run_v2(args: &[String]) {
                 );
                 let mle_path = format!("{}/mle_params.toml", stage_dir.display());
                 let model_hash = crate::hashing::model_hash(&run_config.model_ir_json);
-                let data_hashes: Vec<(String, String)> = config.data.observations.iter()
+                let data_hashes: Vec<(String, String)> = sweep_config.data.observations.iter()
                     .map(|(name, path)| {
                         let bytes = std::fs::read(path).unwrap_or_default();
                         let hash = {
@@ -370,7 +451,7 @@ pub fn cmd_fit_run_v2(args: &[String]) {
                     .collect();
                 let metadata = provenance::MleMetadata {
                     input_hash: model_hash[..8].to_string(),
-                    model_path: config.model.camdl.clone(),
+                    model_path: sweep_config.model.camdl.clone(),
                     model_hash: model_hash.clone(),
                     data_hashes: data_hashes.clone(),
                     seed,
@@ -405,16 +486,16 @@ pub fn cmd_fit_run_v2(args: &[String]) {
                     config_hash: config_hash.clone(),
                     fit_config: fit_path.clone(),
                     stage: stage_name.to_string(),
-                    model: config.model.camdl.clone(),
+                    model: sweep_config.model.camdl.clone(),
                     model_hash: model_hash.clone(),
                     data_hashes: data_hashes.iter()
                         .map(|(n, h)| (n.clone(), h.clone())).collect(),
-                    estimated: config.estimate.keys().cloned().collect(),
+                    estimated: sweep_config.estimate.keys().cloned().collect(),
                     fixed: fixed_resolved.iter()
                         .map(|(k, v)| (k.clone(), *v)).collect(),
                     algorithm: algo_json,
                     starts_from: starts_from_prov,
-                    derived_from: config.provenance.as_ref()
+                    derived_from: sweep_config.provenance.as_ref()
                         .and_then(|p| p.derived_from.clone()),
                     seed,
                     wall_time_seconds: elapsed.as_secs_f64(),
@@ -432,17 +513,16 @@ pub fn cmd_fit_run_v2(args: &[String]) {
             }
             Stage::PGAS { chains, particles, sweeps, burn_in, thin, .. } => {
                 // Override legacy PGAS config with v2 stage values
-                let mut legacy_pgas = legacy.pgas.clone().unwrap_or_default();
+                let mut legacy_pgas = sweep_legacy.pgas.clone().unwrap_or_default();
                 legacy_pgas.chains = Some(*chains);
                 legacy_pgas.particles = Some(*particles);
                 legacy_pgas.sweeps = Some(*sweeps);
                 if let Some(b) = burn_in { legacy_pgas.burn_in = Some(*b); }
                 if let Some(t) = thin { legacy_pgas.thin = Some(*t); }
                 legacy_pgas.starts_from = effective_starts.clone();
-                let mut legacy_with_pgas = legacy.clone();
+                let mut legacy_with_pgas = sweep_legacy.clone();
                 legacy_with_pgas.pgas = Some(legacy_pgas);
-                // Override output_dir to place output in the stage subdir
-                legacy_with_pgas.fit.output_dir = fit_dir.to_string_lossy().to_string();
+                legacy_with_pgas.fit.output_dir = sweep_fit_dir.to_string_lossy().to_string();
 
                 pgas::run_pgas_cli(
                     &legacy_with_pgas,
@@ -454,7 +534,7 @@ pub fn cmd_fit_run_v2(args: &[String]) {
                 });
 
                 // Rename pgas/ → {stage_name}/ if they differ
-                let pgas_dir = fit_dir.join("pgas");
+                let pgas_dir = sweep_fit_dir.join("pgas");
                 if stage_name != &"pgas" && pgas_dir.exists() {
                     std::fs::rename(&pgas_dir, &stage_dir).unwrap_or_else(|e| {
                         eprintln!("warning: could not rename pgas/ to {}: {}", stage_name, e);
@@ -462,15 +542,15 @@ pub fn cmd_fit_run_v2(args: &[String]) {
                 }
             }
             Stage::PMMH { chains, particles, iterations, burn_in, thin, .. } => {
-                let mut legacy_pmmh = legacy.pmmh.clone().unwrap_or_default();
+                let mut legacy_pmmh = sweep_legacy.pmmh.clone().unwrap_or_default();
                 legacy_pmmh.chains = Some(*chains);
                 legacy_pmmh.particles = Some(*particles);
                 legacy_pmmh.steps = Some(*iterations);
                 if let Some(b) = burn_in { legacy_pmmh.burn_in = Some(*b); }
                 if let Some(t) = thin { legacy_pmmh.thin = Some(*t); }
-                let mut legacy_with_pmmh = legacy.clone();
+                let mut legacy_with_pmmh = sweep_legacy.clone();
                 legacy_with_pmmh.pmmh = Some(legacy_pmmh);
-                legacy_with_pmmh.fit.output_dir = fit_dir.to_string_lossy().to_string();
+                legacy_with_pmmh.fit.output_dir = sweep_fit_dir.to_string_lossy().to_string();
 
                 pmmh::run_pmmh_cli(
                     &legacy_with_pmmh,
@@ -481,7 +561,7 @@ pub fn cmd_fit_run_v2(args: &[String]) {
                     std::process::exit(1);
                 });
 
-                let pmmh_dir = fit_dir.join("pmmh");
+                let pmmh_dir = sweep_fit_dir.join("pmmh");
                 if stage_name != &"pmmh" && pmmh_dir.exists() {
                     std::fs::rename(&pmmh_dir, &stage_dir).unwrap_or_else(|e| {
                         eprintln!("warning: could not rename pmmh/ to {}: {}", stage_name, e);
@@ -496,7 +576,8 @@ pub fn cmd_fit_run_v2(args: &[String]) {
                 eprintln!("  (pfilter dispatch not yet implemented — use camdl pfilter directly)");
             }
         }
-    }
+    } // end stages
+    } // end sweep_points
 }
 
 fn parse_fit_args(args: &[String], _needs_starts_from: bool) -> (FitToml, u64, bool) {
