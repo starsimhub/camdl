@@ -1252,6 +1252,11 @@ waning    : R --> S  @ omega * R   # no extra noise
 
 ## 10. Coupling Sugar (Shorthand for Stratified Transmission)
 
+> **Status: not yet implemented.** The coupling sugar described in this section
+> is a design specification for a planned feature. The compiler does not
+> currently support `coupling[dim = M]` syntax. Use the fully explicit indexed
+> transition form instead (see §9).
+
 ### 10.1 Why Coupling Sugar Exists
 
 Writing the full indexed transmission formula is the primitive — it's always
@@ -2602,7 +2607,7 @@ transitions {
 }
 ```
 
-**Coupling sugar form** (identical IR output):
+**Coupling sugar form** (not yet implemented — identical IR output when available):
 
 ```
 time_unit = 'days
