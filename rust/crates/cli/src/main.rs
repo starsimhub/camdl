@@ -1813,6 +1813,69 @@ mod tests {
             "error should name the bad scenario: {}", err);
     }
 
+    /// Large-batch summary statistics from sample_from_prior_raw.
+    /// Regression guard for parameterization bugs (e.g., accidentally
+    /// using shape/scale instead of shape/rate for Gamma).
+    #[test]
+    fn sample_from_prior_raw_matches_expected_moments() {
+        use ir::parameter::{PriorDist, UniformPrior, NormalPrior, LogNormalPrior,
+            HalfNormalPrior, BetaPrior, GammaPrior, ExponentialPrior};
+        let n = 50_000usize;
+        let mut rng = sim::rng::StatefulRng::new(20260416);
+
+        // Helper: draw n samples, return (mean, variance).
+        let mut moments = |pd: &PriorDist| -> (f64, f64) {
+            let xs: Vec<f64> = (0..n).map(|_| sample_from_prior_raw(pd, &mut rng)).collect();
+            let mean = xs.iter().sum::<f64>() / (n as f64);
+            let var = xs.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / (n as f64);
+            (mean, var)
+        };
+
+        // Uniform(0, 4): E=2, Var=4/12*4^2=16/12 ≈ 1.333
+        let (m, v) = moments(&PriorDist::Uniform(UniformPrior { lower: 0.0, upper: 4.0 }));
+        assert!((m - 2.0).abs() < 0.05, "uniform mean {}", m);
+        assert!((v - 16.0/12.0).abs() < 0.05, "uniform var {}", v);
+
+        // Normal(3, 0.5): E=3, Var=0.25
+        let (m, v) = moments(&PriorDist::Normal(NormalPrior { mean: 3.0, sd: 0.5 }));
+        assert!((m - 3.0).abs() < 0.02, "normal mean {}", m);
+        assert!((v - 0.25).abs() < 0.02, "normal var {}", v);
+
+        // LogNormal(mu=0, sigma=0.5): E = exp(mu + sigma²/2) = exp(0.125) ≈ 1.1331
+        //                              Var = (exp(sigma²) - 1) * exp(2 mu + sigma²)
+        let (m, v) = moments(&PriorDist::LogNormal(LogNormalPrior { mu: 0.0, sigma: 0.5 }));
+        let expected_mean = (0.125_f64).exp();
+        let expected_var = ((0.25_f64).exp() - 1.0) * (0.25_f64).exp();
+        assert!((m - expected_mean).abs() < 0.05, "lognormal mean {} (exp {})", m, expected_mean);
+        assert!((v - expected_var).abs() < 0.1, "lognormal var {} (exp {})", v, expected_var);
+
+        // HalfNormal(sigma=1): E = sigma*sqrt(2/π) ≈ 0.7979
+        //                      Var = sigma² * (1 - 2/π) ≈ 0.3634
+        let (m, v) = moments(&PriorDist::HalfNormal(HalfNormalPrior { sigma: 1.0 }));
+        let exp_m = (2.0_f64 / std::f64::consts::PI).sqrt();
+        let exp_v = 1.0 - 2.0 / std::f64::consts::PI;
+        assert!((m - exp_m).abs() < 0.02, "half_normal mean {}", m);
+        assert!((v - exp_v).abs() < 0.02, "half_normal var {}", v);
+
+        // Beta(2, 5): E = α/(α+β) = 2/7 ≈ 0.2857
+        //              Var = αβ/((α+β)²(α+β+1)) ≈ 0.02551
+        let (m, v) = moments(&PriorDist::Beta(BetaPrior { alpha: 2.0, beta: 5.0 }));
+        assert!((m - 2.0/7.0).abs() < 0.01, "beta mean {}", m);
+        assert!((v - 2.0*5.0/(49.0*8.0)).abs() < 0.005, "beta var {}", v);
+
+        // Gamma(shape=3, rate=2): E = k/r = 1.5, Var = k/r² = 0.75.
+        // This specifically catches shape/scale vs shape/rate confusion:
+        // if we had used scale = 2 by mistake, the mean would be 6, not 1.5.
+        let (m, v) = moments(&PriorDist::Gamma(GammaPrior { shape: 3.0, rate: 2.0 }));
+        assert!((m - 1.5).abs() < 0.02, "gamma mean {} (should be 1.5, not 6.0!)", m);
+        assert!((v - 0.75).abs() < 0.03, "gamma var {}", v);
+
+        // Exponential(rate=0.5): E = 1/rate = 2, Var = 1/rate² = 4
+        let (m, v) = moments(&PriorDist::Exponential(ExponentialPrior { rate: 0.5 }));
+        assert!((m - 2.0).abs() < 0.05, "exponential mean {}", m);
+        assert!((v - 4.0).abs() < 0.2, "exponential var {}", v);
+    }
+
     #[test]
     fn prior_draws_different_seeds_produce_different_draws() {
         let ir = ir_with_prior("beta", "[0.01, 10.0]",
