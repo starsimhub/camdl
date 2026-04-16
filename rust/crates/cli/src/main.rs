@@ -156,8 +156,10 @@ fn main() {
                 Some("status")   => fit::cmd_fit_status(&all_args[2..]),
                 Some("pmmh")     => fit::cmd_fit_pmmh(&all_args[2..]),
                 Some("pgas")     => fit::cmd_fit_pgas(&all_args[2..]),
+                Some("diff")     => fit::cmd_fit_diff(&all_args[2..]),
+                Some("new")      => fit::cmd_fit_new(&all_args[2..]),
                 _ => {
-                    eprintln!("usage: camdl fit <run|scout|refine|validate|pmmh|pgas|status> FIT.toml");
+                    eprintln!("usage: camdl fit <run|status|diff|new|scout|refine|validate|pmmh|pgas> FIT.toml");
                     std::process::exit(1);
                 }
             }

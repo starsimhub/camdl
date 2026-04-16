@@ -744,6 +744,174 @@ pub fn cmd_fit_run_v2(args: &[String]) {
     } // end sweep_points
 }
 
+// ─── camdl fit diff ─────────────────────────────────────────────────────────
+
+pub fn cmd_fit_diff(args: &[String]) {
+    use config_v2::FitConfigV2;
+
+    if args.len() < 2 {
+        eprintln!("usage: camdl fit diff A.toml B.toml");
+        std::process::exit(1);
+    }
+    let a = FitConfigV2::load(&args[0]).unwrap_or_else(|e| {
+        eprintln!("error loading {}: {}", args[0], e);
+        std::process::exit(1);
+    });
+    let b = FitConfigV2::load(&args[1]).unwrap_or_else(|e| {
+        eprintln!("error loading {}: {}", args[1], e);
+        std::process::exit(1);
+    });
+
+    println!("diff: {} → {}", args[0], args[1]);
+    println!();
+
+    // Parameter changes
+    let a_est: std::collections::BTreeSet<&str> = a.estimate.keys().map(|s| s.as_str()).collect();
+    let b_est: std::collections::BTreeSet<&str> = b.estimate.keys().map(|s| s.as_str()).collect();
+    let a_fixed = a.fixed.resolve().unwrap_or_default();
+    let b_fixed = b.fixed.resolve().unwrap_or_default();
+    let a_fix_keys: std::collections::BTreeSet<&str> = a_fixed.keys().map(|s| s.as_str()).collect();
+    let b_fix_keys: std::collections::BTreeSet<&str> = b_fixed.keys().map(|s| s.as_str()).collect();
+
+    let mut param_changes = false;
+    // Moved from estimate → fixed
+    for name in a_est.difference(&b_est) {
+        if b_fix_keys.contains(name) {
+            println!("  {}: [estimate] → [fixed] = {}", name, b_fixed.get(*name).unwrap());
+            param_changes = true;
+        }
+    }
+    // Moved from fixed → estimate
+    for name in b_est.difference(&a_est) {
+        if a_fix_keys.contains(name) {
+            println!("  {}: [fixed] = {} → [estimate]", name, a_fixed.get(*name).unwrap());
+            param_changes = true;
+        }
+    }
+    // Fixed value changed
+    for name in a_fix_keys.intersection(&b_fix_keys) {
+        let va = a_fixed.get(*name).unwrap();
+        let vb = b_fixed.get(*name).unwrap();
+        if (va - vb).abs() > 1e-15 {
+            println!("  {}: [fixed] {} → {}", name, va, vb);
+            param_changes = true;
+        }
+    }
+    // Bounds changed
+    for name in a_est.intersection(&b_est) {
+        let ab = a.estimate[*name].bounds;
+        let bb = b.estimate[*name].bounds;
+        if (ab.0 - bb.0).abs() > 1e-15 || (ab.1 - bb.1).abs() > 1e-15 {
+            println!("  {}: bounds [{}, {}] → [{}, {}]", name, ab.0, ab.1, bb.0, bb.1);
+            param_changes = true;
+        }
+    }
+    if !param_changes {
+        println!("  (no parameter changes)");
+    }
+
+    // Stage changes
+    println!();
+    let a_stages: std::collections::BTreeSet<&str> = a.stages.keys().map(|s| s.as_str()).collect();
+    let b_stages: std::collections::BTreeSet<&str> = b.stages.keys().map(|s| s.as_str()).collect();
+    for name in b_stages.difference(&a_stages) {
+        let s = &b.stages[*name];
+        println!("  stage '{}': (new) {}", name, s.method_name());
+    }
+    for name in a_stages.difference(&b_stages) {
+        println!("  stage '{}': (removed)", name);
+    }
+    for name in a_stages.intersection(&b_stages) {
+        let sa = &a.stages[*name];
+        let sb = &b.stages[*name];
+        if sa.method_name() != sb.method_name() {
+            println!("  stage '{}': method {} → {}", name, sa.method_name(), sb.method_name());
+        }
+    }
+}
+
+// ─── camdl fit new ──────────────────────────────────────────────────────────
+
+pub fn cmd_fit_new(args: &[String]) {
+    let mut from_path: Option<String> = None;
+    let mut to_path: Option<String> = None;
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--from" => { i += 1; from_path = Some(args[i].clone()); }
+            s if !s.starts_with("--") => {
+                if from_path.is_none() {
+                    from_path = Some(s.to_string());
+                } else {
+                    to_path = Some(s.to_string());
+                }
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+
+    let from = from_path.unwrap_or_else(|| {
+        eprintln!("usage: camdl fit new --from SOURCE.toml DEST.toml");
+        std::process::exit(1);
+    });
+    let to = to_path.unwrap_or_else(|| {
+        eprintln!("usage: camdl fit new --from SOURCE.toml DEST.toml");
+        std::process::exit(1);
+    });
+
+    if std::path::Path::new(&to).exists() {
+        eprintln!("error: {} already exists. Choose a different name.", to);
+        std::process::exit(1);
+    }
+
+    // Read source, inject provenance
+    let mut content = std::fs::read_to_string(&from).unwrap_or_else(|e| {
+        eprintln!("error reading {}: {}", from, e);
+        std::process::exit(1);
+    });
+
+    // Check if [provenance] already exists
+    if !content.contains("[provenance]") {
+        // Add provenance block at the top, after the first blank line or at start
+        let prov_block = format!(
+            "[provenance]\nderived_from = \"{}\"\nreason = \"\"\n\n",
+            from
+        );
+        // Insert after any leading comments
+        if let Some(pos) = content.find("\n[") {
+            content.insert_str(pos + 1, &prov_block);
+        } else {
+            content = format!("{}{}", prov_block, content);
+        }
+    } else {
+        // Update existing provenance
+        // Simple approach: just warn
+        eprintln!("note: {} already has [provenance]. Update derived_from manually.", to);
+    }
+
+    // Find the first stage and update starts_from to point to source's results
+    let source_config = config_v2::FitConfigV2::load(&from).ok();
+    if let Some(ref cfg) = source_config {
+        let source_fit_dir = cfg.fit_dir(&from);
+        if let Some(last_stage) = cfg.stages.keys().last() {
+            let starts_path = source_fit_dir.join(last_stage);
+            if starts_path.exists() {
+                eprintln!("  [provenance] derived_from = \"{}\"", from);
+                eprintln!("  hint: set starts_from = \"{}\" on your first stage",
+                    starts_path.display());
+            }
+        }
+    }
+
+    std::fs::write(&to, &content).unwrap_or_else(|e| {
+        eprintln!("error writing {}: {}", to, e);
+        std::process::exit(1);
+    });
+
+    eprintln!("created {}", to);
+}
+
 fn parse_fit_args(args: &[String], _needs_starts_from: bool) -> (FitToml, u64, bool) {
     let mut fit_path: Option<String> = None;
     let mut seed = 1_u64;
