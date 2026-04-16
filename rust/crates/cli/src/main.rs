@@ -35,6 +35,7 @@ fn usage() -> ! {
     eprintln!("  --obs-dir  DIR           generate one TSV per observation stream in DIR");
     eprintln!("  --obs-only FILE|DIR      like --obs/--obs-dir but suppress trajectory output");
     eprintln!("  --replicates N           run N independent simulations (adds replicate column)");
+    eprintln!("  --draws    FILE.tsv      simulate at each row of a draws file (posterior/prior predictive)");
     std::process::exit(1);
 }
 
@@ -192,6 +193,7 @@ fn run_simulate(args: &[String]) {
     let mut obs_dir: Option<String> = None;
     let mut obs_only: Option<String> = None;
     let mut replicates: usize = 1;
+    let mut draws_path: Option<String> = None;
 
     // Collect --param-vec PREFIX=FILE entries for deferred validation after model load
     let mut set_vec_entries: Vec<(String, String)> = Vec::new();
@@ -236,6 +238,7 @@ fn run_simulate(args: &[String]) {
             "--obs-dir"  => { i += 1; obs_dir = Some(args[i].clone()); }
             "--obs-only" => { i += 1; obs_only = Some(args[i].clone()); }
             "--replicates" => { i += 1; replicates = args[i].parse().unwrap_or_else(|_| { eprintln!("error: --replicates needs a positive integer"); std::process::exit(1); }); }
+            "--draws" => { i += 1; draws_path = Some(args[i].clone()); }
             s if s.starts_with("--") => { eprintln!("unknown flag: {}", s); usage(); }
             path => { ir_path = Some(path.to_string()); }
         }
@@ -343,42 +346,65 @@ fn run_simulate(args: &[String]) {
     };
     let mut traj_header_written = false;
 
+    // ── Load draws if --draws is specified ─────────────────────────────────
+    let draws: Vec<HashMap<String, f64>> = if let Some(ref path) = draws_path {
+        load_draws_tsv(path).unwrap_or_else(|e| {
+            eprintln!("error loading draws: {}", e);
+            std::process::exit(1);
+        })
+    } else {
+        // No draws — single point (parameters come from --params / --param)
+        vec![HashMap::new()]
+    };
+    let n_draws = draws.len();
+    let total_runs = n_draws * replicates;
+    if n_draws > 1 {
+        eprintln!("draws: {} parameter vectors × {} replicates = {} runs",
+            n_draws, replicates, total_runs);
+    }
+
     // ── Observation accumulators ────────────────────────────────────────────
-    // obs_rows[stream_idx] = Vec<(obs_time, Vec<(replicate, value)>)>
-    // Built up across replicates, written at the end.
     struct ObsRow { time: f64, replicate: usize, value: f64 }
     let mut obs_data: Vec<Vec<ObsRow>> = Vec::new(); // per-stream
     let mut obs_stream_names: Vec<String> = Vec::new();
     let mut obs_times_cache: Vec<Vec<f64>> = Vec::new();
 
-    // ── Replicate loop ────────────────────────────────────────��─────────────
-    for rep in 0..replicates {
-        let process_seed = if replicates == 1 {
-            seed
-        } else {
-            seed ^ ((rep as u64).wrapping_mul(0x517cc1b727220a95))
-        };
-        let obs_seed = process_seed ^ 0xa5a5a5a5a5a5;
+    // ── Main loop: draws × replicates ──────────────────────────────────────
+    let mut run_idx = 0usize;
+    for (draw_idx, draw_overrides) in draws.iter().enumerate() {
+        for rep in 0..replicates {
+            let process_seed = if total_runs == 1 {
+                seed
+            } else {
+                // Unique seed per (draw, replicate) pair
+                seed ^ ((draw_idx as u64).wrapping_mul(0x9e3779b97f4a7c15))
+                     ^ ((rep as u64).wrapping_mul(0x517cc1b727220a95))
+            };
+            let obs_seed = process_seed ^ 0xa5a5a5a5a5a5;
 
-        let mut sim_run = util::SimRun { seed: process_seed, ..Default::default() };
-        sim_run.ir_path = base_sim_run.ir_path.clone();
-        sim_run.params_files = base_sim_run.params_files.clone();
-        sim_run.overrides = base_sim_run.overrides.clone();
-        sim_run.set_vec_entries = base_sim_run.set_vec_entries.clone();
-        sim_run.table_files = base_sim_run.table_files.clone();
-        sim_run.scenario_name = base_sim_run.scenario_name.clone();
-        sim_run.adhoc_enable = base_sim_run.adhoc_enable.clone();
-        sim_run.adhoc_disable = base_sim_run.adhoc_disable.clone();
-        sim_run.backend = base_sim_run.backend.clone();
-        sim_run.dt = base_sim_run.dt;
+            // Merge draw overrides with CLI --param overrides
+            let mut combined_overrides = base_sim_run.overrides.clone();
+            combined_overrides.extend(draw_overrides.iter().map(|(k, v)| (k.clone(), *v)));
+
+            let mut sim_run = util::SimRun { seed: process_seed, ..Default::default() };
+            sim_run.ir_path = base_sim_run.ir_path.clone();
+            sim_run.params_files = base_sim_run.params_files.clone();
+            sim_run.overrides = combined_overrides;
+            sim_run.set_vec_entries = base_sim_run.set_vec_entries.clone();
+            sim_run.table_files = base_sim_run.table_files.clone();
+            sim_run.scenario_name = base_sim_run.scenario_name.clone();
+            sim_run.adhoc_enable = base_sim_run.adhoc_enable.clone();
+            sim_run.adhoc_disable = base_sim_run.adhoc_disable.clone();
+            sim_run.backend = base_sim_run.backend.clone();
+            sim_run.dt = base_sim_run.dt;
 
         let (traj, model) = util::run_simulation(&sim_run).unwrap_or_else(|e| {
             eprintln!("error: {}", e);
             std::process::exit(1);
         });
 
-        // Write diagnostics (first replicate only)
-        if rep == 0 && !traj.transition_diagnostics.is_empty() {
+        // Write diagnostics (first run only)
+        if run_idx == 0 && !traj.transition_diagnostics.is_empty() {
             match write_diagnostics_tsv("diagnostics.tsv", &traj.transition_diagnostics) {
                 Ok(zero_count) => {
                     if zero_count > 0 { warn_zero_firings(&traj.transition_diagnostics); }
@@ -399,7 +425,7 @@ fn run_simulate(args: &[String]) {
 
             if !traj_header_written {
                 writeln!(out, "# {}", version::VERSION).unwrap();
-                if replicates > 1 { write!(out, "replicate\t").unwrap(); }
+                if total_runs > 1 { write!(out, "replicate\t").unwrap(); }
                 write!(out, "t").unwrap();
                 for n in &int_names  { write!(out, "\t{}", n).unwrap(); }
                 for n in &real_names { write!(out, "\t{}", n).unwrap(); }
@@ -409,7 +435,7 @@ fn run_simulate(args: &[String]) {
             }
 
             for snap in &traj.snapshots {
-                if replicates > 1 { write!(out, "{}\t", rep + 1).unwrap(); }
+                if total_runs > 1 { write!(out, "{}\t", run_idx + 1).unwrap(); }
                 write!(out, "{}", snap.t).unwrap();
                 for &c in &snap.int_state.counts  { write!(out, "\t{}", c).unwrap(); }
                 for &v in &snap.real_state.values { write!(out, "\t{:.4}", v).unwrap(); }
@@ -429,8 +455,8 @@ fn run_simulate(args: &[String]) {
             let params = compiled.default_params.clone();
             let mut obs_rng = sim::rng::StatefulRng::new(obs_seed);
 
-            // Initialize stream names and obs data on first replicate
-            if rep == 0 {
+            // Initialize stream names and obs data on first run
+            if run_idx == 0 {
                 for obs_model in &model.observations {
                     obs_stream_names.push(obs_model.name.clone());
                     obs_data.push(Vec::new());
@@ -456,13 +482,16 @@ fn run_simulate(args: &[String]) {
                     let draw = sampler(projected_values[ti], &mut obs_rng);
                     obs_data[si].push(ObsRow {
                         time: obs_t,
-                        replicate: rep + 1,
+                        replicate: run_idx + 1,
                         value: draw,
                     });
                 }
             }
         }
-    }
+
+            run_idx += 1;
+        } // end replicates
+    } // end draws
 
     // Flush trajectory output
     drop(traj_out);
@@ -472,7 +501,7 @@ fn run_simulate(args: &[String]) {
 
     // ── Write observation output ────────────���───────────────────────────────
     if want_obs && !obs_data.is_empty() {
-        let multi_rep = replicates > 1;
+        let multi_rep = total_runs > 1;
 
         // --obs: single wide-format file
         if let Some(ref path) = obs_path {
@@ -489,10 +518,10 @@ fn run_simulate(args: &[String]) {
             // All streams share the same schedule (validated above).
             // Rows: iterate over (replicate, time), collect values across streams.
             let n_times = obs_times_cache[0].len();
-            for rep in 0..replicates {
+            for run in 0..total_runs {
                 for ti in 0..n_times {
-                    let row_idx = rep * n_times + ti;
-                    if multi_rep { write!(out, "{}\t", rep + 1).unwrap(); }
+                    let row_idx = run * n_times + ti;
+                    if multi_rep { write!(out, "{}\t", run + 1).unwrap(); }
                     write!(out, "{}", obs_data[0][row_idx].time).unwrap();
                     for si in 0..obs_stream_names.len() {
                         let val = obs_data[si][row_idx].value;
@@ -686,4 +715,46 @@ fn read_comp(snap: &sim::Snapshot, loc: &CompLoc) -> f64 {
         CompLoc::Int(i) => snap.int_state.counts[*i] as f64,
         CompLoc::Real(i) => snap.real_state.values[*i],
     }
+}
+
+/// Load a draws TSV file. Each row is a complete parameter vector.
+/// Column names must match model parameter names.
+/// Returns Vec<HashMap<param_name, value>>.
+fn load_draws_tsv(path: &str) -> Result<Vec<HashMap<String, f64>>, String> {
+    let content = std::fs::read_to_string(path)
+        .map_err(|e| format!("cannot read {}: {}", path, e))?;
+    let mut lines = content.lines();
+    let header = lines.next()
+        .ok_or_else(|| format!("empty draws file: {}", path))?;
+    let col_names: Vec<&str> = header.split('\t').collect();
+    if col_names.len() < 2 {
+        return Err(format!("draws file needs at least 2 columns, got {}", col_names.len()));
+    }
+
+    let mut draws = Vec::new();
+    for (line_num, line) in lines.enumerate() {
+        if line.trim().is_empty() { continue; }
+        let fields: Vec<&str> = line.split('\t').collect();
+        if fields.len() != col_names.len() {
+            return Err(format!(
+                "draws file line {}: expected {} columns, got {}",
+                line_num + 2, col_names.len(), fields.len()
+            ));
+        }
+        let mut row = HashMap::new();
+        for (col, field) in col_names.iter().zip(fields.iter()) {
+            let val: f64 = field.trim().parse()
+                .map_err(|_| format!(
+                    "draws file line {}, column '{}': cannot parse '{}' as number",
+                    line_num + 2, col, field
+                ))?;
+            row.insert(col.to_string(), val);
+        }
+        draws.push(row);
+    }
+
+    if draws.is_empty() {
+        return Err(format!("draws file has header but no data rows: {}", path));
+    }
+    Ok(draws)
 }
