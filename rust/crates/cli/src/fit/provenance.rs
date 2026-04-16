@@ -223,9 +223,8 @@ pub enum ContentVerification {
 
 /// Compute the config hash for a fit stage. Covers all inputs that affect
 /// the stage's output: model IR, data files, estimate specs, fixed values,
-/// stage algorithm settings, and camdl version. Change any of these → different hash.
-/// Compute the config hash for a fit stage. Covers all inputs that affect
-/// the stage's output. Returns an error if any data file is missing.
+/// stage algorithm settings, and camdl version. Returns an error if any
+/// data file is missing.
 ///
 /// Hash is full 64-char hex (256 bits). Truncated to 16 chars for display.
 pub fn compute_config_hash_v2(

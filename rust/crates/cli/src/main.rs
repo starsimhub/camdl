@@ -83,6 +83,9 @@ fn simulate_help() -> ! {
     eprintln!("  {}", d("# Posterior predictive check"));
     eprintln!("  camdl simulate sir.camdl --draws posterior.tsv --replicates 10 --obs ppc.tsv");
     eprintln!();
+    eprintln!("  {}", d("# Prior predictive check (requires priors in fit.toml)"));
+    eprintln!("  camdl simulate sir.camdl --draws prior --fit fits/02.toml -n 500 --obs prior_pred.tsv");
+    eprintln!();
     eprintln!("  {}", d("# Space-filling exploration from parameter bounds"));
     eprintln!("  camdl simulate sir.camdl --draws uniform -n 500 --obs explore.tsv");
     eprintln!();
@@ -104,8 +107,9 @@ fn simulate_help() -> ! {
     eprintln!("  --scenario NAME[,NAME]    Named scenarios (comma-separated)");
     eprintln!("  --enable NAME             Enable intervention (mutually exclusive with --scenario)");
     eprintln!("  --disable NAME            Disable intervention");
-    eprintln!("  --draws SOURCE            Parameter draws: path.tsv or uniform");
-    eprintln!("  -n N                      Number of draws (for --draws uniform)");
+    eprintln!("  --draws SOURCE            Parameter draws: path.tsv, uniform, or prior");
+    eprintln!("  --fit FILE                fit.toml for --draws prior (prior source)");
+    eprintln!("  -n N                      Number of draws (for --draws uniform/prior)");
     eprintln!("  --replicates N            Stochastic replicates per parameter point");
     eprintln!("  --obs FILE                Write synthetic observations (wide-format TSV)");
     eprintln!("  --obs-dir DIR             Write one TSV per observation stream");
@@ -359,6 +363,7 @@ const SEED_MIX_DRAW: u64 = 0x9e3779b97f4a7c15; // golden ratio fractional bits
 const SEED_MIX_REP: u64  = 0x517cc1b727220a95; // more golden ratio mixing
 const SEED_MIX_OBS: u64  = 0xa5a5a5a5a5a5;     // obs RNG independence from process
 const SEED_MIX_UNIFORM: u64 = 0xd4a5_b1ce;      // uniform draws RNG
+const SEED_MIX_PRIOR: u64  = 0x0014_b1ce;      // prior draws RNG
 
 fn run_simulate(args: &[String]) {
     let mut ir_path:     Option<String> = None;
@@ -1038,7 +1043,7 @@ fn generate_prior_draws(
         ));
     }
 
-    let mut rng = sim::rng::StatefulRng::new(seed ^ 0x0014_b1ce);
+    let mut rng = sim::rng::StatefulRng::new(seed ^ SEED_MIX_PRIOR);
     let mut draws = Vec::with_capacity(n);
 
     for _ in 0..n {

@@ -267,7 +267,7 @@ pub fn cmd_fit_run_v2(args: &[String]) {
 
     let mut fit_path: Option<String> = None;
     let mut seed = 1_u64;
-    let mut _force = false;
+    let mut force = false;
     let mut stage_filter: Option<String> = None;
     let mut starts_from_override: Option<String> = None;
     let mut has_seed_flag = false;
@@ -277,7 +277,7 @@ pub fn cmd_fit_run_v2(args: &[String]) {
     while i < args.len() {
         match args[i].as_str() {
             "--seed" => { i += 1; seed = args[i].parse().expect("--seed needs integer"); has_seed_flag = true; }
-            "--force" => { _force = true; }
+            "--force" => { force = true; }
             "--stage" => { i += 1; stage_filter = Some(args[i].clone()); }
             "--starts-from" => { i += 1; starts_from_override = Some(args[i].clone()); }
             "--sweep" => { i += 1; sweep_args.push(args[i].clone()); }
@@ -456,7 +456,7 @@ pub fn cmd_fit_run_v2(args: &[String]) {
             eprintln!("error: {}", e);
             std::process::exit(1);
         });
-        if !_force {
+        if !force {
             match provenance::check_config_hash(&stage_dir.to_string_lossy(), &config_hash) {
                 provenance::ConfigCacheStatus::Match => {
                     eprintln!("  \x1b[33mskipped — results already exist for these inputs.\x1b[0m");
@@ -627,7 +627,7 @@ pub fn cmd_fit_run_v2(args: &[String]) {
                 pgas::run_pgas_cli(
                     &legacy_with_pgas,
                     effective_starts.as_deref(),
-                    seed, _force, true, true, false,
+                    seed, force, true, true, false,
                 ).unwrap_or_else(|e| {
                     eprintln!("error running pgas stage '{}': {}", stage_name, e);
                     std::process::exit(1);
@@ -647,6 +647,11 @@ pub fn cmd_fit_run_v2(args: &[String]) {
                         std::process::exit(1);
                     });
                 }
+                // Bubble loglik from fit_state.toml written by PGAS runner
+                if let Ok(fs) = state::FitState::load(&stage_dir.to_string_lossy()) {
+                    stage_best_loglik = Some(fs.best_loglik);
+                    stage_best_chain = Some(fs.best_chain);
+                }
             }
             Stage::PMMH { chains, particles, iterations, burn_in, thin, .. } => {
                 let mut legacy_pmmh = sweep_legacy.pmmh.clone().unwrap_or_default();
@@ -662,7 +667,7 @@ pub fn cmd_fit_run_v2(args: &[String]) {
                 pmmh::run_pmmh_cli(
                     &legacy_with_pmmh,
                     effective_starts.as_deref(),
-                    seed, _force, false, false,
+                    seed, force, false, false,
                 ).unwrap_or_else(|e| {
                     eprintln!("error running pmmh stage '{}': {}", stage_name, e);
                     std::process::exit(1);
@@ -677,6 +682,10 @@ pub fn cmd_fit_run_v2(args: &[String]) {
                         eprintln!("error: could not rename pmmh/ to {}: {}", stage_name, e);
                         std::process::exit(1);
                     });
+                }
+                if let Ok(fs) = state::FitState::load(&stage_dir.to_string_lossy()) {
+                    stage_best_loglik = Some(fs.best_loglik);
+                    stage_best_chain = Some(fs.best_chain);
                 }
             }
             Stage::PFilter { particles, replicates, .. } => {
@@ -745,6 +754,7 @@ pub fn cmd_fit_run_v2(args: &[String]) {
                         writeln!(f, "{}\t{:.4}", i + 1, ll).unwrap();
                     }
                 }
+                stage_best_loglik = Some(mean_ll);
             }
         }
 
@@ -776,7 +786,11 @@ pub fn cmd_fit_run_v2(args: &[String]) {
             model_hash: crate::hashing::model_hash(&model_json),
             data_hashes: sweep_config.data.observations.iter()
                 .map(|(name, path)| {
-                    let hash = provenance::file_content_hash(path).unwrap_or_default();
+                    let hash = provenance::file_content_hash(path)
+                        .unwrap_or_else(|| {
+                            eprintln!("warning: cannot hash data file '{}' for provenance", path);
+                            "<unreadable>".to_string()
+                        });
                     (name.clone(), hash)
                 }).collect(),
             estimated: sweep_config.estimate.keys().cloned().collect(),
@@ -799,6 +813,17 @@ pub fn cmd_fit_run_v2(args: &[String]) {
 }
 
 // ─── camdl fit diff ─────────────────────────────────────────────────────────
+
+fn format_prior(p: &Option<config_v2::PriorSpec>) -> String {
+    match p {
+        None => "(none)".to_string(),
+        Some(config_v2::PriorSpec::LogNormal { mu, sigma }) => format!("log_normal(mu={}, sigma={})", mu, sigma),
+        Some(config_v2::PriorSpec::Normal { mu, sigma }) => format!("normal(mu={}, sigma={})", mu, sigma),
+        Some(config_v2::PriorSpec::Beta { alpha, beta }) => format!("beta(alpha={}, beta={})", alpha, beta),
+        Some(config_v2::PriorSpec::Uniform) => "uniform".to_string(),
+        Some(config_v2::PriorSpec::HalfNormal { sigma }) => format!("half_normal(sigma={})", sigma),
+    }
+}
 
 pub fn cmd_fit_diff(args: &[String]) {
     use config_v2::FitConfigV2;
@@ -860,21 +885,19 @@ pub fn cmd_fit_diff(args: &[String]) {
             param_changes = true;
         }
     }
-    if !param_changes {
-        println!("  (no parameter changes)");
-    }
-
     // Prior changes
-    let mut _prior_changes = false;
     for name in a_est.intersection(&b_est) {
         let ap = &a.estimate[*name].prior;
         let bp = &b.estimate[*name].prior;
-        let ap_str = format!("{:?}", ap);
-        let bp_str = format!("{:?}", bp);
+        let ap_str = format_prior(ap);
+        let bp_str = format_prior(bp);
         if ap_str != bp_str {
-            println!("  {}: prior {:?} → {:?}", name, ap, bp);
-            _prior_changes = true;
+            println!("  {}: prior {} → {}", name, ap_str, bp_str);
+            param_changes = true;
         }
+    }
+    if !param_changes {
+        println!("  (no parameter changes)");
     }
 
     // Stage changes
