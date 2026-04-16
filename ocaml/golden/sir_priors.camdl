@@ -1,0 +1,43 @@
+# SIR model with explicit priors declared in the DSL.
+# Exercises `~ prior(...)` syntax for all supported distributions.
+time_unit = 'days
+
+compartments { S, I, R }
+
+let N = S + I + R
+
+parameters {
+  beta  : rate        in [0.01, 2.0]   ~ log_normal(mu = -1.0, sigma = 0.5)
+  gamma : rate        in [0.05, 1.0]   ~ half_normal(sigma = 0.3)
+  rho   : probability in [0.001, 1.0]  ~ beta(alpha = 2.0, beta = 5.0)
+  N0    : count       in [100, 1000000] ~ log_normal(mu = 7.0, sigma = 0.2)
+  I0    : count       in [1, 1000]      ~ exponential(rate = 0.01)
+}
+
+transitions {
+  infection : S --> I  @ beta * S * (I / N)
+  recovery  : I --> R  @ gamma * I
+}
+
+init {
+  S = N0 - I0
+  I = I0
+}
+
+simulate {
+  from = 0 'days
+  to   = 80 'days
+}
+
+scenarios {
+  baseline {
+    label = "priors default (R0 ≈ 3)"
+    set = {
+      beta  = 0.3
+      gamma = 0.1
+      rho   = 0.4
+      N0    = 1000
+      I0    = 10
+    }
+  }
+}

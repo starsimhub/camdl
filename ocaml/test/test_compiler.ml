@@ -1179,6 +1179,148 @@ let test_date_requires_origin () =
   let found_e220 = List.exists (fun d -> d.Diagnostics.code = "E220") errors in
   Alcotest.(check bool) "E220 emitted when origin missing" true found_e220
 
+(* ── Prior distribution syntax ──────────────────────────────────────────
+   Test that ~ prior(...) syntax parses and produces correct IR priors. *)
+
+let compile_expect_ok src =
+  match Compiler.compile ~name:"test_prior" src with
+  | Ok m -> m
+  | Error e -> Alcotest.failf "compile failed: %s" e
+
+let find_param (m : Ir.model) name =
+  List.find (fun (p : Ir.parameter) -> p.name = name) m.parameters
+
+let test_prior_log_normal () =
+  let src = {|
+    time_unit = 'days
+    parameters {
+      beta : rate in [0.01, 2.0] ~ log_normal(mu = -1.0, sigma = 0.5)
+      N0   : count in [100, 1000000]
+    }
+    compartments { S, I, R }
+    let N = S + I + R
+    transitions {
+      infection : S --> I @ beta * S * I / N
+    }
+    init { S = N0 - 10  I = 10  R = 0 }
+    simulate { from = 0 'days  to = 100 'days }
+  |} in
+  let m = compile_expect_ok src in
+  let beta = find_param m "beta" in
+  match beta.prior with
+  | Some (Ir.LogNormal { mu; sigma }) ->
+    Alcotest.(check (float 1e-10)) "mu" (-1.0) mu;
+    Alcotest.(check (float 1e-10)) "sigma" 0.5 sigma
+  | _ -> Alcotest.fail "expected LogNormal prior"
+
+let test_prior_beta () =
+  let src = {|
+    time_unit = 'days
+    parameters {
+      rho  : probability in [0.01, 1.0] ~ beta(alpha = 2.0, beta = 5.0)
+      N0   : count in [100, 1000000]
+    }
+    compartments { S }
+    init { S = N0 }
+    simulate { from = 0 'days  to = 1 'days }
+  |} in
+  let m = compile_expect_ok src in
+  let rho = find_param m "rho" in
+  match rho.prior with
+  | Some (Ir.Beta { alpha; beta }) ->
+    Alcotest.(check (float 1e-10)) "alpha" 2.0 alpha;
+    Alcotest.(check (float 1e-10)) "beta" 5.0 beta
+  | _ -> Alcotest.fail "expected Beta prior"
+
+let test_prior_gamma_with_rate_kwarg () =
+  (* 'rate' is a DSL keyword — make sure it works as a prior kwarg name *)
+  let src = {|
+    time_unit = 'days
+    parameters {
+      x : positive in [0.01, 100.0] ~ gamma(shape = 2.0, rate = 0.1)
+    }
+    compartments { S }
+    init { S = 1 }
+    simulate { from = 0 'days  to = 1 'days }
+  |} in
+  let m = compile_expect_ok src in
+  let x = find_param m "x" in
+  match x.prior with
+  | Some (Ir.Gamma { shape; rate }) ->
+    Alcotest.(check (float 1e-10)) "shape" 2.0 shape;
+    Alcotest.(check (float 1e-10)) "rate" 0.1 rate
+  | _ -> Alcotest.fail "expected Gamma prior"
+
+let test_prior_half_normal () =
+  let src = {|
+    time_unit = 'days
+    parameters {
+      sigma_noise : positive in [0.001, 10.0] ~ half_normal(sigma = 0.5)
+    }
+    compartments { S }
+    init { S = 1 }
+    simulate { from = 0 'days  to = 1 'days }
+  |} in
+  let m = compile_expect_ok src in
+  let p = find_param m "sigma_noise" in
+  match p.prior with
+  | Some (Ir.HalfNormal { sigma }) ->
+    Alcotest.(check (float 1e-10)) "sigma" 0.5 sigma
+  | _ -> Alcotest.fail "expected HalfNormal prior"
+
+let test_no_prior_is_none () =
+  let src = {|
+    time_unit = 'days
+    parameters {
+      N0 : count in [100, 1000000]
+    }
+    compartments { S }
+    init { S = N0 }
+    simulate { from = 0 'days  to = 1 'days }
+  |} in
+  let m = compile_expect_ok src in
+  let n0 = find_param m "N0" in
+  Alcotest.(check bool) "no prior means None" true (n0.prior = None)
+
+let test_indexed_param_shares_prior () =
+  (* Indexed parameters: the prior applies to all expanded instances *)
+  let src = {|
+    time_unit = 'days
+    dimensions {
+      patch = [north, south, east]
+    }
+    parameters {
+      R0[patch] : positive in [1.0, 10.0] ~ log_normal(mu = 1.0, sigma = 0.3)
+      N0        : count in [100, 1000000]
+    }
+    compartments { S }
+    init { S = N0 }
+    simulate { from = 0 'days  to = 1 'days }
+  |} in
+  let m = compile_expect_ok src in
+  let expected = Ir.LogNormal { mu = 1.0; sigma = 0.3 } in
+  List.iter (fun name ->
+    let p = find_param m name in
+    match p.prior with
+    | Some pd when pd = expected -> ()
+    | _ -> Alcotest.failf "%s should have LogNormal prior" name
+  ) ["R0_north"; "R0_south"; "R0_east"]
+
+let test_unknown_prior_errors () =
+  let src = {|
+    time_unit = 'days
+    parameters {
+      x : rate in [0.01, 1.0] ~ weibull(shape = 2.0, scale = 1.0)
+    }
+    compartments { S }
+    init { S = 1 }
+    simulate { from = 0 'days  to = 1 'days }
+  |} in
+  match Compiler.compile ~name:"bad_prior" src with
+  | Ok _ -> Alcotest.fail "should have failed with unknown distribution"
+  | Error e -> Alcotest.(check bool) "error mentions unknown prior"
+                 true (String.length e > 0)
+
 let () =
   Alcotest.run "compiler" [
     "golden", [
@@ -1258,5 +1400,14 @@ let () =
     "origin_date", [
       Alcotest.test_case "date() converts to float days since origin" `Quick test_date_to_const;
       Alcotest.test_case "date() without origin → E220"               `Quick test_date_requires_origin;
+    ];
+    "priors", [
+      Alcotest.test_case "~ log_normal(mu, sigma) parses"                `Quick test_prior_log_normal;
+      Alcotest.test_case "~ beta(alpha, beta) parses"                    `Quick test_prior_beta;
+      Alcotest.test_case "~ gamma(shape, rate) — 'rate' kw allowed"       `Quick test_prior_gamma_with_rate_kwarg;
+      Alcotest.test_case "~ half_normal(sigma) parses"                   `Quick test_prior_half_normal;
+      Alcotest.test_case "no prior clause → prior = None"                `Quick test_no_prior_is_none;
+      Alcotest.test_case "indexed param shares prior across expansion"   `Quick test_indexed_param_shares_prior;
+      Alcotest.test_case "unknown distribution name errors"              `Quick test_unknown_prior_errors;
     ];
   ]
