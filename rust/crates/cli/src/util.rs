@@ -517,8 +517,28 @@ pub fn run_simulation(run: &SimRun) -> Result<(Trajectory, ir::Model), String> {
     }
 
     // Apply scalar overrides (highest priority)
+    // Check for unknown params first
+    let model_param_names: std::collections::HashSet<&str> = model.parameters.iter()
+        .map(|p| p.name.as_str()).collect();
+    for name in run.overrides.keys() {
+        if !model_param_names.contains(name.as_str()) {
+            return Err(format!(
+                "unknown parameter '{}' in --param override.\n  \
+                 Available parameters: {}",
+                name,
+                model.parameters.iter().map(|p| p.name.as_str()).collect::<Vec<_>>().join(", ")
+            ));
+        }
+    }
     for p in &mut model.parameters {
-        if let Some(&v) = run.overrides.get(&p.name) { p.value = Some(v); }
+        if let Some(&v) = run.overrides.get(&p.name) {
+            if let Some(old) = p.value {
+                if (old - v).abs() > 1e-15 {
+                    log::info!("--param {}={} overrides previous value {}", p.name, v, old);
+                }
+            }
+            p.value = Some(v);
+        }
     }
 
     // Fill external tables
