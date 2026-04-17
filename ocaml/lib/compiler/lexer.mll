@@ -98,6 +98,7 @@
       "then",          THEN;
       "else",          ELSE;
       "every",         EVERY;
+      "until",         UNTIL;
       "at",            AT_KW;
       "format",        FORMAT;
       "description",   DESCRIPTION;

@@ -5,6 +5,36 @@
    can't infer (table lookups, time functions with ambiguous dimension). *)
 let () = Compiler.no_dim_check := true
 
+(** Substring check without the Str library. *)
+let contains_substring ~needle s =
+  let nl = String.length needle and sl = String.length s in
+  if nl = 0 then true
+  else if nl > sl then false
+  else
+    let rec loop i =
+      if i > sl - nl then false
+      else if String.sub s i nl = needle then true
+      else loop (i + 1)
+    in loop 0
+
+(** Compile with JSON-diagnostics mode so the Error variant carries the
+    structured error payload (codes + messages) rather than the generic
+    "compilation failed" string. Then assert the given error code and a
+    substring (typically a parameter/intervention name, to confirm
+    diagnostics carry enough context) both appear in the payload. *)
+let compile_expect_error_code ~code ~contains src =
+  Diagnostics.json_errors_mode := true;
+  let result = Compiler.compile ~name:"test_err" src in
+  Diagnostics.json_errors_mode := false;
+  match result with
+  | Ok _ -> Alcotest.failf "expected error %s but compile succeeded" code
+  | Error e ->
+    if String.length e = 0 then Alcotest.failf "error text was empty";
+    if not (contains_substring ~needle:code e) then
+      Alcotest.failf "expected error code %s, got: %s" code e;
+    if not (contains_substring ~needle:contains e) then
+      Alcotest.failf "expected error to contain %S, got: %s" contains e
+
 let golden_dir =
   (* The dune test runner sets cwd to the project root (_build/default/test).
      We walk up to find the ocaml/golden directory. *)
@@ -319,6 +349,215 @@ let test_intervention_expansion () =
        Alcotest.(check string) "src=S" "S" ft.Ir.src;
        Alcotest.(check string) "dst=V" "V" ft.Ir.dst
      | _ -> Alcotest.fail "expected FractionTransfer action")
+
+(* ── Recurring intervention block syntax ─────────────────────────────────
+   transfer(...) { every = T, from = T0, until = T1 } — exists alongside
+   the existing at [t1, t2, ...] form. *)
+
+let test_recurring_block_transfer () =
+  let src = {|
+    time_unit = 'days
+    compartments { S, V }
+    parameters { vacc_rate : probability in [0.0, 1.0] }
+    transitions {}
+    init { S = 1000  V = 0 }
+    simulate { from = 0 'days  to = 365 'days }
+    interventions {
+      routine : transfer(fraction = vacc_rate, from = S, to = V) {
+        every = 30 'days
+        from  = 0 'days
+        until = 365 'days
+      }
+    }
+  |} in
+  match Compiler.compile ~name:"test_recurring" src with
+  | Error e -> Alcotest.failf "compile failed: %s" e
+  | Ok m ->
+    let iv = List.hd m.Ir.interventions in
+    (match iv.Ir.schedule with
+     | Ir.Recurring { start; period; end_; at_day = None } ->
+       Alcotest.(check (float 1e-9)) "start" 0.0 start;
+       Alcotest.(check (float 1e-9)) "period = 30 days" 30.0 period;
+       Alcotest.(check (float 1e-9)) "end" 365.0 end_
+     | _ -> Alcotest.fail "expected Recurring schedule")
+
+let test_recurring_kwargs_any_order () =
+  (* until / from / every in arbitrary order — all should work. *)
+  let src = {|
+    time_unit = 'days
+    compartments { S, V }
+    transitions {}
+    init { S = 1 }
+    simulate { from = 0 'days  to = 100 'days }
+    interventions {
+      r : transfer(fraction = 0.1, from = S, to = V) {
+        until = 100 'days
+        every = 7 'days
+        from  = 14 'days
+      }
+    }
+  |} in
+  match Compiler.compile ~name:"test_order" src with
+  | Error e -> Alcotest.failf "compile failed: %s" e
+  | Ok m ->
+    let iv = List.hd m.Ir.interventions in
+    (match iv.Ir.schedule with
+     | Ir.Recurring { start; period; end_; _ } ->
+       Alcotest.(check (float 1e-9)) "start" 14.0 start;
+       Alcotest.(check (float 1e-9)) "period" 7.0 period;
+       Alcotest.(check (float 1e-9)) "end" 100.0 end_
+     | _ -> Alcotest.fail "expected Recurring")
+
+let test_recurring_unit_conversion () =
+  (* Per-year interval with time_unit = weeks. *)
+  let src = {|
+    time_unit = 'weeks
+    compartments { S, V }
+    transitions {}
+    init { S = 1 }
+    simulate { from = 0 'weeks  to = 1 'years }
+    interventions {
+      r : transfer(fraction = 0.1, from = S, to = V) {
+        every = 30 'days
+        from  = 0 'days
+        until = 1 'years
+      }
+    }
+  |} in
+  match Compiler.compile ~name:"test_units" src with
+  | Error e -> Alcotest.failf "compile failed: %s" e
+  | Ok m ->
+    let iv = List.hd m.Ir.interventions in
+    (match iv.Ir.schedule with
+     | Ir.Recurring { period; end_; _ } ->
+       (* 30 days / 7 days/week = 30/7 weeks *)
+       Alcotest.(check (float 1e-9)) "period in weeks" (30.0 /. 7.0) period;
+       (* 1 year = 365.2425 days = 365.2425/7 weeks *)
+       Alcotest.(check (float 1e-6)) "end in weeks" (365.2425 /. 7.0) end_
+     | _ -> Alcotest.fail "expected Recurring")
+
+let test_recurring_add_action () =
+  (* Block syntax works with add() actions too, not just transfer(). *)
+  let src = {|
+    time_unit = 'days
+    compartments { S }
+    transitions {}
+    init { S = 0 }
+    simulate { from = 0 'days  to = 100 'days }
+    events {
+      influx : add(S, 50) {
+        every = 10 'days
+        from  = 0 'days
+        until = 100 'days
+      }
+    }
+  |} in
+  match Compiler.compile ~name:"test_add_recurring" src with
+  | Error e -> Alcotest.failf "compile failed: %s" e
+  | Ok m ->
+    let iv = List.hd m.Ir.interventions in
+    (match iv.Ir.schedule with
+     | Ir.Recurring { period; _ } ->
+       Alcotest.(check (float 1e-9)) "period" 10.0 period
+     | _ -> Alcotest.fail "expected Recurring");
+    (match List.hd iv.Ir.actions with
+     | Ir.AddAction _ -> ()
+     | _ -> Alcotest.fail "expected Add action")
+
+let test_recurring_default_from_until () =
+  (* 'from' and 'until' default to simulate.from / simulate.to when omitted.
+     Only 'every' is required. *)
+  let src = {|
+    time_unit = 'days
+    compartments { S, V }
+    transitions {}
+    init { S = 1 }
+    simulate { from = 0 'days  to = 100 'days }
+    interventions {
+      r : transfer(fraction = 0.1, from = S, to = V) {
+        every = 10 'days
+      }
+    }
+  |} in
+  match Compiler.compile ~name:"test_defaults" src with
+  | Error e -> Alcotest.failf "compile failed: %s" e
+  | Ok m ->
+    let iv = List.hd m.Ir.interventions in
+    (match iv.Ir.schedule with
+     | Ir.Recurring { start; period; end_; _ } ->
+       Alcotest.(check (float 1e-9)) "start defaults to t_start" 0.0 start;
+       Alcotest.(check (float 1e-9)) "period"                     10.0 period;
+       Alcotest.(check (float 1e-9)) "end defaults to t_end"     100.0 end_
+     | _ -> Alcotest.fail "expected Recurring")
+
+let test_recurring_at_times_still_works () =
+  (* Regression guard: the existing at [...] form still compiles unchanged. *)
+  let src = {|
+    time_unit = 'days
+    compartments { S, V }
+    transitions {}
+    init { S = 1 }
+    simulate { from = 0 'days  to = 365 'days }
+    interventions {
+      pulses : transfer(fraction = 0.5, from = S, to = V) at [30, 60, 90]
+    }
+  |} in
+  match Compiler.compile ~name:"regression" src with
+  | Error e -> Alcotest.failf "compile failed: %s" e
+  | Ok m ->
+    match (List.hd m.Ir.interventions).schedule with
+    | Ir.AtTimes ts ->
+      Alcotest.(check int) "three pulses" 3 (List.length ts)
+    | _ -> Alcotest.fail "expected AtTimes"
+
+let test_recurring_e240_zero_every () =
+  compile_expect_error_code ~code:"E240" ~contains:"'every' must be positive" {|
+    time_unit = 'days
+    compartments { S, V }
+    transitions {}
+    init { S = 1 }
+    simulate { from = 0 'days  to = 10 'days }
+    interventions {
+      r : transfer(fraction = 0.1, from = S, to = V) {
+        every = 0 'days
+        from  = 0 'days
+        until = 10 'days
+      }
+    }
+  |}
+
+let test_recurring_e241_inverted_range () =
+  compile_expect_error_code ~code:"E241" ~contains:"must be <= 'until'" {|
+    time_unit = 'days
+    compartments { S, V }
+    transitions {}
+    init { S = 1 }
+    simulate { from = 0 'days  to = 10 'days }
+    interventions {
+      r : transfer(fraction = 0.1, from = S, to = V) {
+        every = 1 'days
+        from  = 20 'days
+        until = 10 'days
+      }
+    }
+  |}
+
+let test_recurring_e242_schedule_too_long () =
+  (* 1 'years / 1e-7 'days (effectively) → way over the cap. Use tiny period. *)
+  compile_expect_error_code ~code:"E242" ~contains:"cap" {|
+    time_unit = 'days
+    compartments { S, V }
+    transitions {}
+    init { S = 1 }
+    simulate { from = 0 'days  to = 10 'years }
+    interventions {
+      r : transfer(fraction = 0.1, from = S, to = V) {
+        every = 0.000001 'days
+        from  = 0 'days
+        until = 10 'days
+      }
+    }
+  |}
 
 (* ── Phase D (BUG-4): Time function expansion ────────────────────────────────
    Compile a model with a sinusoidal forcing function.
@@ -1187,36 +1426,6 @@ let compile_expect_ok src =
   | Ok m -> m
   | Error e -> Alcotest.failf "compile failed: %s" e
 
-(** Substring check without the Str library. *)
-let contains_substring ~needle s =
-  let nl = String.length needle and sl = String.length s in
-  if nl = 0 then true
-  else if nl > sl then false
-  else
-    let rec loop i =
-      if i > sl - nl then false
-      else if String.sub s i nl = needle then true
-      else loop (i + 1)
-    in loop 0
-
-(** Compile with JSON-diagnostics mode so the Error variant carries the
-    structured error payload (codes + messages) rather than the generic
-    "compilation failed" string. Then assert the given error code and a
-    substring (typically the parameter name, to confirm diagnostics carry
-    enough context) both appear in the payload. *)
-let compile_expect_error_code ~code ~contains src =
-  Diagnostics.json_errors_mode := true;
-  let result = Compiler.compile ~name:"test_prior_err" src in
-  Diagnostics.json_errors_mode := false;
-  match result with
-  | Ok _ -> Alcotest.failf "expected error %s but compile succeeded" code
-  | Error e ->
-    if String.length e = 0 then Alcotest.failf "error text was empty";
-    if not (contains_substring ~needle:code e) then
-      Alcotest.failf "expected error code %s, got: %s" code e;
-    if not (contains_substring ~needle:contains e) then
-      Alcotest.failf "expected error to contain %S, got: %s" contains e
-
 let find_param (m : Ir.model) name =
   List.find (fun (p : Ir.parameter) -> p.name = name) m.parameters
 
@@ -1576,6 +1785,17 @@ let () =
     ];
     "interventions", [
       Alcotest.test_case "intervention expansion" `Quick test_intervention_expansion;
+    ];
+    "recurring_interventions", [
+      Alcotest.test_case "transfer(...) { every, from, until }"     `Quick test_recurring_block_transfer;
+      Alcotest.test_case "kwargs accepted in any order"             `Quick test_recurring_kwargs_any_order;
+      Alcotest.test_case "unit conversion applies to interval args" `Quick test_recurring_unit_conversion;
+      Alcotest.test_case "add(...) { every, from, until } in events" `Quick test_recurring_add_action;
+      Alcotest.test_case "from / until default to simulation bounds" `Quick test_recurring_default_from_until;
+      Alcotest.test_case "at [...] form still compiles (regression)" `Quick test_recurring_at_times_still_works;
+      Alcotest.test_case "E240 every = 0 is rejected"               `Quick test_recurring_e240_zero_every;
+      Alcotest.test_case "E241 from > until is rejected"            `Quick test_recurring_e241_inverted_range;
+      Alcotest.test_case "E242 expanded schedule too long"          `Quick test_recurring_e242_schedule_too_long;
     ];
     "time_functions", [
       Alcotest.test_case "sinusoidal compiles to TimeFunc"       `Quick test_sinusoidal_time_func;

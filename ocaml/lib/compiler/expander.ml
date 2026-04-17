@@ -1970,10 +1970,40 @@ let expand_scheduled_actions ctx decls ~always_active =
             let ir = normalize_expr (resolve_expr ctx env e) in
             match ir with Ir.Const f -> f | _ -> 0.0
           ) exprs)
-        | SRecurring (every, from_, until) ->
+        | SRecurring (every, from_opt, until_opt) ->
           let period = resolve_float_expr ctx every in
-          let start  = resolve_float_expr ctx from_  in
-          let end_   = resolve_float_expr ctx until in
+          let start  = match from_opt with
+            | Some e -> resolve_float_expr ctx e
+            | None   -> t_start
+          in
+          let end_   = match until_opt with
+            | Some e -> resolve_float_expr ctx e
+            | None   -> t_end
+          in
+          if period <= 0.0 then
+            Diagnostics.error ctx.diags
+              ~code:"E240" ~loc:Diagnostics.no_loc
+              ~message:(Printf.sprintf "intervention '%s': 'every' must be positive (got %g)" iv.ivname period)
+              ~hint:"Use a positive interval, e.g. every = 30 'days"
+              ();
+          if start > end_ then
+            Diagnostics.error ctx.diags
+              ~code:"E241" ~loc:Diagnostics.no_loc
+              ~message:(Printf.sprintf "intervention '%s': 'from' (%g) must be <= 'until' (%g)" iv.ivname start end_)
+              ~hint:"Either reorder the values or check unit conversions (e.g. years → days)."
+              ();
+          (* Cap expanded schedule length to catch accidental year-at-minute schedules. *)
+          let max_fires = 1_000_000 in
+          if period > 0.0 && start <= end_ then begin
+            let n_fires = int_of_float (((end_ -. start) /. period) +. 1.0) in
+            if n_fires > max_fires then
+              Diagnostics.error ctx.diags
+                ~code:"E242" ~loc:Diagnostics.no_loc
+                ~message:(Printf.sprintf "intervention '%s' schedule expands to %d firings (cap %d)"
+                            iv.ivname n_fires max_fires)
+                ~hint:"Check units: e.g. every = 1 'days with until = 100 'years is 36_525 entries."
+                ()
+          end;
           Ir.Recurring { Ir.start; Ir.period; Ir.end_; Ir.at_day = None }
         | SEveryAtDay (every, day) ->
           let period = resolve_float_expr ctx every in

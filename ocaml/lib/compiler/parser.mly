@@ -34,7 +34,7 @@
 %token TRANSITIONS OBSERVATIONS INTERVENTIONS ODE OUTPUT SIMULATE
 %token INIT TIMEPOINTS SCENARIOS STRATIFY LET FROM TO WHERE SUM
 %token CONSECUTIVE IN BY DIMENSIONS ONLY REAL INTEGER RATE PROBABILITY POSITIVE COUNT
-%token AND OR NOT IF THEN ELSE EVERY AT_KW FORMAT DESCRIPTION TAG NULL TRANSFER LIKELIHOOD ORIGIN BALANCE EVENTS ADD AT_DAY
+%token AND OR NOT IF THEN ELSE EVERY UNTIL AT_KW FORMAT DESCRIPTION TAG NULL TRANSFER LIKELIHOOD ORIGIN BALANCE EVENTS ADD AT_DAY
 
 %token EOF
 
@@ -400,12 +400,42 @@ intervention_decl:
         { ivname = name; ivindices = ibs; ivaction = !action; ivschedule = !sched; ivguard = guard } }
   | name = IDENT ibs = index_bindings_opt COLON TRANSFER LPAREN kwargs = separated_list(COMMA, transfer_kwarg) RPAREN AT_KW LBRACKET ts = separated_list(COMMA, expr) RBRACKET guard = where_clause_opt
       { { ivname = name; ivindices = ibs; ivaction = ATransfer kwargs; ivschedule = SAtTimes ts; ivguard = guard } }
+  (* transfer(...) { every = T, from = T0, until = T1 } — recurring schedule *)
+  | name = IDENT ibs = index_bindings_opt COLON TRANSFER LPAREN kwargs = separated_list(COMMA, transfer_kwarg) RPAREN LBRACE sched = recurring_body RBRACE guard = where_clause_opt
+      { { ivname = name; ivindices = ibs; ivaction = ATransfer kwargs; ivschedule = sched; ivguard = guard } }
   (* add(COMP, EXPR) at [...] *)
   | name = IDENT ibs = index_bindings_opt COLON ADD LPAREN comp = IDENT COMMA count = expr RPAREN AT_KW LBRACKET ts = separated_list(COMMA, expr) RBRACKET guard = where_clause_opt
       { { ivname = name; ivindices = ibs; ivaction = AAdd (comp, [], count); ivschedule = SAtTimes ts; ivguard = guard } }
+  (* add(COMP, EXPR) { every = T, from = T0, until = T1 } — recurring schedule *)
+  | name = IDENT ibs = index_bindings_opt COLON ADD LPAREN comp = IDENT COMMA count = expr RPAREN LBRACE sched = recurring_body RBRACE guard = where_clause_opt
+      { { ivname = name; ivindices = ibs; ivaction = AAdd (comp, [], count); ivschedule = sched; ivguard = guard } }
   (* add(COMP, EXPR) every PERIOD at_day DAY *)
   | name = IDENT ibs = index_bindings_opt COLON ADD LPAREN comp = IDENT COMMA count = expr RPAREN EVERY period = expr AT_DAY day = expr guard = where_clause_opt
       { { ivname = name; ivindices = ibs; ivaction = AAdd (comp, [], count); ivschedule = SEveryAtDay (period, day); ivguard = guard } }
+
+(* Recurring schedule body: kwargs in any order, newline-separated
+   (matches the rest of camdl's block style — no commas required). *)
+recurring_body:
+  | kvs = list(recurring_kv)
+      { let every = ref None in
+        let from_ = ref None in
+        let until = ref None in
+        List.iter (function
+          | `Every e  -> every := Some e
+          | `From  e  -> from_  := Some e
+          | `Until e  -> until := Some e
+        ) kvs;
+        let every_e = match !every with
+          | Some e -> e
+          | None   -> failwith "recurring schedule missing required 'every = ...'"
+        in
+        (* from and until default to simulate.from / simulate.to respectively. *)
+        SRecurring (every_e, !from_, !until) }
+
+recurring_kv:
+  | EVERY EQ e = expr  { `Every e }
+  | FROM  EQ e = expr  { `From  e }
+  | UNTIL EQ e = expr  { `Until e }
 
 transfer_kwarg:
   | k = IDENT EQ e = expr { (k, e) }
@@ -416,7 +446,7 @@ iv_kv:
   | AT_KW EQ LBRACKET ts = separated_list(COMMA, expr) RBRACKET
       { `Schedule (SAtTimes ts) }
   | EVERY EQ e = expr FROM EQ f = expr TO EQ t = expr
-      { `Schedule (SRecurring (e, f, t)) }
+      { `Schedule (SRecurring (e, Some f, Some t)) }
   | IDENT EQ e = expr
       { (* action hint -- simplified *)
         `Action (ASet ($1, [], e)) }

@@ -150,7 +150,9 @@ type action_decl =
 
 type schedule_decl =
   | SAtTimes of expr list
-  | SRecurring of expr * expr * expr    (* every, from, until *)
+  (** Recurring schedule: (every, from?, until?).
+      from defaults to simulate.from if None; until defaults to simulate.to. *)
+  | SRecurring of expr * expr option * expr option
   | SEveryAtDay of expr * expr          (* period, at_day *)
 
 type intervention_decl = {
