@@ -237,18 +237,16 @@ path once the boarding-school fixtures are added (follow-up).
 
 ## Out of scope
 
-- **Implicit sum for Erlang-stratified compartments**
-  (`prevalence(B)` auto-summing over `B1..Bk`). Requires defining
-  compartment families at the IR level — the `base_name` machinery
-  exists for interventions but not compartments — and deciding how the
-  implicit sum interacts with other stratification dimensions (patch,
-  age): does `prevalence(B)` give the global sum or a per-dimension
-  vector? That answer depends on whether the observation itself is
-  indexed, which is design work that deserves its own proposal. Users
-  can write `projected = B1 + B2` today; the compiler validates
-  the names and the DerivedExpr path handles it. Ship prevalence
-  projections without the sugar; add the sugar in a follow-up once
-  compartment-grouping semantics are worked out.
+- ~~**Implicit sum for Erlang-stratified compartments**
+  (`prevalence(B)` auto-summing over `B1..Bk`).~~ **Shipped after
+  initial review** — the compartment-grouping semantics turned out to
+  already be settled: rate expressions apply the same "omitted
+  dimension sums over it" rule (language spec §5.1), so
+  `prevalence(B)` on a stratified `B` just follows the same rule and
+  emits `CurrentPopSum` over all expansions. Partial indexing
+  (`prevalence(B[patch1])` on a `B × patch × age` compartment) is
+  still deferred; the common case of "Erlang substages with no other
+  stratification" and the fully-indexed case both work today.
 - **Period-average prevalence** (mean of `I` over the interval
   `[t_{k-1}, t_k]`). A legitimate observation mode for weekly ICU
   census with daily dynamics, but requires a trapezoidal / running-sum
