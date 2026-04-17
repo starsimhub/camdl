@@ -1,7 +1,8 @@
 mod util;
 mod hashing;
-#[allow(dead_code)] // some helpers are only used by list/show/cat in later commits
+#[allow(dead_code)] // some write/read helpers wired up by follow-up commits (obs caching)
 mod cas;
+mod browse;
 mod sampling;
 #[allow(dead_code)]
 mod experiment; // used by --batch delegation
@@ -59,6 +60,11 @@ fn print_main_help() -> ! {
     eprintln!("  {}        Evaluate expressions against a model", b("eval"));
     eprintln!("  {}        Data utilities (split train/holdout)", b("data"));
     eprintln!("  {}       Launch web visualization server", b("serve"));
+    eprintln!();
+    eprintln!("Cache browsing (runs written by {}):", d("simulate --cas / --batch"));
+    eprintln!("  {}        Browse cached runs as a table", b("list"));
+    eprintln!("  {}        Show full metadata for one run", b("show"));
+    eprintln!("  {}         Emit a cached trajectory or obs stream", b("cat"));
     eprintln!();
     eprintln!("Run {} for details on any command.", d("camdl <command> --help"));
     std::process::exit(0);
@@ -355,6 +361,15 @@ fn main() {
         }
         "serve" => {
             serve::cmd_serve(&all_args[1..]);
+        }
+        "list" => {
+            browse::cmd_list(&all_args[1..]);
+        }
+        "show" => {
+            browse::cmd_show(&all_args[1..]);
+        }
+        "cat" => {
+            browse::cmd_cat(&all_args[1..]);
         }
         _ => {
             // Accept bare "camdl FILE ..." for simulation

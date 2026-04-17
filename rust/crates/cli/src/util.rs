@@ -659,6 +659,46 @@ pub fn write_traj_tsv(path: &str, model: &ir::Model, traj: &Trajectory, emit_flo
     Ok(())
 }
 
+// ─── Human-friendly relative time ────────────────────────────────────────────
+
+/// Format a SystemTime as a human-readable relative time like "5m ago",
+/// "yesterday", or "2w ago". Used by `camdl list`.
+///
+/// Buckets (each one-bucket-wide for readability; no "59m 42s" precision):
+///
+/// - `now - from < 60s`        → "just now"
+/// - `< 1h`                    → "Nm ago"
+/// - `< 24h`                   → "Nh ago"
+/// - `< 48h`                   → "yesterday"
+/// - `< 7d`                    → "Nd ago"
+/// - `< 30d`                   → "Nw ago"       (weeks)
+/// - `< 365d`                  → "Nmo ago"      (approx months; 30-day buckets)
+/// - `≥ 365d`                  → "Ny ago"       (approx years; 365-day buckets)
+/// - future times              → "in the future"
+///
+/// Pure stdlib — no chrono/humantime/timeago dependency. Supply-chain
+/// surface is zero; logic fits in a single function.
+pub fn fmt_relative_time(from: std::time::SystemTime, now: std::time::SystemTime) -> String {
+    let secs: i64 = match now.duration_since(from) {
+        Ok(d) => d.as_secs() as i64,
+        Err(_) => return "in the future".to_string(),
+    };
+    const MIN:  i64 = 60;
+    const HOUR: i64 = 60 * MIN;
+    const DAY:  i64 = 24 * HOUR;
+    const WEEK: i64 = 7 * DAY;
+    const MONTH: i64 = 30 * DAY;
+    const YEAR: i64 = 365 * DAY;
+    if secs < MIN { "just now".to_string() }
+    else if secs < HOUR  { format!("{}m ago", secs / MIN) }
+    else if secs < DAY   { format!("{}h ago", secs / HOUR) }
+    else if secs < 2 * DAY { "yesterday".to_string() }
+    else if secs < WEEK  { format!("{}d ago", secs / DAY) }
+    else if secs < MONTH { format!("{}w ago", secs / WEEK) }
+    else if secs < YEAR  { format!("{}mo ago", secs / MONTH) }
+    else                 { format!("{}y ago", secs / YEAR) }
+}
+
 // ─── Tests ──────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -893,5 +933,36 @@ mod tests {
         let vals = load_params_toml(&path).unwrap();
         assert_eq!(vals.len(), 2);
         assert!((vals["x"] - 1.5).abs() < 1e-10);
+    }
+
+    #[test]
+    fn fmt_relative_time_buckets() {
+        use std::time::{Duration, SystemTime};
+        let now = SystemTime::UNIX_EPOCH + Duration::from_secs(2_000_000_000);
+        let at = |secs_ago: u64| now - Duration::from_secs(secs_ago);
+
+        assert_eq!(fmt_relative_time(at(0), now),   "just now");
+        assert_eq!(fmt_relative_time(at(30), now),  "just now");
+        assert_eq!(fmt_relative_time(at(60), now),  "1m ago");
+        assert_eq!(fmt_relative_time(at(300), now), "5m ago");
+        assert_eq!(fmt_relative_time(at(3600), now), "1h ago");
+        assert_eq!(fmt_relative_time(at(3600 * 5), now), "5h ago");
+        assert_eq!(fmt_relative_time(at(86400), now), "yesterday");
+        assert_eq!(fmt_relative_time(at(86400 * 2), now), "2d ago");
+        assert_eq!(fmt_relative_time(at(86400 * 6), now), "6d ago");
+        assert_eq!(fmt_relative_time(at(86400 * 7), now), "1w ago");
+        assert_eq!(fmt_relative_time(at(86400 * 29), now), "4w ago");
+        assert_eq!(fmt_relative_time(at(86400 * 30), now), "1mo ago");
+        assert_eq!(fmt_relative_time(at(86400 * 180), now), "6mo ago");
+        assert_eq!(fmt_relative_time(at(86400 * 365), now), "1y ago");
+        assert_eq!(fmt_relative_time(at(86400 * 365 * 3), now), "3y ago");
+    }
+
+    #[test]
+    fn fmt_relative_time_future() {
+        use std::time::{Duration, SystemTime};
+        let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000_000);
+        let future = now + Duration::from_secs(3600);
+        assert_eq!(fmt_relative_time(future, now), "in the future");
     }
 }
