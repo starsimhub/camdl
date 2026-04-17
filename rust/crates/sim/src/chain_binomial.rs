@@ -141,7 +141,12 @@ fn run_chain_binomial(
             real_s.clamp_nonneg();
         }
 
-        // All Euler-multinomial draws, events, clamping, balance via step_one
+        // All Euler-multinomial draws, events, interventions, clamping,
+        // and balance are done inside step_one. A prior version of this
+        // function also called apply_interventions_at here after t += dt,
+        // which caused interventions to fire TWICE per scheduled time
+        // (once at t_end inside step_one, once at the new t here).
+        // See docs/dev/incidents/2026-04-17-chain-binomial-double-fire.md.
         for f in &mut flows { *f = 0; }
         scratch.gamma_used.clear();
         step_one(model, &mut int_s.counts, &mut flows, params, t, dt, &mut rng, &mut scratch)?;
@@ -153,11 +158,10 @@ fn run_chain_binomial(
 
         t += dt;
 
-        // Interventions (step_one handles always_active events internally,
-        // but scheduled interventions at specific times are handled here)
-        if iv_times.get(iv_idx).copied().is_some_and(|iv| (iv - t).abs() < cfg.dt * 0.5) {
-            apply_interventions_at(t, model, &mut int_s, &mut real_s, params, cfg.dt * 0.5)?;
-            while iv_idx < iv_times.len() && iv_times[iv_idx] <= t + cfg.dt * 0.5 { iv_idx += 1; }
+        // Bookkeeping: advance iv_idx past any intervention that fired
+        // in step_one this step. The firing itself happens in step_one.
+        while iv_idx < iv_times.len() && iv_times[iv_idx] <= t + cfg.dt * 0.5 {
+            iv_idx += 1;
         }
 
         // Output

@@ -123,3 +123,80 @@ fn test_fraction_transfer_floor_larger() {
     assert_eq!(int_s.counts[0], 1, "S should be 1 after 4 transferred");
     assert_eq!(int_s.counts[1], 4, "V should be 4 after transfer");
 }
+
+/// Regression: chain_binomial used to fire scheduled interventions twice
+/// per firing time — once in `step_one` at t+dt, once in
+/// `run_chain_binomial` after `t += dt`. Two fires means retain fraction
+/// is (1-f)², so a 50% transfer on S=1000 left S=250 instead of 500.
+/// See docs/dev/incidents/2026-04-17-chain-binomial-double-fire.md.
+#[test]
+fn chain_binomial_fires_scheduled_intervention_exactly_once() {
+    use sim::{
+        config::{ChainBinomialConfig, SimConfig},
+        simulate::Simulate,
+        ChainBinomialSim,
+    };
+    use ir::intervention::InterventionSchedule;
+
+    let intervention = Intervention {
+        name: "sia".into(),
+        base_name: None,
+        schedule: InterventionSchedule::AtTimes(vec![10.0]),
+        always_active: false,
+        actions: vec![Action::FractionTransfer(FractionTransfer {
+            src: "S".into(),
+            dst: "V".into(),
+            fraction: Expr::Const(ConstExpr { value: 0.5 }),
+        })],
+    };
+
+    // Build a model with a known starting state (S=1000, V=0) and
+    // outputs at every integer t so we can observe the post-firing state.
+    let mut init = HashMap::new();
+    init.insert("S".to_string(), 1000.0);
+    init.insert("V".to_string(), 0.0);
+    let model = Model {
+        name: "double_fire_regression".into(),
+        version: "0.3".into(),
+        time_unit: "days".into(),
+        description: None, origin: None,
+        compartments: vec![int_comp("S"), int_comp("V")],
+        transitions: vec![],
+        ode_equations: vec![],
+        time_functions: vec![],
+        tables: vec![],
+        observations: vec![],
+        parameters: vec![],
+        parameter_groups: vec![],
+        initial_conditions: InitialConditions::Explicit(init),
+        data_contract: None,
+        output: OutputConfig {
+            times: OutputSchedule::AtTimes((0..=20).map(|t| t as f64).collect()),
+            format: "tsv".into(),
+            trajectory: true, observations: false,
+        },
+        simulation: SimulationConfig {
+            t_start: 0.0, t_end: 20.0,
+            time_semantics: "continuous".into(),
+            dt: Some(1.0), rng_seed: Some(42),
+        },
+        interventions: vec![intervention],
+        presets: vec![],
+        model_structure: None, balance: None,
+    };
+    let compiled = CompiledModel::new(model).unwrap();
+    let params = compiled.default_params.clone();
+
+    let cfg = SimConfig::ChainBinomial(ChainBinomialConfig {
+        t_start: 0.0, t_end: 20.0, dt: 1.0,
+    });
+    let traj = ChainBinomialSim.run(&compiled, &params, 42, &cfg).unwrap();
+
+    let s_after = traj.snapshots.iter()
+        .find(|s| s.t >= 15.0)
+        .expect("trajectory should reach t=15")
+        .int_state.counts[0];
+    assert_eq!(s_after, 500,
+        "one 50% fractional transfer must leave S=500; double-firing would \
+         give S=250 (got S={})", s_after);
+}
