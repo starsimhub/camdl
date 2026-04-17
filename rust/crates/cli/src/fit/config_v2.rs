@@ -32,6 +32,21 @@ pub struct FitConfigV2 {
     #[serde(default)]
     pub config: FitBackendConfig,
 
+    /// Named scenario from the model. Applies scenario's enable/disable lists
+    /// and param overrides before inference. Mutually exclusive with
+    /// `enable`/`disable`. Per spec §14.4, toggleable interventions default
+    /// OFF; events always fire unless explicitly disabled.
+    #[serde(default)]
+    pub scenario: Option<String>,
+    /// Ad-hoc enable list (intervention names or family base_names).
+    /// Wildcard `"*"` enables every toggleable intervention.
+    #[serde(default)]
+    pub enable: Vec<String>,
+    /// Ad-hoc disable list. Explicit disable wins over always_active —
+    /// the only way to silence an event during inference.
+    #[serde(default)]
+    pub disable: Vec<String>,
+
     /// Optional lineage metadata (not used by the runner).
     #[serde(default)]
     pub provenance: Option<FitProvenance>,
@@ -440,6 +455,9 @@ impl FitConfigV2 {
                 model: self.model.camdl.clone(),
                 output_dir: self.output_dir.clone().unwrap_or_else(|| "results".to_string()),
                 seed: None,
+                scenario: self.scenario.clone(),
+                enable: self.enable.clone(),
+                disable: self.disable.clone(),
             },
             data: data_legacy,
             holdout: holdout_legacy,
@@ -487,6 +505,12 @@ impl FitConfigV2 {
 
     /// Exhaustive partition check + stage DAG validation + data consistency.
     pub fn validate(&self, model_params: &[String]) -> Result<(), String> {
+        // scenario and enable/disable are mutually exclusive (matches simulate).
+        if self.scenario.is_some() && (!self.enable.is_empty() || !self.disable.is_empty()) {
+            return Err("`scenario` is mutually exclusive with `enable`/`disable`. \
+                        Use one approach.".to_string());
+        }
+
         // holdout_after and holdout are mutually exclusive
         if self.data.holdout_after.is_some() && self.data.holdout.is_some() {
             return Err("data.holdout_after and data.holdout are mutually exclusive.\n  \

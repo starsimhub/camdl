@@ -32,6 +32,7 @@ pub fn cmd_pfilter(args: &[String]) {
     let mut overrides: HashMap<String, f64> = HashMap::new();
     let mut scenario_name: Option<String> = None;
     let mut adhoc_enable: Vec<String> = Vec::new();
+    let mut adhoc_disable: Vec<String> = Vec::new();
     let mut flow_name: Option<String> = None; // --flow recovery → project that transition
     let mut obs_name: Option<String> = None; // --obs NAME → select observation block
     let mut save_final_state: Option<String> = None;
@@ -58,6 +59,7 @@ pub fn cmd_pfilter(args: &[String]) {
             "--output" | "-o" => { i += 1; output_path = Some(args[i].clone()); }
             "--scenario"  => { i += 1; scenario_name = Some(args[i].clone()); }
             "--enable"    => { i += 1; adhoc_enable.push(args[i].clone()); }
+            "--disable"   => { i += 1; adhoc_disable.push(args[i].clone()); }
             "--obs"       => { i += 1; obs_name = Some(args[i].clone()); }
             "--flow"      => { i += 1; flow_name = Some(args[i].clone()); }
             "--save-final-state" => { i += 1; save_final_state = Some(args[i].clone()); }
@@ -98,32 +100,26 @@ pub fn cmd_pfilter(args: &[String]) {
             .unwrap_or_else(|e| { eprintln!("error: {}", e); std::process::exit(1); });
     }
 
-    // Apply scenario preset params
-    if let Some(ref name) = scenario_name {
-        if let Some(preset) = model.presets.iter().find(|p| p.name == *name) {
-            for p in &mut model.parameters {
-                if let Some(&v) = preset.params.get(&p.name) { p.value = Some(v); }
-            }
-            // Enable interventions from scenario
-            let enable_names: Vec<String> = preset.enable.clone();
-            model.interventions.retain(|iv| {
-                enable_names.iter().any(|en| {
-                    iv.name == *en || iv.base_name.as_deref() == Some(en.as_str())
-                })
+    // Resolve scenario → enable/disable + preset params; fall through
+    // to ad-hoc lists otherwise. Mutually exclusive per spec §18.
+    let (enable_list, disable_list) = if let Some(ref name) = scenario_name {
+        let preset = model.presets.iter().find(|p| p.name == *name).cloned()
+            .unwrap_or_else(|| {
+                eprintln!("error: scenario '{}' not found", name);
+                std::process::exit(1);
             });
-        } else {
-            eprintln!("error: scenario '{}' not found", name);
-            std::process::exit(1);
+        for p in &mut model.parameters {
+            if let Some(&v) = preset.params.get(&p.name) { p.value = Some(v); }
         }
-    }
-    // Ad-hoc enable
-    if !adhoc_enable.is_empty() {
-        model.interventions.retain(|iv| {
-            adhoc_enable.iter().any(|en| {
-                iv.name == *en || iv.base_name.as_deref() == Some(en.as_str())
-            })
-        });
-    }
+        (preset.enable, preset.disable)
+    } else {
+        (adhoc_enable, adhoc_disable)
+    };
+
+    // Single shared filter: events stay on unless explicitly disabled;
+    // toggleable interventions stay off unless enabled (matches §14.4).
+    crate::util::apply_scenario_filter(&mut model, &enable_list, &disable_list)
+        .unwrap_or_else(|e| { eprintln!("error: {}", e); std::process::exit(1); });
 
     // Apply overrides
     for p in &mut model.parameters {

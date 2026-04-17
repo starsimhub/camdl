@@ -33,6 +33,25 @@ pub struct FitSection {
     pub output_dir: String,
     /// RNG seed. CLI --seed overrides this.
     pub seed: Option<u64>,
+
+    /// Named scenario from the model's `scenarios { }` block. Applies the
+    /// scenario's enable/disable lists and param overrides before the fit.
+    /// Mutually exclusive with `enable`/`disable`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scenario: Option<String>,
+
+    /// Ad-hoc enable list. Names of interventions (or their base_name
+    /// families) to activate during inference. Default: no toggleable
+    /// interventions fire, matching the spec's "off by default". Events
+    /// (`events {}` block) always fire unless explicitly disabled.
+    /// Wildcard `"*"` activates every toggleable intervention.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub enable: Vec<String>,
+
+    /// Ad-hoc disable list. Explicit disable wins over always_active, so
+    /// this is the only way to silence an event during inference.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub disable: Vec<String>,
 }
 
 /// Per-stage configuration for scout and refine.

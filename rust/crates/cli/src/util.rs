@@ -342,6 +342,100 @@ pub fn resolve_enable_list(
     Ok(resolved)
 }
 
+/// Apply an enable/disable scenario filter to `model.interventions`,
+/// respecting the `always_active` distinction (events vs toggleable
+/// interventions).
+///
+/// Semantics (matches the spec in `camdl-language-spec.md` §14 / §14.4):
+///
+/// - **Events** (`always_active = true`) are kept unless *explicitly*
+///   named in the `disable` list. This is the only way an event can be
+///   silenced — the default-off behaviour that applies to toggleable
+///   interventions never applies to events.
+/// - **Toggleable interventions** (`always_active = false`) are kept
+///   only if named in the `enable` list (or its scenario expansion).
+///   The default is "off," matching the spec.
+/// - The `enable`/`disable` lists may contain:
+///   - exact intervention names (`sia_round_1_north`),
+///   - family base names (`sia_round_1` → all its expanded members),
+///   - the wildcard `"*"` (matches every toggleable intervention for
+///     `enable`; every action, events included, for `disable`).
+///
+/// Shared between `simulate`, `pfilter`, and `fit` so the three entry
+/// points cannot drift apart on this contract.
+pub fn apply_scenario_filter(
+    model: &mut ir::Model,
+    enable: &[String],
+    disable: &[String],
+) -> Result<(), String> {
+    // Separate out wildcards so family/exact resolution below doesn't
+    // try to match "*" against a real intervention name.
+    let enable_wild  = enable.iter().any(|s| s == "*");
+    let disable_wild = disable.iter().any(|s| s == "*");
+    let enable_non_wild:  Vec<String> = enable.iter().filter(|s| *s != "*").cloned().collect();
+    let disable_non_wild: Vec<String> = disable.iter().filter(|s| *s != "*").cloned().collect();
+
+    // Resolve family names → concrete intervention names.
+    let active_enable  = resolve_enable_list(&enable_non_wild,  &model.interventions)?;
+    let active_disable = resolve_enable_list(&disable_non_wild, &model.interventions)?;
+
+    model.interventions.retain(|iv| {
+        // Explicit disable wins — even for always_active events.
+        if disable_wild || active_disable.contains(&iv.name) {
+            return false;
+        }
+        // Events stay on unless explicitly disabled above.
+        if iv.always_active {
+            return true;
+        }
+        // Toggleable interventions: enable list or wildcard required.
+        enable_wild || active_enable.contains(&iv.name)
+    });
+
+    Ok(())
+}
+
+/// Print a compact summary of the active scheduled actions — the events
+/// that will always fire and the interventions that survived filtering.
+/// Matches the style of the priors-reporting block. Silent when neither
+/// block has entries.
+///
+/// The intent: make the default behaviour of `fit` and `pfilter` visible
+/// on startup, so a user who forgot `scenario = "..."` sees "0 active
+/// of 5 declared" immediately rather than discovering it from posteriors
+/// hours later.
+pub fn print_scheduled_actions_summary(
+    model_before_filter: &ir::Model,
+    model_after_filter: &ir::Model,
+) {
+    // Split declared actions into events vs toggleable interventions.
+    let (decl_events, decl_interv): (Vec<_>, Vec<_>) = model_before_filter
+        .interventions.iter().partition(|iv| iv.always_active);
+    let active_names: std::collections::HashSet<&str> = model_after_filter
+        .interventions.iter().map(|iv| iv.name.as_str()).collect();
+
+    if !decl_interv.is_empty() {
+        let active_count = decl_interv.iter().filter(|iv| active_names.contains(iv.name.as_str())).count();
+        eprintln!("  interventions ({} active of {} declared):", active_count, decl_interv.len());
+        for iv in &decl_interv {
+            let on = active_names.contains(iv.name.as_str());
+            let glyph = if on { "\x1b[32m✓\x1b[0m" } else { "\x1b[2m✗\x1b[0m" };
+            let note = if on { "" } else { "  (off — not enabled)" };
+            eprintln!("    {} {}{}", glyph, iv.name, note);
+        }
+    }
+    if !decl_events.is_empty() {
+        let active_count = decl_events.iter().filter(|iv| active_names.contains(iv.name.as_str())).count();
+        eprintln!("  events ({} declared, {} active):", decl_events.len(), active_count);
+        for iv in &decl_events {
+            let on = active_names.contains(iv.name.as_str());
+            let glyph = if on { "\x1b[32m✓\x1b[0m" } else { "\x1b[2m✗\x1b[0m" };
+            let note = if on { "" } else { "  (disabled)" };
+            eprintln!("    {} {}{}", glyph, iv.name, note);
+        }
+    }
+}
+
 // ─── SimRun / SimOutput ───────────────────────────────────────────────────────
 
 /// All inputs needed to run one simulation.
@@ -433,20 +527,11 @@ pub fn run_simulation(run: &SimRun) -> Result<(Trajectory, ir::Model), String> {
                 (run.adhoc_enable.clone(), run.adhoc_disable.clone(), vec![], vec![], vec![])
             };
 
-        // Resolve family names → concrete intervention names
-        let active_enable  = resolve_enable_list(&raw_enable,  &model.interventions)?;
-        let active_disable = resolve_enable_list(&raw_disable, &model.interventions)?;
-
-        if !active_enable.is_empty() || !active_disable.is_empty() {
-            model.interventions.retain(|iv| {
-                let kept_by_enable  = active_enable.is_empty() || active_enable.contains(&iv.name);
-                let kept_by_disable = !active_disable.contains(&iv.name);
-                kept_by_enable && kept_by_disable
-            });
-        } else {
-            // Baseline identity patch: no interventions fire
-            model.interventions.clear();
-        }
+        // Apply the shared scenario filter. Preserves always_active events
+        // unless they're explicitly disabled; drops toggleable interventions
+        // unless they're explicitly enabled or named by the scenario.
+        // See apply_scenario_filter for the full semantics.
+        apply_scenario_filter(&mut model, &raw_enable, &raw_disable)?;
 
         for (k, v) in scenario_params {
             for p in &mut model.parameters {
@@ -948,5 +1033,163 @@ mod tests {
         let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000_000);
         let future = now + Duration::from_secs(3600);
         assert_eq!(fmt_relative_time(future, now), "in the future");
+    }
+
+    // ── apply_scenario_filter: the spec contract ────────────────────────
+    //
+    // Spec (camdl-language-spec.md §14 / §14.4):
+    //   - events (always_active = true)        : on by default, off iff in `disable`
+    //   - interventions (always_active = false): off by default, on iff in `enable`
+    //   - wildcard `"*"` matches every toggleable intervention (`enable`)
+    //     or every action including events (`disable`)
+
+    use ir::intervention::{Intervention, InterventionSchedule};
+
+    fn tok_iv(name: &str, base: Option<&str>, always_active: bool) -> Intervention {
+        Intervention {
+            name: name.into(),
+            base_name: base.map(str::to_owned),
+            schedule: InterventionSchedule::AtTimes(vec![10.0]),
+            actions: vec![],
+            always_active,
+        }
+    }
+
+    fn mk_model(ivs: Vec<Intervention>) -> ir::Model {
+        ir::Model {
+            name: "t".into(), version: "0.3".into(), time_unit: "days".into(),
+            description: None, origin: None,
+            compartments: vec![], transitions: vec![], ode_equations: vec![],
+            time_functions: vec![], tables: vec![], observations: vec![],
+            parameters: vec![], parameter_groups: vec![],
+            initial_conditions: ir::model::InitialConditions::Explicit(
+                std::collections::HashMap::new()),
+            data_contract: None,
+            output: ir::model::OutputConfig {
+                times: ir::model::OutputSchedule::AtTimes(vec![]),
+                format: "tsv".into(), trajectory: true, observations: false,
+            },
+            simulation: ir::model::SimulationConfig {
+                t_start: 0.0, t_end: 1.0, time_semantics: "continuous".into(),
+                dt: None, rng_seed: None,
+            },
+            interventions: ivs,
+            presets: vec![], model_structure: None, balance: None,
+        }
+    }
+
+    #[test]
+    fn scenario_filter_default_preserves_events_drops_interventions() {
+        // The critical spec default: with NO enable/disable, events stay
+        // and toggleable interventions are cleared. This also guards the
+        // util.rs:448 latent bug where `.clear()` was nuking events.
+        let mut m = mk_model(vec![
+            tok_iv("cohort_entry", None, true),           // event
+            tok_iv("births",       None, true),           // event
+            tok_iv("sia_round_1",  None, false),          // intervention
+            tok_iv("lockdown",     None, false),          // intervention
+        ]);
+        apply_scenario_filter(&mut m, &[], &[]).unwrap();
+        let names: Vec<&str> = m.interventions.iter().map(|iv| iv.name.as_str()).collect();
+        assert_eq!(names, vec!["cohort_entry", "births"],
+            "events must survive default filter; interventions must not");
+    }
+
+    #[test]
+    fn scenario_filter_enable_activates_by_exact_name() {
+        let mut m = mk_model(vec![
+            tok_iv("sia_round_1", None, false),
+            tok_iv("sia_round_2", None, false),
+        ]);
+        apply_scenario_filter(&mut m, &["sia_round_1".into()], &[]).unwrap();
+        let names: Vec<&str> = m.interventions.iter().map(|iv| iv.name.as_str()).collect();
+        assert_eq!(names, vec!["sia_round_1"]);
+    }
+
+    #[test]
+    fn scenario_filter_enable_activates_by_base_name_family() {
+        // Indexed interventions expand to per-stratum members. One enable
+        // entry with the base_name matches every member.
+        let mut m = mk_model(vec![
+            tok_iv("sia_north", Some("sia"), false),
+            tok_iv("sia_south", Some("sia"), false),
+            tok_iv("sia_east",  Some("sia"), false),
+            tok_iv("other",     None,        false),
+        ]);
+        apply_scenario_filter(&mut m, &["sia".into()], &[]).unwrap();
+        let names: Vec<&str> = m.interventions.iter().map(|iv| iv.name.as_str()).collect();
+        assert_eq!(names, vec!["sia_north", "sia_south", "sia_east"],
+            "family-name `sia` enables every expansion; `other` stays off");
+    }
+
+    #[test]
+    fn scenario_filter_wildcard_enable_activates_all_interventions() {
+        let mut m = mk_model(vec![
+            tok_iv("event_a",        None, true),
+            tok_iv("intervention_a", None, false),
+            tok_iv("intervention_b", None, false),
+        ]);
+        apply_scenario_filter(&mut m, &["*".into()], &[]).unwrap();
+        let names: Vec<&str> = m.interventions.iter().map(|iv| iv.name.as_str()).collect();
+        assert_eq!(names, vec!["event_a", "intervention_a", "intervention_b"]);
+    }
+
+    #[test]
+    fn scenario_filter_disable_silences_event() {
+        // Explicit disable MUST win over always_active. Only way to
+        // turn an event off.
+        let mut m = mk_model(vec![
+            tok_iv("cohort_entry", None, true),
+            tok_iv("births",       None, true),
+        ]);
+        apply_scenario_filter(&mut m, &[], &["cohort_entry".into()]).unwrap();
+        let names: Vec<&str> = m.interventions.iter().map(|iv| iv.name.as_str()).collect();
+        assert_eq!(names, vec!["births"], "`cohort_entry` must be disabled, `births` stays");
+    }
+
+    #[test]
+    fn scenario_filter_disable_overrides_enable() {
+        // If the same name appears in both enable and disable, disable wins.
+        let mut m = mk_model(vec![
+            tok_iv("sia", None, false),
+        ]);
+        apply_scenario_filter(&mut m, &["sia".into()], &["sia".into()]).unwrap();
+        assert!(m.interventions.is_empty(), "disable trumps enable");
+    }
+
+    #[test]
+    fn scenario_filter_unknown_name_errors() {
+        let mut m = mk_model(vec![
+            tok_iv("sia", None, false),
+        ]);
+        let err = apply_scenario_filter(&mut m, &["nonesuch".into()], &[]).unwrap_err();
+        assert!(err.contains("does not match"), "err should cite the mismatch: {}", err);
+    }
+
+    #[test]
+    fn scenario_filter_mixed_events_and_interventions() {
+        // End-to-end-shaped case: realistic mix of structural events
+        // and toggleable policy interventions, single enable selects
+        // one family, disable silences one event.
+        let mut m = mk_model(vec![
+            tok_iv("cohort_entry",    None,                true),
+            tok_iv("births",          None,                true),
+            tok_iv("sia_north",       Some("sia"),         false),
+            tok_iv("sia_south",       Some("sia"),         false),
+            tok_iv("lockdown_2022",   None,                false),
+        ]);
+        apply_scenario_filter(&mut m,
+            &["sia".into()],
+            &["cohort_entry".into()],
+        ).unwrap();
+        let names: std::collections::HashSet<&str> =
+            m.interventions.iter().map(|iv| iv.name.as_str()).collect();
+        // births stays (event, not disabled); cohort_entry gone (disabled)
+        // sia_north + sia_south on (family enabled); lockdown off (not enabled)
+        assert!(names.contains("births"));
+        assert!(!names.contains("cohort_entry"));
+        assert!(names.contains("sia_north"));
+        assert!(names.contains("sia_south"));
+        assert!(!names.contains("lockdown_2022"));
     }
 }

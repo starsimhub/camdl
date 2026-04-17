@@ -32,6 +32,11 @@ pub struct ObsStream {
 pub struct FitRunConfig {
     pub compiled: Arc<CompiledModel>,
     pub model: ir::Model,
+    /// Pre-filter snapshot — every intervention and event declared in the
+    /// model file, whether or not the active scenario enabled it. Used by
+    /// `print_scheduled_actions_summary` to show a "N active of M declared"
+    /// block on startup.
+    pub model_declared: ir::Model,
     pub model_ir_json: String,
     pub base_params: Vec<f64>,
     pub estimated_params: Vec<EstimatedParam>,
@@ -67,6 +72,42 @@ impl FitRunConfig {
         // Load model
         let model_path = &fit.fit.model;
         let (mut model, model_ir_json) = crate::util::load_model(model_path)?;
+        // Keep a copy of the unfiltered model so the startup diagnostic
+        // can show what was declared vs what's active. Cheap clone — the
+        // intervention list is small.
+        let model_declared = model.clone();
+
+        // Apply scenario / enable / disable filter BEFORE compile.
+        // Per spec §14.4, toggleable interventions default OFF; events
+        // (always_active) stay on unless explicitly disabled. If neither
+        // scenario nor enable/disable are set in fit.toml, interventions
+        // are cleared (spec default). Shared helper with simulate/pfilter
+        // so the three entry points cannot drift.
+        if fit.fit.scenario.is_some()
+            && (!fit.fit.enable.is_empty() || !fit.fit.disable.is_empty())
+        {
+            return Err("fit.toml [fit]: `scenario` is mutually exclusive \
+                with `enable`/`disable`. Use one approach.".into());
+        }
+        let (enable_list, disable_list) = if let Some(ref name) = fit.fit.scenario {
+            let preset = model.presets.iter().find(|p| p.name == *name).cloned()
+                .ok_or_else(|| {
+                    let avail: Vec<&str> = model.presets.iter()
+                        .map(|p| p.name.as_str()).collect();
+                    format!("scenario '{}' not found in model. Available: {}",
+                        name,
+                        if avail.is_empty() { "(none)".into() } else { avail.join(", ") })
+                })?;
+            // Apply scenario's param overrides so the fit sees the
+            // scenario's parameter defaults (matches simulate semantics).
+            for p in &mut model.parameters {
+                if let Some(&v) = preset.params.get(&p.name) { p.value = Some(v); }
+            }
+            (preset.enable, preset.disable)
+        } else {
+            (fit.fit.enable.clone(), fit.fit.disable.clone())
+        };
+        crate::util::apply_scenario_filter(&mut model, &enable_list, &disable_list)?;
 
         // Apply parameter values from fit.toml BEFORE compiling, so that
         // parameters without model defaults get values.
@@ -189,6 +230,7 @@ impl FitRunConfig {
         Ok(FitRunConfig {
             compiled: Arc::new(compiled),
             model,
+            model_declared,
             model_ir_json,
             base_params,
             estimated_params: if2_params,

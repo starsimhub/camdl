@@ -182,6 +182,9 @@ pub fn run_pmmh_cli(
         .map(|spec| super::runner::resolve_prior(&spec.name, fit, &config.model).0)
         .collect();
 
+    // Active interventions + events — see same block in pgas.rs.
+    crate::util::print_scheduled_actions_summary(&config.model_declared, &config.model);
+
     let dt = config.if2_config.dt;
 
     // Compute config hash — identifies the statistical problem.
