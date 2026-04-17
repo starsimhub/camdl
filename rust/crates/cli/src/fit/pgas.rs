@@ -78,6 +78,7 @@ pub fn run_pgas_cli(
     // visible before sampling, so a forgotten `scenario = "..."` doesn't
     // hide as "0 of N firing" behind a 6-hour chain.
     crate::util::print_scheduled_actions_summary(&config.model_declared, &config.model);
+    crate::util::print_observations_summary(&config.model);
 
     // Report priors
     let any_non_flat = priors.iter().any(|p| !matches!(p, Prior::Flat));

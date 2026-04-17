@@ -2087,6 +2087,105 @@ for every non-time column. Output written to `results/simulate/summary/`.
 
 ---
 
+## 14. Observation Semantics
+
+Observation blocks project simulator state into the scalar `projected`
+value that the likelihood evaluates. camdl supports two projection
+modes — **incidence** (accumulated flow) and **prevalence / snapshot**
+(point-in-time state). Both are available in `simulate --obs`, the
+particle filter, and all inference methods (IF2, PGAS, PMMH).
+
+### 14.1 Projection modes
+
+- **Incidence** (`incidence(X)`, IR `CumulativeFlow`): sum of
+  per-transition flow counters over the interval since the last
+  observation. Appropriate for daily case notifications, weekly deaths,
+  cumulative reported hospitalizations — any **event count over an
+  interval**.
+- **Prevalence** (`prevalence(X)`, IR `CurrentPop`; or `prevalence(X1, X2)`
+  → IR `CurrentPopSum`): integer compartment count(s) read at the
+  observation instant. Appropriate for hospital bed occupancy, ICU
+  census, wastewater concentration snapshots, seroprevalence surveys —
+  any **point-in-time state reading**.
+- **Derived expression** (`projected = <expr>`, IR `DerivedExpr`):
+  arbitrary expression over compartment state (e.g. `B1 + B2`,
+  `I / (S + I + R)`), evaluated at the observation instant.
+
+Incidence streams accumulate flow counters between observations and
+**reset after the likelihood is scored**. Prevalence and derived-expr
+streams read the state vector and **do not reset** — each observation
+is independent of the previous one.
+
+### 14.2 Snapshot timing
+
+The snapshot is the value of the projection expression *at* the
+observation time `t`, evaluated against the simulator state at `t`.
+The following rules specify what "state at `t`" means per backend:
+
+- **Gillespie SSA (continuous-time):** state is piecewise-constant
+  between events. The snapshot reads the state that has been in effect
+  since the last event preceding `t`. If an event or scheduled
+  intervention fires exactly at `t`, the snapshot reads the
+  **post-event** state.
+- **Chain-binomial / tau-leap (discrete-time, step `dt`):** the
+  snapshot reads the state at the step boundary that lands on, or
+  first passes, `t`. For `dt = 1` with daily observations this is
+  exact; for `dt < 1` the snapshot is the state at the first step
+  boundary `≥ t`.
+- **ODE (continuous integrator):** dense-output evaluation of the
+  integrator state at exactly `t`.
+
+### 14.3 Interaction with scheduled interventions
+
+If a scheduled intervention fires at the same time as an observation,
+the snapshot reads the **post-intervention** state. Rationale: the
+data was generated in a world where the intervention had already
+fired; evaluating the likelihood against the pre-intervention state
+would deterministically bias the posterior against any scenario that
+correctly represents the intervention.
+
+The step loop at an observation time `t` is:
+
+1. Advance state to `t`.
+2. Fire any scheduled interventions at `t`
+   (`apply_interventions_at(t, …)`).
+3. Evaluate the projection expression against the resulting state;
+   pass `projected` to the likelihood.
+4. Reset incidence counters.
+
+This ordering is the same in `simulate --obs` (synthetic data
+generation) and in the particle filter's observation tick, so
+likelihood evaluation and data generation are always consistent. For
+chain-binomial, `step_one` already fires scheduled interventions at
+`t + dt` (see `docs/dev/incidents/2026-04-17-chain-binomial-double-fire.md`),
+and the PF reads `counts_after` — the post-`step_one` state — when
+scoring the observation.
+
+### 14.4 Likelihood-family guidance
+
+Incidence and prevalence need different default likelihoods; a model
+that pairs a NegBinomial with a prevalence projection is syntactically
+valid but usually wrong in interpretation. The `fit run` and `pfilter`
+startup block lists each stream's `(projection, likelihood)` pairing so
+the mismatch is visible before the PF runs.
+
+- **Incidence:** NegativeBinomial or Poisson with reporting rate.
+  Support on ℤ≥0; overdispersion natural.
+- **Prevalence, single compartment:** Binomial(N, p) with
+  `p = projected / N` when the total is fixed and known; Poisson for
+  large `N`. NegBinomial is valid but the dispersion parameter has a
+  different meaning than for incidence.
+- **Prevalence as a fraction** (projection ∈ [0, 1]): Beta or
+  Binomial.
+
+Prevalence and incidence data also have different Fisher information
+about the parameters: prevalence is more informative about the
+recovery rate γ (decay shape), incidence is more informative about the
+transmission rate β (direct flow into I). Joint fits on both streams
+are strictly more informative than either alone.
+
+---
+
 ## Appendix A: CLI Reference
 
 ```

@@ -842,6 +842,31 @@ afp_cases = "data/afp_by_district.tsv"
 es_positive = "data/es_results.tsv"
 ```
 
+### 10.2.1 Incidence vs. Prevalence
+
+Incidence data (event counts accumulated over the interval since the
+last observation) and prevalence data (point-in-time compartment
+counts) project the simulator state differently. Both are
+first-class: the observation block's projection (`incidence(X)`,
+`prevalence(X)`, or a derived expression like `B1 + B2`) selects the
+mode. See `camdl-run-spec.md` §14 for the snapshot-timing and
+intervention-ordering rules.
+
+Prevalence and incidence carry different Fisher information about the
+parameters — prevalence is more informative about the recovery rate
+γ (decay shape), incidence about the transmission rate β (direct flow
+into I). A fit against prevalence-only data may have a substantially
+wider posterior for β than the same model fit against incidence data
+on the same trajectory; this is a feature of the data, not a bug in
+the fit.
+
+Pair likelihoods with projection types deliberately: NegBinomial or
+Poisson-with-reporting for incidence, Binomial or Poisson for
+prevalence counts, Beta or Binomial for prevalence fractions. The
+`fit run` and `pfilter` startup diagnostic lists the
+`(projection, likelihood)` pairing for every stream so that a mismatch
+is visible before the filter runs.
+
 ### 10.3 Missing Data
 
 Rows with `NA` or blank values are skipped (no contribution to

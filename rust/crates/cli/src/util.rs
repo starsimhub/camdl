@@ -436,6 +436,51 @@ pub fn print_scheduled_actions_summary(
     }
 }
 
+/// Print a summary of the active observation streams — one row per
+/// stream with its projection kind (incidence vs. prevalence /
+/// snapshot) and likelihood family. Emits a soft advisory when a
+/// NegativeBinomial is paired with a snapshot projection (valid but
+/// unusual; see `camdl-run-spec.md` §14.4).
+///
+/// Silent when the model has no observations. Called by `fit run` and
+/// `pfilter` right after the interventions/events summary.
+pub fn print_observations_summary(model: &ir::Model) {
+    if model.observations.is_empty() { return; }
+    eprintln!("  observations ({} stream{}):",
+        model.observations.len(),
+        if model.observations.len() == 1 { "" } else { "s" });
+    let mut warn_negbin_on_snapshot = false;
+    for obs in &model.observations {
+        let (kind_label, is_snapshot) = match &obs.projection {
+            ir::observation::Projection::CumulativeFlow(name) =>
+                (format!("incidence({})", name), false),
+            ir::observation::Projection::CurrentPop(name) =>
+                (format!("prevalence({})", name), true),
+            ir::observation::Projection::CurrentPopSum(names) =>
+                (format!("prevalence({})", names.join(" + ")), true),
+            ir::observation::Projection::DerivedExpr(_) =>
+                ("derived expression".to_string(), true),
+        };
+        let lik_label = match &obs.likelihood {
+            ir::observation::Likelihood::NegBinomial(_)  => "NegBinomial",
+            ir::observation::Likelihood::Poisson(_)      => "Poisson",
+            ir::observation::Likelihood::Normal(_)       => "Normal",
+            ir::observation::Likelihood::Binomial(_)     => "Binomial",
+            ir::observation::Likelihood::BetaBinomial(_) => "BetaBinomial",
+            ir::observation::Likelihood::Bernoulli(_)    => "Bernoulli",
+        };
+        eprintln!("    \x1b[32m✓\x1b[0m {:<16} {:<28} {}", obs.name, kind_label, lik_label);
+        if is_snapshot && matches!(obs.likelihood, ir::observation::Likelihood::NegBinomial(_)) {
+            warn_negbin_on_snapshot = true;
+        }
+    }
+    if warn_negbin_on_snapshot {
+        eprintln!("    \x1b[2mnote: NegBinomial on a prevalence / snapshot projection is valid");
+        eprintln!("          but uncommon. Binomial or Poisson is the typical choice for");
+        eprintln!("          point-in-time counts. See camdl-run-spec.md §14.4.\x1b[0m");
+    }
+}
+
 // ─── SimRun / SimOutput ───────────────────────────────────────────────────────
 
 /// All inputs needed to run one simulation.

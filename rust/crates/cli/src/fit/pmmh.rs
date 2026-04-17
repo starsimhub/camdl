@@ -184,6 +184,7 @@ pub fn run_pmmh_cli(
 
     // Active interventions + events — see same block in pgas.rs.
     crate::util::print_scheduled_actions_summary(&config.model_declared, &config.model);
+    crate::util::print_observations_summary(&config.model);
 
     let dt = config.if2_config.dt;
 
