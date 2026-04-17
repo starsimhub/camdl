@@ -1,1 +1,1 @@
-/Users/vsb/projects/work/camdl/docs/compartmental-ir-spec.md
+../../../compartmental-ir-spec.md

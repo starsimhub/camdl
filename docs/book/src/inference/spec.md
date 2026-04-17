@@ -1,1 +1,1 @@
-/Users/vsb/projects/work/camdl/docs/camdl-inference-spec.md
+../../../camdl-inference-spec.md

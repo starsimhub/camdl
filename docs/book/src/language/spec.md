@@ -1,1 +1,1 @@
-/Users/vsb/projects/work/camdl/docs/camdl-language-spec.md
+../../../camdl-language-spec.md

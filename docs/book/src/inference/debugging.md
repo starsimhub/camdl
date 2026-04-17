@@ -1,1 +1,1 @@
-/Users/vsb/projects/work/camdl/docs/debugging.md
+../../../debugging.md

@@ -1,1 +1,1 @@
-/Users/vsb/projects/work/camdl/docs/inference.md
+../../../inference.md
