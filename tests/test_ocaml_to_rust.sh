@@ -60,21 +60,27 @@ print(s[0]['name'] if s else '')
     fi
 done
 
-# ── Experiment pipeline tests ─────────────────────────────────────────────────
+# ── Batch pipeline tests ─────────────────────────────────────────────────────
+#
+# Previously named `experiment` — the subcommand was renamed to
+# `simulate batch` on 2026-04-17 (commit 4d1291b). The `summarize`
+# sub-subcommand was removed at the same time (see
+# docs/dev/proposals/2026-04-16-cas-simulate.md); trajectory aggregation
+# now lives in `camdl list` / `camdl cat`.
 
-run_experiment_test() {
+run_batch_test() {
     local fixture="$1"        # e.g. tests/fixtures/exp_sir_basic.toml
     local expected_runs="$2"  # e.g. 50
     local name
     name=$(basename "$fixture" .toml)
 
     local outdir
-    outdir=$(mktemp -d /tmp/camdl_exp_XXXXXX)
+    outdir=$(mktemp -d /tmp/camdl_batch_XXXXXX)
     trap "rm -rf '$outdir'" RETURN
 
     # run
-    if ! "$CAMDL" experiment run "$fixture" --output-dir "$outdir" --parallel 2 > /dev/null; then
-        echo "FAIL [experiment run] $name"; FAIL=$((FAIL+1)); return
+    if ! "$CAMDL" simulate batch "$fixture" --output-dir "$outdir" --parallel 2 > /dev/null; then
+        echo "FAIL [simulate batch] $name"; FAIL=$((FAIL+1)); return
     fi
 
     # check manifest completed count
@@ -86,33 +92,22 @@ run_experiment_test() {
     fi
 
     # resume is a no-op (re-run without --force, check it succeeds)
-    if ! "$CAMDL" experiment run "$fixture" --output-dir "$outdir" --parallel 2 > /dev/null; then
+    if ! "$CAMDL" simulate batch "$fixture" --output-dir "$outdir" --parallel 2 > /dev/null; then
         echo "FAIL [resume] $name"; FAIL=$((FAIL+1)); return
     fi
 
-    # summarize
-    if ! "$CAMDL" experiment summarize "$outdir" > /dev/null; then
-        echo "FAIL [summarize] $name"; FAIL=$((FAIL+1)); return
-    fi
-
-    # check at least one scenario summary TSV exists
-    if ! ls "$outdir"/analysis/summaries/*.tsv > /dev/null 2>&1; then
-        echo "FAIL [summaries] $name: no summary TSVs found"
-        FAIL=$((FAIL+1)); return
-    fi
-
-    echo "PASS [experiment] $name"
+    echo "PASS [batch] $name"
     PASS=$((PASS+1))
 }
 
-run_experiment_test tests/fixtures/exp_malaria.toml               60
-run_experiment_test tests/fixtures/exp_sir_basic.toml             50
-run_experiment_test tests/fixtures/exp_seir_erlang.toml           40
-run_experiment_test tests/fixtures/exp_sir_five_age.toml          40
-run_experiment_test tests/fixtures/exp_sir_patches_5.toml         40
-run_experiment_test tests/fixtures/exp_seir_vaccine.toml          30
-run_experiment_test tests/fixtures/exp_seir_vaccine_seasonal.toml 30
-run_experiment_test tests/fixtures/exp_polio_spatial_5.toml       45
+run_batch_test tests/fixtures/exp_malaria.toml               60
+run_batch_test tests/fixtures/exp_sir_basic.toml             50
+run_batch_test tests/fixtures/exp_seir_erlang.toml           40
+run_batch_test tests/fixtures/exp_sir_five_age.toml          40
+run_batch_test tests/fixtures/exp_sir_patches_5.toml         40
+run_batch_test tests/fixtures/exp_seir_vaccine.toml          30
+run_batch_test tests/fixtures/exp_seir_vaccine_seasonal.toml 30
+run_batch_test tests/fixtures/exp_polio_spatial_5.toml       45
 
 echo ""
 echo "Results: $PASS passed, $FAIL failed"

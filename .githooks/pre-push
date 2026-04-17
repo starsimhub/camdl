@@ -1,23 +1,17 @@
 #!/bin/bash
-# Pre-push hook: catch compile errors before they hit CI.
-# Runs cargo check + clippy, OCaml build + tests.
-# Skip with: git push --no-verify
+# Pre-push hook: catch what CI catches, before CI has to catch it.
+# Mirror of .github/workflows/ci.yml's `test` job, minus the Linux-
+# specific setup. Skip with: git push --no-verify.
+#
+# Rule of thumb: if CI would fail, this must fail too. No exceptions.
+# The last time this hook let a CI failure through (2026-04-17, commit
+# 19677a0), the root cause was `cargo check --tests` compiling tests
+# without running them. Don't repeat the mistake — run the actual tests.
 
 set -e
 
-echo "pre-push: checking Rust..."
-(cd rust && cargo check --all --tests 2>&1) || {
-    echo "error: Rust check failed. Fix before pushing."
-    exit 1
-}
-
-echo "pre-push: clippy..."
-(cd rust && cargo clippy --all-targets -- -D warnings 2>&1) || {
-    echo "error: clippy failed. Fix before pushing."
-    exit 1
-}
-
-echo "pre-push: checking OCaml..."
+# ── OCaml: compile + tests ────────────────────────────────────────────
+echo "pre-push: OCaml build..."
 (cd ocaml && dune build 2>&1) || {
     echo "error: OCaml build failed. Fix before pushing."
     exit 1
@@ -28,5 +22,54 @@ echo "pre-push: OCaml tests..."
     echo "error: OCaml tests failed. Fix before pushing."
     exit 1
 }
+
+# ── Rust: build + clippy + actual tests (not just --check) ────────────
+# Use `cargo test --workspace` — compiles everything AND runs tests.
+# Previously this step used `cargo check --tests` which compiled tests
+# but never executed them; runtime failures and assertion failures
+# slipped through to CI. `cargo test` is only marginally slower than
+# check because compile is the bottleneck.
+echo "pre-push: Rust build + tests..."
+(cd rust && cargo test --workspace --no-fail-fast 2>&1) || {
+    echo "error: Rust tests failed. Fix before pushing."
+    exit 1
+}
+
+echo "pre-push: clippy..."
+(cd rust && cargo clippy --all-targets -- -D warnings 2>&1) || {
+    echo "error: clippy failed. Fix before pushing."
+    exit 1
+}
+
+# ── Golden files: regenerate and check for unintended drift ───────────
+# CI runs `make update-golden && git diff --exit-code ir/golden/ ocaml/golden/`.
+# Mirror it here so a schema change that forgot to update goldens is
+# caught locally, not after push.
+echo "pre-push: golden files unchanged..."
+make -s update-golden > /dev/null 2>&1 || {
+    echo "error: make update-golden failed."
+    exit 1
+}
+if ! git diff --quiet ir/golden/ ocaml/golden/ 2>/dev/null; then
+    echo "error: golden files changed after regeneration. Either:"
+    echo "  - commit the intentional update: git add ir/golden/ ocaml/golden/ && git commit"
+    echo "  - or revert: git checkout -- ir/golden/ ocaml/golden/"
+    echo ""
+    git --no-pager diff --stat ir/golden/ ocaml/golden/ 2>/dev/null | head -20
+    exit 1
+fi
+
+# ── Integration: shell out to the built binary against fixtures ───────
+# `make test-integration` runs tests/test_ocaml_to_rust.sh — the script
+# that actually exercises `camdl simulate batch FILE` end-to-end against
+# golden fixtures. This is the layer that caught the CI failure on
+# 2026-04-17 (a rename from `experiment` to `simulate batch` that the
+# compile-only check happily missed). Keep it in.
+echo "pre-push: integration tests..."
+make -s test-integration 2>&1 | tail -5
+if [ "${PIPESTATUS[0]}" -ne 0 ]; then
+    echo "error: integration tests failed. Fix before pushing."
+    exit 1
+fi
 
 echo "pre-push: all checks passed."
