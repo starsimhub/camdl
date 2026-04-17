@@ -1,5 +1,7 @@
 mod util;
 mod hashing;
+#[allow(dead_code)] // wired up by --cas branch in the next commit
+mod cas;
 mod sampling;
 #[allow(dead_code)]
 mod experiment; // used by --batch delegation
