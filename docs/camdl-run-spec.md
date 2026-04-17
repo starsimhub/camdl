@@ -678,7 +678,78 @@ camdl simulate model.camdl --params p.toml --scenario with_sia --param beta=0.5 
 --table NAME=FILE          # supply external() table data
 ```
 
-### 4.4 Synthetic Observations
+### 4.4 `--cas` — opt-in content-addressable caching
+
+```bash
+# Cache output; repeated identical invocations are instant
+camdl simulate model.camdl --params p.toml --seed 42 --cas
+# stderr: cached: output/runs/<sim_hash>/<scenario>-<scen_hash>/seed_42/
+# stdout: trajectory TSV as usual
+
+# Run again: cache hit, no simulation
+camdl simulate model.camdl --params p.toml --seed 42 --cas
+# stderr: cache hit: output/runs/<sim_hash>/<scenario>-<scen_hash>/seed_42/
+# stdout: same trajectory, read from cache
+
+# Browse cached runs
+camdl list
+camdl show <short-hash>
+camdl cat <short-hash>
+```
+
+**Scope.** `--cas` currently supports single-run invocations only — one
+seed, one scenario, no `--draws` / `--replicates`. For sweeps use
+`--batch` (§5), which has had content-addressable output since v0.2.
+
+**Layout.** Same as batch — `output/runs/{sim_hash[:8]}/{scenario_slug}-{scen_hash[:8]}/seed_{n}/traj.tsv`.
+See §2.4.
+
+**Hash composition.** `sim_hash` keys on model IR + base params + backend
++ dt + **runtime version** (VERSION_SHORT, includes git hash).
+`scen_hash` keys on enable/disable/param overrides + runtime version.
+A code change that alters simulation semantics (intervention expansion,
+scenario resolution, etc.) invalidates the cache under identical
+inputs — no silent stale results.
+
+**Stderr vs stdout convention.** `cached: <path>` / `cache hit: <path>`
+are logged to stderr; trajectory bytes go to stdout (or `-o FILE`).
+Pipelines like `camdl simulate ... --cas > out.tsv` work as expected.
+
+**Output location.** Defaults to `./output` (matches `--batch`). Override
+with `--output-dir DIR`.
+
+### 4.5 `camdl list` / `camdl show` / `camdl cat` — browse cached runs
+
+```bash
+# Tabular overview — most recent first
+camdl list
+camdl list --since 1h          # last hour
+camdl list --scenario baseline --all
+camdl list --format json       # scripts / external tooling
+
+# Full metadata for one run (resolves short-hash prefix git-style)
+camdl show abc1234
+camdl show ./output/runs/abc12345/baseline-def45/seed_42
+
+# Emit trajectory or a named observation stream
+camdl cat abc1234
+camdl cat abc1234 --obs cases
+```
+
+`camdl list` walks `./output/runs/` (or a given path) and shows:
+
+```
+CREATED     MODEL              SCENARIO  SEED  PARAMS  SIZE  PATH
+5m ago      sir.camdl          baseline  42    —       12K   ./output/runs/abc12345/baseline-def45/seed_42
+yesterday   seir.camdl         vacc       7    —       48K   ./output/runs/77cc8a21/vacc-9f88/seed_7
+```
+
+Relative paths are copy-paste ready — feed them straight into
+`camdl show` / `camdl cat`. Short-hash prefix resolution is git-style:
+unique prefix succeeds, ambiguous prefix errors with a list of matches
+and a suggestion to refine (`prefix/scenario[/seed]`).
+
+### 4.6 Synthetic Observations
 
 ```bash
 # Generate synthetic observations from the observations block
