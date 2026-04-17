@@ -1575,5 +1575,12 @@ pub fn compute_config_hash(fit: &super::config::FitToml, config: &FitRunConfig) 
     h.update(config.if2_config.n_particles.to_le_bytes());
     h.update(config.if2_config.dt.to_bits().to_le_bytes());
 
+    // Pin the runtime version. Without this, a code change that alters
+    // inference semantics but leaves the config bytes identical would
+    // silently reuse stale cached state. Matches compute_config_hash_v2
+    // and compute_input_hash, which were already version-aware.
+    h.update(b"\x00");
+    h.update(crate::version::VERSION_SHORT.as_bytes());
+
     hex::encode(h.finalize())
 }

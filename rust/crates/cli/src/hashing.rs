@@ -59,6 +59,20 @@ pub fn sim_hash(model_hash: &str, params_canonical: &str, backend: &str, dt: f64
 /// not just hash the compose list by name. Hashing names would break cache correctness
 /// if a composed scenario's params change without the parent scenario changing.
 pub fn scen_hash(enable: &[String], disable: &[String], params: &HashMap<String, f64>) -> String {
+    scen_hash_with_version(enable, disable, params, version::VERSION_SHORT)
+}
+
+/// Test-visible variant that allows injecting a synthetic version string.
+/// Production code should go through [`scen_hash`], which pins the version
+/// to `version::VERSION_SHORT` (semver + git hash). The runtime-version
+/// component is load-bearing: without it, a code change that alters
+/// scenario resolution (e.g. family-name expansion in
+/// `resolve_enable_list`) would silently return stale cached results
+/// under identical hashes.
+pub(crate) fn scen_hash_with_version(
+    enable: &[String], disable: &[String], params: &HashMap<String, f64>,
+    version_short: &str,
+) -> String {
     let mut h = Sha256::new();
 
     // Sort enables/disables so order in TOML doesn't matter
@@ -79,6 +93,8 @@ pub fn scen_hash(enable: &[String], disable: &[String], params: &HashMap<String,
     }
     h.update(b"params\x00");
     h.update(canonical_params(params).as_bytes());
+    h.update(b"\x00");
+    h.update(version_short.as_bytes());
     hex::encode(h.finalize())
 }
 
@@ -185,6 +201,18 @@ mod tests {
     fn scen_hash_returns_64_hex_chars() {
         let p: HashMap<String, f64> = HashMap::new();
         assert_eq!(scen_hash(&[], &[], &p).len(), 64);
+    }
+
+    #[test]
+    fn scen_hash_version_invalidates() {
+        // Regression guard: a code change that alters scenario semantics
+        // (e.g. resolve_enable_list family expansion) must invalidate the
+        // cache. Version is pinned into scen_hash so two differing
+        // versions produce different digests even with identical inputs.
+        let p: HashMap<String, f64> = HashMap::new();
+        let h_v1 = scen_hash_with_version(&["sia".into()], &[], &p, "0.1.0+aaaaaaa");
+        let h_v2 = scen_hash_with_version(&["sia".into()], &[], &p, "0.1.0+bbbbbbb");
+        assert_ne!(h_v1, h_v2, "scen_hash must invalidate on version change");
     }
 
     // ── slug ─────────────────────────────────────────────────────────────────
