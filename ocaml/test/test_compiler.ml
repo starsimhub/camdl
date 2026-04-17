@@ -2015,6 +2015,76 @@ let test_projected_bare_stratified_compartment () =
      | _ -> Alcotest.fail "expected CurrentPopSum projection for bare stratified compartment")
   | _ -> Alcotest.fail "expected exactly one observation block"
 
+(* Fully-indexed prevalence on a stratified compartment picks a specific
+   stratum (not a sum). Guards against over-eagerly sum-expanding when
+   the user wanted one. *)
+let test_prevalence_fully_indexed_stratified () =
+  let src = {|
+    time_unit = 'days
+    compartments { S, E, I, R }
+    dimensions { latent_stage = [e1, e2, e3] }
+    stratify(by = latent_stage, only = [E])
+    parameters {
+      beta  : rate in [0.001, 2.0]
+      sigma : rate in [0.01, 1.0]
+      gamma : rate in [0.01, 1.0]
+      k     : real in [1.0, 100.0]
+    }
+    transitions {
+      infection : S --> E[e1] @ beta * S * I / (S + E + I + R)
+      latent[(s, s_next) in consecutive(latent_stage)]
+        : E[s] --> E[s_next] @ 3 * sigma * E[s]
+      onset : E[e3] --> I @ 3 * sigma * E[e3]
+      recovery : I --> R @ gamma * I
+    }
+    observations {
+      first_latent : {
+        projected  = prevalence(E[e1])
+        every      = 1 'days
+        likelihood = neg_binomial(mean = projected, r = k)
+      }
+    }
+    init { S = 990  E[e1] = 5  I = 5 }
+    simulate { from = 0 'days  to = 10 'days }
+  |} in
+  let m = compile_expect_ok src in
+  match (List.hd m.observations).projection with
+  | Ir.CurrentPop "E_e1" -> ()
+  | Ir.CurrentPopSum _ ->
+    Alcotest.fail "fully-indexed prevalence must not sum over strata"
+  | Ir.CurrentPop other ->
+    Alcotest.failf "expected CurrentPop E_e1, got CurrentPop %s" other
+  | _ -> Alcotest.fail "expected CurrentPop projection"
+
+(* Unstratified compartment — behavior unchanged. *)
+let test_prevalence_unstratified () =
+  let src = {|
+    time_unit = 'days
+    compartments { S, I, R }
+    parameters {
+      beta  : rate in [0.001, 2.0]
+      gamma : rate in [0.01, 1.0]
+      k     : real in [1.0, 100.0]
+    }
+    transitions {
+      infection : S --> I @ beta * S * I
+      recovery  : I --> R @ gamma * I
+    }
+    observations {
+      prev : {
+        projected  = prevalence(I)
+        every      = 1 'days
+        likelihood = neg_binomial(mean = projected, r = k)
+      }
+    }
+    init { S = 999  I = 1 }
+    simulate { from = 0 'days  to = 10 'days }
+  |} in
+  let m = compile_expect_ok src in
+  match (List.hd m.observations).projection with
+  | Ir.CurrentPop "I" -> ()
+  | _ -> Alcotest.fail "expected CurrentPop I on unstratified compartment"
+
 let () =
   Alcotest.run "compiler" [
     "golden", [
@@ -2154,5 +2224,7 @@ let () =
     "observation_projections", [
       Alcotest.test_case "prevalence(E) sums Erlang substages"           `Quick test_prevalence_on_stratified_compartment;
       Alcotest.test_case "bare E in projected sums Erlang substages"     `Quick test_projected_bare_stratified_compartment;
+      Alcotest.test_case "prevalence(E[e1]) picks single stratum"        `Quick test_prevalence_fully_indexed_stratified;
+      Alcotest.test_case "prevalence(I) unstratified is unchanged"       `Quick test_prevalence_unstratified;
     ];
   ]

@@ -106,6 +106,88 @@ fn build_obs_model(compiled: &Arc<CompiledModel>, projection: StreamProjection, 
     )
 }
 
+/// `CurrentPopSum(["E_e1", "E_e2", "E_e3"])` — the IR shape the compiler
+/// emits for `prevalence(E)` on an Erlang-stratified `E` — resolves
+/// through `StreamProjection::from_ir` to an `IntCompSum` whose sum
+/// matches the declared-order local indices. Guards the compiler↔runtime
+/// contract for the Erlang-substage prevalence case.
+#[test]
+fn current_pop_sum_from_ir_resolves_stratified_compartments() {
+    let mut init = HashMap::new();
+    init.insert("S".into(),     900.0);
+    init.insert("E_e1".into(),   10.0);
+    init.insert("E_e2".into(),    7.0);
+    init.insert("E_e3".into(),    3.0);
+    init.insert("I".into(),       5.0);
+    let compartments = vec![
+        int_comp("S"), int_comp("E_e1"), int_comp("E_e2"), int_comp("E_e3"), int_comp("I"),
+    ];
+    let compiled = Arc::new(CompiledModel::new(model_with_obs(
+        compartments, init,
+        Projection::CurrentPopSum(vec!["E_e1".into(), "E_e2".into(), "E_e3".into()]),
+    )).unwrap());
+    let params = compiled.default_params.clone();
+
+    // The from_ir resolver must pick the three E_e* int indices.
+    let projection = StreamProjection::from_ir(
+        &compiled.model.observations[0].projection, &compiled, "obs",
+    ).expect("CurrentPopSum over declared compartments must resolve");
+
+    // Build a state and verify the projection sums E_e1 + E_e2 + E_e3 = 20.
+    let mut state = ParticleState::new(5, 0);
+    state.counts[0] = 900;
+    state.counts[1] = 10;
+    state.counts[2] = 7;
+    state.counts[3] = 3;
+    state.counts[4] = 5;
+
+    let obs_model = MultiStreamObsModel::new(
+        vec![StreamSpec {
+            projection,
+            ir_model: compiled.model.observations[0].clone(),
+            observations: vec![20.0],
+            obs_times: vec![5.0],
+        }],
+        compiled.clone(),
+    );
+    // Poisson(observed=20, rate=projected+0.1) peaks at projected≈20.
+    let ll_at_truth = obs_model.log_likelihood(&state, 0, &params);
+    assert!(ll_at_truth.is_finite(), "log-lik must be finite: {}", ll_at_truth);
+    // Sanity: a state where only E_e1 is nonzero scores worse.
+    let mut state_skewed = ParticleState::new(5, 0);
+    state_skewed.counts[1] = 20;
+    let ll_skewed = obs_model.log_likelihood(&state_skewed, 0, &params);
+    assert!((ll_at_truth - ll_skewed).abs() < 1e-9,
+        "projection must sum the three E_e* compartments — projecting from \
+         (10+7+3)=20 and from (20+0+0)=20 should score identically ({} vs {})",
+        ll_at_truth, ll_skewed);
+}
+
+/// An unknown compartment name in a `CurrentPopSum` must produce a
+/// readable error from `from_ir`, not a panic, not a silent miss.
+#[test]
+fn current_pop_sum_unknown_compartment_errors_cleanly() {
+    let mut init = HashMap::new();
+    init.insert("S".into(), 100.0);
+    init.insert("I".into(),  5.0);
+    let compiled = Arc::new(CompiledModel::new(model_with_obs(
+        vec![int_comp("S"), int_comp("I")],
+        init,
+        Projection::CurrentPopSum(vec!["I".into(), "NOT_A_COMPARTMENT".into()]),
+    )).unwrap());
+
+    let err = match StreamProjection::from_ir(
+        &compiled.model.observations[0].projection, &compiled, "obs",
+    ) {
+        Ok(_)  => panic!("unknown compartment must be rejected"),
+        Err(e) => e,
+    };
+    assert!(err.contains("NOT_A_COMPARTMENT"),
+        "error must name the bad compartment for debuggability: {}", err);
+    assert!(err.contains("obs"),
+        "error must name the observation block: {}", err);
+}
+
 /// `CurrentPop("I")` reads the `I` compartment at the observation tick
 /// and scores the likelihood against it. Ground-truth state has `I = 42`,
 /// so `projected` is 42 and the Poisson log-likelihood at `observed = 42`
