@@ -1922,6 +1922,99 @@ let test_prior_arg_exp_and_sqrt () =
     Alcotest.(check (float 1e-12)) "rate = exp(0)" 1.0 rate
   | _ -> Alcotest.fail "expected Gamma prior"
 
+(* ── Observation projections on stratified compartments ────────────────────
+   `prevalence(E)` on an Erlang-stratified `E` (E_e1, E_e2, E_e3) should
+   expand to `CurrentPopSum [E_e1; E_e2; E_e3]`, following the same
+   "omitted dimension sums over it" rule that applies to rate expressions
+   (see `resolve_ident_name` and language spec §5.1). Previously emitted
+   `CurrentPop "E"` which the Rust runtime could not resolve.
+   See docs/dev/proposals/2026-04-17-state-snapshot-projections.md. *)
+let test_prevalence_on_stratified_compartment () =
+  let src = {|
+    time_unit = 'days
+    compartments { S, E, I, R }
+    dimensions { latent_stage = [e1, e2, e3] }
+    stratify(by = latent_stage, only = [E])
+    parameters {
+      beta  : rate in [0.001, 2.0]
+      sigma : rate in [0.01, 1.0]
+      gamma : rate in [0.01, 1.0]
+      k     : real in [1.0, 100.0]
+    }
+    transitions {
+      infection : S --> E[e1] @ beta * S * I / (S + E + I + R)
+      latent[(s, s_next) in consecutive(latent_stage)]
+        : E[s] --> E[s_next] @ 3 * sigma * E[s]
+      onset : E[e3] --> I @ 3 * sigma * E[e3]
+      recovery : I --> R @ gamma * I
+    }
+    observations {
+      in_latent : {
+        projected  = prevalence(E)
+        every      = 1 'days
+        likelihood = neg_binomial(mean = projected, r = k)
+      }
+    }
+    init { S = 990  E[e1] = 5  I = 5 }
+    simulate { from = 0 'days  to = 10 'days }
+  |} in
+  let m = compile_expect_ok src in
+  match m.observations with
+  | [obs] ->
+    (match obs.projection with
+     | Ir.CurrentPopSum names ->
+       Alcotest.(check (list string))
+         "prevalence(E) expands to all Erlang substages"
+         ["E_e1"; "E_e2"; "E_e3"] names
+     | Ir.CurrentPop name ->
+       Alcotest.failf
+         "expected CurrentPopSum over Erlang substages; got CurrentPop(%s)" name
+     | _ ->
+       Alcotest.fail "expected CurrentPopSum projection")
+  | _ -> Alcotest.fail "expected exactly one observation block"
+
+(* Same rule for `projected = E` (bare identifier form that resolves to a
+   stratified compartment). *)
+let test_projected_bare_stratified_compartment () =
+  let src = {|
+    time_unit = 'days
+    compartments { S, E, I, R }
+    dimensions { latent_stage = [e1, e2, e3] }
+    stratify(by = latent_stage, only = [E])
+    parameters {
+      beta  : rate in [0.001, 2.0]
+      sigma : rate in [0.01, 1.0]
+      gamma : rate in [0.01, 1.0]
+      k     : real in [1.0, 100.0]
+    }
+    transitions {
+      infection : S --> E[e1] @ beta * S * I / (S + E + I + R)
+      latent[(s, s_next) in consecutive(latent_stage)]
+        : E[s] --> E[s_next] @ 3 * sigma * E[s]
+      onset : E[e3] --> I @ 3 * sigma * E[e3]
+      recovery : I --> R @ gamma * I
+    }
+    observations {
+      latent_total : {
+        projected  = E
+        every      = 1 'days
+        likelihood = neg_binomial(mean = projected, r = k)
+      }
+    }
+    init { S = 990  E[e1] = 5  I = 5 }
+    simulate { from = 0 'days  to = 10 'days }
+  |} in
+  let m = compile_expect_ok src in
+  match m.observations with
+  | [obs] ->
+    (match obs.projection with
+     | Ir.CurrentPopSum names ->
+       Alcotest.(check (list string))
+         "bare E in projection expands to all Erlang substages"
+         ["E_e1"; "E_e2"; "E_e3"] names
+     | _ -> Alcotest.fail "expected CurrentPopSum projection for bare stratified compartment")
+  | _ -> Alcotest.fail "expected exactly one observation block"
+
 let () =
   Alcotest.run "compiler" [
     "golden", [
@@ -2057,5 +2150,9 @@ let () =
       Alcotest.test_case "E235 exponential(rate=0)"                      `Quick test_e235_exponential_zero_rate;
       Alcotest.test_case "E235 normal(sigma<0)"                          `Quick test_e235_normal_negative_sigma;
       Alcotest.test_case "E235 half_normal(sigma=0)"                     `Quick test_e235_half_normal_zero_sigma;
+    ];
+    "observation_projections", [
+      Alcotest.test_case "prevalence(E) sums Erlang substages"           `Quick test_prevalence_on_stratified_compartment;
+      Alcotest.test_case "bare E in projected sums Erlang substages"     `Quick test_projected_bare_stratified_compartment;
     ];
   ]

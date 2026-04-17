@@ -2070,6 +2070,26 @@ let expand_observations ctx =
       | ObsTimes ts ->
         Ir.ObsAtTimes (List.map (resolve_float_expr ctx) ts)
     in
+    (* `prevalence(X)` projects a compartment snapshot at observation time.
+       If X is Erlang- or otherwise-stratified, the bare name has no concrete
+       expansion — the user means "sum over all strata," matching how the
+       same bare name in a rate expression expands to PopSum (see
+       `resolve_ident_name`, §5.1 of the language spec). Emit CurrentPopSum
+       when the base name is a declared compartment with >1 expansions. *)
+    let prevalence_projection base idx_vals =
+      let concrete = if idx_vals = [] then base
+        else String.concat "_" (base :: idx_vals) in
+      if Hashtbl.mem ctx.expanded_comp_tbl concrete then
+        Ir.CurrentPop concrete
+      else if idx_vals = [] && Hashtbl.mem ctx.comp_tbl base then
+        (* Bare stratified compartment — sum over all strata. *)
+        let expansions = expand_compartment_name ctx base in
+        (match expansions with
+         | [single] -> Ir.CurrentPop single
+         | many     -> Ir.CurrentPopSum many)
+      else
+        Ir.CurrentPop concrete  (* Unknown — let the Rust side emit a clean diagnostic. *)
+    in
     let projection = match od.oprojection with
       | ProjIncidence (name, idxs) ->
         let idx_vals = List.map (index_item_to_str env) idxs in
@@ -2078,9 +2098,7 @@ let expand_observations ctx =
         Ir.CumulativeFlow concrete
       | ProjPrevalence (name, idxs) ->
         let idx_vals = List.map (index_item_to_str env) idxs in
-        let concrete = if idx_vals = [] then name
-          else String.concat "_" (name :: idx_vals) in
-        Ir.CurrentPop concrete
+        prevalence_projection name idx_vals
       | ProjDerived (EFuncCall ("incidence", args)) ->
         (match List.assoc_opt "" args with
          | Some (EIdent (n, _))    -> Ir.CumulativeFlow n
@@ -2089,14 +2107,16 @@ let expand_observations ctx =
          | _ -> Ir.CumulativeFlow "?")
       | ProjDerived (EFuncCall ("prevalence", args)) ->
         (match List.assoc_opt "" args with
-         | Some (EIdent (n, _))    -> Ir.CurrentPop n
+         | Some (EIdent (n, _))    -> prevalence_projection n []
          | Some (EIndex (n, idxs)) ->
-           Ir.CurrentPop (String.concat "_" (n :: List.map (index_item_to_str env) idxs))
+           prevalence_projection n (List.map (index_item_to_str env) idxs)
          | _ -> Ir.CurrentPop "?")
       | ProjDerived (EIdent (name, _)) ->
         (* Disambiguate: is this a compartment (prevalence) or transition (flow)? *)
         if Hashtbl.mem ctx.expanded_comp_tbl name then
           Ir.CurrentPop name
+        else if Hashtbl.mem ctx.comp_tbl name then
+          prevalence_projection name []
         else
           Ir.CumulativeFlow name
       | ProjDerived (EIndex (name, idxs)) ->
@@ -2104,6 +2124,8 @@ let expand_observations ctx =
         let concrete = String.concat "_" (name :: idx_vals) in
         if Hashtbl.mem ctx.expanded_comp_tbl concrete then
           Ir.CurrentPop concrete
+        else if Hashtbl.mem ctx.comp_tbl name then
+          prevalence_projection name idx_vals
         else
           Ir.CumulativeFlow concrete
       | ProjDerived e ->
