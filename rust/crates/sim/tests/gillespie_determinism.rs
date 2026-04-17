@@ -106,3 +106,76 @@ fn test_gillespie_different_seeds_different_output() {
         .any(|(s1, s2)| s1.int_state.counts != s2.int_state.counts);
     assert!(any_differ, "Different seeds should produce different trajectories");
 }
+
+/// Regression: `source_groups` ordering inside CompiledModel must be
+/// deterministic across recompilations of the same model. Prior to the
+/// fix, `groups.into_iter().collect()` preserved HashMap randomized
+/// iteration order, so the same .ir.json could produce two different
+/// orderings — and since downstream chain_binomial/PGAS/PMMH consume the
+/// RNG in source_groups order, the same seed produced different
+/// trajectories across runs in the same process.
+#[test]
+fn test_source_groups_is_sorted_and_stable() {
+    // Use a multi-transition model so several compartments act as sources,
+    // giving the HashMap a chance to shuffle.
+    let model = load_model("sir_basic");
+    let mut m = model.clone();
+    for p in &mut m.parameters {
+        match p.name.as_str() {
+            "beta"  => p.value = Some(0.3),
+            "gamma" => p.value = Some(0.1),
+            "N0"    => p.value = Some(1000.0),
+            "I0"    => p.value = Some(10.0),
+            _ => {}
+        }
+    }
+
+    // Compile the same model 20 times. Every compilation must produce the
+    // same source_groups order, and that order must be sorted by src_local.
+    let first = CompiledModel::new(m.clone()).unwrap().source_groups.clone();
+    assert!(
+        first.windows(2).all(|w| w[0].0 < w[1].0),
+        "source_groups must be sorted by src_local (got: {:?})",
+        first.iter().map(|(s, _)| *s).collect::<Vec<_>>()
+    );
+    for _ in 0..20 {
+        let next = CompiledModel::new(m.clone()).unwrap().source_groups.clone();
+        assert_eq!(next, first,
+            "source_groups order drifted between compilations — \
+             HashMap randomization is leaking into simulation output");
+    }
+}
+
+/// Regression: a seeded simulation run must produce byte-identical output
+/// across 20 recompilations of the same model. This is the end-to-end
+/// version of the test above — it would fail the same way if any
+/// HashMap-ordered iteration made it into simulation code paths.
+#[test]
+fn test_recompile_preserves_trajectory() {
+    let model = load_model("sir_basic");
+    let mut m = model.clone();
+    for p in &mut m.parameters {
+        match p.name.as_str() {
+            "beta"  => p.value = Some(0.3),
+            "gamma" => p.value = Some(0.1),
+            "N0"    => p.value = Some(1000.0),
+            "I0"    => p.value = Some(10.0),
+            _ => {}
+        }
+    }
+    let config = SimConfig::Gillespie(GillespieConfig {
+        t_start: 0.0, t_end: 50.0, output_dt: None,
+    });
+    let compiled0 = CompiledModel::new(m.clone()).unwrap();
+    let traj0 = GillespieSim.run(&compiled0, &compiled0.default_params.clone(), 42, &config).unwrap();
+    for _ in 0..20 {
+        let compiled = CompiledModel::new(m.clone()).unwrap();
+        let traj = GillespieSim.run(&compiled, &compiled.default_params.clone(), 42, &config).unwrap();
+        assert_eq!(traj.snapshots.len(), traj0.snapshots.len(),
+            "trajectory length differs across recompilations");
+        for (i, (a, b)) in traj.snapshots.iter().zip(traj0.snapshots.iter()).enumerate() {
+            assert_eq!(a.int_state.counts, b.int_state.counts,
+                "snapshot {} counts differ across recompilations", i);
+        }
+    }
+}

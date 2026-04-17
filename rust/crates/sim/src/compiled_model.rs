@@ -431,7 +431,12 @@ impl CompiledModel {
             }
         }
 
-        // Group transitions by source compartment for multinomial draws
+        // Group transitions by source compartment for multinomial draws.
+        //
+        // Iteration order of `source_groups` drives RNG consumption in the
+        // chain-binomial/PGAS/PMMH paths. HashMap::into_iter() is
+        // nondeterministic, so we sort by src_local after collecting — same
+        // seed + same model must always produce the same trajectory.
         let source_groups: Vec<(usize, Vec<usize>)> = {
             let mut groups: HashMap<usize, Vec<usize>> = HashMap::new();
             for (tr_idx, stoich) in transition_stoich.iter().enumerate() {
@@ -439,7 +444,9 @@ impl CompiledModel {
                     groups.entry(src_local).or_default().push(tr_idx);
                 }
             }
-            groups.into_iter().collect()
+            let mut out: Vec<(usize, Vec<usize>)> = groups.into_iter().collect();
+            out.sort_by_key(|(src, _)| *src);
+            out
         };
 
         // Pre-compute ODE equation → real local index

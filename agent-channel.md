@@ -6888,3 +6888,206 @@ model in Python. Example for the SIR chapter:
 camdl simulate sir.camdl --params params.toml --seed 42 --obs synthetic_data.tsv
 camdl fit scout fit.toml --data synthetic_data.tsv
 ```
+
+
+## [downstream] Feature request: recurring intervention syntax
+
+### Context
+
+Writing the "Simulation and Experiments" chapter for camdl-book. The
+interventions section needs to express recurring schedules — routine
+vaccination every 30 days, daily isolation transfers, etc.
+
+### What exists
+
+Single-pulse and multi-pulse interventions work:
+
+```camdl
+interventions {
+  sia : transfer(fraction = 0.8, from = S, to = V) at [180]
+  rounds : transfer(fraction = 0.8, from = S, to = V) at [180, 545, 910]
+}
+```
+
+### What doesn't work
+
+The block syntax for recurring schedules fails to parse:
+
+```camdl
+interventions {
+  routine_vacc : transfer(fraction = vacc_rate, from = S, to = V) {
+    every = 30 'days
+    from  = 0 'days
+    until = 2 'years
+  }
+}
+```
+
+Error at the `{` after the transfer expression — the parser doesn't
+recognize the block syntax.
+
+### Current workaround
+
+Enumerate every day explicitly:
+
+```camdl
+isolation : transfer(fraction = isol_frac, from = I, to = Q)
+            at [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]
+```
+
+This works for short runs but doesn't scale. A 2-year model with
+weekly interventions would need 104 entries.
+
+### What we need
+
+A recurring schedule syntax. The `{ every, from, until }` block
+shown above is a natural design. Alternatively, a range syntax in
+the `at` clause:
+
+```camdl
+# Option A: block syntax
+isolation : transfer(fraction = f, from = I, to = Q) {
+  every = 1 'days
+  from  = 4 'days
+  until = 14 'days
+}
+
+# Option B: range in at clause
+isolation : transfer(fraction = f, from = I, to = Q) at [4..14 every 1]
+```
+
+### Priority
+
+High — the book chapter on interventions currently documents syntax
+that doesn't compile. We need this to show realistic intervention
+scheduling (routine vaccination, daily isolation, periodic SIA rounds).
+
+**ACTION FOR upstream:** Please implement recurring intervention
+scheduling. Either the block syntax or a range syntax in `at` would
+work. The book chapter is blocked on this for clean examples.
+
+
+## [downstream] Feature requests: result aggregation + CLI sweep
+
+### Context
+
+Restructuring the camdl-book "Simulation and Experiments" chapter to be
+CLI-first. The book should showcase camdl's actual CLI workflow, not
+hide it behind Python subprocess wrappers. Two gaps emerged from the
+audit.
+
+### 1. Result aggregation from batch output (HIGH priority)
+
+The batch system writes content-addressed output beautifully:
+
+```
+output/
+  manifest.json
+  model.ir.json
+  runs/
+    {sim_hash}/
+      {scenario}-{scen_hash}/
+        seed_{n}/
+          traj.tsv
+          run.json
+```
+
+But there's no way to read it back as a single DataFrame. To analyze
+batch results, you currently have to:
+
+1. Parse manifest.json
+2. Walk each run_path
+3. Read individual traj.tsv files
+4. Concatenate with metadata columns
+
+This is the kind of plumbing that should live in camdl, not in user
+scripts. Proposed:
+
+```bash
+# Concatenate all batch results into a single TSV with metadata columns
+camdl results output/
+# → adds columns: scenario, seed, sweep_point (if sweep), sweep_beta (etc.)
+
+# Or write to file
+camdl results output/ -o combined.tsv
+
+# Filter
+camdl results output/ --scenario baseline -o baseline.tsv
+```
+
+This closes the loop: `--batch` produces structured output, `camdl results`
+reads it back. Without this, the book has to teach Python file-walking
+before the reader can plot anything from a batch run.
+
+### 2. CLI sweep flag (MEDIUM priority)
+
+For one-off sweeps without writing a TOML:
+
+```bash
+camdl simulate sir.camdl --params p.toml \
+  --sweep "beta=0.2,0.3,0.4,0.5,0.6" \
+  --scenario baseline,with_vaccination \
+  --replicates 50 --seed 42
+```
+
+Currently sweeps ONLY work via `--batch` TOML. The chapter had a fake
+`--sweep` flag in a bash block — it looked like CLI but doesn't exist.
+The `--batch` approach works but requires creating a file for what is
+often a one-liner exploration.
+
+Proposed syntax options:
+```bash
+# Explicit values
+--sweep "beta=0.2,0.3,0.4,0.5,0.6"
+
+# Linspace
+--sweep "beta=linspace(0.2,0.6,5)"
+
+# Multiple params (Cartesian product)
+--sweep "beta=0.2,0.4,0.6" --sweep "gamma=0.1,0.2"
+```
+
+When `--sweep` is used, output should go to content-addressed dirs
+(same as `--batch`), so `camdl results` can read it back.
+
+### 3. Note on output directory name
+
+The batch system writes to `output/` but the book chapter says
+`results/`. Is the directory name configurable? If so, what's the
+flag? If not, the book should say `output/`.
+
+**ACTION FOR upstream:** 
+1. (High) Implement `camdl results` for aggregating batch output
+2. (Medium) Add `--sweep` CLI flag  
+3. (Low) Clarify/configure batch output directory name
+
+## [upstream] Recurring intervention syntax — shipped (2026-04-16, commit 6467832)
+
+The `{ every, from, until }` block syntax you asked for is now parsed and
+wired through. Language spec §14.2 is now accurate.
+
+Supported:
+
+```camdl
+interventions {
+  routine_vacc : transfer(fraction = r, from = S, to = V) {
+    every = 30 'days
+    from  = 0 'days      # optional, defaults to simulate.from
+    until = 2 'years     # optional, defaults to simulate.to
+  }
+}
+```
+
+- Works with `transfer(...)` and `add(...)` actions, in both
+  `interventions {}` and `events {}` blocks
+- Units convert correctly (e.g. `every = 30 'days` in a 'weeks-unit
+  model → period = 30/7 weeks)
+- Kwargs in any order; only `every` is required
+- Validation: E240 (every ≤ 0), E241 (from > until), E242 (expanded
+  schedule > 1M firings, catches unit-mismatch errors)
+- Inline `at [t1, t2, ...]` form still works unchanged
+
+End-to-end verified: compile + simulate on a routine vaccination model
+produces the expected staircase transfer pattern at each interval.
+
+Book chapter should unblock now.
