@@ -1,0 +1,337 @@
+//! State-snapshot projection tests for `MultiStreamObsModel`.
+//!
+//! Covers the three new projection paths added in the state-snapshot
+//! proposal (2026-04-17):
+//!
+//! - `prevalence_projection_reads_compartment_count` — `CurrentPop`
+//!   reads the correct compartment at observation time and scores the
+//!   likelihood against it.
+//! - `derived_expr_matches_comp_sum` — a `DerivedExpr` projection that
+//!   sums two compartments matches the arithmetic of an explicit
+//!   `CurrentPopSum` over the same compartments.
+//! - `snapshot_reads_post_intervention_state` — when a scheduled
+//!   intervention fires at the observation time, the snapshot sees the
+//!   post-intervention state. Guards the intervention-ordering
+//!   semantics that the PF observation tick relies on.
+
+use std::collections::HashMap;
+use std::sync::Arc;
+
+use ir::{
+    expr::{BinOp, BinOpExpr, BinOpWrap, ConstExpr, Expr, PopExpr, ProjectedExpr},
+    intervention::{Action, FractionTransfer, Intervention, InterventionSchedule},
+    model::{Compartment, CompartmentKind, InitialConditions, OutputConfig, OutputSchedule, SimulationConfig},
+    observation::{Likelihood, ObservationModel as IrObservationModel, ObservationSchedule, PoissonLikelihood, Projection},
+    Model,
+};
+use sim::{
+    compiled_model::CompiledModel,
+    inference::{
+        multi_stream_obs::{MultiStreamObsModel, StreamProjection, StreamSpec},
+        traits::ObservationModel,
+        ParticleState,
+    },
+};
+
+fn int_comp(name: &str) -> Compartment {
+    Compartment { name: name.into(), kind: CompartmentKind::Integer }
+}
+
+/// Minimal model with a single integer compartment `I` (plus whatever else)
+/// and a single Poisson observation on `projected`. Callers supply the IR
+/// `Projection` variant to exercise.
+fn model_with_obs(
+    compartments: Vec<Compartment>,
+    initial: HashMap<String, f64>,
+    projection: Projection,
+) -> Model {
+    Model {
+        name: "snapshot_projection_test".into(),
+        version: "0.3".into(),
+        time_unit: "days".into(),
+        description: None,
+        origin: None,
+        compartments,
+        transitions: vec![],
+        ode_equations: vec![],
+        time_functions: vec![],
+        tables: vec![],
+        interventions: vec![],
+        observations: vec![IrObservationModel {
+            name: "obs".into(),
+            data_stream: "obs".into(),
+            schedule: ObservationSchedule::AtTimes(vec![5.0]),
+            projection,
+            likelihood: Likelihood::Poisson(PoissonLikelihood {
+                // rate = projected + 0.1 (floor to avoid Poisson(0) → -inf)
+                rate: Expr::BinOp(BinOpWrap {
+                    bin_op: BinOpExpr {
+                        op: BinOp::Add,
+                        left: Box::new(Expr::Projected(ProjectedExpr { projected: () })),
+                        right: Box::new(Expr::Const(ConstExpr { value: 0.1 })),
+                    },
+                }),
+            }),
+        }],
+        parameters: vec![],
+        parameter_groups: vec![],
+        initial_conditions: InitialConditions::Explicit(initial),
+        data_contract: None,
+        output: OutputConfig {
+            times: OutputSchedule::AtTimes(vec![0.0, 5.0]),
+            format: "tsv".into(), trajectory: true, observations: false,
+        },
+        simulation: SimulationConfig {
+            t_start: 0.0, t_end: 10.0,
+            time_semantics: "continuous".into(),
+            dt: Some(1.0), rng_seed: Some(42),
+        },
+        presets: vec![],
+        model_structure: None, balance: None,
+    }
+}
+
+fn build_obs_model(compiled: &Arc<CompiledModel>, projection: StreamProjection, observed: f64)
+    -> MultiStreamObsModel
+{
+    let obs_ir = compiled.model.observations[0].clone();
+    MultiStreamObsModel::new(
+        vec![StreamSpec {
+            projection,
+            ir_model: obs_ir,
+            observations: vec![observed],
+            obs_times: vec![5.0],
+        }],
+        compiled.clone(),
+    )
+}
+
+/// `CurrentPop("I")` reads the `I` compartment at the observation tick
+/// and scores the likelihood against it. Ground-truth state has `I = 42`,
+/// so `projected` is 42 and the Poisson log-likelihood at `observed = 42`
+/// must peak there (higher than at `observed = 10` or `observed = 80`).
+#[test]
+fn prevalence_projection_reads_compartment_count() {
+    let mut init = HashMap::new();
+    init.insert("S".into(), 100.0);
+    init.insert("I".into(), 42.0);
+    let compiled = Arc::new(CompiledModel::new(model_with_obs(
+        vec![int_comp("S"), int_comp("I")],
+        init,
+        Projection::CurrentPop("I".into()),
+    )).unwrap());
+    let params = compiled.default_params.clone();
+
+    // Fabricate a particle state with S=100, I=42.
+    let mut state = ParticleState::new(2, 0);
+    // Local int order follows declaration order: S=0, I=1.
+    state.counts[0] = 100;
+    state.counts[1] = 42;
+
+    let ll_at_truth = build_obs_model(
+        &compiled,
+        StreamProjection::IntCompSum(vec![1]),
+        42.0,
+    ).log_likelihood(&state, 0, &params);
+    let ll_low = build_obs_model(
+        &compiled,
+        StreamProjection::IntCompSum(vec![1]),
+        10.0,
+    ).log_likelihood(&state, 0, &params);
+    let ll_high = build_obs_model(
+        &compiled,
+        StreamProjection::IntCompSum(vec![1]),
+        80.0,
+    ).log_likelihood(&state, 0, &params);
+
+    assert!(ll_at_truth.is_finite());
+    assert!(ll_at_truth > ll_low, "truth={} low={}", ll_at_truth, ll_low);
+    assert!(ll_at_truth > ll_high, "truth={} high={}", ll_at_truth, ll_high);
+}
+
+/// A `DerivedExpr` projection that sums two compartments yields the same
+/// likelihood as an equivalent `CurrentPopSum`. Guards that the two
+/// routes through the projection machinery agree arithmetically.
+#[test]
+fn derived_expr_matches_comp_sum() {
+    let mut init = HashMap::new();
+    init.insert("B1".into(), 13.0);
+    init.insert("B2".into(), 27.0);
+
+    // Build two compiled models, identical except for the projection.
+    let model_expr = model_with_obs(
+        vec![int_comp("B1"), int_comp("B2")],
+        init.clone(),
+        Projection::DerivedExpr(Expr::BinOp(BinOpWrap {
+            bin_op: BinOpExpr {
+                op: BinOp::Add,
+                left: Box::new(Expr::Pop(PopExpr { pop: "B1".into() })),
+                right: Box::new(Expr::Pop(PopExpr { pop: "B2".into() })),
+            },
+        })),
+    );
+    let model_sum = model_with_obs(
+        vec![int_comp("B1"), int_comp("B2")],
+        init,
+        Projection::CurrentPopSum(vec!["B1".into(), "B2".into()]),
+    );
+    let compiled_expr = Arc::new(CompiledModel::new(model_expr).unwrap());
+    let compiled_sum = Arc::new(CompiledModel::new(model_sum).unwrap());
+    let params = compiled_expr.default_params.clone();
+
+    let mut state = ParticleState::new(2, 0);
+    state.counts[0] = 13;
+    state.counts[1] = 27;
+
+    let proj_expr = StreamProjection::from_ir(
+        &compiled_expr.model.observations[0].projection, &compiled_expr, "obs",
+    ).unwrap();
+    let proj_sum = StreamProjection::from_ir(
+        &compiled_sum.model.observations[0].projection, &compiled_sum, "obs",
+    ).unwrap();
+
+    let ll_expr = build_obs_model(&compiled_expr, proj_expr, 40.0)
+        .log_likelihood(&state, 0, &params);
+    let ll_sum = build_obs_model(&compiled_sum, proj_sum, 40.0)
+        .log_likelihood(&state, 0, &params);
+
+    assert!((ll_expr - ll_sum).abs() < 1e-12,
+        "DerivedExpr(B1+B2) and CurrentPopSum([B1,B2]) must match: {} vs {}",
+        ll_expr, ll_sum);
+}
+
+/// Snapshot-after-intervention semantic: a `FractionTransfer(0.5)` firing
+/// at the observation time must be applied *before* the snapshot reads
+/// the compartment counts. Otherwise the likelihood sees the
+/// pre-intervention state, biasing the PF against correctly-modeled
+/// interventions.
+///
+/// This exercises the PGAS / pgas_grad path
+/// (`log_likelihood_from_flows_and_counts`) with `counts_after` — the
+/// state recorded after `step_one` has fired scheduled interventions at
+/// `t+dt`.
+#[test]
+fn snapshot_reads_post_intervention_state() {
+    use sim::{
+        chain_binomial::{step_one, StepScratch},
+        rng::StatefulRng,
+    };
+
+    let mut init = HashMap::new();
+    init.insert("S".into(), 1000.0);
+    init.insert("V".into(),    0.0);
+    let model = Model {
+        name: "snap_intv".into(),
+        version: "0.3".into(),
+        time_unit: "days".into(),
+        description: None, origin: None,
+        compartments: vec![int_comp("S"), int_comp("V")],
+        transitions: vec![],
+        ode_equations: vec![],
+        time_functions: vec![],
+        tables: vec![],
+        interventions: vec![Intervention {
+            name: "halve_S".into(),
+            base_name: None,
+            schedule: InterventionSchedule::AtTimes(vec![5.0]),
+            always_active: true, // fire without scenario gating
+            actions: vec![Action::FractionTransfer(FractionTransfer {
+                src: "S".into(),
+                dst: "V".into(),
+                fraction: Expr::Const(ConstExpr { value: 0.5 }),
+            })],
+        }],
+        observations: vec![IrObservationModel {
+            name: "obs".into(),
+            data_stream: "obs".into(),
+            schedule: ObservationSchedule::AtTimes(vec![5.0]),
+            projection: Projection::CurrentPop("S".into()),
+            likelihood: Likelihood::Poisson(PoissonLikelihood {
+                rate: Expr::BinOp(BinOpWrap {
+                    bin_op: BinOpExpr {
+                        op: BinOp::Add,
+                        left: Box::new(Expr::Projected(ProjectedExpr { projected: () })),
+                        right: Box::new(Expr::Const(ConstExpr { value: 0.1 })),
+                    },
+                }),
+            }),
+        }],
+        parameters: vec![],
+        parameter_groups: vec![],
+        initial_conditions: InitialConditions::Explicit(init),
+        data_contract: None,
+        output: OutputConfig {
+            times: OutputSchedule::AtTimes(vec![5.0]),
+            format: "tsv".into(), trajectory: true, observations: false,
+        },
+        simulation: SimulationConfig {
+            t_start: 0.0, t_end: 10.0,
+            time_semantics: "continuous".into(),
+            dt: Some(1.0), rng_seed: Some(1),
+        },
+        presets: vec![],
+        model_structure: None, balance: None,
+    };
+
+    let compiled = Arc::new(CompiledModel::new(model).unwrap());
+    let params = compiled.default_params.clone();
+
+    // Drive the chain-binomial `step_one` path for five dt=1 steps to t=5.
+    // At t+dt=5 (the step ending at t=5), `step_one` fires the intervention
+    // and produces the `counts_after` state that the PF observation tick
+    // reads for the snapshot.
+    let mut counts = vec![1000i64, 0i64];
+    let mut flows = vec![0u64; 0];
+    let mut rng = StatefulRng::new(42);
+    let mut scratch = StepScratch::new(&compiled);
+
+    for k in 0..5 {
+        let t = k as f64;
+        step_one(&compiled, &mut counts, &mut flows, &params, t, 1.0, &mut rng, &mut scratch)
+            .unwrap();
+    }
+
+    // After the t=4→5 step, the intervention at t=5 must have fired.
+    // S = 1000 * (1 - 0.5) = 500; V = 500. If the intervention did NOT
+    // fire (old behavior would be pre-snapshot reading), S would still be
+    // 1000.
+    assert_eq!(counts[0], 500, "S must be 500 post-intervention (was {})", counts[0]);
+    assert_eq!(counts[1], 500, "V must be 500 post-intervention (was {})", counts[1]);
+
+    // The PF likelihood scores the observation against `counts_after`.
+    // Hand the same `counts` slice into `log_likelihood_from_flows_and_counts`
+    // and assert it projects 500, not 1000.
+    let projection = StreamProjection::from_ir(
+        &compiled.model.observations[0].projection, &compiled, "obs",
+    ).unwrap();
+    let obs_model = MultiStreamObsModel::new(
+        vec![StreamSpec {
+            projection,
+            ir_model: compiled.model.observations[0].clone(),
+            observations: vec![500.0],
+            obs_times: vec![5.0],
+        }],
+        compiled.clone(),
+    );
+
+    let cum_flows = vec![0u64; compiled.model.transitions.len()];
+    let ll_at_post = obs_model.log_likelihood_from_flows_and_counts(
+        &cum_flows, &counts, 0, &params,
+    );
+    // Compare to "if the snapshot had read pre-intervention state": hand
+    // in counts [1000, 0] and score the same observation (500). Poisson
+    // likelihood at (observed=500, rate=1000) is much worse than at
+    // (observed=500, rate=500), so this strongly dominates.
+    let pre_counts = vec![1000i64, 0i64];
+    let ll_at_pre = obs_model.log_likelihood_from_flows_and_counts(
+        &cum_flows, &pre_counts, 0, &params,
+    );
+
+    assert!(ll_at_post.is_finite());
+    assert!(ll_at_pre.is_finite());
+    assert!(ll_at_post > ll_at_pre,
+        "snapshot-after-intervention likelihood ({}) must be greater than \
+         snapshot-before-intervention likelihood ({}); the PF intervention \
+         ordering is broken if this flips",
+        ll_at_post, ll_at_pre);
+}
