@@ -314,16 +314,18 @@ fn resolve_run(root: &str, key: &str) -> Result<RunEntry, String> {
 // ── Output formatting ────────────────────────────────────────────────────────
 
 fn print_table(runs: &[RunEntry], now: SystemTime) {
-    use comfy_table::{Table, Cell, ContentArrangement, presets::UTF8_FULL_CONDENSED};
+    use comfy_table::{Table, Cell, ContentArrangement, presets::NOTHING};
 
     if runs.is_empty() {
         eprintln!("{}", "(no cached runs)".dimmed());
         return;
     }
 
+    // NOTHING preset: plain aligned columns, no borders. Reads like `ls -l`
+    // and scans cleanly for 20+ rows without box-art visual fatigue.
     let mut table = Table::new();
     table
-        .load_preset(UTF8_FULL_CONDENSED)
+        .load_preset(NOTHING)
         .set_content_arrangement(ContentArrangement::Dynamic)
         .set_header(vec![
             Cell::new("CREATED").add_attribute(comfy_table::Attribute::Bold),
