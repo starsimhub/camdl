@@ -314,35 +314,57 @@ fn resolve_run(root: &str, key: &str) -> Result<RunEntry, String> {
 // ── Output formatting ────────────────────────────────────────────────────────
 
 fn print_table(runs: &[RunEntry], now: SystemTime) {
+    use comfy_table::{Table, Cell, ContentArrangement, presets::UTF8_FULL_CONDENSED};
+
     if runs.is_empty() {
         eprintln!("{}", "(no cached runs)".dimmed());
         return;
     }
 
-    // Header (dimmed)
-    println!(
-        "{:<12}  {:<20}  {:<18}  {:<5}  {:<30}  {:<8}  {}",
-        "CREATED".bold(), "MODEL".bold(), "SCENARIO".bold(),
-        "SEED".bold(), "PARAMS".bold(), "SIZE".bold(), "PATH".bold()
-    );
+    let mut table = Table::new();
+    table
+        .load_preset(UTF8_FULL_CONDENSED)
+        .set_content_arrangement(ContentArrangement::Dynamic)
+        .set_header(vec![
+            Cell::new("CREATED").add_attribute(comfy_table::Attribute::Bold),
+            Cell::new("MODEL").add_attribute(comfy_table::Attribute::Bold),
+            Cell::new("SCENARIO").add_attribute(comfy_table::Attribute::Bold),
+            Cell::new("SEED").add_attribute(comfy_table::Attribute::Bold),
+            Cell::new("PARAMS").add_attribute(comfy_table::Attribute::Bold),
+            Cell::new("SIZE").add_attribute(comfy_table::Attribute::Bold),
+            Cell::new("PATH").add_attribute(comfy_table::Attribute::Bold),
+        ]);
 
     for r in runs {
-        let rel_time = fmt_relative_time(r.created, now);
-        let model_short = shorten(&r.meta.model, 20);
-        let scen_short  = shorten(&r.meta.scenario, 18);
-        let params_summary = format_params_summary(&r.meta, 30);
-        let size = format_size(r.traj_bytes);
-        println!(
-            "{:<12}  {:<20}  {:<18}  {:<5}  {:<30}  {:<8}  {}",
-            rel_time.yellow(),
-            model_short,
-            scen_short.green(),
-            r.meta.seed,
-            params_summary.dimmed(),
-            size,
-            r.rel_path.cyan(),
-        );
+        let rel_time    = fmt_relative_time(r.created, now);
+        let model       = model_display_name(&r.meta.model);
+        let params      = format_params_summary(&r.meta, 40);
+        let size        = format_size(r.traj_bytes);
+        table.add_row(vec![
+            Cell::new(rel_time).fg(comfy_table::Color::Yellow),
+            Cell::new(model),
+            Cell::new(&r.meta.scenario).fg(comfy_table::Color::Green),
+            Cell::new(r.meta.seed),
+            Cell::new(params).add_attribute(comfy_table::Attribute::Dim),
+            Cell::new(size),
+            Cell::new(&r.rel_path).fg(comfy_table::Color::Cyan),
+        ]);
     }
+
+    println!("{table}");
+}
+
+/// Compact model identifier for the list's MODEL column. Full absolute
+/// paths (`/Users/vsb/projects/work/camdl/ocaml/golden/sir_basic.ir.json`)
+/// are unreadable at table width. Strip the directory and the standard
+/// extensions — a reader recognizes the model by its basename.
+fn model_display_name(path: &str) -> String {
+    // Take the last path component after either separator.
+    let base = path.rsplit(|c| c == '/' || c == '\\').next().unwrap_or(path);
+    // Strip `.ir.json` first (longer suffix), then fall back to `.camdl`.
+    if let Some(stem) = base.strip_suffix(".ir.json") { return stem.to_string(); }
+    if let Some(stem) = base.strip_suffix(".camdl")   { return stem.to_string(); }
+    base.to_string()
 }
 
 fn print_json(runs: &[RunEntry]) {
@@ -511,6 +533,21 @@ mod tests {
         assert_eq!(format_size(500), "500B");
         assert_eq!(format_size(2048), "2K");
         assert_eq!(format_size(5 * 1024 * 1024), "5M");
+    }
+
+    #[test]
+    fn model_display_name_strips_dir_and_extension() {
+        // Absolute path + .ir.json → basename without extension
+        assert_eq!(
+            model_display_name("/Users/vsb/projects/work/camdl/ocaml/golden/sir_basic.ir.json"),
+            "sir_basic"
+        );
+        // .camdl extension also stripped
+        assert_eq!(model_display_name("../models/seir.camdl"), "seir");
+        // No extension → bare basename
+        assert_eq!(model_display_name("/tmp/custom"), "custom");
+        // Bare basename unchanged (still strips known extension)
+        assert_eq!(model_display_name("sir.ir.json"), "sir");
     }
 
     #[test]

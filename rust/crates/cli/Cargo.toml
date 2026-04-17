@@ -30,6 +30,9 @@ env_logger = "0.11"
 # respects NO_COLOR when the `supports-colors` feature is enabled on the
 # call site via `.if_supports_color(...)`.
 owo-colors = { version = "4", features = ["supports-colors"] }
+# Table formatting for `camdl list` — automatic width/wrapping, preserves
+# ANSI styling. Single TTY-detection dep (crossterm) — no big tree.
+comfy-table = "7"
 tokio = { version = "1", features = ["rt-multi-thread", "net", "macros"] }
 toml = { version = "0.8", features = ["parse"] }
 tower-http = { version = "0.5", features = ["fs", "cors"] }
