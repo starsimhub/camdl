@@ -416,20 +416,30 @@ fn run_simulate(args: &[String]) {
     // Collect --param-vec PREFIX=FILE entries for deferred validation after model load
     let mut set_vec_entries: Vec<(String, String)> = Vec::new();
 
+    // Advance i and return the next argument as a slice. Exits with a
+    // clean error (not a panic) when the flag is the final arg.
+    let need = |i: &mut usize, flag: &str| -> String {
+        *i += 1;
+        if *i >= args.len() {
+            eprintln!("error: {} requires a value", flag);
+            std::process::exit(1);
+        }
+        args[*i].clone()
+    };
+
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
-            "--backend"  => { i += 1; backend = args[i].clone(); }
-            "--dt"       => { i += 1; dt      = args[i].parse().unwrap_or_else(|_| { eprintln!("error: --dt needs a number"); std::process::exit(1); }); }
-            "--seed"     => { i += 1; seed    = args[i].parse().unwrap_or_else(|_| { eprintln!("error: --seed needs an integer"); std::process::exit(1); }); }
-            "--params"   => { i += 1; params_files.push(args[i].clone()); }
-            "--scenario" => { i += 1; scenario_names.extend(args[i].split(',').map(|s| s.trim().to_string())); }
-            "--seeds"   => { i += 1; seeds_spec = Some(args[i].clone()); }
-            "--enable"   => { i += 1; adhoc_enable.push(args[i].clone()); }
-            "--disable"  => { i += 1; adhoc_disable.push(args[i].clone()); }
+            "--backend"  => { backend = need(&mut i, "--backend"); }
+            "--dt"       => { dt      = need(&mut i, "--dt").parse().unwrap_or_else(|_| { eprintln!("error: --dt needs a number"); std::process::exit(1); }); }
+            "--seed"     => { seed    = need(&mut i, "--seed").parse().unwrap_or_else(|_| { eprintln!("error: --seed needs an integer"); std::process::exit(1); }); }
+            "--params"   => { params_files.push(need(&mut i, "--params")); }
+            "--scenario" => { scenario_names.extend(need(&mut i, "--scenario").split(',').map(|s| s.trim().to_string())); }
+            "--seeds"    => { seeds_spec = Some(need(&mut i, "--seeds")); }
+            "--enable"   => { adhoc_enable.push(need(&mut i, "--enable")); }
+            "--disable"  => { adhoc_disable.push(need(&mut i, "--disable")); }
             "--param"     => {
-                i += 1;
-                let kv = &args[i];
+                let kv = need(&mut i, "--param");
                 let mut parts = kv.splitn(2, '=');
                 let k = parts.next().unwrap_or_else(|| { eprintln!("error: --param needs NAME=VALUE"); std::process::exit(1); }).to_string();
                 let v: f64 = parts.next().and_then(|s| s.parse().ok())
@@ -437,32 +447,30 @@ fn run_simulate(args: &[String]) {
                 overrides.insert(k, v);
             }
             "--param-vec" => {
-                i += 1;
-                let kv = &args[i];
+                let kv = need(&mut i, "--param-vec");
                 let mut parts = kv.splitn(2, '=');
                 let prefix = parts.next().unwrap_or_else(|| { eprintln!("error: --param-vec needs PREFIX=FILE"); std::process::exit(1); }).to_string();
                 let file   = parts.next().unwrap_or_else(|| { eprintln!("error: --param-vec needs PREFIX=FILE"); std::process::exit(1); }).to_string();
                 set_vec_entries.push((prefix, file));
             }
             "--table"   => {
-                i += 1;
-                let kv = &args[i];
+                let kv = need(&mut i, "--table");
                 let mut parts = kv.splitn(2, '=');
                 let k = parts.next().unwrap_or_else(|| { eprintln!("error: --table needs NAME=FILE"); std::process::exit(1); }).to_string();
                 let v = parts.next().unwrap_or_else(|| { eprintln!("error: --table needs NAME=FILE"); std::process::exit(1); }).to_string();
                 table_files.insert(k, v);
             }
-            "--output" | "-o" => { i += 1; output_path = Some(args[i].clone()); }
-            "--obs"      => { i += 1; obs_path = Some(args[i].clone()); }
-            "--obs-dir"  => { i += 1; obs_dir = Some(args[i].clone()); }
-            "--obs-only" => { i += 1; obs_only = Some(args[i].clone()); }
-            "--replicates" => { i += 1; replicates = args[i].parse().unwrap_or_else(|_| { eprintln!("error: --replicates needs a positive integer"); std::process::exit(1); }); }
-            "--draws" => { i += 1; draws_path = Some(args[i].clone()); }
-            "-n" | "--n-draws" => { i += 1; n_draws_arg = Some(args[i].parse().unwrap_or_else(|_| { eprintln!("error: -n needs a positive integer"); std::process::exit(1); })); }
-            "--fit" => { i += 1; fit_path_for_draws = Some(args[i].clone()); }
+            "--output" | "-o" => { output_path = Some(need(&mut i, "--output")); }
+            "--obs"      => { obs_path = Some(need(&mut i, "--obs")); }
+            "--obs-dir"  => { obs_dir = Some(need(&mut i, "--obs-dir")); }
+            "--obs-only" => { obs_only = Some(need(&mut i, "--obs-only")); }
+            "--replicates" => { replicates = need(&mut i, "--replicates").parse().unwrap_or_else(|_| { eprintln!("error: --replicates needs a positive integer"); std::process::exit(1); }); }
+            "--draws" => { draws_path = Some(need(&mut i, "--draws")); }
+            "-n" | "--n-draws" => { n_draws_arg = Some(need(&mut i, "-n").parse().unwrap_or_else(|_| { eprintln!("error: -n needs a positive integer"); std::process::exit(1); })); }
+            "--fit" => { fit_path_for_draws = Some(need(&mut i, "--fit")); }
             "--dry-run" => { dry_run = true; }
             "--cas"        => { cas_enabled = true; }
-            "--output-dir" => { i += 1; output_dir_arg = Some(args[i].clone()); }
+            "--output-dir" => { output_dir_arg = Some(need(&mut i, "--output-dir")); }
             s if s.starts_with("--") => { eprintln!("unknown flag: {}", s); simulate_help(); }
             path => { ir_path = Some(path.to_string()); }
         }
