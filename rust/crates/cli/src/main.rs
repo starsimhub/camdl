@@ -1,6 +1,6 @@
 mod util;
 mod hashing;
-#[allow(dead_code)] // wired up by --cas branch in the next commit
+#[allow(dead_code)] // some helpers are only used by list/show/cat in later commits
 mod cas;
 mod sampling;
 #[allow(dead_code)]
@@ -97,6 +97,10 @@ fn simulate_help() -> ! {
     eprintln!("  {}", d("# From a batch TOML file"));
     eprintln!("  camdl simulate --batch batches/sweep.toml");
     eprintln!();
+    eprintln!("  {}", d("# Cache output in content-addressable storage — repeat runs are instant"));
+    eprintln!("  camdl simulate sir.camdl --params p.toml --seed 42 --cas");
+    eprintln!("  camdl list        # browse cached runs");
+    eprintln!();
     eprintln!("Options:");
     eprintln!("  --params FILE             Load parameter values (repeatable)");
     eprintln!("  --param NAME=VALUE        Override single parameter (repeatable)");
@@ -120,6 +124,8 @@ fn simulate_help() -> ! {
     eprintln!("  --batch FILE              Load all settings from batch TOML");
     eprintln!("  --parallel N              Concurrent runs");
     eprintln!("  --dry-run                 Show resolved parameters and run plan, don't simulate");
+    eprintln!("  --cas                     Cache output under {}/runs/.../seed_<n>/ (single-run only)", d("./output"));
+    eprintln!("  --output-dir DIR          Root for --cas output (default: ./output)");
     eprintln!("  --force                   Re-run cached results");
     std::process::exit(0);
 }
@@ -389,6 +395,8 @@ fn run_simulate(args: &[String]) {
     let mut n_draws_arg: Option<usize> = None;
     let mut fit_path_for_draws: Option<String> = None;
     let mut dry_run = false;
+    let mut cas_enabled = false;
+    let mut output_dir_arg: Option<String> = None;
 
     // Collect --param-vec PREFIX=FILE entries for deferred validation after model load
     let mut set_vec_entries: Vec<(String, String)> = Vec::new();
@@ -438,6 +446,8 @@ fn run_simulate(args: &[String]) {
             "-n" | "--n-draws" => { i += 1; n_draws_arg = Some(args[i].parse().unwrap_or_else(|_| { eprintln!("error: -n needs a positive integer"); std::process::exit(1); })); }
             "--fit" => { i += 1; fit_path_for_draws = Some(args[i].clone()); }
             "--dry-run" => { dry_run = true; }
+            "--cas"        => { cas_enabled = true; }
+            "--output-dir" => { i += 1; output_dir_arg = Some(args[i].clone()); }
             s if s.starts_with("--") => { eprintln!("unknown flag: {}", s); simulate_help(); }
             path => { ir_path = Some(path.to_string()); }
         }
@@ -501,6 +511,21 @@ fn run_simulate(args: &[String]) {
         scenario_names.iter().map(|s| Some(s.clone())).collect()
     };
 
+    // --cas currently supports single-run invocations. For sweeps or
+    // replicates, redirect users to --batch which already has robust CAS.
+    if cas_enabled {
+        let multi_seeds = seeds.len() > 1;
+        let multi_scenarios = scenario_list.len() > 1;
+        let has_draws = draws_path.is_some();
+        if multi_seeds || multi_scenarios || replicates > 1 || has_draws {
+            eprintln!("error: --cas supports single runs only.");
+            eprintln!("  For sweeps (multiple seeds/scenarios/draws/replicates), use --batch");
+            eprintln!("  with a TOML config. See `camdl simulate --help`.");
+            std::process::exit(1);
+        }
+    }
+    let cas_root = output_dir_arg.clone().unwrap_or_else(|| "output".to_string());
+
     let base_sim_run = util::SimRun {
         ir_path: ir_path.clone(),
         params_files,
@@ -554,16 +579,60 @@ fn run_simulate(args: &[String]) {
     }
 
     use std::io::Write;
+    use owo_colors::OwoColorize;
+
+    // ── CAS preparation (single-run --cas) ─────────────────────────────────
+    // Compute hashes, resolve run path, check for cache hit. If the cached
+    // trajectory already exists, we short-circuit: read it, emit to user's
+    // destination, log 'cache hit' to stderr, and return.
+    let cas_ctx: Option<CasCtx> = if cas_enabled {
+        match prepare_cas_ctx(&base_sim_run, scenario_list[0].clone(), seeds[0], &cas_root) {
+            Ok(ctx) => Some(ctx),
+            Err(e) => {
+                eprintln!("error preparing CAS: {}", e);
+                std::process::exit(1);
+            }
+        }
+    } else {
+        None
+    };
+
+    if let Some(ref ctx) = cas_ctx {
+        if cas::has_cached_traj(&ctx.run_dir) {
+            let cached = std::fs::read(ctx.run_dir.join("traj.tsv"))
+                .unwrap_or_else(|e| {
+                    eprintln!("error reading cached traj.tsv: {}", e);
+                    std::process::exit(1);
+                });
+            // Emit cached bytes to user's chosen destination
+            if !suppress_trajectory {
+                match &output_path {
+                    Some(path) => std::fs::write(path, &cached).unwrap_or_else(|e| {
+                        eprintln!("cannot write {}: {}", path, e); std::process::exit(1);
+                    }),
+                    None => {
+                        std::io::stdout().write_all(&cached).unwrap();
+                    }
+                }
+            }
+            eprintln!("{} {}", "cache hit:".bright_green().bold(), ctx.relative.cyan());
+            return;
+        }
+    }
 
     // ── Trajectory output setup ─────────────────────────────────────────────
+    // When --cas is active, we buffer trajectory bytes via RunBuffer so we
+    // can write them to both the user's destination and the CAS at end.
+    let cas_buffer: Option<cas::RunBuffer> = cas_ctx.as_ref().map(|_| cas::RunBuffer::new());
     let mut traj_out: Option<Box<dyn Write>> = if !suppress_trajectory {
-        Some(match &output_path {
-            Some(path) => {
+        Some(match (&cas_buffer, &output_path) {
+            (Some(buf), _) => Box::new(buf.clone()),
+            (None, Some(path)) => {
                 let f = std::fs::File::create(path)
                     .unwrap_or_else(|e| { eprintln!("cannot create {}: {}", path, e); std::process::exit(1); });
                 Box::new(std::io::BufWriter::new(f))
             }
-            None => Box::new(std::io::BufWriter::new(std::io::stdout().lock())),
+            (None, None) => Box::new(std::io::BufWriter::new(std::io::stdout().lock())),
         })
     } else {
         None
@@ -787,6 +856,34 @@ fn run_simulate(args: &[String]) {
         eprintln!("trajectory written to {}", path);
     }
 
+    // ── CAS write (single-run --cas on cache miss) ─────────────────────────
+    if let (Some(ctx), Some(buf)) = (cas_ctx.as_ref(), cas_buffer.as_ref()) {
+        let bytes = buf.bytes();
+        // Mirror to user's destination
+        if !suppress_trajectory {
+            match &output_path {
+                Some(path) => std::fs::write(path, &bytes).unwrap_or_else(|e| {
+                    eprintln!("cannot write {}: {}", path, e); std::process::exit(1);
+                }),
+                None => {
+                    std::io::stdout().write_all(&bytes).unwrap();
+                }
+            }
+        }
+        // Write to CAS
+        std::fs::create_dir_all(&ctx.run_dir).unwrap_or_else(|e| {
+            eprintln!("cannot create CAS dir {}: {}", ctx.run_dir.display(), e);
+            std::process::exit(1);
+        });
+        std::fs::write(ctx.run_dir.join("traj.tsv"), &bytes).unwrap_or_else(|e| {
+            eprintln!("cannot write traj.tsv: {}", e); std::process::exit(1);
+        });
+        cas::write_run_meta(&ctx.run_dir, &ctx.meta).unwrap_or_else(|e| {
+            eprintln!("cannot write run.json: {}", e); std::process::exit(1);
+        });
+        eprintln!("{} {}", "cached:".bright_green().bold(), ctx.relative.cyan());
+    }
+
     // ── Write observation output ────────────���───────────────────────────────
     if want_obs && !obs_data.is_empty() {
         let multi_rep = total_runs > 1;
@@ -862,6 +959,99 @@ fn run_simulate(args: &[String]) {
 }
 
 // ── Observation helpers ─────────────────────────────────────��───────────────
+
+// ── CAS preparation (single-run --cas) ──────────────────────────────────────
+
+/// Everything needed to write a single-run CAS entry: resolved run
+/// directory + metadata template. Built before simulation so we can
+/// check for a cache hit and skip work if possible.
+struct CasCtx {
+    /// Relative path under `<root>/runs/`, e.g.
+    /// `abc12345/baseline-def45678/seed_42`. Logged to stderr.
+    relative: String,
+    /// Absolute path to the run directory.
+    run_dir: std::path::PathBuf,
+    /// Metadata to write to `run.json` after a successful run.
+    meta: cas::RunMeta,
+}
+
+/// Resolve the CAS run directory and build a `RunMeta` template for a
+/// single (model, scenario, seed) triple. Mirrors the relevant bits of
+/// `util::run_simulation`'s model-load + scenario-resolve pipeline so
+/// the hash inputs match exactly without re-running the sim.
+fn prepare_cas_ctx(
+    run: &util::SimRun,
+    scenario_name: Option<String>,
+    seed: u64,
+    cas_root: &str,
+) -> Result<CasCtx, String> {
+    // Load IR source + parse model
+    let (ir_path_resolved, _tmp) = util::resolve_ir_path(&run.ir_path)?;
+    let src = std::fs::read_to_string(&ir_path_resolved)
+        .map_err(|e| format!("cannot read {}: {}", ir_path_resolved, e))?;
+    let mut model: ir::Model = serde_json::from_str(&src)
+        .map_err(|e| format!("IR parse error: {}", e))?;
+
+    // Apply --params files and --param overrides to collect base_params
+    // (scenario deltas are the other side of the cache key — don't apply here).
+    for path in &run.params_files {
+        util::apply_params_file(&mut model, path)?;
+    }
+    for (k, v) in &run.overrides {
+        if let Some(p) = model.parameters.iter_mut().find(|p| &p.name == k) {
+            p.value = Some(*v);
+        }
+    }
+    let base_params: HashMap<String, f64> = model.parameters.iter()
+        .filter_map(|p| p.value.map(|v| (p.name.clone(), v)))
+        .collect();
+
+    // Scenario delta
+    let (enable, disable, scen_params) = if let Some(ref name) = scenario_name {
+        let preset = model.presets.iter().find(|p| p.name == *name).cloned()
+            .ok_or_else(|| {
+                let available: Vec<&str> = model.presets.iter().map(|p| p.name.as_str()).collect();
+                format!("scenario '{}' not found. Available: {}",
+                    name,
+                    if available.is_empty() { "(none)".into() } else { available.join(", ") })
+            })?;
+        let params: HashMap<String, f64> =
+            preset.params.iter().map(|(k, v)| (k.clone(), *v)).collect();
+        (preset.enable.clone(), preset.disable.clone(), params)
+    } else {
+        (run.adhoc_enable.clone(), run.adhoc_disable.clone(), HashMap::new())
+    };
+
+    let model_h = hashing::model_hash(&src);
+    let sim_h = hashing::sim_hash(
+        &model_h,
+        &hashing::canonical_params(&base_params),
+        &run.backend,
+        run.dt,
+    );
+    let scen_h = hashing::scen_hash(&enable, &disable, &scen_params);
+    let scenario_display = scenario_name.clone().unwrap_or_else(|| "baseline".to_string());
+    let relative = cas::run_path_relative(
+        &sim_h, &scenario_display, &enable, &disable, &scen_params, seed,
+    );
+    let run_dir = cas::run_dir(std::path::Path::new(cas_root), &relative);
+
+    let meta = cas::RunMeta {
+        model: run.ir_path.clone(),
+        model_hash: model_h,
+        scenario: scenario_display,
+        sim_hash: sim_h,
+        scen_hash: scen_h,
+        seed,
+        backend: run.backend.clone(),
+        dt: run.dt,
+        version: version::VERSION_SHORT.to_string(),
+        created_at: cas::iso8601_utc(std::time::SystemTime::now()),
+        argv: std::env::args().collect(),
+    };
+
+    Ok(CasCtx { relative, run_dir, meta })
+}
 
 /// Generate observation times from an IR schedule.
 fn obs_schedule_times(

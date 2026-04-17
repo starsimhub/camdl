@@ -116,6 +116,36 @@ pub enum ObsLayout {
     PerStream,
 }
 
+// ─── Run buffer: accumulator for --cas trajectory bytes ────────────────────
+
+/// `Rc<RefCell<Vec<u8>>>`-backed `Write` target for --cas mode. The
+/// trajectory-emission code writes to a `Box<dyn Write>` target; using
+/// `RunBuffer` lets the caller hold a reference to the underlying bytes
+/// while the main loop writes through the trait object.
+#[derive(Clone)]
+pub struct RunBuffer {
+    inner: std::rc::Rc<std::cell::RefCell<Vec<u8>>>,
+}
+
+impl RunBuffer {
+    pub fn new() -> Self {
+        RunBuffer { inner: std::rc::Rc::new(std::cell::RefCell::new(Vec::with_capacity(64 * 1024))) }
+    }
+
+    /// Snapshot the buffered bytes. Call after all writes complete.
+    pub fn bytes(&self) -> Vec<u8> {
+        self.inner.borrow().clone()
+    }
+}
+
+impl std::io::Write for RunBuffer {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.inner.borrow_mut().extend_from_slice(buf);
+        Ok(buf.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> { Ok(()) }
+}
+
 // ─── Read/write helpers ──────────────────────────────────────────────────────
 
 pub fn write_traj(run_dir: &Path, content: &str) -> std::io::Result<()> {
