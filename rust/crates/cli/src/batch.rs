@@ -1,3 +1,21 @@
+//! `simulate batch FILE` subcommand — the multi-scenario / sweep runner
+//! behind `camdl simulate batch`. Writes content-addressed output to
+//! `<output_dir>/runs/{sim_hash}/{scen_slug}-{scen_hash}/seed_{n}/` in the
+//! same layout `--cas` uses for single runs, so `camdl list/show/cat`
+//! browse both uniformly.
+//!
+//! ## Schema note: batch TOML is v1
+//!
+//! The field names used here (`[config]`, `[[scenario]]`, `[sweep]`,
+//! `[design.*]`) are standalone and pre-date the v2 run-system types
+//! (`SimulateJob`, `SweepSpec`, `Seeds` in `fit/config_v2.rs`). A future
+//! version will align the schema with v2 for consistency across the
+//! single-run and batch paths.
+//!
+//! External tooling should NOT assume the current field names survive
+//! unchanged. If you're building tooling against this schema and need
+//! a migration window, open an issue.
+
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -10,7 +28,7 @@ use crate::sampling::{generate_design, DesignParam, PriorSpec};
 use crate::cas;
 use crate::version;
 
-// ─── TOML schema ─────────────────────────────────────────────────────────────
+// ─── TOML schema (v1 — see module-level doc) ─────────────────────────────────
 
 #[derive(Debug, Deserialize)]
 struct ExperimentToml {
@@ -338,36 +356,49 @@ struct Manifest {
     runs: Vec<RunEntry>,
 }
 
-// ─── cmd_experiment_run ──────────────────────────────────────────────────────
+// ─── cmd_batch_run ──────────────────────────────────────────────────────
 
-pub fn cmd_experiment_run(args: &[String]) {
+pub fn cmd_batch_run(args: &[String]) {
     let mut toml_path: Option<String> = None;
     let mut output_dir_override: Option<String> = None;
     let mut parallel_override: Option<usize> = None;
     let mut force = false;
+    let mut dry_run = false;
+
+    // Bounds-checked value-grabbing closure. Errors cleanly instead of
+    // panicking when a flag is the last argv entry.
+    let need = |i: &mut usize, flag: &str| -> String {
+        *i += 1;
+        if *i >= args.len() {
+            eprintln!("error: {} requires a value", flag);
+            std::process::exit(1);
+        }
+        args[*i].clone()
+    };
 
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
-            "--output-dir" => { i += 1; output_dir_override = Some(args[i].clone()); }
+            "--output-dir" => { output_dir_override = Some(need(&mut i, "--output-dir")); }
             "--parallel"   => {
-                i += 1;
-                parallel_override = Some(args[i].parse().unwrap_or_else(|_| {
+                parallel_override = Some(need(&mut i, "--parallel").parse().unwrap_or_else(|_| {
                     eprintln!("error: --parallel requires an integer");
                     std::process::exit(1);
                 }));
             }
-            "--force"  => { force = true; }
-            "--resume" => { /* default, no-op */ }
-            s if s.starts_with("--") => { eprintln!("unknown flag: {}", s); experiment_usage(); }
+            "--force"    => { force = true; }
+            "--resume"   => { /* default, no-op */ }
+            "--dry-run"  => { dry_run = true; }
+            "--help" | "-h" => { batch_usage(); }
+            s if s.starts_with("--") => { eprintln!("unknown flag: {}", s); batch_usage(); }
             path => { toml_path = Some(path.to_string()); }
         }
         i += 1;
     }
 
     let toml_path = toml_path.unwrap_or_else(|| {
-        eprintln!("error: experiment run requires a TOML file path");
-        experiment_usage();
+        eprintln!("error: simulate batch requires a TOML file path");
+        batch_usage();
     });
 
     let toml_src = std::fs::read_to_string(&toml_path).unwrap_or_else(|e| {
@@ -484,6 +515,23 @@ pub fn cmd_experiment_run(args: &[String]) {
     };
 
     let runs_dir = format!("{}/runs", output_dir);
+
+    // Classify every (sweep_point, scenario, seed) triple before any
+    // fs writes. plan_runs only probes file existence — it's safe to
+    // run before we create the output dir, which matters for --dry-run:
+    // a dry run must not touch the filesystem.
+    let plans = plan_runs(&scenarios, &sweep_points, &seeds, &shash, &runs_dir, force);
+    let total = plans.len();
+
+    if dry_run {
+        print_batch_dry_run(
+            &model_path, &backend, dt, &output_dir, parallel,
+            &scenarios, &sweep_points, &seeds, &base_params,
+            exp.config.params.as_deref(), &plans,
+        );
+        return;
+    }
+
     std::fs::create_dir_all(&runs_dir).unwrap_or_else(|e| {
         eprintln!("error: cannot create output dir {}: {}", runs_dir, e);
         std::process::exit(1);
@@ -516,9 +564,6 @@ pub fn cmd_experiment_run(args: &[String]) {
         }
     }
 
-    // Classify every (sweep_point, scenario, seed) triple before touching the thread pool.
-    let plans = plan_runs(&scenarios, &sweep_points, &seeds, &shash, &runs_dir, force);
-    let total = plans.len();
     let scenario_names: Vec<String> = scenarios.iter().map(|s| s.name.clone()).collect();
 
     let counter = Arc::new(AtomicUsize::new(0));
@@ -833,14 +878,14 @@ fn build_priors_txt(params: &[(String, DesignParam)]) -> Option<String> {
     Some(txt)
 }
 
-// ─── cmd_experiment_status ───────────────────────────────────────────────────
+// ─── cmd_batch_status ───────────────────────────────────────────────────
 
-pub fn cmd_experiment_status(args: &[String]) {
+pub fn cmd_batch_status(args: &[String]) {
     let mut toml_path: Option<String> = None;
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
-            s if s.starts_with("--") => { eprintln!("unknown flag: {}", s); experiment_usage(); }
+            s if s.starts_with("--") => { eprintln!("unknown flag: {}", s); batch_usage(); }
             path => { toml_path = Some(path.to_string()); }
         }
         i += 1;
@@ -848,7 +893,7 @@ pub fn cmd_experiment_status(args: &[String]) {
 
     let toml_path = toml_path.unwrap_or_else(|| {
         eprintln!("error: experiment status requires a TOML file path");
-        experiment_usage();
+        batch_usage();
     });
 
     let toml_src = std::fs::read_to_string(&toml_path).unwrap_or_else(|e| {
@@ -904,12 +949,144 @@ pub fn cmd_experiment_status(args: &[String]) {
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-fn experiment_usage() -> ! {
-    eprintln!("usage: camdl experiment <run|status> EXPERIMENT.toml [OPTIONS]");
+/// Print the resolved sweep grid + cache summary for `simulate batch --dry-run`.
+/// Does not simulate. Format mirrors the single-run `--dry-run` idiom in
+/// main.rs: header block, per-item tables, totals.
+#[allow(clippy::too_many_arguments)]
+fn print_batch_dry_run(
+    model_path: &str,
+    backend: &str,
+    dt: f64,
+    output_dir: &str,
+    parallel: usize,
+    scenarios: &[ScenarioEntry],
+    sweep_points: &[HashMap<String, f64>],
+    seeds: &[u64],
+    base_params: &HashMap<String, f64>,
+    params_file: Option<&str>,
+    plans: &[RunPlan],
+) {
+    eprintln!("camdl simulate batch (dry run)");
     eprintln!();
-    eprintln!("  run OPTIONS:");
+    eprintln!("  model:       {}", model_path);
+    eprintln!("  backend:     {}", backend);
+    eprintln!("  dt:          {}", dt);
+    eprintln!("  output_dir:  {}", output_dir);
+    eprintln!("  parallel:    {}", parallel);
+    eprintln!();
+
+    // Scenarios
+    eprintln!("Scenarios ({}):", scenarios.len());
+    for sc in scenarios {
+        let marker = if sc.enable.is_empty() && sc.disable.is_empty() && sc.params.is_empty() {
+            "(baseline)".to_string()
+        } else {
+            let mut parts = Vec::new();
+            if !sc.enable.is_empty()  { parts.push(format!("enable={}",  sc.enable.join(","))); }
+            if !sc.disable.is_empty() { parts.push(format!("disable={}", sc.disable.join(","))); }
+            if !sc.params.is_empty() {
+                let mut ks: Vec<&String> = sc.params.keys().collect();
+                ks.sort();
+                let kv: Vec<String> = ks.iter().map(|k| format!("{}={}", k, sc.params[*k])).collect();
+                parts.push(format!("set={{{}}}", kv.join(", ")));
+            }
+            parts.join(" ")
+        };
+        eprintln!("  {:24} {}", sc.name, marker);
+    }
+    eprintln!();
+
+    // Sweep grid with per-point provenance
+    let total_runs = plans.len();
+    let n_pts = sweep_points.len().max(1);
+    eprintln!(
+        "Sweep grid ({} points × {} scenarios × {} seeds = {} runs):",
+        n_pts, scenarios.len(), seeds.len(), total_runs,
+    );
+    eprintln!();
+
+    let src_label = |name: &str, in_sweep: bool, scenario: Option<&str>| -> String {
+        if in_sweep {
+            "sweep override".to_string()
+        } else if let Some(sn) = scenario {
+            format!("scenario '{}' set", sn)
+        } else if params_file.is_some() && base_params.contains_key(name) {
+            format!("params file: {}", params_file.unwrap())
+        } else if base_params.contains_key(name) {
+            "TOML default".to_string()
+        } else {
+            "model default".to_string()
+        }
+    };
+
+    // Show every sweep point, each as a compact table. For points > 0,
+    // only list the keys that differ from point 0 (keeps wide sweeps
+    // readable when most params are constant).
+    let effective_points: &[HashMap<String, f64>] = if sweep_points.is_empty() {
+        &[] // no sweep → one implicit null point, handled separately
+    } else {
+        sweep_points
+    };
+
+    if effective_points.is_empty() {
+        // No sweep: just the baseline param set
+        eprintln!("  (no [sweep] — single parameter point)");
+        let mut keys: Vec<&String> = base_params.keys().collect();
+        keys.sort();
+        for k in keys {
+            eprintln!("    {:20} = {:<12}  {}", k, base_params[k], src_label(k, false, None));
+        }
+    } else {
+        // Compute union of all keys that ever vary across sweep points.
+        let mut varying_keys: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+        for pt in effective_points {
+            for k in pt.keys() { varying_keys.insert(k.clone()); }
+        }
+
+        for (i, pt) in effective_points.iter().enumerate() {
+            eprintln!("  point {}:", i);
+            if i == 0 {
+                // Full table for the first point
+                let mut union_keys: std::collections::BTreeSet<String> =
+                    base_params.keys().cloned().collect();
+                for k in pt.keys() { union_keys.insert(k.clone()); }
+                for k in &union_keys {
+                    let (v, in_sweep) = match pt.get(k) {
+                        Some(v) => (*v, true),
+                        None    => (*base_params.get(k).unwrap_or(&f64::NAN), false),
+                    };
+                    eprintln!("    {:20} = {:<12}  {}", k, v, src_label(k, in_sweep, None));
+                }
+            } else {
+                // Subsequent points: only show varying-keys that differ
+                for k in &varying_keys {
+                    if let Some(v) = pt.get(k) {
+                        eprintln!("    {:20} = {:<12}  sweep override", k, v);
+                    }
+                }
+            }
+            eprintln!();
+        }
+    }
+
+    // Cache status
+    let hits    = plans.iter().filter(|p| p.decision == RunDecision::CacheHit).count();
+    let misses  = plans.iter().filter(|p| p.decision == RunDecision::CacheMiss).count();
+    eprintln!("Cache status:");
+    eprintln!("  {} cache hits  → skipped", hits);
+    eprintln!("  {} cache misses → would simulate", misses);
+    eprintln!();
+    eprintln!("(dry run — no simulation, no files written.)");
+}
+
+fn batch_usage() -> ! {
+    eprintln!("usage: camdl simulate batch FILE [OPTIONS]");
+    eprintln!("       camdl simulate status FILE");
+    eprintln!();
+    eprintln!("  batch OPTIONS:");
     eprintln!("    --output-dir DIR   override output_dir from TOML");
     eprintln!("    --parallel N       override parallel from TOML");
+    eprintln!("    --dry-run          print the resolved sweep grid and exit (no simulation)");
     eprintln!("    --resume           skip runs where output already exists (default)");
     eprintln!("    --force            re-run even if output exists");
     std::process::exit(1);

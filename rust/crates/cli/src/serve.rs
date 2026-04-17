@@ -9,8 +9,8 @@ fn usage() -> ! {
     eprintln!("Options:");
     eprintln!("  --port N   port to listen on (default: 4280)");
     eprintln!();
-    eprintln!("Serves an experiment output directory as static HTTP files with CORS enabled.");
-    eprintln!("  GET /manifest.json                                     → experiment manifest");
+    eprintln!("Serves a batch output directory as static HTTP files with CORS enabled.");
+    eprintln!("  GET /manifest.json                                     → batch manifest");
     eprintln!("  GET /runs/<sim8>/<scenario_slug>-<scen8>/seed_<N>/   → trajectory and run.json");
     eprintln!("  GET /geo/<file>                                       → GeoJSON boundary files (if present)");
     std::process::exit(1);

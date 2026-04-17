@@ -20,7 +20,7 @@ CAMDLC=${CAMDLC:-camdlc}
 CAMDL_SIM=${CAMDL_SIM:-camdl-sim}
 
 if [ $# -eq 0 ]; then
-  echo "usage: camdl <compile|check|inspect|simulate|eval|experiment|serve>" >&2
+  echo "usage: camdl <compile|check|inspect|simulate|fit|eval|serve|list|show|cat>" >&2
   exit 1
 fi
 
@@ -32,27 +32,32 @@ case "$1" in
   check|inspect)
     exec "$CAMDLC" "$@"
     ;;
-  simulate|experiment|eval|pfilter|if2|mif2|profile|fit|voi|data|serve|list|show|cat)
+  simulate|eval|pfilter|if2|mif2|profile|fit|voi|data|serve|list|show|cat)
     exec "$CAMDL_SIM" "$@"
+    ;;
+  experiment)
+    echo "camdl: 'experiment' was removed. Use 'camdl simulate batch FILE' instead." >&2
+    echo "  Details: docs/camdl-run-spec.md §4.5 or 'camdl simulate batch --help'" >&2
+    exit 1
     ;;
   --help|-h|help)
     cat >&2 <<'EOF'
 camdl — stochastic compartmental model toolchain
 
 Subcommands:
-  compile     Compile a .camdl model to IR JSON (output on stdout)
-  check       Parse and validate a .camdl model (no output)
-  inspect     Inspect compiled IR (compartments, transitions, parameters, ...)
-  simulate    Run a forward simulation (accepts .camdl or .ir.json)
-  eval        Evaluate time-dependent expressions at a time grid (no simulation)
-  experiment  Run or summarize a multi-scenario experiment (TOML manifest)
-  fit         Inference pipeline (MLE, posterior sampling, evaluation)
-  serve       Serve experiment output dirs over HTTP for the web editor
+  compile          Compile a .camdl model to IR JSON (output on stdout)
+  check            Parse and validate a .camdl model (no output)
+  inspect          Inspect compiled IR (compartments, transitions, parameters, ...)
+  simulate         Run a forward simulation (single .camdl or .ir.json)
+  simulate batch   Run a multi-scenario / sweep experiment from a TOML manifest
+  eval             Evaluate time-dependent expressions at a time grid (no simulation)
+  fit              Inference pipeline (MLE, posterior sampling, evaluation)
+  serve            Serve batch output dirs over HTTP for the web editor
 
-Cache browsing (runs written by simulate --cas / --batch):
-  list        Browse cached runs as a table
-  show        Show full metadata for one run
-  cat         Emit a cached trajectory or obs stream
+Cache browsing (runs written by `simulate --cas` or `simulate batch`):
+  list             Browse cached runs as a table
+  show             Show full metadata for one run
+  cat              Emit a cached trajectory or obs stream
 
 Examples:
   camdl compile sir.camdl > sir.ir.json

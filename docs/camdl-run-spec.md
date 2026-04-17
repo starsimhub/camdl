@@ -2113,8 +2113,16 @@ camdl simulate MODEL [OPTIONS]
   --obs-only-dir DIR        Like --obs-dir, suppress trajectory output
   --parallel N              Concurrent runs
   --output-dir DIR          Output root (default: results/)
-  --batch FILE              Load all settings from TOML
   --force                   Re-run cached results
+
+camdl simulate batch FILE [OPTIONS]
+  --output-dir DIR          Override output_dir from the TOML
+  --parallel N              Override parallel from the TOML
+  --dry-run                 Print the resolved sweep grid + cache summary; exit
+  --resume                  Skip runs whose output already exists (default)
+  --force                   Re-run even if output exists
+
+camdl simulate status FILE     Print status of a batch TOML's output tree
 
 camdl fit run CONFIG [OPTIONS]
   --stage NAME              Run specific stage only
@@ -2132,17 +2140,35 @@ camdl fit diff A.toml B.toml   Show differences between fit configs
 camdl fit new --from A B       Create derived fit config with lineage
 camdl summarize DIR            Compute summary statistics from trajectories
 
-camdl simulate --batch FILE    Equivalent to camdl experiment run (deprecated)
-
-Migration from experiment.toml v0.6:
-  [config]       → top-level fields in batch TOML or CLI args
-  [sweep]        → [sweep] (unchanged)
-  [[scenario]]   → [[scenario]] (unchanged)
-  [design.*]     → removed. Use R or Python for sensitivity analysis
-                   (e.g., the sensitivity R package with camdl simulation output)
-  camdl experiment analyze → removed (Sobol computation was niche; external
-                   tooling is the right answer)
 ```
+
+**Batch TOML is v1 and will change.** Field names (`[config]`,
+`[[scenario]]`, `[sweep]`) are standalone and pre-date the v2 run-system
+types (`SimulateJob`, `SweepSpec`, `Seeds` in
+`rust/crates/cli/src/fit/config_v2.rs`). A future version will align the
+schema with v2. **External tooling should not assume the current field
+names survive unchanged.** Open an issue if you're writing such tooling
+and need a migration window.
+
+The `experiment` subcommand and its `camdl experiment analyze` Sobol
+workflow were removed in favor of `simulate batch` + `camdl list/show/cat`
+for browsing + external tools (R `sensitivity` package, Python) for
+sensitivity analysis.
+
+### Migrating from the old `--batch` / `camdl experiment`
+
+| Old                                        | New                                   |
+|--------------------------------------------|---------------------------------------|
+| `camdl simulate --batch FILE`              | `camdl simulate batch FILE`           |
+| `camdl simulate --batch FILE --parallel N` | `camdl simulate batch FILE --parallel N` |
+| `camdl experiment run FILE`                | `camdl simulate batch FILE`           |
+| `camdl experiment status FILE`             | `camdl simulate status FILE`          |
+| `camdl experiment analyze FILE`            | (removed; use R `sensitivity` or Python) |
+
+The `--batch` flag is no longer accepted on `simulate`. A user who tries
+`camdl simulate sir.camdl --batch foo.toml` gets `unknown flag: --batch`
+from the single-run parser — the clean failure replaces the old silent
+semantic swap where `sir.camdl` was misinterpreted as the batch TOML.
 
 ---
 

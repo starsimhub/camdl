@@ -11,47 +11,31 @@ use sim::{
 
 // ─── Experiment TOML parsing ─────────────────────────────────────────────────
 
-/// Fields extracted from an experiment.toml needed by summarize, analyze, voi.
+/// Minimal batch-TOML view needed by `voi` (the only remaining consumer
+/// now that analyze/summarize are gone). Just the output_dir — design
+/// and analyze sections aren't read anywhere.
 pub struct ExperimentInfo {
-    pub output_dir:         String,
-    pub design_names:       Vec<String>,
-    pub analyze_outputs:    Option<Vec<String>>,
-    pub analyze_confidence: Option<f64>,
+    pub output_dir: String,
 }
 
-/// Parse an experiment.toml source string using proper TOML deserialization.
-/// Returns an error string on parse failure.
+/// Parse a batch TOML source string for `voi`. Returns an error string
+/// on parse failure.
 pub fn parse_experiment_toml(src: &str) -> Result<ExperimentInfo, String> {
     #[derive(Deserialize, Default)]
     struct ConfigSection {
         output_dir: Option<String>,
     }
-    #[derive(Deserialize, Default)]
-    struct AnalyzeSection {
-        outputs:    Option<Vec<String>>,
-        confidence: Option<f64>,
-    }
     #[derive(Deserialize)]
     struct ExperimentDoc {
         #[serde(default)]
-        config:  ConfigSection,
-        #[serde(default)]
-        design:  HashMap<String, toml::Value>,
-        #[serde(default)]
-        analyze: AnalyzeSection,
+        config: ConfigSection,
     }
 
     let doc: ExperimentDoc = toml::from_str(src)
-        .map_err(|e| format!("experiment TOML parse error: {}", e))?;
-
-    let mut design_names: Vec<String> = doc.design.into_keys().collect();
-    design_names.sort();
+        .map_err(|e| format!("batch TOML parse error: {}", e))?;
 
     Ok(ExperimentInfo {
-        output_dir:         doc.config.output_dir.unwrap_or_else(|| "output".to_string()),
-        design_names,
-        analyze_outputs:    doc.analyze.outputs,
-        analyze_confidence: doc.analyze.confidence,
+        output_dir: doc.config.output_dir.unwrap_or_else(|| "output".to_string()),
     })
 }
 

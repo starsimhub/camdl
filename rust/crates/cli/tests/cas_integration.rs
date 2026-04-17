@@ -162,8 +162,8 @@ fn cas_rejects_multi_seeds() {
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(stderr.contains("--cas supports single runs only"),
         "error should name the limitation: {}", stderr);
-    assert!(stderr.contains("--batch"),
-        "error should hint at --batch: {}", stderr);
+    assert!(stderr.contains("simulate batch"),
+        "error should hint at `simulate batch`: {}", stderr);
 }
 
 #[test]
@@ -272,7 +272,7 @@ beta = [0.2, 0.3, 0.4]
     )).unwrap();
 
     let st = Command::new(&bin)
-        .args(["simulate", "--batch", &batch_path.to_string_lossy()])
+        .args(["simulate", "batch", &batch_path.to_string_lossy()])
         .status().expect("spawn");
     assert!(st.success(), "batch sweep should succeed");
 
@@ -317,6 +317,78 @@ beta = [0.2, 0.3, 0.4]
     assert!(stdout.contains("beta=0.2"), "list should show beta=0.2: {}", stdout);
     assert!(stdout.contains("beta=0.3"), "list should show beta=0.3: {}", stdout);
     assert!(stdout.contains("beta=0.4"), "list should show beta=0.4: {}", stdout);
+}
+
+#[test]
+fn simulate_batch_dry_run_prints_grid_no_output() {
+    // --dry-run on `simulate batch` must print the resolved sweep grid
+    // on stderr, exit 0, and touch zero files under output/runs/.
+    let Some(bin) = skip_if_missing_binary() else { return; };
+    let tmp = tempfile::tempdir().unwrap();
+    let output = tmp.path().join("output");
+    let params_path = tmp.path().join("params.toml");
+    std::fs::write(&params_path, "beta = 0.3\ngamma = 0.1\nN0 = 1000\nI0 = 10\n").unwrap();
+    let batch_path = tmp.path().join("batch.toml");
+    std::fs::write(&batch_path, format!(r#"
+[config]
+model = "{model}"
+params = "{params}"
+output_dir = "{out}"
+seeds = {{ n = 1 }}
+parallel = 1
+
+[[scenario]]
+name = "baseline"
+
+[sweep]
+beta = [0.2, 0.3, 0.4]
+"#,
+        model = golden_sir_basic().display(),
+        params = params_path.display(),
+        out = output.display(),
+    )).unwrap();
+
+    let out = Command::new(&bin)
+        .args(["simulate", "batch", &batch_path.to_string_lossy(), "--dry-run"])
+        .output().expect("spawn");
+    assert!(out.status.success(), "dry-run should exit 0");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("camdl simulate batch (dry run)"),
+        "stderr should mark the dry run: {}", stderr);
+    assert!(stderr.contains("Sweep grid"), "stderr should include sweep grid: {}", stderr);
+    for beta in ["0.2", "0.3", "0.4"] {
+        assert!(stderr.contains(beta), "stderr should include beta={}: {}", beta, stderr);
+    }
+    assert!(stderr.contains("no simulation"),
+        "stderr should confirm no simulation ran: {}", stderr);
+
+    // Must not have written any run files.
+    let runs_dir = output.join("runs");
+    assert!(!runs_dir.exists() ||
+            walkdir(&runs_dir).into_iter().filter(|p| p.join("run.json").exists()).next().is_none(),
+        "dry-run must not write any run.json files");
+}
+
+#[test]
+fn simulate_batch_flag_rejected_cleanly() {
+    // `simulate FILE --batch OTHER` used to silently misinterpret the
+    // first positional as the batch TOML path. With the flag removed,
+    // the single-run parser errors cleanly on the unknown flag rather
+    // than panicking or silently doing the wrong thing.
+    let Some(bin) = skip_if_missing_binary() else { return; };
+    let tmp = tempfile::tempdir().unwrap();
+    let batch_path = tmp.path().join("foo.toml");
+    std::fs::write(&batch_path, "").unwrap();
+
+    let out = Command::new(&bin)
+        .args(["simulate",
+               &golden_sir_basic().to_string_lossy(),
+               "--batch", &batch_path.to_string_lossy()])
+        .output().expect("spawn");
+    assert!(!out.status.success(), "`--batch` flag should fail cleanly, not run");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("unknown flag") && stderr.contains("--batch"),
+        "stderr should report unknown flag, not panic: {}", stderr);
 }
 
 #[test]

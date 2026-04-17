@@ -5,7 +5,7 @@ mod cas;
 mod browse;
 mod sampling;
 #[allow(dead_code)]
-mod experiment; // used by --batch delegation
+mod batch;  // `simulate batch FILE` subcommand (formerly `experiment`)
 mod serve;
 mod eval;
 #[allow(dead_code)]
@@ -15,8 +15,6 @@ mod fit;
 pub mod version;
 
 // Modules kept for internal use but with no direct CLI entry points:
-#[allow(dead_code)] mod analyze;
-#[allow(dead_code)] mod summarize;
 #[allow(dead_code)] mod voi;
 #[allow(dead_code)] mod if2;
 #[allow(dead_code)] mod profile;
@@ -61,7 +59,7 @@ fn print_main_help() -> ! {
     eprintln!("  {}        Data utilities (split train/holdout)", b("data"));
     eprintln!("  {}       Launch web visualization server", b("serve"));
     eprintln!();
-    eprintln!("Cache browsing (runs written by {}):", d("simulate --cas / --batch"));
+    eprintln!("Cache browsing (runs written by {}):", d("simulate --cas / simulate batch"));
     eprintln!("  {}        Browse cached runs as a table", b("list"));
     eprintln!("  {}        Show full metadata for one run", b("show"));
     eprintln!("  {}         Emit a cached trajectory or obs stream", b("cat"));
@@ -100,8 +98,11 @@ fn simulate_help() -> ! {
     eprintln!("  {}", d("# Batch: multiple scenarios × seeds"));
     eprintln!("  camdl simulate sir.camdl --params p.toml --seeds 1:100 --scenario baseline,with_sia");
     eprintln!();
-    eprintln!("  {}", d("# From a batch TOML file"));
-    eprintln!("  camdl simulate --batch batches/sweep.toml");
+    eprintln!("  {}", d("# Batch sweep (multiple scenarios × seeds × sweep points)"));
+    eprintln!("  camdl simulate batch batches/sweep.toml --parallel 8");
+    eprintln!();
+    eprintln!("  {}", d("# Verify a batch config before running"));
+    eprintln!("  camdl simulate batch batches/sweep.toml --dry-run");
     eprintln!();
     eprintln!("  {}", d("# Cache output in content-addressable storage — repeat runs are instant"));
     eprintln!("  camdl simulate sir.camdl --params p.toml --seed 42 --cas");
@@ -127,8 +128,7 @@ fn simulate_help() -> ! {
     eprintln!("  --obs-dir DIR             Write one TSV per observation stream");
     eprintln!("  --obs-only FILE           Like --obs but suppress trajectory output");
     eprintln!("  -o, --output FILE         Write trajectory to file (default: stdout)");
-    eprintln!("  --batch FILE              Load all settings from batch TOML");
-    eprintln!("  --parallel N              Concurrent runs");
+    eprintln!("  --parallel N              Concurrent runs (single-run + --cas)");
     eprintln!("  --dry-run                 Show resolved parameters and run plan, don't simulate");
     eprintln!("  --cas                     Cache output under {}/runs/.../seed_<n>/ (single-run only)", d("./output"));
     eprintln!("  --output-dir DIR          Root for --cas output (default: ./output)");
@@ -304,14 +304,12 @@ fn main() {
         "simulate" | "sim" => {
             let args = &all_args[1..];
             if args.is_empty() || args.iter().any(|a| a == "--help" || a == "-h") { simulate_help(); }
-            if args.iter().any(|a| a == "--batch") {
-                let batch_args: Vec<String> = args.iter()
-                    .filter(|a| *a != "--batch")
-                    .cloned()
-                    .collect();
-                experiment::cmd_experiment_run(&batch_args);
-            } else {
-                run_simulate(args);
+            // `simulate batch FILE` and `simulate status FILE` are
+            // sub-subcommands. Everything else is a single-run simulate.
+            match args.first().map(String::as_str) {
+                Some("batch")  => batch::cmd_batch_run(&args[1..]),
+                Some("status") => batch::cmd_batch_status(&args[1..]),
+                _              => run_simulate(args),
             }
         }
         // ── Inference ──
@@ -471,7 +469,11 @@ fn run_simulate(args: &[String]) {
             "--dry-run" => { dry_run = true; }
             "--cas"        => { cas_enabled = true; }
             "--output-dir" => { output_dir_arg = Some(need(&mut i, "--output-dir")); }
-            s if s.starts_with("--") => { eprintln!("unknown flag: {}", s); simulate_help(); }
+            s if s.starts_with("--") => {
+                eprintln!("error: unknown flag: {}", s);
+                eprintln!("  run `camdl simulate --help` for usage");
+                std::process::exit(1);
+            }
             path => { ir_path = Some(path.to_string()); }
         }
         i += 1;
@@ -535,15 +537,15 @@ fn run_simulate(args: &[String]) {
     };
 
     // --cas currently supports single-run invocations. For sweeps or
-    // replicates, redirect users to --batch which already has robust CAS.
+    // replicates, redirect users to `simulate batch` which has robust CAS.
     if cas_enabled {
         let multi_seeds = seeds.len() > 1;
         let multi_scenarios = scenario_list.len() > 1;
         let has_draws = draws_path.is_some();
         if multi_seeds || multi_scenarios || replicates > 1 || has_draws {
             eprintln!("error: --cas supports single runs only.");
-            eprintln!("  For sweeps (multiple seeds/scenarios/draws/replicates), use --batch");
-            eprintln!("  with a TOML config. See `camdl simulate --help`.");
+            eprintln!("  For sweeps (multiple seeds/scenarios/draws/replicates), use");
+            eprintln!("  `camdl simulate batch FILE` with a TOML config.");
             std::process::exit(1);
         }
     }
