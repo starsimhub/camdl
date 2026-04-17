@@ -32,7 +32,7 @@
 (* ── Keywords ───────────────────────────────────────────────────────────── *)
 %token TIME_UNIT COMPARTMENTS PARAMETERS TABLES FORCING
 %token TRANSITIONS OBSERVATIONS INTERVENTIONS ODE OUTPUT SIMULATE
-%token INIT TIMEPOINTS SCENARIOS STRATIFY LET FROM TO WHERE SUM
+%token INIT TIMEPOINTS SCENARIOS EXTENDS STRATIFY LET FROM TO WHERE SUM
 %token CONSECUTIVE IN BY DIMENSIONS ONLY REAL INTEGER RATE PROBABILITY POSITIVE COUNT
 %token AND OR NOT IF THEN ELSE EVERY UNTIL AT_KW FORMAT DESCRIPTION TAG NULL TRANSFER LIKELIHOOD ORIGIN BALANCE EVENTS ADD AT_DAY
 
@@ -650,6 +650,12 @@ scenario_field:
         | "set"   -> Ast.ScSet   ps
         | "scale" -> Ast.ScScale ps
         | _       -> Ast.ScSet   [(k, EConst 0.0)] }
+  | EXTENDS EQ v = expr
+      { let s = match v with
+          | EIdent (s, _)    -> s
+          | EFuncCall (s, []) -> s
+          | _ -> failwith "invalid extends clause: expected a scenario name, e.g. extends = baseline" in
+        Ast.ScExtends s }
   | k = IDENT EQ v = expr
       { match k with
         | "label"   ->

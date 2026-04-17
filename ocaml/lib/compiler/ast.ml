@@ -201,6 +201,7 @@ type scenario_field =
   | ScScale   of (string * expr) list
   | ScCompose of string list
   | ScTEnd    of expr
+  | ScExtends of string     (** `extends = parent_name` — single-inheritance sugar *)
 
 type scenario_decl = {
   scname   : string;

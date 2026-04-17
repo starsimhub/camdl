@@ -74,6 +74,7 @@
       "init",          INIT;
       "timepoints",    TIMEPOINTS;
       "scenarios",     SCENARIOS;
+      "extends",       EXTENDS;
       "stratify",      STRATIFY;
       "let",           LET;
       "from",          FROM;

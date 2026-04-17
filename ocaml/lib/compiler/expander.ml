@@ -2180,32 +2180,245 @@ let check_shadowing ctx =
 
 (* ── Scenarios expansion ─────────────────────────────────────────────────── *)
 
+(** Resolved, pre-IR scenario form. Built in two passes: first collect
+    this scenario's own fields into a ResolvedScen, then fold parent
+    chain through `extends`. Expressions in set/scale remain unresolved
+    here so that children can reference parent-resolved values. *)
+type resolved_scen = {
+  rs_name    : string;
+  rs_label   : string option;             (* None = use rs_name as default *)
+  rs_enable  : string list;
+  rs_disable : string list;
+  rs_set     : (string * expr) list;     (* still exprs — resolved after merge *)
+  rs_scale   : (string * expr) list;
+  rs_compose : string list;
+  rs_t_end   : expr option;               (* still expr — resolved after merge *)
+  rs_parent  : string option;
+}
+
+(** Closest-by-edit-distance scenario name suggestion for an unknown
+    parent. Returns [None] if nothing is within 3 edits. *)
+let suggest_scenario_name (candidates : string list) (target : string) : string option =
+  let edit_distance a b =
+    let la = String.length a and lb = String.length b in
+    let m = Array.make_matrix (la + 1) (lb + 1) 0 in
+    for i = 0 to la do m.(i).(0) <- i done;
+    for j = 0 to lb do m.(0).(j) <- j done;
+    for i = 1 to la do
+      for j = 1 to lb do
+        let cost = if a.[i-1] = b.[j-1] then 0 else 1 in
+        m.(i).(j) <- min (min (m.(i-1).(j) + 1) (m.(i).(j-1) + 1)) (m.(i-1).(j-1) + cost)
+      done
+    done;
+    m.(la).(lb)
+  in
+  candidates
+  |> List.map (fun c -> (c, edit_distance target c))
+  |> List.sort (fun (_, a) (_, b) -> compare a b)
+  |> List.filter (fun (_, d) -> d <= 3)
+  |> (function (name, _) :: _ -> Some name | [] -> None)
+
+(** Merge parent fields under the child's. For each field, apply the
+    rule documented in the plan:
+    - label / t_end: child overrides parent (if child specified)
+    - set / scale: child keys override parent keys on collision; union otherwise
+    - enable / disable / compose: append parent first, then child, dedup
+      while preserving first-occurrence order. Emits a loud info! log
+      when this actually changes the resolved list vs the child's own
+      list (surfaces the footgun).
+    Does not resolve expressions — that happens in the final pass. *)
+let merge_fields ctx ~child ~parent ~parent_name =
+  (* Append-and-dedup: parent first, then child; keep first occurrence. *)
+  let dedup_concat parent_list child_list =
+    let seen = Hashtbl.create 4 in
+    let combined = parent_list @ child_list in
+    List.filter (fun x ->
+      if Hashtbl.mem seen x then false
+      else (Hashtbl.add seen x (); true)
+    ) combined
+  in
+  let merged_enable  = dedup_concat parent.rs_enable  child.rs_enable  in
+  let merged_disable = dedup_concat parent.rs_disable child.rs_disable in
+  let merged_compose = dedup_concat parent.rs_compose child.rs_compose in
+  (* Loud log when the append changed things: child-only enables did NOT
+     capture the full picture. Only fires when the parent contributed
+     something beyond the child's own list. *)
+  (* Loud warning (Diagnostics has no Info level) when the append-dedup
+     actually changed the resolved list — surfaces the footgun where a
+     child declares `enable = [X]` intending "only X" but the parent
+     contributes more entries. *)
+  let changed name cl ml =
+    if ml <> cl then
+      Diagnostics.warning ctx.diags ~code:"W310" ~loc:Diagnostics.no_loc
+        ~message:(Printf.sprintf
+          "scenario '%s' inherits %s from '%s': resolved %s = [%s] \
+           (child declared [%s])"
+          child.rs_name name parent_name name
+          (String.concat "; " ml) (String.concat "; " cl))
+        ~hint:"`extends` appends parent's enable/disable/compose to the child's. \
+               To remove a parent's intervention, put it in `disable`."
+        ()
+  in
+  changed "enable"  child.rs_enable  merged_enable;
+  changed "disable" child.rs_disable merged_disable;
+  changed "compose" child.rs_compose merged_compose;
+  {
+    rs_name    = child.rs_name;
+    rs_label   = (match child.rs_label with Some _ as l -> l | None -> parent.rs_label);
+    rs_enable  = merged_enable;
+    rs_disable = merged_disable;
+    (* Keep both parent's and child's set entries in order so that the
+       child's expression can reference the parent's resolved value.
+       Duplicate keys are resolved by HashMap overwrite during the
+       final resolution pass (later entry wins). *)
+    rs_set     = parent.rs_set   @ child.rs_set;
+    rs_scale   = parent.rs_scale @ child.rs_scale;
+    rs_compose = merged_compose;
+    rs_t_end   = (match child.rs_t_end with Some _ as t -> t | None -> parent.rs_t_end);
+    rs_parent  = None;  (* post-resolve *)
+  }
+
+(** Collect a scenario_decl's own fields into a ResolvedScen, without
+    resolving parent or expressions. *)
+let collect_own_fields (sd : scenario_decl) : resolved_scen =
+  let label    = ref None in
+  let enable   = ref [] in
+  let disable  = ref [] in
+  let set_ps   = ref [] in
+  let scale_ps = ref [] in
+  let compose  = ref [] in
+  let t_end    = ref None in
+  let parent   = ref None in
+  List.iter (function
+    | ScLabel s    -> label := Some s
+    | ScEnable es  -> enable := !enable @ es
+    | ScDisable ds -> disable := !disable @ ds
+    | ScSet ps     -> set_ps := !set_ps @ ps
+    | ScScale ps   -> scale_ps := !scale_ps @ ps
+    | ScCompose cs -> compose := !compose @ cs
+    | ScTEnd e     -> t_end := Some e
+    | ScExtends p  -> parent := Some p
+  ) sd.scfields;
+  { rs_name = sd.scname;
+    rs_label = !label;
+    rs_enable = !enable;
+    rs_disable = !disable;
+    rs_set = !set_ps;
+    rs_scale = !scale_ps;
+    rs_compose = !compose;
+    rs_t_end = !t_end;
+    rs_parent = !parent;
+  }
+
+(** Resolve parent chain for one scenario. DFS with visiting set for
+    cycle detection (E25x) and depth counter for code-smell cap (E25z).
+    Returns the fully-merged resolved_scen (expressions still unresolved). *)
+let resolve_parents ctx (decl_map : (string * scenario_decl) list) (own : resolved_scen)
+    : resolved_scen =
+  let max_depth = 5 in
+  let rec go visiting depth scen =
+    match scen.rs_parent with
+    | None -> scen
+    | Some parent_name ->
+      if List.mem parent_name visiting then begin
+        let chain = (scen.rs_name :: visiting |> List.rev) @ [parent_name] in
+        Diagnostics.error ctx.diags ~code:"E25x" ~loc:Diagnostics.no_loc
+          ~message:(Printf.sprintf "scenario extends cycle: %s"
+                      (String.concat " → " chain))
+          ~hint:"remove one of the `extends` in the cycle."
+          ();
+        { scen with rs_parent = None }   (* stop descent after error *)
+      end
+      else if depth >= max_depth then begin
+        Diagnostics.error ctx.diags ~code:"E25z" ~loc:Diagnostics.no_loc
+          ~message:(Printf.sprintf
+            "scenario '%s' extends chain exceeds %d — refactor, or submit a \
+             feature request for multi-parent composition"
+            scen.rs_name max_depth)
+          ~hint:"Chains longer than 5 are a code smell; factor common \
+                 ancestors into shared base scenarios, or combine into one \
+                 scenario if they're really the same configuration."
+          ();
+        { scen with rs_parent = None }
+      end
+      else begin
+        match List.assoc_opt parent_name decl_map with
+        | None ->
+          let all_names = List.map fst decl_map in
+          let hint = match suggest_scenario_name all_names parent_name with
+            | Some s -> Printf.sprintf "Did you mean '%s'?" s
+            | None -> "No scenario by that name is defined in this model."
+          in
+          Diagnostics.error ctx.diags ~code:"E25y" ~loc:Diagnostics.no_loc
+            ~message:(Printf.sprintf "scenario '%s' extends unknown scenario '%s'"
+                        scen.rs_name parent_name)
+            ~hint:hint
+            ();
+          { scen with rs_parent = None }
+        | Some parent_decl ->
+          let parent_own = collect_own_fields parent_decl in
+          let parent_resolved = go (scen.rs_name :: visiting) (depth + 1) parent_own in
+          merge_fields ctx ~child:scen ~parent:parent_resolved ~parent_name
+      end
+  in
+  go [] 0 own
+
 let expand_scenarios ctx : Ir.preset list =
-  List.map (fun (sd : scenario_decl) ->
-    let label        = ref sd.scname in
-    let enable       = ref [] in
-    let disable      = ref [] in
-    let set_params   = ref [] in
-    let scale_params = ref [] in
-    let compose      = ref [] in
-    let t_end        = ref None in
-    List.iter (function
-      | ScLabel s    -> label := s
-      | ScEnable es  -> enable := !enable @ es
-      | ScDisable ds -> disable := !disable @ ds
-      | ScSet ps     -> set_params := !set_params @ ps
-      | ScScale ps   -> scale_params := !scale_params @ ps
-      | ScCompose cs -> compose := !compose @ cs
-      | ScTEnd e     -> t_end := Some (resolve_float_expr ctx e)
-    ) sd.scfields;
-    { Ir.preset_name    = sd.scname;
-      Ir.preset_label   = !label;
-      Ir.preset_params  = List.map (fun (k, e) -> (k, resolve_float_expr ctx e)) !set_params;
-      Ir.preset_enable  = !enable;
-      Ir.preset_disable = !disable;
-      Ir.preset_scale   = List.map (fun (k, e) -> (k, resolve_float_expr ctx e)) !scale_params;
-      Ir.preset_compose = !compose;
-      Ir.preset_t_end   = !t_end;
+  (* Pass 1: build name → declaration lookup. *)
+  let decl_map : (string * scenario_decl) list =
+    List.map (fun sd -> (sd.scname, sd)) ctx.scenario_decls
+  in
+  (* Pass 2: for each scenario, resolve parents then emit IR preset. *)
+  List.map (fun sd ->
+    let own = collect_own_fields sd in
+    let resolved = resolve_parents ctx decl_map own in
+    (* Expression resolution with parent-first semantics:
+       parent's `set` values become bindings for the child's set
+       expressions. Fold left-to-right, substituting any EIdent that
+       matches a prior name with its resolved numeric value. This
+       bypasses ctx.let_bindings (which is finalized at compile start)
+       and keeps the substitution scoped to this scenario. *)
+    let rec subst bindings expr =
+      match expr with
+      | EConst _ | EUnit _ -> expr
+      | EIdent (n, _) when List.mem_assoc n bindings ->
+        EConst (List.assoc n bindings)
+      | EIdent _ -> expr
+      | EUnOp (op, e) -> EUnOp (op, subst bindings e)
+      | EBinOp (op, l, r) -> EBinOp (op, subst bindings l, subst bindings r)
+      | EFuncCall (name, args) ->
+        EFuncCall (name, List.map (fun (k, e) -> (k, subst bindings e)) args)
+      | other -> other
+    in
+    (* Left-to-right fold with overwrite-on-duplicate. Each expression
+       is substituted using every prior binding (so a child's
+       `beta = beta * 1.5` reads the parent's resolved beta), then
+       resolved to f64. When the same key appears twice — always the
+       case when a child overrides a parent's set — the later value
+       wins in the final output. First-seen order is preserved. *)
+    let resolve_fold vs =
+      let map = Hashtbl.create (List.length vs) in
+      let order = ref [] in
+      List.iter (fun (k, e) ->
+        let bindings = Hashtbl.fold (fun k v acc -> (k, v) :: acc) map [] in
+        let e' = subst bindings e in
+        let v = resolve_float_expr ctx e' in
+        if not (Hashtbl.mem map k) then order := k :: !order;
+        Hashtbl.replace map k v
+      ) vs;
+      List.rev !order |> List.map (fun k -> (k, Hashtbl.find map k))
+    in
+    let set_vals   = resolve_fold resolved.rs_set in
+    let scale_vals = resolve_fold resolved.rs_scale in
+    let t_end_val  = Option.map (resolve_float_expr ctx) resolved.rs_t_end in
+    { Ir.preset_name    = resolved.rs_name;
+      Ir.preset_label   = Option.value resolved.rs_label ~default:resolved.rs_name;
+      Ir.preset_params  = set_vals;
+      Ir.preset_enable  = resolved.rs_enable;
+      Ir.preset_disable = resolved.rs_disable;
+      Ir.preset_scale   = scale_vals;
+      Ir.preset_compose = resolved.rs_compose;
+      Ir.preset_t_end   = t_end_val;
     }
   ) ctx.scenario_decls
 

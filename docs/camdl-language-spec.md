@@ -2012,7 +2012,63 @@ The compiler warns on non-commutative compositions (overlapping write sets).
 error** — the user must handle clamping explicitly via `set` with an
 `if/then/else` expression. No implicit clamping.
 
-### 18.2 Scenario Expression Scope
+### 18.2 Scenario Inheritance — `extends`
+
+A scenario can inherit from another via `extends = <parent_name>`, which is
+**compile-time sugar**: the child is resolved as the parent with the child's
+fields layered on top. The IR keeps its flat preset shape — downstream
+consumers see no trace of inheritance.
+
+```
+scenarios {
+  baseline {
+    label = "No intervention"
+    set = { beta = 0.4, gamma = 0.15, N0 = 10_000, I0 = 10 }
+  }
+  with_vacc {
+    extends = baseline
+    label   = "Vaccination at day 15"
+    enable  = [vaccination]
+  }
+  warmer {
+    extends = baseline
+    set     = { beta = beta * 1.5 }    # references parent's resolved value
+  }
+}
+```
+
+**Merge rules (per field):**
+
+| Field                     | Behavior                                                   |
+|---------------------------|-------------------------------------------------------------|
+| `set`, `scale`            | Child keys override parent keys on collision; union otherwise. |
+| `enable`, `disable`, `compose` | Parent + child, deduped preserving first-seen order.  |
+| `label`, `simulate.to`    | Child overrides parent when present.                       |
+
+**Expression scope.** Child `set` expressions are evaluated *after* parent's
+`set` is resolved — so `set = { beta = beta * 1.5 }` in a child reads the
+parent's resolved `beta`. There's no default-at-declaration path in camdl;
+the name must resolve to a concrete upstream value or the compiler errors.
+
+::: {.callout-warning}
+**`enable`/`disable`/`compose` append parent's list to the child's.** A
+child writing `enable = [masking]` under a parent with `enable = [vaccination]`
+gets `[vaccination, masking]`, **not** just `[masking]`. To remove a parent's
+intervention in a child, use `disable`. The compiler emits **W310** whenever
+this merge actually changes the child's declared list, so the surprise is
+observable rather than silent.
+:::
+
+**Diagnostics:**
+
+- **E25x** — cycle in `extends` chain (includes the full chain in the message).
+- **E25y** — unknown parent scenario (suggests the closest name by edit distance).
+- **E25z** — chain depth > 5; treat as a code smell and factor common ancestors,
+  or request multi-parent composition as a future feature.
+- **W310** — append-dedup of parent's enable/disable/compose changed the
+  resolved list (see callout above).
+
+### 18.3 Scenario Expression Scope
 
 Inside `set = { PARAM = EXPR }`, the RHS expression can reference:
 
@@ -2024,7 +2080,7 @@ Compartment state, time, and other scenario settings are NOT in scope — scenar
 patches are static transformations of parameter values, not runtime-dependent
 operations.
 
-### 18.3 External Experiment Files
+### 18.4 External Experiment Files
 
 For multi-model analysis, a separate experiment file:
 
@@ -2061,7 +2117,7 @@ experiment("Nigeria SIA evaluation") {
 }
 ```
 
-### 18.4 Compare Block Semantics
+### 18.5 Compare Block Semantics
 
 The `compare` block drives paired scenario simulation with EKRNG coupling:
 

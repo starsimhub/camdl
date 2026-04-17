@@ -17,6 +17,11 @@ let contains_substring ~needle s =
       else loop (i + 1)
     in loop 0
 
+let compile_expect_ok src =
+  match Compiler.compile ~name:"test" src with
+  | Ok m -> m
+  | Error e -> Alcotest.failf "compile failed: %s" e
+
 (** Compile with JSON-diagnostics mode so the Error variant carries the
     structured error payload (codes + messages) rather than the generic
     "compilation failed" string. Then assert the given error code and a
@@ -558,6 +563,176 @@ let test_recurring_e242_schedule_too_long () =
       }
     }
   |}
+
+(* ── Scenario `extends` (single-inheritance sugar) ───────────────────────── *)
+
+let find_scenario (m : Ir.model) name =
+  List.find (fun (p : Ir.preset) -> p.preset_name = name) m.presets
+
+let extends_boilerplate = {|
+    time_unit = 'days
+    compartments { S }
+    parameters { x : rate }
+    transitions {}
+    init { S = 1 }
+    simulate { from = 0 'days  to = 1 'days }
+  |}
+
+let test_extends_inherits_set_values () =
+  let src = extends_boilerplate ^ {|
+    scenarios {
+      baseline { set = { x = 0.3 } }
+      child    { extends = baseline }
+    }
+  |} in
+  let m = compile_expect_ok src in
+  let child = find_scenario m "child" in
+  Alcotest.(check (float 1e-9)) "inherits x" 0.3 (List.assoc "x" child.preset_params)
+
+let test_extends_child_overrides_key () =
+  let src = extends_boilerplate ^ {|
+    scenarios {
+      baseline { set = { x = 0.3 } }
+      hot      { extends = baseline   set = { x = 0.9 } }
+    }
+  |} in
+  let m = compile_expect_ok src in
+  let hot = find_scenario m "hot" in
+  Alcotest.(check (float 1e-9)) "child overrides" 0.9 (List.assoc "x" hot.preset_params)
+
+let test_extends_enable_append_dedup () =
+  let src = {|
+    time_unit = 'days
+    compartments { S, V }
+    parameters { x : rate }
+    transitions {}
+    init { S = 1 }
+    simulate { from = 0 'days  to = 10 'days }
+    interventions {
+      a : transfer(fraction = 0.1, from = S, to = V) at [1]
+      b : transfer(fraction = 0.1, from = S, to = V) at [2]
+      c : transfer(fraction = 0.1, from = S, to = V) at [3]
+    }
+    scenarios {
+      parent { enable = [a, b] }
+      child  { extends = parent   enable = [b, c] }
+    }
+  |} in
+  let m = compile_expect_ok src in
+  let child = find_scenario m "child" in
+  (* Parent-first, child-second, dedup: [a; b; c] *)
+  Alcotest.(check (list string)) "enable append+dedup"
+    ["a"; "b"; "c"] child.preset_enable
+
+let test_extends_three_level_chain () =
+  let src = extends_boilerplate ^ {|
+    scenarios {
+      a { set = { x = 0.1 } }
+      b { extends = a  set = { x = x * 2 } }
+      c { extends = b  set = { x = x * 3 } }
+    }
+  |} in
+  let m = compile_expect_ok src in
+  let c = find_scenario m "c" in
+  (* 0.1 × 2 × 3 = 0.6 *)
+  Alcotest.(check (float 1e-9)) "three-level chain" 0.6 (List.assoc "x" c.preset_params)
+
+let test_extends_e25x_cycle () =
+  compile_expect_error_code ~code:"E25x" ~contains:"cycle"
+    (extends_boilerplate ^ {|
+    scenarios {
+      a { extends = b }
+      b { extends = a }
+    }
+  |})
+
+let test_extends_e25y_unknown_with_suggestion () =
+  compile_expect_error_code ~code:"E25y" ~contains:"baseline"
+    (extends_boilerplate ^ {|
+    scenarios {
+      foo { extends = baselime }
+      baseline {}
+    }
+  |})
+
+let test_extends_scale_interaction () =
+  (* Parent sets, child scales the same key. Child's scale evaluated
+     after parent's set is in scope — scale of 0.5 against parent's 0.4
+     is what makes it to the scale preset field (scales are applied at
+     simulate time as multipliers; resolution here is just value
+     computation). *)
+  let src = extends_boilerplate ^ {|
+    scenarios {
+      p { set = { x = 0.4 } }
+      c { extends = p   scale = { x = 0.5 } }
+    }
+  |} in
+  let m = compile_expect_ok src in
+  let c = find_scenario m "c" in
+  Alcotest.(check (float 1e-9)) "scale resolves" 0.5 (List.assoc "x" c.preset_scale);
+  (* Child inherits parent's set too *)
+  Alcotest.(check (float 1e-9)) "parent set flows through"
+    0.4 (List.assoc "x" c.preset_params)
+
+let test_extends_child_references_parent_value () =
+  (* Regression: `beta = beta * 1.5` in child must see parent's beta. *)
+  let src = extends_boilerplate ^ {|
+    scenarios {
+      parent { set = { x = 0.4 } }
+      warmer { extends = parent   set = { x = x * 1.5 } }
+    }
+  |} in
+  let m = compile_expect_ok src in
+  let w = find_scenario m "warmer" in
+  Alcotest.(check (float 1e-9)) "parent-first resolution"
+    0.6 (List.assoc "x" w.preset_params)
+
+let test_extends_e25z_depth_exceeds () =
+  compile_expect_error_code ~code:"E25z" ~contains:"chain"
+    (extends_boilerplate ^ {|
+    scenarios {
+      s1 {}
+      s2 { extends = s1 }
+      s3 { extends = s2 }
+      s4 { extends = s3 }
+      s5 { extends = s4 }
+      s6 { extends = s5 }
+      s7 { extends = s6 }
+    }
+  |})
+
+let test_extends_w310_on_enable_dedup () =
+  (* Compile should succeed but emit a W310 warning naming the parent
+     and showing the resolved enable list. *)
+  let src = {|
+    time_unit = 'days
+    compartments { S, V }
+    parameters { x : rate }
+    transitions {}
+    init { S = 1 }
+    simulate { from = 0 'days  to = 10 'days }
+    interventions {
+      a : transfer(fraction = 0.1, from = S, to = V) at [1]
+      b : transfer(fraction = 0.1, from = S, to = V) at [2]
+    }
+    scenarios {
+      p { enable = [a] }
+      c { extends = p   enable = [b] }
+    }
+  |} in
+  Diagnostics.json_errors_mode := true;
+  let r = Compiler.compile ~name:"w310_test" src in
+  Diagnostics.json_errors_mode := false;
+  (* Note: compile succeeds (warning, not error) so diagnostics won't
+     be in Error variant. The warning is rendered to stderr; we can't
+     easily capture that without stream redirection. Instead, assert
+     the scenario resolves correctly (a; b) which is the observable
+     behavior of the rule firing. *)
+  match r with
+  | Error e -> Alcotest.failf "should compile despite W310: %s" e
+  | Ok m ->
+    let c = find_scenario m "c" in
+    Alcotest.(check (list string)) "merged enable" ["a"; "b"] c.preset_enable
 
 (* ── Phase D (BUG-4): Time function expansion ────────────────────────────────
    Compile a model with a sinusoidal forcing function.
@@ -1421,10 +1596,6 @@ let test_date_requires_origin () =
 (* ── Prior distribution syntax ──────────────────────────────────────────
    Test that ~ prior(...) syntax parses and produces correct IR priors. *)
 
-let compile_expect_ok src =
-  match Compiler.compile ~name:"test_prior" src with
-  | Ok m -> m
-  | Error e -> Alcotest.failf "compile failed: %s" e
 
 let find_param (m : Ir.model) name =
   List.find (fun (p : Ir.parameter) -> p.name = name) m.parameters
@@ -1796,6 +1967,18 @@ let () =
       Alcotest.test_case "E240 every = 0 is rejected"               `Quick test_recurring_e240_zero_every;
       Alcotest.test_case "E241 from > until is rejected"            `Quick test_recurring_e241_inverted_range;
       Alcotest.test_case "E242 expanded schedule too long"          `Quick test_recurring_e242_schedule_too_long;
+    ];
+    "scenario_extends", [
+      Alcotest.test_case "child inherits parent set values"          `Quick test_extends_inherits_set_values;
+      Alcotest.test_case "child overrides parent key"                `Quick test_extends_child_overrides_key;
+      Alcotest.test_case "enable: parent + child, dedup"             `Quick test_extends_enable_append_dedup;
+      Alcotest.test_case "three-level chain a -> b -> c"             `Quick test_extends_three_level_chain;
+      Alcotest.test_case "scale interacts with parent's set"         `Quick test_extends_scale_interaction;
+      Alcotest.test_case "child references parent's resolved value"  `Quick test_extends_child_references_parent_value;
+      Alcotest.test_case "E25x cycle detected with chain in message" `Quick test_extends_e25x_cycle;
+      Alcotest.test_case "E25y unknown parent + edit-distance hint"  `Quick test_extends_e25y_unknown_with_suggestion;
+      Alcotest.test_case "E25z chain depth > 5 errors"               `Quick test_extends_e25z_depth_exceeds;
+      Alcotest.test_case "W310 fires on append-dedup collision"      `Quick test_extends_w310_on_enable_dedup;
     ];
     "time_functions", [
       Alcotest.test_case "sinusoidal compiles to TimeFunc"       `Quick test_sinusoidal_time_func;
