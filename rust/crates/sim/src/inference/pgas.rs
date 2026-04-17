@@ -525,9 +525,12 @@ pub fn complete_data_loglik(
             cum_flows[i] += f;
         }
 
-        // Observation density — joint across all streams
+        // Observation density — joint across all streams. Snapshot
+        // projections read post-step state (after step_one fired any
+        // scheduled intervention at t+dt).
         if let Some(&obs_idx) = obs_at_substep.get(&s) {
-            let obs_ll = obs_model.log_likelihood_from_flows(&cum_flows, obs_idx, params);
+            let obs_ll = obs_model.log_likelihood_from_flows_and_counts(
+                &cum_flows, &rec.counts_after, obs_idx, params);
             if !obs_ll.is_finite() {
                 log::debug!("complete_data_loglik: obs density -inf at substep {} (obs_idx={})", s, obs_idx);
             }
@@ -837,8 +840,8 @@ pub fn csmc_as(
         // ── 5. Compute weights — joint across all streams ──
         if let Some(&obs_idx) = obs_at_substep.get(&s) {
             for j in 0..n_particles {
-                log_weights[j] = obs_model.log_likelihood_from_flows(
-                    &cum_flows[j], obs_idx, params);
+                log_weights[j] = obs_model.log_likelihood_from_flows_and_counts(
+                    &cum_flows[j], &counts[j], obs_idx, params);
             }
             for j in 0..n_particles {
                 for f in &mut cum_flows[j] { *f = 0; }

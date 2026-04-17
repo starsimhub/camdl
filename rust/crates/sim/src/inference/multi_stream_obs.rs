@@ -4,11 +4,23 @@
 //! likelihood expressions and evaluates them with params at call time —
 //! no baked-in params. This means IF2, PGAS, and PMMH all correctly
 //! respond to observation-level parameter changes (e.g., sigma_se).
+//!
+//! A stream's `projection` is one of:
+//! - `FlowSum(flow_indices)`    — incidence projections (`Projection::CumulativeFlow`)
+//! - `IntCompSum(comp_indices)` — prevalence projections (`Projection::CurrentPop` /
+//!                                 `Projection::CurrentPopSum`)
+//! - `Expr(resolved)`           — arbitrary state expressions
+//!                                 (`Projection::DerivedExpr`)
+//!
+//! Incidence streams read and reset a per-stream counter; prevalence and
+//! expression streams read current compartment counts and do not reset.
+//! See docs/dev/proposals/2026-04-17-state-snapshot-projections.md.
 
 use std::sync::Arc;
 use crate::compiled_model::CompiledModel;
 use crate::rng::StatefulRng;
-use crate::resolved_expr::ResolvedLikelihood;
+use crate::propensity::EvalCtx;
+use crate::resolved_expr::{ResolvedExpr, ResolvedLikelihood, eval_resolved};
 use crate::state::{IntState, RealState};
 use super::traits::ObservationModel;
 use super::types::ParticleState;
@@ -17,10 +29,108 @@ use super::obs_model::{
     sample_obs_resolved, eval_obs_mean_resolved,
 };
 
-/// One observation stream: projection indices, resolved likelihood, and data.
+/// How a stream projects simulator state into the scalar `projected` value
+/// passed to the likelihood.
+#[derive(Clone)]
+pub enum StreamProjection {
+    /// Sum of per-transition flow counters, reset after each observation.
+    /// Used for incidence data (`CumulativeFlow`).
+    FlowSum(Vec<usize>),
+    /// Sum of integer compartment counts read at the observation instant.
+    /// Used for prevalence data (`CurrentPop`, `CurrentPopSum`). No reset.
+    IntCompSum(Vec<usize>),
+    /// Arbitrary expression over state, evaluated at the observation instant.
+    /// Used for `DerivedExpr` (e.g. `B1 + B2`, `I/(S+I+R)`). No reset.
+    Expr(ResolvedExpr),
+}
+
+impl StreamProjection {
+    /// True for projections that accumulate between observations and must be
+    /// reset after the likelihood is scored. Only `FlowSum` does.
+    pub fn resets_after_observation(&self) -> bool {
+        matches!(self, StreamProjection::FlowSum(_))
+    }
+
+    /// Build a projection from the IR projection + compiled model. Handles:
+    /// `CumulativeFlow` (by flow-name family match), `CurrentPop` /
+    /// `CurrentPopSum` (by local int index lookup), and `DerivedExpr` (via
+    /// the shared expression resolver).
+    ///
+    /// Errors carry the observation stream name for a readable message
+    /// (caller passes it in `obs_name`).
+    pub fn from_ir(
+        projection: &ir::observation::Projection,
+        compiled: &CompiledModel,
+        obs_name: &str,
+    ) -> Result<Self, String> {
+        use ir::observation::Projection as P;
+        match projection {
+            P::CumulativeFlow(flow_name) => {
+                let idxs: Vec<usize> = compiled.model.transitions.iter().enumerate()
+                    .filter(|(_, tr)| tr.name == *flow_name
+                        || tr.name.starts_with(&format!("{}_", flow_name)))
+                    .map(|(i, _)| i).collect();
+                if idxs.is_empty() {
+                    return Err(format!(
+                        "observation '{}': incidence projection references flow '{}', \
+                         but no transition with that name (or family `{}_*`) exists",
+                        obs_name, flow_name, flow_name));
+                }
+                Ok(StreamProjection::FlowSum(idxs))
+            }
+            P::CurrentPop(comp_name) => {
+                let local = resolve_int_comp(compiled, comp_name)
+                    .ok_or_else(|| format!(
+                        "observation '{}': prevalence projection references \
+                         compartment '{}', which is not an integer compartment \
+                         in this model",
+                        obs_name, comp_name))?;
+                Ok(StreamProjection::IntCompSum(vec![local]))
+            }
+            P::CurrentPopSum(names) => {
+                let mut idxs = Vec::with_capacity(names.len());
+                for n in names {
+                    let local = resolve_int_comp(compiled, n).ok_or_else(|| format!(
+                        "observation '{}': prevalence-sum projection references \
+                         compartment '{}', which is not an integer compartment",
+                        obs_name, n))?;
+                    idxs.push(local);
+                }
+                Ok(StreamProjection::IntCompSum(idxs))
+            }
+            P::DerivedExpr(expr) => {
+                use ir::table::OobPolicy;
+                use crate::resolved_expr::{resolve_expr, ResolveCtx};
+                let table_meta: Vec<(OobPolicy, usize)> = compiled.model.tables.iter()
+                    .zip(&compiled.table_values_cache)
+                    .map(|(t, cached)| (t.out_of_bounds.clone(), cached.len()))
+                    .collect();
+                let ctx = ResolveCtx {
+                    comp_index: &compiled.comp_index,
+                    param_index: &compiled.param_index,
+                    time_func_index: &compiled.time_func_index,
+                    table_index: &compiled.table_index,
+                    global_to_int: &compiled.global_to_int,
+                    global_to_real: &compiled.global_to_real,
+                    table_meta: &table_meta,
+                };
+                let resolved = resolve_expr(expr, &ctx).map_err(|e| format!(
+                    "observation '{}': cannot resolve state-snapshot expression: {:?}",
+                    obs_name, e))?;
+                Ok(StreamProjection::Expr(resolved))
+            }
+        }
+    }
+}
+
+fn resolve_int_comp(compiled: &CompiledModel, name: &str) -> Option<usize> {
+    let global = *compiled.comp_index.get(name)?;
+    compiled.global_to_int[global]
+}
+
+/// One observation stream.
 struct Stream {
-    /// Indices into flow_accumulators for this stream's projection.
-    flow_indices: Vec<usize>,
+    projection: StreamProjection,
     /// Resolved likelihood expression tree (pre-resolved at construction,
     /// but evaluates with params at call time — no baked-in values).
     resolved: ResolvedLikelihood,
@@ -37,19 +147,18 @@ pub struct MultiStreamObsModel {
     streams: Vec<Stream>,
     obs_times: Vec<f64>,
     compiled: Arc<CompiledModel>,
-    /// Dummy zeroed state objects required by `EvalCtx`. The obs model
-    /// likelihood expressions only read `params` and `projected` — never
-    /// compartment counts. These exist solely because `EvalCtx` requires
-    /// `&IntState`/`&RealState` references (it's shared with propensity
-    /// evaluation which does read state). Refactoring EvalCtx to accept
-    /// Option would touch 13 files for zero behavioral change.
-    int_s: IntState,
+    /// Number of integer compartments, used to allocate a per-call scratch
+    /// `IntState` when evaluating `Expr` projections. Allocation happens at
+    /// observation ticks only — not in the propensity hot loop.
+    n_int: usize,
+    /// Zero real state; likelihood eval never reads real compartments and
+    /// `RealState` has no interior mutability.
     real_s: RealState,
 }
 
 /// Specification for building one observation stream.
 pub struct StreamSpec {
-    pub flow_indices: Vec<usize>,
+    pub projection: StreamProjection,
     pub ir_model: ir::observation::ObservationModel,
     pub observations: Vec<f64>,
     pub obs_times: Vec<f64>,
@@ -58,13 +167,19 @@ pub struct StreamSpec {
 impl MultiStreamObsModel {
     /// Create an empty observation model (no streams, no data).
     /// Used when only the transition density is needed (e.g., gradient tests
-    /// with no observation data). `log_likelihood_from_flows` returns 0.0.
-    /// For trait-generic contexts (PF, IF2) that don't need `log_likelihood_from_flows`,
-    /// prefer `NullObsModel` which requires no `CompiledModel`.
+    /// with no observation data). `log_likelihood_from_flows_and_counts`
+    /// returns 0.0. For trait-generic contexts (PF, IF2) that don't need it,
+    /// prefer `NullObsModel`.
     pub fn empty(compiled: Arc<CompiledModel>) -> Self {
-        let int_s = IntState::new(compiled.int_local_to_global.len());
+        let n_int = compiled.int_local_to_global.len();
         let real_s = RealState::new(compiled.real_local_to_global.len());
-        MultiStreamObsModel { streams: vec![], obs_times: vec![], compiled, int_s, real_s }
+        MultiStreamObsModel {
+            streams: vec![],
+            obs_times: vec![],
+            compiled,
+            n_int,
+            real_s,
+        }
     }
 
     pub fn new(
@@ -79,37 +194,87 @@ impl MultiStreamObsModel {
                 &spec.ir_model.likelihood, &compiled,
             );
             Stream {
-                flow_indices: spec.flow_indices,
+                projection: spec.projection,
                 resolved,
                 observations: spec.observations,
             }
         }).collect();
 
-        let int_s = IntState::new(compiled.int_local_to_global.len());
+        let n_int = compiled.int_local_to_global.len();
         let real_s = RealState::new(compiled.real_local_to_global.len());
 
-        MultiStreamObsModel { streams, obs_times, compiled, int_s, real_s }
+        MultiStreamObsModel {
+            streams,
+            obs_times,
+            compiled,
+            n_int,
+            real_s,
+        }
     }
 
-    /// Project from particle state to observable quantity for one stream.
-    fn project(&self, state: &ParticleState, stream_idx: usize) -> f64 {
-        self.streams[stream_idx].flow_indices.iter()
-            .map(|&i| state.flow_accumulators[i] as f64).sum()
+    /// Evaluate a stream's projection given current particle state and
+    /// params. `flows` is the per-stream flow counter slice (ignored for
+    /// non-flow projections); `counts` is the integer compartment vector.
+    fn project_stream_with_params(
+        &self,
+        stream_idx: usize,
+        flows: &[u64],
+        counts: &[i64],
+        params: &[f64],
+    ) -> f64 {
+        match &self.streams[stream_idx].projection {
+            StreamProjection::FlowSum(idxs) => {
+                idxs.iter().map(|&i| flows[i] as f64).sum()
+            }
+            StreamProjection::IntCompSum(idxs) => {
+                idxs.iter().map(|&i| counts[i] as f64).sum()
+            }
+            StreamProjection::Expr(expr) => {
+                let mut scratch = IntState::new(self.n_int);
+                scratch.counts.copy_from_slice(counts);
+                let ctx = EvalCtx {
+                    model: &self.compiled,
+                    int_s: &scratch,
+                    real_s: &self.real_s,
+                    params,
+                    t: 0.0,
+                    projected: None,
+                };
+                eval_resolved(expr, &ctx)
+            }
+        }
     }
 
-    /// Project from cumulative flow array (used by PGAS which doesn't
-    /// have a ParticleState, only raw flow arrays).
+    /// Project + score from raw per-particle arrays. Used by PGAS which
+    /// carries `counts` and `cum_flows` as flat Vec<i64>/Vec<u64> and has
+    /// no `ParticleState`.
+    pub fn log_likelihood_from_flows_and_counts(
+        &self,
+        cum_flows: &[u64],
+        counts: &[i64],
+        obs_idx: usize,
+        params: &[f64],
+    ) -> f64 {
+        (0..self.streams.len()).map(|si| {
+            let projected = self.project_stream_with_params(si, cum_flows, counts, params);
+            let s = &self.streams[si];
+            let int_s = IntState::new(self.n_int);
+            eval_likelihood_resolved(
+                &s.resolved, projected, s.observations[obs_idx],
+                params, &self.compiled, &int_s, &self.real_s,
+            )
+        }).sum()
+    }
+
+    /// Deprecated-shape helper kept for tests that exercise the flow-only
+    /// branch. Equivalent to passing a zeroed counts slice; snapshot streams
+    /// would project 0.
+    #[doc(hidden)]
     pub fn log_likelihood_from_flows(
         &self, cum_flows: &[u64], obs_idx: usize, params: &[f64],
     ) -> f64 {
-        self.streams.iter().map(|s| {
-            let projected: f64 = s.flow_indices.iter()
-                .map(|&i| cum_flows[i] as f64).sum();
-            eval_likelihood_resolved(
-                &s.resolved, projected, s.observations[obs_idx],
-                params, &self.compiled, &self.int_s, &self.real_s,
-            )
-        }).sum()
+        let zeros = vec![0i64; self.compiled.int_local_to_global.len()];
+        self.log_likelihood_from_flows_and_counts(cum_flows, &zeros, obs_idx, params)
     }
 }
 
@@ -117,11 +282,15 @@ impl ObservationModel<ParticleState> for MultiStreamObsModel {
     fn log_likelihood(
         &self, state: &ParticleState, obs_idx: usize, params: &[f64],
     ) -> f64 {
-        self.streams.iter().enumerate().map(|(si, s)| {
-            let projected = self.project(state, si);
+        (0..self.streams.len()).map(|si| {
+            let projected = self.project_stream_with_params(
+                si, &state.flow_accumulators, &state.counts, params,
+            );
+            let s = &self.streams[si];
+            let int_s = IntState::new(self.n_int);
             eval_likelihood_resolved(
                 &s.resolved, projected, s.observations[obs_idx],
-                params, &self.compiled, &self.int_s, &self.real_s,
+                params, &self.compiled, &int_s, &self.real_s,
             )
         }).sum()
     }
@@ -134,11 +303,15 @@ impl ObservationModel<ParticleState> for MultiStreamObsModel {
         &self, state: &ParticleState, _obs_idx: usize,
         params: &[f64], rng: &mut StatefulRng,
     ) -> Vec<f64> {
-        self.streams.iter().enumerate().map(|(si, s)| {
-            let projected = self.project(state, si);
+        (0..self.streams.len()).map(|si| {
+            let projected = self.project_stream_with_params(
+                si, &state.flow_accumulators, &state.counts, params,
+            );
+            let s = &self.streams[si];
+            let int_s = IntState::new(self.n_int);
             sample_obs_resolved(
                 &s.resolved, projected, params,
-                &self.compiled, &self.int_s, &self.real_s, rng,
+                &self.compiled, &int_s, &self.real_s, rng,
             )
         }).collect()
     }
@@ -146,11 +319,15 @@ impl ObservationModel<ParticleState> for MultiStreamObsModel {
     fn mean(
         &self, state: &ParticleState, _obs_idx: usize, params: &[f64],
     ) -> Vec<f64> {
-        self.streams.iter().enumerate().map(|(si, s)| {
-            let projected = self.project(state, si);
+        (0..self.streams.len()).map(|si| {
+            let projected = self.project_stream_with_params(
+                si, &state.flow_accumulators, &state.counts, params,
+            );
+            let s = &self.streams[si];
+            let int_s = IntState::new(self.n_int);
             eval_obs_mean_resolved(
                 &s.resolved, projected, params,
-                &self.compiled, &self.int_s, &self.real_s,
+                &self.compiled, &int_s, &self.real_s,
             )
         }).collect()
     }
@@ -169,3 +346,4 @@ impl ObservationModel<ParticleState> for NullObsModel {
     fn obs_time(&self, _obs_idx: usize) -> f64 { 0.0 }
     fn n_streams(&self) -> usize { 0 }
 }
+

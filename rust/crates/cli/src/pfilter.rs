@@ -137,38 +137,6 @@ pub fn cmd_pfilter(args: &[String]) {
     eprintln!("pfilter: {} observations, {} particles, dt={}, seed={}",
         observations.len(), n_particles, dt, seed);
 
-    // Find the observation projection: sum of flows for the specified transition(s).
-    // --flow NAME: project incidence of that transition (e.g., --flow recovery).
-    // Default: project all transitions with origin_kind = "transmission".
-    let mut flow_indices: Vec<usize> = if let Some(ref name) = flow_name {
-        let indices: Vec<usize> = model.transitions.iter().enumerate()
-            .filter(|(_, tr)| tr.name == *name || tr.name.starts_with(&format!("{}_", name)))
-            .map(|(i, _)| i)
-            .collect();
-        if indices.is_empty() {
-            eprintln!("error: no transition named '{}' found. Available: {}",
-                name, model.transitions.iter().map(|t| t.name.as_str()).collect::<Vec<_>>().join(", "));
-            std::process::exit(1);
-        }
-        eprintln!("pfilter: projecting incidence({}) → {} flow(s)", name, indices.len());
-        indices
-    } else {
-        let indices: Vec<usize> = model.transitions.iter().enumerate()
-            .filter(|(_, tr)| {
-                tr.metadata.as_ref()
-                    .and_then(|m| m.origin_kind.as_deref())
-                    .map_or(false, |k| k == "transmission")
-            })
-            .map(|(i, _)| i)
-            .collect();
-        if indices.is_empty() {
-            eprintln!("warning: no transmission transitions found; use --flow NAME to specify projection");
-            vec![0]
-        } else {
-            indices
-        }
-    };
-
     // Find observation model from the IR
     let obs_model_ir = if let Some(ref name) = obs_name {
         model.observations.iter().find(|o| o.name == *name)
@@ -189,19 +157,28 @@ pub fn cmd_pfilter(args: &[String]) {
         std::process::exit(1);
     };
 
-    // Override flow indices from obs model projection if --flow not specified
-    if flow_name.is_none() {
-        if let ir::observation::Projection::CumulativeFlow(ref name) = obs_model_ir.projection {
-            let obs_flow_indices: Vec<usize> = model.transitions.iter().enumerate()
+    // Build the projection. An explicit `--flow NAME` overrides the obs
+    // model's projection (forces incidence over the named transition);
+    // otherwise the projection comes from the obs model's `projection:`
+    // field — incidence, prevalence, or a DerivedExpr snapshot.
+    let projection: sim::inference::multi_stream_obs::StreamProjection =
+        if let Some(ref name) = flow_name {
+            let indices: Vec<usize> = model.transitions.iter().enumerate()
                 .filter(|(_, tr)| tr.name == *name || tr.name.starts_with(&format!("{}_", name)))
                 .map(|(i, _)| i)
                 .collect();
-            if !obs_flow_indices.is_empty() {
-                flow_indices = obs_flow_indices;
-                eprintln!("pfilter: projecting incidence({}) from observation model", name);
+            if indices.is_empty() {
+                eprintln!("error: no transition named '{}' found. Available: {}",
+                    name, model.transitions.iter().map(|t| t.name.as_str()).collect::<Vec<_>>().join(", "));
+                std::process::exit(1);
             }
-        }
-    }
+            eprintln!("pfilter: --flow override → incidence({}) ({} transitions)", name, indices.len());
+            sim::inference::multi_stream_obs::StreamProjection::FlowSum(indices)
+        } else {
+            sim::inference::multi_stream_obs::StreamProjection::from_ir(
+                &obs_model_ir.projection, &compiled, &obs_model_ir.name,
+            ).unwrap_or_else(|e| { eprintln!("error: {}", e); std::process::exit(1); })
+        };
 
     eprintln!("pfilter: obs_model={}, likelihood={}", obs_model_ir.name,
         match &obs_model_ir.likelihood {
@@ -221,7 +198,7 @@ pub fn cmd_pfilter(args: &[String]) {
     let obs_values: Vec<f64> = observations.iter().map(|o| o.value).collect();
     let obs_model = MultiStreamObsModel::new(
         vec![StreamSpec {
-            flow_indices: flow_indices.clone(),
+            projection,
             ir_model: obs_model_ir.clone(),
             observations: obs_values,
             obs_times,

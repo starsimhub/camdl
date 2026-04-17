@@ -365,9 +365,19 @@ pub fn cmd_if2(args: &[String]) {
 
     let obs_model_obj: Box<dyn ObservationModel<ParticleState> + Sync> = if let Some(obs_block) = model.observations.first() {
         eprintln!("if2: using observation model '{}' from IR", obs_block.name);
+        // `--flow` forces incidence over a specific transition; otherwise
+        // derive the projection (incidence / prevalence / snapshot) from
+        // the observation block.
+        let projection = if flow_name.is_some() {
+            sim::inference::multi_stream_obs::StreamProjection::FlowSum(flow_indices.clone())
+        } else {
+            sim::inference::multi_stream_obs::StreamProjection::from_ir(
+                &obs_block.projection, &compiled, &obs_block.name,
+            ).unwrap_or_else(|e| { eprintln!("error: {}", e); std::process::exit(1); })
+        };
         Box::new(MultiStreamObsModel::new(
             vec![StreamSpec {
-                flow_indices: flow_indices.clone(),
+                projection,
                 ir_model: obs_block.clone(),
                 observations: obs_values,
                 obs_times,

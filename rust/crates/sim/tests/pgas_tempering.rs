@@ -115,7 +115,7 @@ fn obs_model(compiled: &Arc<CompiledModel>) -> MultiStreamObsModel {
     let obs = observations();
     MultiStreamObsModel::new(
         vec![StreamSpec {
-            flow_indices: vec![0],
+            projection: sim::inference::multi_stream_obs::StreamProjection::FlowSum(vec![0]),
             ir_model: ir::observation::ObservationModel {
                 name: "cases".into(),
                 data_stream: "cases".into(),

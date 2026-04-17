@@ -228,9 +228,16 @@ pub fn cmd_profile(args: &[String]) {
         let obs_block = model.observations.first();
         if let Some(obs) = obs_block {
             eprintln!("profile: using observation model '{}' from IR", obs.name);
+            let projection = if flow_name.is_some() {
+                sim::inference::multi_stream_obs::StreamProjection::FlowSum(flow_indices.to_vec())
+            } else {
+                sim::inference::multi_stream_obs::StreamProjection::from_ir(
+                    &obs.projection, &compiled, &obs.name,
+                ).unwrap_or_else(|e| { eprintln!("error: {}", e); std::process::exit(1); })
+            };
             Arc::new(MultiStreamObsModel::new(
                 vec![StreamSpec {
-                    flow_indices: flow_indices.to_vec(),
+                    projection,
                     ir_model: obs.clone(),
                     observations: observations.iter().map(|o| o.value).collect(),
                     obs_times: observations.iter().map(|o| o.time).collect(),

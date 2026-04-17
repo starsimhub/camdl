@@ -24,7 +24,9 @@ use std::sync::Arc;
 /// One observation data stream with its projection and likelihood.
 pub struct ObsStream {
     pub name: String,
-    pub flow_indices: Vec<usize>,
+    /// Resolved projection (incidence / prevalence / snapshot expression)
+    /// built from the IR observation block.
+    pub projection: sim::inference::multi_stream_obs::StreamProjection,
     pub obs_model_ir: ir::observation::ObservationModel,
     pub data: Vec<Observation>,
 }
@@ -176,7 +178,6 @@ impl FitRunConfig {
 
         for (stream_name, data_path) in &data_entries {
             let obs = load_observations(data_path, stream_name, dt)?;
-            let flow_idx = resolve_flow_indices(&model, stream_name)?;
             let obs_model = model.observations.iter()
                 .find(|o| o.name == **stream_name)
                 .cloned()
@@ -185,6 +186,9 @@ impl FitRunConfig {
                     stream_name,
                     model.observations.iter().map(|o| o.name.as_str()).collect::<Vec<_>>().join(", ")
                 ))?;
+            let projection = sim::inference::multi_stream_obs::StreamProjection::from_ir(
+                &obs_model.projection, &compiled, stream_name,
+            )?;
 
             // Validate all streams share the same observation times
             let times: Vec<f64> = obs.iter().map(|o| o.time).collect();
@@ -203,7 +207,7 @@ impl FitRunConfig {
 
             streams.push(ObsStream {
                 name: stream_name.to_string(),
-                flow_indices: flow_idx,
+                projection,
                 obs_model_ir: obs_model,
                 data: obs,
             });
@@ -248,7 +252,7 @@ impl FitRunConfig {
     pub fn build_obs_model(&self) -> sim::inference::MultiStreamObsModel {
         sim::inference::MultiStreamObsModel::new(
             self.streams.iter().map(|s| sim::inference::multi_stream_obs::StreamSpec {
-                flow_indices: s.flow_indices.clone(),
+                projection: s.projection.clone(),
                 ir_model: s.obs_model_ir.clone(),
                 observations: s.data.iter().map(|o| o.value).collect(),
                 obs_times: self.observations.iter().map(|o| o.time).collect(),
@@ -583,36 +587,6 @@ fn load_observations(path: &str, column: &str, dt: f64) -> Result<Vec<Observatio
     Ok(observations.into_iter().map(|o| Observation { time: o.time, value: o.value }).collect())
 }
 
-/// Resolve flow indices from the model's observation blocks.
-fn resolve_flow_indices(model: &ir::Model, stream_name: &str) -> Result<Vec<usize>, String> {
-    // Find observation block matching the data stream name
-    if let Some(obs_model) = model.observations.iter().find(|o| o.name == *stream_name) {
-        match &obs_model.projection {
-            ir::observation::Projection::CumulativeFlow(flow_name) => {
-                let indices: Vec<usize> = model.transitions.iter().enumerate()
-                    .filter(|(_, tr)| tr.name == *flow_name || tr.name.starts_with(&format!("{}_", flow_name)))
-                    .map(|(i, _)| i)
-                    .collect();
-                if indices.is_empty() {
-                    return Err(format!("observation '{}' projects flow '{}', but no matching transition found", stream_name, flow_name));
-                }
-                Ok(indices)
-            }
-            _ => Err(format!(
-                "observation '{}' uses unsupported projection type. Only CumulativeFlow is supported for fitting.",
-                stream_name
-            )),
-        }
-    } else {
-        Err(format!(
-            "no observation block named '{}' in model.\n\
-             Available observations: {}\n\
-             The [data] key in fit.toml must match an observation block name in the model.",
-            stream_name,
-            model.observations.iter().map(|o| o.name.as_str()).collect::<Vec<_>>().join(", ")
-        ))
-    }
-}
 
 /// Run one IF2 chain (called from thread::scope).
 fn run_one_chain(

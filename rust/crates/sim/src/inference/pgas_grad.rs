@@ -331,9 +331,11 @@ pub fn complete_data_loglik_grad(
             cum_flows[i] += f;
         }
 
-        // Observation density (gradient is zero when obs params are fixed)
+        // Observation density (gradient is zero when obs params are fixed).
+        // Snapshot projections read post-step state from the trajectory record.
         if let Some(&obs_idx) = obs_at_substep.get(&s) {
-            log_p += obs_model.log_likelihood_from_flows(&cum_flows, obs_idx, params);
+            log_p += obs_model.log_likelihood_from_flows_and_counts(
+                &cum_flows, &rec.counts_after, obs_idx, params);
             for f in &mut cum_flows { *f = 0; }
         }
     }
