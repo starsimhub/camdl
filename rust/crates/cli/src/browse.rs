@@ -352,10 +352,33 @@ fn print_json(runs: &[RunEntry]) {
     }
 }
 
-fn format_params_summary(_meta: &RunMeta, _max_len: usize) -> String {
-    // Placeholder: we don't currently record merged-param values in run.json.
-    // The user can `camdl show PATH` for full details.
-    "—".to_string()
+/// Compact one-line summary of the run's sweep point (if any).
+/// Empty `sweep_point` → em-dash placeholder. Non-empty → sorted-by-key
+/// `name=value` pairs separated by spaces, truncated to `max_len` with
+/// an ellipsis.
+fn format_params_summary(meta: &RunMeta, max_len: usize) -> String {
+    if meta.sweep_point.is_empty() { return "—".to_string(); }
+    let mut pairs: Vec<(&String, &f64)> = meta.sweep_point.iter().collect();
+    pairs.sort_by_key(|(k, _)| k.as_str());
+    let full: String = pairs.iter()
+        .map(|(k, v)| format!("{}={}", k, format_num(**v)))
+        .collect::<Vec<_>>()
+        .join(" ");
+    shorten(&full, max_len)
+}
+
+/// Format a number compactly: no trailing zeros, fixed-width for tidy tables.
+fn format_num(v: f64) -> String {
+    if v == v.round() && v.abs() < 1e6 {
+        format!("{}", v as i64)
+    } else if v.abs() >= 0.001 && v.abs() < 1e6 {
+        // Trim trailing zeros: "0.300" -> "0.3"
+        let s = format!("{:.4}", v);
+        let trimmed = s.trim_end_matches('0').trim_end_matches('.');
+        trimmed.to_string()
+    } else {
+        format!("{:.2e}", v)
+    }
 }
 
 fn format_size(bytes: u64) -> String {
@@ -429,8 +452,7 @@ fn pathdiff_str(path: &Path, base: &Path) -> String {
     }
 }
 
-// Bring HashMap into scope — unused here, future-proofing for rich
-// `format_params_summary` once run.json carries merged param values.
+// HashMap is used via RunMeta::sweep_point.
 #[allow(dead_code)]
 type _Unused = HashMap<String, f64>;
 
@@ -492,6 +514,44 @@ mod tests {
     }
 
     #[test]
+    fn format_num_compact() {
+        assert_eq!(format_num(0.0), "0");
+        assert_eq!(format_num(42.0), "42");
+        assert_eq!(format_num(0.3), "0.3");
+        assert_eq!(format_num(0.12345), "0.1235"); // rounds to 4 decimal
+        assert_eq!(format_num(1e-10), "1.00e-10"); // scientific for tiny
+    }
+
+    #[test]
+    fn format_params_summary_empty_and_populated() {
+        use crate::cas::RunMeta;
+        let base = RunMeta {
+            model: "m".into(), model_hash: "".into(), scenario: "".into(),
+            sim_hash: "".into(), scen_hash: "".into(), seed: 0,
+            backend: "gillespie".into(), dt: 1.0,
+            version: "".into(), created_at: "".into(), argv: vec![],
+            sweep_point: HashMap::new(),
+        };
+        assert_eq!(format_params_summary(&base, 30), "—");
+
+        let mut sp = HashMap::new();
+        sp.insert("beta".to_string(), 0.3);
+        sp.insert("gamma".to_string(), 0.1);
+        let meta = RunMeta { sweep_point: sp, ..base.clone() };
+        let s = format_params_summary(&meta, 30);
+        // Sorted by key: beta then gamma
+        assert_eq!(s, "beta=0.3 gamma=0.1");
+
+        // Truncation: force a long param name
+        let mut sp = HashMap::new();
+        sp.insert("very_long_parameter_name".to_string(), 0.12345);
+        let meta = RunMeta { sweep_point: sp, ..base };
+        let s = format_params_summary(&meta, 15);
+        assert!(s.ends_with('…'), "should truncate with ellipsis: {}", s);
+        assert_eq!(s.chars().count(), 15);
+    }
+
+    #[test]
     fn resolve_run_roundtrip() {
         use crate::cas::{RunMeta, write_run_meta};
         let tmp = tempfile::tempdir().unwrap();
@@ -510,6 +570,7 @@ mod tests {
             version: "0.1.0".into(),
             created_at: "2026-04-16T00:00:00Z".into(),
             argv: vec!["camdl".into(), "simulate".into(), "--cas".into()],
+            sweep_point: HashMap::new(),
         };
         write_run_meta(&run_dir, &meta).unwrap();
 

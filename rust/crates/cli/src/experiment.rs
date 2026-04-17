@@ -7,6 +7,8 @@ use rayon::prelude::*;
 use crate::util::{run_simulation, write_traj_tsv, load_params_toml, resolve_ir_path, SimRun};
 use crate::hashing::{model_hash, sim_hash, scen_hash, canonical_params, slug};
 use crate::sampling::{generate_design, DesignParam, PriorSpec};
+use crate::cas;
+use crate::version;
 
 // ─── TOML schema ─────────────────────────────────────────────────────────────
 
@@ -294,14 +296,9 @@ pub fn plan_runs(
 
 // ─── Manifest / run metadata ─────────────────────────────────────────────────
 
-#[derive(Debug, Serialize, Deserialize)]
-struct RunMeta {
-    scenario: String,
-    seed: u64,
-    sim_hash: String,
-    scen_hash: String,
-    model_hash: String,
-}
+// RunMeta is the shared cas::RunMeta — both single-run `--cas` and
+// batch `--batch` write the same schema so `camdl list/show/cat` reads
+// both uniformly.
 
 /// Minimal descriptor for one completed run, included in manifest.json.
 /// The web app uses run_path to construct the URL: /runs/{run_path}/traj.tsv
@@ -310,6 +307,10 @@ struct RunEntry {
     scenario: String,
     seed: u64,
     run_path: String,
+    /// Mirrors RunMeta.sweep_point — convenient for aggregating without
+    /// reading every run.json.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    sweep_point: HashMap<String, f64>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -532,7 +533,12 @@ pub fn cmd_experiment_run(args: &[String]) {
             if plan.decision == RunDecision::CacheHit {
                 let n = counter.fetch_add(1, Ordering::Relaxed) + 1;
                 eprintln!("[{}/{}] scenario={} seed={} (skipped — already exists)", n, total, plan.scenario, plan.seed);
-                return Ok(RunEntry { scenario: plan.scenario.clone(), seed: plan.seed, run_path: plan.run_path.clone() });
+                return Ok(RunEntry {
+                    scenario: plan.scenario.clone(),
+                    seed: plan.seed,
+                    run_path: plan.run_path.clone(),
+                    sweep_point: plan.sweep_overrides.clone(),
+                });
             }
 
             // Build per-run overrides: sweep point (M layer) + scenario params (σ layer)
@@ -569,12 +575,19 @@ pub fn cmd_experiment_run(args: &[String]) {
                     }
                     let mut merged_params = plan.sweep_overrides.clone();
                     merged_params.extend(sc.params.iter().map(|(k, v)| (k.clone(), *v)));
-                    let meta = RunMeta {
+                    let meta = cas::RunMeta {
+                        model: ir_path_resolved.clone(),
+                        model_hash: mhash.clone(),
                         scenario: plan.scenario.clone(),
-                        seed: plan.seed,
                         sim_hash: shash.clone(),
                         scen_hash: scen_hash(&sc.enable, &sc.disable, &merged_params),
-                        model_hash: mhash.clone(),
+                        seed: plan.seed,
+                        backend: backend.clone(),
+                        dt,
+                        version: version::VERSION_SHORT.to_string(),
+                        created_at: cas::iso8601_utc(std::time::SystemTime::now()),
+                        argv: std::env::args().collect(),
+                        sweep_point: plan.sweep_overrides.clone(),
                     };
                     let meta_path = format!("{}/run.json", plan.run_dir);
                     std::fs::write(&meta_path, serde_json::to_string_pretty(&meta).unwrap_or_default())
@@ -582,7 +595,12 @@ pub fn cmd_experiment_run(args: &[String]) {
 
                     let n = counter.fetch_add(1, Ordering::Relaxed) + 1;
                     eprintln!("[{}/{}] scenario={} seed={}", n, total, plan.scenario, plan.seed);
-                    Ok(RunEntry { scenario: plan.scenario.clone(), seed: plan.seed, run_path: plan.run_path.clone() })
+                    Ok(RunEntry {
+                        scenario: plan.scenario.clone(),
+                        seed: plan.seed,
+                        run_path: plan.run_path.clone(),
+                        sweep_point: plan.sweep_overrides.clone(),
+                    })
                 }
             }
         }).collect()

@@ -1071,6 +1071,7 @@ fn prepare_cas_ctx(
         version: version::VERSION_SHORT.to_string(),
         created_at: cas::iso8601_utc(std::time::SystemTime::now()),
         argv: std::env::args().collect(),
+        sweep_point: HashMap::new(), // --cas is single-run; no sweep
     };
 
     Ok(CasCtx { relative, run_dir, meta })

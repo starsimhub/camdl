@@ -235,6 +235,91 @@ fn cat_emits_cached_trajectory() {
 }
 
 #[test]
+fn batch_sweep_records_sweep_point_in_run_json_and_manifest() {
+    // Regression: before this fix, batch sweeps wrote run.json and
+    // manifest entries with no record of the sweep parameter values —
+    // you could see there were 8 distinct scen_hashes but not which
+    // beta value produced which trajectory. This test runs a minimal
+    // --batch with a 3-point sweep and asserts sweep_point is present.
+    let Some(bin) = skip_if_missing_binary() else { return; };
+    let tmp = tempfile::tempdir().unwrap();
+    let output = tmp.path().join("output");
+
+    // Use the golden sir_basic IR directly (no .camdl → camdlc step).
+    // Write a params.toml with the non-swept params pinned.
+    let params_path = tmp.path().join("params.toml");
+    std::fs::write(&params_path, "beta = 0.3\ngamma = 0.1\nN0 = 1000\nI0 = 10\n").unwrap();
+
+    // Minimal batch TOML with a 3-point sweep over beta.
+    let batch_path = tmp.path().join("batch.toml");
+    std::fs::write(&batch_path, format!(r#"
+[config]
+model = "{model}"
+params = "{params}"
+output_dir = "{out}"
+seeds = {{ n = 1 }}
+parallel = 1
+
+[[scenario]]
+name = "baseline"
+
+[sweep]
+beta = [0.2, 0.3, 0.4]
+"#,
+        model = golden_sir_basic().display(),
+        params = params_path.display(),
+        out = output.display(),
+    )).unwrap();
+
+    let st = Command::new(&bin)
+        .args(["simulate", "--batch", &batch_path.to_string_lossy()])
+        .status().expect("spawn");
+    assert!(st.success(), "batch sweep should succeed");
+
+    // Find all run.json files (one per sweep point × scenario × seed = 3 total)
+    let run_dirs: Vec<_> = walkdir(&output.join("runs")).into_iter()
+        .filter(|p| p.join("run.json").exists()).collect();
+    assert_eq!(run_dirs.len(), 3, "expected 3 runs for 3-point sweep");
+
+    // Each run.json must have sweep_point with the beta value
+    let mut beta_values: Vec<f64> = Vec::new();
+    for dir in &run_dirs {
+        let meta: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(dir.join("run.json")).unwrap()
+        ).unwrap();
+        let sp = &meta["sweep_point"];
+        assert!(!sp.is_null(), "run.json must have sweep_point: {:?}", meta);
+        let beta = sp["beta"].as_f64().expect("sweep_point.beta must be a number");
+        beta_values.push(beta);
+    }
+    beta_values.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    assert!((beta_values[0] - 0.2).abs() < 1e-9);
+    assert!((beta_values[1] - 0.3).abs() < 1e-9);
+    assert!((beta_values[2] - 0.4).abs() < 1e-9);
+
+    // manifest.json must also carry sweep_point on each entry
+    let manifest: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(output.join("manifest.json")).unwrap()
+    ).unwrap();
+    let runs = manifest["runs"].as_array().expect("manifest.runs should be an array");
+    assert_eq!(runs.len(), 3);
+    for run in runs {
+        assert!(run["sweep_point"]["beta"].is_number(),
+            "manifest entry missing sweep_point.beta: {:?}", run);
+    }
+
+    // `camdl list` should show the beta values in PARAMS column
+    let out = Command::new(&bin)
+        .args(["list", &output.to_string_lossy()])
+        .output().expect("spawn");
+    assert!(out.status.success());
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("beta=0.2"), "list should show beta=0.2: {}", stdout);
+    assert!(stdout.contains("beta=0.3"), "list should show beta=0.3: {}", stdout);
+    assert!(stdout.contains("beta=0.4"), "list should show beta=0.4: {}", stdout);
+}
+
+#[test]
 fn show_prints_metadata() {
     let Some(bin) = skip_if_missing_binary() else { return; };
     let tmp = tempfile::tempdir().unwrap();

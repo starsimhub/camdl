@@ -94,6 +94,13 @@ pub struct RunMeta {
     pub created_at: String,
     /// Original argv that produced this run.
     pub argv: Vec<String>,
+    /// Sweep parameter values applied to this run (empty for non-sweep
+    /// runs, including all single-run `--cas` invocations). Populated by
+    /// `--batch` when a `[sweep]` block is active. Without this, the
+    /// scen_hash is opaque — analysis can't recover which param values
+    /// produced which trajectory.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub sweep_point: HashMap<String, f64>,
 }
 
 /// Metadata written to `obs/{obs_hash}-{obs_seed}/obs.json`.
@@ -269,6 +276,7 @@ mod tests {
             version: "0.1.0+aaa".into(),
             created_at: "2026-04-16T00:00:00Z".into(),
             argv: vec!["camdl".into(), "simulate".into(), "sir.camdl".into(), "--seed".into(), "42".into(), "--cas".into()],
+            sweep_point: HashMap::new(),
         };
         write_run_meta(tmp.path(), &meta).unwrap();
         let read = read_run_meta(tmp.path()).unwrap();
