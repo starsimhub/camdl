@@ -32,7 +32,7 @@ case "$1" in
   check|inspect)
     exec "$CAMDLC" "$@"
     ;;
-  simulate|experiment|eval|pfilter|if2|mif2|profile|fit|voi|data|serve)
+  simulate|experiment|eval|pfilter|if2|mif2|profile|fit|voi|data|serve|list|show|cat)
     exec "$CAMDL_SIM" "$@"
     ;;
   --help|-h|help)
@@ -46,7 +46,13 @@ Subcommands:
   simulate    Run a forward simulation (accepts .camdl or .ir.json)
   eval        Evaluate time-dependent expressions at a time grid (no simulation)
   experiment  Run or summarize a multi-scenario experiment (TOML manifest)
+  fit         Inference pipeline (MLE, posterior sampling, evaluation)
   serve       Serve experiment output dirs over HTTP for the web editor
+
+Cache browsing (runs written by simulate --cas / --batch):
+  list        Browse cached runs as a table
+  show        Show full metadata for one run
+  cat         Emit a cached trajectory or obs stream
 
 Examples:
   camdl compile sir.camdl > sir.ir.json
@@ -57,7 +63,7 @@ EOF
     exit 0
     ;;
   *)
-    echo "camdl: unknown subcommand '$1'. Use compile, check, inspect, simulate, eval, experiment, or serve." >&2
+    echo "camdl: unknown subcommand '$1'. Run 'camdl --help' for the list." >&2
     exit 1
     ;;
 esac
