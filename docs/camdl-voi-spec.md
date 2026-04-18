@@ -454,8 +454,8 @@ many SIA rounds to conduct in northern Nigeria?"
 **Step 1: Run the experiment**
 
 ```bash
-camdl experiment run experiment.toml --parallel 16
-camdl experiment summarize experiment.toml
+camdl simulate batch experiment.toml --parallel 16
+camdl list results/simulate/
 ```
 
 The experiment has `[design.prior]` with 2048 LHS samples from informative

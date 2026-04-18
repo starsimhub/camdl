@@ -2432,17 +2432,22 @@ Evaluates time-dependent expressions (forcing functions, parameters, math
 expressions) at a time grid without simulation. Expressions that reference
 compartment state produce an error.
 
-### 22.4 Experiments
+### 22.4 Batch simulation
 
 ```bash
-camdl experiment run    EXPERIMENT.toml [--parallel N] [--force]
-camdl experiment status EXPERIMENT.toml
-camdl experiment summarize OUTPUT_DIR
-camdl experiment analyze   EXPERIMENT.toml [--design NAME] [--bootstrap N]
+camdl simulate batch    BATCH.toml [--parallel N] [--force] [--dry-run]
+camdl simulate status   BATCH.toml
+camdl list              [RESULTS_DIR]          # browse cached runs
+camdl show  <short-hash>
+camdl cat   <short-hash> [--stream NAME]
 ```
 
-Batch parameter sweeps, sensitivity analysis (Sobol indices), and scenario
-comparisons. See the Experiment Specification for details.
+Batch parameter sweeps, scenario comparisons, and posterior-predictive
+checks. The `camdl experiment` subcommand was renamed to `camdl simulate
+batch` on 2026-04-17 — the old form is no longer accepted. Sensitivity
+analysis (Sobol indices) was removed from the CLI; use R's `sensitivity`
+package or Python's `SALib` on the batch output. See the Run
+Specification (`camdl-run-spec.md` §5) for details.
 
 ### 22.5 Inference
 

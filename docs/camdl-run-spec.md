@@ -53,7 +53,7 @@ the inference algorithm explores and which it treats as known constants.
 model.camdl      → what the model IS (structure, scenarios)
 params.toml      → a point m ∈ M (concrete parameter values)
 fit.toml         → how inference RUNS (what to estimate, algorithm, data)
-batch file       → how a batch RUNS (sweep/scenarios/seeds, via --batch)
+batch file       → how a batch RUNS (sweep/scenarios/seeds, via `camdl simulate batch`)
 ```
 
 Each file owns its domain exclusively. The fit file cannot define model
@@ -114,10 +114,10 @@ the algorithm explores.
 ### 1.4 Core Design Rules
 
 **CLI and file are the same type.** Every batch TOML file deserializes into the
-same Rust struct that CLI argument parsing produces. `--batch file.toml` and a
-long command line are interchangeable representations of the same job. This is
-enforced by deriving both `clap::Parser` and `serde::Deserialize` from shared
-types.
+same Rust struct that CLI argument parsing produces. `camdl simulate batch
+file.toml` and a long command line are interchangeable representations of the
+same job. This is enforced by deriving both `clap::Parser` and
+`serde::Deserialize` from shared types.
 
 **No silent defaults for parameters.** Following camdl's core philosophy,
 parameter values are never silently inherited. In `fit.toml`, every model
@@ -699,7 +699,8 @@ camdl cat <short-hash>
 
 **Scope.** `--cas` currently supports single-run invocations only — one
 seed, one scenario, no `--draws` / `--replicates`. For sweeps use
-`--batch` (§5), which has had content-addressable output since v0.2.
+`camdl simulate batch` (§5), which has had content-addressable output
+since v0.2.
 
 **Layout.** Same as batch — `output/runs/{sim_hash[:8]}/{scenario_slug}-{scen_hash[:8]}/seed_{n}/traj.tsv`.
 See §2.4.
@@ -715,8 +716,8 @@ inputs — no silent stale results.
 are logged to stderr; trajectory bytes go to stdout (or `-o FILE`).
 Pipelines like `camdl simulate ... --cas > out.tsv` work as expected.
 
-**Output location.** Defaults to `./output` (matches `--batch`). Override
-with `--output-dir DIR`.
+**Output location.** Defaults to `./output` (matches `simulate batch`).
+Override with `--output-dir DIR`.
 
 ### 4.5 `camdl list` / `camdl show` / `camdl cat` — browse cached runs
 
@@ -808,7 +809,7 @@ camdl simulate model.camdl \
     --scenario baseline,with_sia --replicates 10 --obs-dir obs/
 
 # ── From a batch file ────────────────────────────────────
-camdl simulate --batch batches/ppc.toml
+camdl simulate batch batches/ppc.toml
 ```
 
 **CLI `--sweep` accepts comma-separated lists only.** Generators (`linspace`,
@@ -1061,7 +1062,21 @@ output.)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FitConfig {
     pub model: ModelRef,
-    pub data: DataSpec,
+
+    /// Real-data source. Mutually exclusive with `synthetic` — exactly
+    /// one of the two must be present.
+    pub data: Option<DataSpec>,
+
+    /// Synthetic-data source for simulation-based calibration. When set,
+    /// the runner generates N datasets from `true_params` and fits each
+    /// one. See `camdl-inference-spec.md` §3.7.
+    pub synthetic: Option<SyntheticSpec>,
+
+    /// IF2/PGAS seeds. Scalar/absent runs one fit per dataset; a list
+    /// runs one fit per listed seed per dataset (start-sensitivity, or
+    /// the full SBC × fitter matrix).
+    pub fit_seeds: Option<Vec<u64>>,
+
     pub output_dir: Option<PathBuf>,
 
     /// The free parameters: what the inference algorithm estimates.
@@ -1104,6 +1119,25 @@ pub struct DataSpec {
     /// spatial leave-one-out). Keys match observation stream names.
     /// Mutually exclusive with `holdout_after`.
     pub holdout: Option<IndexMap<String, PathBuf>>,
+}
+
+/// Synthetic-data generation for simulation-based calibration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SyntheticSpec {
+    /// Path to a TOML file of `name = value` lines — the ground truth
+    /// used to generate data and to compute coverage / bias.
+    pub true_params: PathBuf,
+
+    /// Simulation seeds — either a range string (`"1:20"`) or an
+    /// explicit list. Duplicates rejected.
+    pub sim_seeds: SeedsSpec,
+
+    /// Number of datasets. Optional — when omitted, inferred from
+    /// `len(sim_seeds)`. When supplied, must equal that length.
+    pub datasets: Option<usize>,
+
+    /// Scenario applied during data generation (not during fitting).
+    pub scenario: Option<String>,
 }
 ```
 

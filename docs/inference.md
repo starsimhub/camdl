@@ -698,7 +698,7 @@ log-likelihood and ESS measurement.
 
 Each stage reads the previous stage's `fit_state.toml` and writes its own. The
 final output is `mle_params.toml` — a standard params file with provenance
-hashing that feeds directly into `camdl simulate` and `camdl experiment run`.
+hashing that feeds directly into `camdl simulate` and `camdl simulate batch`.
 
 ```bash
 # Full pipeline

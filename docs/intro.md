@@ -373,7 +373,7 @@ camdl simulate model.camdl --params p.toml --scenario with_sia --seed 42
 Or run all scenarios across many seeds:
 
 ```bash
-camdl experiment run experiment.toml --parallel 8
+camdl simulate batch experiment.toml --parallel 8
 ```
 
 ---
