@@ -1,11 +1,4 @@
-#![allow(dead_code)]
-
 //! Synthetic-data generation for `[synthetic]` fit configs.
-//!
-//! Step 3 of the proposal. The grid runner (step 4) will be the first
-//! caller from `fit run`; until that lands the functions here are
-//! reachable only from unit tests, hence the module-level dead-code
-//! allow. Drop the allow when step 4 merges.
 //!
 //!
 //! Runs the simulation backend once per `sim_seed`, samples each
@@ -36,6 +29,7 @@ use crate::util::{load_params_toml, SimRun, run_simulation};
 /// tables consume this to find each cell's data file; the runner
 /// dispatches a fit per entry.
 #[derive(Debug, Clone)]
+#[allow(dead_code)] // sim_seed / content_hash consumed by step 5 (summary).
 pub struct SyntheticDataset {
     /// 1-based dataset index (matches `ds_NN` in the output directory).
     pub idx: usize,

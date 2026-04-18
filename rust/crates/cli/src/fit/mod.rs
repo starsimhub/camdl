@@ -413,12 +413,129 @@ pub fn cmd_fit_run_v2(args: &[String]) {
     eprintln!("  output:   {}", fit_dir.display());
 
     // Seed: CLI --seed > default (1). Deterministic by default for reproducibility.
-    let seed = if has_seed_flag { seed } else { 1 };
+    let base_seed = if has_seed_flag { seed } else { 1 };
+
+    // ── Build the replicate grid: (dataset_idx, fit_seed) cells ──────────
+    //
+    // Four canonical modes, all routed through the same grid:
+    //   Mode                     synthetic?  fit_seeds     Cells
+    //   Single fit               no          None/scalar   1       → real/fit_<base>/
+    //   Start-sensitivity        no          list of M     M       → real/fit_<s_i>/
+    //   SBC (classical)          yes         None/scalar   N       → synthetic/ds_NN/fit_<base>/
+    //   SBC × start-sensitivity  yes         list of M     N × M   → synthetic/ds_NN/fit_<s_i>/
+    //
+    // For synthetic modes the datasets are generated once up front and the
+    // per-cell DataSpec is materialised from their on-disk paths. See
+    // docs/dev/proposals/2026-04-17-synthetic-fit-replicates.md.
+    let fit_seeds: Vec<u64> = match &config.fit_seeds {
+        Some(list) => list.clone(),
+        None       => vec![base_seed],
+    };
+
+    let synthetic_datasets: Vec<synthetic::SyntheticDataset> = if let Some(spec) = &config.synthetic {
+        let datasets = synthetic::generate_synthetic_datasets(
+            spec,
+            &config.model.camdl,
+            &fit_dir,
+            &config.config.backend,
+            config.config.dt,
+        ).unwrap_or_else(|e| {
+            eprintln!("error: synthetic-data generation failed: {}", e);
+            std::process::exit(1);
+        });
+        eprintln!("synthetic: generated {} dataset{} under {}/synthetic/data/",
+            datasets.len(),
+            if datasets.len() == 1 { "" } else { "s" },
+            fit_dir.display());
+        datasets
+    } else {
+        Vec::new()
+    };
+
+    // A cell is one (data_source, fit_seed) pair. Real-data cells carry
+    // `dataset_idx = None` and leave the existing `config.data` in place;
+    // synthetic cells carry `Some(idx)` and replace `config.data` with a
+    // DataSpec pointing at the generated TSV.
+    struct Cell {
+        dataset_idx: Option<usize>,
+        fit_seed: u64,
+        // None → keep config.data; Some → overwrite with synthetic path.
+        data_override: Option<config_v2::DataSpec>,
+    }
+    let cells: Vec<Cell> = if synthetic_datasets.is_empty() {
+        fit_seeds.iter().map(|&s| Cell {
+            dataset_idx: None,
+            fit_seed: s,
+            data_override: None,
+        }).collect()
+    } else {
+        // Determine the observation stream name(s) for the generated TSVs
+        // from the model itself — synthetic generation writes one column
+        // per declared observation block, so the fit data map points each
+        // stream name at the same ds_NN.tsv file (the data loader picks
+        // its named column).
+        let model_for_obs = {
+            let (m, _) = crate::util::load_model(&config.model.camdl).unwrap_or_else(|e| {
+                eprintln!("error loading model for obs stream names: {}", e);
+                std::process::exit(1);
+            });
+            m
+        };
+        let obs_names: Vec<String> = model_for_obs.observations.iter()
+            .map(|o| o.name.clone()).collect();
+        let mut out = Vec::with_capacity(synthetic_datasets.len() * fit_seeds.len());
+        for ds in &synthetic_datasets {
+            let mut observations = indexmap::IndexMap::new();
+            for n in &obs_names {
+                observations.insert(n.clone(), ds.path.to_string_lossy().to_string());
+            }
+            let data_spec = config_v2::DataSpec {
+                observations,
+                holdout_after: None,
+                holdout: None,
+            };
+            for &fs in &fit_seeds {
+                out.push(Cell {
+                    dataset_idx: Some(ds.idx),
+                    fit_seed: fs,
+                    data_override: Some(data_spec.clone()),
+                });
+            }
+        }
+        out
+    };
+
+    let total_cells = cells.len();
+    if total_cells > 1 {
+        eprintln!("grid: {} cell{}", total_cells,
+            if total_cells == 1 { "" } else { "s" });
+    }
+
+    // ── Execute grid: cell × sweep_point × stage ──
+    for (cell_i, cell) in cells.iter().enumerate() {
+        let mut cell_config = config.clone();
+        if let Some(spec) = &cell.data_override {
+            // Materialise the synthetic cell's data path. Keep
+            // `synthetic` set so `per_fit_prefix` picks the
+            // `synthetic/ds_NN/fit_<seed>/` branch; `data_spec()`
+            // returns `data` when both are present, which is the
+            // per-cell behaviour we want.
+            cell_config.data = Some(spec.clone());
+        }
+        let seed = cell.fit_seed;
+        if total_cells > 1 {
+            match cell.dataset_idx {
+                Some(idx) => eprintln!("\n━━━ cell {}/{}: ds_{:02} × fit_seed={} ━━━",
+                    cell_i + 1, total_cells, idx, seed),
+                None      => eprintln!("\n━━━ cell {}/{}: fit_seed={} ━━━",
+                    cell_i + 1, total_cells, seed),
+            }
+        }
 
     // Execute stages: sweep_point × stage
     for (pt_idx, sweep_point) in sweep_points.iter().enumerate() {
         // Build a config with swept values applied to [fixed]
-        let mut sweep_config = config.clone();
+        let mut sweep_config = cell_config.clone();
         for (name, val) in sweep_point {
             sweep_config.fixed.values.insert(name.clone(), *val);
         }
@@ -429,12 +546,11 @@ pub fn cmd_fit_run_v2(args: &[String]) {
             std::process::exit(1);
         });
 
-        // Base directory for this sweep point. The output layout wraps
-        // every fit in `<fit_dir>/real/fit_<seed>/...` (for real-data
-        // fits; `synthetic/ds_NN/fit_<seed>/` once synthetic runner
-        // dispatch lands). See
-        // docs/dev/proposals/2026-04-17-synthetic-fit-replicates.md.
-        let per_fit_prefix = sweep_config.per_fit_prefix(seed, None);
+        // Per-cell output directory:
+        //   real-data:  <fit_dir>/real/fit_<seed>/<stage>/
+        //   synthetic:  <fit_dir>/synthetic/ds_NN/fit_<seed>/<stage>/
+        // Sweep slug (when present) is nested under the per-fit prefix.
+        let per_fit_prefix = sweep_config.per_fit_prefix(seed, cell.dataset_idx);
         let sweep_fit_dir = if has_sweep {
             let slug: String = sweep_point.iter()
                 .map(|(k, v)| format!("{}_{:.3}", k, v))
@@ -824,6 +940,7 @@ pub fn cmd_fit_run_v2(args: &[String]) {
 
     } // end stages
     } // end sweep_points
+    } // end cells
 }
 
 // ─── camdl fit diff ─────────────────────────────────────────────────────────
