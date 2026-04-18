@@ -428,7 +428,12 @@ pub fn cmd_fit_run_v2(args: &[String]) {
             std::process::exit(1);
         });
 
-        // Base directory for this sweep point
+        // Base directory for this sweep point. The output layout wraps
+        // every fit in `<fit_dir>/real/fit_<seed>/...` (for real-data
+        // fits; `synthetic/ds_NN/fit_<seed>/` once synthetic runner
+        // dispatch lands). See
+        // docs/dev/proposals/2026-04-17-synthetic-fit-replicates.md.
+        let per_fit_prefix = sweep_config.per_fit_prefix(seed, None);
         let sweep_fit_dir = if has_sweep {
             let slug: String = sweep_point.iter()
                 .map(|(k, v)| format!("{}_{:.3}", k, v))
@@ -438,9 +443,9 @@ pub fn cmd_fit_run_v2(args: &[String]) {
                 eprintln!("");
             }
             eprintln!("═══ sweep point {}/{}: {} ═══", pt_idx + 1, sweep_points.len(), slug);
-            fit_dir.join(slug)
+            fit_dir.join(&per_fit_prefix).join(slug)
         } else {
-            fit_dir.clone()
+            fit_dir.join(&per_fit_prefix)
         };
 
     for (stage_name, stage) in &stages_to_run {

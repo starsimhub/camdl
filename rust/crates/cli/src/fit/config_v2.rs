@@ -687,6 +687,22 @@ impl FitConfigV2 {
         self.fit_dir(config_path).join(stage_name)
     }
 
+    /// The per-fit subdirectory under `fit_dir()` — always
+    /// `real/fit_<seed>/` for real-data fits, and
+    /// `synthetic/ds_NN/fit_<seed>/` for synthetic-data fits. The
+    /// resulting directory wraps all stage outputs for that fit.
+    ///
+    /// `dataset_idx` is `None` for real-data fits and `Some(n)` for
+    /// synthetic-data fits (1-based dataset index).
+    pub fn per_fit_prefix(&self, seed: u64, dataset_idx: Option<usize>) -> PathBuf {
+        let source = if self.synthetic.is_some() { "synthetic" } else { "real" };
+        let mut p = PathBuf::from(source);
+        if let Some(idx) = dataset_idx {
+            p = p.join(format_dataset_dir(idx));
+        }
+        p.join(format!("fit_{}", seed))
+    }
+
     /// Real-data observation paths. Returns an error with a helpful
     /// message when the config is synthetic-only or when neither
     /// source is present (should be caught by `validate()`, but
@@ -1772,4 +1788,65 @@ cases = "data/cases.tsv"
             .unwrap_err();
         assert!(err.contains("duplicate"), "must reject duplicate fit seeds: {}", err);
     }
+
+    // ── per_fit_prefix layout ──────────────────────────────────────────────
+
+    fn mini_real() -> FitConfigV2 {
+        toml::from_str(r#"
+[model]
+camdl = "models/sir.camdl"
+
+[data.observations]
+cases = "data/cases.tsv"
+
+[estimate]
+beta = { bounds = [0.01, 2.0] }
+
+[fixed]
+N0 = 1000
+
+[stages.mle]
+method = "if2"
+chains = 4
+particles = 1000
+iterations = 50
+cooling = 0.7
+"#).unwrap()
+    }
+
+    #[test]
+    fn real_fit_prefix_is_real_fit_seed() {
+        let cfg = mini_real();
+        assert_eq!(cfg.per_fit_prefix(42, None),
+                   std::path::PathBuf::from("real").join("fit_42"));
+    }
+
+    #[test]
+    fn synthetic_fit_prefix_is_synthetic_ds_fit_seed() {
+        let mut cfg = mini_real();
+        cfg.data = None;
+        cfg.synthetic = Some(SyntheticSpec {
+            true_params: "truth.toml".into(),
+            sim_seeds: SeedsSpec::Range("1:3".into()),
+            datasets: None,
+            scenario: None,
+        });
+        assert_eq!(cfg.per_fit_prefix(101, Some(2)),
+                   std::path::PathBuf::from("synthetic").join("ds_02").join("fit_101"));
+    }
+
+    #[test]
+    fn dataset_dir_is_zero_padded() {
+        assert_eq!(format_dataset_dir(1),   "ds_01");
+        assert_eq!(format_dataset_dir(9),   "ds_09");
+        assert_eq!(format_dataset_dir(10),  "ds_10");
+        assert_eq!(format_dataset_dir(100), "ds_100");
+    }
+}
+
+/// Format a dataset index as `ds_01`, `ds_02`, … zero-padded to the
+/// minimum width for a 2-digit grid. Grids beyond 99 datasets just
+/// stop padding and render as `ds_100`, `ds_101`, etc.
+pub(crate) fn format_dataset_dir(idx: usize) -> String {
+    format!("ds_{:02}", idx)
 }
