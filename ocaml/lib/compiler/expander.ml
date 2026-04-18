@@ -2131,10 +2131,67 @@ let expand_observations ctx =
       | ProjDerived e ->
         Ir.DerivedExpr (resolve_expr ctx env e)
     in
+    (* Likelihood kwarg resolution with strict diagnostics. Unlike the
+       silent 0.0 default of old, we emit a real error for:
+         E250 — missing required kwarg (or only positional args supplied)
+         E251 — unknown kwarg name (typo / wrong distribution)
+       Mirrors E231/E233 on priors. *)
+    let lik_name = match od.olikelihood with
+      | LikNegBinomial _  -> "neg_binomial"
+      | LikPoisson _      -> "poisson"
+      | LikNormal _       -> "normal"
+      | LikBinomial _     -> "binomial"
+      | LikBetaBinomial _ -> "beta_binomial"
+      | LikBernoulli _    -> "bernoulli"
+    in
+    let required_kwargs = match od.olikelihood with
+      | LikNegBinomial _  -> ["mean"; "r"]
+      | LikPoisson _      -> ["rate"]
+      | LikNormal _       -> ["mean"; "sd"]
+      | LikBinomial _     -> ["n"; "p"]
+      | LikBetaBinomial _ -> ["n"; "alpha"; "beta"]
+      | LikBernoulli _    -> ["p"]
+    in
+    let current_kwargs = match od.olikelihood with
+      | LikNegBinomial k | LikPoisson k | LikNormal k
+      | LikBinomial k | LikBetaBinomial k | LikBernoulli k -> k
+    in
+    (* Report unknown kwargs and positional args up front. *)
+    List.iter (fun (k, _) ->
+      if k = "" then
+        Diagnostics.error ctx.diags
+          ~code:"E250" ~loc:Diagnostics.no_loc
+          ~message:(Printf.sprintf
+            "observation '%s': likelihood '%s' requires named arguments \
+             (got a positional argument)" od.oname lik_name)
+          ~hint:(Printf.sprintf "Use '%s' — e.g. %s(%s = ...)"
+            (String.concat " = ..., " required_kwargs)
+            lik_name
+            (List.hd required_kwargs))
+          ()
+      else if not (List.mem k required_kwargs) then
+        Diagnostics.error ctx.diags
+          ~code:"E251" ~loc:Diagnostics.no_loc
+          ~message:(Printf.sprintf
+            "observation '%s': likelihood '%s' has no argument '%s'"
+            od.oname lik_name k)
+          ~hint:(Printf.sprintf "Expected: %s"
+            (String.concat ", " required_kwargs))
+          ()
+    ) current_kwargs;
     let resolve_kw kwargs name =
       match List.assoc_opt name kwargs with
       | Some e -> resolve_expr ctx env e
-      | None   -> Ir.Const 0.0
+      | None   ->
+        Diagnostics.error ctx.diags
+          ~code:"E250" ~loc:Diagnostics.no_loc
+          ~message:(Printf.sprintf
+            "observation '%s': likelihood '%s' missing required argument '%s'"
+            od.oname lik_name name)
+          ~hint:(Printf.sprintf "Add '%s = <expr>' to the likelihood — e.g. %s(%s = projected)"
+            name lik_name name)
+          ();
+        Ir.Const 0.0
     in
     let likelihood = match od.olikelihood with
       | LikNegBinomial kwargs ->

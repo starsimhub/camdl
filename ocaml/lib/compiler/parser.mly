@@ -172,16 +172,10 @@ prior_clause:
    common keywords (rate, count, etc.) that conflict with DSL reserved
    words but are natural in statistical contexts. *)
 prior_name:
-  | id = IDENT { id }
-  | RATE       { "rate" }
-  | COUNT      { "count" }
-  | PROBABILITY { "probability" }
-  | POSITIVE   { "positive" }
-  | REAL       { "real" }
-  | INTEGER    { "integer" }
+  | k = kw_arg_name { k }
 
 prior_kwarg:
-  | k = prior_name EQ v = expr { (k, v) }
+  | k = kw_arg_name EQ v = expr { (k, v) }
 
 dim_annotation_opt:
   | (* empty *) { None }
@@ -630,9 +624,22 @@ list_element:
   | lo = atom_expr COLON hi = atom_expr { ERange (lo, hi) }
   | e = expr                            { e }
 
+(* A keyword-arg key can be a bare IDENT or one of the soft keywords
+   that are reserved elsewhere but unambiguous in kwarg position
+   (e.g. `poisson(rate = ...)`, `normal(mean = ..., sd = ...)`).
+   Same pattern as prior_name. Extend as new clashes appear. *)
+kw_arg_name:
+  | id = IDENT  { id }
+  | RATE        { "rate" }
+  | COUNT       { "count" }
+  | PROBABILITY { "probability" }
+  | POSITIVE    { "positive" }
+  | REAL        { "real" }
+  | INTEGER     { "integer" }
+
 kw_expr:
-  | k = IDENT EQ v = expr { (k, v) }
-  | e = expr               { ("", e) }
+  | k = kw_arg_name EQ v = expr { (k, v) }
+  | e = expr                     { ("", e) }
 
 (* ── Scenarios block ─────────────────────────────────────────────────────── *)
 

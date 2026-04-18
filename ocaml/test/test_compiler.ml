@@ -2085,6 +2085,86 @@ let test_prevalence_unstratified () =
   | Ir.CurrentPop "I" -> ()
   | _ -> Alcotest.fail "expected CurrentPop I on unstratified compartment"
 
+(* ── Likelihood keyword-argument parsing ──────────────────────────────────
+   `rate` is a reserved keyword in parameter type annotations; the kwarg
+   rule in the parser must allow it (and other soft keywords) in kwarg
+   position so `poisson(rate = projected)` parses. Also ensure missing or
+   positional args are rejected with real diagnostics, not a silent 0.0. *)
+let test_poisson_rate_kwarg_parses () =
+  let src = {|
+    time_unit = 'days
+    compartments { S, I, R }
+    parameters {
+      beta  : rate in [0.001, 5.0]
+      gamma : rate in [0.01, 1.0]
+    }
+    transitions {
+      infection : S --> I @ beta * S * I / (S + I + R)
+      recovery  : I --> R @ gamma * I
+    }
+    observations {
+      in_bed : {
+        projected = prevalence(I)
+        every = 1 'days
+        likelihood = poisson(rate = projected)
+      }
+    }
+    init { S = 999  I = 1 }
+    simulate { from = 0 'days  to = 14 'days }
+  |} in
+  let m = compile_expect_ok src in
+  match (List.hd m.observations).likelihood with
+  | Ir.Poisson { rate = Ir.Projected } -> ()
+  | _ -> Alcotest.fail "expected Poisson{ rate = Projected }"
+
+let test_poisson_positional_errors () =
+  let src = {|
+    time_unit = 'days
+    compartments { S, I, R }
+    parameters {
+      beta  : rate in [0.001, 5.0]
+      gamma : rate in [0.01, 1.0]
+    }
+    transitions {
+      infection : S --> I @ beta * S * I / (S + I + R)
+      recovery  : I --> R @ gamma * I
+    }
+    observations {
+      in_bed : {
+        projected = prevalence(I)
+        every = 1 'days
+        likelihood = poisson(projected)
+      }
+    }
+    init { S = 999  I = 1 }
+    simulate { from = 0 'days  to = 14 'days }
+  |} in
+  compile_expect_error_code ~code:"E250" ~contains:"poisson" src
+
+let test_likelihood_unknown_kwarg_errors () =
+  let src = {|
+    time_unit = 'days
+    compartments { S, I, R }
+    parameters {
+      beta  : rate in [0.001, 5.0]
+      gamma : rate in [0.01, 1.0]
+    }
+    transitions {
+      infection : S --> I @ beta * S * I / (S + I + R)
+      recovery  : I --> R @ gamma * I
+    }
+    observations {
+      in_bed : {
+        projected = prevalence(I)
+        every = 1 'days
+        likelihood = poisson(lambda = projected)
+      }
+    }
+    init { S = 999  I = 1 }
+    simulate { from = 0 'days  to = 14 'days }
+  |} in
+  compile_expect_error_code ~code:"E251" ~contains:"lambda" src
+
 let () =
   Alcotest.run "compiler" [
     "golden", [
@@ -2226,5 +2306,10 @@ let () =
       Alcotest.test_case "bare E in projected sums Erlang substages"     `Quick test_projected_bare_stratified_compartment;
       Alcotest.test_case "prevalence(E[e1]) picks single stratum"        `Quick test_prevalence_fully_indexed_stratified;
       Alcotest.test_case "prevalence(I) unstratified is unchanged"       `Quick test_prevalence_unstratified;
+    ];
+    "likelihood_kwargs", [
+      Alcotest.test_case "poisson(rate = projected) parses"              `Quick test_poisson_rate_kwarg_parses;
+      Alcotest.test_case "E250 positional arg in likelihood"             `Quick test_poisson_positional_errors;
+      Alcotest.test_case "E251 unknown kwarg in likelihood"              `Quick test_likelihood_unknown_kwarg_errors;
     ];
   ]
