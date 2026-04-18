@@ -126,21 +126,18 @@ and likelihood used for data generation — the same `--obs` path that
 
 ## Output layout
 
-### Single fit (today, unchanged)
+One shape, always. Every fit has a seed regardless of whether it's
+the only fit or one of M; the leaf is therefore always
+`fit_<seed>/`. This removes the classic "single-run exception" that
+forces downstream result-processing code to handle two layouts.
+Breaking change vs. today — acceptable per the project's
+backwards-compatibility stance (unreleased software; clean design
+wins).
 
-No `fit_seeds`, no `[synthetic]` block:
+### Real-data fit
 
-```
-results/fits/<name>/
-  scout/
-  refine/
-  validate/
-  run.json
-```
-
-### Fit-seed sweep on real data
-
-`[data]` + `fit_seeds = [101, 102, 103]`:
+`[data]` + `fit_seeds = 101` (scalar) or `fit_seeds = [101, 102, 103]`
+(list) — same shape either way:
 
 ```
 results/fits/<name>/
@@ -148,17 +145,11 @@ results/fits/<name>/
     scout/
     refine/
     validate/
-  fit_102/
+  fit_102/          # present only if fit_seeds included 102
     ...
-  fit_103/
-    ...
-  summary.tsv          # one row per fit_seed
-  run.json             # top-level provenance; references per-fit hashes
+  summary.tsv       # one row per fit (one row if scalar seed)
+  run.json
 ```
-
-The `fit_NNN/` wrapping appears exactly when there is more than one
-fit to disambiguate — never for a scalar `fit_seeds` and never when
-the block is omitted.
 
 ### Synthetic-data fit
 
@@ -171,18 +162,17 @@ results/fits/<name>/
       fit_101/
         scout/
         refine/
-        ...
-      fit_102/
+        validate/
+      fit_102/      # present only if fit_seeds is a list
         ...
     ds_02/
       fit_101/
       ...
-    ...
-    summary.tsv        # one row per (ds, fit_seed)
-    coverage.tsv       # per-parameter coverage + bias vs truth
-    truth.toml         # copy of the ground-truth params (provenance)
+    summary.tsv     # one row per (ds, fit_seed)
+    coverage.tsv    # per-parameter coverage + bias vs truth
+    truth.toml      # copy of the ground-truth params (provenance)
     data/
-      ds_01.tsv        # generated datasets, one per sim_seed
+      ds_01.tsv     # generated datasets, one per sim_seed
       ds_02.tsv
       ...
   run.json
@@ -190,22 +180,36 @@ results/fits/<name>/
 
 The `synthetic/` subdirectory is the visual cue that everything under
 it was fit against data generated from known truth. SBC-specific
-statistics (bias vs. truth, coverage of truth by the MLE distribution)
-are written only here; they are not meaningful for real-data fits.
+statistics (bias vs. truth, coverage of truth by the MLE
+distribution) are written only there; they are not meaningful for
+real-data fits.
 
-When `fit_seeds` collapses to a scalar, the `fit_NNN/` wrapping under
-each `ds_NN/` still disappears — a single fit per dataset lives
-directly at `synthetic/ds_NN/scout/` etc. This keeps the directory
-shape minimal for classical SBC (N datasets, one fit each).
+### What `fit_<seed>` means
+
+Every fit has exactly one IF2/PGAS seed. For `fit_seeds = 101`, the
+directory is `fit_101/` — a single directory, not a bare pipeline.
+For `fit_seeds = [101, 102]`, there are two directories, `fit_101/`
+and `fit_102/`. The seed is in the name because it's the thing that
+disambiguates fits, not because there are several — so the layout is
+uniform and result-processing scripts read one shape.
+
+### Migration
+
+Existing `results/fits/<name>/scout/…` becomes
+`results/fits/<name>/fit_<seed>/scout/…` where `<seed>` is the seed
+currently supplied (in fit.toml or via `--seed`). Scripts that walk
+`results/fits/<name>/scout/` directly must be updated to first
+descend into `fit_<seed>/`. The seed value is deterministic from the
+fit config, so the new path is knowable without runtime inspection.
 
 ## Canonical modes
 
-| Mode                        | `[synthetic]` | `fit_seeds`  | Output           | Fits  |
-|-----------------------------|---------------|--------------|------------------|-------|
-| Single fit (today)          | —             | —            | flat             | 1     |
-| Start-sensitivity           | —             | list, len M  | `fit_NNN/`       | M     |
-| SBC (classical)             | N datasets    | — or scalar  | `synthetic/ds_NN/` | N     |
-| SBC × start-sensitivity     | N datasets    | list, len M  | `synthetic/ds_NN/fit_NNN/` | N × M |
+| Mode                    | `[synthetic]` | `fit_seeds`  | Output                              | Fits  |
+|-------------------------|---------------|--------------|-------------------------------------|-------|
+| Single fit              | —             | scalar       | `fit_<seed>/`                       | 1     |
+| Start-sensitivity       | —             | list, len M  | `fit_<seed>/` × M                   | M     |
+| SBC (classical)         | N datasets    | scalar       | `synthetic/ds_NN/fit_<seed>/`       | N     |
+| SBC × start-sensitivity | N datasets    | list, len M  | `synthetic/ds_NN/fit_<seed>/` × M   | N × M |
 
 All four run the same `scout → refine → validate` pipeline inside
 each cell. No new stage verb; `--stage scout` etc. still selects
@@ -280,11 +284,11 @@ synthetic cells; editing `[fit]` invalidates everything; editing
 
 Six tests, all in `rust/crates/cli/tests/`:
 
-- **`single_fit_unchanged`** — fit.toml with no `fit_seeds`, no
-  `[synthetic]`. Assert output layout is exactly today's (flat
-  `scout/ refine/ validate/`, no wrapping). Guards the "zero-impact
-  when block absent" claim.
-- **`fit_seeds_on_real_data_produces_per_seed_dirs`** — `[data]` +
+- **`single_fit_lives_under_fit_seed_dir`** — fit.toml with
+  `fit_seeds = 42`, no `[synthetic]`. Assert output is
+  `results/fits/<name>/fit_42/scout,refine,validate/`, no bare
+  `scout/` at the top level. Guards the "one shape, always" claim.
+- **`fit_seeds_list_produces_per_seed_dirs`** — `[data]` +
   `fit_seeds = [1,2,3]`. Assert three `fit_1/`, `fit_2/`, `fit_3/`
   directories, one `summary.tsv` with three rows and distinct
   content hashes.
@@ -300,7 +304,7 @@ Six tests, all in `rust/crates/cli/tests/`:
   each. Guards the statistical correctness of the SBC summary.
 - **`synthetic_and_fit_seeds_full_matrix`** — `datasets = 3`,
   `fit_seeds = [1,2]`. Assert six cells ran, `summary.tsv` has six
-  rows, layout is `synthetic/ds_0N/fit_N/`.
+  rows, layout is `synthetic/ds_0N/fit_<seed>/`.
 - **`data_and_synthetic_errors_cleanly`** — both blocks present.
   Assert hard error with a message naming both blocks and pointing
   to "choose one."
@@ -330,10 +334,10 @@ Six tests, all in `rust/crates/cli/tests/`:
   "data generation from truth" and nothing else; `fit_seeds` is
   "fitter variation" and nothing else. A reader of the fit.toml can
   tell what's being varied without reading docs.
-- **Collapses orthogonally.** Each axis disappears independently
-  when absent, with no wrapping directories, no extra files, no
-  noise in the output layout. Single fits are indistinguishable from
-  today's single fits.
+- **One output shape, always.** Every fit lives at
+  `[synthetic/ds_NN/]fit_<seed>/<stage>/`. No single-fit exception,
+  no conditional wrapping. Downstream result-processing code walks
+  one layout regardless of whether one fit ran or sixty.
 - **No new pipeline.** `scout → refine → validate` runs per cell,
   unchanged. The grid is a sweep layer on top, not a new fit mode.
 - **Provenance falls out.** Per-cell content hashes mean the cache
