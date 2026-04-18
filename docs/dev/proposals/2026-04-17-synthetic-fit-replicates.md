@@ -90,8 +90,8 @@ A new top-level block, mutually exclusive with `[data]`:
 ```toml
 [synthetic]
 true_params = "params/truth.toml"    # required
-datasets    = 20                      # required, ≥ 1
 sim_seeds   = "1:20"                  # required; string range or list
+datasets    = 20                      # optional; inferred from sim_seeds
 scenario    = "baseline"              # optional; default: no scenario
 ```
 
@@ -99,10 +99,12 @@ scenario    = "baseline"              # optional; default: no scenario
   as the existing `--params` file). The values are the ground truth
   used to generate data; downstream SBC statistics (bias, coverage)
   use these.
-- `datasets` — number of synthetic realizations to produce. Must
-  equal `len(sim_seeds)`; mismatch is a hard error.
 - `sim_seeds` — either an integer-range string (`"1:20"`) or an
   explicit list (`[7, 42, 101, ...]`). Duplicates are rejected.
+- `datasets` — *optional*. When omitted, inferred as
+  `len(sim_seeds)`. When supplied, must equal that length; mismatch
+  is a hard error. Present as a safety check for users who want the
+  count stated explicitly.
 - `scenario` — named scenario from the `.camdl` file applied during
   data generation (not during fitting). The fit runs against the
   scenario-free baseline; counterfactual fits are a separate
@@ -120,7 +122,9 @@ and likelihood used for data generation — the same `--obs` path that
   hard error; each is required.
 - `fit_seeds` containing duplicates: hard error (provenance hashes
   would collide).
-- `datasets ≠ len(sim_seeds)`: hard error.
+- `datasets` supplied and `≠ len(sim_seeds)`: hard error. (When
+  `datasets` is omitted, it is set to `len(sim_seeds)` and no check
+  runs.)
 - `sim_seeds` ∩ `fit_seeds` nonempty: warning, not error (different
   namespaces, but confusing to read in logs).
 
@@ -252,15 +256,26 @@ always wants it.
 
 ## Parallelism
 
-`--parallel P` parallelises across the outer loop: datasets first,
+`--parallel P` covers **both phases** — synthetic data generation
+and the fit grid — using the same outer-loop worker pool. For
+cheap models data generation finishes in seconds either way, but
+for expensive models (spatial SEIR with 100K population, polio
+spatial 5-patch) the data-generation phase itself takes real time,
+and parallelising it costs nothing to wire up since the N simulate
+calls are independent.
+
+Inside each phase, parallelism is outer-loop only: datasets first,
 then fit_seeds within a dataset. IF2/PGAS internals stay
 single-threaded per cell — avoids nested parallelism, avoids core
-oversubscription. For a 20 × 4 matrix on 8 cores, the runtime is
-`ceil(80 / 8) × per_cell_time`, which is the expected behavior.
+oversubscription. For a 20 × 4 matrix on 8 cores, the fit-phase
+runtime is `ceil(80 / 8) × per_cell_time`, which is the expected
+behavior.
 
 Cache-hit cells (unchanged inputs, unchanged config) skip execution
 and contribute to the summary from cached results — exactly as
-single-fit runs do today.
+single-fit runs do today. Generated datasets are cached by
+`(true_params_hash, sim_seed, scenario_name)` so re-runs don't
+regenerate data that hasn't changed.
 
 ## Provenance
 
@@ -361,3 +376,134 @@ Six tests, all in `rust/crates/cli/tests/`:
   dataset × fitter matrix are the same feature viewed from three
   angles. No user needs to learn a second config shape to move
   between them.
+
+---
+
+## Appendix: LOC comparison with the scripted workaround
+
+Before this feature existed, the downstream team ran SBC by hand
+with a bash loop that generated N datasets, templated N fit.toml
+files, ran each fit, and extracted the MLE columns with `grep` +
+`awk`. A side-by-side comparison was recorded while this proposal
+was under review; it is reproduced here verbatim as a record of why
+the feature was worth building.
+
+### With the proposal
+
+```toml
+[model]
+camdl    = "boarding_school_sir_poisson.camdl"
+scenario = "baseline"
+
+[synthetic]
+true_params = "data/sbc/true_params_nok.toml"
+sim_seeds   = "1:20"
+
+[estimate]
+beta  = { bounds = [0.5, 5.0], start = 1.5 }
+gamma = { bounds = [0.1, 1.0], start = 0.4 }
+
+[fixed]
+N0 = 763
+I0 = 5
+
+[stages.scout]
+method     = "if2"
+chains     = 24
+particles  = 1000
+iterations = 100
+cooling    = 0.9
+
+[stages.refine]
+method     = "if2"
+chains     = 8
+particles  = 2000
+iterations = 120
+cooling    = 0.95
+starts_from = "scout"
+```
+
+```
+camdl fit run fit_sir_poisson_sbc.toml --seed 42 --parallel 8
+```
+
+One file, one command. Output lands at
+`results/fits/.../synthetic/` with `summary.tsv` and `coverage.tsv`
+pre-computed.
+
+### What was actually written in bash
+
+```bash
+# Generate 20 datasets (loop)
+for dseed in $(seq 1 20); do
+    camdl simulate boarding_school_sir_poisson.camdl \
+        --params data/sbc/true_params_nok.toml \
+        --scenario baseline --seed $dseed \
+        --obs-only data/sbc/syn_poisson_${dseed}.tsv
+done
+
+# Create 20 fit configs (loop with heredoc)
+for dseed in $(seq 1 20); do
+    cat > /tmp/fit_pois_${dseed}.toml << TOML
+[model]
+camdl = "boarding_school_sir_poisson.camdl"
+scenario = "baseline"
+[data.observations]
+in_bed = "data/sbc/syn_poisson_${dseed}.tsv"
+[estimate]
+beta  = { bounds = [0.5, 5.0], start = 1.5 }
+gamma = { bounds = [0.1, 1.0], start = 0.4 }
+[fixed]
+N0 = 763
+I0 = 5
+[stages.scout]
+method = "if2"
+chains = 24
+particles = 1000
+iterations = 100
+cooling = 0.9
+[stages.refine]
+method = "if2"
+chains = 8
+particles = 2000
+iterations = 120
+cooling = 0.95
+starts_from = "scout"
+TOML
+    camdl fit run /tmp/fit_pois_${dseed}.toml --seed 42
+done
+
+# Collect results (another loop)
+echo "dseed\tbeta\tgamma\tll" > results/sbc_poisson.tsv
+for dseed in $(seq 1 20); do
+    mle="results/fits/fit_pois_${dseed}/refine/mle_params.toml"
+    beta=$(grep "^beta " $mle | awk '{print $3}')
+    gamma=$(grep "^gamma " $mle | awk '{print $3}')
+    ll=$(grep "Log-likelihood" $mle | awk '{print $3}')
+    echo "$dseed\t$beta\t$gamma\t$ll" >> results/sbc_poisson.tsv
+done
+```
+
+~45 lines per observation model, three loops, temp file
+management, manual result extraction, no provenance, no
+parallelism, no coverage stats.
+
+### Counts
+
+| | Lines | Commands | Loops |
+|---|---|---|---|
+| Proposal (single fit.toml + one `fit run`) | ~21 (TOML) + 1 | 1 | 0 |
+| Bash workaround, per observation model | ~45 | 3 (simulate + fit + collect) | 3 |
+| Bash workaround, 3 observation models (the actual book chapter) | ~135 + error handling + temp cleanup | 9 | 9 |
+
+Net saving on the book's boarding-school chapter alone: ~115 lines
+of boilerplate eliminated, plus correctness gains (provenance
+hashes, per-cell cache invalidation, parallel execution, standard
+coverage table). The manual-extraction `grep | awk` step is where
+the bash workaround was most fragile — any change to the MLE file
+format silently breaks the summary.
+
+This comparison motivates the design: not a new algorithm, just
+taking a ubiquitous scripted pattern and making it a first-class
+operation so the correctness and parallelism concerns get solved
+once.
