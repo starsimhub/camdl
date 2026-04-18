@@ -25,6 +25,7 @@ pub mod pmmh;
 pub mod pgas;
 pub mod trace_writer;
 pub mod synthetic;
+pub mod summary;
 
 use config::FitToml;
 
@@ -941,6 +942,55 @@ pub fn cmd_fit_run_v2(args: &[String]) {
     } // end stages
     } // end sweep_points
     } // end cells
+
+    // ── Post-grid aggregation: summary.tsv (+ coverage.tsv for synthetic)
+    //
+    // Walk each cell's terminal-stage output, parse the `mle_params.toml`
+    // back into a row, and write the tables. `summary.tsv` lives under
+    // `real/` or `synthetic/` — the visual subdir that groups all of a
+    // fit's cells.
+    let terminal_stage = stages_to_run.last()
+        .map(|(n, _)| n.to_string())
+        .unwrap_or_else(|| "mle".to_string());
+
+    let source = if config.synthetic.is_some() { "synthetic" } else { "real" };
+    let mut rows: Vec<summary::SummaryRow> = Vec::new();
+    for (cell_i, cell) in cells.iter().enumerate() {
+        let (dataset, cell_dir) = match cell.dataset_idx {
+            Some(idx) => {
+                let ds = format!("ds_{:02}", idx);
+                let dir = fit_dir.join("synthetic").join(&ds).join(format!("fit_{}", cell.fit_seed));
+                (ds, dir)
+            }
+            None => {
+                let dir = fit_dir.join("real").join(format!("fit_{}", cell.fit_seed));
+                ("real".to_string(), dir)
+            }
+        };
+        match summary::read_cell_row(&cell_dir, &terminal_stage, &dataset, cell.fit_seed) {
+            Some(r) => rows.push(r),
+            None    => eprintln!(
+                "warning: cell {}/{} ({} × fit_seed={}) produced no mle_params.toml at {}",
+                cell_i + 1, cells.len(), dataset, cell.fit_seed,
+                cell_dir.join(&terminal_stage).display()),
+        }
+    }
+
+    if !rows.is_empty() {
+        match summary::write_summary(&fit_dir, source, &rows) {
+            Ok(p)  => eprintln!("summary: {}", p.display()),
+            Err(e) => eprintln!("warning: could not write summary.tsv: {}", e),
+        }
+        if config.synthetic.is_some() {
+            match summary::load_truth(&fit_dir) {
+                Ok(truth) => match summary::write_coverage(&fit_dir, &truth, &rows) {
+                    Ok(p)  => eprintln!("coverage: {}", p.display()),
+                    Err(e) => eprintln!("warning: could not write coverage.tsv: {}", e),
+                },
+                Err(e) => eprintln!("warning: no truth for coverage: {}", e),
+            }
+        }
+    }
 }
 
 // ─── camdl fit diff ─────────────────────────────────────────────────────────
