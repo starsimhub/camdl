@@ -241,6 +241,104 @@ es_positive = "data/es_results.tsv"
 The particle filter sums log-likelihoods across all streams at
 each observation time.
 
+### 3.7 Replicate fits and synthetic-data calibration
+
+A fit config can describe a grid of fits instead of a single fit,
+varying two orthogonal axes:
+
+- **Data axis** — real data (`[data]`) or synthetic data
+  (`[synthetic]`, generated from known truth). Mutually exclusive.
+- **Fit axis** — list-valued `fit_seeds`. Each seed runs the full
+  stage pipeline independently with a different IF2/PGAS seed and
+  (optionally) perturbation start.
+
+The grid is the Cartesian product. Collapses orthogonally: omit both
+and the fit runs once, unchanged from today.
+
+#### Config shape
+
+```toml
+# Top-level scalars must precede any [table] header.
+fit_seeds = [101, 102, 103]   # optional; list-only
+
+[model]
+camdl = "models/sir.camdl"
+
+# Choose one of [data] or [synthetic], never both.
+[data.observations]
+cases = "data/cases.tsv"
+
+# …or:
+[synthetic]
+true_params = "params/truth.toml"
+sim_seeds   = "1:20"           # or an explicit list
+datasets    = 20               # optional; inferred from sim_seeds
+scenario    = "baseline"       # optional
+```
+
+#### Canonical modes
+
+| Mode                    | `[synthetic]` | `fit_seeds`  | Output layout                       | Cells |
+|-------------------------|---------------|--------------|-------------------------------------|-------|
+| Single fit              | —             | scalar / absent | `real/fit_<seed>/`              | 1     |
+| Start-sensitivity       | —             | list, len M  | `real/fit_<seed>/` × M              | M     |
+| SBC (classical)         | N datasets    | scalar / absent | `synthetic/ds_NN/fit_<seed>/`   | N     |
+| SBC × start-sensitivity | N datasets    | list, len M  | `synthetic/ds_NN/fit_<seed>/` × M   | N × M |
+
+#### Output directory
+
+Every fit lives under a data-source subdirectory. No single-fit
+exception — the seed is always the leaf:
+
+```
+results/fits/<name>/
+  real/                       or    synthetic/
+    fit_101/                            ds_01/
+      scout/ refine/ …                    fit_101/
+    fit_102/                                scout/ refine/ …
+      …                                   fit_102/ …
+    summary.tsv                         …
+                                        summary.tsv
+                                        coverage.tsv
+                                        truth.toml
+                                        data/
+                                          ds_01.tsv
+                                          …
+```
+
+`summary.tsv` (always): one row per `(dataset, fit_seed)` with
+every estimated parameter's MLE, the log-likelihood, and the
+content hash.
+
+`coverage.tsv` (synthetic mode only): one row per estimated
+parameter with `truth`, `mean_mle`, `bias`, `sd_mle`, `q05`, `q95`,
+`covers_truth`, `n_datasets`. `covers_truth = 1` when the central
+90 % MLE window brackets the declared ground truth.
+
+#### Synthetic data semantics
+
+When `[synthetic]` is present, the runner generates
+`len(sim_seeds)` datasets before dispatching any fits. Each
+dataset is a single run of the chosen backend at `true_params`
+with `sim_seed`, sampled through every declared observation stream
+at its declared schedule. The resulting wide-format TSV is written
+to `<fit_dir>/synthetic/data/ds_NN.tsv` and handed to the fit
+runner as if the user had supplied it via `[data.observations]`.
+
+Generation is deterministic: same `(true_params, sim_seed)`
+produces bit-identical data. The content hash of each dataset
+participates in the per-cell provenance hash so regenerating with
+unchanged inputs is a cache hit, not a redo.
+
+#### Validation
+
+- `[data]` + `[synthetic]` — hard error (choose one).
+- Neither present — hard error.
+- `sim_seeds` range/list with duplicates — hard error (would
+  collide on provenance hashes).
+- `datasets` supplied and `≠ len(sim_seeds)` — hard error.
+- `fit_seeds` list with duplicates — hard error.
+
 ---
 
 ## 4. The Fit State File
