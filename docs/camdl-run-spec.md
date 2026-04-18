@@ -2283,25 +2283,9 @@ schema with v2. **External tooling should not assume the current field
 names survive unchanged.** Open an issue if you're writing such tooling
 and need a migration window.
 
-The `experiment` subcommand and its `camdl experiment analyze` Sobol
-workflow were removed in favor of `simulate batch` + `camdl list/show/cat`
-for browsing + external tools (R `sensitivity` package, Python) for
-sensitivity analysis.
-
-### Migrating from the old `--batch` / `camdl experiment`
-
-| Old                                        | New                                   |
-|--------------------------------------------|---------------------------------------|
-| `camdl simulate --batch FILE`              | `camdl simulate batch FILE`           |
-| `camdl simulate --batch FILE --parallel N` | `camdl simulate batch FILE --parallel N` |
-| `camdl experiment run FILE`                | `camdl simulate batch FILE`           |
-| `camdl experiment status FILE`             | `camdl simulate status FILE`          |
-| `camdl experiment analyze FILE`            | (removed; use R `sensitivity` or Python) |
-
-The `--batch` flag is no longer accepted on `simulate`. A user who tries
-`camdl simulate sir.camdl --batch foo.toml` gets `unknown flag: --batch`
-from the single-run parser — the clean failure replaces the old silent
-semantic swap where `sir.camdl` was misinterpreted as the batch TOML.
+Sensitivity analysis (Sobol indices and similar) is not a camdl
+concern. Run `camdl simulate batch` to produce the output tree, then
+compute indices with R's `sensitivity` package or Python's `SALib`.
 
 ---
 

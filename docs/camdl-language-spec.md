@@ -2443,11 +2443,10 @@ camdl cat   <short-hash> [--stream NAME]
 ```
 
 Batch parameter sweeps, scenario comparisons, and posterior-predictive
-checks. The `camdl experiment` subcommand was renamed to `camdl simulate
-batch` on 2026-04-17 — the old form is no longer accepted. Sensitivity
-analysis (Sobol indices) was removed from the CLI; use R's `sensitivity`
-package or Python's `SALib` on the batch output. See the Run
-Specification (`camdl-run-spec.md` §5) for details.
+checks. Sensitivity analysis (Sobol indices) is out of scope for the
+CLI; compute it with R's `sensitivity` package or Python's `SALib` on
+the batch output. See the Run Specification (`camdl-run-spec.md` §5)
+for details.
 
 ### 22.5 Inference
 
