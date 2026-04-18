@@ -449,8 +449,12 @@ pub fn cmd_fit_run_v2(args: &[String]) {
 
         // Config hash staleness check
         let fixed_resolved = sweep_config.fixed.resolve().unwrap_or_default();
+        let data_spec = sweep_config.data_spec().unwrap_or_else(|e| {
+            eprintln!("error: {}", e);
+            std::process::exit(1);
+        });
         let config_hash = provenance::compute_config_hash_v2(
-            &model_json, &sweep_config.data.observations, &sweep_config.estimate,
+            &model_json, &data_spec.observations, &sweep_config.estimate,
             &fixed_resolved, stage_name, stage, seed,
         ).unwrap_or_else(|e| {
             eprintln!("error: {}", e);
@@ -575,7 +579,9 @@ pub fn cmd_fit_run_v2(args: &[String]) {
                 );
                 let mle_path = format!("{}/mle_params.toml", stage_dir.display());
                 let model_hash = crate::hashing::model_hash(&run_config.model_ir_json);
-                let data_hashes: Vec<(String, String)> = sweep_config.data.observations.iter()
+                let data_hashes: Vec<(String, String)> = sweep_config.data_spec()
+                    .unwrap_or_else(|e| { eprintln!("error: {}", e); std::process::exit(1); })
+                    .observations.iter()
                     .map(|(name, path)| {
                         let bytes = std::fs::read(path).unwrap_or_default();
                         let hash = {
@@ -784,7 +790,9 @@ pub fn cmd_fit_run_v2(args: &[String]) {
             stage: stage_name.to_string(),
             model: sweep_config.model.camdl.clone(),
             model_hash: crate::hashing::model_hash(&model_json),
-            data_hashes: sweep_config.data.observations.iter()
+            data_hashes: sweep_config.data_spec()
+                .unwrap_or_else(|e| { eprintln!("error: {}", e); std::process::exit(1); })
+                .observations.iter()
                 .map(|(name, path)| {
                     let hash = provenance::file_content_hash(path)
                         .unwrap_or_else(|| {

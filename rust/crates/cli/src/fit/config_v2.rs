@@ -14,7 +14,33 @@ use std::path::{Path, PathBuf};
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct FitConfigV2 {
     pub model: ModelRef,
-    pub data: DataSpec,
+
+    /// Real-data source. Mutually exclusive with `[synthetic]`: exactly
+    /// one of the two must be present. `validate()` enforces this.
+    #[serde(default)]
+    pub data: Option<DataSpec>,
+
+    /// Synthetic-data source — generates N datasets from known truth and
+    /// fits each one (simulation-based calibration). See proposal
+    /// docs/dev/proposals/2026-04-17-synthetic-fit-replicates.md §"Config
+    /// shape".
+    #[serde(default)]
+    pub synthetic: Option<SyntheticSpec>,
+
+    /// IF2/PGAS seeds. A list (`[42]` for a single fit, `[101, 102, 103]`
+    /// for start-sensitivity sweeps). When absent, the top-level
+    /// `--seed` CLI flag (or its default) is used as the single seed.
+    /// Duplicates are rejected at validation time — each seed must be
+    /// unique to avoid provenance-hash collisions.
+    #[serde(default)]
+    pub fit_seeds: Option<Vec<u64>>,
+
+    /// How the initial parameter point is chosen for each fit. Default
+    /// matches today's behaviour (`model_default` — start from the
+    /// model's declared values). `"prior"` draws from declared priors.
+    #[serde(default)]
+    pub fit_starts: Option<FitStarts>,
+
     #[serde(default)]
     pub output_dir: Option<String>,
 
@@ -92,6 +118,163 @@ pub struct DataSpec {
     /// Mutually exclusive with `holdout_after`.
     #[serde(default)]
     pub holdout: Option<IndexMap<String, String>>,
+}
+
+// ─── Synthetic data ──────────────────────────────────────────────────────────
+
+/// Synthetic-data generation spec. Mutually exclusive with `[data]`:
+/// when present, the runner generates `len(sim_seeds)` datasets from
+/// `true_params` using the model's observation block, then fits each
+/// one. Output directory structure places these under `synthetic/ds_NN/`
+/// — see docs/dev/proposals/2026-04-17-synthetic-fit-replicates.md.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct SyntheticSpec {
+    /// Path to a TOML file of `name = value` lines supplying the ground
+    /// truth used to generate data and to compute coverage / bias.
+    pub true_params: String,
+
+    /// Simulation seeds. Either a range string (`"1:20"`) or an explicit
+    /// list (`[7, 42, 101, ...]`). Duplicates are rejected.
+    pub sim_seeds: SeedsSpec,
+
+    /// Number of datasets. When omitted, inferred from `len(sim_seeds)`.
+    /// When supplied, must equal that length.
+    #[serde(default)]
+    pub datasets: Option<usize>,
+
+    /// Scenario for data generation (not for fitting). Applies the
+    /// named scenario's enable/disable lists and param overrides when
+    /// generating synthetic datasets. Fits themselves run against the
+    /// scenario-free baseline (unless the top-level `scenario =` is also
+    /// set, in which case that applies at fit time).
+    #[serde(default)]
+    pub scenario: Option<String>,
+}
+
+impl SyntheticSpec {
+    pub fn validate(&self) -> Result<(), String> {
+        // Ensure sim_seeds is non-empty and has no duplicates.
+        let seeds = self.sim_seeds.to_vec();
+        if seeds.is_empty() {
+            return Err("[synthetic] sim_seeds is empty — at least one seed required".into());
+        }
+        self.sim_seeds.validate_no_duplicates().map_err(|e| format!("[synthetic] {}", e))?;
+
+        if let Some(n) = self.datasets {
+            if n != seeds.len() {
+                return Err(format!(
+                    "[synthetic] datasets = {} but sim_seeds has length {}. \
+                     These must match, or omit `datasets` to infer from sim_seeds.",
+                    n, seeds.len()));
+            }
+            if n == 0 {
+                return Err("[synthetic] datasets must be ≥ 1".into());
+            }
+        }
+        Ok(())
+    }
+
+    /// The effective dataset count, after applying the "omit → infer from
+    /// sim_seeds" rule.
+    pub fn effective_datasets(&self) -> usize {
+        self.datasets.unwrap_or_else(|| self.sim_seeds.to_vec().len())
+    }
+}
+
+/// Simulation-seeds spec: an explicit list or a range string (`"1:20"`).
+/// Custom Deserialize dispatches on the TOML value type directly.
+#[derive(Debug, Clone, Serialize)]
+#[serde(untagged)]
+pub enum SeedsSpec {
+    /// Explicit list of seeds.
+    List(Vec<u64>),
+    /// Range string, e.g. `"1:20"` meaning `[1, 2, ..., 20]` inclusive.
+    Range(String),
+}
+
+impl<'de> Deserialize<'de> for SeedsSpec {
+    fn deserialize<D: serde::Deserializer<'de>>(de: D) -> Result<Self, D::Error> {
+        use serde::de::Error;
+        let v = toml::Value::deserialize(de)?;
+        match v {
+            toml::Value::String(s) => Ok(SeedsSpec::Range(s)),
+            toml::Value::Array(xs) => {
+                if xs.is_empty() {
+                    return Err(D::Error::custom("seeds list must be non-empty"));
+                }
+                let mut out = Vec::with_capacity(xs.len());
+                for item in xs {
+                    match item {
+                        toml::Value::Integer(n) if n >= 0 => out.push(n as u64),
+                        toml::Value::Integer(n)           => return Err(D::Error::custom(
+                            format!("seed must be non-negative, got {}", n))),
+                        other => return Err(D::Error::custom(
+                            format!("seeds list must contain integers, got {:?}", other))),
+                    }
+                }
+                Ok(SeedsSpec::List(out))
+            }
+            other => Err(D::Error::custom(format!(
+                "expected a range string like \"1:20\" or a list of integers; got {:?}",
+                other))),
+        }
+    }
+}
+
+impl SeedsSpec {
+    /// Expand to a concrete list. Parses the range form on demand.
+    pub fn to_vec(&self) -> Vec<u64> {
+        match self {
+            SeedsSpec::List(xs) => xs.clone(),
+            SeedsSpec::Range(s) => parse_seed_range(s).unwrap_or_default(),
+        }
+    }
+
+    pub fn validate_no_duplicates(&self) -> Result<(), String> {
+        let v = self.to_vec();
+        let mut seen = BTreeSet::new();
+        for s in &v {
+            if !seen.insert(*s) {
+                return Err(format!(
+                    "duplicate seed {} — each seed must be unique to avoid \
+                     provenance-hash collisions between fits", s));
+            }
+        }
+        if let SeedsSpec::Range(s) = self {
+            if v.is_empty() {
+                return Err(format!(
+                    "malformed seed range '{}' — use 'start:end' with start ≤ end, \
+                     e.g. '1:20'", s));
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Parse `"N:M"` into `[N, N+1, ..., M]` inclusive.
+/// Errors (returning None) when the form is malformed or inverted.
+fn parse_seed_range(s: &str) -> Option<Vec<u64>> {
+    let (lo, hi) = s.split_once(':')?;
+    let lo: u64 = lo.trim().parse().ok()?;
+    let hi: u64 = hi.trim().parse().ok()?;
+    if lo > hi { return None; }
+    Some((lo..=hi).collect())
+}
+
+/// How initial parameter points are chosen for each fit-seed replicate.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FitStarts {
+    /// Start from the model's declared parameter values (default).
+    ModelDefault,
+    /// Draw starts from declared priors. Errors if any estimated
+    /// parameter lacks a prior.
+    Prior,
+    // LatinHypercube is reserved; not implemented in the initial landing.
+}
+
+impl Default for FitStarts {
+    fn default() -> Self { FitStarts::ModelDefault }
 }
 
 // ─── Estimate ───────────────────────────────────────────────────────────────
@@ -442,11 +625,12 @@ impl FitConfigV2 {
             }
         }
 
-        let data_legacy: HashMap<String, String> = self.data.observations.iter()
+        let data = self.data_spec()?;
+        let data_legacy: HashMap<String, String> = data.observations.iter()
             .map(|(k, v)| (k.clone(), v.clone()))
             .collect();
 
-        let holdout_legacy = self.data.holdout.as_ref().map(|h| {
+        let holdout_legacy = data.holdout.as_ref().map(|h| {
             h.iter().map(|(k, v)| (k.clone(), v.clone())).collect()
         });
 
@@ -503,19 +687,74 @@ impl FitConfigV2 {
         self.fit_dir(config_path).join(stage_name)
     }
 
+    /// Real-data observation paths. Returns an error with a helpful
+    /// message when the config is synthetic-only or when neither
+    /// source is present (should be caught by `validate()`, but
+    /// callers downstream of validation still need a concrete
+    /// `DataSpec`).
+    pub fn data_spec(&self) -> Result<&DataSpec, String> {
+        match (&self.data, &self.synthetic) {
+            (Some(d), _)    => Ok(d),
+            (None, Some(_)) => Err(
+                "this code path requires [data] but the fit config uses [synthetic]. \
+                 Synthetic-data fits must be routed through the replicate runner, \
+                 which materialises generated datasets before calling the per-fit \
+                 path.".to_string()),
+            (None, None)    => Err(
+                "fit config has neither [data] nor [synthetic] — one must be supplied."
+                    .to_string()),
+        }
+    }
+
     /// Exhaustive partition check + stage DAG validation + data consistency.
     pub fn validate(&self, model_params: &[String]) -> Result<(), String> {
+        // Data source must be exactly one of [data] or [synthetic].
+        match (&self.data, &self.synthetic) {
+            (Some(_), Some(_)) => return Err(
+                "[data] and [synthetic] are mutually exclusive — choose one.\n  \
+                 [data] fits against observed data files; [synthetic] generates \
+                 datasets from known truth for simulation-based calibration.".to_string()),
+            (None, None) => return Err(
+                "fit config has neither [data] nor [synthetic] — one must be supplied.".to_string()),
+            _ => {}
+        }
+
+        // Validate synthetic spec if present.
+        if let Some(syn) = &self.synthetic {
+            syn.validate()?;
+        }
+
+        // Validate fit_seeds if present (reject duplicates — they would
+        // collide on per-cell provenance hashes).
+        if let Some(seeds) = &self.fit_seeds {
+            if seeds.is_empty() {
+                return Err("fit_seeds list is empty — at least one seed required, \
+                            or omit the field for single-fit behaviour".to_string());
+            }
+            let mut seen = BTreeSet::new();
+            for &s in seeds {
+                if !seen.insert(s) {
+                    return Err(format!(
+                        "duplicate fit_seed {} — each seed must be unique to avoid \
+                         provenance-hash collisions between fits", s));
+                }
+            }
+        }
+
         // scenario and enable/disable are mutually exclusive (matches simulate).
         if self.scenario.is_some() && (!self.enable.is_empty() || !self.disable.is_empty()) {
             return Err("`scenario` is mutually exclusive with `enable`/`disable`. \
                         Use one approach.".to_string());
         }
 
-        // holdout_after and holdout are mutually exclusive
-        if self.data.holdout_after.is_some() && self.data.holdout.is_some() {
-            return Err("data.holdout_after and data.holdout are mutually exclusive.\n  \
-                        Use holdout_after for temporal splits, holdout for explicit files."
-                .to_string());
+        // holdout_after and holdout are mutually exclusive (real-data only;
+        // synthetic datasets have no holdout).
+        if let Some(data) = &self.data {
+            if data.holdout_after.is_some() && data.holdout.is_some() {
+                return Err("data.holdout_after and data.holdout are mutually exclusive.\n  \
+                            Use holdout_after for temporal splits, holdout for explicit files."
+                    .to_string());
+            }
         }
 
         let model_set: BTreeSet<&str> = model_params.iter()
@@ -835,8 +1074,9 @@ iterations = 50
 cooling = 0.70
         "#).unwrap();
 
-        assert_eq!(config.data.holdout_after, Some(5474.0));
-        assert!(config.data.holdout.is_none());
+        let data = config.data.as_ref().expect("[data] section required in test fixture");
+        assert_eq!(data.holdout_after, Some(5474.0));
+        assert!(data.holdout.is_none());
     }
 
     #[test]
@@ -1381,5 +1621,155 @@ cooling = 0.70
         let resolved = config.fixed.resolve().unwrap();
         assert_eq!(resolved["N0"], 1000000.0);
         assert_eq!(resolved["I0"], 50.0); // inline overrides from_file
+    }
+
+    // ── Synthetic / fit_seeds schema extension ─────────────────────────────
+
+    fn minimal_fit_stages() -> &'static str {
+        r#"
+[model]
+camdl = "models/sir.camdl"
+
+[estimate]
+beta = { bounds = [0.01, 2.0] }
+
+[fixed]
+N0 = 1000
+I0 = 5
+gamma = 0.1
+
+[stages.mle]
+method = "if2"
+chains = 4
+particles = 1000
+iterations = 50
+cooling = 0.70
+"#
+    }
+
+    #[test]
+    fn synthetic_block_parses() {
+        let src = format!(r#"{}
+[synthetic]
+true_params = "truth.toml"
+sim_seeds   = "1:20"
+"#, minimal_fit_stages());
+        let config = parse(&src).unwrap();
+        let syn = config.synthetic.as_ref().expect("[synthetic] missing");
+        assert_eq!(syn.true_params, "truth.toml");
+        assert_eq!(syn.effective_datasets(), 20);
+        assert!(syn.scenario.is_none());
+    }
+
+    #[test]
+    fn synthetic_datasets_inferred_from_sim_seeds() {
+        let src = format!(r#"{}
+[synthetic]
+true_params = "truth.toml"
+sim_seeds   = [7, 42, 101]
+"#, minimal_fit_stages());
+        let config = parse(&src).unwrap();
+        let syn = config.synthetic.unwrap();
+        assert!(syn.datasets.is_none(), "datasets should be inferred, not set");
+        assert_eq!(syn.effective_datasets(), 3);
+        syn.validate().expect("inferred count must validate");
+    }
+
+    #[test]
+    fn synthetic_datasets_explicit_must_match() {
+        let src = format!(r#"{}
+[synthetic]
+true_params = "truth.toml"
+datasets    = 20
+sim_seeds   = "1:5"
+"#, minimal_fit_stages());
+        let config = parse(&src).unwrap();
+        let err = config.synthetic.unwrap().validate().unwrap_err();
+        assert!(err.contains("20") && err.contains("5"),
+            "error must name both counts: {}", err);
+    }
+
+    #[test]
+    fn data_and_synthetic_mutually_exclusive() {
+        let src = format!(r#"{}
+[data.observations]
+cases = "data/cases.tsv"
+
+[synthetic]
+true_params = "truth.toml"
+sim_seeds   = "1:5"
+"#, minimal_fit_stages());
+        let config = parse(&src).unwrap();
+        let err = config.validate(&["beta".into(), "gamma".into(), "N0".into(), "I0".into()])
+            .unwrap_err();
+        assert!(err.contains("[data]") && err.contains("[synthetic]"),
+            "error must name both blocks: {}", err);
+    }
+
+    #[test]
+    fn neither_data_nor_synthetic_errors() {
+        let src = minimal_fit_stages().to_string();
+        let config = parse(&src).unwrap();
+        let err = config.validate(&["beta".into(), "gamma".into(), "N0".into(), "I0".into()])
+            .unwrap_err();
+        assert!(err.contains("[data]") && err.contains("[synthetic]"),
+            "error must mention both options: {}", err);
+    }
+
+    #[test]
+    fn seeds_range_parses() {
+        let s = SeedsSpec::Range("1:5".into());
+        assert_eq!(s.to_vec(), vec![1u64, 2, 3, 4, 5]);
+        s.validate_no_duplicates().unwrap();
+    }
+
+    #[test]
+    fn seeds_inverted_range_errors() {
+        let s = SeedsSpec::Range("10:5".into());
+        assert_eq!(s.to_vec(), Vec::<u64>::new());
+        let err = s.validate_no_duplicates().unwrap_err();
+        assert!(err.contains("malformed") || err.contains("start ≤ end"),
+            "inverted range must surface a clear error: {}", err);
+    }
+
+    #[test]
+    fn seeds_list_duplicates_rejected() {
+        let s = SeedsSpec::List(vec![1, 2, 2, 3]);
+        let err = s.validate_no_duplicates().unwrap_err();
+        assert!(err.contains("duplicate"), "must name duplicate: {}", err);
+    }
+
+    #[test]
+    fn fit_seeds_list_parses() {
+        // Top-level keys like `fit_seeds` must precede any [table] header
+        // in TOML, otherwise the key is consumed by the previous table.
+        let single_src = format!(r#"fit_seeds = [42]
+{}
+[data.observations]
+cases = "data/cases.tsv"
+"#, minimal_fit_stages());
+        let config = parse(&single_src).unwrap();
+        assert_eq!(config.fit_seeds.unwrap(), vec![42u64]);
+
+        let list_src = format!(r#"fit_seeds = [101, 102, 103]
+{}
+[data.observations]
+cases = "data/cases.tsv"
+"#, minimal_fit_stages());
+        let config = parse(&list_src).unwrap();
+        assert_eq!(config.fit_seeds.unwrap(), vec![101u64, 102, 103]);
+    }
+
+    #[test]
+    fn fit_seeds_duplicates_rejected_during_validate() {
+        let src = format!(r#"fit_seeds = [1, 2, 1]
+{}
+[data.observations]
+cases = "data/cases.tsv"
+"#, minimal_fit_stages());
+        let config = parse(&src).unwrap();
+        let err = config.validate(&["beta".into(), "gamma".into(), "N0".into(), "I0".into()])
+            .unwrap_err();
+        assert!(err.contains("duplicate"), "must reject duplicate fit seeds: {}", err);
     }
 }
