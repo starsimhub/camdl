@@ -1080,7 +1080,7 @@ fn prepare_cas_ctx(
 }
 
 /// Generate observation times from an IR schedule.
-fn obs_schedule_times(
+pub(crate) fn obs_schedule_times(
     schedule: &ir::observation::ObservationSchedule,
     t_start: f64,
     t_end: f64,
@@ -1117,7 +1117,7 @@ fn obs_schedule_times(
 /// For CumulativeFlow: accumulate per-snapshot flows, difference between
 /// consecutive observation times to get per-interval flow counts.
 /// For CurrentPop/CurrentPopSum: read state at snapshot closest to each obs time.
-fn project_all_obs_times(
+pub(crate) fn project_all_obs_times(
     traj: &sim::Trajectory,
     obs_ir: &ir::observation::ObservationModel,
     model: &ir::Model,

@@ -1,0 +1,414 @@
+#![allow(dead_code)]
+
+//! Synthetic-data generation for `[synthetic]` fit configs.
+//!
+//! Step 3 of the proposal. The grid runner (step 4) will be the first
+//! caller from `fit run`; until that lands the functions here are
+//! reachable only from unit tests, hence the module-level dead-code
+//! allow. Drop the allow when step 4 merges.
+//!
+//!
+//! Runs the simulation backend once per `sim_seed`, samples each
+//! observation stream through its declared likelihood, and writes one
+//! wide-format TSV per dataset into `<fit_dir>/synthetic/data/`. The
+//! resulting file paths can be handed to the fit runner verbatim, as
+//! if the user had supplied them via `[data.observations]`.
+//!
+//! Generation is a thin wrapper over the existing `simulate --obs`
+//! pipeline: `util::run_simulation` produces the trajectory,
+//! `main::project_all_obs_times` computes the projection per
+//! observation tick, and `sim::inference::obs_model::compile_obs_sample_pf`
+//! samples the likelihood. No new simulation machinery — just a
+//! write-loop and deterministic path layout.
+//!
+//! See docs/dev/proposals/2026-04-17-synthetic-fit-replicates.md.
+
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+
+use sim::compiled_model::CompiledModel;
+use sim::rng::StatefulRng;
+
+use super::config_v2::{SyntheticSpec, format_dataset_dir};
+use crate::util::{load_params_toml, SimRun, run_simulation};
+
+/// One generated synthetic dataset. Writers of summary / coverage
+/// tables consume this to find each cell's data file; the runner
+/// dispatches a fit per entry.
+#[derive(Debug, Clone)]
+pub struct SyntheticDataset {
+    /// 1-based dataset index (matches `ds_NN` in the output directory).
+    pub idx: usize,
+    /// Simulation seed used for data generation.
+    pub sim_seed: u64,
+    /// Wide-format TSV at `<fit_dir>/synthetic/data/ds_NN.tsv`.
+    pub path: PathBuf,
+    /// Content hash of the generated file, for per-cell provenance.
+    pub content_hash: String,
+}
+
+/// Generate `len(sim_seeds)` synthetic datasets into
+/// `<fit_dir>/synthetic/data/`. Returns the dataset descriptors in
+/// 1-based index order.
+///
+/// Each dataset is a single run of the simulation backend at
+/// `spec.true_params` with the given `sim_seed`, with every
+/// observation block in the model sampled through its declared
+/// likelihood at the declared schedule. The resulting TSV has one
+/// column per observation stream (plus `time`).
+pub fn generate_synthetic_datasets(
+    spec: &SyntheticSpec,
+    model_path: &str,
+    fit_dir: &Path,
+    backend: &str,
+    dt: f64,
+) -> Result<Vec<SyntheticDataset>, String> {
+    let data_dir = fit_dir.join("synthetic").join("data");
+    std::fs::create_dir_all(&data_dir)
+        .map_err(|e| format!("cannot create {}: {}", data_dir.display(), e))?;
+
+    // Also copy truth.toml into synthetic/ for provenance — downstream
+    // summary/coverage computation reads this, and it ties the whole
+    // synthetic run to the specific truth the user declared.
+    let truth_bytes = std::fs::read(&spec.true_params)
+        .map_err(|e| format!("cannot read true_params {}: {}", spec.true_params, e))?;
+    let synthetic_dir = fit_dir.join("synthetic");
+    std::fs::write(synthetic_dir.join("truth.toml"), &truth_bytes)
+        .map_err(|e| format!("cannot write synthetic/truth.toml: {}", e))?;
+
+    let seeds = spec.sim_seeds.to_vec();
+    let mut out = Vec::with_capacity(seeds.len());
+    for (i, &sim_seed) in seeds.iter().enumerate() {
+        let idx = i + 1;
+        let path = data_dir.join(format!("{}.tsv", format_dataset_dir(idx)));
+        let hash = generate_one_dataset(
+            spec, model_path, sim_seed, &path, backend, dt,
+        )?;
+        out.push(SyntheticDataset {
+            idx, sim_seed,
+            path,
+            content_hash: hash,
+        });
+    }
+    Ok(out)
+}
+
+/// Generate a single synthetic dataset at a given seed. Writes the
+/// wide-format TSV to `out_path`. Returns a short hex content hash.
+fn generate_one_dataset(
+    spec: &SyntheticSpec,
+    model_path: &str,
+    sim_seed: u64,
+    out_path: &Path,
+    backend: &str,
+    dt: f64,
+) -> Result<String, String> {
+    // Build a SimRun matching `simulate --obs` semantics — load the
+    // model, apply `true_params` as overrides, apply the synthetic
+    // scenario if declared, run the backend at `sim_seed`.
+    let truth_overrides = load_params_toml(&spec.true_params)
+        .map_err(|e| format!("parsing [synthetic] true_params {}: {}", spec.true_params, e))?;
+    let run = SimRun {
+        ir_path: model_path.to_string(),
+        params_files: vec![],
+        overrides: truth_overrides,
+        set_vec_entries: vec![],
+        table_files: Default::default(),
+        scenario_name: spec.scenario.clone(),
+        adhoc_enable: vec![],
+        adhoc_disable: vec![],
+        backend: backend.to_string(),
+        dt,
+        seed: sim_seed,
+    };
+    let (traj, model) = run_simulation(&run)?;
+
+    if model.observations.is_empty() {
+        return Err(format!(
+            "model has no `observations {{ }}` block — synthetic-data fits \
+             require at least one observation stream in the .camdl file"));
+    }
+
+    // Compile observation samplers once per dataset. The RNG stream
+    // uses `sim_seed ^ SEED_MIX_OBS` so that observation noise is
+    // deterministic from `(sim_seed, obs_index)` alone — re-running a
+    // dataset with the same seed reproduces the same draws bit-for-bit,
+    // which is what users expect for SBC reproducibility.
+    let compiled = Arc::new(
+        CompiledModel::new(model.clone())
+            .map_err(|e| format!("compile error: {:?}", e))?,
+    );
+    let params = compiled.default_params.clone();
+    const SEED_MIX_OBS: u64 = 0xa7c1_e890_7f2c_1d3a;
+    let mut obs_rng = StatefulRng::new(sim_seed ^ SEED_MIX_OBS);
+
+    // Per-stream: declared times, projected values per time, drawn values.
+    let mut all_times: Vec<Vec<f64>> = Vec::with_capacity(model.observations.len());
+    let mut all_draws: Vec<Vec<f64>> = Vec::with_capacity(model.observations.len());
+    for obs_ir in &model.observations {
+        let times = crate::obs_schedule_times(
+            &obs_ir.schedule,
+            model.simulation.t_start,
+            model.simulation.t_end,
+        );
+        let projected = crate::project_all_obs_times(&traj, obs_ir, &model, &times);
+
+        let sampler = sim::inference::obs_model::compile_obs_sample_pf(
+            obs_ir, compiled.clone(), &params,
+        );
+        let draws: Vec<f64> = (0..times.len())
+            .map(|ti| sampler(projected[ti], &mut obs_rng))
+            .collect();
+        all_times.push(times);
+        all_draws.push(draws);
+    }
+
+    // Write wide-format TSV: time column + one column per obs stream.
+    // Uses the union of all obs times across streams, sorted; missing
+    // values are blank (NA-compatible with the fit-loader). Streams
+    // that share the same schedule (the common case for SBC) collapse
+    // to one row per time, no NAs.
+    let mut union_times: Vec<f64> = all_times.iter().flatten().copied().collect();
+    union_times.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    union_times.dedup_by(|a, b| (*a - *b).abs() < 1e-9);
+
+    let mut buf = String::new();
+    buf.push_str("time");
+    for obs_ir in &model.observations {
+        buf.push('\t');
+        buf.push_str(&obs_ir.name);
+    }
+    buf.push('\n');
+
+    for &t in &union_times {
+        buf.push_str(&format_time(t));
+        for (si, _obs_ir) in model.observations.iter().enumerate() {
+            buf.push('\t');
+            // Find the tick in this stream matching t (within tolerance)
+            let hit = all_times[si].iter()
+                .position(|&ot| (ot - t).abs() < 1e-9);
+            match hit {
+                Some(ti) => buf.push_str(&format_value(all_draws[si][ti])),
+                None     => {} // blank cell — fit-loader treats as missing
+            }
+        }
+        buf.push('\n');
+    }
+
+    std::fs::write(out_path, &buf)
+        .map_err(|e| format!("cannot write {}: {}", out_path.display(), e))?;
+
+    // Short content hash for provenance. The downstream grid runner
+    // uses this in its per-cell hash so that regenerating with an
+    // unchanged seed + truth is a cache hit.
+    let hash = {
+        use sha2::{Sha256, Digest};
+        let result = Sha256::digest(buf.as_bytes());
+        hex::encode(&result[..4])
+    };
+
+    Ok(hash)
+}
+
+/// Render a time value without trailing zeros, keeping integer-valued
+/// times as integers (`5` not `5.0`) to match the existing observation
+/// file conventions.
+fn format_time(t: f64) -> String {
+    if (t.round() - t).abs() < 1e-9 {
+        format!("{}", t.round() as i64)
+    } else {
+        format!("{}", t)
+    }
+}
+
+fn format_value(v: f64) -> String {
+    if (v.round() - v).abs() < 1e-9 {
+        format!("{}", v.round() as i64)
+    } else {
+        format!("{}", v)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use super::super::config_v2::SeedsSpec;
+
+    #[test]
+    fn format_time_keeps_integers_clean() {
+        assert_eq!(format_time(0.0), "0");
+        assert_eq!(format_time(7.0), "7");
+        assert_eq!(format_time(7.5), "7.5");
+    }
+
+    #[test]
+    fn format_value_keeps_count_data_clean() {
+        // Counts should render as integers so the output looks like
+        // observed incidence / prevalence, not scientific notation.
+        assert_eq!(format_value(42.0), "42");
+        assert_eq!(format_value(0.0), "0");
+        assert_eq!(format_value(3.14159), "3.14159");
+    }
+
+    // ── End-to-end: generation against a tiny compiled SIR fixture.
+    //    Requires the OCaml `camdlc` binary built at
+    //    `ocaml/_build/default/bin/camdlc.exe`. Skipped automatically
+    //    when that binary is absent so the suite stays runnable in
+    //    rust-only CI. ──────────────────────────────────────────────
+
+    fn camdlc_path() -> Option<std::path::PathBuf> {
+        let manifest = std::env::var("CARGO_MANIFEST_DIR").ok()?;
+        let p = std::path::PathBuf::from(&manifest)
+            .join("../../../ocaml/_build/default/bin/camdlc.exe");
+        if p.exists() { Some(p) } else { None }
+    }
+
+    struct TempDir(PathBuf);
+    impl TempDir {
+        fn path(&self) -> &std::path::Path { &self.0 }
+    }
+    impl Drop for TempDir {
+        fn drop(&mut self) { let _ = std::fs::remove_dir_all(&self.0); }
+    }
+    fn tempdir(tag: &str) -> TempDir {
+        let ns = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        let base = std::env::temp_dir().join(format!(
+            "camdl_synth_{}_{}_{}", tag, std::process::id(), ns));
+        std::fs::create_dir_all(&base).unwrap();
+        TempDir(base)
+    }
+
+    fn write_fixture(dir: &std::path::Path, camdlc: &std::path::Path)
+        -> (PathBuf, PathBuf)
+    {
+        let model_src = r#"
+time_unit = 'days
+compartments { S, I, R }
+parameters {
+  beta  : rate  in [0.001, 5.0]
+  gamma : rate  in [0.01, 1.0]
+  N0    : count in [100, 10000]
+}
+transitions {
+  infection : S --> I @ beta * S * I / N0
+  recovery  : I --> R @ gamma * I
+}
+observations {
+  cases : {
+    projected  = prevalence(I)
+    every      = 1 'days
+    likelihood = poisson(rate = projected)
+  }
+}
+init { S = 999  I = 1 }
+simulate { from = 0 'days  to = 10 'days }
+"#;
+        let model_path = dir.join("sir.camdl");
+        std::fs::write(&model_path, model_src).unwrap();
+
+        let output = std::process::Command::new(camdlc)
+            .arg(&model_path)
+            .output()
+            .expect("camdlc invocation must succeed");
+        assert!(output.status.success(),
+            "camdlc compile failed: {}", String::from_utf8_lossy(&output.stderr));
+        let ir_path = dir.join("sir.ir.json");
+        std::fs::write(&ir_path, &output.stdout).unwrap();
+
+        let truth_path = dir.join("truth.toml");
+        std::fs::write(&truth_path, "beta = 0.8\ngamma = 0.3\nN0 = 1000\n").unwrap();
+
+        (ir_path, truth_path)
+    }
+
+    #[test]
+    fn generates_one_file_per_sim_seed() {
+        let Some(camdlc) = camdlc_path() else {
+            eprintln!("skipping: camdlc.exe not built; run `cd ocaml && dune build` first");
+            return;
+        };
+        let tmp = tempdir("one_per");
+        let (ir_path, truth_path) = write_fixture(tmp.path(), &camdlc);
+
+        let fit_dir = tmp.path().join("fit_out");
+        let spec = SyntheticSpec {
+            true_params: truth_path.to_string_lossy().to_string(),
+            sim_seeds: SeedsSpec::List(vec![1, 2, 3]),
+            datasets: None,
+            scenario: None,
+        };
+        let datasets = generate_synthetic_datasets(
+            &spec, ir_path.to_str().unwrap(), &fit_dir,
+            "chain_binomial", 1.0,
+        ).expect("generation must succeed on minimal SIR");
+
+        assert_eq!(datasets.len(), 3);
+        for (i, ds) in datasets.iter().enumerate() {
+            assert_eq!(ds.idx, i + 1);
+            assert_eq!(ds.sim_seed, (i + 1) as u64);
+            assert!(ds.path.exists(),
+                "ds_{:02}.tsv must exist at {}", i + 1, ds.path.display());
+            let contents = std::fs::read_to_string(&ds.path).unwrap();
+            assert!(contents.lines().next().unwrap().contains("cases"),
+                "header must declare the obs stream name");
+            assert!(contents.lines().count() >= 10,
+                "≥10 daily obs rows expected, got {}",
+                contents.lines().count().saturating_sub(1));
+        }
+        assert!(fit_dir.join("synthetic").join("truth.toml").exists(),
+            "truth.toml must be copied for provenance");
+    }
+
+    #[test]
+    fn same_seed_produces_identical_content_hash() {
+        let Some(camdlc) = camdlc_path() else { return; };
+        let tmp = tempdir("det");
+        let (ir_path, truth_path) = write_fixture(tmp.path(), &camdlc);
+
+        let spec = SyntheticSpec {
+            true_params: truth_path.to_string_lossy().to_string(),
+            sim_seeds: SeedsSpec::List(vec![42]),
+            datasets: None,
+            scenario: None,
+        };
+        let a = generate_synthetic_datasets(
+            &spec, ir_path.to_str().unwrap(),
+            &tmp.path().join("run_a"), "chain_binomial", 1.0,
+        ).unwrap();
+        let b = generate_synthetic_datasets(
+            &spec, ir_path.to_str().unwrap(),
+            &tmp.path().join("run_b"), "chain_binomial", 1.0,
+        ).unwrap();
+
+        assert_eq!(a[0].content_hash, b[0].content_hash,
+            "same seed + same truth must produce identical datasets");
+        assert_eq!(std::fs::read(&a[0].path).unwrap(),
+                   std::fs::read(&b[0].path).unwrap());
+    }
+
+    #[test]
+    fn different_seeds_produce_different_data() {
+        let Some(camdlc) = camdlc_path() else { return; };
+        let tmp = tempdir("diff");
+        let (ir_path, truth_path) = write_fixture(tmp.path(), &camdlc);
+        let spec = SyntheticSpec {
+            true_params: truth_path.to_string_lossy().to_string(),
+            sim_seeds: SeedsSpec::List(vec![1, 999]),
+            datasets: None,
+            scenario: None,
+        };
+        let ds = generate_synthetic_datasets(
+            &spec, ir_path.to_str().unwrap(),
+            &tmp.path().join("fit"), "chain_binomial", 1.0,
+        ).unwrap();
+        assert_ne!(ds[0].content_hash, ds[1].content_hash,
+            "different sim seeds must produce different data realizations");
+    }
+
+    #[test]
+    fn spec_roundtrips_seed_lists() {
+        let s = SeedsSpec::List(vec![1, 2, 3]);
+        assert_eq!(s.to_vec(), vec![1u64, 2, 3]);
+    }
+}

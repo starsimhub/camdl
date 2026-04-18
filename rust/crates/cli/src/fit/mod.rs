@@ -24,6 +24,7 @@ pub mod status;
 pub mod pmmh;
 pub mod pgas;
 pub mod trace_writer;
+pub mod synthetic;
 
 use config::FitToml;
 
