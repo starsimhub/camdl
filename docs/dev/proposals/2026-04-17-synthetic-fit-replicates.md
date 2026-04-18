@@ -134,6 +134,11 @@ Breaking change vs. today — acceptable per the project's
 backwards-compatibility stance (unreleased software; clean design
 wins).
 
+Every fit lives under a data-source subdirectory — `real/` or
+`synthetic/`. The two are analogues: a reader of the output tree
+cannot mistake a fit against generated data for a fit against
+observed data, because the distinction is in the path.
+
 ### Real-data fit
 
 `[data]` + `fit_seeds = 101` (scalar) or `fit_seeds = [101, 102, 103]`
@@ -141,13 +146,14 @@ wins).
 
 ```
 results/fits/<name>/
-  fit_101/
-    scout/
-    refine/
-    validate/
-  fit_102/          # present only if fit_seeds included 102
-    ...
-  summary.tsv       # one row per fit (one row if scalar seed)
+  real/
+    fit_101/
+      scout/
+      refine/
+      validate/
+    fit_102/        # present only if fit_seeds included 102
+      ...
+    summary.tsv     # one row per fit (one row if scalar seed)
   run.json
 ```
 
@@ -178,11 +184,15 @@ results/fits/<name>/
   run.json
 ```
 
-The `synthetic/` subdirectory is the visual cue that everything under
-it was fit against data generated from known truth. SBC-specific
-statistics (bias vs. truth, coverage of truth by the MLE
-distribution) are written only there; they are not meaningful for
-real-data fits.
+The `real/` vs. `synthetic/` split is the visual cue for what the fit
+consumed. SBC-specific statistics (bias vs. truth, coverage of truth
+by the MLE distribution) are written only under `synthetic/`; they
+are not meaningful for real-data fits. The one remaining asymmetry is
+genuine: `synthetic/` has a `ds_NN/` level between the root and
+`fit_<seed>/` because there are N datasets; `real/` has one dataset
+and skips that level. If multi-file real-data fitting is ever added,
+`real/` gains a `<data_basename>/` level and the shapes become
+identical.
 
 ### What `fit_<seed>` means
 
@@ -196,18 +206,18 @@ uniform and result-processing scripts read one shape.
 ### Migration
 
 Existing `results/fits/<name>/scout/…` becomes
-`results/fits/<name>/fit_<seed>/scout/…` where `<seed>` is the seed
-currently supplied (in fit.toml or via `--seed`). Scripts that walk
-`results/fits/<name>/scout/` directly must be updated to first
-descend into `fit_<seed>/`. The seed value is deterministic from the
-fit config, so the new path is knowable without runtime inspection.
+`results/fits/<name>/real/fit_<seed>/scout/…` where `<seed>` is the
+seed currently supplied (in fit.toml or via `--seed`). Scripts that
+walk `results/fits/<name>/scout/` directly must be updated. The full
+path is deterministic from config, so the new location is knowable
+without runtime inspection.
 
 ## Canonical modes
 
 | Mode                    | `[synthetic]` | `fit_seeds`  | Output                              | Fits  |
 |-------------------------|---------------|--------------|-------------------------------------|-------|
-| Single fit              | —             | scalar       | `fit_<seed>/`                       | 1     |
-| Start-sensitivity       | —             | list, len M  | `fit_<seed>/` × M                   | M     |
+| Single fit              | —             | scalar       | `real/fit_<seed>/`                  | 1     |
+| Start-sensitivity       | —             | list, len M  | `real/fit_<seed>/` × M              | M     |
 | SBC (classical)         | N datasets    | scalar       | `synthetic/ds_NN/fit_<seed>/`       | N     |
 | SBC × start-sensitivity | N datasets    | list, len M  | `synthetic/ds_NN/fit_<seed>/` × M   | N × M |
 
@@ -284,14 +294,15 @@ synthetic cells; editing `[fit]` invalidates everything; editing
 
 Six tests, all in `rust/crates/cli/tests/`:
 
-- **`single_fit_lives_under_fit_seed_dir`** — fit.toml with
+- **`single_fit_lives_under_real_fit_seed_dir`** — fit.toml with
   `fit_seeds = 42`, no `[synthetic]`. Assert output is
-  `results/fits/<name>/fit_42/scout,refine,validate/`, no bare
-  `scout/` at the top level. Guards the "one shape, always" claim.
+  `results/fits/<name>/real/fit_42/scout,refine,validate/`, with no
+  bare `scout/` at `real/` or at the top level. Guards "one shape,
+  always" and the mandatory `real/` wrapping.
 - **`fit_seeds_list_produces_per_seed_dirs`** — `[data]` +
-  `fit_seeds = [1,2,3]`. Assert three `fit_1/`, `fit_2/`, `fit_3/`
-  directories, one `summary.tsv` with three rows and distinct
-  content hashes.
+  `fit_seeds = [1,2,3]`. Assert three `real/fit_1/`, `real/fit_2/`,
+  `real/fit_3/` directories, one `real/summary.tsv` with three rows
+  and distinct content hashes.
 - **`synthetic_generates_n_datasets`** — `[synthetic]` with
   `datasets = 5`. Assert five `ds_0N.tsv` files in
   `synthetic/data/`, each distinct, each generated with the declared
@@ -335,9 +346,11 @@ Six tests, all in `rust/crates/cli/tests/`:
   "fitter variation" and nothing else. A reader of the fit.toml can
   tell what's being varied without reading docs.
 - **One output shape, always.** Every fit lives at
-  `[synthetic/ds_NN/]fit_<seed>/<stage>/`. No single-fit exception,
-  no conditional wrapping. Downstream result-processing code walks
-  one layout regardless of whether one fit ran or sixty.
+  `{real|synthetic}/[ds_NN/]fit_<seed>/<stage>/`. The data-source
+  subdirectory is mandatory and makes it impossible to confuse a
+  real-data fit with a synthetic-data fit when browsing results or
+  composing downstream processing. No single-fit exception, no
+  conditional wrapping.
 - **No new pipeline.** `scout → refine → validate` runs per cell,
   unchanged. The grid is a sweep layer on top, not a new fit mode.
 - **Provenance falls out.** Per-cell content hashes mean the cache
