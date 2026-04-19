@@ -1,5 +1,7 @@
 mod util;
 mod hashing;
+#[allow(dead_code)] // write sites wire up in commit 4/6 of the unified-output-tree rollout
+mod run_meta;       // unified Run/RunKind ADT — see docs/dev/proposals/2026-04-19-unified-output-tree.md
 #[allow(dead_code)] // some write/read helpers wired up by follow-up commits (obs caching)
 mod cas;
 mod browse;
