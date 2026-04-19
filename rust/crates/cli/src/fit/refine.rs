@@ -219,6 +219,8 @@ pub fn run_refine(
         seed,
         stage: "refine".into(),
         best_chain: chain_results.best_chain,
+        backend: fit.config.backend.clone(),
+        dt: fit.config.dt,
         loglik: chain_results.best_loglik,
         loglik_sd: 0.0, // Not computed in refine
         n_particles: n_particles,

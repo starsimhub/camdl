@@ -646,6 +646,10 @@ pub fn cmd_batch_run(args: &[String]) {
                             backend: backend.clone(),
                             dt,
                             sweep_point: plan.sweep_overrides.clone(),
+                            // Batch sweeps never launch from a fit MLE —
+                            // they read from an experiment config, not
+                            // from mle_params.toml. Leave as None.
+                            from_fit_hash: None,
                         }),
                     };
                     run_rec.write(std::path::Path::new(&plan.run_dir))

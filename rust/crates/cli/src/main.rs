@@ -396,6 +396,13 @@ fn run_simulate(args: &[String]) {
     let mut ir_path:     Option<String> = None;
     let mut backend    = "gillespie".to_string();
     let mut dt         = 1.0_f64;
+    // Track explicit vs default flags. The backend-provenance
+    // guardrail (docs/dev/proposals/2026-04-19-backend-provenance-guardrail.md)
+    // only auto-matches the fit's backend when --backend was NOT
+    // passed; when it was passed AND differs from the fit's backend,
+    // we warn instead of silently overriding.
+    let mut backend_explicit = false;
+    let mut dt_explicit      = false;
     let mut seed       = 1_u64;
     let mut overrides: HashMap<String, f64> = HashMap::new();
     let mut table_files: HashMap<String, String> = HashMap::new();
@@ -433,8 +440,13 @@ fn run_simulate(args: &[String]) {
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
-            "--backend"  => { backend = need(&mut i, "--backend"); }
-            "--dt"       => { dt      = need(&mut i, "--dt").parse().unwrap_or_else(|_| { eprintln!("error: --dt needs a number"); std::process::exit(1); }); }
+            "--backend"  => { backend = need(&mut i, "--backend"); backend_explicit = true; }
+            "--dt"       => {
+                dt = need(&mut i, "--dt").parse().unwrap_or_else(|_| {
+                    eprintln!("error: --dt needs a number"); std::process::exit(1);
+                });
+                dt_explicit = true;
+            }
             "--seed"     => { seed    = need(&mut i, "--seed").parse().unwrap_or_else(|_| { eprintln!("error: --seed needs an integer"); std::process::exit(1); }); }
             "--params"   => { params_files.push(need(&mut i, "--params")); }
             "--scenario" => { scenario_names.extend(need(&mut i, "--scenario").split(',').map(|s| s.trim().to_string())); }
@@ -557,6 +569,56 @@ fn run_simulate(args: &[String]) {
     let cas_root = output_dir_arg.clone()
         .unwrap_or_else(|| run_paths::DEFAULT_OUTPUT_ROOT.to_string());
 
+    // ── Backend-provenance guardrail ─────────────────────────────
+    //
+    // If any of the params files carries a `[provenance]` block from
+    // a fit, apply the three-way matching rule for backend + dt.
+    // See docs/dev/proposals/2026-04-19-backend-provenance-guardrail.md
+    // and the incident at
+    // docs/dev/incidents/2026-04-19-backend-default-mismatch.md.
+    //
+    // We read the first fit-provenance block found; if the user passes
+    // multiple --params files, one can be a fit MLE and others can be
+    // standalone overrides, but two conflicting fit-provenance blocks
+    // is itself a misconfiguration we'd flag — for the v1 of this
+    // feature we stop at the first block and trust single-fit
+    // workflows.
+    let mut from_fit_hash: Option<String> = None;
+    for pf in &params_files {
+        let prov = match crate::fit::provenance::read_mle_provenance(pf) {
+            Ok(Some(p)) => p,
+            Ok(None) | Err(_) => continue,
+        };
+        from_fit_hash = prov.fit_hash.clone();
+
+        if !backend_explicit {
+            // Auto-match path.
+            eprintln!("[info] backend auto-matched to {} (dt={}) from fit \
+                      provenance in {}. Pass --backend explicitly to override; \
+                      the fit's backend is the consistent default for forward \
+                      sims of the MLE.",
+                prov.backend, prov.dt, pf);
+            backend = prov.backend.clone();
+            if !dt_explicit { dt = prov.dt; }
+        } else if backend != prov.backend {
+            // Explicit-differs path — warn.
+            eprintln!("warning: backend mismatch.");
+            eprintln!("  {} was produced by a fit that used {} (dt={}).",
+                pf, prov.backend, prov.dt);
+            eprintln!("  You passed --backend {}, which is a different \
+                       dynamical model at the same parameters.", backend);
+            eprintln!("  The resulting trajectories will NOT reproduce the \
+                       fit's behavior — this combination has caused real \
+                       confusion; see");
+            eprintln!("  docs/dev/incidents/2026-04-19-backend-default-mismatch.md.");
+            eprintln!("  If this is intentional (e.g. cross-backend \
+                       comparison), ignore this warning.");
+        }
+        // If backend_explicit and matches: silent. Normal case.
+
+        break;
+    }
+
     let base_sim_run = util::SimRun {
         ir_path: ir_path.clone(),
         params_files,
@@ -617,7 +679,8 @@ fn run_simulate(args: &[String]) {
     // trajectory already exists, we short-circuit: read it, emit to user's
     // destination, log 'cache hit' to stderr, and return.
     let mut cas_ctx: Option<CasCtx> = if cas_enabled {
-        match prepare_cas_ctx(&base_sim_run, scenario_list[0].clone(), seeds[0], &cas_root) {
+        match prepare_cas_ctx(&base_sim_run, scenario_list[0].clone(), seeds[0],
+                              &cas_root, from_fit_hash.clone()) {
             Ok(ctx) => Some(ctx),
             Err(e) => {
                 eprintln!("error preparing CAS: {}", e);
@@ -1034,6 +1097,7 @@ fn prepare_cas_ctx(
     scenario_name: Option<String>,
     seed: u64,
     cas_root: &str,
+    from_fit_hash: Option<String>,
 ) -> Result<CasCtx, String> {
     // Load IR source + parse model
     let (ir_path_resolved, _tmp) = util::resolve_ir_path(&run.ir_path)?;
@@ -1107,6 +1171,7 @@ fn prepare_cas_ctx(
             backend: run.backend.clone(),
             dt: run.dt,
             sweep_point: HashMap::new(), // --cas is single-run; no sweep
+            from_fit_hash,
         }),
     };
 

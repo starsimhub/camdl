@@ -890,6 +890,7 @@ mod tests {
             sim_hash: "".into(), scen_hash: "".into(), seed: 0,
             backend: "gillespie".into(), dt: 1.0,
             sweep_point: HashMap::new(),
+            from_fit_hash: None,
         }
     }
 
@@ -935,6 +936,7 @@ mod tests {
                 backend: "gillespie".into(),
                 dt: 1.0,
                 sweep_point: HashMap::new(),
+            from_fit_hash: None,
             }),
         };
         record.write(&run_dir).unwrap();

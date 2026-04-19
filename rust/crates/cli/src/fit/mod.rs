@@ -940,6 +940,8 @@ pub fn cmd_fit_run_v2(args: &[String]) {
                     seed,
                     stage: stage_name.to_string(),
                     best_chain: chain_results.best_chain,
+                    backend: sweep_config.config.backend.clone(),
+                    dt: sweep_config.config.dt,
                     loglik: chain_results.best_loglik,
                     loglik_sd: 0.0,
                     n_particles: *particles,

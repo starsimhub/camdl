@@ -249,6 +249,12 @@ pub fn load_params_toml(path: &str) -> Result<HashMap<String, f64>, String> {
         .map_err(|e| format!("TOML parse error in {}: {}", path, e))?;
     let mut out = HashMap::new();
     for (key, val) in &table {
+        // The `[provenance]` table in mle_params.toml files carries
+        // fit metadata (backend, dt, fit_hash, etc.) — not model
+        // parameters. Skip it here so provenance fields don't get
+        // splatted into the parameter namespace. See
+        // docs/dev/proposals/2026-04-19-backend-provenance-guardrail.md.
+        if key == "provenance" { continue; }
         match val {
             toml::Value::Float(f)   => { out.insert(key.clone(), *f); }
             toml::Value::Integer(i) => { out.insert(key.clone(), *i as f64); }

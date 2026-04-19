@@ -254,6 +254,8 @@ pub fn run_validate(fit: &FitToml, starts_from: &str, seed: u64, force: bool) ->
         seed,
         stage: "validate".into(),
         best_chain: chain_results.best_chain,
+        backend: fit.config.backend.clone(),
+        dt: fit.config.dt,
         loglik,
         loglik_sd,
         n_particles: pfilter_particles,

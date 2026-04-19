@@ -81,6 +81,12 @@ pub struct SimulateMeta {
     /// Sweep-point param values (empty for single-run `--cas`).
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub sweep_point: HashMap<String, f64>,
+    /// Full Run.hash of the fit whose `mle_params.toml` was passed to
+    /// `camdl simulate --params`, when applicable. Populates a
+    /// sim → fit provenance link for `camdl list` / `camdl show` to
+    /// surface. See `docs/dev/proposals/2026-04-19-backend-provenance-guardrail.md`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub from_fit_hash: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -279,6 +285,7 @@ mod tests {
                 backend: "gillespie".into(),
                 dt: 1.0,
                 sweep_point: HashMap::new(),
+                from_fit_hash: None,
             }),
         }
     }
