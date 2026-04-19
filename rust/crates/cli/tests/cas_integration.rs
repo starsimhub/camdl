@@ -331,6 +331,34 @@ fn cas_stale_metadata_warns_and_reruns() {
 }
 
 #[test]
+fn show_resolves_fit_by_hash_prefix() {
+    let Some(bin) = skip_if_missing_binary() else { return; };
+    let tmp = tempfile::tempdir().unwrap();
+    let output = tmp.path().join("output");
+    let fit_dir = output.join("fits").join("demo-deadbeef");
+    std::fs::create_dir_all(&fit_dir).unwrap();
+    // hash starts with deadbeef so the short-hash lookup should match.
+    let run_json = r#"{
+        "hash":"deadbeefc0ffee00000000000000000000000000000000000000000000000000",
+        "version":"0.1.0+test","created_at":"2026-04-19T12:00:00Z",
+        "argv":["camdl","fit","run","demo.toml"],"wall_time_seconds":1.0,
+        "kind":{"kind":"fit","model":"demo.camdl","model_hash":"m",
+        "fit_toml_path":"demo.toml","fit_toml_hash":"h",
+        "data_hashes":{},"estimated":["beta"],"fixed":{},"stages_declared":["mle"]}
+    }"#;
+    std::fs::write(fit_dir.join("run.json"), run_json).unwrap();
+    let out = Command::new(&bin)
+        .args(["show", "deadbee", &output.to_string_lossy()])
+        .output().expect("spawn");
+    assert!(out.status.success(), "show by short-hash should resolve: stderr={}",
+        String::from_utf8_lossy(&out.stderr));
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("kind"));
+    assert!(stdout.contains("fit"));
+    assert!(stdout.contains("demo.camdl"));
+}
+
+#[test]
 fn show_renders_fit_metadata() {
     let Some(bin) = skip_if_missing_binary() else { return; };
     let tmp = tempfile::tempdir().unwrap();

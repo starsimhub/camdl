@@ -204,29 +204,20 @@ pub fn cmd_show(args: &[String]) {
     if args.is_empty() || args[0] == "--help" || args[0] == "-h" {
         eprintln!("usage: camdl show <PATH | short-hash> [OUTPUT-DIR]");
         eprintln!();
-        eprintln!("Prints the full run.json for a cached sim run or a fit.");
-        eprintln!("Accepts either a full relative path or a git-style short-hash");
-        eprintln!("prefix for sim runs. Fit directories resolve only by path today.");
+        eprintln!("Prints the run.json for a cached sim run or a fit. Accepts a");
+        eprintln!("full path, or a git-style short-hash prefix that matches");
+        eprintln!("either sim.sim_hash or fit.hash. Ambiguous prefixes error with");
+        eprintln!("a candidate list.");
         std::process::exit(if args.is_empty() { 1 } else { 0 });
     }
     let key = &args[0];
     let root = args.get(1).cloned().unwrap_or_else(|| "./output".to_string());
 
-    // If the key is a directory path, check whether it's a fit root
-    // before treating it as a sim lookup. Fit resolution by short-hash
-    // prefix is a follow-up (cleanup.md:L3).
-    let as_path = Path::new(key);
-    if as_path.is_dir() && as_path.join("run.json").exists() {
-        let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-        if let Some(fit) = load_fit_entry(as_path, &cwd) {
-            show_fit(&fit);
-            return;
-        }
-    }
-
-    let entry = resolve_run(&root, key).unwrap_or_else(|e| {
-        eprintln!("error: {}", e); std::process::exit(1);
-    });
+    let entry = match resolve_any(&root, key) {
+        Ok(Resolved::Fit(f)) => { show_fit(&f); return; }
+        Ok(Resolved::Sim(s)) => s,
+        Err(e) => { eprintln!("error: {}", e); std::process::exit(1); }
+    };
 
     println!("{}", "path".bright_black()); println!("  {}", entry.rel_path.cyan());
     println!("{}", "model".bright_black()); println!("  {}", entry.meta.model);
@@ -304,6 +295,19 @@ pub fn cmd_cat(args: &[String]) {
         std::process::exit(1);
     });
 
+    // If the key happens to point at a fit (by path or unique hash
+    // prefix), give a clear error instead of a confusing "no
+    // traj.tsv" message from the sim path.
+    match resolve_any(&root, &key) {
+        Ok(Resolved::Fit(f)) => {
+            eprintln!("error: 'camdl cat' on a fit has no single-file target.\n  \
+                       {} is a fit directory. For stage output, pass the stage\n  \
+                       path directly, e.g. `camdl cat {}/real/fit_<seed>/<stage>/mle_params.toml`.",
+                      f.rel_path, f.rel_path);
+            std::process::exit(1);
+        }
+        Ok(Resolved::Sim(_)) | Err(_) => {}
+    }
     let entry = resolve_run(&root, &key).unwrap_or_else(|e| {
         eprintln!("error: {}", e); std::process::exit(1);
     });
@@ -415,11 +419,71 @@ fn discover_fits(root: &str) -> Result<Vec<FitEntry>, String> {
     Ok(out)
 }
 
-/// Resolve a user-supplied key to a single run. Accepts:
-/// - Full relative path: `output/sims/abc12345/baseline-def45/seed_42`
-/// - A short hash prefix (git-style): `abc1234` → the unique run whose
-///   sim_hash starts with `abc1234`
-/// - `{sim_hash_prefix}/{scenario}` or `{prefix}/{scenario}/{seed}`
+/// Resolved by a user-supplied key: either a sim run or a fit.
+#[derive(Debug, Clone)]
+enum Resolved {
+    Sim(RunEntry),
+    Fit(FitEntry),
+}
+
+/// Resolve a user-supplied key to either a sim run or a fit. Accepts:
+/// - Full relative or absolute path to a run.json-containing directory.
+/// - Short hash prefix (git-style): `abc1234` matches on sim.sim_hash
+///   OR fit.hash. If the prefix matches exactly one entry across both
+///   subtrees, we return it; if it matches multiple (even split across
+///   kinds), we surface a disambiguation error listing all candidates.
+/// - For sims only: `{prefix}/{scenario}` or `{prefix}/{scenario}/{seed}`
+///   narrows further. Fit matching ignores slash-delimited filters.
+fn resolve_any(root: &str, key: &str) -> Result<Resolved, String> {
+    let as_path = Path::new(key);
+    if as_path.is_dir() && as_path.join("run.json").exists() {
+        let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        if let Some(f) = load_fit_entry(as_path, &cwd) { return Ok(Resolved::Fit(f)); }
+        if let Some(s) = load_sim_entry(as_path, &cwd) { return Ok(Resolved::Sim(s)); }
+        return Err(format!("run.json at {} has an unrecognised kind", as_path.display()));
+    }
+
+    let parts: Vec<&str> = key.split('/').collect();
+    let hash_prefix = parts[0];
+
+    // Collect fit matches (fits don't use scenario/seed filters).
+    let fit_matches: Vec<FitEntry> = discover_fits(root)?.into_iter()
+        .filter(|f| f.run.hash.starts_with(hash_prefix))
+        .collect();
+
+    // Collect sim matches with optional /scenario[/seed] filters.
+    let scen_filter = parts.get(1).copied();
+    let seed_filter: Option<u64> = parts.get(2)
+        .and_then(|s| s.strip_prefix("seed_"))
+        .or_else(|| parts.get(2).copied())
+        .and_then(|s| s.parse().ok());
+    let sim_matches: Vec<RunEntry> = discover_runs(root)?.into_iter()
+        .filter(|r| r.meta.sim_hash.starts_with(hash_prefix))
+        .filter(|r| scen_filter.map_or(true, |s| r.meta.scenario == s))
+        .filter(|r| seed_filter.map_or(true, |s| r.meta.seed == s))
+        .collect();
+
+    let total = fit_matches.len() + sim_matches.len();
+    match total {
+        0 => Err(format!("no run matches '{}' in {}", key, root)),
+        1 => if let Some(s) = sim_matches.into_iter().next() {
+            Ok(Resolved::Sim(s))
+        } else {
+            Ok(Resolved::Fit(fit_matches.into_iter().next().unwrap()))
+        },
+        n => {
+            let mut msg = format!("'{}' is ambiguous, matches {} entries:\n", key, n);
+            for m in &sim_matches { msg.push_str(&format!("  sim  {}\n", m.rel_path)); }
+            for m in &fit_matches { msg.push_str(&format!("  fit  {}\n", m.rel_path)); }
+            msg.push_str("refine by appending /<scenario> and/or /<seed>, \
+                         or pass a longer hash prefix");
+            Err(msg)
+        }
+    }
+}
+
+/// Sim-only resolver (legacy entry). `cmd_cat` keeps using this
+/// because `cat` on a fit has no single-file meaning.
 fn resolve_run(root: &str, key: &str) -> Result<RunEntry, String> {
     // If the key is an existing directory, use it directly.
     let as_path = Path::new(key);

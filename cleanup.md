@@ -194,9 +194,13 @@ order; each is a self-contained commit.
       Integration test `list_kind_filter_isolates_sections` covers
       both flags.
 
-- [ ] **L3 — `camdl show` / `cat` for fit dirs** (partial)
-      `camdl show <fit-dir>` works via path. Short-hash prefix
-      resolution for fits and `camdl cat <fit>` still unsupported.
+- [x] **L3 — `camdl show` / `cat` for fit dirs**
+      Added `resolve_any()` which searches both subtrees. `camdl show`
+      now accepts short-hash prefixes for either sims or fits; ambiguous
+      prefixes list candidates across both subtrees. `camdl cat` on a
+      fit emits a clear error pointing at the stage-file alternative
+      (no single-file cat target on a fit). Integration test
+      `show_resolves_fit_by_hash_prefix` covers the happy path.
 
 - [x] **L4 — `manifest.json` location**
       Moved to `<output>/sims/manifest.json` — batch writer, status
