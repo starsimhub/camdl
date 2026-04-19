@@ -147,16 +147,44 @@ pub fn file_hash(path: &str) -> Option<String> {
     Some(hex::encode(&Sha256::digest(&bytes)[..4]))
 }
 
+/// Canonicalise a TOML document for hashing. Parses to a value, then
+/// serialises back through `toml::to_string` which sorts keys and
+/// strips comments + non-semantic whitespace. Purpose: cache-
+/// invalidation based on semantic content, not textual form — editing
+/// a comment or reformatting the file doesn't bust the cache.
+///
+/// Falls back to raw bytes on parse failure: if the TOML is
+/// unparseable, the config is broken anyway and downstream will
+/// produce a better error than "can't canonicalise your hash input."
+/// We prefer to still produce a hash (for cache-staleness detection)
+/// rather than refuse, since the caller handles real errors on the
+/// primary `FitToml::load` path.
+fn canonicalise_toml(raw: &[u8]) -> Vec<u8> {
+    let s = match std::str::from_utf8(raw) {
+        Ok(s) => s,
+        Err(_) => return raw.to_vec(), // non-UTF-8: pass through
+    };
+    match toml::from_str::<toml::Value>(s) {
+        Ok(v) => match toml::to_string(&v) {
+            Ok(canonical) => canonical.into_bytes(),
+            Err(_) => raw.to_vec(),
+        },
+        Err(_) => raw.to_vec(),
+    }
+}
+
 /// Content hash for a fit's *directory* (seed-independent). Keyed on
-/// `(model IR, data files, fit.toml, version)` — deliberately omits
-/// seed so re-running the same fit config with different seeds lands
-/// in the same `output/fits/<stem>-<hash>/` directory, with seeds
+/// `(model IR, data files, canonicalised fit.toml, version)` — deliberately
+/// omits seed so re-running the same fit config with different seeds lands
+/// in the same `results/fits/<stem>-<hash>/` directory, with seeds
 /// differentiated via the `fit_<seed>` subdirectory.
 ///
 /// Used by `FitConfigV2::fit_dir()` to produce the content-addressable
 /// suffix on the fit-directory name. The proposal's "edit your
-/// fit.toml and get a new dir" invariant falls out of this: any edit
-/// to model, data, or fit.toml changes the hash; seed alone doesn't.
+/// fit.toml and get a new dir" invariant falls out of this: any
+/// *semantic* edit to model, data, or fit.toml changes the hash;
+/// seed alone doesn't, and neither do comment edits or whitespace
+/// reformatting (TOML is canonicalised before hashing).
 pub fn fit_content_hash(
     model_ir_bytes: &[u8],
     data_files: &mut [(String, Vec<u8>)],
@@ -174,7 +202,7 @@ pub fn fit_content_hash(
         h.update(b"\x00");
     }
     h.update(b"fit\x00");
-    h.update(fit_toml_bytes);
+    h.update(&canonicalise_toml(fit_toml_bytes));
     h.update(b"\x00version\x00");
     h.update(version::VERSION_SHORT.as_bytes());
     // Full 64-char hex. Directory-name truncation happens at the
@@ -217,7 +245,7 @@ pub fn fit_input_hash(
         h.update(b"\x00");
     }
     h.update(b"fit\x00");
-    h.update(fit_toml_bytes);
+    h.update(&canonicalise_toml(fit_toml_bytes));
     h.update(b"\x00seed\x00");
     h.update(seed.to_le_bytes());
     h.update(b"\x00version\x00");
@@ -309,6 +337,46 @@ mod tests {
         // Two calls in the same process must equal.
         assert_eq!(sim_hash(&mh, "beta=0.3", "gillespie", 1.0),
                    sim_hash(&mh, "beta=0.3", "gillespie", 1.0));
+    }
+
+    #[test]
+    fn fit_content_hash_ignores_comments_and_whitespace() {
+        // Two fit.tomls that differ only in comments and whitespace
+        // must produce the same fit_content_hash after canonicalisation.
+        // Hardening #6 — comments are for humans, not provenance inputs.
+        let model = b"ir:{}";
+        let mut data1: Vec<(String, Vec<u8>)> = vec![];
+        let mut data2: Vec<(String, Vec<u8>)> = vec![];
+        let toml_a = b"# top comment\n[estimate]\nbeta = { bounds = [0.1, 2.0] }\n";
+        let toml_b = b"[estimate]\n   beta  =  { bounds = [0.1,  2.0] }\n# trailing\n";
+        let h_a = fit_content_hash(model, &mut data1, toml_a);
+        let h_b = fit_content_hash(model, &mut data2, toml_b);
+        assert_eq!(h_a, h_b,
+            "canonicalised TOML must ignore comments + whitespace");
+    }
+
+    #[test]
+    fn fit_content_hash_still_senses_real_changes() {
+        // Sanity check the inverse: a semantic change (different
+        // bounds) must produce a different hash.
+        let model = b"ir:{}";
+        let mut data1: Vec<(String, Vec<u8>)> = vec![];
+        let mut data2: Vec<(String, Vec<u8>)> = vec![];
+        let toml_a = b"[estimate]\nbeta = { bounds = [0.1, 2.0] }\n";
+        let toml_b = b"[estimate]\nbeta = { bounds = [0.1, 3.0] }\n";
+        let h_a = fit_content_hash(model, &mut data1, toml_a);
+        let h_b = fit_content_hash(model, &mut data2, toml_b);
+        assert_ne!(h_a, h_b,
+            "changing a numeric bound must change the hash");
+    }
+
+    #[test]
+    fn canonicalise_toml_falls_back_on_invalid_input() {
+        // Unparseable TOML: return raw bytes. The caller produces a
+        // better error than we would; we just need to not panic.
+        let garbage = b"this = is = not = valid = toml";
+        let out = canonicalise_toml(garbage);
+        assert_eq!(out, garbage.to_vec());
     }
 
     #[test]
