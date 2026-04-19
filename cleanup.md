@@ -206,11 +206,17 @@ order; each is a self-contained commit.
       Moved to `<output>/sims/manifest.json` — batch writer, status
       reader, serve usage, and integration test updated in lockstep.
 
-- [ ] **L5 — `camdl-book` fit paths**
-      Book snippets hard-code `results/fits/fit_sir/refine/…`. These
-      no longer work after the rename + hash suffix. Needs a pattern
-      for users to locate the right fit dir (glob on stem? env var?).
-      Significant doc work — separate PR.
+- [x] **L5 — `camdl-book` fit paths**
+      `fitting.qmd`, `fitting_backup_with_rho.qmd`, and
+      `fitting_diagnostic.qmd` each gained `find_fit_root(stem)` and
+      (where needed) `find_fit_stage(stem, stage, seed=None)` helpers
+      that glob on the stem prefix under `output/fits/<stem>-*` and
+      pick the most-recent match. ~25 hard-coded
+      `results/fits/<stem>/refine/mle_params.toml` path literals
+      replaced with helper calls. `scenarios.qmd` had two stale
+      `output/runs/` references — fixed to `output/sims/`.
+      Vignettes were already clean. `.html` derivatives will
+      regenerate on the next quarto render.
 
 ---
 
