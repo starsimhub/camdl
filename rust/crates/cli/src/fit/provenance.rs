@@ -9,8 +9,14 @@ use crate::version;
 // as part of the 2026-04-19 output-tree unification. Call sites
 // updated in lockstep.
 
-/// Content hash: detects manual edits to mle_params.toml.
-pub fn compute_content_hash(params: &HashMap<String, f64>) -> String {
+/// MLE-params tamper-detection hash. Hashes the canonicalised (name,
+/// value) pairs from an `mle_params.toml` file so we can detect post-
+/// write edits to the parameter values. Naming note: this is **not**
+/// a general content-hash helper (unlike `crate::hashing::file_hash` or
+/// `sha256_hex`); it's mle-specific because it canonicalises numeric
+/// formatting with `{:.12}` precision before hashing. Lives in
+/// `fit::provenance` (not `crate::hashing`) for that reason.
+pub fn mle_params_tamper_hash(params: &HashMap<String, f64>) -> String {
     let mut pairs: Vec<(&String, &f64)> = params.iter().collect();
     pairs.sort_by_key(|(k, _)| k.as_str());
     let mut h = Sha256::new();
@@ -27,7 +33,7 @@ pub fn write_mle_params(
     metadata: &MleMetadata,
 ) -> Result<(), String> {
     use std::io::Write;
-    let content_hash = compute_content_hash(all_params);
+    let content_hash = mle_params_tamper_hash(all_params);
     let mut f = std::fs::File::create(path)
         .map_err(|e| format!("cannot write {}: {}", path, e))?;
 
@@ -174,7 +180,7 @@ pub fn verify_content_hash(path: &str) -> Result<ContentVerification, String> {
         })
         .collect();
 
-    let computed = compute_content_hash(&params);
+    let computed = mle_params_tamper_hash(&params);
 
     match declared {
         Some(ref d) if *d == computed => Ok(ContentVerification::Valid),
@@ -192,20 +198,23 @@ pub enum ContentVerification {
     NoHash,
 }
 
-// ─── V2 provenance: config_hash + provenance.json ───────────────────────────
+// ─── Fit-stage hash ──────────────────────────────────────────────────────────
 
-/// Compute the config hash for a fit stage. Covers all inputs that affect
-/// the stage's output: model IR, data files, estimate specs, fixed values,
-/// stage algorithm settings, and camdl version. Returns an error if any
-/// data file is missing.
+/// Compute the content hash for a single fit stage. Full 64-char hex
+/// (256 bits) covering every input that affects the stage's output:
+/// model IR, data file bytes, estimate specs, fixed values, stage
+/// algorithm settings, seed, and camdl version. Returns `Err` if a
+/// data file is unreadable (data must hash to something — we don't
+/// silently substitute a placeholder the way display code does).
 ///
-/// Hash is full 64-char hex (256 bits). Truncated to 16 chars for display.
-/// Per-stage configuration hash. Stays in `fit::provenance` (not
-/// `crate::hashing`) because it depends on fit-specific types
-/// `EstimateSpecV2` and `Stage` — moving it to the general hashing
-/// module would create a reverse dependency. Named `fit_stage_hash`
-/// under the unified hashing vocabulary (was `fit_stage_hash`
-/// before 2026-04-19).
+/// **Why this lives in `fit::provenance` rather than `crate::hashing`.**
+/// The 2026-04-19 unification proposal's commit-1 goal was to
+/// consolidate all hash helpers into `crate::hashing`. This one
+/// resisted because it consumes `fit::config_v2::{EstimateSpecV2,
+/// Stage}` via `serde_json::to_vec` — moving it to `hashing` would
+/// invert the dep graph (`hashing → fit::config_v2`). Keeping it
+/// here keeps `hashing` fit-agnostic. The cost is a one-directory
+/// split on the hash vocabulary; the benefit is a cleaner boundary.
 pub fn fit_stage_hash(
     model_ir_json: &str,
     observations: &indexmap::IndexMap<String, String>,
@@ -283,8 +292,8 @@ mod tests {
             ("beta".to_string(), 0.3),
             ("gamma".to_string(), 0.1),
         ].into();
-        let h1 = compute_content_hash(&params);
-        let h2 = compute_content_hash(&params);
+        let h1 = mle_params_tamper_hash(&params);
+        let h2 = mle_params_tamper_hash(&params);
         assert_eq!(h1, h2, "same params must produce same hash");
         assert_eq!(h1.len(), 8, "content hash is 8 hex chars");
     }
@@ -294,8 +303,8 @@ mod tests {
         let params1: HashMap<String, f64> = [("beta".to_string(), 0.3)].into();
         let params2: HashMap<String, f64> = [("beta".to_string(), 0.31)].into();
         assert_ne!(
-            compute_content_hash(&params1),
-            compute_content_hash(&params2),
+            mle_params_tamper_hash(&params1),
+            mle_params_tamper_hash(&params2),
             "different values must produce different hashes"
         );
     }

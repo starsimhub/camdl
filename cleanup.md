@@ -83,14 +83,18 @@ order; each is a self-contained commit.
 
 ## Hashing consolidation (proposal commit 1, partially done)
 
-- [ ] **H1 — `fit_stage_hash` still in `fit::provenance`**
-      Proposal said rename to `hashing::stage_hash`. Move it.
+- [~] **H1 — `fit_stage_hash` in `fit::provenance`** (won't move)
+      Moving it to `crate::hashing` would invert the dep graph
+      (hashing → fit::config_v2 via Stage + EstimateSpecV2). Kept
+      in provenance with an explicit docstring explaining the
+      deviation from the proposal.
 
-- [ ] **H2 — `compute_content_hash` / `verify_content_hash` still in `fit::provenance`**
-      These are the `mle_params.toml` content hash + verifier. They're
-      the same shape as `file_hash` with a custom canonical form for
-      the TOML body. Keep in provenance (they're mle-specific), but
-      rename & document to stop looking like they belong in `hashing`.
+- [x] **H2 — `compute_content_hash` / `verify_content_hash` still in `fit::provenance`**
+      Renamed `compute_content_hash` → `mle_params_tamper_hash` with
+      a docstring noting (a) it's mle-specific, (b) it canonicalises
+      numeric formatting with `{:.12}`, and (c) why it stays here
+      rather than in `crate::hashing`. `verify_content_hash` kept its
+      name — unambiguous in context.
 
 ## Tests (coverage gaps the proposal called out)
 

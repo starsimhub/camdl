@@ -630,7 +630,7 @@ fn write_fit_record(
         },
         "provenance": {
             "input_hash": metadata.input_hash,
-            "content_hash": provenance::compute_content_hash(all_params),
+            "content_hash": provenance::mle_params_tamper_hash(all_params),
             "timestamp": metadata.timestamp,
             "camdl_version": crate::version::VERSION_SHORT,
         },
@@ -685,7 +685,7 @@ fn write_fit_report(
     }
     writeln!(f).unwrap();
     writeln!(f, "Provenance: input_hash={}, content_hash={}",
-        metadata.input_hash, provenance::compute_content_hash(all_params)).unwrap();
+        metadata.input_hash, provenance::mle_params_tamper_hash(all_params)).unwrap();
 
     Ok(())
 }
