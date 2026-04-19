@@ -212,11 +212,11 @@ fn run_status_v2_dir(dir: &str) {
         let entry_path = entry.path();
 
         if entry_path.is_dir() {
-            // Check if this is a stage dir (has fit_state.toml or provenance.json)
+            // Check if this is a stage dir (has fit_state.toml or run.json)
             let has_fit_state = entry_path.join("fit_state.toml").exists();
-            let has_provenance = entry_path.join("provenance.json").exists();
+            let has_run_json  = entry_path.join("run.json").exists();
 
-            if has_fit_state || has_provenance {
+            if has_fit_state || has_run_json {
                 // Direct stage
                 print_stage_status(&name, &entry_path.to_string_lossy());
                 found_stages = true;
@@ -226,7 +226,7 @@ fn run_status_v2_dir(dir: &str) {
                     .into_iter().flatten().flatten().collect();
                 child_entries.sort_by_key(|e| e.file_name());
                 let has_child_stages = child_entries.iter().any(|c| {
-                    c.path().join("fit_state.toml").exists() || c.path().join("provenance.json").exists()
+                    c.path().join("fit_state.toml").exists() || c.path().join("run.json").exists()
                 });
                 if has_child_stages {
                     println!("\n  \x1b[1m{}/\x1b[0m", name);
@@ -253,18 +253,21 @@ fn run_status_v2_dir(dir: &str) {
 
 fn print_stage_status(name: &str, stage_dir: &str) {
     use crate::fit::state::FitState;
-    use crate::fit::provenance;
+    use crate::run_meta::{Run, RunKind};
 
-    // Try provenance.json first (v2), then fit_state.toml (v1)
-    if let Ok(prov) = provenance::read_provenance_json(stage_dir) {
-        let ll = prov.best_loglik.map(|l| format!("{:.1}", l)).unwrap_or_else(|| "—".into());
-        let chain = prov.best_chain.map(|c| format!(" (chain {})", c + 1)).unwrap_or_default();
-        let method = &prov.algorithm.get("method")
-            .and_then(|v| v.as_str())
-            .unwrap_or("?");
-        println!("    {:12} \x1b[32m✓\x1b[0m {} — loglik={}{}, {:.0}s",
-            name, method, ll, chain, prov.wall_time_seconds);
-    } else if let Ok(state) = FitState::load(stage_dir) {
+    // Prefer the unified run.json (Run::FitStage); fall back to
+    // fit_state.toml for older pre-run.json stage dirs (e.g. scout
+    // runs written before the Run ADT migration).
+    if let Ok(run) = Run::read(std::path::Path::new(stage_dir)) {
+        if let RunKind::FitStage(stage_meta) = &run.kind {
+            let ll = stage_meta.best_loglik.map(|l| format!("{:.1}", l)).unwrap_or_else(|| "—".into());
+            let chain = stage_meta.best_chain.map(|c| format!(" (chain {})", c + 1)).unwrap_or_default();
+            println!("    {:12} \x1b[32m✓\x1b[0m {} — loglik={}{}, {:.0}s",
+                name, stage_meta.method, ll, chain, run.wall_time_seconds);
+            return;
+        }
+    }
+    if let Ok(state) = FitState::load(stage_dir) {
         let n_good = state.n_good_chains.unwrap_or(state.n_chains);
         println!("    {:12} \x1b[32m✓\x1b[0m {} chains, loglik={:.1}, {}/{} good",
             name, state.n_chains, state.best_loglik, n_good, state.n_chains);
@@ -676,19 +679,19 @@ pub fn cmd_fit_run_v2(args: &[String]) {
             std::process::exit(1);
         });
         if !force {
-            match provenance::check_config_hash(&stage_dir.to_string_lossy(), &config_hash) {
-                provenance::ConfigCacheStatus::Match => {
+            match crate::run_meta::Run::check_cache(&stage_dir, &config_hash) {
+                crate::run_meta::CacheStatus::Hit { .. } => {
                     eprintln!("  \x1b[33mskipped — results already exist for these inputs.\x1b[0m");
                     eprintln!("  config_hash: {}", &config_hash[..16]);
                     eprintln!("  Use --force to re-run.");
                     continue;
                 }
-                provenance::ConfigCacheStatus::Stale { stored, current } => {
+                crate::run_meta::CacheStatus::Stale { stored, current } => {
                     eprintln!("  \x1b[33mstale results detected — config has changed. Re-running.\x1b[0m");
                     eprintln!("  stored:  {}", &stored[..16.min(stored.len())]);
                     eprintln!("  current: {}", &current[..16.min(current.len())]);
                 }
-                provenance::ConfigCacheStatus::NotFound => {}
+                crate::run_meta::CacheStatus::Miss => {}
             }
         }
 
@@ -1065,12 +1068,12 @@ pub fn cmd_fit_run_v2(args: &[String]) {
             }
         }
 
-        // ── Shared provenance write (all stage types) ───────────────────────
+        // ── Shared run.json write (all stage types) ─────────────────────────
         let stage_elapsed = stage_t0.elapsed();
-        let starts_from_prov = effective_starts.as_ref().map(|s| {
-            provenance::StartsFromProv {
-                source: s.clone(),
-                source_hash: None,
+        let starts_from_ref = effective_starts.as_ref().map(|s| {
+            crate::run_meta::StartsFromRef {
+                stage: s.clone(),
+                stage_hash: String::new(),
             }
         });
         let algo_json = match stage {
@@ -1083,39 +1086,37 @@ pub fn cmd_fit_run_v2(args: &[String]) {
             Stage::PFilter { particles, replicates, .. } =>
                 serde_json::json!({ "method": "pfilter", "particles": particles, "replicates": replicates }),
         };
-        let stage_prov = provenance::StageProvenance {
-            camdl_version: crate::version::VERSION_SHORT.to_string(),
-            timestamp: scout::now_iso8601_pub(),
-            config_hash: config_hash.clone(),
-            fit_config: fit_path.clone(),
-            stage: stage_name.to_string(),
-            model: sweep_config.model.camdl.clone(),
-            model_hash: crate::hashing::model_hash(&model_json),
-            data_hashes: sweep_config.data_spec()
-                .unwrap_or_else(|e| { eprintln!("error: {}", e); std::process::exit(1); })
-                .observations.iter()
-                .map(|(name, path)| {
-                    let hash = crate::hashing::file_hash(path)
-                        .unwrap_or_else(|| {
-                            eprintln!("warning: cannot hash data file '{}' for provenance", path);
-                            "<unreadable>".to_string()
-                        });
-                    (name.clone(), hash)
-                }).collect(),
-            estimated: sweep_config.estimate.keys().cloned().collect(),
-            fixed: fixed_resolved.iter().map(|(k, v)| (k.clone(), *v)).collect(),
-            algorithm: algo_json,
-            starts_from: starts_from_prov,
-            derived_from: sweep_config.provenance.as_ref()
-                .and_then(|p| p.derived_from.clone()),
-            seed,
-            wall_time_seconds: stage_elapsed.as_secs_f64(),
-            best_loglik: stage_best_loglik,
-            best_chain: stage_best_chain,
+        let n_chains = match stage {
+            Stage::IF2  { chains, .. } => *chains,
+            Stage::PGAS { chains, .. } => *chains,
+            Stage::PMMH { chains, .. } => *chains,
+            Stage::PFilter { .. }      => 1,
         };
-        provenance::write_provenance_json(
-            &stage_dir.to_string_lossy(), &stage_prov,
-        ).unwrap_or_else(|e| eprintln!("warning: could not write provenance.json: {}", e));
+        let parent_fit_hash = sweep_config.fit_content_hash(&fit_path).unwrap_or_default();
+        let stage_run = crate::run_meta::Run {
+            hash: config_hash.clone(),
+            version: crate::version::VERSION_SHORT.to_string(),
+            created_at: scout::now_iso8601_pub(),
+            argv: std::env::args().collect(),
+            wall_time_seconds: stage_elapsed.as_secs_f64(),
+            kind: crate::run_meta::RunKind::FitStage(crate::run_meta::FitStageMeta {
+                fit_hash: parent_fit_hash,
+                stage: stage_name.to_string(),
+                method: stage.method_name().to_string(),
+                stage_hash: config_hash.clone(),
+                seed,
+                n_chains,
+                algorithm: algo_json,
+                best_loglik: stage_best_loglik,
+                best_chain: stage_best_chain,
+                starts_from: starts_from_ref,
+                derived_from: sweep_config.provenance.as_ref()
+                    .and_then(|p| p.derived_from.clone()),
+            }),
+        };
+        if let Err(e) = stage_run.write(&stage_dir) {
+            eprintln!("warning: could not write {}/run.json: {}", stage_dir.display(), e);
+        }
 
     } // end stages
     } // end sweep_points

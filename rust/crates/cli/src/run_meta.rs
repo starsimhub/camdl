@@ -115,6 +115,12 @@ pub struct FitStageMeta {
     pub stage_hash: String,
     pub seed: u64,
     pub n_chains: usize,
+    /// Stage-specific algorithm settings (chains, particles, cooling,
+    /// etc.). A `serde_json::Value` keeps the shape open — each method
+    /// (if2/pgas/pmmh/pfilter) has a different parameter set, and the
+    /// human-readable record doesn't need a typed schema.
+    #[serde(default, skip_serializing_if = "serde_json::Value::is_null")]
+    pub algorithm: serde_json::Value,
     /// Best loglik across chains; `None` if the stage didn't compute
     /// one (e.g. a pure-diagnostic pass).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -125,6 +131,11 @@ pub struct FitStageMeta {
     /// (e.g. refine → scout). Absent when the stage has no predecessor.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub starts_from: Option<StartsFromRef>,
+    /// Path to the upstream fit dir this fit was derived from
+    /// (`camdl fit derive` workflows). Free-form string — the consumer
+    /// treats this as a display hint.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub derived_from: Option<String>,
 }
 
 /// Stable reference to a parent stage. Uses the stage *name* plus its
@@ -137,10 +148,9 @@ pub struct StartsFromRef {
     pub stage_hash: String,
 }
 
-/// Unified cache status, consolidating the previously-separate
-/// `cas::has_cached_traj` boolean and
-/// `fit::provenance::ConfigCacheStatus` enum. Stale semantics apply
-/// to both sim and fit runs now.
+/// Unified cache status: result of comparing an expected content hash
+/// against the `run.json` in a directory. Applies to both simulate
+/// and fit-stage runs.
 #[derive(Debug, Clone)]
 pub enum CacheStatus {
     /// Run directory exists and its stored hash matches the expected
@@ -172,9 +182,10 @@ impl Run {
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
     }
 
-    /// Check whether `dir` has a run.json matching `expected_hash`.
-    /// Consolidates the sim-side `has_cached_traj` + `RunMeta.sim_hash`
-    /// check and the fit-side `check_config_hash` into one code path.
+    /// Check whether `dir` has a `run.json` whose `hash` matches
+    /// `expected_hash`. Replaces the sim-side `has_cached_traj` +
+    /// `RunMeta.sim_hash` pair and the fit-side provenance.json check
+    /// with one uniform code path.
     pub fn check_cache(dir: &std::path::Path, expected_hash: &str) -> CacheStatus {
         match Self::read(dir) {
             Ok(run) if run.hash == expected_hash =>
@@ -262,12 +273,14 @@ mod tests {
                 stage_hash: "ae123456".repeat(8),
                 seed: 42,
                 n_chains: 4,
+                algorithm: serde_json::Value::Null,
                 best_loglik: Some(-56.7),
                 best_chain: Some(1),
                 starts_from: Some(StartsFromRef {
                     stage: "scout".into(),
                     stage_hash: "beef1234".repeat(8),
                 }),
+                derived_from: None,
             }),
         }
     }
@@ -385,7 +398,9 @@ mod tests {
                 stage: "mle".into(), method: "if2".into(),
                 stage_hash: "s".repeat(64),
                 seed: 1, n_chains: 1,
+                algorithm: serde_json::Value::Null,
                 best_loglik: None, best_chain: None, starts_from: None,
+                derived_from: None,
             }),
         };
         let json = serde_json::to_string(&r).unwrap();
