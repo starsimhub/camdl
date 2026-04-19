@@ -248,6 +248,98 @@ sim_seeds = [10, 20]
         "summary.tsv should have 4 rows for 2×2 grid: {}", summary);
 }
 
+// ── per-chain random starts: an IF2 stage with N > 1 chains and no
+//    starts_from must give each chain its own draw over bounds, and
+//    IF2 must actually start from those draws (not just record them
+//    decoratively in chain_starts.tsv). Regression against the
+//    2026-04-18 finding that v2 dispatch collapsed all chains to the
+//    same base_params at iter 0. ─────────────────────────────────────
+#[test]
+fn v2_if2_chains_diverge_at_iter_0_when_no_starts_from() {
+    let Some(bin) = camdl_sim() else { return; };
+    if camdlc().is_none() { return; }
+    let tmp = tempdir("chain_starts");
+    let (ir, truth) = write_fixture(tmp.path());
+    let out = tmp.path().join("out");
+    let fit_toml = tmp.path().join("fit.toml");
+    // 8 chains to get a readable spread across the beta bounds.
+    std::fs::write(&fit_toml, format!(r#"
+output_dir = "{}"
+
+[model]
+camdl = "{}"
+
+[synthetic]
+true_params = "{}"
+sim_seeds = [1]
+
+[estimate]
+beta  = {{ bounds = [0.01, 5.0], start = 1.0 }}
+gamma = {{ bounds = [0.01, 1.0], start = 0.3 }}
+
+[fixed]
+N0 = 1000
+
+[stages.mle]
+method     = "if2"
+chains     = 8
+particles  = 50
+iterations = 2
+cooling    = 0.9
+"#, out.display(), ir.display(), truth.display())).unwrap();
+    run_fit(&bin, &fit_toml);
+
+    let stage = out.join("fits").join("fit").join("synthetic")
+        .join("ds_01").join("fit_1").join("mle");
+    let starts_text = std::fs::read_to_string(stage.join("chain_starts.tsv"))
+        .expect("chain_starts.tsv must exist");
+    let starts: Vec<Vec<f64>> = starts_text.lines()
+        .filter(|l| !l.starts_with('#') && !l.starts_with("chain"))
+        .map(|l| l.split('\t').skip(1)  // skip chain id
+             .map(|s| s.parse::<f64>().unwrap()).collect())
+        .collect();
+    assert_eq!(starts.len(), 8, "need 8 chain rows");
+
+    // Assertion 1: chain_starts.tsv shows genuine spread, not 8 copies
+    // of the seeded start. Take the beta column (index 0).
+    let betas: Vec<f64> = starts.iter().map(|r| r[0]).collect();
+    let (min_b, max_b) = betas.iter()
+        .fold((f64::INFINITY, f64::NEG_INFINITY),
+              |(lo, hi), &x| (lo.min(x), hi.max(x)));
+    let range = max_b - min_b;
+    // Bounds span 5.0 - 0.01 = 4.99. 8 uniform draws over that range
+    // should easily span > 20% of the bounds range.
+    assert!(range > 1.0,
+        "beta starts must span > 1.0 of the 4.99-wide bounds; got range={} \
+         from values {:?}. If this fails, the v2 dispatch isn't building \
+         per-chain random starts.", range, betas);
+
+    // Assertion 2: IF2 actually used those starts — chain 1 and chain 2
+    // iter-0 rows in parameter_traces.tsv differ meaningfully, beyond
+    // what per-chain RNG noise on a shared base_params would produce.
+    // Use chain 1 vs chain 8 (widest expected spread at iter 0).
+    let read_iter_0_beta = |chain: usize| -> f64 {
+        let path = stage.join(format!("chain_{}", chain))
+            .join("parameter_traces.tsv");
+        let text = std::fs::read_to_string(&path).unwrap();
+        let first_data = text.lines()
+            .find(|l| !l.starts_with('#') && !l.starts_with("iteration"))
+            .unwrap();
+        // iteration\tloglik\tif2_perturbed_loglik\tbeta\tgamma
+        first_data.split('\t').nth(3).unwrap().parse().unwrap()
+    };
+    let iter0_c1 = read_iter_0_beta(1);
+    let iter0_c8 = read_iter_0_beta(8);
+    let iter0_spread = (iter0_c1 - iter0_c8).abs();
+    assert!(iter0_spread > 0.3,
+        "chain 1 and chain 8 iter-0 beta must differ meaningfully (> 0.3); \
+         got {:.4} vs {:.4} (spread {:.4}). If the spread is ~rw_sd ({:.3}), \
+         IF2 started both chains from the same base_params and only the \
+         per-chain RNG diverged them — the .initial-authoritative fix \
+         didn't land.",
+         iter0_c1, iter0_c8, iter0_spread, 0.03);
+}
+
 // ── seeding parity: --obs-only and [synthetic] must produce byte-identical
 //    data at the same nominal seed. Regression against the 2026-04-18
 //    SBC-bias discrepancy. ───────────────────────────────────────────────

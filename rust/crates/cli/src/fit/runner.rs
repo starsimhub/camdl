@@ -1007,6 +1007,42 @@ pub fn write_chain_outputs(
     Ok(())
 }
 
+/// Build per-chain random starts for an IF2 dispatch. Each chain gets
+/// its own draw over the declared bounds so Rhat across chains reflects
+/// genuine independence-of-starts, not just per-chain RNG noise on a
+/// shared initial point.
+///
+/// Mirrors the v1 scout policy: chain 0 keeps the seeded start (from
+/// `config.estimated_params[i].initial` — i.e. `[estimate].*.start` or
+/// `base_params[idx]`) so the first chain is reproducible given the
+/// fit config; chains 1..N draw uniformly from bounds (or jitter ±50 %
+/// of the seeded start when unbounded).
+///
+/// `seed` is the fit's top-level seed. Per-chain RNGs mix in the chain
+/// id so adding chains doesn't disturb existing chains' starts.
+pub fn build_random_chain_starts(
+    config: &FitRunConfig,
+    seed: u64,
+    n_chains: usize,
+) -> Vec<Vec<EstimatedParam>> {
+    (0..n_chains).map(|chain_id| {
+        let mut rng = StatefulRng::new(
+            seed ^ (chain_id as u64).wrapping_mul(0x9e3779b97f4a7c15));
+        config.estimated_params.iter().map(|spec| {
+            let initial = if chain_id == 0 {
+                // Chain 0 keeps the seeded start for reproducibility.
+                spec.initial
+            } else if spec.lower.is_finite() && spec.upper.is_finite() {
+                spec.lower + rng.uniform() * (spec.upper - spec.lower)
+            } else {
+                // Unbounded: jitter ±50 % from the seeded start.
+                spec.initial * (0.5 + rng.uniform())
+            };
+            EstimatedParam { initial, ..spec.clone() }
+        }).collect()
+    }).collect()
+}
+
 /// Write `chain_starts.tsv` at the stage root — one row per chain
 /// with the pre-filter starting values of every estimated parameter.
 ///

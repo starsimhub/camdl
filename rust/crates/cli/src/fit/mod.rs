@@ -655,7 +655,23 @@ pub fn cmd_fit_run_v2(args: &[String]) {
 
                 let collector = sim::inference::diagnostic::DiagnosticCollector::new(stage_name);
                 let t0 = std::time::Instant::now();
-                let chain_results = runner::run_chains_with_diagnostics(&run_config, &collector);
+                // When a stage has no `starts_from` predecessor and runs
+                // > 1 chain, give each chain its own random starting
+                // point from bounds. This matches v1 scout's default
+                // and is what makes Rhat across chains meaningful —
+                // chains starting from the same point only diverge via
+                // per-chain RNG, so their between-chain variance
+                // reflects sampling noise rather than
+                // independence-of-starts. When `starts_from` resolves
+                // to a prior stage, every chain correctly starts from
+                // that stage's MLE (the intent of the handoff).
+                let per_chain_params = if effective_starts.is_none() && *chains > 1 {
+                    Some(runner::build_random_chain_starts(&run_config, seed, *chains))
+                } else {
+                    None
+                };
+                let chain_results = runner::run_chains_with_per_chain_params(
+                    &run_config, per_chain_params.as_deref(), &collector);
                 let elapsed = t0.elapsed();
 
                 // Write outputs
@@ -665,13 +681,14 @@ pub fn cmd_fit_run_v2(args: &[String]) {
                     &run_config.estimated_params, &param_names,
                     &run_config.base_params, &run_config.compiled,
                 ).unwrap_or_else(|e| eprintln!("warning: {}", e));
-                // Pre-filter starts — every chain here starts from the
-                // same `config.estimated_params` (IF2 dispatch path uses
-                // run_chains_with_diagnostics, no per-chain override).
-                // Still written for symmetry with scout and so diagnostic
-                // tooling doesn't special-case stage type.
+                // Pre-filter starts — records whatever per-chain
+                // initial points IF2 actually received. With the
+                // per-chain random-start builder above, this file now
+                // shows genuine independence across chains when
+                // `starts_from` is None.
                 runner::write_chain_starts(
-                    &stage_dir.to_string_lossy(), None,
+                    &stage_dir.to_string_lossy(),
+                    per_chain_params.as_deref(),
                     &run_config.estimated_params, *chains,
                 ).unwrap_or_else(|e| eprintln!("warning: {}", e));
                 runner::write_diagnostics(&stage_dir.to_string_lossy(), &chain_results.results)

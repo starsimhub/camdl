@@ -334,8 +334,22 @@ pub fn run_if2_with_progress<P: ProcessModel<State = ParticleState>>(
     let n_tr = process.n_transitions();
     let n_obs = obs_model.n_observations();
 
-    // Mutable copy of params — updated each iteration with the filter mean
+    // Mutable copy of params — updated each iteration with the filter mean.
+    // Start from `base_params` for non-estimated slots, then overwrite each
+    // estimated slot with that `EstimatedParam`'s `.initial`. For
+    // single-start fits `.initial == base_params[idx]` so this is a no-op;
+    // for scout with per-chain random starts (or any caller that supplies
+    // divergent `.initial` values per chain) this is what actually makes
+    // IF2 start from the declared point. Before 2026-04-18 this was a bug
+    // — chains supposedly starting from 64 random points all started from
+    // the same `base_params` and only diverged via their per-chain RNG on
+    // the first perturbation. See docs/dev/incidents/2026-04-18-if2-ignored-per-chain-initial.md.
     let mut current_params = base_params.to_vec();
+    for spec in if2_params {
+        if spec.index < current_params.len() {
+            current_params[spec.index] = spec.initial;
+        }
+    }
 
     // Compute per-filtering-step cooling factor.
     // Matches pomp's cooling.fraction.50 semantics: the fraction is reached
