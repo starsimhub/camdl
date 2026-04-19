@@ -1926,6 +1926,25 @@ let expand_time_function_one ctx fname (env : (string * string) list) fkind farg
   in
   { Ir.name = fname; Ir.kind }
 
+(** Expand ODE equations from the DSL's `ode { X = expr }` blocks into
+    IR `ode_equation` records.
+
+    The DSL surface currently takes a bare compartment name (no
+    indices); each `ode_decl` maps 1:1 to an `Ir.ode_equation`. If the
+    parser is later extended with stratified ODEs, this needs a
+    cartesian-product loop like `expand_time_functions`. Reported as
+    C5 in the 2026-04-19 compiler review — previously
+    `Ir.ode_equations` was hardcoded to `[]`, so every `ode {}` block
+    was silently dropped and any `: real` compartment that depended on
+    its ODE stayed frozen at its init value. Post-expansion integrity
+    (`Validate.validate`, M1 in the same review) will error when a
+    `Real` compartment has no emitted equation. *)
+let expand_ode_equations ctx : Ir.ode_equation list =
+  List.map (fun (od : ode_decl) ->
+    let deriv = normalize_expr (resolve_expr ctx [] od.oderiv) in
+    { Ir.compartment = od.ocomp; Ir.derivative = deriv }
+  ) ctx.ode_decls
+
 let expand_time_functions ctx : Ir.time_function list =
   List.concat_map (fun (fd : func_decl) ->
     if fd.findices = [] then
@@ -2607,7 +2626,7 @@ let expand_detail ?(source_dir = "") (name : string) (decls : declaration list)
     Ir.origin             = ctx.origin;
     Ir.compartments       = expanded_comps;
     Ir.transitions        = expanded_trs;
-    Ir.ode_equations      = [];
+    Ir.ode_equations      = expand_ode_equations ctx;
     Ir.time_functions     = expand_time_functions ctx;
     Ir.tables             = expand_tables ctx;
     Ir.interventions      = expand_interventions ctx;

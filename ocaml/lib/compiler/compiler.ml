@@ -69,9 +69,94 @@ let compile_detail_result ?(name = "model") ?(filename = "<input>") (src : strin
 
 let no_dim_check = ref false
 
+(** Translate a `Validate.error` into an E5xx Diagnostic and attach
+    it to the given context. Codes are new (E500–E511) — the existing
+    E2xx range covers parser/expansion-phase duplicates and unknowns,
+    but `Validate.validate` runs post-expansion and can catch cases
+    the parser/expander miss (e.g. unknown reference in a let-binding
+    that expands into a rate, or a `Real` compartment with no ODE).
+    A separate code range makes that distinction visible in output. *)
+let diagnose_validate_error ctx (err : Validate.error) : unit =
+  let open Validate in
+  let (code, message, hint) = match err with
+    | DuplicateCompartment s ->
+      "E500",
+      Printf.sprintf "duplicate compartment after expansion: '%s'" s,
+      Some "stratification produced two compartments with the same name"
+    | DuplicateTransition s ->
+      "E501",
+      Printf.sprintf "duplicate transition after expansion: '%s'" s,
+      Some "stratification produced two transitions with the same name"
+    | DuplicateParameter s ->
+      "E502",
+      Printf.sprintf "duplicate parameter: '%s'" s, None
+    | UnknownCompartment s ->
+      "E503",
+      Printf.sprintf "unknown compartment referenced: '%s'" s,
+      Some "check stratification / spelling against the compartments block"
+    | UnknownParameter s ->
+      "E504",
+      Printf.sprintf "unknown parameter referenced: '%s'" s,
+      Some "check the parameters block for a matching declaration"
+    | UnknownTable s ->
+      "E505",
+      Printf.sprintf "unknown table referenced: '%s'" s, None
+    | UnknownTimeFunction s ->
+      "E506",
+      Printf.sprintf "unknown time_function referenced: '%s'" s, None
+    | UnknownTransition s ->
+      "E507",
+      Printf.sprintf "unknown transition referenced in observation: '%s'" s, None
+    | RealCompartmentInStoichiometry (tr, c) ->
+      "E508",
+      Printf.sprintf "real-valued compartment '%s' cannot appear in \
+                      stoichiometry of transition '%s'" c tr,
+      Some "real compartments have continuous dynamics (ODE); mixing them \
+            into transition stoichiometry is ill-defined"
+    | MissingOdeEquation s ->
+      "E509",
+      Printf.sprintf "real-valued compartment '%s' has no ODE equation" s,
+      Some "add an `ode { ... }` block with dX/dt for this compartment"
+    | OdeForNonRealComp s ->
+      "E510",
+      Printf.sprintf "ODE equation for '%s', which is not a real-valued \
+                      compartment" s,
+      Some "only compartments declared `: real` can have ODE equations"
+    | ZeroDelta (tr, c) ->
+      "E511",
+      Printf.sprintf "transition '%s' has zero delta for compartment '%s'" tr c,
+      Some "a zero-delta stoichiometry entry has no effect; remove it"
+  in
+  Diagnostics.error ctx.Expander.diags
+    ~code ~loc:Diagnostics.no_loc ~message ?hint ()
+
+(** Run post-expansion structural validation.
+
+    Wired in per M1 of the 2026-04-19 compiler review — previously
+    `Validate.validate` existed in `lib/ir/validate.ml` but was never
+    called from the compile pipeline, so its unknown-reference /
+    missing-ODE / zero-delta checks ran nowhere. Without this pass
+    the `ode_equations = []` hardcoding bug (C5) would have been
+    invisible; now C5 is fixed AND the integrity net that would have
+    caught it in the first place runs.
+
+    Order: post-expansion, pre-dimcheck. Dimcheck ICEs on unknown
+    params, so running Validate first gives the user a clean
+    "unknown parameter 'foo'" error instead of a dimcheck trace. *)
+let run_validate (d : compile_detail) : bool =
+  match Validate.validate d.model with
+  | Ok () -> false
+  | Error errs ->
+    List.iter (diagnose_validate_error d.ctx) errs;
+    true
+
 let compile ?(name = "model") ?(filename = "<input>") (src : string) : (Ir.model, string) result =
   match compile_detail_result ~name ~filename src with
   | Ok d ->
+    (* Post-expansion structural validation (M1 / C5 in the
+       2026-04-19 compiler review). *)
+    if run_validate d then
+      Diagnostics.report_and_exit d.ctx.diags d.source;
     (* Dimensional analysis pass — runs before autodiff.
        Dimension errors block compilation (like type errors).
        Info diagnostics (I300: undetermined dimension) are non-blocking.

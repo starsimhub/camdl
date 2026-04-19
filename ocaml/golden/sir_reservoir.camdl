@@ -1,0 +1,59 @@
+# SIR with an environmental reservoir compartment (real-valued, ODE).
+#
+# Exercises the `ode { … }` block — every other golden uses only
+# discrete transitions. Without this fixture the expander's
+# ode_equations path had no regression coverage (C5 / C9 in the
+# 2026-04-19 compiler review).
+#
+# Pathogen shed by infectious individuals accumulates in W and
+# decays exponentially. S, I, R are integer compartments with
+# discrete transitions; W is real-valued with continuous ODE
+# dynamics.
+time_unit = 'days
+
+compartments { S, I, R, W : real }
+
+let N = S + I + R
+
+parameters {
+  beta    : rate     in [0.001, 2.0]
+  gamma   : rate     in [0.001, 1.0]
+  xi      : rate     in [0.001, 10.0]
+  delta   : rate     in [0.001, 5.0]
+  N0      : count    in [100, 100000]
+  I0      : count    in [1, 1000]
+}
+
+transitions {
+  infection : S --> I @ beta * S * (I / N)
+  recovery  : I --> R @ gamma * I
+}
+
+ode {
+  W = xi * I - delta * W
+}
+
+init {
+  S = N0 - I0
+  I = I0
+  W = 0
+}
+
+simulate {
+  from = 0 'days
+  to   = 60 'days
+}
+
+scenarios {
+  baseline {
+    label = "SIWR baseline"
+    set = {
+      beta  = 0.3
+      gamma = 0.1
+      xi    = 1.0
+      delta = 0.5
+      N0    = 1000
+      I0    = 10
+    }
+  }
+}
