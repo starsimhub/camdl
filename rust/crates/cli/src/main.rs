@@ -614,7 +614,7 @@ fn run_simulate(args: &[String]) {
     // Compute hashes, resolve run path, check for cache hit. If the cached
     // trajectory already exists, we short-circuit: read it, emit to user's
     // destination, log 'cache hit' to stderr, and return.
-    let cas_ctx: Option<CasCtx> = if cas_enabled {
+    let mut cas_ctx: Option<CasCtx> = if cas_enabled {
         match prepare_cas_ctx(&base_sim_run, scenario_list[0].clone(), seeds[0], &cas_root) {
             Ok(ctx) => Some(ctx),
             Err(e) => {
@@ -625,6 +625,7 @@ fn run_simulate(args: &[String]) {
     } else {
         None
     };
+    let cas_sim_t0 = std::time::Instant::now();
 
     if let Some(ref ctx) = cas_ctx {
         if cas::has_cached_traj(&ctx.run_dir) {
@@ -886,8 +887,9 @@ fn run_simulate(args: &[String]) {
     }
 
     // ── CAS write (single-run --cas on cache miss) ─────────────────────────
-    if let (Some(ctx), Some(buf)) = (cas_ctx.as_ref(), cas_buffer.as_ref()) {
+    if let (Some(ctx), Some(buf)) = (cas_ctx.as_mut(), cas_buffer.as_ref()) {
         let bytes = buf.bytes();
+        ctx.run.wall_time_seconds = cas_sim_t0.elapsed().as_secs_f64();
         // Mirror to user's destination
         if !suppress_trajectory {
             match &output_path {

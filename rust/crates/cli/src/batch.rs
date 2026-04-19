@@ -605,6 +605,7 @@ pub fn cmd_batch_run(args: &[String]) {
                 ..Default::default()
             };
 
+            let run_t0 = std::time::Instant::now();
             match run_simulation(&sim_run) {
                 Err(e) => {
                     let n = counter.fetch_add(1, Ordering::Relaxed) + 1;
@@ -627,7 +628,7 @@ pub fn cmd_batch_run(args: &[String]) {
                         version: version::VERSION_SHORT.to_string(),
                         created_at: cas::iso8601_utc(std::time::SystemTime::now()),
                         argv: std::env::args().collect(),
-                        wall_time_seconds: 0.0,
+                        wall_time_seconds: run_t0.elapsed().as_secs_f64(),
                         kind: crate::run_meta::RunKind::Simulate(crate::run_meta::SimulateMeta {
                             model: ir_path_resolved.clone(),
                             model_hash: mhash.clone(),

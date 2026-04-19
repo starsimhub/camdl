@@ -14,18 +14,18 @@ order; each is a self-contained commit.
       writing a stage whose `effective_starts` references another
       stage, resolve the upstream stage's `run.json` hash and fill it.
 
-- [ ] **B2 — `parent_fit_hash` silent default on error**
+- [x] **B2 — `parent_fit_hash` silent default on error**
       `fit/mod.rs:1095` uses `.unwrap_or_default()`. If the top-level
       `Run::Fit` write succeeded, the stage-level recompute should too
       — pass the hash down from the top-level block instead of
       re-reading all the inputs per stage. Also drops O(stages × I/O).
 
-- [ ] **B3 — `Run::Fit.wall_time_seconds` always zero**
+- [x] **B3 — `Run::Fit.wall_time_seconds` always zero**
       Top-level fit `run.json` is written *before* stages run. Field
       advertises "Always set" but stays at `0.0`. Fix: rewrite the
       top-level `run.json` at end-of-fit with accumulated wall time.
 
-- [ ] **B4 — simulate `wall_time_seconds: 0.0`**
+- [x] **B4 — simulate `wall_time_seconds: 0.0`**
       `main.rs:1074` (`prepare_cas_ctx`) and `batch.rs:617` both
       construct `Run::Simulate` with zero wall time and never update.
       Fix: measure around `run_simulation`, patch `run.wall_time_seconds`
@@ -59,7 +59,7 @@ order; each is a self-contained commit.
       Sim variant carries `abs_path` + `traj_bytes`, fit doesn't;
       otherwise identical. Compress to a generic helper.
 
-- [ ] **S5 — 50-line inline `Run::Fit` construction in `fit/mod.rs`**
+- [x] **S5 — 50-line inline `Run::Fit` construction in `fit/mod.rs`**
       Extract to `run_meta::Run::fit_from_config(config, fit_path)`
       so the write site is one line.
 

@@ -423,60 +423,23 @@ pub fn cmd_fit_run_v2(args: &[String]) {
         std::process::exit(1);
     });
 
-    // ── Write top-level run.json at the fit root ──────────────────────
+    // ── Build + write top-level run.json at the fit root ──────────────
     //
     // Per-stage run.json records live inside each stage dir; this one
     // describes the fit as a whole so `camdl list` / `camdl show` can
-    // surface fits alongside simulate runs. `Run.hash` here is the
-    // seed-independent content hash from `fit_content_hash` — the same
-    // hash used in the directory suffix.
-    {
-        let fit_hash = config.fit_content_hash(&fit_path).unwrap_or_else(|e| {
-            eprintln!("error: {}", e);
-            std::process::exit(1);
-        });
-        let model_ir_json = std::fs::read_to_string(&config.model.camdl)
-            .unwrap_or_default();
-        let model_hash = if model_ir_json.is_empty() {
-            String::new()
-        } else {
-            crate::hashing::model_hash(&model_ir_json)
-        };
-        let fit_toml_bytes = std::fs::read(&fit_path).unwrap_or_default();
-        let fit_toml_hash = crate::hashing::sha256_hex(&fit_toml_bytes);
-        let data_hashes: std::collections::HashMap<String, String> = config
-            .data.as_ref()
-            .map(|d| d.observations.iter()
-                .filter_map(|(name, path)| {
-                    crate::hashing::file_hash(path).map(|h| (name.clone(), h))
-                })
-                .collect())
-            .unwrap_or_default();
-        let estimated: Vec<String> = config.estimate.keys().cloned().collect();
-        let fixed: std::collections::HashMap<String, f64> = config.fixed
-            .resolve().unwrap_or_default().into_iter().collect();
-        let stages_declared: Vec<String> = config.stages.keys().cloned().collect();
-        let run_fit = crate::run_meta::Run {
-            hash: fit_hash,
-            version: crate::version::VERSION_SHORT.to_string(),
-            created_at: crate::cas::iso8601_utc(std::time::SystemTime::now()),
-            argv: std::env::args().collect(),
-            wall_time_seconds: 0.0,
-            kind: crate::run_meta::RunKind::Fit(crate::run_meta::FitMeta {
-                model: config.model.camdl.clone(),
-                model_hash,
-                fit_toml_path: fit_path.clone(),
-                fit_toml_hash,
-                data_hashes,
-                estimated,
-                fixed,
-                stages_declared,
-                ic_free: config.ic_free.unwrap_or(false),
-            }),
-        };
-        if let Err(e) = run_fit.write(&fit_dir) {
-            eprintln!("warning: cannot write {}/run.json: {}", fit_dir.display(), e);
-        }
+    // surface fits alongside simulate runs. `Run.hash` is the seed-
+    // independent content hash (same suffix used in the directory name).
+    //
+    // We write once here (so the fit is listable even if interrupted)
+    // and rewrite once at end-of-fit to capture `wall_time_seconds`.
+    // The parent fit hash is also reused by every stage to populate
+    // `FitStageMeta.fit_hash` — computing it once here avoids the O(stages
+    // × full-I/O rehash) pattern.
+    let fit_start = std::time::Instant::now();
+    let mut run_fit = build_fit_run(&config, &fit_path);
+    let parent_fit_hash = run_fit.hash.clone();
+    if let Err(e) = run_fit.write(&fit_dir) {
+        eprintln!("warning: cannot write {}/run.json: {}", fit_dir.display(), e);
     }
 
     eprintln!("fit: {} ({} stage{})",
@@ -1103,7 +1066,6 @@ pub fn cmd_fit_run_v2(args: &[String]) {
             Stage::PMMH { chains, .. } => *chains,
             Stage::PFilter { .. }      => 1,
         };
-        let parent_fit_hash = sweep_config.fit_content_hash(&fit_path).unwrap_or_default();
         let stage_run = crate::run_meta::Run {
             hash: config_hash.clone(),
             version: crate::version::VERSION_SHORT.to_string(),
@@ -1111,7 +1073,7 @@ pub fn cmd_fit_run_v2(args: &[String]) {
             argv: std::env::args().collect(),
             wall_time_seconds: stage_elapsed.as_secs_f64(),
             kind: crate::run_meta::RunKind::FitStage(crate::run_meta::FitStageMeta {
-                fit_hash: parent_fit_hash,
+                fit_hash: parent_fit_hash.clone(),
                 stage: stage_name.to_string(),
                 method: stage.method_name().to_string(),
                 stage_hash: config_hash.clone(),
@@ -1181,9 +1143,72 @@ pub fn cmd_fit_run_v2(args: &[String]) {
             }
         }
     }
+
+    // ── Final rewrite: top-level run.json with accumulated wall time ──
+    //
+    // The top-level Run::Fit was written at fit-start with wall_time=0
+    // so the fit is listable even if interrupted. Now that every stage
+    // has completed (or aggregate post-processing has finished), patch
+    // the wall-clock so `camdl list` / `camdl show` report honest
+    // totals.
+    run_fit.wall_time_seconds = fit_start.elapsed().as_secs_f64();
+    if let Err(e) = run_fit.write(&fit_dir) {
+        eprintln!("warning: cannot rewrite {}/run.json: {}", fit_dir.display(), e);
+    }
 }
 
 // ─── camdl fit diff ─────────────────────────────────────────────────────────
+
+/// Build the top-level `Run::Fit` record for a fit.toml. Fields that
+/// require I/O (model IR, data files, fit.toml bytes) are read here
+/// and hashed; `wall_time_seconds` is initialised to 0 and patched at
+/// end-of-fit by the caller. Silent fallbacks (empty strings / empty
+/// maps) cover the read-error case so a partially-written fit still
+/// produces something `camdl list` can display.
+fn build_fit_run(config: &config_v2::FitConfigV2, fit_path: &str) -> crate::run_meta::Run {
+    let fit_hash = config.fit_content_hash(fit_path).unwrap_or_else(|e| {
+        eprintln!("error: {}", e);
+        std::process::exit(1);
+    });
+    let model_ir_json = std::fs::read_to_string(&config.model.camdl).unwrap_or_default();
+    let model_hash = if model_ir_json.is_empty() {
+        String::new()
+    } else {
+        crate::hashing::model_hash(&model_ir_json)
+    };
+    let fit_toml_bytes = std::fs::read(fit_path).unwrap_or_default();
+    let fit_toml_hash = crate::hashing::sha256_hex(&fit_toml_bytes);
+    let data_hashes: std::collections::HashMap<String, String> = config
+        .data.as_ref()
+        .map(|d| d.observations.iter()
+            .filter_map(|(name, path)| {
+                crate::hashing::file_hash(path).map(|h| (name.clone(), h))
+            })
+            .collect())
+        .unwrap_or_default();
+    let estimated: Vec<String> = config.estimate.keys().cloned().collect();
+    let fixed: std::collections::HashMap<String, f64> = config.fixed
+        .resolve().unwrap_or_default().into_iter().collect();
+    let stages_declared: Vec<String> = config.stages.keys().cloned().collect();
+    crate::run_meta::Run {
+        hash: fit_hash,
+        version: crate::version::VERSION_SHORT.to_string(),
+        created_at: crate::cas::iso8601_utc(std::time::SystemTime::now()),
+        argv: std::env::args().collect(),
+        wall_time_seconds: 0.0,
+        kind: crate::run_meta::RunKind::Fit(crate::run_meta::FitMeta {
+            model: config.model.camdl.clone(),
+            model_hash,
+            fit_toml_path: fit_path.to_string(),
+            fit_toml_hash,
+            data_hashes,
+            estimated,
+            fixed,
+            stages_declared,
+            ic_free: config.ic_free.unwrap_or(false),
+        }),
+    }
+}
 
 fn format_prior(p: &Option<config_v2::PriorSpec>) -> String {
     match p {
