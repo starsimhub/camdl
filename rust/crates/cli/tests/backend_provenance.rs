@@ -195,6 +195,156 @@ n_particles = 500
         "run.json must record from_fit_hash; got: {}", body);
 }
 
+// ── Behavior tests: read run.json and assert the *resolved* backend ──
+//
+// The tests above (auto-match, warn, silent) check the stderr text of
+// each code path, which is useful as a UX regression guard but not
+// sufficient: a bug where the info log says "auto-matched to
+// chain_binomial" but the code silently proceeds with Gillespie would
+// pass those tests. The tests below fix that by running `simulate
+// --cas`, reading the resulting run.json, and asserting the
+// `kind.backend` (+ `kind.dt`) fields match what we expect under the
+// three-way matching rule.
+//
+// Two fixtures (one chain_binomial, one gillespie in provenance) so a
+// bug hard-coding chain_binomial in the auto-match path is caught —
+// checking only one backend direction is insufficient.
+
+/// Helper: find the single run.json under `output/sims/**` and parse
+/// its `kind` table.
+fn read_sim_kind(output_root: &Path) -> serde_json::Value {
+    let run_jsons: Vec<_> = walkdir(&output_root.join("sims")).into_iter()
+        .filter(|p| p.file_name().map(|s| s == "run.json").unwrap_or(false))
+        .collect();
+    assert_eq!(run_jsons.len(), 1,
+        "expected exactly one run.json under {}, got {:?}",
+        output_root.display(), run_jsons);
+    let body = std::fs::read_to_string(&run_jsons[0]).unwrap();
+    let v: serde_json::Value = serde_json::from_str(&body).unwrap();
+    v["kind"].clone()
+}
+
+/// Run `simulate --cas --params <mle> [extra args...]`, return the
+/// output root so the caller can inspect run.json.
+fn run_simulate_cas(
+    bin: &Path, tmp: &Path, mle: &Path, extra: &[&str],
+) -> PathBuf {
+    let output = tmp.join("out");
+    let mut args: Vec<String> = vec![
+        "simulate".into(), golden_pure_death().to_string_lossy().to_string(),
+        "--params".into(), mle.to_string_lossy().to_string(),
+        "--seed".into(), "1".into(), "--cas".into(),
+        "--output-dir".into(), output.to_string_lossy().to_string(),
+        "-o".into(), tmp.join("t.tsv").to_string_lossy().to_string(),
+    ];
+    for a in extra { args.push(a.to_string()); }
+    let status = Command::new(bin).args(&args)
+        .status().expect("spawn");
+    assert!(status.success(), "simulate --cas should succeed");
+    output
+}
+
+#[test]
+fn run_json_records_chain_binomial_when_provenance_says_chain_binomial() {
+    // Fixture A: provenance says chain_binomial. No --backend passed.
+    // Expected: run.json records backend=chain_binomial (auto-match
+    // actually took effect, not just the log text).
+    let Some(bin) = skip_if_missing() else { return; };
+    let tmp = tempfile::tempdir().unwrap();
+    let mle = tmp.path().join("mle_cbin.toml");
+    write_fake_mle(&mle, "chain_binomial", 1.0);
+    let output = run_simulate_cas(&bin, tmp.path(), &mle, &[]);
+    let kind = read_sim_kind(&output);
+    assert_eq!(kind["backend"], "chain_binomial",
+        "run.json.backend must match provenance; got: {}", kind);
+    assert_eq!(kind["dt"], 1.0);
+}
+
+#[test]
+fn run_json_records_gillespie_when_provenance_says_gillespie() {
+    // Fixture B: provenance says gillespie (tests the opposite
+    // direction — guards against a bug where we hardcoded
+    // chain_binomial in the auto-match path).
+    let Some(bin) = skip_if_missing() else { return; };
+    let tmp = tempfile::tempdir().unwrap();
+    let mle = tmp.path().join("mle_gill.toml");
+    write_fake_mle(&mle, "gillespie", 1.0);
+    let output = run_simulate_cas(&bin, tmp.path(), &mle, &[]);
+    let kind = read_sim_kind(&output);
+    assert_eq!(kind["backend"], "gillespie",
+        "run.json.backend must match provenance; got: {}", kind);
+}
+
+#[test]
+fn run_json_records_auto_matched_dt_not_just_backend() {
+    // Provenance has dt=0.5 (non-default). Regression guard: a bug
+    // where we auto-match backend but NOT dt would make run.json
+    // record dt=1.0 (CLI default) despite the fit having used 0.5.
+    // Subtly wrong behavior, silent, hard to spot without this check.
+    let Some(bin) = skip_if_missing() else { return; };
+    let tmp = tempfile::tempdir().unwrap();
+    let mle = tmp.path().join("mle_dt05.toml");
+    write_fake_mle(&mle, "chain_binomial", 0.5);
+    let output = run_simulate_cas(&bin, tmp.path(), &mle, &[]);
+    let kind = read_sim_kind(&output);
+    assert_eq!(kind["dt"], 0.5,
+        "run.json.dt must auto-match provenance dt (0.5), not default \
+         to 1.0. Got kind: {}", kind);
+}
+
+#[test]
+fn explicit_backend_overrides_provenance_in_run_json() {
+    // Provenance says chain_binomial; user explicitly passes
+    // --backend gillespie. The user's choice must win (the warning
+    // fires, but the run proceeds with gillespie). Regression
+    // guard: a bug where the auto-match path always overrides
+    // --backend would silently ignore the user's explicit choice.
+    let Some(bin) = skip_if_missing() else { return; };
+    let tmp = tempfile::tempdir().unwrap();
+    let mle = tmp.path().join("mle.toml");
+    write_fake_mle(&mle, "chain_binomial", 1.0);
+    let output = run_simulate_cas(&bin, tmp.path(), &mle,
+        &["--backend", "gillespie"]);
+    let kind = read_sim_kind(&output);
+    assert_eq!(kind["backend"], "gillespie",
+        "explicit --backend must override provenance; got: {}", kind);
+}
+
+#[test]
+fn standalone_params_preserve_gillespie_default_in_run_json() {
+    // Standalone params file (no [provenance] block) + no --backend:
+    // run.json must record Gillespie (the CLI default), not some
+    // leaked value from a prior run's state. Regression guard on the
+    // "unchanged for non-fit params" claim in the proposal.
+    let Some(bin) = skip_if_missing() else { return; };
+    let tmp = tempfile::tempdir().unwrap();
+    let standalone = tmp.path().join("p.toml");
+    std::fs::write(&standalone, "mu = 0.05\n").unwrap();
+    let output = run_simulate_cas(&bin, tmp.path(), &standalone, &[]);
+    let kind = read_sim_kind(&output);
+    assert_eq!(kind["backend"], "gillespie",
+        "standalone params must preserve Gillespie default; got: {}", kind);
+}
+
+#[test]
+fn explicit_dt_overrides_provenance_in_run_json() {
+    // Provenance has dt=0.5; user explicitly passes --dt 0.25.
+    // User's choice wins. Companion to the backend-override test —
+    // dt and backend are paired fields and the override semantics
+    // should be symmetric.
+    let Some(bin) = skip_if_missing() else { return; };
+    let tmp = tempfile::tempdir().unwrap();
+    let mle = tmp.path().join("mle.toml");
+    write_fake_mle(&mle, "chain_binomial", 0.5);
+    let output = run_simulate_cas(&bin, tmp.path(), &mle,
+        &["--dt", "0.25"]);
+    let kind = read_sim_kind(&output);
+    assert_eq!(kind["dt"], 0.25,
+        "explicit --dt must override provenance dt; got: {}", kind);
+    // And backend still auto-matches (we didn't pass --backend).
+    assert_eq!(kind["backend"], "chain_binomial");
+}
+
 fn walkdir(root: &Path) -> Vec<PathBuf> {
     let mut out = Vec::new();
     let mut stack = vec![root.to_path_buf()];
