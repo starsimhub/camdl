@@ -144,22 +144,33 @@ order; each is a self-contained commit.
 
 ## Documentation drift
 
-- [ ] **D1 — `docs/camdl-run-spec.md:217, 234`** — still show
-      `output/fits/{fit_name}/`; update to `output/fits/<stem>-<hash[:8]>/`.
+- [x] **D1 — `docs/camdl-run-spec.md:217, 234`** — updated to show
+      `output/fits/<stem>-<fit_hash[:8]>/…/fit_<seed>/…`; includes
+      top-level run.json + per-stage run.json comments.
 
-- [ ] **D2 — `rust/crates/cli/src/main.rs:168, 171`** — help text
-      shows `results/fits/01_all_free`; update to new tree.
+- [x] **D2 — `rust/crates/cli/src/main.rs:168, 171`** — help text
+      now references `output/fits/01-<hash>/real/fit_1/mle` and
+      `output/fits/01-<hash>`.
 
-- [ ] **D3 — `rust/crates/cli/src/serve.rs:14`** — usage comment says
-      `GET /runs/…`; update to `/sims/` and `/fits/`.
+- [x] **D3 — `rust/crates/cli/src/serve.rs:14`** — usage comment
+      now lists `GET /sims/<stem>-<sim8>/…/seed_N/`,
+      `GET /fits/<stem>-<fit8>/`, and `GET /manifest.json`.
 
-- [ ] **D4 — `rust/crates/cli/src/fit/config_v2.rs:1069, 1578`** —
-      test TOML fixtures embed `results/fits/…` strings. Update to new
-      convention so grep for `results/fits` returns zero hits.
+- [x] **D4 — `rust/crates/cli/src/fit/config_v2.rs:1069, 1578`** —
+      test fixtures rewritten: `results/fits/` → `output/fits/`.
+      Grep for `results/fits` under `rust/crates/cli/src/` is now
+      empty.
 
-- [ ] **D5 — Sweep `docs/` for any remaining `output/runs/`** that
-      escaped the earlier `sed` pass. (We did `output/runs/` → `output/sims/`
-      but there may be stragglers in vignettes / book.)
+- [~] **D5 — Sweep `docs/` for any remaining `output/runs/`** (partial)
+      Main specs clean (`docs/camdl-run-spec.md`,
+      `docs/camdl-inference-spec.md`). Historical proposals in
+      `docs/dev/proposals/` intentionally still reference the old
+      shape as design history.
+      **Deferred:** `camdl-book/guide/fitting_*.qmd` has many
+      hard-coded `results/fits/fit_sir/…` paths in Python snippets.
+      Updating needs a decision on how users should address fit dirs
+      now — glob on stem prefix, or explicit env var. Separate
+      piece of work (see **L5** below).
 
 ## Lower-priority / defer decisions
 
@@ -174,8 +185,21 @@ order; each is a self-contained commit.
       separate sections instead. Filter is ergonomic when a user
       has hundreds of each. Easy add.
 
-- [ ] **L3 — `camdl show` / `cat` for fit dirs**
-      Related to T6. Decide interface, add.
+- [ ] **L3 — `camdl show` / `cat` for fit dirs** (partial)
+      `camdl show <fit-dir>` works via path. Short-hash prefix
+      resolution for fits and `camdl cat <fit>` still unsupported.
+
+- [ ] **L4 — `manifest.json` location**
+      Batch writes it to `output/manifest.json`; proposal said
+      `output/sims/manifest.json`. Trivial move but changes the
+      browse URL in `camdl serve` and in book snippets — bundle
+      with L5.
+
+- [ ] **L5 — `camdl-book` fit paths**
+      Book snippets hard-code `results/fits/fit_sir/refine/…`. These
+      no longer work after the rename + hash suffix. Needs a pattern
+      for users to locate the right fit dir (glob on stem? env var?).
+      Significant doc work — separate PR.
 
 ---
 

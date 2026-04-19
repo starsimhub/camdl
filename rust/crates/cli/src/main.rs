@@ -165,10 +165,10 @@ fn fit_help() -> ! {
     eprintln!("  camdl fit run fits/01.toml --sweep \"rho=0.5,0.1,0.02\"");
     eprintln!();
     eprintln!("  {}", d("# Seed from a previous fit's results"));
-    eprintln!("  camdl fit run fits/02.toml --starts-from results/fits/01/mle");
+    eprintln!("  camdl fit run fits/02.toml --starts-from output/fits/01-<hash>/real/fit_1/mle");
     eprintln!();
     eprintln!("  {}", d("# Check what's done"));
-    eprintln!("  camdl fit status results/fits/01_all_free");
+    eprintln!("  camdl fit status output/fits/01-<hash>");
     eprintln!();
     eprintln!("  {}", d("# See what changed between two configs"));
     eprintln!("  camdl fit diff fits/01.toml fits/02.toml");

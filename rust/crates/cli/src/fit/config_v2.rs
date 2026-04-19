@@ -1064,7 +1064,7 @@ chains = 4
 particles = 2000
 iterations = 60
 cooling = 0.95
-starts_from = "results/fits/01_all_free/mle"
+starts_from = "output/fits/01_all_free/mle"
 
 [stages.posterior]
 method = "pgas"
@@ -1086,7 +1086,7 @@ starts_from = "mle"
 
         // mle starts from external directory
         match config.stages["mle"].starts_from() {
-            StartsFrom::Directory(p) => assert_eq!(p, Path::new("results/fits/01_all_free/mle")),
+            StartsFrom::Directory(p) => assert_eq!(p, Path::new("output/fits/01_all_free/mle")),
             other => panic!("expected Directory, got {:?}", other),
         }
 
@@ -1573,11 +1573,11 @@ chains = 4
 particles = 1000
 iterations = 50
 cooling = 0.70
-starts_from = "results/fits/01/mle"
+starts_from = "output/fits/01/mle"
         "#).unwrap();
 
         match config.stages["mle"].starts_from() {
-            StartsFrom::Directory(p) => assert_eq!(p, Path::new("results/fits/01/mle")),
+            StartsFrom::Directory(p) => assert_eq!(p, Path::new("output/fits/01/mle")),
             other => panic!("expected Directory, got {:?}", other),
         }
     }

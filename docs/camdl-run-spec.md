@@ -213,32 +213,42 @@ manifest or summary tools.
 
 ### 2.2 Fit Result Layout
 
+Fit directories are content-addressable: the basename stem is followed
+by an 8-char hash of the fit.toml + model IR + data files. Running two
+fits with the same filename but different content produces two distinct
+directories — the hash is the key, the stem is a human-readable label.
+
 ```
-output/fits/{fit_name}/
-  {stage_name}/
-    provenance.json        # inputs, hashes, timing, lineage
-    mle_params.toml        # (optimization stages) best parameters
-    traces.tsv             # (optimization stages) per-iteration traces
-    draws.tsv              # (sampling stages) posterior draws, complete M
-    diagnostics.json       # (sampling stages) ESS, R-hat, acceptance
-    logliks.tsv            # (pfilter stages) per-replicate logliks
-    chain_{n}/             # per-chain output subdirectory
+output/fits/{fit_toml_stem}-{fit_hash[:8]}/
+  run.json                 # top-level Run::Fit record
+  real/                    # (or synthetic/ for [synthetic] fits)
+    fit_{seed}/
+      {stage_name}/
+        run.json           # per-stage Run::FitStage record
+        mle_params.toml    # (optimization stages) best parameters
+        traces.tsv         # (optimization stages) per-iteration traces
+        draws.tsv          # (sampling stages) posterior draws, complete M
+        diagnostics.json   # (sampling stages) ESS, R-hat, acceptance
+        logliks.tsv        # (pfilter stages) per-replicate logliks
+        chain_{n}/         # per-chain output subdirectory
 ```
 
 ### 2.3 Sweep Subdirectories
 
 When a fit is swept over a fixed parameter, each sweep point gets a
-subdirectory under the fit name:
+subdirectory under the fit directory:
 
 ```
-output/fits/03_rho_sweep/
-  rho_0.500/
-    mle/...
-    posterior/...
-  rho_0.100/
-    mle/...
-  rho_0.020/
-    mle/...
+output/fits/03_rho_sweep-{fit_hash[:8]}/
+  real/
+    fit_{seed}/
+      rho_0.500/
+        mle/...
+        posterior/...
+      rho_0.100/
+        mle/...
+      rho_0.020/
+        mle/...
 ```
 
 For multi-parameter sweeps, directory names concatenate with double underscores:
