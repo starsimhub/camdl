@@ -291,7 +291,7 @@ Every fit lives under a data-source subdirectory. No single-fit
 exception — the seed is always the leaf:
 
 ```
-results/fits/<name>/
+output/fits/<name>/
   real/                       or    synthetic/
     fit_101/                            ds_01/
       scout/ refine/ …                    fit_101/

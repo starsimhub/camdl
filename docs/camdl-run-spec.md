@@ -214,7 +214,7 @@ manifest or summary tools.
 ### 2.2 Fit Result Layout
 
 ```
-results/fits/{fit_name}/
+output/fits/{fit_name}/
   {stage_name}/
     provenance.json        # inputs, hashes, timing, lineage
     mle_params.toml        # (optimization stages) best parameters
@@ -231,7 +231,7 @@ When a fit is swept over a fixed parameter, each sweep point gets a
 subdirectory under the fit name:
 
 ```
-results/fits/03_rho_sweep/
+output/fits/03_rho_sweep/
   rho_0.500/
     mle/...
     posterior/...
@@ -683,12 +683,12 @@ camdl simulate model.camdl --params p.toml --scenario with_sia --param beta=0.5 
 ```bash
 # Cache output; repeated identical invocations are instant
 camdl simulate model.camdl --params p.toml --seed 42 --cas
-# stderr: cached: output/runs/<sim_hash>/<scenario>-<scen_hash>/seed_42/
+# stderr: cached: output/sims/<sim_hash>/<scenario>-<scen_hash>/seed_42/
 # stdout: trajectory TSV as usual
 
 # Run again: cache hit, no simulation
 camdl simulate model.camdl --params p.toml --seed 42 --cas
-# stderr: cache hit: output/runs/<sim_hash>/<scenario>-<scen_hash>/seed_42/
+# stderr: cache hit: output/sims/<sim_hash>/<scenario>-<scen_hash>/seed_42/
 # stdout: same trajectory, read from cache
 
 # Browse cached runs
@@ -702,7 +702,7 @@ seed, one scenario, no `--draws` / `--replicates`. For sweeps use
 `camdl simulate batch` (§5), which has had content-addressable output
 since v0.2.
 
-**Layout.** Same as batch — `output/runs/{sim_hash[:8]}/{scenario_slug}-{scen_hash[:8]}/seed_{n}/traj.tsv`.
+**Layout.** Same as batch — `output/sims/{sim_hash[:8]}/{scenario_slug}-{scen_hash[:8]}/seed_{n}/traj.tsv`.
 See §2.4.
 
 **Hash composition.** `sim_hash` keys on model IR + base params + backend
@@ -730,19 +730,19 @@ camdl list --format json       # scripts / external tooling
 
 # Full metadata for one run (resolves short-hash prefix git-style)
 camdl show abc1234
-camdl show ./output/runs/abc12345/baseline-def45/seed_42
+camdl show ./output/sims/abc12345/baseline-def45/seed_42
 
 # Emit trajectory or a named observation stream
 camdl cat abc1234
 camdl cat abc1234 --obs cases
 ```
 
-`camdl list` walks `./output/runs/` (or a given path) and shows:
+`camdl list` walks `./output/sims/` (or a given path) and shows:
 
 ```
 CREATED     MODEL              SCENARIO  SEED  PARAMS  SIZE  PATH
-5m ago      sir.camdl          baseline  42    —       12K   ./output/runs/abc12345/baseline-def45/seed_42
-yesterday   seir.camdl         vacc       7    —       48K   ./output/runs/77cc8a21/vacc-9f88/seed_7
+5m ago      sir.camdl          baseline  42    —       12K   ./output/sims/abc12345/baseline-def45/seed_42
+yesterday   seir.camdl         vacc       7    —       48K   ./output/sims/77cc8a21/vacc-9f88/seed_7
 ```
 
 Relative paths are copy-paste ready — feed them straight into
@@ -791,7 +791,7 @@ camdl simulate model.camdl --params p.toml \
 
 # ── Posterior predictive ─────────────────────────────────
 camdl simulate model.camdl \
-    --draws results/fits/02_fix_beta/posterior/draws.tsv \
+    --draws output/fits/02_fix_beta/posterior/draws.tsv \
     --replicates 10 --obs ppc.tsv
 
 # ── Prior predictive (requires declared priors) ──────────
@@ -805,7 +805,7 @@ camdl simulate model.camdl \
 
 # ── Scenario prediction under posterior uncertainty ──────
 camdl simulate model.camdl \
-    --draws results/fits/02_fix_beta/posterior/draws.tsv \
+    --draws output/fits/02_fix_beta/posterior/draws.tsv \
     --scenario baseline,with_sia --replicates 10 --obs-dir obs/
 
 # ── From a batch file ────────────────────────────────────
@@ -1003,7 +1003,7 @@ obs = "results/ppc/obs.tsv"
 
 [draws]
 source = "file"
-file = "results/fits/02_fix_beta/posterior/draws.tsv"
+file = "output/fits/02_fix_beta/posterior/draws.tsv"
 replicates = 10
 ```
 
@@ -1015,7 +1015,7 @@ seeds = { n = 10 }
 
 [draws]
 source = "file"
-file = "results/fits/02_fix_beta/posterior/draws.tsv"
+file = "output/fits/02_fix_beta/posterior/draws.tsv"
 replicates = 1
 
 [[scenario]]
@@ -1443,7 +1443,7 @@ impl FitConfig {
 camdl fit run fits/01_all_free.toml
 camdl fit run fits/01_all_free.toml --stage mle
 camdl fit run fits/02_fix_beta.toml --stage posterior \
-    --starts-from results/fits/01_all_free/mle
+    --starts-from output/fits/01_all_free/mle
 camdl fit run fits/base.toml --sweep "rho=0.5,0.1,0.02,0.005"
 camdl fit run fits/base.toml --sweep "rho=0.5,0.1" --sweep "k=5,10,20"
 camdl fit run fits/01.toml --stage posterior --skip-chains 2,4
@@ -1577,7 +1577,7 @@ chains = 4
 particles = 2000
 iterations = 60
 cooling = 0.95
-starts_from = "results/fits/01_all_free/mle"
+starts_from = "output/fits/01_all_free/mle"
 
 [stages.posterior]
 method = "pgas"
@@ -1783,7 +1783,7 @@ impl ConfigHasher {
     "sweeps": 5000
   },
   "starts_from": {
-    "source": "results/fits/02_fix_beta/mle",
+    "source": "output/fits/02_fix_beta/mle",
     "source_hash": "e8f1a2b3..."
   },
   "derived_from": "fits/01_all_free.toml",
@@ -1963,7 +1963,7 @@ error: --draws prior requires priors for all estimated parameters.
 
 ```bash
 camdl simulate models/sir.camdl \
-    --draws results/fits/02_fix_beta/posterior/draws.tsv \
+    --draws output/fits/02_fix_beta/posterior/draws.tsv \
     --replicates 10 --obs ppc.tsv
 ```
 
@@ -1973,7 +1973,7 @@ camdl simulate models/sir.camdl \
 
 ```bash
 camdl simulate models/sir.camdl \
-    --draws results/fits/02_fix_beta/posterior/draws.tsv \
+    --draws output/fits/02_fix_beta/posterior/draws.tsv \
     --scenario baseline,with_sia \
     --replicates 10 --obs-dir obs/
 ```
@@ -2106,7 +2106,7 @@ $ camdl fit new --from fits/01_all_free.toml fits/02_fix_beta.toml
 
 Created fits/02_fix_beta.toml
   [provenance] derived_from = "fits/01_all_free.toml"
-  [stages.mle] starts_from = "results/fits/01_all_free/mle"
+  [stages.mle] starts_from = "output/fits/01_all_free/mle"
 ```
 
 ### 13.4 `camdl summarize`
