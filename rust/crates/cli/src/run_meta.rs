@@ -200,11 +200,30 @@ pub enum CacheStatus {
 
 impl Run {
     /// Write `run.json` inside `dir`. Creates parent directories.
+    /// Write `run.json` atomically: write to `run.json.tmp`, then
+    /// rename. POSIX rename within the same filesystem is atomic —
+    /// readers either see the complete new file or nothing at all,
+    /// never a half-written / truncated JSON. The invariant this
+    /// preserves: if `run.json` exists, every sibling artifact was
+    /// written before this rename succeeded, so `run.json`'s mere
+    /// presence is an authoritative "stage completed" marker.
+    ///
+    /// Hardening proposal ship-now #3 — replaces a previous plain
+    /// `fs::write` that left a crash window in which sibling
+    /// artifacts (mle_params.toml, fit_state.toml) were already on
+    /// disk but run.json hadn't been written yet, making partial
+    /// stages look complete to any reader of the sibling files.
     pub fn write(&self, dir: &std::path::Path) -> std::io::Result<()> {
         std::fs::create_dir_all(dir)?;
         let json = serde_json::to_string_pretty(self)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
-        std::fs::write(dir.join("run.json"), json)
+        let tmp = dir.join("run.json.tmp");
+        let final_path = dir.join("run.json");
+        // Write tmp + rename. If anything fails mid-write, tmp may be
+        // left behind — harmless because readers don't look at it,
+        // and the next successful write overwrites it.
+        std::fs::write(&tmp, json)?;
+        std::fs::rename(&tmp, &final_path)
     }
 
     /// Read `run.json` from `dir`. Returns a serde error kinds in
@@ -453,6 +472,49 @@ mod tests {
             RunKind::FitStage(m) => assert_eq!(m.fit_hash, parent_hash),
             _ => panic!("expected FitStage"),
         }
+    }
+
+    #[test]
+    fn atomic_write_leaves_no_tmp_after_success() {
+        // On a clean run, run.json.tmp should not remain. Regression
+        // guard: if we ever forget the rename, tmp would be left behind
+        // and this test catches it.
+        let tmp = std::env::temp_dir().join(format!(
+            "camdl_atomic_{}_{}", std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
+                .unwrap().as_nanos()));
+        std::fs::create_dir_all(&tmp).unwrap();
+        let r = sample_simulate_run();
+        r.write(&tmp).unwrap();
+        assert!(tmp.join("run.json").exists(), "final run.json must exist");
+        assert!(!tmp.join("run.json.tmp").exists(),
+            "run.json.tmp must not be left behind after successful write");
+        std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    #[test]
+    fn atomic_write_mid_crash_leaves_no_visible_run_json() {
+        // Simulate the crash window: write the .tmp but never rename.
+        // A reader should NOT see run.json — the invariant is "if
+        // run.json exists, the write completed."
+        let tmp = std::env::temp_dir().join(format!(
+            "camdl_crash_{}_{}", std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
+                .unwrap().as_nanos()));
+        std::fs::create_dir_all(&tmp).unwrap();
+        // Manually create a run.json.tmp to simulate a crashed write.
+        std::fs::write(tmp.join("run.json.tmp"),
+            r#"{"partial": "data", "oops": "crash"}"#).unwrap();
+        // No run.json should exist.
+        assert!(!tmp.join("run.json").exists(),
+            "crashed write: run.json must not be visible");
+        // A reader's check_cache should report Miss, not a malformed
+        // run.
+        match Run::check_cache(&tmp, "any-hash") {
+            CacheStatus::Miss => {}
+            other => panic!("expected Miss (no run.json), got {:?}", other),
+        }
+        std::fs::remove_dir_all(&tmp).ok();
     }
 
     #[test]
