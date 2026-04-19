@@ -20,8 +20,14 @@ use std::collections::HashMap;
 /// fields are inside `kind`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Run {
-    /// Content hash for this run. Full hex string; the 8-char prefix is
-    /// used in the filesystem path.
+    /// Content hash for this run, full 64-char hex. Scope depends on
+    /// `kind`:
+    ///   - `Simulate`: hash of (sim_hash, scen_hash, seed).
+    ///   - `Fit`: seed-independent content hash of
+    ///     (fit.toml, model IR, data files).
+    ///   - `FitStage`: stage-scope config hash from `fit_stage_hash`
+    ///     (includes stage algorithm + seed).
+    /// The 8-char prefix appears in the filesystem path.
     pub hash: String,
     /// camdl version at write time (e.g. "0.1.0+abc1234").
     pub version: String,
@@ -111,8 +117,11 @@ pub struct FitStageMeta {
     pub stage: String,
     /// Stage method: "if2", "pgas", "pmmh", "pfilter".
     pub method: String,
-    /// Stage-level config hash (scope: this stage's inputs only).
-    pub stage_hash: String,
+    // NB: the stage's own content hash lives in the enclosing
+    // `Run.hash` field (a FitStage run hashes exactly its stage-scope
+    // inputs). Previously FitStageMeta carried a duplicate
+    // `stage_hash: String` — removed to collapse the two-source-of-
+    // truth smell.
     pub seed: u64,
     pub n_chains: usize,
     /// Stage-specific algorithm settings (chains, particles, cooling,
@@ -270,7 +279,6 @@ mod tests {
                 fit_hash: "deadbeef".repeat(8),
                 stage: "refine".into(),
                 method: "if2".into(),
-                stage_hash: "ae123456".repeat(8),
                 seed: 42,
                 n_chains: 4,
                 algorithm: serde_json::Value::Null,
@@ -396,7 +404,6 @@ mod tests {
             kind: RunKind::FitStage(FitStageMeta {
                 fit_hash: "f".repeat(64),
                 stage: "mle".into(), method: "if2".into(),
-                stage_hash: "s".repeat(64),
                 seed: 1, n_chains: 1,
                 algorithm: serde_json::Value::Null,
                 best_loglik: None, best_chain: None, starts_from: None,

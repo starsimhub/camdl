@@ -41,22 +41,30 @@ struct RunEntry {
     traj_bytes: u64,
 }
 
+/// Shared preamble: read `run.json` and derive the display time + the
+/// cwd-relative path. Returns `None` when the directory isn't a run.
+/// Callers match on `run.kind` to build kind-specific entry structs.
+fn load_run_common(dir: &Path, cwd: &Path) -> Option<(Run, SystemTime, String)> {
+    let run = Run::read(dir).ok()?;
+    let created = parse_iso8601(&run.created_at)
+        .unwrap_or_else(|| std::fs::metadata(dir)
+            .and_then(|m| m.modified())
+            .unwrap_or(SystemTime::UNIX_EPOCH));
+    let rel_path = pathdiff_str(dir, cwd);
+    Some((run, created, rel_path))
+}
+
 /// Try to load a simulate run from a directory. Returns None if the
 /// directory has no run.json, the JSON is malformed, or the Run is not
 /// of kind Simulate (e.g. a fit/fit-stage run.json accidentally walked).
 fn load_sim_entry(dir: &Path, cwd: &Path) -> Option<RunEntry> {
-    let run = Run::read(dir).ok()?;
+    let (run, created, rel_path) = load_run_common(dir, cwd)?;
     let meta = match &run.kind {
         RunKind::Simulate(m) => m.clone(),
         _ => return None,
     };
     let traj_bytes = std::fs::metadata(dir.join("traj.tsv"))
         .map(|m| m.len()).unwrap_or(0);
-    let created = parse_iso8601(&run.created_at)
-        .unwrap_or_else(|| std::fs::metadata(dir)
-            .and_then(|m| m.modified())
-            .unwrap_or(SystemTime::UNIX_EPOCH));
-    let rel_path = pathdiff_str(dir, cwd);
     Some(RunEntry {
         run, meta, abs_path: dir.to_path_buf(), rel_path, created, traj_bytes,
     })
@@ -315,16 +323,11 @@ struct FitEntry {
 }
 
 fn load_fit_entry(dir: &Path, cwd: &Path) -> Option<FitEntry> {
-    let run = Run::read(dir).ok()?;
+    let (run, created, rel_path) = load_run_common(dir, cwd)?;
     let meta = match &run.kind {
         RunKind::Fit(m) => m.clone(),
         _ => return None,
     };
-    let created = parse_iso8601(&run.created_at)
-        .unwrap_or_else(|| std::fs::metadata(dir)
-            .and_then(|m| m.modified())
-            .unwrap_or(SystemTime::UNIX_EPOCH));
-    let rel_path = pathdiff_str(dir, cwd);
     Some(FitEntry { run, meta, rel_path, created })
 }
 

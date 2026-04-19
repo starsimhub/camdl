@@ -1075,7 +1075,6 @@ pub fn cmd_fit_run_v2(args: &[String]) {
                 fit_hash: parent_fit_hash.clone(),
                 stage: stage_name.to_string(),
                 method: stage.method_name().to_string(),
-                stage_hash: config_hash.clone(),
                 seed,
                 n_chains,
                 algorithm: algo_json,

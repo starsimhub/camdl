@@ -55,7 +55,7 @@ order; each is a self-contained commit.
       `has_cached_obs`, but never written. Pre-existing — delete as
       part of cleanup.
 
-- [ ] **S4 — `load_sim_entry` / `load_fit_entry` near-duplicates in `browse.rs`**
+- [x] **S4 — `load_sim_entry` / `load_fit_entry` near-duplicates in `browse.rs`**
       Sim variant carries `abs_path` + `traj_bytes`, fit doesn't;
       otherwise identical. Compress to a generic helper.
 
@@ -63,7 +63,7 @@ order; each is a self-contained commit.
       Extract to `run_meta::Run::fit_from_config(config, fit_path)`
       so the write site is one line.
 
-- [ ] **S6 — `Run.hash == FitStageMeta.stage_hash` duplication**
+- [x] **S6 — `Run.hash == FitStageMeta.stage_hash` duplication**
       Same value in two fields. Decide: keep for schema self-
       documentation, or remove `stage_hash` from `FitStageMeta`.
       Either is fine, pick one and comment.
