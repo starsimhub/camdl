@@ -420,6 +420,62 @@ pub fn cmd_fit_run_v2(args: &[String]) {
         std::process::exit(1);
     });
 
+    // ── Write top-level run.json at the fit root ──────────────────────
+    //
+    // Per-stage run.json records live inside each stage dir; this one
+    // describes the fit as a whole so `camdl list` / `camdl show` can
+    // surface fits alongside simulate runs. `Run.hash` here is the
+    // seed-independent content hash from `fit_content_hash` — the same
+    // hash used in the directory suffix.
+    {
+        let fit_hash = config.fit_content_hash(&fit_path).unwrap_or_else(|e| {
+            eprintln!("error: {}", e);
+            std::process::exit(1);
+        });
+        let model_ir_json = std::fs::read_to_string(&config.model.camdl)
+            .unwrap_or_default();
+        let model_hash = if model_ir_json.is_empty() {
+            String::new()
+        } else {
+            crate::hashing::model_hash(&model_ir_json)
+        };
+        let fit_toml_bytes = std::fs::read(&fit_path).unwrap_or_default();
+        let fit_toml_hash = crate::hashing::sha256_hex(&fit_toml_bytes);
+        let data_hashes: std::collections::HashMap<String, String> = config
+            .data.as_ref()
+            .map(|d| d.observations.iter()
+                .filter_map(|(name, path)| {
+                    crate::hashing::file_hash(path).map(|h| (name.clone(), h))
+                })
+                .collect())
+            .unwrap_or_default();
+        let estimated: Vec<String> = config.estimate.keys().cloned().collect();
+        let fixed: std::collections::HashMap<String, f64> = config.fixed
+            .resolve().unwrap_or_default().into_iter().collect();
+        let stages_declared: Vec<String> = config.stages.keys().cloned().collect();
+        let run_fit = crate::run_meta::Run {
+            hash: fit_hash,
+            version: crate::version::VERSION_SHORT.to_string(),
+            created_at: crate::cas::iso8601_utc(std::time::SystemTime::now()),
+            argv: std::env::args().collect(),
+            wall_time_seconds: 0.0,
+            kind: crate::run_meta::RunKind::Fit(crate::run_meta::FitMeta {
+                model: config.model.camdl.clone(),
+                model_hash,
+                fit_toml_path: fit_path.clone(),
+                fit_toml_hash,
+                data_hashes,
+                estimated,
+                fixed,
+                stages_declared,
+                ic_free: config.ic_free.unwrap_or(false),
+            }),
+        };
+        if let Err(e) = run_fit.write(&fit_dir) {
+            eprintln!("warning: cannot write {}/run.json: {}", fit_dir.display(), e);
+        }
+    }
+
     eprintln!("fit: {} ({} stage{})",
         fit_path,
         stages_to_run.len(),

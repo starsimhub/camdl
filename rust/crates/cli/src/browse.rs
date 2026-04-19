@@ -95,9 +95,12 @@ pub fn cmd_list(args: &[String]) {
     let runs = discover_runs(&root).unwrap_or_else(|e| {
         eprintln!("error: {}", e); std::process::exit(1);
     });
+    let fits = discover_fits(&root).unwrap_or_else(|e| {
+        eprintln!("error: {}", e); std::process::exit(1);
+    });
 
     let now = SystemTime::now();
-    let mut filtered: Vec<RunEntry> = runs.into_iter()
+    let mut filtered_runs: Vec<RunEntry> = runs.into_iter()
         .filter(|r| filter_model.as_deref().map_or(true, |m| r.meta.model.contains(m)))
         .filter(|r| filter_scenario.as_deref().map_or(true, |s| r.meta.scenario == s))
         .filter(|r| match filter_since {
@@ -105,18 +108,39 @@ pub fn cmd_list(args: &[String]) {
             None => true,
         })
         .collect();
+    filtered_runs.sort_by(|a, b| b.created.cmp(&a.created));
 
-    // Default sort: most recent first
-    filtered.sort_by(|a, b| b.created.cmp(&a.created));
+    // Fits aren't scenario-qualified; skip scenario filter for them.
+    let mut filtered_fits: Vec<FitEntry> = fits.into_iter()
+        .filter(|f| filter_model.as_deref().map_or(true, |m| f.meta.model.contains(m)))
+        .filter(|_| filter_scenario.is_none())
+        .filter(|f| match filter_since {
+            Some(dur) => now.duration_since(f.created).map_or(false, |d| d <= dur),
+            None => true,
+        })
+        .collect();
+    filtered_fits.sort_by(|a, b| b.created.cmp(&a.created));
 
     if !show_all {
-        filtered.truncate(limit);
+        filtered_runs.truncate(limit);
+        filtered_fits.truncate(limit);
     }
 
     if format_json {
-        print_json(&filtered);
+        print_json(&filtered_runs);
+        print_fits_json(&filtered_fits);
     } else {
-        print_table(&filtered, now);
+        if !filtered_fits.is_empty() {
+            eprintln!("{}", "fits".bold());
+            print_fits_table(&filtered_fits, now);
+            eprintln!();
+        }
+        if !filtered_runs.is_empty() || filtered_fits.is_empty() {
+            if !filtered_fits.is_empty() {
+                eprintln!("{}", "sims".bold());
+            }
+            print_table(&filtered_runs, now);
+        }
     }
 }
 
@@ -249,28 +273,10 @@ pub fn cmd_cat(args: &[String]) {
 
 /// Walk `root/sims/` and collect all simulate runs (directories
 /// containing run.json). Fits live under `root/fits/` and are
-/// surfaced separately by `discover_fits`.
-///
-/// Backward-compat: if `root/sims/` doesn't exist but `root/runs/`
-/// does, walks the legacy tree. Users with pre-2026-04-19 output
-/// dirs see their old results without re-running. Migration path:
-/// `mv output/runs output/sims`.
+/// surfaced separately by [`discover_fits`].
 fn discover_runs(root: &str) -> Result<Vec<RunEntry>, String> {
-    let runs_dir = {
-        let new_path = Path::new(root).join("sims");
-        if new_path.exists() {
-            new_path
-        } else {
-            let legacy = Path::new(root).join("runs");
-            if legacy.exists() {
-                eprintln!("\x1b[33mnote:\x1b[0m walking legacy `runs/` tree. \
-                           Rename to `sims/` when convenient.");
-                legacy
-            } else {
-                return Ok(Vec::new());
-            }
-        }
-    };
+    let runs_dir = Path::new(root).join("sims");
+    if !runs_dir.exists() { return Ok(Vec::new()); }
     let mut out = Vec::new();
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
 
@@ -294,6 +300,50 @@ fn discover_runs(root: &str) -> Result<Vec<RunEntry>, String> {
                     }
                 }
             }
+        }
+    }
+    Ok(out)
+}
+
+/// A discovered cached fit.
+#[derive(Debug, Clone)]
+struct FitEntry {
+    run: Run,
+    meta: crate::run_meta::FitMeta,
+    rel_path: String,
+    created: SystemTime,
+}
+
+fn load_fit_entry(dir: &Path, cwd: &Path) -> Option<FitEntry> {
+    let run = Run::read(dir).ok()?;
+    let meta = match &run.kind {
+        RunKind::Fit(m) => m.clone(),
+        _ => return None,
+    };
+    let created = parse_iso8601(&run.created_at)
+        .unwrap_or_else(|| std::fs::metadata(dir)
+            .and_then(|m| m.modified())
+            .unwrap_or(SystemTime::UNIX_EPOCH));
+    let rel_path = pathdiff_str(dir, cwd);
+    let _ = dir; // abs_path removed; keep signature aligned with load_sim_entry
+    Some(FitEntry { run, meta, rel_path, created })
+}
+
+/// Walk `root/fits/` one level deep — each immediate child is a fit
+/// directory (`<stem>-<hash[:8]>/`). Stage-level run.json records live
+/// deeper and are not surfaced by `camdl list`.
+fn discover_fits(root: &str) -> Result<Vec<FitEntry>, String> {
+    let fits_dir = Path::new(root).join("fits");
+    if !fits_dir.exists() { return Ok(Vec::new()); }
+    let mut out = Vec::new();
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let entries = std::fs::read_dir(&fits_dir)
+        .map_err(|e| format!("cannot read {}: {}", fits_dir.display(), e))?;
+    for entry in entries.flatten() {
+        let p = entry.path();
+        if !p.is_dir() { continue; }
+        if let Some(fe) = load_fit_entry(&p, &cwd) {
+            out.push(fe);
         }
     }
     Ok(out)
@@ -409,6 +459,47 @@ fn print_json(runs: &[RunEntry]) {
         let json = serde_json::to_string(&r.run).unwrap_or_default();
         println!("{}", json);
     }
+}
+
+fn print_fits_json(fits: &[FitEntry]) {
+    for f in fits {
+        let json = serde_json::to_string(&f.run).unwrap_or_default();
+        println!("{}", json);
+    }
+}
+
+fn print_fits_table(fits: &[FitEntry], now: SystemTime) {
+    use comfy_table::{Table, Cell, ContentArrangement, presets::NOTHING};
+    let mut table = Table::new();
+    table
+        .load_preset(NOTHING)
+        .set_content_arrangement(ContentArrangement::Dynamic)
+        .set_header(vec![
+            Cell::new("CREATED").add_attribute(comfy_table::Attribute::Bold),
+            Cell::new("MODEL").add_attribute(comfy_table::Attribute::Bold),
+            Cell::new("ESTIMATE").add_attribute(comfy_table::Attribute::Bold),
+            Cell::new("STAGES").add_attribute(comfy_table::Attribute::Bold),
+            Cell::new("PATH").add_attribute(comfy_table::Attribute::Bold),
+        ]);
+    for f in fits {
+        let rel_time = fmt_relative_time(f.created, now);
+        let model    = model_display_name(&f.meta.model);
+        let estimate = {
+            let joined = f.meta.estimated.join(",");
+            if joined.chars().count() > 30 {
+                let mut s: String = joined.chars().take(29).collect(); s.push('…'); s
+            } else { joined }
+        };
+        let stages = f.meta.stages_declared.join(",");
+        table.add_row(vec![
+            Cell::new(rel_time).fg(comfy_table::Color::Yellow),
+            Cell::new(model),
+            Cell::new(estimate).add_attribute(comfy_table::Attribute::Dim),
+            Cell::new(stages).fg(comfy_table::Color::Green),
+            Cell::new(&f.rel_path).fg(comfy_table::Color::Cyan),
+        ]);
+    }
+    println!("{table}");
 }
 
 /// Compact one-line summary of the run's sweep point (if any).

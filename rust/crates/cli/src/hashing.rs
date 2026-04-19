@@ -125,6 +125,14 @@ pub fn canonical_params(params: &HashMap<String, f64>) -> String {
         .join(";")
 }
 
+/// Full 64-char SHA-256 of a byte slice, hex-encoded. Used where the
+/// caller wants a full content hash (e.g. fit_toml_hash in the top-level
+/// fit run record); the 8-char truncated form is only appropriate when
+/// the hash is paired with a richer identifier.
+pub fn sha256_hex(bytes: &[u8]) -> String {
+    hex::encode(Sha256::digest(bytes))
+}
+
 /// Hash the contents of a file (first 4 bytes of SHA256, 8 hex chars).
 /// Returns `None` when the file can't be read — callers use this to
 /// surface `<unreadable>` in provenance records rather than failing
