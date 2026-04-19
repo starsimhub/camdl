@@ -924,7 +924,13 @@ pub fn cmd_fit_run_v2(args: &[String]) {
                     })
                     .collect();
                 let metadata = provenance::MleMetadata {
-                    input_hash: model_hash[..8].to_string(),
+                    // Full fit content hash — lets a reader locate
+                    // the originating fit dir from just the
+                    // mle_params.toml. Pre-hardening this was
+                    // model_hash[..8], which only collided when data
+                    // and params happened to match across fits of the
+                    // same model. Hardening ship-now #2.
+                    input_hash: parent_fit_hash.clone(),
                     model_path: sweep_config.model.camdl.clone(),
                     model_hash: model_hash.clone(),
                     data_hashes: data_hashes.clone(),
