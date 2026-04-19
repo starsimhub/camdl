@@ -33,6 +33,24 @@ fn tempdir(tag: &str) -> TempDir {
     TempDir(base)
 }
 
+/// Fit directories are named `<stem>-<fit_hash[:8]>/` — the test can't
+/// know the hash up front, so it discovers the single directory under
+/// `<out>/fits/` and asserts it starts with the expected stem.
+fn find_fit_dir(out: &Path, stem: &str) -> PathBuf {
+    let fits = out.join("fits");
+    let entries: Vec<_> = std::fs::read_dir(&fits)
+        .unwrap_or_else(|_| panic!("no fits/ dir under {}", out.display()))
+        .flatten().map(|e| e.path()).collect();
+    assert_eq!(entries.len(), 1,
+        "expected exactly one fit dir under {}, got {:?}", fits.display(), entries);
+    let p = &entries[0];
+    let name = p.file_name().and_then(|s| s.to_str()).unwrap_or("");
+    let prefix = format!("{}-", stem);
+    assert!(name.starts_with(&prefix),
+        "expected {}-<hash> under fits/, got {}", stem, name);
+    p.clone()
+}
+
 /// Minimal SIR with Poisson prevalence obs, fit config skeleton.
 fn write_fixture(dir: &Path) -> (PathBuf, PathBuf) {
     let camdl = camdlc().expect("camdlc.exe");
@@ -126,11 +144,11 @@ cases = "{}"
 
     run_fit(&bin, &fit_toml);
 
-    let expected = out.join("fits").join("fit").join("real").join("fit_1").join("mle");
+    let expected = find_fit_dir(&out, "fit").join("real").join("fit_1").join("mle");
     assert!(expected.exists(),
         "single fit must land at real/fit_1/mle/, not found at {}", expected.display());
     // No flat stage dir at the top level.
-    assert!(!out.join("fits").join("fit").join("mle").exists(),
+    assert!(!find_fit_dir(&out, "fit").join("mle").exists(),
         "flat top-level stage dir must NOT exist");
 }
 
@@ -159,12 +177,12 @@ cases = "{}"
 
     run_fit(&bin, &fit_toml);
 
-    let base = out.join("fits").join("fit").join("real");
+    let base = find_fit_dir(&out, "fit").join("real");
     for s in [11u64, 22, 33] {
         let dir = base.join(format!("fit_{}", s)).join("mle");
         assert!(dir.exists(), "fit_{}/mle/ must exist at {}", s, dir.display());
     }
-    let summary = out.join("fits").join("fit").join("real").join("summary.tsv");
+    let summary = find_fit_dir(&out, "fit").join("real").join("summary.tsv");
     assert!(summary.exists(), "real/summary.tsv must be written");
     let text = std::fs::read_to_string(&summary).unwrap();
     // Header + 3 rows = 4 lines.
@@ -195,7 +213,7 @@ sim_seeds = [1, 2, 3]
 
     run_fit(&bin, &fit_toml);
 
-    let syn = out.join("fits").join("fit").join("synthetic");
+    let syn = find_fit_dir(&out, "fit").join("synthetic");
     for i in 1..=3 {
         let ds_tsv = syn.join("data").join(format!("ds_{:02}.tsv", i));
         assert!(ds_tsv.exists(), "ds_{:02}.tsv must exist", i);
@@ -232,7 +250,7 @@ sim_seeds = [10, 20]
 
     run_fit(&bin, &fit_toml);
 
-    let syn = out.join("fits").join("fit").join("synthetic");
+    let syn = find_fit_dir(&out, "fit").join("synthetic");
     for ds in 1..=2 {
         for fs in [1u64, 2] {
             let p = syn.join(format!("ds_{:02}", ds))
@@ -289,7 +307,7 @@ cooling    = 0.9
 "#, out.display(), ir.display(), truth.display())).unwrap();
     run_fit(&bin, &fit_toml);
 
-    let stage = out.join("fits").join("fit").join("synthetic")
+    let stage = find_fit_dir(&out, "fit").join("synthetic")
         .join("ds_01").join("fit_1").join("mle");
     let starts_text = std::fs::read_to_string(stage.join("chain_starts.tsv"))
         .expect("chain_starts.tsv must exist");
@@ -377,7 +395,7 @@ sim_seeds = [10]
 "#, out.display(), ir.display(), truth.display(), stages_block())).unwrap();
     run_fit(&bin, &fit_toml);
 
-    let syn_tsv = out.join("fits").join("fit").join("synthetic")
+    let syn_tsv = find_fit_dir(&out, "fit").join("synthetic")
         .join("data").join("ds_01.tsv");
 
     let cli_bytes = std::fs::read(&cli_tsv).unwrap();

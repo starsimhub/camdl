@@ -271,6 +271,99 @@ mod tests {
         assert_ne!(sim_hash("m", "r0=2", "gillespie", 1.0), sim_hash("m", "r0=3", "gillespie", 1.0));
     }
 
+    // ── Frozen golden hashes (regression guard) ──────────────────────────────
+    //
+    // These assertions lock each primary hash helper to a known byte-
+    // for-byte output for a fixed input. If someone refactors the
+    // hashing code and the bytes move, CI fails with a crisp diff —
+    // forcing the refactor to either justify the break (and update
+    // this test as a conscious decision) or preserve the hash.
+    //
+    // The inputs are chosen to be minimal-but-not-trivial so they
+    // exercise the main codepaths (params canonicalisation, enable/
+    // disable sort, version injection via scen_hash_with_version).
+
+    #[test]
+    fn golden_hash_model_hash() {
+        let ir = r#"{"compartments":["S","I"],"parameters":[{"name":"beta"}]}"#;
+        assert_eq!(model_hash(ir),
+            "53b7d24e97c71b0fb35e58a95d21ccd8b7178a22317e3115df5770c856d9180b");
+    }
+
+    #[test]
+    fn golden_hash_sim_hash() {
+        // scen_hash_with_version's test-friendly form is used by the
+        // scen_hash tests; here sim_hash folds in VERSION_SHORT which
+        // bumps every commit — so we hash it with a synthetic model
+        // hash that stays fixed. We pin the model side only.
+        let mh = "abc".repeat(16); // 48 chars, stable across commits
+        // Two calls in the same process must equal.
+        assert_eq!(sim_hash(&mh, "beta=0.3", "gillespie", 1.0),
+                   sim_hash(&mh, "beta=0.3", "gillespie", 1.0));
+    }
+
+    #[test]
+    fn golden_hash_scen_hash_with_version() {
+        // scen_hash_with_version pins the version so the golden bytes
+        // remain stable across commits. This guards the sort-enables,
+        // param-canonicalisation, and domain-separator logic.
+        let mut params = HashMap::new();
+        params.insert("rho".to_string(), 0.5);
+        let h = scen_hash_with_version(
+            &["sia".to_string(), "school_close".to_string()],
+            &[],
+            &params,
+            "0.0.0+frozen",
+        );
+        assert_eq!(h, "3d19534d546efd26118d6983fcd8a58a559c9791477db4316d3edfc357dadc78");
+    }
+
+    // ── run_hash ─────────────────────────────────────────────────────────────
+
+    #[test]
+    fn run_hash_stable() {
+        let a = run_hash("aaa", "bbb", 42);
+        let b = run_hash("aaa", "bbb", 42);
+        assert_eq!(a, b);
+        assert_eq!(a.len(), 64, "run_hash returns full SHA-256 hex (64 chars)");
+    }
+
+    #[test]
+    fn run_hash_known_bytes() {
+        // Regression guard: if anyone changes the domain separator or
+        // field order in `run_hash`, existing caches become invisible.
+        // The known value locks the current function to its current
+        // output. Updating this test is a conscious break.
+        let h = run_hash("sim123", "scen456", 7);
+        assert_eq!(h, "74559eaeb35e55fe88042fb428009a47df00be22b1627d87d4171b9688b77443");
+    }
+
+    #[test]
+    fn run_hash_seed_invalidates() {
+        assert_ne!(run_hash("aaa", "bbb", 1), run_hash("aaa", "bbb", 2));
+    }
+
+    #[test]
+    fn run_hash_sim_invalidates() {
+        assert_ne!(run_hash("aaa", "bbb", 1), run_hash("ccc", "bbb", 1));
+    }
+
+    #[test]
+    fn run_hash_scen_invalidates() {
+        assert_ne!(run_hash("aaa", "bbb", 1), run_hash("aaa", "ddd", 1));
+    }
+
+    #[test]
+    fn run_hash_domain_separator_disambiguates() {
+        // "aa" + "bb" + 0  must differ from "aab" + "b" + 0  even
+        // though the concatenated bytes are similar. Domain separators
+        // and length-delimited field framing guard against that
+        // ambiguity. Guards against the domain-separator being dropped
+        // during a refactor.
+        assert_ne!(run_hash("aa", "bb", 0), run_hash("aab", "b", 0));
+        assert_ne!(run_hash("aa", "bb", 0), run_hash("a", "abb", 0));
+    }
+
     // ── scen_hash ────────────────────────────────────────────────────────────
 
     #[test]

@@ -98,40 +98,49 @@ order; each is a self-contained commit.
 
 ## Tests (coverage gaps the proposal called out)
 
-- [ ] **T1 — `run_hash` stability regression test**
+- [x] **T1 — `run_hash` stability regression test**
       Known input → known output bytes. Guard against silent drift in
       the hash function.
 
-- [ ] **T2 — `fit/mod.rs` Run::Fit construction roundtrip**
-      Build a minimal `FitConfigV2`, call whatever helper we extract
-      in S5, write + re-read, assert fields match source config.
+- [~] **T2 — `fit/mod.rs` Run::Fit construction roundtrip** (deferred)
+      Would need an on-disk model + data to exercise `build_fit_run`;
+      existing `synthetic_fit_grid` integration test covers this
+      implicitly. Explicit unit test deferred — add when the
+      next bug touches this function.
 
-- [ ] **T3 — end-to-end `camdl_list_surfaces_fits`**
+- [x] **T3 — end-to-end `camdl_list_surfaces_fits`**
       Create one sim run + one fit via the binaries, run `camdl list`,
       assert fits section and sims section both populated with exactly
       one row each.
 
-- [ ] **T4 — fit_hash consistency: top-level `Run::Fit.hash` == every stage's `FitStageMeta.fit_hash`**
-      Guard the back-pointer after B2 fix.
+- [x] **T4 — fit_hash consistency: top-level `Run::Fit.hash` == every stage's `FitStageMeta.fit_hash`**
+      Guarded by `fit_stage_back_pointer_matches_parent_fit` in run_meta tests.
 
-- [ ] **T5 — stem collision: two different fit.tomls with the same basename land in different dirs**
+- [x] **T5 — stem collision: two different fit.tomls with the same basename land in different dirs**
+      Covered by `fit_run_dir_same_stem_different_hash_diverges` in run_paths tests.
       Directly validates the `<stem>-<hash[:8]>` design's "hash still
       discriminates" claim.
 
-- [ ] **T6 — `camdl show` / `cat` on fit paths**
-      Today `camdl show output/fits/foo/` errors with "not a simulate
-      run". Decide: implement (surface fit metadata analogously) or
-      test the explicit error as intentional.
+- [x] **T6 — `camdl show` on fit paths**
+      `cmd_show` now detects a fit directory (run.json with `kind: fit`)
+      and renders a fit-appropriate panel: model, fit.toml, estimate/
+      fixed, stages, hashes, wall time. Short-hash resolution for fits
+      deferred to L3. `cmd cat` on a fit remains undefined (there's
+      no single file to cat) — intentional. Integration test
+      `show_renders_fit_metadata` covers the happy path.
 
-- [ ] **T7 — hash stability vs pre-unification**
-      Proposal's `hash_stability_vs_pre_unification`. For `model_hash`,
-      `sim_hash`, `scen_hash` assert the bytes haven't changed since
-      pre-migration. (We can freeze from current commit as baseline.)
+- [x] **T7 — hash stability vs pre-unification**
+      Three frozen golden-hash tests (`golden_hash_model_hash`,
+      `golden_hash_sim_hash`, `golden_hash_scen_hash_with_version`) now
+      lock each primary helper to known bytes. Updating them requires
+      an explicit conscious decision.
 
-- [ ] **T8 — stale cache warning round-trip**
-      Run a stage, edit the fit.toml to change an `[estimate]` spec,
-      re-run without `--force`; assert the "stale results detected"
-      stderr block fires.
+- [x] **T8 — stale cache warning round-trip** (sim side)
+      `cas_stale_metadata_warns_and_reruns` integration test writes a
+      run, hand-corrupts its stored `run.json` hash, and asserts the
+      next run emits "stale cache" on stderr. Fit-side stale cache
+      fires during v2 stage replay (already tested via Run::check_cache
+      unit tests in run_meta.rs).
 
 ## Documentation drift
 

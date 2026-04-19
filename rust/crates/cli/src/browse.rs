@@ -180,12 +180,25 @@ pub fn cmd_show(args: &[String]) {
     if args.is_empty() || args[0] == "--help" || args[0] == "-h" {
         eprintln!("usage: camdl show <PATH | short-hash> [OUTPUT-DIR]");
         eprintln!();
-        eprintln!("Prints the full run.json for a cached run. Accepts either a");
-        eprintln!("full relative path or a git-style short hash prefix.");
+        eprintln!("Prints the full run.json for a cached sim run or a fit.");
+        eprintln!("Accepts either a full relative path or a git-style short-hash");
+        eprintln!("prefix for sim runs. Fit directories resolve only by path today.");
         std::process::exit(if args.is_empty() { 1 } else { 0 });
     }
     let key = &args[0];
     let root = args.get(1).cloned().unwrap_or_else(|| "./output".to_string());
+
+    // If the key is a directory path, check whether it's a fit root
+    // before treating it as a sim lookup. Fit resolution by short-hash
+    // prefix is a follow-up (cleanup.md:L3).
+    let as_path = Path::new(key);
+    if as_path.is_dir() && as_path.join("run.json").exists() {
+        let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        if let Some(fit) = load_fit_entry(as_path, &cwd) {
+            show_fit(&fit);
+            return;
+        }
+    }
 
     let entry = resolve_run(&root, key).unwrap_or_else(|e| {
         eprintln!("error: {}", e); std::process::exit(1);
@@ -208,6 +221,33 @@ pub fn cmd_show(args: &[String]) {
     println!("  {}", entry.run.argv.join(" "));
     println!("{}", "trajectory".bright_black());
     println!("  {} bytes", entry.traj_bytes);
+}
+
+fn show_fit(entry: &FitEntry) {
+    println!("{}", "path".bright_black()); println!("  {}", entry.rel_path.cyan());
+    println!("{}", "kind".bright_black()); println!("  fit");
+    println!("{}", "model".bright_black()); println!("  {}", entry.meta.model);
+    println!("{}", "fit.toml".bright_black()); println!("  {}", entry.meta.fit_toml_path);
+    println!("{}", "estimate".bright_black()); println!("  {}", entry.meta.estimated.join(", "));
+    if !entry.meta.fixed.is_empty() {
+        let mut fx: Vec<_> = entry.meta.fixed.iter().collect();
+        fx.sort_by_key(|(k, _)| k.to_string());
+        let items: Vec<String> = fx.iter().map(|(k, v)| format!("{}={}", k, v)).collect();
+        println!("{}", "fixed".bright_black()); println!("  {}", items.join(", "));
+    }
+    println!("{}", "stages".bright_black());
+    println!("  {}", entry.meta.stages_declared.join(", "));
+    println!("{}", "hashes".bright_black());
+    println!("  fit   {}", entry.run.hash.dimmed());
+    println!("  model {}", entry.meta.model_hash.dimmed());
+    println!("  fit.toml {}", entry.meta.fit_toml_hash.dimmed());
+    println!("{}", "created".bright_black());
+    println!("  {}  ({})", entry.run.created_at, fmt_relative_time(entry.created, SystemTime::now()));
+    println!("{}", "version".bright_black()); println!("  {}", entry.run.version);
+    println!("{}", "wall time".bright_black());
+    println!("  {:.1}s", entry.run.wall_time_seconds);
+    println!("{}", "argv".bright_black());
+    println!("  {}", entry.run.argv.join(" "));
 }
 
 // ── cmd_cat ──────────────────────────────────────────────────────────────────

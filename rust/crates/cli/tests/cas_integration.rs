@@ -66,12 +66,17 @@ fn cas_first_run_writes_cache_and_metadata() {
     let meta: serde_json::Value = serde_json::from_str(
         &std::fs::read_to_string(dir.join("run.json")).unwrap()
     ).unwrap();
-    assert_eq!(meta["seed"], 42);
-    assert_eq!(meta["scenario"], "baseline");
-    assert!(meta["sim_hash"].as_str().unwrap().len() == 64);
+    // Unified Run schema nests simulate-specific fields inside `kind`;
+    // shared Run fields stay at the top.
+    assert_eq!(meta["kind"]["seed"], 42);
+    assert_eq!(meta["kind"]["scenario"], "baseline");
+    assert_eq!(meta["kind"]["kind"], "simulate");
+    assert!(meta["kind"]["sim_hash"].as_str().unwrap().len() == 64);
     assert!(meta["argv"].as_array().unwrap().len() >= 4);
     assert!(meta["version"].as_str().unwrap().contains("+"),
         "version should include git hash suffix");
+    assert!(meta["hash"].as_str().unwrap().len() == 64);
+    assert!(meta["created_at"].as_str().is_some());
 }
 
 #[test]
@@ -195,6 +200,133 @@ fn list_shows_cached_runs() {
     assert!(stdout.contains("baseline"), "list should show scenario name");
 }
 
+/// Regression guard for the unified output tree: `camdl list` must
+/// render a fits section when `output/fits/<...>/run.json` exists,
+/// independent of whether any sim runs are cached. We synthesize a
+/// handcrafted `run.json` rather than running a full `camdl fit run`
+/// — that keeps the test fast and orthogonal to fit-runner behaviour.
+#[test]
+fn list_shows_fit_entries() {
+    let Some(bin) = skip_if_missing_binary() else { return; };
+    let tmp = tempfile::tempdir().unwrap();
+    let output = tmp.path().join("output");
+    let fit_dir = output.join("fits").join("demo-abc12345");
+    std::fs::create_dir_all(&fit_dir).unwrap();
+
+    // Minimal valid Run + RunKind::Fit JSON matching run_meta.rs schema.
+    let run_json = r#"{
+        "hash": "abc12345deadbeef0000000000000000000000000000000000000000abc12345",
+        "version": "0.1.0+test",
+        "created_at": "2026-04-19T12:00:00Z",
+        "argv": ["camdl","fit","run","demo.toml"],
+        "wall_time_seconds": 3.2,
+        "kind": {
+            "kind": "fit",
+            "model": "demo.camdl",
+            "model_hash": "m000",
+            "fit_toml_path": "demo.toml",
+            "fit_toml_hash": "h000",
+            "data_hashes": {"cases": "d000"},
+            "estimated": ["beta","gamma"],
+            "fixed": {"N0": 1000.0},
+            "stages_declared": ["scout","refine"]
+        }
+    }"#;
+    std::fs::write(fit_dir.join("run.json"), run_json).unwrap();
+
+    let out = Command::new(&bin)
+        .args(["list", &output.to_string_lossy()])
+        .output().expect("spawn");
+    assert!(out.status.success(), "list should succeed: stderr={:?}",
+        String::from_utf8_lossy(&out.stderr));
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    let all = format!("{}{}", stdout, stderr);
+    assert!(all.contains("fits"), "list output must include a 'fits' section: {}", all);
+    assert!(stdout.contains("demo"),
+        "fit stem should appear in table: {}", stdout);
+    assert!(stdout.contains("scout,refine"),
+        "fit STAGES column should show declared stages: {}", stdout);
+}
+
+/// Tamper-with-metadata regression: if `run.json`'s stored hash no
+/// longer matches the current sim config, `camdl simulate --cas`
+/// should print a "stale cache" warning and re-run, not silently
+/// serve the old trajectory.
+#[test]
+fn cas_stale_metadata_warns_and_reruns() {
+    let Some(bin) = skip_if_missing_binary() else { return; };
+    let tmp = tempfile::tempdir().unwrap();
+    let output = tmp.path().join("output");
+
+    let run_once = || {
+        Command::new(&bin)
+            .args(["simulate", &golden_sir_basic().to_string_lossy(),
+                   "--scenario", "baseline",
+                   "--seed", "42",
+                   "--cas",
+                   "--output-dir", &output.to_string_lossy(),
+                   "-o", &tmp.path().join("traj.tsv").to_string_lossy()])
+            .output().expect("spawn")
+    };
+
+    let _ = run_once();
+    // Locate the run dir, corrupt the stored hash.
+    let dir = walkdir(&output.join("sims")).into_iter()
+        .find(|p| p.join("run.json").exists()).expect("one run");
+    let content = std::fs::read_to_string(dir.join("run.json")).unwrap();
+    let mut v: serde_json::Value = serde_json::from_str(&content).unwrap();
+    v["hash"] = serde_json::Value::String("0".repeat(64));
+    std::fs::write(dir.join("run.json"), serde_json::to_string_pretty(&v).unwrap()).unwrap();
+
+    // Second run should detect the stale hash and warn.
+    let out = run_once();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("stale cache"),
+        "expected stale cache warning on stderr, got: {}", stderr);
+    assert!(out.status.success(), "re-run should still succeed");
+}
+
+#[test]
+fn show_renders_fit_metadata() {
+    let Some(bin) = skip_if_missing_binary() else { return; };
+    let tmp = tempfile::tempdir().unwrap();
+    let output = tmp.path().join("output");
+    let fit_dir = output.join("fits").join("demo-abc12345");
+    std::fs::create_dir_all(&fit_dir).unwrap();
+    let run_json = r#"{
+        "hash": "abc12345deadbeef0000000000000000000000000000000000000000abc12345",
+        "version": "0.1.0+test",
+        "created_at": "2026-04-19T12:00:00Z",
+        "argv": ["camdl","fit","run","demo.toml"],
+        "wall_time_seconds": 3.2,
+        "kind": {
+            "kind": "fit",
+            "model": "demo.camdl",
+            "model_hash": "m000",
+            "fit_toml_path": "demo.toml",
+            "fit_toml_hash": "h000",
+            "data_hashes": {"cases": "d000"},
+            "estimated": ["beta","gamma"],
+            "fixed": {"N0": 1000.0},
+            "stages_declared": ["scout","refine"]
+        }
+    }"#;
+    std::fs::write(fit_dir.join("run.json"), run_json).unwrap();
+
+    let out = Command::new(&bin)
+        .args(["show", &fit_dir.to_string_lossy()])
+        .output().expect("spawn");
+    assert!(out.status.success(), "show should succeed on a fit dir: stderr={}",
+        String::from_utf8_lossy(&out.stderr));
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("kind"),      "output should label the kind field");
+    assert!(stdout.contains("fit"),       "output should say 'fit': {}", stdout);
+    assert!(stdout.contains("demo.camdl"),"output should include model: {}", stdout);
+    assert!(stdout.contains("scout, refine"), "output should list stages");
+    assert!(stdout.contains("3.2"),       "output should show wall time");
+}
+
 #[test]
 fn cat_emits_cached_trajectory() {
     let Some(bin) = skip_if_missing_binary() else { return; };
@@ -216,7 +348,7 @@ fn cat_emits_cached_trajectory() {
     let meta: serde_json::Value = serde_json::from_str(
         &std::fs::read_to_string(dir.join("run.json")).unwrap()
     ).unwrap();
-    let sim_hash_full = meta["sim_hash"].as_str().unwrap();
+    let sim_hash_full = meta["kind"]["sim_hash"].as_str().unwrap();
     let short = &sim_hash_full[..8];
 
     // `camdl cat <short>` uniquely resolves and emits the TSV
@@ -287,8 +419,8 @@ beta = [0.2, 0.3, 0.4]
         let meta: serde_json::Value = serde_json::from_str(
             &std::fs::read_to_string(dir.join("run.json")).unwrap()
         ).unwrap();
-        let sp = &meta["sweep_point"];
-        assert!(!sp.is_null(), "run.json must have sweep_point: {:?}", meta);
+        let sp = &meta["kind"]["sweep_point"];
+        assert!(!sp.is_null(), "run.json must have kind.sweep_point: {:?}", meta);
         let beta = sp["beta"].as_f64().expect("sweep_point.beta must be a number");
         beta_values.push(beta);
     }
@@ -411,7 +543,7 @@ fn show_prints_metadata() {
     let meta: serde_json::Value = serde_json::from_str(
         &std::fs::read_to_string(dir.join("run.json")).unwrap()
     ).unwrap();
-    let short = &meta["sim_hash"].as_str().unwrap()[..8];
+    let short = &meta["kind"]["sim_hash"].as_str().unwrap()[..8];
 
     let out = Command::new(&bin)
         .args(["show", short, &output.to_string_lossy()])

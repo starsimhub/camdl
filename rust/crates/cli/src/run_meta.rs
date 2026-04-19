@@ -394,6 +394,42 @@ mod tests {
     }
 
     #[test]
+    fn fit_stage_back_pointer_matches_parent_fit() {
+        // The FitStageMeta.fit_hash field is how a stage references
+        // its parent fit. If the two ever drift, stages become un-
+        // attributable — guard against that by constructing both with
+        // the same hash string and round-tripping the stage through
+        // JSON, asserting the field survives.
+        let parent = sample_fit_run();
+        let parent_hash = parent.hash.clone();
+        let stage = Run {
+            hash: "stage0000".repeat(8),
+            version: "v".into(),
+            created_at: "t".into(),
+            argv: vec![],
+            wall_time_seconds: 1.0,
+            kind: RunKind::FitStage(FitStageMeta {
+                fit_hash: parent_hash.clone(),
+                stage: "scout".into(),
+                method: "if2".into(),
+                seed: 1,
+                n_chains: 4,
+                algorithm: serde_json::Value::Null,
+                best_loglik: None,
+                best_chain: None,
+                starts_from: None,
+                derived_from: None,
+            }),
+        };
+        let json = serde_json::to_string(&stage).unwrap();
+        let parsed: Run = serde_json::from_str(&json).unwrap();
+        match parsed.kind {
+            RunKind::FitStage(m) => assert_eq!(m.fit_hash, parent_hash),
+            _ => panic!("expected FitStage"),
+        }
+    }
+
+    #[test]
     fn optional_fields_skip_when_empty() {
         // Regression guard: serde(skip_serializing_if) on best_loglik,
         // best_chain, starts_from, sweep_point, ic_free. An empty

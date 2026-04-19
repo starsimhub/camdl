@@ -220,6 +220,24 @@ mod tests {
     }
 
     #[test]
+    fn fit_run_dir_same_stem_different_hash_diverges() {
+        // The whole point of the <stem>-<hash[:8]> scheme: two fits
+        // with the same human-readable name but different content
+        // must land in different directories. Hash is the key, stem
+        // is cosmetic.
+        let a = fit_run_dir(Path::new("/out"), Some("01"), "aaaaaaaa1111111111");
+        let b = fit_run_dir(Path::new("/out"), Some("01"), "bbbbbbbb2222222222");
+        assert_ne!(a, b, "same stem, different hash must produce different dirs");
+    }
+
+    #[test]
+    fn sim_run_rel_same_stem_different_hash_diverges() {
+        let a = sim_run_rel(Some("sir"), "aaaaaaaa0000", "baseline", "cccc", 1);
+        let b = sim_run_rel(Some("sir"), "bbbbbbbb0000", "baseline", "cccc", 1);
+        assert_ne!(a, b);
+    }
+
+    #[test]
     fn fit_cell_dir_real_vs_synthetic() {
         let r = fit_cell_dir(Path::new("/out"), "deadbeef00", FitSource::Real, 42);
         assert_eq!(r, Path::new("/out/fits/deadbeef/real/fit_42"));
