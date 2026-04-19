@@ -319,6 +319,13 @@ pub fn cmd_fit_run_v2(args: &[String]) {
         eprintln!("error: {}", e);
         std::process::exit(1);
     });
+    if let Some(msg) = config.dangling_priors_warning() {
+        // Warning, not error: a staged Bayesian workflow (scout → pgas)
+        // legitimately declares priors that the IF2 stage ignores — so
+        // we can't refuse here. But silent would hide the copy-paste /
+        // mental-model-mismatch class of bug that's the actual risk.
+        eprintln!("\x1b[33mwarning:\x1b[0m {}", msg);
+    }
 
     // ── Parse and validate sweeps ─────────────────────────────────────────
     let sweep_specs: Vec<(String, Vec<f64>)> = sweep_args.iter().map(|arg| {

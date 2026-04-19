@@ -703,6 +703,45 @@ impl FitConfigV2 {
         p.join(format!("fit_{}", seed))
     }
 
+    /// Warn on dangling priors: priors declared on estimated parameters
+    /// but consumed by no active path in this fit. Returns a
+    /// human-readable message, or `None` when every declared prior is
+    /// used somewhere (a Bayesian stage, or `fit_starts = "prior"`
+    /// initialization).
+    ///
+    /// IF2 (scout / refine / validate) maximises the likelihood and
+    /// ignores priors. A user who declares priors and then runs an
+    /// IF2-only pipeline almost certainly didn't mean to: either they
+    /// copied a Bayesian `.camdl` example, or they thought IF2 was
+    /// Bayesian. Silent-but-wrong is worse than a one-line warning, so
+    /// this returns `Some(msg)` that the caller prints to stderr.
+    ///
+    /// Does NOT error — the staged Bayesian workflow (scout → pgas)
+    /// legitimately declares priors in one file and has the IF2 stage
+    /// ignore them while the pgas stage consumes them. That case
+    /// returns `None` here because the pgas stage *is* a prior
+    /// consumer.
+    pub fn dangling_priors_warning(&self) -> Option<String> {
+        let params_with_priors: Vec<&str> = self.estimate.iter()
+            .filter_map(|(name, spec)| spec.prior.as_ref().map(|_| name.as_str()))
+            .collect();
+        if params_with_priors.is_empty() { return None; }
+
+        let any_bayesian_stage = self.stages.values().any(Stage::requires_priors);
+        let starts_from_prior = matches!(self.fit_starts, Some(FitStarts::Prior));
+        if any_bayesian_stage || starts_from_prior { return None; }
+
+        Some(format!(
+            "priors declared on [{}] but no stage in this fit uses them.\n  \
+             IF2 (scout / refine / validate) maximises the likelihood and \
+             ignores prior terms.\n  \
+             To silence this warning, do one of:\n    \
+             - add a Bayesian stage:   [stages.pgas] method = \"pgas\"\n    \
+             - use priors for starts:  fit_starts = \"prior\"\n    \
+             - remove the priors:      drop `prior = {{...}}` from [estimate.*] entries",
+            params_with_priors.join(", ")))
+    }
+
     /// Real-data observation paths. Returns an error with a helpful
     /// message when the config is synthetic-only or when neither
     /// source is present (should be caught by `validate()`, but
@@ -1774,6 +1813,111 @@ cases = "data/cases.tsv"
 "#, minimal_fit_stages());
         let config = parse(&list_src).unwrap();
         assert_eq!(config.fit_seeds.unwrap(), vec![101u64, 102, 103]);
+    }
+
+    // ── Dangling-priors warning ────────────────────────────────────────────
+
+    fn fit_with_priors_if2_only() -> &'static str {
+        r#"
+[model]
+camdl = "models/sir.camdl"
+
+[data.observations]
+cases = "data/cases.tsv"
+
+[estimate]
+beta  = { bounds = [0.01, 2.0], prior = { dist = "log_normal", mu = -0.3, sigma = 0.5 } }
+gamma = { bounds = [0.05, 1.0], prior = { dist = "half_normal", sigma = 1.0 } }
+
+[fixed]
+N0 = 1000
+
+[stages.scout]
+method = "if2"
+chains = 4
+particles = 500
+iterations = 50
+cooling = 0.7
+
+[stages.refine]
+method = "if2"
+chains = 4
+particles = 1000
+iterations = 50
+cooling = 0.9
+starts_from = "scout"
+"#
+    }
+
+    #[test]
+    fn dangling_priors_warns_on_if2_only() {
+        let config = parse(fit_with_priors_if2_only()).unwrap();
+        let msg = config.dangling_priors_warning()
+            .expect("IF2-only config with priors must warn");
+        assert!(msg.contains("beta") && msg.contains("gamma"),
+            "warning must name every param whose prior is dangling: {}", msg);
+        assert!(msg.contains("IF2") && msg.contains("maximises the likelihood"),
+            "warning must explain why priors are unused: {}", msg);
+        // Actionable suggestions present.
+        assert!(msg.contains("pgas") && msg.contains("fit_starts"),
+            "warning must list the fixes: {}", msg);
+    }
+
+    #[test]
+    fn dangling_priors_silent_when_pgas_stage_present() {
+        // Add a PGAS stage to the same config — now priors are live.
+        let mut src = fit_with_priors_if2_only().to_string();
+        src.push_str(r#"
+[stages.pgas]
+method = "pgas"
+chains = 4
+particles = 1000
+sweeps = 1000
+starts_from = "refine"
+"#);
+        let config = parse(&src).unwrap();
+        assert!(config.dangling_priors_warning().is_none(),
+            "pgas consumes the declared priors — no warning expected");
+    }
+
+    #[test]
+    fn dangling_priors_silent_when_fit_starts_is_prior() {
+        let mut src = fit_with_priors_if2_only().to_string();
+        // Prepend fit_starts at the top (TOML: top-level keys must
+        // precede the first [table]).
+        src = format!("fit_starts = \"prior\"\n{}", src);
+        let config = parse(&src).unwrap();
+        assert!(config.dangling_priors_warning().is_none(),
+            "fit_starts = \"prior\" uses priors for init — no warning expected");
+    }
+
+    #[test]
+    fn dangling_priors_silent_when_no_priors_declared() {
+        // No [estimate.*].prior at all — nothing to be dangling.
+        let src = r#"
+[model]
+camdl = "models/sir.camdl"
+
+[data.observations]
+cases = "data/cases.tsv"
+
+[estimate]
+beta = { bounds = [0.01, 2.0] }
+
+[fixed]
+gamma = 0.3
+N0 = 1000
+
+[stages.mle]
+method = "if2"
+chains = 2
+particles = 500
+iterations = 50
+cooling = 0.7
+"#;
+        let config = parse(src).unwrap();
+        assert!(config.dangling_priors_warning().is_none(),
+            "no priors declared — nothing to warn about");
     }
 
     #[test]
