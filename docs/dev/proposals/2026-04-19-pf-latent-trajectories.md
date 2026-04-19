@@ -8,19 +8,25 @@ authors: upstream + downstream via agent-channel
 
 ## TL;DR
 
-Add two output options to the existing `camdl pfilter` subcommand:
+Add two output options to the existing `camdl pfilter` subcommand,
+with **distinct scientific purposes** (not two ways to dump the
+same thing):
 
-- `--save-paths N` — N ancestor-traced trajectory samples from the
-  smoothing distribution `p(x_{1:T} | y_{1:T}, θ)`. **This is what
-  you want for most plots.** Default recommendation.
-- `--save-filtering` — per-step filtering marginals `p(x_t | y_{1:t}, θ)`.
-  Useful for online/sequential diagnostics. Emits an info log on every
-  run explaining what this is and (more importantly) what it isn't.
+- `--save-paths N` — N ancestor-traced samples from the smoothing
+  distribution `p(x_{1:T} | y_{1:T}, θ)`. **The modeller's tool.**
+  What you plot against data to ask "does the fit explain the
+  observations?"
+- `--save-filtering` — per-step particle states + log-weights.
+  **The PF diagnostic tool.** What you reach for to check particle
+  degeneracy, obs-model sanity, filter implementation correctness.
+  Explicitly NOT a model-vs-data plotting object; emits a mandatory
+  info log on every run clarifying this.
 
-And: document the three-envelope diagnostic that the book chapter
-should use for "does the fitted model match the data?" — unconditional
-posterior predictive, smoothing over latent, and raw observations —
-with the interpretive guide for when they agree vs diverge.
+And: document the **two-panel diagnostic** the book chapter should
+use for "does the fitted model match the data?" — unconditional
+posterior predictive on one panel, smoothing over latent on the
+other, data overlaid on both. The *divergence* between the two is
+the diagnostic; neither panel alone answers the question.
 
 ## Motivation
 
@@ -202,6 +208,49 @@ Trivial.
 Default value: `--save-paths 200` is a good starting point (matches
 the replicate count already used in book-chapter forward sims).
 
+### What `--save-filtering` is actually for
+
+Filtering marginals answer "what did the filter believe about `x_t`
+after seeing `y_{1..t}`?" That question is rarely the one a modeller
+asks when comparing a fit to data — smoothing paths (§above) are
+the right answer to "what does the model think the latent
+trajectory was given all the data?"
+
+But filtering-state snapshots are genuinely useful for a separate
+class of use cases — all of them **diagnostic or debugging**, none
+of them "tell me about the latent":
+
+- **Particle degeneracy / ESS-over-time.** Watch effective sample
+  size decay across observation steps to detect the filter
+  collapsing into a small number of lineages before the end of the
+  series. Symptoms: ESS drops near zero at some `t`, then the
+  filter's log-likelihood estimate becomes noisy from that point
+  forward.
+
+- **Sequential-tightening plots.** Show how the filter's marginal
+  belief about `x_t` narrows as observations accumulate. Useful for
+  teaching what "data-conditional inference" means in the online
+  case; not the same as "does the fit match the data" (which is
+  the smoothing question).
+
+- **Debugging PF implementation correctness.** Does the filter
+  produce the right weights at step 1 under a known obs model? Are
+  resampling indices sensible? Is there numerical underflow in the
+  log-weight accumulator? Having raw per-step particle states +
+  weights is how you answer these; smoothing paths abstract the
+  machinery away.
+
+- **Observation-model sanity checks.** Plot each particle's
+  `log p(y_t | x_t^i, θ)` distribution at step `t`; a bimodal
+  distribution may indicate the obs model is picking out a small
+  subset of particles as plausible (filter working) or that the
+  obs model is too sharp / too flat (obs model mis-specified).
+
+None of these are what the book chapter wants. The chapter wants
+smoothing paths, hence `--save-paths`. `--save-filtering` is the
+tool you reach for when something is *wrong* with the PF and you
+want to see inside it.
+
 ### `--save-filtering <PATH>`: filtering marginals with a warning
 
 Semantics: at each observation step `t`, before resampling, emit a
@@ -259,16 +308,25 @@ Revisit when a concrete workflow asks for it.
 
 ### Default recommendation in `--help`
 
-The help text for `camdl pfilter` should state outright:
+The help text for `camdl pfilter` should state the distinct
+purposes of each flag rather than listing them neutrally:
 
 ```
-For plots against data, prefer --save-paths. Filtering marginals
-(--save-filtering) are rarely what you want.
+--save-paths N        Draw N trajectory samples from the smoothing
+                      distribution (ancestor tracing). For
+                      model-vs-data plots, this is what you want.
+
+--save-filtering PATH Dump per-step particle states + weights.
+                      For PF diagnostics (particle degeneracy, obs
+                      model sanity, implementation debugging). NOT
+                      a substitute for --save-paths when plotting
+                      against data.
 ```
 
-Not just list the two flags neutrally — the preference is strongly
-asymmetric for typical use, and help text is where users actually
-read.
+Asymmetric framing is deliberate. The two flags look superficially
+interchangeable ("both dump PF particles!") but serve non-
+overlapping purposes; help text is where users actually read, so
+the distinction belongs there.
 
 ### `camdl fit pfilter <fit_dir>` convenience wrapper
 
