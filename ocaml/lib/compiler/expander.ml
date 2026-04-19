@@ -1168,13 +1168,46 @@ let expand_transitions_counted ctx =
       else begin
         let src_name = Option.map (resolve_stoich_ref ctx env) tr.trsrc in
         let dst_name = Option.map (resolve_stoich_ref ctx env) tr.trdst in
-        (* Extract rate wrappers: overdispersed(rate, σ²) or deterministic(rate) *)
+        (* Extract rate wrappers: overdispersed(rate, σ²) or
+           deterministic(rate). Mismatched arg shapes are a hard
+           error (reported as C1 in the 2026-04-19 review) — before
+           this, any shape other than the exact positional form fell
+           through to `_ -> DrawPoisson`, so users who wrote
+           `overdispersed(rate=foo, sigma=bar)` or `overdispersed(foo)`
+           silently got a pure Poisson draw with no diagnostic.
+           Inference under the wrong noise model produced biased
+           posteriors; this is the "silent wrong answer" class. *)
+        let validate_draw_shape name args n_expected shape_hint =
+          Diagnostics.error ctx.diags
+            ~code:"E260"
+            ~loc:Diagnostics.no_loc
+            ~message:(Printf.sprintf
+              "%s() takes %d positional argument%s: %s"
+              name n_expected
+              (if n_expected = 1 then "" else "s") shape_hint)
+            ~hint:(Printf.sprintf
+              "saw %d argument%s%s"
+              (List.length args)
+              (if List.length args = 1 then "" else "s")
+              (if List.exists (fun (k, _) -> k <> "") args
+               then " (keyword args not supported here — use positional)"
+               else ""))
+            ()
+        in
         let raw_rate, draw_method = match tr.trrate with
           | EFuncCall ("overdispersed", [("", inner); ("", var)]) ->
             let resolved_var = normalize_expr (resolve_expr ctx env var) in
             (inner, Ir.DrawOverdispersed resolved_var)
+          | EFuncCall ("overdispersed", args) ->
+            validate_draw_shape "overdispersed" args 2
+              "overdispersed(rate, sigma_squared)";
+            (tr.trrate, Ir.DrawPoisson)
           | EFuncCall ("deterministic", [("", inner)]) ->
             (inner, Ir.DrawDeterministic)
+          | EFuncCall ("deterministic", args) ->
+            validate_draw_shape "deterministic" args 1
+              "deterministic(rate)";
+            (tr.trrate, Ir.DrawPoisson)
           | _ -> (tr.trrate, Ir.DrawPoisson)
         in
         let rate = normalize_expr (resolve_expr ctx env raw_rate) in
@@ -2031,6 +2064,49 @@ let expand_scheduled_actions ctx decls ~always_active =
       in
       let actions = match iv.ivaction with
         | ATransfer kwargs ->
+          (* Validate the kwarg shape first (C6 in the 2026-04-19
+             review). Before this, a missing/typoed `fraction` or
+             `count` silently produced `actions = []` — the
+             intervention fired on schedule and did nothing. A missing
+             `from`/`to` produced `src = "?"` / `dst = "?"` which the
+             emitted IR happily carried as a non-existent compartment
+             reference. All silent-wrong-answer class. *)
+          let has_from     = List.mem_assoc "from"     kwargs in
+          let has_to       = List.mem_assoc "to"       kwargs in
+          let has_fraction = List.mem_assoc "fraction" kwargs in
+          let has_count    = List.mem_assoc "count"    kwargs in
+          let known = ["from"; "to"; "fraction"; "count"] in
+          let unknown = List.filter_map (fun (k, _) ->
+            if k = "" || List.mem k known then None else Some k) kwargs in
+          let err code msg hint =
+            Diagnostics.error ctx.diags ~code ~loc:Diagnostics.no_loc
+              ~message:msg ~hint ()
+          in
+          if not has_from then
+            err "E261" (Printf.sprintf
+              "intervention '%s': transfer action missing `from =`" iv.ivname)
+              "example: transfer(from = S, to = V, fraction = 0.8)";
+          if not has_to then
+            err "E261" (Printf.sprintf
+              "intervention '%s': transfer action missing `to =`" iv.ivname)
+              "example: transfer(from = S, to = V, fraction = 0.8)";
+          if not (has_fraction || has_count) then
+            err "E261" (Printf.sprintf
+              "intervention '%s': transfer action needs either \
+               `fraction =` or `count =`" iv.ivname)
+              "fraction = 0.0..1.0 (relative) OR count = N (absolute)";
+          if has_fraction && has_count then
+            err "E261" (Printf.sprintf
+              "intervention '%s': transfer action has both `fraction` \
+               and `count` — these are mutually exclusive" iv.ivname)
+              "pick one: fraction for a proportion, count for an \
+               absolute number";
+          List.iter (fun k ->
+            err "E262" (Printf.sprintf
+              "intervention '%s': unknown transfer kwarg '%s'"
+              iv.ivname k)
+              "valid kwargs: from, to, fraction, count"
+          ) unknown;
           let src = match List.assoc_opt "from" kwargs with
             | Some e -> resolve_comp_name ctx env e
             | None   -> "?"
