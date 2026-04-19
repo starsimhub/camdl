@@ -124,17 +124,22 @@ fn generate_one_dataset(
     }
 
     // Compile observation samplers once per dataset. The RNG stream
-    // uses `sim_seed ^ SEED_MIX_OBS` so that observation noise is
-    // deterministic from `(sim_seed, obs_index)` alone — re-running a
-    // dataset with the same seed reproduces the same draws bit-for-bit,
-    // which is what users expect for SBC reproducibility.
+    // uses `sim_seed ^ util::SEED_MIX_OBS` so that observation noise
+    // is deterministic from `sim_seed` alone — re-running a dataset
+    // with the same seed reproduces the same draws bit-for-bit.
+    //
+    // The decorrelation constant is shared with `camdl simulate
+    // --obs-only` (main.rs), so the same nominal seed produces
+    // identical observation bytes whether generated via CLI or via
+    // the `[synthetic]` block. Diverging these constants in the past
+    // caused an SBC discrepancy that looked like a +59% β bias — see
+    // the 2026-04-18 downstream incident report.
     let compiled = Arc::new(
         CompiledModel::new(model.clone())
             .map_err(|e| format!("compile error: {:?}", e))?,
     );
     let params = compiled.default_params.clone();
-    const SEED_MIX_OBS: u64 = 0xa7c1_e890_7f2c_1d3a;
-    let mut obs_rng = StatefulRng::new(sim_seed ^ SEED_MIX_OBS);
+    let mut obs_rng = StatefulRng::new(sim_seed ^ crate::util::SEED_MIX_OBS);
 
     // Per-stream: declared times, projected values per time, drawn values.
     let mut all_times: Vec<Vec<f64>> = Vec::with_capacity(model.observations.len());

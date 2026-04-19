@@ -383,7 +383,7 @@ fn main() {
 // pairs get non-overlapping RNG streams.
 const SEED_MIX_DRAW: u64 = 0x9e3779b97f4a7c15; // golden ratio fractional bits
 const SEED_MIX_REP: u64  = 0x517cc1b727220a95; // more golden ratio mixing
-const SEED_MIX_OBS: u64  = 0xa5a5a5a5a5a5;     // obs RNG independence from process
+use util::SEED_MIX_OBS;     // canonical home: util.rs
 const SEED_MIX_UNIFORM: u64 = 0xd4a5_b1ce;      // uniform draws RNG
 const SEED_MIX_PRIOR: u64  = 0x0014_b1ce;      // prior draws RNG
 

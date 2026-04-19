@@ -248,6 +248,56 @@ sim_seeds = [10, 20]
         "summary.tsv should have 4 rows for 2×2 grid: {}", summary);
 }
 
+// ── seeding parity: --obs-only and [synthetic] must produce byte-identical
+//    data at the same nominal seed. Regression against the 2026-04-18
+//    SBC-bias discrepancy. ───────────────────────────────────────────────
+#[test]
+fn obs_only_and_synthetic_agree_byte_for_byte_at_same_seed() {
+    let Some(bin) = camdl_sim() else { return; };
+    if camdlc().is_none() { return; }
+    let tmp = tempdir("seed_parity");
+    let (ir, truth) = write_fixture(tmp.path());
+
+    // Path A: --obs-only at seed=10
+    let cli_tsv = tmp.path().join("cli.tsv");
+    let cli_status = Command::new(&bin).arg("simulate")
+        .arg(&ir)
+        .args(["--params"]).arg(&truth)
+        .args(["--seed", "10"])
+        .args(["--backend", "chain_binomial", "--dt", "1"])
+        .args(["--obs-only"]).arg(&cli_tsv)
+        .status().expect("--obs-only must invoke");
+    assert!(cli_status.success());
+
+    // Path B: [synthetic] with sim_seeds = [10]
+    let out = tmp.path().join("out");
+    let fit_toml = tmp.path().join("fit.toml");
+    std::fs::write(&fit_toml, format!(r#"
+output_dir = "{}"
+
+[model]
+camdl = "{}"
+
+[synthetic]
+true_params = "{}"
+sim_seeds = [10]
+{}
+"#, out.display(), ir.display(), truth.display(), stages_block())).unwrap();
+    run_fit(&bin, &fit_toml);
+
+    let syn_tsv = out.join("fits").join("fit").join("synthetic")
+        .join("data").join("ds_01.tsv");
+
+    let cli_bytes = std::fs::read(&cli_tsv).unwrap();
+    let syn_bytes = std::fs::read(&syn_tsv).unwrap();
+    assert_eq!(cli_bytes, syn_bytes,
+        "--obs-only (seed=N) and [synthetic] (sim_seeds=[N]) must produce \
+         byte-identical observations. Diverging these paths caused the \
+         2026-04-18 SBC-bias discrepancy. CLI:\n{}\nsynthetic:\n{}",
+        String::from_utf8_lossy(&cli_bytes),
+        String::from_utf8_lossy(&syn_bytes));
+}
+
 // ── mode 5: [data] + [synthetic] errors cleanly ───────────────────────
 #[test]
 fn data_and_synthetic_errors_cleanly() {

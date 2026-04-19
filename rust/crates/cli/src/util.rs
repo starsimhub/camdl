@@ -9,6 +9,15 @@ use sim::{
     Trajectory,
 };
 
+/// Observation RNG decorrelation mask. Any code path that samples
+/// synthetic observations on top of a simulated trajectory must seed
+/// its observation RNG with `process_seed ^ SEED_MIX_OBS` so that the
+/// obs stream is independent of the process stream. Shared between
+/// `camdl simulate --obs` / `--obs-only` and the `[synthetic]` data
+/// generator in `fit run` so that the same nominal seed produces the
+/// same observation bytes regardless of which path generated them.
+pub const SEED_MIX_OBS: u64 = 0xa5a5a5a5a5a5;
+
 // ─── Experiment TOML parsing ─────────────────────────────────────────────────
 
 /// Minimal batch-TOML view needed by `voi` (the only remaining consumer
