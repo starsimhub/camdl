@@ -299,6 +299,69 @@ shows 80, both "predicted 0" and "predicted 5" are equally wrong — flooring at
 1e-18 treats them the same. Without the floor, "predicted 0" gets a 650 log-unit
 worse penalty than "predicted 5", collapsing ESS. Default matches pomp.
 
+### Filtering marginals vs smoothing paths
+
+At each observation step `t`, the bootstrap filter holds `N` particles
+weighted by `p(y_t | x_t, θ)`. Two different distributions come out of
+this setup, and conflating them produces quietly-wrong plots:
+
+- **Filtering marginals** `p(x_t | y_{1..t}, θ)` — the per-step
+  distribution of particle states at time `t`, weighted by their
+  log-weights. `camdl pfilter --save-filtering PATH` dumps these as a
+  long-format TSV. **Joining particles across `t` by index is NOT a
+  sample path.** Resampling between steps shuffles the swarm; the
+  particle indexed `i` at step `t+1` is not a descendant of particle
+  `i` at step `t`.
+
+- **Smoothing paths** — samples from `p(x_{1:T} | y_{1:T}, θ)`. Each
+  path is a coherent latent trajectory consistent with all
+  observations. Obtained via ancestor tracing: at the final step,
+  sample a particle proportional to its weight, walk its ancestor
+  chain backwards to collect the state at each earlier step.
+  `camdl pfilter --save-paths N PATH` writes `N` such paths.
+
+For **"does this fit match the data?" plots**, use `--save-paths`.
+Its quantile ribbon over `N` paths estimates the smoothing marginal
+at each `t` — what the model believes the latent trajectory was given
+all the data.
+
+For **PF diagnostics** (particle degeneracy, ESS decay, obs-model
+sanity checks, filter-implementation debugging), use
+`--save-filtering`. The per-step log-weights are what you need to
+detect those pathologies; they're not what you need to compare
+trajectories to data.
+
+### The diagnostic plot: unconditional vs smoothing
+
+A fitted stochastic compartmental model gives you three distinct
+views of the data:
+
+1. **Unconditional posterior predictive.** `camdl simulate --replicates
+   N` at the MLE. "What does the fitted model predict a priori?"
+2. **Smoothing over latent.** `camdl pfilter --save-paths N` at the
+   MLE. "What does the model think the latent trajectory was, given
+   the data?"
+3. **Raw observations.**
+
+Plot (1) and (2) as ribbons, (3) as points, side by side:
+
+- If both ribbons track the data: well-specified model, inference
+  worked.
+- If (2) tracks the data but (1) misses it: **diagnostic of over-
+  flexible process noise papering over structural mis-specification.**
+  The PF log-likelihood is high because the model is flexible enough
+  to thread through any data via stochastic fluctuations — not
+  because it predicts well.
+- If both miss the data: the fit is wrong.
+
+The second case is pedagogically important and easy to misread. A
+reader seeing (1) alone miss the data will conclude "the fit is
+bad"; a reader seeing (2) alone track the data will conclude "the
+fit is good." Neither is right. The divergence between them *is* the
+diagnostic — teach it that way.
+
+Background: `docs/dev/proposals/2026-04-19-pf-latent-trajectories.md`.
+
 ---
 
 ## IF2: turning the particle filter into an optimizer
