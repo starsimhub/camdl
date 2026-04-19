@@ -180,10 +180,11 @@ order; each is a self-contained commit.
       them as explicitly legacy (kept working, not surfaced by
       `camdl list`). Separate piece of work.
 
-- [ ] **L2 — `camdl list --kind sim|fit|fit-stage` filter**
-      Proposal commit 5 included this; we shipped fits + sims as
-      separate sections instead. Filter is ergonomic when a user
-      has hundreds of each. Easy add.
+- [x] **L2 — `camdl list --kind sim|fit|both` filter**
+      Added. `fit-stage` variant deferred (stages are surfaced by
+      `camdl fit status <fit-dir>` rather than the top-level list).
+      Integration test `list_kind_filter_isolates_sections` covers
+      both flags.
 
 - [ ] **L3 — `camdl show` / `cat` for fit dirs** (partial)
       `camdl show <fit-dir>` works via path. Short-hash prefix

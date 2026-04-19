@@ -200,6 +200,49 @@ fn list_shows_cached_runs() {
     assert!(stdout.contains("baseline"), "list should show scenario name");
 }
 
+/// `camdl list --kind fit` should hide sim rows entirely; `--kind sim`
+/// should hide fit rows. Covers cleanup.md:L2.
+#[test]
+fn list_kind_filter_isolates_sections() {
+    let Some(bin) = skip_if_missing_binary() else { return; };
+    let tmp = tempfile::tempdir().unwrap();
+    let output = tmp.path().join("output");
+
+    // Cache one sim.
+    Command::new(&bin)
+        .args(["simulate", &golden_sir_basic().to_string_lossy(),
+               "--scenario", "baseline", "--seed", "7", "--cas",
+               "--output-dir", &output.to_string_lossy(),
+               "-o", &tmp.path().join("t.tsv").to_string_lossy()])
+        .status().expect("spawn");
+    // Synthesise a fit.
+    let fit_dir = output.join("fits").join("demo-abc12345");
+    std::fs::create_dir_all(&fit_dir).unwrap();
+    let run_json = r#"{
+        "hash": "abc12345deadbeef0000000000000000000000000000000000000000abc12345",
+        "version":"0.1.0+test","created_at":"2026-04-19T12:00:00Z",
+        "argv":["camdl","fit","run","demo.toml"],"wall_time_seconds":1.0,
+        "kind": {"kind":"fit","model":"demo.camdl","model_hash":"m",
+        "fit_toml_path":"demo.toml","fit_toml_hash":"h",
+        "data_hashes":{},"estimated":["beta"],"fixed":{},"stages_declared":["mle"]}
+    }"#;
+    std::fs::write(fit_dir.join("run.json"), run_json).unwrap();
+
+    let fit_only = Command::new(&bin)
+        .args(["list", "--kind", "fit", &output.to_string_lossy()])
+        .output().expect("spawn");
+    let s = String::from_utf8_lossy(&fit_only.stdout);
+    assert!(s.contains("demo"), "--kind fit should show fits: {}", s);
+    assert!(!s.contains("seed_7"), "--kind fit must hide sims: {}", s);
+
+    let sim_only = Command::new(&bin)
+        .args(["list", "--kind", "sim", &output.to_string_lossy()])
+        .output().expect("spawn");
+    let s = String::from_utf8_lossy(&sim_only.stdout);
+    assert!(s.contains("seed_7"), "--kind sim should show sims: {}", s);
+    assert!(!s.contains("demo-abc12345"), "--kind sim must hide fits: {}", s);
+}
+
 /// Regression guard for the unified output tree: `camdl list` must
 /// render a fits section when `output/fits/<...>/run.json` exists,
 /// independent of whether any sim runs are cached. We synthesize a

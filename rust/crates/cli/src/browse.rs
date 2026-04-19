@@ -72,11 +72,16 @@ fn load_sim_entry(dir: &Path, cwd: &Path) -> Option<RunEntry> {
 
 // ── cmd_list ─────────────────────────────────────────────────────────────────
 
+/// `--kind` filter: which of sims / fits / both to surface.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum KindFilter { Sim, Fit, Both }
+
 pub fn cmd_list(args: &[String]) {
     let mut root = "./output".to_string();
     let mut filter_model: Option<String> = None;
     let mut filter_scenario: Option<String> = None;
     let mut filter_since: Option<std::time::Duration> = None;
+    let mut filter_kind: KindFilter = KindFilter::Both;
     let mut limit: usize = 50;
     let mut format_json = false;
     let mut show_all = false;
@@ -88,6 +93,15 @@ pub fn cmd_list(args: &[String]) {
             "--scenario" => { i += 1; filter_scenario = Some(args[i].clone()); }
             "--since"    => { i += 1; filter_since    = Some(parse_duration(&args[i]).unwrap_or_else(|e| {
                                  eprintln!("error: --since: {}", e); std::process::exit(1); })); }
+            "--kind"     => { i += 1; filter_kind = match args[i].as_str() {
+                                 "sim" | "simulate"  => KindFilter::Sim,
+                                 "fit"               => KindFilter::Fit,
+                                 "both" | "all"      => KindFilter::Both,
+                                 other => {
+                                     eprintln!("error: --kind expects sim|fit|both, got '{}'", other);
+                                     std::process::exit(1);
+                                 }
+                              }; }
             "--limit"    => { i += 1; limit = args[i].parse().unwrap_or_else(|_| {
                                  eprintln!("error: --limit needs an integer"); std::process::exit(1); }); }
             "--format"   => { i += 1; if args[i] == "json" { format_json = true; } else {
@@ -100,12 +114,20 @@ pub fn cmd_list(args: &[String]) {
         i += 1;
     }
 
-    let runs = discover_runs(&root).unwrap_or_else(|e| {
-        eprintln!("error: {}", e); std::process::exit(1);
-    });
-    let fits = discover_fits(&root).unwrap_or_else(|e| {
-        eprintln!("error: {}", e); std::process::exit(1);
-    });
+    let runs = if filter_kind == KindFilter::Fit {
+        Vec::new()
+    } else {
+        discover_runs(&root).unwrap_or_else(|e| {
+            eprintln!("error: {}", e); std::process::exit(1);
+        })
+    };
+    let fits = if filter_kind == KindFilter::Sim {
+        Vec::new()
+    } else {
+        discover_fits(&root).unwrap_or_else(|e| {
+            eprintln!("error: {}", e); std::process::exit(1);
+        })
+    };
 
     let now = SystemTime::now();
     let mut filtered_runs: Vec<RunEntry> = runs.into_iter()
@@ -161,14 +183,16 @@ fn list_help() -> ! {
     eprintln!();
     eprintln!("Options:");
     eprintln!("  --model NAME          Filter to runs whose model name contains NAME");
-    eprintln!("  --scenario NAME       Filter to runs with exact scenario name");
+    eprintln!("  --scenario NAME       Filter to sim runs with exact scenario name");
+    eprintln!("  --kind KIND           Filter by kind: sim | fit | both (default: both)");
     eprintln!("  --since DURATION      Show only runs newer than DURATION (e.g. 1h, 1d, 1w)");
-    eprintln!("  --limit N             Limit rows shown (default: 50)");
+    eprintln!("  --limit N             Limit rows shown per section (default: 50)");
     eprintln!("  --all                 Don't truncate; show every matching run");
     eprintln!("  --format json         Machine-readable output, one run.json per line");
     eprintln!();
     eprintln!("Examples:");
-    eprintln!("  camdl list                    # most recent 50 runs, table format");
+    eprintln!("  camdl list                    # most recent runs, both sections");
+    eprintln!("  camdl list --kind fit         # only fits");
     eprintln!("  camdl list --since 1h         # runs from the last hour");
     eprintln!("  camdl list --scenario baseline --all");
     std::process::exit(0);
