@@ -970,14 +970,33 @@ pub fn cmd_fit_run_v2(args: &[String]) {
                     std::process::exit(1);
                 });
 
-                // Rename pgas/ → {stage_name}/ if they differ
+                // Rename pgas/ → {stage_name}/ if they differ.
                 // PGAS runner writes to {output_dir}/pgas/. If our stage has a
                 // different name, move the output to the correct stage directory.
+                //
+                // Collision handling: previously this did a silent
+                // `remove_dir_all` on the target. Under concurrent fits
+                // against the same fit_dir, or mid-edit iteration, that
+                // silently clobbered an existing stage's results. Now
+                // we error unless `--force` is explicitly given.
+                // cleanup-proposal §ship-now/#4.
                 let pgas_dir = sweep_fit_dir.join("pgas");
                 if stage_name != &"pgas" && pgas_dir.exists() {
-                    // Remove target if it exists (stale results from a previous run)
                     if stage_dir.exists() {
-                        let _ = std::fs::remove_dir_all(&stage_dir);
+                        if !force {
+                            eprintln!("error: {} already exists. Refusing to \
+                                      overwrite a previous stage's results.",
+                                stage_dir.display());
+                            eprintln!("  Pass --force to re-run this stage, \
+                                      or remove the directory manually.");
+                            std::process::exit(1);
+                        }
+                        eprintln!("warning: --force — removing existing {}", stage_dir.display());
+                        if let Err(e) = std::fs::remove_dir_all(&stage_dir) {
+                            eprintln!("error: could not remove {}: {}",
+                                stage_dir.display(), e);
+                            std::process::exit(1);
+                        }
                     }
                     std::fs::rename(&pgas_dir, &stage_dir).unwrap_or_else(|e| {
                         eprintln!("error: could not rename pgas/ to {}: {}", stage_name, e);
