@@ -37,6 +37,8 @@ pub fn cmd_pfilter(args: &[String]) {
     let mut obs_name: Option<String> = None; // --obs NAME → select observation block
     let mut save_final_state: Option<String> = None;
     let mut n_replicates = 1_usize;
+    let mut save_paths: Option<(usize, String)> = None;
+    let mut save_filtering: Option<String> = None;
 
     let mut i = 0;
     while i < args.len() {
@@ -63,6 +65,23 @@ pub fn cmd_pfilter(args: &[String]) {
             "--obs"       => { i += 1; obs_name = Some(args[i].clone()); }
             "--flow"      => { i += 1; flow_name = Some(args[i].clone()); }
             "--save-final-state" => { i += 1; save_final_state = Some(args[i].clone()); }
+            "--save-paths" => {
+                // Two-argument form: --save-paths N PATH.TSV. N is
+                // the number of trajectory samples from the smoothing
+                // distribution; PATH is where to write them.
+                i += 1;
+                let n: usize = args[i].parse().unwrap_or_else(|_| {
+                    eprintln!("error: --save-paths needs an integer count (got '{}')", args[i]);
+                    std::process::exit(1);
+                });
+                i += 1;
+                let path = args.get(i).cloned().unwrap_or_else(|| {
+                    eprintln!("error: --save-paths needs both N and a PATH");
+                    std::process::exit(1);
+                });
+                save_paths = Some((n, path));
+            }
+            "--save-filtering" => { i += 1; save_filtering = Some(args[i].clone()); }
             "--param"     => {
                 i += 1;
                 let kv = &args[i];
@@ -73,7 +92,18 @@ pub fn cmd_pfilter(args: &[String]) {
             }
             s if s.starts_with("--") => {
                 eprintln!("unknown flag: {}", s);
-                eprintln!("usage: camdl pfilter MODEL --params P.toml --data cases.tsv --particles 5000 --dt 1.0 --seed 1");
+                eprintln!();
+                eprintln!("usage: camdl pfilter MODEL --params P.toml --data cases.tsv \\");
+                eprintln!("         --particles 5000 --dt 1.0 --seed 1");
+                eprintln!();
+                eprintln!("Latent-trajectory outputs (see docs/dev/proposals/2026-04-19-pf-latent-trajectories.md):");
+                eprintln!("  --save-paths N PATH      Draw N trajectory samples from the smoothing");
+                eprintln!("                           distribution (ancestor tracing). For model-vs-data");
+                eprintln!("                           plots, this is what you want.");
+                eprintln!("  --save-filtering PATH    Dump per-step particle states + weights. For PF");
+                eprintln!("                           diagnostics (particle degeneracy, obs sanity,");
+                eprintln!("                           implementation debugging). NOT a substitute for");
+                eprintln!("                           --save-paths when plotting against data.");
                 std::process::exit(1);
             }
             path => { ir_path = Some(path.to_string()); }
@@ -206,13 +236,29 @@ pub fn cmd_pfilter(args: &[String]) {
         compiled.clone(),
     );
 
+    // Record ancestry when either --save-paths or --save-filtering is
+    // active. Both flags consume the same per-step snapshot data; the
+    // difference is only in what we write to disk at the end.
+    let need_ancestry = save_paths.is_some() || save_filtering.is_some();
     let smc_config = SMCConfig {
         n_particles,
         dt,
         t_start: compiled.model.simulation.t_start,
         skip_first_obs_from_loglik: false,
-            record_ancestry: false,
+        record_ancestry: need_ancestry,
     };
+
+    // --save-filtering caveat log. Fires unconditionally (not quietable)
+    // because the failure mode — plotting filtering marginals as if
+    // they were smoothing paths — is silent. See
+    // docs/dev/proposals/2026-04-19-pf-latent-trajectories.md.
+    if save_filtering.is_some() {
+        eprintln!("[info] --save-filtering emits filtering marginals \
+                   p(x_t | y_{{1..t}}), not smoothing paths. Joining \
+                   particles across time by index does NOT yield \
+                   trajectory samples from the posterior. For coherent \
+                   sample paths use --save-paths N PATH.");
+    }
 
     // ── Replicates mode: run N independent pfilters, output loglik summary ──
     if n_replicates > 1 {
@@ -311,6 +357,33 @@ pub fn cmd_pfilter(args: &[String]) {
             });
             eprintln!("final particle states ({} particles) written to {}", states.len(), path);
         }
+    }
+
+    // Save smoothing paths (--save-paths N PATH): ancestor-trace
+    // N trajectory samples from the smoothing distribution.
+    if let Some((n_paths, ref path)) = save_paths {
+        let trace = result.ancestry.as_ref().expect(
+            "record_ancestry must be true when save_paths is set");
+        let paths = sim::inference::ancestor_trace::sample_paths(
+            trace, n_paths, seed);
+        write_paths_tsv(path, &paths, &model).unwrap_or_else(|e| {
+            eprintln!("error writing paths: {}", e);
+            std::process::exit(1);
+        });
+        eprintln!("{} sample paths written to {}", n_paths, path);
+    }
+
+    // Save filtering marginals (--save-filtering PATH): per-step
+    // pre-resample particle states + log-weights. Caveat log fired
+    // earlier at SMCConfig construction.
+    if let Some(ref path) = save_filtering {
+        let trace = result.ancestry.as_ref().expect(
+            "record_ancestry must be true when save_filtering is set");
+        write_filtering_tsv(path, trace, &model).unwrap_or_else(|e| {
+            eprintln!("error writing filtering: {}", e);
+            std::process::exit(1);
+        });
+        eprintln!("filtering marginals written to {}", path);
     }
 
     // Write loglik
@@ -456,6 +529,79 @@ fn write_final_states(
         writeln!(f).unwrap();
     }
 
+    Ok(())
+}
+
+/// Write ancestor-traced smoothing paths as a long-format TSV.
+/// Schema matches `camdl simulate --replicates N` for pipeline reuse:
+/// columns `path`, `time`, and one column per integer compartment.
+/// Each `path ∈ 1..=N` is an equally-weighted sample from the
+/// smoothing distribution; no log_weight column needed.
+fn write_paths_tsv(
+    path: &str,
+    paths: &[sim::inference::ancestor_trace::SampledPath],
+    model: &ir::Model,
+) -> Result<(), String> {
+    let mut f = std::fs::File::create(path)
+        .map_err(|e| format!("cannot create {}: {}", path, e))?;
+
+    write!(f, "path\ttime").unwrap();
+    let comp_names: Vec<&str> = model.compartments.iter()
+        .filter(|c| c.kind == ir::model::CompartmentKind::Integer)
+        .map(|c| c.name.as_str())
+        .collect();
+    for name in &comp_names {
+        write!(f, "\t{}", name).unwrap();
+    }
+    writeln!(f).unwrap();
+
+    for (i, p) in paths.iter().enumerate() {
+        for (t_idx, &obs_t) in p.obs_times.iter().enumerate() {
+            write!(f, "{}\t{}", i + 1, obs_t).unwrap();
+            // Only the first n_comp_names columns of the state are
+            // integer compartments; the PF records all state counts,
+            // but we present only the public compartments.
+            for k in 0..comp_names.len() {
+                write!(f, "\t{}", p.states[t_idx][k]).unwrap();
+            }
+            writeln!(f).unwrap();
+        }
+    }
+    Ok(())
+}
+
+/// Write filtering marginals as a long-format TSV. Schema:
+/// `time`, `particle`, one column per integer compartment, and
+/// `log_weight`. `particle` is an in-step index only — it is NOT
+/// stable across `time`, and joining particles across `time` by
+/// index is NOT a sample path.
+fn write_filtering_tsv(
+    path: &str,
+    trace: &sim::inference::ancestor_trace::AncestorTrace,
+    model: &ir::Model,
+) -> Result<(), String> {
+    let mut f = std::fs::File::create(path)
+        .map_err(|e| format!("cannot create {}: {}", path, e))?;
+
+    write!(f, "time\tparticle").unwrap();
+    let comp_names: Vec<&str> = model.compartments.iter()
+        .filter(|c| c.kind == ir::model::CompartmentKind::Integer)
+        .map(|c| c.name.as_str())
+        .collect();
+    for name in &comp_names {
+        write!(f, "\t{}", name).unwrap();
+    }
+    writeln!(f, "\tlog_weight").unwrap();
+
+    for (t_idx, &obs_t) in trace.obs_times.iter().enumerate() {
+        for (i, state) in trace.states[t_idx].iter().enumerate() {
+            write!(f, "{}\t{}", obs_t, i + 1).unwrap();
+            for k in 0..comp_names.len() {
+                write!(f, "\t{}", state[k]).unwrap();
+            }
+            writeln!(f, "\t{:.6}", trace.log_weights[t_idx][i]).unwrap();
+        }
+    }
     Ok(())
 }
 
