@@ -993,13 +993,6 @@ pub fn write_chain_outputs(
         let mut f = std::fs::File::create(&trace_path)
             .map_err(|e| format!("cannot write {}: {}", trace_path, e))?;
         writeln!(f, "# {}", crate::version::VERSION).unwrap();
-        // Document iter 0 semantics explicitly — it's AFTER the first
-        // filter pass with perturbed params, not the chain's pre-filter
-        // initial state. The pre-filter init is in chain_starts.tsv at
-        // the stage root.
-        writeln!(f, "# iteration 0 = filter-mean params AFTER the first IF2 pass").unwrap();
-        writeln!(f, "# (already perturbed once). Chain pre-filter starts are in").unwrap();
-        writeln!(f, "# ../chain_starts.tsv — use that for 'did chains span the bounds?'").unwrap();
         write!(f, "iteration\tloglik\tif2_perturbed_loglik").unwrap();
         for spec in if2_params { write!(f, "\t{}", spec.name).unwrap(); }
         writeln!(f).unwrap();
