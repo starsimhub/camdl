@@ -39,15 +39,34 @@ pub fn output_root(cli: Option<&str>, config: Option<&str>) -> PathBuf {
 /// `batch.rs`'s sweep-point path assembly.
 pub fn sim_run_dir(
     root: &Path,
+    model_stem: Option<&str>,
     sim_hash: &str,
     scenario: &str,
     scen_hash: &str,
     seed: u64,
 ) -> PathBuf {
-    root.join("sims")
-        .join(&sim_hash[..8.min(sim_hash.len())])
-        .join(format!("{}-{}", slug(scenario), &scen_hash[..8.min(scen_hash.len())]))
-        .join(format!("seed_{}", seed))
+    root.join("sims").join(sim_run_rel(model_stem, sim_hash, scenario, scen_hash, seed))
+}
+
+/// Relative path under `<root>/sims/` for a single simulate run.
+/// Shared between [`sim_run_dir`] (filesystem target) and callers that
+/// need a display string (e.g. `cached: sir_basic-abc/baseline-def/seed_1`
+/// stderr log, `RunEntry::run_path` in the batch manifest). Keeping the
+/// two return forms on the same helper prevents the display string from
+/// drifting out of sync with the write path.
+pub fn sim_run_rel(
+    model_stem: Option<&str>,
+    sim_hash: &str,
+    scenario: &str,
+    scen_hash: &str,
+    seed: u64,
+) -> String {
+    let hash_prefix = &sim_hash[..8.min(sim_hash.len())];
+    let head = match model_stem {
+        Some(s) if !s.is_empty() => format!("{}-{}", s, hash_prefix),
+        _ => hash_prefix.to_string(),
+    };
+    format!("{}/{}-{}/seed_{}", head, slug(scenario), &scen_hash[..8.min(scen_hash.len())], seed)
 }
 
 /// Directory for obs draws derived from a simulate run. Obs is a
@@ -58,14 +77,22 @@ pub fn sim_obs_dir(run_dir: &Path, obs_hash: &str, obs_seed: u64) -> PathBuf {
     run_dir.join("obs").join(format!("{}-{}", &obs_hash[..8.min(obs_hash.len())], obs_seed))
 }
 
-/// Top-level directory for a fit. Commit 4 will switch writes to
-/// this path (replacing today's `results/fits/<config-stem>/`).
+/// Top-level directory for a fit.
 ///
-/// ```text
-/// <root>/fits/<fit_hash[:8]>/
-/// ```
-pub fn fit_run_dir(root: &Path, fit_hash: &str) -> PathBuf {
-    root.join("fits").join(&fit_hash[..8.min(fit_hash.len())])
+/// With `fit_toml_stem = None`:       `<root>/fits/<fit_hash[:8]>/`
+/// With `fit_toml_stem = Some("01")`: `<root>/fits/01-<fit_hash[:8]>/`
+///
+/// The stem (basename of fit.toml, slugified) is what users see in
+/// `ls output/fits/`. The content hash follows as a suffix so two
+/// configs that share a name but differ in content get distinct dirs
+/// — the hash is the authoritative key.
+pub fn fit_run_dir(root: &Path, fit_toml_stem: Option<&str>, fit_hash: &str) -> PathBuf {
+    let hash_prefix = &fit_hash[..8.min(fit_hash.len())];
+    let dirname = match fit_toml_stem {
+        Some(s) if !s.is_empty() => format!("{}-{}", s, hash_prefix),
+        _ => hash_prefix.to_string(),
+    };
+    root.join("fits").join(dirname)
 }
 
 /// Where a fit's dataset sits. `Real` fits have a single dataset,
@@ -92,7 +119,7 @@ pub enum FitSource {
 /// synthetic/ds_NN/fit_<seed>/                   # SBC-style cell
 /// ```
 pub fn fit_cell_dir(root: &Path, fit_hash: &str, source: FitSource, fit_seed: u64) -> PathBuf {
-    let base = fit_run_dir(root, fit_hash);
+    let base = fit_run_dir(root, None, fit_hash);
     match source {
         FitSource::Real =>
             base.join("real").join(format!("fit_{}", fit_seed)),
@@ -142,17 +169,35 @@ mod tests {
 
     #[test]
     fn sim_run_dir_layout() {
-        let p = sim_run_dir(Path::new("/out"), "abcdef1234567890", "baseline",
+        let p = sim_run_dir(Path::new("/out"), None, "abcdef1234567890", "baseline",
             "deadbeef1234", 42);
         assert_eq!(p, Path::new("/out/sims/abcdef12/baseline-deadbeef/seed_42"));
     }
 
     #[test]
     fn sim_run_dir_slugifies_scenario() {
-        let p = sim_run_dir(Path::new("/out"), "aaaaaaaa", "With SIA!",
+        let p = sim_run_dir(Path::new("/out"), None, "aaaaaaaa", "With SIA!",
             "bbbbbbbb", 1);
         assert!(p.to_str().unwrap().contains("/with_sia_-"),
             "scenario must be slugified: {}", p.display());
+    }
+
+    #[test]
+    fn sim_run_dir_with_stem_prefix() {
+        let p = sim_run_dir(Path::new("/out"), Some("sir_basic"), "abcdef1234",
+            "baseline", "deadbeef", 1);
+        assert_eq!(p, Path::new("/out/sims/sir_basic-abcdef12/baseline-deadbeef/seed_1"));
+    }
+
+    #[test]
+    fn sim_run_rel_matches_sim_run_dir_tail() {
+        // The relative form must equal the last three path segments of
+        // the filesystem form — otherwise display strings drift from
+        // write paths.
+        let root = Path::new("/tmp/out");
+        let dir = sim_run_dir(root, Some("foo"), "abcdef1234", "s", "beefface", 9);
+        let rel = sim_run_rel(Some("foo"), "abcdef1234", "s", "beefface", 9);
+        assert_eq!(dir, root.join("sims").join(&rel));
     }
 
     #[test]
@@ -163,9 +208,15 @@ mod tests {
     }
 
     #[test]
-    fn fit_run_dir_uses_hash_prefix() {
-        let p = fit_run_dir(Path::new("/out"), "deadbeef00000000");
+    fn fit_run_dir_hash_only() {
+        let p = fit_run_dir(Path::new("/out"), None, "deadbeef00000000");
         assert_eq!(p, Path::new("/out/fits/deadbeef"));
+    }
+
+    #[test]
+    fn fit_run_dir_with_stem() {
+        let p = fit_run_dir(Path::new("/out"), Some("01"), "deadbeef00000000");
+        assert_eq!(p, Path::new("/out/fits/01-deadbeef"));
     }
 
     #[test]
@@ -198,7 +249,7 @@ mod tests {
         // accidentally passes a short hash, the slice should still
         // work (not panic) so we don't turn a hash-bug into a
         // crash-bug.
-        let p = fit_run_dir(Path::new("/out"), "abc");
+        let p = fit_run_dir(Path::new("/out"), None, "abc");
         assert_eq!(p, Path::new("/out/fits/abc"));
     }
 }

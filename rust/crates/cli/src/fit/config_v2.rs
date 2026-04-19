@@ -713,13 +713,11 @@ impl FitConfigV2 {
     /// [`fit_content_hash`]. Recognisable directory names, content-
     /// addressable cache keys, no silent overwrites.
     pub fn fit_dir(&self, config_path: &str) -> Result<PathBuf, String> {
-        let stem = crate::hashing::path_stem_slug(config_path)
-            .unwrap_or_else(|| "fit".to_string());
+        let stem = crate::hashing::path_stem_slug(config_path);
         let hash = self.fit_content_hash(config_path)?;
-        let output_root = self.output_dir.as_deref().unwrap_or("output");
-        Ok(PathBuf::from(output_root)
-            .join("fits")
-            .join(format!("{}-{}", stem, &hash[..8.min(hash.len())])))
+        let output_root = crate::run_paths::output_root(
+            None, self.output_dir.as_deref());
+        Ok(crate::run_paths::fit_run_dir(&output_root, stem.as_deref(), &hash))
     }
 
     /// Output directory for a specific stage.

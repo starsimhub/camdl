@@ -1063,10 +1063,13 @@ fn prepare_cas_ctx(
     let scen_h = hashing::scen_hash(&enable, &disable, &scen_params);
     let scenario_display = scenario_name.clone().unwrap_or_else(|| "baseline".to_string());
     let model_stem = hashing::path_stem_slug(&run.ir_path);
-    let relative = cas::run_path_relative(
-        &sim_h, model_stem.as_deref(), &scenario_display, &enable, &disable, &scen_params, seed,
+    let relative = run_paths::sim_run_rel(
+        model_stem.as_deref(), &sim_h, &scenario_display, &scen_h, seed,
     );
-    let run_dir = cas::run_dir(std::path::Path::new(cas_root), &relative);
+    let run_dir = run_paths::sim_run_dir(
+        std::path::Path::new(cas_root), model_stem.as_deref(),
+        &sim_h, &scenario_display, &scen_h, seed,
+    );
 
     let run_h = hashing::run_hash(&sim_h, &scen_h, seed);
     let run_record = run_meta::Run {

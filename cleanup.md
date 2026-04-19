@@ -33,7 +33,7 @@ order; each is a self-contained commit.
 
 ## Code smells / dead code
 
-- [ ] **S1 — `run_paths` module has zero production callers**
+- [x] **S1 — `run_paths` module has zero production callers**
       `sim_run_dir`, `fit_run_dir`, `fit_cell_dir`, `fit_stage_dir`
       are tested but never called from the binary. The actual path
       assembly lives in `cas::run_path_relative` + `FitConfigV2::fit_dir`.
@@ -49,7 +49,7 @@ order; each is a self-contained commit.
       which checks file existence, not hash. Unify, or at minimum make
       sim cache check hash-aware.
 
-- [ ] **S3 — Dead `ObsMeta` in `cas.rs`**
+- [x] **S3 — Dead `ObsMeta` in `cas.rs`**
       `pub struct ObsMeta` + `pub fn write_obs_meta` have zero callers
       anywhere. `obs.json` is referenced in doc comments and
       `has_cached_obs`, but never written. Pre-existing — delete as
@@ -68,7 +68,7 @@ order; each is a self-contained commit.
       documentation, or remove `stage_hash` from `FitStageMeta`.
       Either is fine, pick one and comment.
 
-- [ ] **S7 — Three output_root resolvers still**
+- [x] **S7 — Three output_root resolvers still**
       `run_paths::output_root` exists and is tested, but `FitConfigV2`
       and `batch.rs` each resolve `output_dir` with their own inline
       `unwrap_or_else(|| "output".to_string())`. Route through the

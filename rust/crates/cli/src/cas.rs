@@ -27,53 +27,7 @@
 //! the trajectory cache key is `(sim_hash, scen_hash, seed)`; the obs cache
 //! key is `(trajectory, obs_hash, obs_seed)`.
 
-use std::collections::HashMap;
-use std::path::{Path, PathBuf};
-use serde::{Serialize, Deserialize};
-
-use crate::hashing::{scen_hash, slug};
-
-/// Build the canonical relative run path.
-///
-/// With `model_stem = None`:   `{sim_hash[:8]}/{scenario_slug}-{scen_hash[:8]}/seed_{n}`
-/// With `model_stem = Some(s)`: `{s}-{sim_hash[:8]}/{scenario_slug}-{scen_hash[:8]}/seed_{n}`
-///
-/// The optional model stem (typically the basename of the `.camdl` file,
-/// slugified via [`hashing::path_stem_slug`]) lets `ls output/sims/` surface
-/// recognisable names alongside their content hashes. The hash still fully
-/// discriminates — two models with the same stem but different content
-/// land in different directories.
-///
-/// `sim_hash` must be the full 64-char hex string from `hashing::sim_hash`.
-pub fn run_path_relative(
-    sim_hash: &str,
-    model_stem: Option<&str>,
-    scenario_name: &str,
-    enable: &[String],
-    disable: &[String],
-    params: &HashMap<String, f64>,
-    seed: u64,
-) -> String {
-    let sh = scen_hash(enable, disable, params);
-    let hash_prefix = &sim_hash[..8.min(sim_hash.len())];
-    let head = match model_stem {
-        Some(s) if !s.is_empty() => format!("{}-{}", s, hash_prefix),
-        _ => hash_prefix.to_string(),
-    };
-    format!("{}/{}-{}/seed_{}", head, slug(scenario_name), &sh[..8], seed)
-}
-
-/// Absolute path to the simulate run directory for a given root and
-/// relative path.
-///
-/// E.g. `run_dir(Path::new("./output"), "abc12345/baseline-def45678/seed_42")`
-/// → `./output/sims/abc12345/baseline-def45678/seed_42`.
-///
-/// Before 2026-04-19 this was `./output/runs/…`; the rename unifies
-/// the path vocabulary with fits which live at `./output/fits/…`.
-pub fn run_dir(root: &Path, relative: &str) -> PathBuf {
-    root.join("sims").join(relative)
-}
+use std::path::Path;
 
 /// Does this run have a cached trajectory?
 pub fn has_cached_traj(run_dir: &Path) -> bool {
@@ -81,7 +35,7 @@ pub fn has_cached_traj(run_dir: &Path) -> bool {
 }
 
 /// Obs directory for a given (obs_hash, obs_seed) pair, relative to a run dir.
-pub fn obs_dir(run_dir: &Path, obs_hash: &str, obs_seed: u64) -> PathBuf {
+pub fn obs_dir(run_dir: &Path, obs_hash: &str, obs_seed: u64) -> std::path::PathBuf {
     run_dir.join("obs").join(format!("{}-{}", &obs_hash[..8], obs_seed))
 }
 
@@ -90,28 +44,6 @@ pub fn obs_dir(run_dir: &Path, obs_hash: &str, obs_seed: u64) -> PathBuf {
 /// or may not be present depending on the model).
 pub fn has_cached_obs(run_dir: &Path, obs_hash: &str, obs_seed: u64) -> bool {
     obs_dir(run_dir, obs_hash, obs_seed).join("obs.json").exists()
-}
-
-// ─── Metadata types ──────────────────────────────────────────────────────────
-
-/// Metadata written to `obs/{obs_hash}-{obs_seed}/obs.json`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ObsMeta {
-    pub obs_hash: String,
-    pub obs_seed: u64,
-    pub streams: Vec<String>,
-    pub layout: ObsLayout,
-    pub version: String,
-    pub created_at: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum ObsLayout {
-    /// Single wide TSV with all streams as columns.
-    Wide,
-    /// One TSV per stream (`{stream}.tsv`).
-    PerStream,
 }
 
 // ─── Run buffer: accumulator for --cas trajectory bytes ────────────────────
@@ -153,13 +85,6 @@ pub fn write_traj(run_dir: &Path, content: &str) -> std::io::Result<()> {
 
 pub fn read_traj(run_dir: &Path) -> std::io::Result<String> {
     std::fs::read_to_string(run_dir.join("traj.tsv"))
-}
-
-pub fn write_obs_meta(obs_dir: &Path, meta: &ObsMeta) -> std::io::Result<()> {
-    std::fs::create_dir_all(obs_dir)?;
-    let json = serde_json::to_string_pretty(meta)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
-    std::fs::write(obs_dir.join("obs.json"), json)
 }
 
 // ─── ISO-8601 timestamp helper ───────────────────────────────────────────────
@@ -204,47 +129,6 @@ fn civil_from_secs(secs: i64) -> (i32, u32, u32, u32, u32, u32) {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn run_path_format_is_stable() {
-        let params: HashMap<String, f64> = HashMap::new();
-        let path = run_path_relative(
-            "abc12345000000000000000000000000000000000000000000000000",
-            None,
-            "baseline",
-            &[],
-            &[],
-            &params,
-            42,
-        );
-        // sim_hash 8-char prefix + scen_slug + scen_hash 8-char prefix + seed
-        assert!(path.starts_with("abc12345/baseline-"));
-        assert!(path.ends_with("/seed_42"));
-    }
-
-    #[test]
-    fn run_path_slugifies_scenario() {
-        let params: HashMap<String, f64> = HashMap::new();
-        let sim = "a".repeat(64);
-        let path = run_path_relative(&sim, None, "With SIA!", &[], &[], &params, 1);
-        assert!(path.contains("/with_sia_-"), "got: {}", path);
-    }
-
-    #[test]
-    fn run_path_uses_model_stem_prefix() {
-        let params: HashMap<String, f64> = HashMap::new();
-        let sim = "a".repeat(64);
-        let path = run_path_relative(&sim, Some("sir_basic"), "baseline", &[], &[], &params, 1);
-        assert!(path.starts_with("sir_basic-aaaaaaaa/"), "got: {}", path);
-    }
-
-    #[test]
-    fn run_path_empty_stem_falls_back_to_hash_only() {
-        let params: HashMap<String, f64> = HashMap::new();
-        let sim = "b".repeat(64);
-        let path = run_path_relative(&sim, Some(""), "baseline", &[], &[], &params, 1);
-        assert!(path.starts_with("bbbbbbbb/"), "got: {}", path);
-    }
 
     #[test]
     fn has_cached_traj_detects_file() {

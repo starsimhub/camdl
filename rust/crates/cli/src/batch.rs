@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize};
 use rayon::prelude::*;
 
 use crate::util::{run_simulation, write_traj_tsv, load_params_toml, resolve_ir_path, SimRun};
-use crate::hashing::{model_hash, sim_hash, scen_hash, canonical_params, slug};
+use crate::hashing::{model_hash, sim_hash, scen_hash, canonical_params};
 use crate::sampling::{generate_design, DesignParam, PriorSpec};
 use crate::cas;
 use crate::version;
@@ -269,10 +269,10 @@ pub fn plan_runs(
     sweep_points: &[HashMap<String, f64>],
     seeds: &[u64],
     shash: &str,
+    model_stem: Option<&str>,
     runs_dir: &str,
     force: bool,
 ) -> Vec<RunPlan> {
-    let sim_hash_8 = &shash[..8];
     let effective_points: &[HashMap<String, f64>] = if sweep_points.is_empty() {
         &[HashMap::new()]
     } else {
@@ -287,9 +287,14 @@ pub fn plan_runs(
             merged_params.extend(sweep.iter().map(|(k, v)| (k.clone(), *v)));
 
             let sc_hash = scen_hash(&sc.enable, &sc.disable, &merged_params);
-            let sc_slug = slug(&sc.name);
             for &seed in seeds {
-                let run_path = format!("{}/{}-{}/seed_{}", sim_hash_8, sc_slug, &sc_hash[..8], seed);
+                // `runs_dir` is already the `<root>/sims` subtree; the
+                // `sim_run_rel` helper produces the trailing three-segment
+                // relative path (stem-<sim_hash>/slug-<scen_hash>/seed_N)
+                // and stays byte-identical to the single-run --cas path.
+                let run_path = crate::run_paths::sim_run_rel(
+                    model_stem, shash, &sc.name, &sc_hash, seed,
+                );
                 let run_dir  = format!("{}/{}", runs_dir, run_path);
                 let traj_exists = std::path::Path::new(&format!("{}/traj.tsv", run_dir)).exists();
                 let decision = if !force && traj_exists {
@@ -520,7 +525,9 @@ pub fn cmd_batch_run(args: &[String]) {
     // fs writes. plan_runs only probes file existence — it's safe to
     // run before we create the output dir, which matters for --dry-run:
     // a dry run must not touch the filesystem.
-    let plans = plan_runs(&scenarios, &sweep_points, &seeds, &shash, &runs_dir, force);
+    let model_stem = crate::hashing::path_stem_slug(&ir_path_resolved);
+    let plans = plan_runs(&scenarios, &sweep_points, &seeds, &shash,
+        model_stem.as_deref(), &runs_dir, force);
     let total = plans.len();
 
     if dry_run {
@@ -786,7 +793,9 @@ fn run_design_experiment(
 
         // Annotate each point with its index for run.json
         let sweep_points = &design_result.points;
-        let plans = plan_runs(&scenarios, sweep_points, &seeds, shash, &runs_dir, force);
+        let design_stem = crate::hashing::path_stem_slug(ir_path);
+        let plans = plan_runs(&scenarios, sweep_points, &seeds, shash,
+            design_stem.as_deref(), &runs_dir, force);
         let total = plans.len();
         let counter = Arc::new(AtomicUsize::new(0));
 
@@ -940,7 +949,9 @@ pub fn cmd_batch_status(args: &[String]) {
                 let seeds   = exp.config.seeds.resolve().unwrap_or_default();
                 let sweep_points = expand_sweep(&exp.sweep);
                 let runs_dir = format!("{}/sims", output_dir);
-                let plans   = plan_runs(&scenarios, &sweep_points, &seeds, &shash, &runs_dir, false);
+                let cache_stem = crate::hashing::path_stem_slug(&exp.config.model);
+                let plans   = plan_runs(&scenarios, &sweep_points, &seeds, &shash,
+                    cache_stem.as_deref(), &runs_dir, false);
                 let live_hits = plans.iter().filter(|p| p.decision == RunDecision::CacheHit).count();
                 println!("  Live count: {}/{} traj.tsv files present", live_hits, plans.len());
             }
@@ -1143,7 +1154,7 @@ mod tests {
     fn all_miss_on_empty_dir() {
         let dir = tempfile::tempdir().unwrap();
         let plans = plan_runs(&[sc("baseline"), sc("with_sia")], &no_sweep(), &[1, 2, 3],
-            "aaaa1111bbbb2222", dir.path().to_str().unwrap(), false);
+            "aaaa1111bbbb2222", None, dir.path().to_str().unwrap(), false);
         assert_eq!(plans.len(), 6);
         assert!(plans.iter().all(|p| p.decision == RunDecision::CacheMiss));
     }
@@ -1153,10 +1164,10 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let runs_dir = dir.path().to_str().unwrap();
         // First pass to learn the path
-        let plans = plan_runs(&[sc("baseline")], &no_sweep(), &[1, 2], "aaaa1111bbbb2222", runs_dir, false);
+        let plans = plan_runs(&[sc("baseline")], &no_sweep(), &[1, 2], "aaaa1111bbbb2222", None, runs_dir, false);
         seed_traj(&plans[0].run_dir); // seed 1 only
         // Re-classify
-        let plans = plan_runs(&[sc("baseline")], &no_sweep(), &[1, 2], "aaaa1111bbbb2222", runs_dir, false);
+        let plans = plan_runs(&[sc("baseline")], &no_sweep(), &[1, 2], "aaaa1111bbbb2222", None, runs_dir, false);
         assert_eq!(plans[0].decision, RunDecision::CacheHit,  "seed 1 should be a hit");
         assert_eq!(plans[1].decision, RunDecision::CacheMiss, "seed 2 should be a miss");
     }
@@ -1165,9 +1176,9 @@ mod tests {
     fn force_ignores_existing_traj() {
         let dir = tempfile::tempdir().unwrap();
         let runs_dir = dir.path().to_str().unwrap();
-        let plans = plan_runs(&[sc("baseline")], &no_sweep(), &[1], "aaaa1111bbbb2222", runs_dir, false);
+        let plans = plan_runs(&[sc("baseline")], &no_sweep(), &[1], "aaaa1111bbbb2222", None, runs_dir, false);
         seed_traj(&plans[0].run_dir);
-        let plans = plan_runs(&[sc("baseline")], &no_sweep(), &[1], "aaaa1111bbbb2222", runs_dir, true);
+        let plans = plan_runs(&[sc("baseline")], &no_sweep(), &[1], "aaaa1111bbbb2222", None, runs_dir, true);
         assert_eq!(plans[0].decision, RunDecision::CacheMiss);
     }
 
@@ -1178,10 +1189,10 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let runs_dir = dir.path().to_str().unwrap();
         // Populate under old sim_hash
-        let old = plan_runs(&[sc("baseline")], &no_sweep(), &[1, 2], "aaaa1111bbbb2222", runs_dir, false);
+        let old = plan_runs(&[sc("baseline")], &no_sweep(), &[1, 2], "aaaa1111bbbb2222", None, runs_dir, false);
         for p in &old { seed_traj(&p.run_dir); }
         // New sim_hash → different tier, all miss
-        let new = plan_runs(&[sc("baseline")], &no_sweep(), &[1, 2], "cccc3333dddd4444", runs_dir, false);
+        let new = plan_runs(&[sc("baseline")], &no_sweep(), &[1, 2], "cccc3333dddd4444", None, runs_dir, false);
         assert!(new.iter().all(|p| p.decision == RunDecision::CacheMiss));
         // Old paths unchanged
         for p in &old {
@@ -1197,11 +1208,11 @@ mod tests {
         let runs_dir = dir.path().to_str().unwrap();
         let scenarios = vec![sc("baseline"), sc_enable("with_sia", &["sia_r1"])];
         // Populate all runs
-        let plans = plan_runs(&scenarios, &no_sweep(), &[1], "aaaa1111bbbb2222", runs_dir, false);
+        let plans = plan_runs(&scenarios, &no_sweep(), &[1], "aaaa1111bbbb2222", None, runs_dir, false);
         for p in &plans { seed_traj(&p.run_dir); }
         // Change only with_sia's enable list
         let new_scenarios = vec![sc("baseline"), sc_enable("with_sia", &["sia_r1", "sia_r2"])];
-        let new = plan_runs(&new_scenarios, &no_sweep(), &[1], "aaaa1111bbbb2222", runs_dir, false);
+        let new = plan_runs(&new_scenarios, &no_sweep(), &[1], "aaaa1111bbbb2222", None, runs_dir, false);
         let baseline = new.iter().find(|p| p.scenario == "baseline").unwrap();
         let with_sia = new.iter().find(|p| p.scenario == "with_sia").unwrap();
         assert_eq!(baseline.decision, RunDecision::CacheHit,  "baseline must be reused");
@@ -1213,10 +1224,10 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let runs_dir = dir.path().to_str().unwrap();
         let scenarios = vec![sc("baseline"), sc_params("variant", &[("vacc_frac", 0.7)])];
-        let plans = plan_runs(&scenarios, &no_sweep(), &[1], "aaaa1111bbbb2222", runs_dir, false);
+        let plans = plan_runs(&scenarios, &no_sweep(), &[1], "aaaa1111bbbb2222", None, runs_dir, false);
         for p in &plans { seed_traj(&p.run_dir); }
         let new_scenarios = vec![sc("baseline"), sc_params("variant", &[("vacc_frac", 0.9)])];
-        let new = plan_runs(&new_scenarios, &no_sweep(), &[1], "aaaa1111bbbb2222", runs_dir, false);
+        let new = plan_runs(&new_scenarios, &no_sweep(), &[1], "aaaa1111bbbb2222", None, runs_dir, false);
         assert_eq!(new.iter().find(|p| p.scenario == "baseline").unwrap().decision, RunDecision::CacheHit);
         assert_eq!(new.iter().find(|p| p.scenario == "variant").unwrap().decision, RunDecision::CacheMiss);
     }
@@ -1228,10 +1239,10 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let runs_dir = dir.path().to_str().unwrap();
         // Populate seeds 1-3
-        let plans = plan_runs(&[sc("baseline")], &no_sweep(), &[1, 2, 3], "aaaa1111bbbb2222", runs_dir, false);
+        let plans = plan_runs(&[sc("baseline")], &no_sweep(), &[1, 2, 3], "aaaa1111bbbb2222", None, runs_dir, false);
         for p in &plans { seed_traj(&p.run_dir); }
         // Extend to seeds 1-5
-        let plans = plan_runs(&[sc("baseline")], &no_sweep(), &[1, 2, 3, 4, 5], "aaaa1111bbbb2222", runs_dir, false);
+        let plans = plan_runs(&[sc("baseline")], &no_sweep(), &[1, 2, 3, 4, 5], "aaaa1111bbbb2222", None, runs_dir, false);
         let (hits, misses): (Vec<_>, Vec<_>) = plans.iter()
             .partition(|p| p.decision == RunDecision::CacheHit);
         assert_eq!(hits.len(), 3,   "seeds 1-3 must be reused");
@@ -1245,7 +1256,7 @@ mod tests {
     #[test]
     fn run_path_format() {
         let dir = tempfile::tempdir().unwrap();
-        let plans = plan_runs(&[sc("with sia!")], &no_sweep(), &[42], "aaaa1111bbbb2222", dir.path().to_str().unwrap(), false);
+        let plans = plan_runs(&[sc("with sia!")], &no_sweep(), &[42], "aaaa1111bbbb2222", None, dir.path().to_str().unwrap(), false);
         // sim_hash_8 / slug-scen_hash_8 / seed_N
         let parts: Vec<&str> = plans[0].run_path.splitn(3, '/').collect();
         assert_eq!(parts[0], "aaaa1111",            "sim_hash_8");
@@ -1260,8 +1271,8 @@ mod tests {
         // for semantically identical runs.
         let dir = tempfile::tempdir().unwrap();
         let runs_dir = dir.path().to_str().unwrap();
-        let p1 = plan_runs(&[sc_enable("old_name", &["sia"])], &no_sweep(), &[1], "aaaa1111bbbb2222", runs_dir, false);
-        let p2 = plan_runs(&[sc_enable("new_name", &["sia"])], &no_sweep(), &[1], "aaaa1111bbbb2222", runs_dir, false);
+        let p1 = plan_runs(&[sc_enable("old_name", &["sia"])], &no_sweep(), &[1], "aaaa1111bbbb2222", None, runs_dir, false);
+        let p2 = plan_runs(&[sc_enable("new_name", &["sia"])], &no_sweep(), &[1], "aaaa1111bbbb2222", None, runs_dir, false);
         // Slugs differ but scen_hash_8 (embedded in dir name) is identical
         let hash1: &str = p1[0].run_path.splitn(3, '/').nth(1).unwrap().splitn(2, '-').nth(1).unwrap();
         let hash2: &str = p2[0].run_path.splitn(3, '/').nth(1).unwrap().splitn(2, '-').nth(1).unwrap();
@@ -1317,8 +1328,8 @@ mod tests {
         let runs_dir = dir.path().to_str().unwrap();
         let pt1 = sweep1(&[("vacc_eff", 0.3)]);
         let pt2 = sweep1(&[("vacc_eff", 0.7)]);
-        let p1 = plan_runs(&[sc("baseline")], &pt1, &[1], "aaaa1111bbbb2222", runs_dir, false);
-        let p2 = plan_runs(&[sc("baseline")], &pt2, &[1], "aaaa1111bbbb2222", runs_dir, false);
+        let p1 = plan_runs(&[sc("baseline")], &pt1, &[1], "aaaa1111bbbb2222", None, runs_dir, false);
+        let p2 = plan_runs(&[sc("baseline")], &pt2, &[1], "aaaa1111bbbb2222", None, runs_dir, false);
         // Different sweep values → different scen_hash → different directories
         assert_ne!(p1[0].run_path, p2[0].run_path, "distinct sweep points must produce distinct paths");
     }
@@ -1333,7 +1344,7 @@ mod tests {
         let points = expand_sweep(&sweep);
         // 5 sweep × 2 scenarios × 3 seeds = 30
         let plans = plan_runs(&[sc("baseline"), sc("with_sia")], &points, &[1, 2, 3],
-            "aaaa1111bbbb2222", dir.path().to_str().unwrap(), false);
+            "aaaa1111bbbb2222", None, dir.path().to_str().unwrap(), false);
         assert_eq!(plans.len(), 30);
     }
 }
