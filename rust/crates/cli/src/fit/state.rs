@@ -28,6 +28,29 @@ pub struct FitState {
     /// Overall acceptance rate of the best chain (PGAS/PMMH only).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub acceptance_rate: Option<f64>,
+
+    /// Per-parameter tail-Rhat (last half of iterations). Populated at
+    /// end-of-stage so downstream stages (notably refine) can gate on
+    /// scout's convergence without re-running. Absent in legacy
+    /// fit_state.toml files — downstream readers must treat absence as
+    /// "unknown, proceed with warning," not "converged."
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub tail_rhat: HashMap<String, f64>,
+
+    /// Names of estimated parameters declared `ivp = true`. Refine's
+    /// Rhat gate exempts these — IVP parameters are expected to be
+    /// harder to identify and shouldn't block the pipeline when
+    /// structural convergence is fine. Stored here (not re-derived
+    /// from fit.toml in the downstream) so the two can't drift.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub ivp_params: Vec<String>,
+
+    /// Per-chain final log-likelihoods (the full distribution behind
+    /// `best_loglik`). Refine's post-run loglik-regression gate uses
+    /// the spread to compute its tolerance ε. Short vector; cheap to
+    /// serialise.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub chain_logliks: Vec<f64>,
 }
 
 impl FitState {

@@ -14,7 +14,10 @@ const REFINE_PARTICLES: usize = 1000;
 const REFINE_ITERATIONS: usize = 50;
 const REFINE_COOLING: f64 = 0.05; // cf50: 5% at halfway, 0.25% at end — converge to MLE
 
-pub fn run_refine(fit: &FitToml, starts_from: &str, seed: u64, force: bool) -> Result<(), String> {
+pub fn run_refine(
+    fit: &FitToml, starts_from: &str, seed: u64, force: bool,
+    allow_nonconverged_scout: bool,
+) -> Result<(), String> {
     let stage_dir = format!("{}/refine", fit.fit.output_dir);
     let rc = fit.refine.as_ref();
 
@@ -35,6 +38,38 @@ pub fn run_refine(fit: &FitToml, starts_from: &str, seed: u64, force: bool) -> R
     eprintln!("refine: starting from {} (loglik={:.1}, {} good chains)",
         starts_from, prior_state.best_loglik,
         prior_state.n_good_chains.unwrap_or(prior_state.n_chains));
+
+    // Gate 1: scout tail-Rhat convergence. See
+    // docs/dev/proposals/2026-04-19-refine-gates-scout-convergence.md.
+    match crate::fit::gating::check_scout_convergence(&prior_state) {
+        crate::fit::gating::ScoutGateVerdict::Ok => {}
+        crate::fit::gating::ScoutGateVerdict::SoftWarn { param_rhats } => {
+            eprintln!("\x1b[33m  warning:\x1b[0m scout tail-Rhat is in the 1.05–1.10 \
+                       grey zone for: {}",
+                param_rhats.iter()
+                    .map(|(n, r)| format!("{} (Rhat={:.2})", n, r))
+                    .collect::<Vec<_>>().join(", "));
+            eprintln!("  proceeding with refine, but scout's convergence is \
+                       weaker than ideal — inspect results carefully.");
+        }
+        crate::fit::gating::ScoutGateVerdict::Hard { failing, all_structural, ivp, loglik_spread } => {
+            let msg = crate::fit::gating::format_hard_verdict(
+                &failing, &all_structural, &ivp,
+                loglik_spread, prior_state.best_loglik,
+                None,
+            );
+            if allow_nonconverged_scout {
+                eprintln!("\x1b[33m  warning:\x1b[0m {}", msg);
+                eprintln!("\n  --allow-nonconverged-scout: proceeding anyway.");
+            } else {
+                return Err(msg);
+            }
+        }
+    }
+    // Snapshot scout's chain logliks + best for the post-refine Gate 2
+    // check. Even if Gate 1 was overridden, Gate 2 still fires.
+    let scout_best_loglik = prior_state.best_loglik;
+    let scout_chain_logliks = prior_state.chain_logliks.clone();
 
     let mut config = FitRunConfig::build(
         fit, Some(&prior_state),
@@ -73,6 +108,17 @@ pub fn run_refine(fit: &FitToml, starts_from: &str, seed: u64, force: bool) -> R
     let t0 = std::time::Instant::now();
     let chain_results = runner::run_chains_with_diagnostics(&config, &collector);
     let elapsed = t0.elapsed();
+
+    // Gate 2: refine must not regress below scout. Not overridable —
+    // if this fires, refine landed in a worse basin than scout had
+    // found, which is a run-time pipeline failure rather than a
+    // user-facing choice. Fail before writing any "refine completed"
+    // artefact so the filesystem matches the actual truth of the run.
+    crate::fit::gating::check_loglik_regression(
+        scout_best_loglik,
+        chain_results.best_loglik,
+        &scout_chain_logliks,
+    )?;
 
     // Check convergence
     let all_converged = chain_results.rhat.values().all(|&r| r < 1.1);
@@ -116,6 +162,11 @@ pub fn run_refine(fit: &FitToml, starts_from: &str, seed: u64, force: bool) -> R
         }
     };
 
+    let refine_chain_logliks: Vec<f64> = chain_results.results.iter()
+        .map(|(_, r)| r.final_loglik).collect();
+    let refine_ivp_params: Vec<String> = config.estimated_params.iter()
+        .filter(|p| p.ivp).map(|p| p.name.clone()).collect();
+
     let state = FitState {
         stage: "refine".into(),
         seed,
@@ -131,6 +182,9 @@ pub fn run_refine(fit: &FitToml, starts_from: &str, seed: u64, force: bool) -> R
         rw_sd,
         loglik_type: Some("if2".into()),
         acceptance_rate: None,
+        tail_rhat: chain_results.rhat.clone(),
+        ivp_params: refine_ivp_params,
+        chain_logliks: refine_chain_logliks,
     };
     state.save(&stage_dir)?;
 

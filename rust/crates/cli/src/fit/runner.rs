@@ -1435,6 +1435,9 @@ cooling = 0.5
             rw_sd: HashMap::new(),
             loglik_type: Some("if2".into()),
             acceptance_rate: None,
+            tail_rhat: HashMap::new(),
+            ivp_params: Vec::new(),
+            chain_logliks: Vec::new(),
         };
 
         let config = FitRunConfig::build(

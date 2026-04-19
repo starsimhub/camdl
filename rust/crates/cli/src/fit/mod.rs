@@ -26,6 +26,7 @@ pub mod pgas;
 pub mod trace_writer;
 pub mod synthetic;
 pub mod summary;
+pub mod gating;
 
 use config::FitToml;
 
@@ -57,6 +58,7 @@ pub fn cmd_fit_scout(args: &[String]) {
 pub fn cmd_fit_refine(args: &[String]) {
     let (fit, seed, force) = parse_fit_args(args, true);
     let starts_from = parse_starts_from(args);
+    let allow_nonconverged_scout = args.iter().any(|a| a == "--allow-nonconverged-scout");
 
     let (model, _) = load_model_for_validation(&fit);
     let model_params: Vec<String> = model.parameters.iter().map(|p| p.name.clone()).collect();
@@ -65,10 +67,11 @@ pub fn cmd_fit_refine(args: &[String]) {
         std::process::exit(1);
     });
 
-    refine::run_refine(&fit, &starts_from, seed, force).unwrap_or_else(|e| {
-        eprintln!("error: {}", e);
-        std::process::exit(1);
-    });
+    refine::run_refine(&fit, &starts_from, seed, force, allow_nonconverged_scout)
+        .unwrap_or_else(|e| {
+            eprintln!("error: {}", e);
+            std::process::exit(1);
+        });
 }
 
 #[allow(dead_code)]
@@ -274,6 +277,7 @@ pub fn cmd_fit_run_v2(args: &[String]) {
     let mut starts_from_override: Option<String> = None;
     let mut has_seed_flag = false;
     let mut sweep_args: Vec<String> = Vec::new();
+    let mut allow_nonconverged_scout = false;
 
     let mut i = 0;
     while i < args.len() {
@@ -283,6 +287,7 @@ pub fn cmd_fit_run_v2(args: &[String]) {
             "--stage" => { i += 1; stage_filter = Some(args[i].clone()); }
             "--starts-from" => { i += 1; starts_from_override = Some(args[i].clone()); }
             "--sweep" => { i += 1; sweep_args.push(args[i].clone()); }
+            "--allow-nonconverged-scout" => { allow_nonconverged_scout = true; }
             "--resume" => {
                 eprintln!("error: --resume is not yet implemented for `camdl fit run`.");
                 eprintln!("  Use the legacy `camdl fit pgas` or `camdl fit pmmh` with --resume.");
@@ -653,6 +658,44 @@ pub fn cmd_fit_run_v2(args: &[String]) {
                     state::FitState::load(dir).ok()
                 });
 
+                // Gate 1 — pre-stage: if this stage consumes a prior
+                // stage (starts_from), refuse to run when the prior
+                // stage's tail-Rhat failed convergence on any
+                // non-IVP param. Skipped when starts_from is absent
+                // (this stage is itself the scout). Overridable via
+                // --allow-nonconverged-scout. See proposal
+                // docs/dev/proposals/2026-04-19-refine-gates-scout-convergence.md.
+                let (scout_best_for_gate2, scout_chain_logliks_for_gate2):
+                    (Option<f64>, Vec<f64>) = match prior_state.as_ref() {
+                    Some(ps) => {
+                        use gating::ScoutGateVerdict;
+                        match gating::check_scout_convergence(ps) {
+                            ScoutGateVerdict::Ok => {}
+                            ScoutGateVerdict::SoftWarn { param_rhats } => {
+                                eprintln!("\x1b[33m  warning:\x1b[0m prior stage tail-Rhat in \
+                                           1.05–1.10 grey zone for: {}",
+                                    param_rhats.iter()
+                                        .map(|(n, r)| format!("{} (Rhat={:.2})", n, r))
+                                        .collect::<Vec<_>>().join(", "));
+                            }
+                            ScoutGateVerdict::Hard { failing, all_structural, ivp, loglik_spread } => {
+                                let msg = gating::format_hard_verdict(
+                                    &failing, &all_structural, &ivp,
+                                    loglik_spread, ps.best_loglik, None);
+                                if allow_nonconverged_scout {
+                                    eprintln!("\x1b[33m  warning:\x1b[0m {}", msg);
+                                    eprintln!("\n  --allow-nonconverged-scout: proceeding anyway.");
+                                } else {
+                                    eprintln!("error: {}", msg);
+                                    std::process::exit(1);
+                                }
+                            }
+                        }
+                        (Some(ps.best_loglik), ps.chain_logliks.clone())
+                    }
+                    None => (None, Vec::new()),
+                };
+
                 let run_config = runner::FitRunConfig::build(
                     &sweep_legacy,
                     prior_state.as_ref(),
@@ -688,6 +731,23 @@ pub fn cmd_fit_run_v2(args: &[String]) {
                 let chain_results = runner::run_chains_with_per_chain_params(
                     &run_config, per_chain_params.as_deref(), &collector);
                 let elapsed = t0.elapsed();
+
+                // Gate 2 — post-stage: refine must not regress below
+                // scout's best. Not overridable — a regression is a
+                // pipeline failure regardless of user preference.
+                // Fires only when a prior stage was consumed (scout→
+                // refine handoff). Fails before writing any
+                // "stage completed" artefacts so the filesystem tells
+                // the truth.
+                if let Some(scout_best) = scout_best_for_gate2 {
+                    if let Err(msg) = gating::check_loglik_regression(
+                        scout_best, chain_results.best_loglik,
+                        &scout_chain_logliks_for_gate2,
+                    ) {
+                        eprintln!("error: {}", msg);
+                        std::process::exit(1);
+                    }
+                }
 
                 // Write outputs
                 let param_names: Vec<String> = model.parameters.iter().map(|p| p.name.clone()).collect();
@@ -738,6 +798,11 @@ pub fn cmd_fit_run_v2(args: &[String]) {
                     rw_sd,
                     loglik_type: Some("if2".into()),
                     acceptance_rate: None,
+                    tail_rhat: chain_results.rhat.clone(),
+                    ivp_params: run_config.estimated_params.iter()
+                        .filter(|p| p.ivp).map(|p| p.name.clone()).collect(),
+                    chain_logliks: chain_results.results.iter()
+                        .map(|(_, r)| r.final_loglik).collect(),
                 };
                 fit_state.save(&stage_dir.to_string_lossy()).unwrap_or_else(|e| {
                     eprintln!("warning: could not save fit_state: {}", e);

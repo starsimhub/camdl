@@ -473,6 +473,11 @@ pub fn run_pmmh_cli(
         rw_sd: HashMap::new(),
         loglik_type: Some("marginal".into()),
         acceptance_rate: Some(map_result.acceptance_rate),
+        // Bayesian stages don't produce an IF2-style Rhat table; the
+        // refine-gates proposal only gates on scout→refine handoffs.
+        tail_rhat: HashMap::new(),
+        ivp_params: Vec::new(),
+        chain_logliks: Vec::new(),
     };
     state.save(&stage_dir)?;
 

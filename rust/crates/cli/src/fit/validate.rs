@@ -215,6 +215,11 @@ pub fn run_validate(fit: &FitToml, starts_from: &str, seed: u64, force: bool) ->
         rw_sd,
         loglik_type: Some("if2".into()),
         acceptance_rate: None,
+        tail_rhat: chain_results.rhat.clone(),
+        ivp_params: config.estimated_params.iter()
+            .filter(|p| p.ivp).map(|p| p.name.clone()).collect(),
+        chain_logliks: chain_results.results.iter()
+            .map(|(_, r)| r.final_loglik).collect(),
     };
     state.save(&stage_dir)?;
 

@@ -141,6 +141,14 @@ pub fn run_scout(fit: &FitToml, seed: u64, force: bool) -> Result<(), String> {
     let initial_loglik = runner::run_quick_pfilter(&config, &config.base_params, n_particles, seed);
     eprintln!("  initial loglik: {:.1}", initial_loglik);
 
+    // Per-chain final loglik + IVP param names, for Gate 2 and the
+    // IVP exemption in Gate 1 of refine's convergence check. See
+    // docs/dev/proposals/2026-04-19-refine-gates-scout-convergence.md.
+    let chain_logliks: Vec<f64> = chain_results.results.iter()
+        .map(|(_, r)| r.final_loglik).collect();
+    let ivp_params: Vec<String> = config.estimated_params.iter()
+        .filter(|p| p.ivp).map(|p| p.name.clone()).collect();
+
     // Write fit_state.toml
     let state = FitState {
         stage: "scout".into(),
@@ -157,6 +165,9 @@ pub fn run_scout(fit: &FitToml, seed: u64, force: bool) -> Result<(), String> {
         rw_sd: HashMap::new(),
         loglik_type: Some("if2".into()),
         acceptance_rate: None,
+        tail_rhat: chain_results.rhat.clone(),
+        ivp_params,
+        chain_logliks,
     };
     state.save(&stage_dir)?;
 
