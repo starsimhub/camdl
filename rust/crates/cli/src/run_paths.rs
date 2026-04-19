@@ -17,7 +17,12 @@ use crate::hashing::slug;
 /// `--output-dir`, fit.toml `output_dir`, or batch.toml `output_dir`
 /// — in that precedence order. Callers should resolve via
 /// [`output_root`] so the three entry points can't drift.
-pub const DEFAULT_OUTPUT_ROOT: &str = "output";
+/// Default output root. `results/` pairs with `data/` in the research-
+/// workflow vocabulary the project's downstream users (book chapters,
+/// vignettes) already speak. Was briefly `output/` during the
+/// 2026-04-19 unification; reverted per the post-ship review's
+/// naming argument — see hardening proposal §ship-now/#7.
+pub const DEFAULT_OUTPUT_ROOT: &str = "results";
 
 /// Resolve the output root from the three places a user can set it.
 /// CLI override wins; then config-file value; else default.
@@ -160,7 +165,9 @@ mod tests {
 
     #[test]
     fn output_root_precedence() {
-        assert_eq!(output_root(None, None), PathBuf::from("output"));
+        assert_eq!(output_root(None, None), PathBuf::from(DEFAULT_OUTPUT_ROOT));
+        assert_eq!(DEFAULT_OUTPUT_ROOT, "results",
+            "default output root is 'results/' (pairs with 'data/')");
         assert_eq!(output_root(None, Some("results")), PathBuf::from("results"));
         assert_eq!(output_root(Some("/tmp/abc"), None), PathBuf::from("/tmp/abc"));
         // CLI wins over config.

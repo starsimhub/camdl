@@ -44,7 +44,8 @@ pub fn parse_experiment_toml(src: &str) -> Result<ExperimentInfo, String> {
         .map_err(|e| format!("batch TOML parse error: {}", e))?;
 
     Ok(ExperimentInfo {
-        output_dir: doc.config.output_dir.unwrap_or_else(|| "output".to_string()),
+        output_dir: doc.config.output_dir.unwrap_or_else(
+            || crate::run_paths::DEFAULT_OUTPUT_ROOT.to_string()),
     })
 }
 

@@ -649,7 +649,8 @@ impl FitConfigV2 {
         Ok(FitToml {
             fit: FitSection {
                 model: self.model.camdl.clone(),
-                output_dir: self.output_dir.clone().unwrap_or_else(|| "output".to_string()),
+                output_dir: self.output_dir.clone().unwrap_or_else(
+                    || crate::run_paths::DEFAULT_OUTPUT_ROOT.to_string()),
                 seed: None,
                 scenario: self.scenario.clone(),
                 enable: self.enable.clone(),

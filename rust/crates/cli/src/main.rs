@@ -134,8 +134,8 @@ fn simulate_help() -> ! {
     eprintln!("  -o, --output FILE         Write trajectory to file (default: stdout)");
     eprintln!("  --parallel N              Concurrent runs (single-run + --cas)");
     eprintln!("  --dry-run                 Show resolved parameters and run plan, don't simulate");
-    eprintln!("  --cas                     Cache output under {}/runs/.../seed_<n>/ (single-run only)", d("./output"));
-    eprintln!("  --output-dir DIR          Root for --cas output (default: ./output)");
+    eprintln!("  --cas                     Cache output under {}/sims/.../seed_<n>/ (single-run only)", d("./results"));
+    eprintln!("  --output-dir DIR          Root for --cas output (default: ./results)");
     eprintln!("  --force                   Re-run cached results");
     std::process::exit(0);
 }
@@ -165,10 +165,10 @@ fn fit_help() -> ! {
     eprintln!("  camdl fit run fits/01.toml --sweep \"rho=0.5,0.1,0.02\"");
     eprintln!();
     eprintln!("  {}", d("# Seed from a previous fit's results"));
-    eprintln!("  camdl fit run fits/02.toml --starts-from output/fits/01-<hash>/real/fit_1/mle");
+    eprintln!("  camdl fit run fits/02.toml --starts-from results/fits/01-<hash>/real/fit_1/mle");
     eprintln!();
     eprintln!("  {}", d("# Check what's done"));
-    eprintln!("  camdl fit status output/fits/01-<hash>");
+    eprintln!("  camdl fit status results/fits/01-<hash>");
     eprintln!();
     eprintln!("  {}", d("# See what changed between two configs"));
     eprintln!("  camdl fit diff fits/01.toml fits/02.toml");
@@ -553,7 +553,8 @@ fn run_simulate(args: &[String]) {
             std::process::exit(1);
         }
     }
-    let cas_root = output_dir_arg.clone().unwrap_or_else(|| "output".to_string());
+    let cas_root = output_dir_arg.clone()
+        .unwrap_or_else(|| run_paths::DEFAULT_OUTPUT_ROOT.to_string());
 
     let base_sim_run = util::SimRun {
         ir_path: ir_path.clone(),

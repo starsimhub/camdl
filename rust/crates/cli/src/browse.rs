@@ -1,7 +1,7 @@
 //! `camdl list`, `camdl show`, `camdl cat` — browse the content-addressable
 //! store written by `camdl simulate --cas` and `camdl simulate --batch`.
 //!
-//! All three walk `./output/runs/` by default. For alpha, walk is
+//! All three walk `./results/sims/` by default. For alpha, walk is
 //! unindexed — fast enough for thousands of runs. A persistent index
 //! can be added later if needed.
 
@@ -77,7 +77,7 @@ fn load_sim_entry(dir: &Path, cwd: &Path) -> Option<RunEntry> {
 enum KindFilter { Sim, Fit, Both }
 
 pub fn cmd_list(args: &[String]) {
-    let mut root = "./output".to_string();
+    let mut root = format!("./{}", crate::run_paths::DEFAULT_OUTPUT_ROOT);
     let mut filter_model: Option<String> = None;
     let mut filter_scenario: Option<String> = None;
     let mut filter_since: Option<std::time::Duration> = None;
@@ -179,7 +179,7 @@ fn list_help() -> ! {
     eprintln!();
     eprintln!("Usage:  camdl list [OUTPUT-DIR] [OPTIONS]");
     eprintln!();
-    eprintln!("OUTPUT-DIR defaults to ./output");
+    eprintln!("OUTPUT-DIR defaults to ./results");
     eprintln!();
     eprintln!("Options:");
     eprintln!("  --model NAME          Filter to runs whose model name contains NAME");
@@ -211,7 +211,8 @@ pub fn cmd_show(args: &[String]) {
         std::process::exit(if args.is_empty() { 1 } else { 0 });
     }
     let key = &args[0];
-    let root = args.get(1).cloned().unwrap_or_else(|| "./output".to_string());
+    let root = args.get(1).cloned()
+        .unwrap_or_else(|| format!("./{}", crate::run_paths::DEFAULT_OUTPUT_ROOT));
 
     let entry = match resolve_any(&root, key) {
         Ok(Resolved::Fit(f)) => { show_fit(&f); return; }
@@ -277,7 +278,7 @@ pub fn cmd_cat(args: &[String]) {
     }
     let mut key: Option<String> = None;
     let mut obs_stream: Option<String> = None;
-    let mut root = "./output".to_string();
+    let mut root = format!("./{}", crate::run_paths::DEFAULT_OUTPUT_ROOT);
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
