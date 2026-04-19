@@ -1,7 +1,12 @@
 ---
-status: proposal
+status: implemented
 date: 2026-04-19
 authors: upstream + downstream via agent-channel
+shipped:
+  - e38a845  feat(sim): ancestor-trace primitive + opt-in PF recording
+  - bbfa193  feat(cli): --save-paths + --save-filtering flags
+  - 9bdab82  test(cli): pfilter integration tests
+  - b226ad0  docs(inference): filtering-vs-smoothing + diagnostic plot
 ---
 
 # Expose PF latent trajectories + clarify the right "does model fit data?" comparison
