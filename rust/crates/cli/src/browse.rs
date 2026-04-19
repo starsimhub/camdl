@@ -11,15 +11,25 @@ use std::time::SystemTime;
 
 use owo_colors::OwoColorize;
 
-use crate::cas::{read_run_meta, RunMeta};
+use crate::run_meta::{Run, RunKind, SimulateMeta};
 use crate::util::fmt_relative_time;
 
 // ── Entry types ──────────────────────────────────────────────────────────────
 
-/// A discovered cached run.
+/// A discovered cached simulate run. The surrounding `output/sims/` walk
+/// guarantees every entry's kind is `Simulate`, so we destructure at
+/// discovery and hold the `SimulateMeta` directly for field-access
+/// ergonomics (this struct predates the unified `Run`; rather than
+/// switch every `entry.meta.seed` call site to pattern-match, we keep
+/// the flat view here and leave the full `Run` record available for
+/// JSON output).
 #[derive(Debug, Clone)]
 struct RunEntry {
-    meta: RunMeta,
+    /// The full Run record as loaded from run.json.
+    run: Run,
+    /// Destructured Simulate payload (duplicates `run.kind` — stored
+    /// alongside for direct field access without repeated matches).
+    meta: SimulateMeta,
     /// Absolute path to the `seed_{n}/` directory.
     abs_path: PathBuf,
     /// Path relative to the current working directory, copy-paste ready.
@@ -29,6 +39,27 @@ struct RunEntry {
     created: SystemTime,
     /// Size of `traj.tsv` in bytes.
     traj_bytes: u64,
+}
+
+/// Try to load a simulate run from a directory. Returns None if the
+/// directory has no run.json, the JSON is malformed, or the Run is not
+/// of kind Simulate (e.g. a fit/fit-stage run.json accidentally walked).
+fn load_sim_entry(dir: &Path, cwd: &Path) -> Option<RunEntry> {
+    let run = Run::read(dir).ok()?;
+    let meta = match &run.kind {
+        RunKind::Simulate(m) => m.clone(),
+        _ => return None,
+    };
+    let traj_bytes = std::fs::metadata(dir.join("traj.tsv"))
+        .map(|m| m.len()).unwrap_or(0);
+    let created = parse_iso8601(&run.created_at)
+        .unwrap_or_else(|| std::fs::metadata(dir)
+            .and_then(|m| m.modified())
+            .unwrap_or(SystemTime::UNIX_EPOCH));
+    let rel_path = pathdiff_str(dir, cwd);
+    Some(RunEntry {
+        run, meta, abs_path: dir.to_path_buf(), rel_path, created, traj_bytes,
+    })
 }
 
 // ── cmd_list ─────────────────────────────────────────────────────────────────
@@ -139,10 +170,10 @@ pub fn cmd_show(args: &[String]) {
     println!("  scen {}", entry.meta.scen_hash.dimmed());
     println!("  model {}", entry.meta.model_hash.dimmed());
     println!("{}", "created".bright_black());
-    println!("  {}  ({})", entry.meta.created_at, fmt_relative_time(entry.created, SystemTime::now()));
-    println!("{}", "version".bright_black()); println!("  {}", entry.meta.version);
+    println!("  {}  ({})", entry.run.created_at, fmt_relative_time(entry.created, SystemTime::now()));
+    println!("{}", "version".bright_black()); println!("  {}", entry.run.version);
     println!("{}", "argv".bright_black());
-    println!("  {}", entry.meta.argv.join(" "));
+    println!("  {}", entry.run.argv.join(" "));
     println!("{}", "trajectory".bright_black());
     println!("  {} bytes", entry.traj_bytes);
 }
@@ -257,17 +288,8 @@ fn discover_runs(root: &str) -> Result<Vec<RunEntry>, String> {
                     for seed in seeds.flatten() {
                         let seed_path = seed.path();
                         if !seed_path.is_dir() { continue; }
-                        if let Ok(meta) = read_run_meta(&seed_path) {
-                            let traj_bytes = std::fs::metadata(seed_path.join("traj.tsv"))
-                                .map(|m| m.len()).unwrap_or(0);
-                            let created = parse_iso8601(&meta.created_at)
-                                .unwrap_or_else(|| std::fs::metadata(&seed_path)
-                                    .and_then(|m| m.modified())
-                                    .unwrap_or(SystemTime::UNIX_EPOCH));
-                            let rel_path = pathdiff_str(&seed_path, &cwd);
-                            out.push(RunEntry {
-                                meta, abs_path: seed_path, rel_path, created, traj_bytes,
-                            });
+                        if let Some(entry) = load_sim_entry(&seed_path, &cwd) {
+                            out.push(entry);
                         }
                     }
                 }
@@ -286,16 +308,11 @@ fn resolve_run(root: &str, key: &str) -> Result<RunEntry, String> {
     // If the key is an existing directory, use it directly.
     let as_path = Path::new(key);
     if as_path.is_dir() && as_path.join("run.json").exists() {
-        let meta = read_run_meta(as_path)
-            .map_err(|e| format!("cannot read run.json: {}", e))?;
-        let traj_bytes = std::fs::metadata(as_path.join("traj.tsv"))
-            .map(|m| m.len()).unwrap_or(0);
-        let created = parse_iso8601(&meta.created_at).unwrap_or(SystemTime::UNIX_EPOCH);
         let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-        let rel_path = pathdiff_str(as_path, &cwd);
-        return Ok(RunEntry {
-            meta, abs_path: as_path.to_path_buf(), rel_path, created, traj_bytes,
-        });
+        return load_sim_entry(as_path, &cwd)
+            .ok_or_else(|| format!(
+                "run.json at {} is not a simulate run (or is unreadable)",
+                as_path.display()));
     }
 
     // Otherwise treat as sim_hash prefix (optionally "prefix/scenario" or
@@ -389,7 +406,7 @@ fn model_display_name(path: &str) -> String {
 
 fn print_json(runs: &[RunEntry]) {
     for r in runs {
-        let json = serde_json::to_string(&r.meta).unwrap_or_default();
+        let json = serde_json::to_string(&r.run).unwrap_or_default();
         println!("{}", json);
     }
 }
@@ -398,7 +415,7 @@ fn print_json(runs: &[RunEntry]) {
 /// Empty `sweep_point` → em-dash placeholder. Non-empty → sorted-by-key
 /// `name=value` pairs separated by spaces, truncated to `max_len` with
 /// an ellipsis.
-fn format_params_summary(meta: &RunMeta, max_len: usize) -> String {
+fn format_params_summary(meta: &SimulateMeta, max_len: usize) -> String {
     if meta.sweep_point.is_empty() { return "—".to_string(); }
     let mut pairs: Vec<(&String, &f64)> = meta.sweep_point.iter().collect();
     pairs.sort_by_key(|(k, _)| k.as_str());
@@ -579,30 +596,30 @@ mod tests {
         assert_eq!(format_num(1e-10), "1.00e-10"); // scientific for tiny
     }
 
-    #[test]
-    fn format_params_summary_empty_and_populated() {
-        use crate::cas::RunMeta;
-        let base = RunMeta {
+    fn sample_sim_meta() -> SimulateMeta {
+        SimulateMeta {
             model: "m".into(), model_hash: "".into(), scenario: "".into(),
             sim_hash: "".into(), scen_hash: "".into(), seed: 0,
             backend: "gillespie".into(), dt: 1.0,
-            version: "".into(), created_at: "".into(), argv: vec![],
             sweep_point: HashMap::new(),
-        };
+        }
+    }
+
+    #[test]
+    fn format_params_summary_empty_and_populated() {
+        let base = sample_sim_meta();
         assert_eq!(format_params_summary(&base, 30), "—");
 
         let mut sp = HashMap::new();
         sp.insert("beta".to_string(), 0.3);
         sp.insert("gamma".to_string(), 0.1);
-        let meta = RunMeta { sweep_point: sp, ..base.clone() };
+        let meta = SimulateMeta { sweep_point: sp, ..base.clone() };
         let s = format_params_summary(&meta, 30);
-        // Sorted by key: beta then gamma
         assert_eq!(s, "beta=0.3 gamma=0.1");
 
-        // Truncation: force a long param name
         let mut sp = HashMap::new();
         sp.insert("very_long_parameter_name".to_string(), 0.12345);
-        let meta = RunMeta { sweep_point: sp, ..base };
+        let meta = SimulateMeta { sweep_point: sp, ..base };
         let s = format_params_summary(&meta, 15);
         assert!(s.ends_with('…'), "should truncate with ellipsis: {}", s);
         assert_eq!(s.chars().count(), 15);
@@ -610,42 +627,37 @@ mod tests {
 
     #[test]
     fn resolve_run_roundtrip() {
-        use crate::cas::{RunMeta, write_run_meta};
         let tmp = tempfile::tempdir().unwrap();
-        let run_dir = tmp.path().join("runs/abc12345/baseline-def45678/seed_42");
+        let run_dir = tmp.path().join("sims/abc12345/baseline-def45678/seed_42");
         std::fs::create_dir_all(&run_dir).unwrap();
         std::fs::write(run_dir.join("traj.tsv"), "t\tS\n0\t100\n").unwrap();
-        let meta = RunMeta {
-            model: "sir.camdl".into(),
-            model_hash: "m".into(),
-            scenario: "baseline".into(),
-            sim_hash: "abc12345aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
-            scen_hash: "def45678".into(),
-            seed: 42,
-            backend: "gillespie".into(),
-            dt: 1.0,
+        let record = Run {
+            hash: "abc12345".repeat(8),
             version: "0.1.0".into(),
             created_at: "2026-04-16T00:00:00Z".into(),
             argv: vec!["camdl".into(), "simulate".into(), "--cas".into()],
-            sweep_point: HashMap::new(),
+            wall_time_seconds: 0.0,
+            kind: RunKind::Simulate(SimulateMeta {
+                model: "sir.camdl".into(),
+                model_hash: "m".into(),
+                scenario: "baseline".into(),
+                sim_hash: "abc12345aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
+                scen_hash: "def45678".into(),
+                seed: 42,
+                backend: "gillespie".into(),
+                dt: 1.0,
+                sweep_point: HashMap::new(),
+            }),
         };
-        write_run_meta(&run_dir, &meta).unwrap();
+        record.write(&run_dir).unwrap();
 
         let root = tmp.path().to_str().unwrap();
-
-        // Full prefix resolves
         let r = resolve_run(root, "abc12345").unwrap();
         assert_eq!(r.meta.seed, 42);
-
-        // Partial prefix still resolves (unique)
         let r = resolve_run(root, "abc").unwrap();
         assert_eq!(r.meta.seed, 42);
-
-        // With scenario filter
         let r = resolve_run(root, "abc/baseline").unwrap();
         assert_eq!(r.meta.seed, 42);
-
-        // Miss
         assert!(resolve_run(root, "zzz").is_err());
     }
 }

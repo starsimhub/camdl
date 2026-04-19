@@ -49,6 +49,23 @@ pub fn sim_hash(model_hash: &str, params_canonical: &str, backend: &str, dt: f64
     hex::encode(h.finalize())
 }
 
+/// Content hash for a single simulate run. Covers the full identity of
+/// what produced `traj.tsv`: the simulation config (`sim_hash`), the
+/// scenario delta (`scen_hash`), and the seed. Stored in `run.json`
+/// as `Run.hash` for cache-staleness checks that are independent of
+/// the directory layout (so we can rename the tree without invalidating
+/// the cache).
+pub fn run_hash(sim_hash: &str, scen_hash: &str, seed: u64) -> String {
+    let mut h = Sha256::new();
+    h.update(b"run\x00");
+    h.update(sim_hash.as_bytes());
+    h.update(b"\x00");
+    h.update(scen_hash.as_bytes());
+    h.update(b"\x00");
+    h.update(seed.to_le_bytes());
+    hex::encode(h.finalize())
+}
+
 /// Hash of a scenario's per-scenario delta: enable/disable lists and param overrides.
 /// Does NOT include the scenario name — the name appears in the directory slug for navigation,
 /// but two identically-specified scenarios (same enables/disables/params, different names)

@@ -94,37 +94,6 @@ pub fn has_cached_obs(run_dir: &Path, obs_hash: &str, obs_seed: u64) -> bool {
 
 // ─── Metadata types ──────────────────────────────────────────────────────────
 
-/// Metadata written to `run.json` inside each `seed_{n}/` directory.
-///
-/// `argv` records the full original command line for reproducibility —
-/// `camdl show <path>` prints it back so the user knows exactly what
-/// produced the cached output.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RunMeta {
-    /// Model file path or name (for display; not a hash input).
-    pub model: String,
-    pub model_hash: String,
-    pub scenario: String,
-    pub sim_hash: String,
-    pub scen_hash: String,
-    pub seed: u64,
-    pub backend: String,
-    pub dt: f64,
-    /// Runtime version at write time (`version::VERSION_SHORT`).
-    pub version: String,
-    /// ISO 8601 UTC timestamp at completion.
-    pub created_at: String,
-    /// Original argv that produced this run.
-    pub argv: Vec<String>,
-    /// Sweep parameter values applied to this run (empty for non-sweep
-    /// runs, including all single-run `--cas` invocations). Populated by
-    /// `--batch` when a `[sweep]` block is active. Without this, the
-    /// scen_hash is opaque — analysis can't recover which param values
-    /// produced which trajectory.
-    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
-    pub sweep_point: HashMap<String, f64>,
-}
-
 /// Metadata written to `obs/{obs_hash}-{obs_seed}/obs.json`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ObsMeta {
@@ -184,19 +153,6 @@ pub fn write_traj(run_dir: &Path, content: &str) -> std::io::Result<()> {
 
 pub fn read_traj(run_dir: &Path) -> std::io::Result<String> {
     std::fs::read_to_string(run_dir.join("traj.tsv"))
-}
-
-pub fn write_run_meta(run_dir: &Path, meta: &RunMeta) -> std::io::Result<()> {
-    std::fs::create_dir_all(run_dir)?;
-    let json = serde_json::to_string_pretty(meta)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
-    std::fs::write(run_dir.join("run.json"), json)
-}
-
-pub fn read_run_meta(run_dir: &Path) -> std::io::Result<RunMeta> {
-    let contents = std::fs::read_to_string(run_dir.join("run.json"))?;
-    serde_json::from_str(&contents)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
 }
 
 pub fn write_obs_meta(obs_dir: &Path, meta: &ObsMeta) -> std::io::Result<()> {
@@ -298,30 +254,6 @@ mod tests {
         assert!(!has_cached_traj(&dir));
         std::fs::write(dir.join("traj.tsv"), "t\tS\n0\t100\n").unwrap();
         assert!(has_cached_traj(&dir));
-    }
-
-    #[test]
-    fn run_meta_roundtrip() {
-        let tmp = tempfile::tempdir().unwrap();
-        let meta = RunMeta {
-            model: "sir.camdl".into(),
-            model_hash: "abc".into(),
-            scenario: "baseline".into(),
-            sim_hash: "def".into(),
-            scen_hash: "123".into(),
-            seed: 42,
-            backend: "gillespie".into(),
-            dt: 1.0,
-            version: "0.1.0+aaa".into(),
-            created_at: "2026-04-16T00:00:00Z".into(),
-            argv: vec!["camdl".into(), "simulate".into(), "sir.camdl".into(), "--seed".into(), "42".into(), "--cas".into()],
-            sweep_point: HashMap::new(),
-        };
-        write_run_meta(tmp.path(), &meta).unwrap();
-        let read = read_run_meta(tmp.path()).unwrap();
-        assert_eq!(read.seed, 42);
-        assert_eq!(read.scenario, "baseline");
-        assert_eq!(read.argv.len(), 6);
     }
 
     #[test]

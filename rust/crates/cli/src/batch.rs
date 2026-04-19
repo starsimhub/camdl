@@ -620,23 +620,28 @@ pub fn cmd_batch_run(args: &[String]) {
                     }
                     let mut merged_params = plan.sweep_overrides.clone();
                     merged_params.extend(sc.params.iter().map(|(k, v)| (k.clone(), *v)));
-                    let meta = cas::RunMeta {
-                        model: ir_path_resolved.clone(),
-                        model_hash: mhash.clone(),
-                        scenario: plan.scenario.clone(),
-                        sim_hash: shash.clone(),
-                        scen_hash: scen_hash(&sc.enable, &sc.disable, &merged_params),
-                        seed: plan.seed,
-                        backend: backend.clone(),
-                        dt,
+                    let sh = scen_hash(&sc.enable, &sc.disable, &merged_params);
+                    let run_h = crate::hashing::run_hash(&shash, &sh, plan.seed);
+                    let run_rec = crate::run_meta::Run {
+                        hash: run_h,
                         version: version::VERSION_SHORT.to_string(),
                         created_at: cas::iso8601_utc(std::time::SystemTime::now()),
                         argv: std::env::args().collect(),
-                        sweep_point: plan.sweep_overrides.clone(),
+                        wall_time_seconds: 0.0,
+                        kind: crate::run_meta::RunKind::Simulate(crate::run_meta::SimulateMeta {
+                            model: ir_path_resolved.clone(),
+                            model_hash: mhash.clone(),
+                            scenario: plan.scenario.clone(),
+                            sim_hash: shash.clone(),
+                            scen_hash: sh,
+                            seed: plan.seed,
+                            backend: backend.clone(),
+                            dt,
+                            sweep_point: plan.sweep_overrides.clone(),
+                        }),
                     };
-                    let meta_path = format!("{}/run.json", plan.run_dir);
-                    std::fs::write(&meta_path, serde_json::to_string_pretty(&meta).unwrap_or_default())
-                        .map_err(|e| format!("cannot write {}: {}", meta_path, e))?;
+                    run_rec.write(std::path::Path::new(&plan.run_dir))
+                        .map_err(|e| format!("cannot write run.json in {}: {}", plan.run_dir, e))?;
 
                     let n = counter.fetch_add(1, Ordering::Relaxed) + 1;
                     eprintln!("[{}/{}] scenario={} seed={}", n, total, plan.scenario, plan.seed);

@@ -907,7 +907,7 @@ fn run_simulate(args: &[String]) {
         std::fs::write(ctx.run_dir.join("traj.tsv"), &bytes).unwrap_or_else(|e| {
             eprintln!("cannot write traj.tsv: {}", e); std::process::exit(1);
         });
-        cas::write_run_meta(&ctx.run_dir, &ctx.meta).unwrap_or_else(|e| {
+        ctx.run.write(&ctx.run_dir).unwrap_or_else(|e| {
             eprintln!("cannot write run.json: {}", e); std::process::exit(1);
         });
         eprintln!("{} {}", "cached:".bright_green().bold(), ctx.relative.cyan());
@@ -995,13 +995,13 @@ fn run_simulate(args: &[String]) {
 /// directory + metadata template. Built before simulation so we can
 /// check for a cache hit and skip work if possible.
 struct CasCtx {
-    /// Relative path under `<root>/runs/`, e.g.
+    /// Relative path under `<root>/sims/`, e.g.
     /// `abc12345/baseline-def45678/seed_42`. Logged to stderr.
     relative: String,
     /// Absolute path to the run directory.
     run_dir: std::path::PathBuf,
     /// Metadata to write to `run.json` after a successful run.
-    meta: cas::RunMeta,
+    run: run_meta::Run,
 }
 
 /// Resolve the CAS run directory and build a `RunMeta` template for a
@@ -1066,22 +1066,27 @@ fn prepare_cas_ctx(
     );
     let run_dir = cas::run_dir(std::path::Path::new(cas_root), &relative);
 
-    let meta = cas::RunMeta {
-        model: run.ir_path.clone(),
-        model_hash: model_h,
-        scenario: scenario_display,
-        sim_hash: sim_h,
-        scen_hash: scen_h,
-        seed,
-        backend: run.backend.clone(),
-        dt: run.dt,
+    let run_h = hashing::run_hash(&sim_h, &scen_h, seed);
+    let run_record = run_meta::Run {
+        hash: run_h,
         version: version::VERSION_SHORT.to_string(),
         created_at: cas::iso8601_utc(std::time::SystemTime::now()),
         argv: std::env::args().collect(),
-        sweep_point: HashMap::new(), // --cas is single-run; no sweep
+        wall_time_seconds: 0.0, // filled in by caller after sim completes
+        kind: run_meta::RunKind::Simulate(run_meta::SimulateMeta {
+            model: run.ir_path.clone(),
+            model_hash: model_h,
+            scenario: scenario_display,
+            sim_hash: sim_h,
+            scen_hash: scen_h,
+            seed,
+            backend: run.backend.clone(),
+            dt: run.dt,
+            sweep_point: HashMap::new(), // --cas is single-run; no sweep
+        }),
     };
 
-    Ok(CasCtx { relative, run_dir, meta })
+    Ok(CasCtx { relative, run_dir, run: run_record })
 }
 
 /// Generate observation times from an IR schedule.
