@@ -199,6 +199,7 @@ fn test_if2_converges_from_dispersed_start() {
         cooling_target_iters: 50, simplex_groups: vec![],
         dt: 1.0,
         t_start: 0.0,
+        skip_first_obs_from_loglik: false,
     };
 
     let result = run_if2(
@@ -269,6 +270,7 @@ fn test_if2_respects_bounds() {
         cooling_target_iters: 50, simplex_groups: vec![],
         dt: 1.0,
         t_start: 0.0,
+        skip_first_obs_from_loglik: false,
     };
 
     let result = run_if2(
@@ -314,6 +316,7 @@ fn test_if2_no_cooling_explores() {
         cooling_target_iters: 50, simplex_groups: vec![],
         dt: 1.0,
         t_start: 0.0,
+        skip_first_obs_from_loglik: false,
     };
 
     let result = run_if2(

@@ -339,6 +339,54 @@ unchanged inputs is a cache hit, not a redo.
 - `datasets` supplied and `≠ len(sim_seeds)` — hard error.
 - `fit_seeds` list with duplicates — hard error.
 
+### 3.8 IC-free inference
+
+Stochastic compartmental models have a ridge in `(β, I₀)`: short
+observation windows admit many parameter combinations that fit the
+data equally well. Fixing `I₀` gives a tight `β` posterior that is
+paid for with a pretence; estimating `I₀` reveals the ridge but
+needs a prior on `I₀` to resolve along it. The principled alternative
+from the pomp literature (King et al. 2008; Bretó et al. 2009) is to
+condition the likelihood on the first observation and let the
+particle filter's initial reweight pin `I₀` implicitly:
+
+```toml
+[fit]
+ic_free = true
+```
+
+When set:
+
+- The PF / IF2 / PGAS runs still weight and resample at `y₁`
+  (that's what pins `x₀` given `y₁` via Bayesian update on the
+  particle cloud).
+- The log-likelihood accumulation skips `y₁`. The returned loglik
+  is `log L_c(θ | y₁) = Σ_{t=2}^T log p(y_t | y_{1:t-1})` rather than
+  the full `log L(θ)`. These differ by `log p(y_1)` and are not
+  directly comparable across runs with different `ic_free` settings.
+
+Precondition: at least one `[estimate.*]` entry must be
+`ivp = true`. Without per-particle spread at `t=0`, the first
+reweight cannot discriminate between particles and `ic_free`
+silently degenerates to dropping the first observation. Config
+validation rejects the degenerate case:
+
+```toml
+[estimate]
+I0 = { bounds = [1, 500], ivp = true }   # required under ic_free
+```
+
+See `docs/dev/proposals/2026-04-18-ic-free-inference.md` for the
+mathematical derivation, references (King Nguyen Ionides 2016 JSS,
+Ionides et al. 2015 PNAS, King et al. 2008 Nature, Bretó He Ionides
+King 2009 AOAS), and the epistemic-laundering motivation.
+
+Explicitly not the same: the Cori-Fraser-Cauchemez / EpiEstim
+renewal-equation approach avoids `I₀` by replacing the compartmental
+structure during growth with a branching process parameterised by
+`R_t`. That is a different process model, not a different likelihood
+factorisation, and is out of scope for this feature.
+
 ---
 
 ## 4. The Fit State File

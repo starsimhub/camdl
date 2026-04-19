@@ -52,6 +52,16 @@ pub struct FitSection {
     /// this is the only way to silence an event during inference.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub disable: Vec<String>,
+
+    /// IC-free inference: condition the likelihood on the first
+    /// observation rather than on an initial-state commitment. The PF
+    /// still weights and resamples at y₁ (that's how y₁ pins the
+    /// initial state), but the log-likelihood accumulation starts from
+    /// y₂. Requires at least one `[estimate.*]` entry with `ivp = true`
+    /// to provide particle spread at t=0. See
+    /// docs/dev/proposals/2026-04-18-ic-free-inference.md.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub ic_free: bool,
 }
 
 /// Per-stage configuration for scout and refine.

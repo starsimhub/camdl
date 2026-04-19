@@ -232,6 +232,12 @@ pub struct IF2Config {
     /// Simplex parameter groups (barycentric transform). Members are
     /// perturbed jointly in log-ratio space with softmax inverse.
     pub simplex_groups: Vec<SimplexGroup>,
+    /// IC-free inference: still weight and resample at the first
+    /// observation (pinning x₀ given y₁) but don't accumulate that
+    /// step's log-sum-exp into the returned log-likelihood. Requires
+    /// per-particle spread at t=0, typically from an `ivp` estimated
+    /// parameter. See docs/dev/proposals/2026-04-18-ic-free-inference.md.
+    pub skip_first_obs_from_loglik: bool,
 }
 
 /// Result of one IF2 iteration.
@@ -545,9 +551,16 @@ pub fn run_if2_with_progress<P: ProcessModel<State = ParticleState>>(
                 }
             }
 
-            // Log-likelihood increment
+            // Log-likelihood increment. Under IC-free inference
+            // (`config.skip_first_obs_from_loglik`), the first
+            // observation still reweights and resamples (that's the
+            // pinning of x₀ given y₁) but is dropped from the
+            // accumulated log-likelihood. See
+            // docs/dev/proposals/2026-04-18-ic-free-inference.md.
             let ll_inc = log_sum_exp(&log_weights) - (n as f64).ln();
-            total_loglik += ll_inc;
+            if !(config.skip_first_obs_from_loglik && obs_idx == 0) {
+                total_loglik += ll_inc;
+            }
 
             // Resample states AND parameters jointly via double-buffer (no allocation)
             let indices = systematic_resample(&log_weights, &mut resample_rng);

@@ -480,6 +480,7 @@ fn run_profiles(
                 dt: config.if2_config.dt,
                 t_start: config.compiled.model.simulation.t_start,
                 simplex_groups: vec![],
+                skip_first_obs_from_loglik: config.ic_free,
             };
 
             let process = config.build_process();

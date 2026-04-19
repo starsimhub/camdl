@@ -161,9 +161,18 @@ pub fn bootstrap_filter<P: ProcessModel<State = ParticleState>>(
             swarm.log_weights[i] = obs_model.log_likelihood(state, obs_idx, params);
         }
 
-        // Log-marginal increment
+        // Log-marginal increment. Under IC-free inference
+        // (`skip_first_obs_from_loglik`), we still compute the
+        // reweight-and-resample at the first observation — that's what
+        // pins x_0 given y_1 — but we don't accumulate it into the
+        // returned log-likelihood. Subsequent observations contribute
+        // normally, giving the conditional likelihood
+        //   log L_c(θ | y_1) = Σ_{t=2}^{T} log p(y_t | y_{1:t-1}).
+        // See docs/dev/proposals/2026-04-18-ic-free-inference.md.
         let ll_increment = log_sum_exp(&swarm.log_weights) - (n_particles as f64).ln();
-        total_loglik += ll_increment;
+        if !(config.skip_first_obs_from_loglik && obs_idx == 0) {
+            total_loglik += ll_increment;
+        }
         ll_increments.push(ll_increment);
         ess_trace.push(swarm.ess());
 

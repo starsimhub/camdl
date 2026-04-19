@@ -356,6 +356,8 @@ pub fn cmd_if2(args: &[String]) {
         cooling_target_iters: n_iterations, simplex_groups: vec![],
         dt,
         t_start: compiled.model.simulation.t_start,
+        // Legacy `camdl fit if2` subcommand doesn't surface ic_free.
+        skip_first_obs_from_loglik: false,
     };
 
     // Build process + observation model via traits
@@ -432,6 +434,7 @@ pub fn cmd_if2(args: &[String]) {
             n_particles: n_eval_particles,
             dt,
             t_start: compiled.model.simulation.t_start,
+            skip_first_obs_from_loglik: false,
         };
 
         eprintln!("\nevaluating loglik (every {} iterations, all {} chains)...", eval_interval, n_chains);

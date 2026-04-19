@@ -73,6 +73,18 @@ pub struct FitConfigV2 {
     #[serde(default)]
     pub disable: Vec<String>,
 
+    /// IC-free inference: condition the likelihood on the first
+    /// observation rather than an initial-state commitment. Absent or
+    /// false means standard inference over `y_{1:T}` with a committed
+    /// initial state. True means the PF / IF2 / PGAS weight-and-resample
+    /// at y₁ (pinning the initial state) but accumulate log-likelihood
+    /// only from y₂ onward. Requires at least one `[estimate.*]` entry
+    /// with `ivp = true` to give particles spread at t=0.
+    ///
+    /// See docs/dev/proposals/2026-04-18-ic-free-inference.md.
+    #[serde(default)]
+    pub ic_free: Option<bool>,
+
     /// Optional lineage metadata (not used by the runner).
     #[serde(default)]
     pub provenance: Option<FitProvenance>,
@@ -642,6 +654,7 @@ impl FitConfigV2 {
                 scenario: self.scenario.clone(),
                 enable: self.enable.clone(),
                 disable: self.disable.clone(),
+                ic_free: self.ic_free.unwrap_or(false),
             },
             data: data_legacy,
             holdout: holdout_legacy,

@@ -420,6 +420,21 @@ pub fn cmd_fit_run_v2(args: &[String]) {
     });
     eprintln!("  output:   {}", fit_dir.display());
 
+    // IC-free inference diagnostic: when ic_free = true, make it
+    // visible on the startup block so the user can confirm the PF is
+    // computing log L_c (conditional on y₁) rather than log L. Silent
+    // when ic_free is false or absent. See
+    // docs/dev/proposals/2026-04-18-ic-free-inference.md.
+    if config.ic_free.unwrap_or(false) {
+        let ivp_params: Vec<&str> = config.estimate.iter()
+            .filter(|(_, spec)| spec.ivp)
+            .map(|(n, _)| n.as_str())
+            .collect();
+        eprintln!("\n  \x1b[36mic-free inference:\x1b[0m conditioning on y₁");
+        eprintln!("    - initial state spread from ivp params: [{}]", ivp_params.join(", "));
+        eprintln!("    - log-likelihood accumulation from t = 2 (y₁ reweights and resamples only)");
+    }
+
     // Seed: CLI --seed > default (1). Deterministic by default for reproducibility.
     let base_seed = if has_seed_flag { seed } else { 1 };
 

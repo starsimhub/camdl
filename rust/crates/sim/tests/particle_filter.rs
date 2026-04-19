@@ -130,7 +130,7 @@ fn run_pf(n_particles: usize, seed: u64) -> f64 {
     let process = ChainBinomialProcess::new(compiled.clone());
     let obs_model = pure_death_obs();
 
-    let config = SMCConfig { n_particles, dt: 1.0, t_start: 0.0 };
+    let config = SMCConfig { n_particles, dt: 1.0, t_start: 0.0, skip_first_obs_from_loglik: false };
 
     let result = bootstrap_filter(
         &process, &obs_model, &params, &config, seed,
@@ -192,7 +192,7 @@ fn test_pf_ess_reasonable() {
     let process = ChainBinomialProcess::new(compiled.clone());
     let obs_model = pure_death_obs();
 
-    let config = SMCConfig { n_particles: 500, dt: 1.0, t_start: 0.0 };
+    let config = SMCConfig { n_particles: 500, dt: 1.0, t_start: 0.0, skip_first_obs_from_loglik: false };
 
     let result = bootstrap_filter(
         &process, &obs_model, &params, &config, 42,
@@ -205,4 +205,84 @@ fn test_pf_ess_reasonable() {
         assert!(ess <= 500.0,
             "ESS > N_particles at obs {}: {:.1}", i, ess);
     }
+}
+
+// ── IC-free inference (skip_first_obs_from_loglik) ─────────────────────
+//
+// The PF-level contract: when `skip_first_obs_from_loglik = true`, the
+// filter still weights and resamples at the first observation (that's
+// how y₁ pins x₀ in the PF framing) but does NOT accumulate the t=0
+// log-sum-exp into the returned log-likelihood. Log-accumulation picks
+// up from t=1.
+//
+// The load-bearing identity:
+//
+//   log L_standard − log L_ic_free  ≡  ll_increments_standard[0]
+//
+// because the only difference between the two runs is whether we
+// included the first increment.
+
+fn run_pf_full(
+    n_particles: usize, seed: u64, skip_first: bool,
+) -> sim::inference::particle_filter::PFilterResult {
+    let (compiled, params) = pure_death_model();
+    let compiled = Arc::new(compiled);
+    let process = ChainBinomialProcess::new(compiled.clone());
+    let obs_model = pure_death_obs();
+    let config = SMCConfig {
+        n_particles, dt: 1.0, t_start: 0.0,
+        skip_first_obs_from_loglik: skip_first,
+    };
+    sim::inference::bootstrap_filter(&process, &obs_model, &params, &config, seed)
+        .unwrap()
+}
+
+#[test]
+fn ic_free_drops_only_the_first_obs_from_loglik() {
+    // Both runs share the exact seed → identical particle trajectories
+    // → identical ll_increments. The only difference is whether
+    // increment[0] is added to total_loglik.
+    let standard = run_pf_full(500, 42, false);
+    let ic_free  = run_pf_full(500, 42, true);
+
+    // Same filter trajectory means every per-obs increment matches.
+    assert_eq!(standard.ll_increments.len(), ic_free.ll_increments.len(),
+        "both runs must visit every observation");
+    for (i, (&a, &b)) in standard.ll_increments.iter()
+        .zip(ic_free.ll_increments.iter()).enumerate() {
+        assert!((a - b).abs() < 1e-12,
+            "per-obs ll_increments must match bit-for-bit at obs {}: {} vs {}",
+            i, a, b);
+    }
+
+    // The difference is exactly the first increment.
+    let diff = standard.log_likelihood - ic_free.log_likelihood;
+    let expected = standard.ll_increments[0];
+    assert!((diff - expected).abs() < 1e-12,
+        "log L − log L_c must equal ll_increments[0]: diff={:.10}, expected={:.10}",
+        diff, expected);
+}
+
+#[test]
+fn ic_free_disabled_matches_standard_exactly() {
+    // Explicit "ic_free = false produces identical output to no flag"
+    // guard — it's a bool field with a default, and the default must
+    // not silently change the answer.
+    let a = run_pf_full(200, 7, false);
+    let b = run_pf_full(200, 7, false);
+    assert_eq!(a.log_likelihood, b.log_likelihood,
+        "deterministic: same seed + same flag → same answer");
+}
+
+#[test]
+fn ic_free_enabled_changes_reported_loglik() {
+    // Sanity: the flag actually DOES something. If ic_free=true returns
+    // the same value as ic_free=false, the guard regressed.
+    let standard = run_pf_full(500, 7, false);
+    let ic_free  = run_pf_full(500, 7, true);
+    assert_ne!(standard.log_likelihood, ic_free.log_likelihood,
+        "ic_free must change the reported loglik when obs[0] has any \
+         observation density at all (it does — pure-death obs at t=10 \
+         is Poisson-like with nonzero ll). If this passes loglik-equal \
+         the guard isn't firing.");
 }

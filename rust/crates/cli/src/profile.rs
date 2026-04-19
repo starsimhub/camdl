@@ -309,6 +309,9 @@ pub fn cmd_profile(args: &[String]) {
                 cooling_fraction: cooling, cooling_target_iters: n_iterations, dt,
                 t_start: process.compiled.model.simulation.t_start,
                 simplex_groups: vec![],
+                // Profile doesn't surface ic_free; it's a 2D β-γ scan
+                // assuming a committed initial state.
+                skip_first_obs_from_loglik: false,
             };
             let job_seed = seed ^ (grid_idx as u64 * 1000 + start_idx as u64);
 

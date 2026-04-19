@@ -49,6 +49,13 @@ pub struct FitRunConfig {
     pub if2_config: IF2Config,
     pub n_chains: usize,
     pub seed: u64,
+    /// IC-free inference flag. When true, the PF/IF2/PGAS log-likelihood
+    /// accumulation skips the first observation (y₁ is still used to
+    /// weight and resample — that's how the initial state gets pinned).
+    /// Mirrors `FitToml::fit.ic_free` (and thus FitConfigV2::ic_free).
+    /// Flows into `SMCConfig.skip_first_obs_from_loglik`. See
+    /// docs/dev/proposals/2026-04-18-ic-free-inference.md.
+    pub ic_free: bool,
 }
 
 /// Result of running multiple IF2 chains.
@@ -234,6 +241,7 @@ impl FitRunConfig {
                 streams.iter().map(|s| s.name.as_str()).collect::<Vec<_>>().join(", "));
         }
 
+        let ic_free = fit.fit.ic_free;
         let config = IF2Config {
             n_particles,
             n_iterations,
@@ -241,7 +249,22 @@ impl FitRunConfig {
             cooling_target_iters: n_iterations, simplex_groups: vec![],
             dt,
             t_start: compiled.model.simulation.t_start,
+            skip_first_obs_from_loglik: ic_free,
         };
+        // IC-free precondition: at least one estimated param must be
+        // marked ivp. Without per-particle spread at t=0, the first
+        // reweight can't discriminate and ic-free degenerates to
+        // silently dropping y₁. Error at config build so the mistake
+        // surfaces before any PF time is spent.
+        if ic_free && !if2_params.iter().any(|p| p.ivp) {
+            return Err(
+                "ic_free = true requires at least one [estimate.*] entry with \
+                 ivp = true. Without per-particle variation at t=0, the first \
+                 observation cannot discriminate between particles and ic_free \
+                 degenerates to dropping the first data point.\n\n\
+                 Example: mark your initial-state parameter as ivp:\n\n    \
+                 [estimate]\n    I0 = { bounds = [1, 500], ivp = true }".into());
+        }
 
         Ok(FitRunConfig {
             compiled: Arc::new(compiled),
@@ -255,6 +278,7 @@ impl FitRunConfig {
             if2_config: config,
             n_chains,
             seed,
+            ic_free,
         })
     }
 
@@ -277,6 +301,7 @@ impl FitRunConfig {
             n_particles: self.if2_config.n_particles,
             dt: self.if2_config.dt,
             t_start: self.compiled.model.simulation.t_start,
+            skip_first_obs_from_loglik: self.ic_free,
         }
     }
 }
@@ -1428,7 +1453,106 @@ cooling = 0.5
         std::fs::remove_dir_all(&data_dir).ok();
     }
 
-    /// IR JSON, deserialization back into ir::Model, and the resolve_prior
+    // ── IC-free inference: config validation ────────────────────────────
+
+    fn ic_free_fixture(dir: &std::path::Path, ic_free: bool, ivp: bool)
+        -> FitToml
+    {
+        // Minimal fit.toml against the seir_observations golden IR.
+        // Toggles ic_free and whether I0 is ivp-flagged independently
+        // so all four combinations can be built.
+        let manifest = std::env::var("CARGO_MANIFEST_DIR").unwrap();
+        let ir_path = format!(
+            "{}/../../../ocaml/golden/seir_observations.ir.json", manifest);
+        let data_path = dir.join("obs.tsv");
+        std::fs::write(&data_path,
+            "time\tweekly_cases\n7\t1\n14\t2\n21\t3\n28\t4\n35\t5\n").unwrap();
+        let ivp_clause = if ivp { ", ivp = true" } else { "" };
+        let toml_src = format!(r#"
+[fit]
+model = "{}"
+output_dir = "{}"
+seed = 1
+ic_free = {}
+[config]
+backend = "gillespie"
+dt = 1.0
+[data]
+weekly_cases = "{}"
+[fixed]
+sigma    = 0.25
+gamma    = 0.3
+rho      = 0.5
+k        = 10.0
+p_detect = 0.5
+N0       = 1000
+beta     = 1.5
+[estimate]
+I0 = {{ start = 5{} }}
+[scout]
+chains = 1
+particles = 100
+iterations = 1
+cooling = 0.5
+"#, ir_path, dir.display(), ic_free, data_path.display(), ivp_clause);
+        toml::from_str(&toml_src).expect("fit.toml parse")
+    }
+
+    fn ic_free_test_dir(tag: &str) -> std::path::PathBuf {
+        let d = std::env::temp_dir().join(format!(
+            "camdl_icfree_{}_{}_{}", tag, std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    /// ic_free=true WITHOUT any ivp estimate → build errors with a
+    /// helpful message naming the fix.
+    #[test]
+    fn ic_free_true_requires_ivp() {
+        let dir = ic_free_test_dir("requires_ivp");
+        let fit = ic_free_fixture(&dir, true, false);
+        let err = match FitRunConfig::build(&fit, None, 1, 100, 1, 0.5, 1, false) {
+            Ok(_)  => panic!("ic_free=true + no ivp must error"),
+            Err(e) => e,
+        };
+        assert!(err.contains("ic_free") && err.contains("ivp"),
+            "error must name both ic_free and ivp: {}", err);
+        assert!(err.contains("I0 = {") || err.contains("ivp = true"),
+            "error should include a copy-pasteable example: {}", err);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// ic_free=true WITH an ivp estimate → build succeeds and
+    /// config.ic_free is propagated.
+    #[test]
+    fn ic_free_true_with_ivp_succeeds() {
+        let dir = ic_free_test_dir("with_ivp");
+        let fit = ic_free_fixture(&dir, true, true);
+        let config = FitRunConfig::build(&fit, None, 1, 100, 1, 0.5, 1, false)
+            .expect("ic_free=true + ivp must build");
+        assert!(config.ic_free, "FitRunConfig.ic_free must be true");
+        // The SMCConfig view also carries the flag — that's what reaches
+        // the PF / IF2 loop.
+        assert!(config.smc_config().skip_first_obs_from_loglik,
+            "smc_config() must thread ic_free into skip_first_obs_from_loglik");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// ic_free absent (default false) → build succeeds regardless of
+    /// ivp presence, and the SMCConfig view reports ic_free=false.
+    /// Regression guard: the new flag must default to OFF so no
+    /// existing fit.toml silently changes behaviour.
+    #[test]
+    fn ic_free_default_off_does_not_require_ivp() {
+        let dir = ic_free_test_dir("default_off");
+        let fit = ic_free_fixture(&dir, false, false);
+        let config = FitRunConfig::build(&fit, None, 1, 100, 1, 0.5, 1, false)
+            .expect("ic_free=false + no ivp must build");
+        assert!(!config.ic_free);
+        assert!(!config.smc_config().skip_first_obs_from_loglik);
+        std::fs::remove_dir_all(&dir).ok();
+    }
     /// pipeline that pgas.rs / pmmh.rs use to build the Prior vector.
     ///
     /// This is the integration counterpart to resolve_prior_precedence_chain

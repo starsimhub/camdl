@@ -158,4 +158,17 @@ pub struct SMCConfig {
     pub dt: f64,
     /// Simulation start time (before first observation).
     pub t_start: f64,
+    /// IC-free inference: weight and resample at the first observation
+    /// (so y₁ pins the initial state via Bayesian update on the particle
+    /// cloud) but do NOT accumulate that step's log-sum-exp into the
+    /// returned log-likelihood. Log-likelihood accumulation starts from
+    /// the second observation.
+    ///
+    /// The caller is responsible for ensuring particle spread at t=0 —
+    /// typically via an `ivp = true` estimated parameter. Without
+    /// spread, the first reweight is a no-op and ic-free degenerates to
+    /// silently dropping the first observation. Validation is at the
+    /// fit-config layer. See
+    /// docs/dev/proposals/2026-04-18-ic-free-inference.md.
+    pub skip_first_obs_from_loglik: bool,
 }
