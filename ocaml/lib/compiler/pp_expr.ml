@@ -83,8 +83,13 @@ and pp_at ~mode ~split ~ascii min_prec ppf e =
 
 and pp_inner ~mode ~split ~ascii ppf = function
   | Ir.Const f ->
+    (* Integer-valued floats up to 1e15 print as bare integers (no
+       decimal point or scientific-notation tail); outside that range,
+       fall back to %g. Prior version had both arms identical, losing
+       the intended integer-literal rendering — reported as m4 in the
+       2026-04-19 compiler review. *)
     if Float.is_integer f && Float.abs f < 1e15 then
-      Fmt.pf ppf "%g" f
+      Fmt.pf ppf "%.0f" f
     else
       Fmt.pf ppf "%g" f
   | Ir.Param name ->

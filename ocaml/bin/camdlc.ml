@@ -41,9 +41,6 @@ let () =
          | _ -> parse tl)
       | "--transition" :: name :: tl ->
         tr_rate := Some name; parse tl
-      | "--rate" :: tl ->
-        (* handled together with --transition *)
-        parse tl
       | "--count" :: tl ->
         tr_count := true; parse tl
       | "--let" :: name :: tl ->
@@ -55,7 +52,14 @@ let () =
       | "--no-color" :: tl -> no_color  := true; parse tl
       | s :: tl when not (String.length s > 0 && s.[0] = '-') ->
         files := s :: !files; parse tl
-      | s :: tl -> Printf.eprintf "unknown flag: %s\n" s; parse tl
+      | s :: _ ->
+        (* Per CLAUDE.md "no loose semantics" — unknown flags are
+           typos (e.g. --sumary for --summary) and silently continuing
+           produces default output that masks the user's intent.
+           Hard exit with the flag named. *)
+        Printf.eprintf "error: unknown flag '%s'\n" s;
+        Printf.eprintf "  run `camdlc inspect --help` for supported flags\n";
+        exit 1
     in
     parse rest;
     let path = match List.rev !files with
@@ -66,11 +70,7 @@ let () =
       if !dims              then Inspect.Dims
       else if !comps             then Inspect.Compartments
       else if !do_transitions then Inspect.Transitions !transitions_pat
-      else if !tr_count then (
-        match !tr_rate with
-        | Some _ -> Inspect.TransitionCount !transitions_pat
-        | None -> Inspect.TransitionCount !transitions_pat
-      )
+      else if !tr_count then Inspect.TransitionCount !transitions_pat
       else (match !tr_rate with
         | Some name -> Inspect.TransitionRate name
         | None ->
