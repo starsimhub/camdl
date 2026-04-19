@@ -74,10 +74,10 @@ order; each is a self-contained commit.
       `unwrap_or_else(|| "output".to_string())`. Route through the
       shared helper.
 
-- [ ] **S8 — `load_fit_entry` has `let _ = dir;` smell**
+- [x] **S8 — `load_fit_entry` has `let _ = dir;` smell**
       `browse.rs:328` — clear sign the parameter is unused. Drop it.
 
-- [ ] **S9 — `print_stage_status` `fit_state.toml` fallback is dead**
+- [x] **S9 — `print_stage_status` `fit_state.toml` fallback is dead**
       New stages all write `run.json`. Fallback only covers pre-
       migration stages (nonexistent post clean-break). Remove.
 

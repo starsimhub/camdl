@@ -325,7 +325,6 @@ fn load_fit_entry(dir: &Path, cwd: &Path) -> Option<FitEntry> {
             .and_then(|m| m.modified())
             .unwrap_or(SystemTime::UNIX_EPOCH));
     let rel_path = pathdiff_str(dir, cwd);
-    let _ = dir; // abs_path removed; keep signature aligned with load_sim_entry
     Some(FitEntry { run, meta, rel_path, created })
 }
 

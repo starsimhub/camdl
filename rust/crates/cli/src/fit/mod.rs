@@ -252,25 +252,24 @@ fn run_status_v2_dir(dir: &str) {
 }
 
 fn print_stage_status(name: &str, stage_dir: &str) {
-    use crate::fit::state::FitState;
     use crate::run_meta::{Run, RunKind};
 
-    // Prefer the unified run.json (Run::FitStage); fall back to
-    // fit_state.toml for older pre-run.json stage dirs (e.g. scout
-    // runs written before the Run ADT migration).
-    if let Ok(run) = Run::read(std::path::Path::new(stage_dir)) {
-        if let RunKind::FitStage(stage_meta) = &run.kind {
-            let ll = stage_meta.best_loglik.map(|l| format!("{:.1}", l)).unwrap_or_else(|| "—".into());
-            let chain = stage_meta.best_chain.map(|c| format!(" (chain {})", c + 1)).unwrap_or_default();
-            println!("    {:12} \x1b[32m✓\x1b[0m {} — loglik={}{}, {:.0}s",
-                name, stage_meta.method, ll, chain, run.wall_time_seconds);
-            return;
+    // A completed v2 stage always has a FitStage run.json. The
+    // fit_state.toml path (checked by the caller's directory walk)
+    // is written earlier in the stage, so a dir with fit_state.toml
+    // but no run.json is an interrupted run.
+    match Run::read(std::path::Path::new(stage_dir)) {
+        Ok(run) => {
+            if let RunKind::FitStage(m) = &run.kind {
+                let ll    = m.best_loglik.map(|l| format!("{:.1}", l)).unwrap_or_else(|| "—".into());
+                let chain = m.best_chain.map(|c| format!(" (chain {})", c + 1)).unwrap_or_default();
+                println!("    {:12} \x1b[32m✓\x1b[0m {} — loglik={}{}, {:.0}s",
+                    name, m.method, ll, chain, run.wall_time_seconds);
+            }
         }
-    }
-    if let Ok(state) = FitState::load(stage_dir) {
-        let n_good = state.n_good_chains.unwrap_or(state.n_chains);
-        println!("    {:12} \x1b[32m✓\x1b[0m {} chains, loglik={:.1}, {}/{} good",
-            name, state.n_chains, state.best_loglik, n_good, state.n_chains);
+        Err(_) => {
+            println!("    {:12} \x1b[33m⚠\x1b[0m incomplete (no run.json)", name);
+        }
     }
 }
 
