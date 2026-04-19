@@ -51,8 +51,8 @@ fn cas_first_run_writes_cache_and_metadata() {
     assert!(status.success(), "first --cas run should succeed");
 
     // Exactly one CAS entry under runs/
-    let runs = output.join("runs");
-    assert!(runs.exists(), "runs/ directory should exist");
+    let runs = output.join("sims");
+    assert!(runs.exists(), "sims/ directory should exist");
     let seed_dirs: Vec<_> = walkdir(&runs).into_iter()
         .filter(|p| p.join("run.json").exists())
         .collect();
@@ -98,7 +98,7 @@ fn cas_second_identical_run_is_cache_hit() {
     assert!(stderr1.contains("cached:"), "first run stderr should say 'cached:': {}", stderr1);
 
     // Wait long enough that the filesystem mtime would differ if rewritten
-    let cache_path = walkdir(&output.join("runs")).into_iter()
+    let cache_path = walkdir(&output.join("sims")).into_iter()
         .find(|p| p.join("traj.tsv").exists()).unwrap()
         .join("traj.tsv");
     let mtime1 = std::fs::metadata(&cache_path).unwrap().modified().unwrap();
@@ -134,7 +134,7 @@ fn cas_different_seed_new_cache_entry() {
         assert!(st.success());
     }
 
-    let dirs: Vec<_> = walkdir(&output.join("runs")).into_iter()
+    let dirs: Vec<_> = walkdir(&output.join("sims")).into_iter()
         .filter(|p| p.join("run.json").exists()).collect();
     assert_eq!(dirs.len(), 2, "should have two separate seed dirs");
 
@@ -211,7 +211,7 @@ fn cat_emits_cached_trajectory() {
         .status().expect("spawn");
 
     // Find the cached dir, derive short hash
-    let dir = walkdir(&output.join("runs")).into_iter()
+    let dir = walkdir(&output.join("sims")).into_iter()
         .find(|p| p.join("run.json").exists()).unwrap();
     let meta: serde_json::Value = serde_json::from_str(
         &std::fs::read_to_string(dir.join("run.json")).unwrap()
@@ -277,7 +277,7 @@ beta = [0.2, 0.3, 0.4]
     assert!(st.success(), "batch sweep should succeed");
 
     // Find all run.json files (one per sweep point × scenario × seed = 3 total)
-    let run_dirs: Vec<_> = walkdir(&output.join("runs")).into_iter()
+    let run_dirs: Vec<_> = walkdir(&output.join("sims")).into_iter()
         .filter(|p| p.join("run.json").exists()).collect();
     assert_eq!(run_dirs.len(), 3, "expected 3 runs for 3-point sweep");
 
@@ -363,7 +363,7 @@ beta = [0.2, 0.3, 0.4]
         "stderr should confirm no simulation ran: {}", stderr);
 
     // Must not have written any run files.
-    let runs_dir = output.join("runs");
+    let runs_dir = output.join("sims");
     assert!(!runs_dir.exists() ||
             walkdir(&runs_dir).into_iter().filter(|p| p.join("run.json").exists()).next().is_none(),
         "dry-run must not write any run.json files");
@@ -406,7 +406,7 @@ fn show_prints_metadata() {
                "-o", &tmp.path().join("traj.tsv").to_string_lossy()])
         .status().expect("spawn");
 
-    let dir = walkdir(&output.join("runs")).into_iter()
+    let dir = walkdir(&output.join("sims")).into_iter()
         .find(|p| p.join("run.json").exists()).unwrap();
     let meta: serde_json::Value = serde_json::from_str(
         &std::fs::read_to_string(dir.join("run.json")).unwrap()

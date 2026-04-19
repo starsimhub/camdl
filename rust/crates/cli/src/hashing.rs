@@ -122,6 +122,39 @@ pub fn file_hash(path: &str) -> Option<String> {
     Some(hex::encode(&Sha256::digest(&bytes)[..4]))
 }
 
+/// Content hash for a fit's *directory* (seed-independent). Keyed on
+/// `(model IR, data files, fit.toml, version)` — deliberately omits
+/// seed so re-running the same fit config with different seeds lands
+/// in the same `output/fits/<stem>-<hash>/` directory, with seeds
+/// differentiated via the `fit_<seed>` subdirectory.
+///
+/// Used by `FitConfigV2::fit_dir()` to produce the content-addressable
+/// suffix on the fit-directory name. The proposal's "edit your
+/// fit.toml and get a new dir" invariant falls out of this: any edit
+/// to model, data, or fit.toml changes the hash; seed alone doesn't.
+pub fn fit_content_hash(
+    model_ir_bytes: &[u8],
+    data_files: &mut [(String, Vec<u8>)],
+    fit_toml_bytes: &[u8],
+) -> String {
+    let mut h = Sha256::new();
+    h.update(b"model\x00");
+    h.update(model_ir_bytes);
+    h.update(b"\x00data\x00");
+    data_files.sort_by(|a, b| a.0.cmp(&b.0));
+    for (name, bytes) in data_files.iter() {
+        h.update(name.as_bytes());
+        h.update(b"\x00");
+        h.update(bytes);
+        h.update(b"\x00");
+    }
+    h.update(b"fit\x00");
+    h.update(fit_toml_bytes);
+    h.update(b"\x00version\x00");
+    h.update(version::VERSION_SHORT.as_bytes());
+    hex::encode(&h.finalize()[..4]) // 8 hex chars
+}
+
 /// Fit-level input hash: `(model IR bytes, data files, fit.toml bytes,
 /// seed, version)` → 8 hex chars. Identifies the whole fit as a
 /// computation; written into `fit_state.toml.input_hash`. A change to
@@ -159,6 +192,17 @@ pub fn fit_input_hash(
     h.update(b"\x00version\x00");
     h.update(version::VERSION_SHORT.as_bytes());
     hex::encode(&h.finalize()[..4]) // 8 hex chars
+}
+
+/// Extract a directory-safe stem from a file path: basename without
+/// extension(s), slugified. Used to label fit / sim output
+/// directories so `ls output/fits/` shows recognisable names alongside
+/// their content hashes. Multi-dot extensions (`foo.ir.json` →
+/// `foo`) collapse by stripping from the first dot.
+pub fn path_stem_slug(path: &str) -> Option<String> {
+    let name = std::path::Path::new(path).file_name()?.to_str()?;
+    let stem = name.split('.').next().filter(|s| !s.is_empty())?;
+    Some(slug(stem))
 }
 
 /// Convert a scenario name to a filesystem-safe slug: lowercase, non-[a-z0-9_] → '_'.

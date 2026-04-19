@@ -6,7 +6,7 @@
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeSet, HashMap};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 // ─── Top-level ──────────────────────────────────────────────────────────────
 
@@ -685,19 +685,46 @@ impl FitConfigV2 {
         Ok(config)
     }
 
-    /// Output directory for this fit, derived from the config file name.
-    pub fn fit_dir(&self, config_path: &str) -> PathBuf {
-        let name = Path::new(config_path)
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .unwrap_or("fit");
+    /// Seed-independent content hash for the fit directory. Keyed on
+    /// (model IR, data files, fit.toml bytes, version). Any edit to
+    /// these produces a new hash → new directory, so previous fit
+    /// results are never silently overwritten when the config changes.
+    pub fn fit_content_hash(&self, config_path: &str) -> Result<String, String> {
+        let fit_bytes = std::fs::read(config_path)
+            .map_err(|e| format!("cannot read fit.toml at '{}': {}", config_path, e))?;
+        let model_ir_bytes = std::fs::read(&self.model.camdl)
+            .map_err(|e| format!("cannot read model at '{}': {}", self.model.camdl, e))?;
+        let mut data_files: Vec<(String, Vec<u8>)> = Vec::new();
+        if let Some(data) = &self.data {
+            for (name, path) in &data.observations {
+                let bytes = std::fs::read(path)
+                    .map_err(|e| format!("cannot read data file '{}' ({}): {}", name, path, e))?;
+                data_files.push((name.clone(), bytes));
+            }
+        }
+        // Synthetic fits (no [data]) derive data deterministically
+        // from `true_params` + sim_seeds inside the fit.toml, so the
+        // fit hash captures them via the fit.toml bytes.
+        Ok(crate::hashing::fit_content_hash(&model_ir_bytes, &mut data_files, &fit_bytes))
+    }
+
+    /// Output directory for this fit: `<root>/fits/<stem>-<hash[:8]>/`.
+    /// Stem from the fit.toml basename; hash from
+    /// [`fit_content_hash`]. Recognisable directory names, content-
+    /// addressable cache keys, no silent overwrites.
+    pub fn fit_dir(&self, config_path: &str) -> Result<PathBuf, String> {
+        let stem = crate::hashing::path_stem_slug(config_path)
+            .unwrap_or_else(|| "fit".to_string());
+        let hash = self.fit_content_hash(config_path)?;
         let output_root = self.output_dir.as_deref().unwrap_or("output");
-        PathBuf::from(output_root).join("fits").join(name)
+        Ok(PathBuf::from(output_root)
+            .join("fits")
+            .join(format!("{}-{}", stem, &hash[..8.min(hash.len())])))
     }
 
     /// Output directory for a specific stage.
-    pub fn stage_dir(&self, config_path: &str, stage_name: &str) -> PathBuf {
-        self.fit_dir(config_path).join(stage_name)
+    pub fn stage_dir(&self, config_path: &str, stage_name: &str) -> Result<PathBuf, String> {
+        Ok(self.fit_dir(config_path)?.join(stage_name))
     }
 
     /// The per-fit subdirectory under `fit_dir()` — always
@@ -952,6 +979,7 @@ impl FitConfigV2 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::Path;
 
     fn parse(toml_str: &str) -> Result<FitConfigV2, String> {
         toml::from_str(toml_str)

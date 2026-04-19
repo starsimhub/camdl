@@ -1060,8 +1060,9 @@ fn prepare_cas_ctx(
     );
     let scen_h = hashing::scen_hash(&enable, &disable, &scen_params);
     let scenario_display = scenario_name.clone().unwrap_or_else(|| "baseline".to_string());
+    let model_stem = hashing::path_stem_slug(&run.ir_path);
     let relative = cas::run_path_relative(
-        &sim_h, &scenario_display, &enable, &disable, &scen_params, seed,
+        &sim_h, model_stem.as_deref(), &scenario_display, &enable, &disable, &scen_params, seed,
     );
     let run_dir = cas::run_dir(std::path::Path::new(cas_root), &relative);
 

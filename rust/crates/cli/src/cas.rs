@@ -33,13 +33,21 @@ use serde::{Serialize, Deserialize};
 
 use crate::hashing::{scen_hash, slug};
 
-/// Build the canonical relative run path: `{sim_hash[:8]}/{scenario_slug}-{scen_hash[:8]}/seed_{n}`.
+/// Build the canonical relative run path.
+///
+/// With `model_stem = None`:   `{sim_hash[:8]}/{scenario_slug}-{scen_hash[:8]}/seed_{n}`
+/// With `model_stem = Some(s)`: `{s}-{sim_hash[:8]}/{scenario_slug}-{scen_hash[:8]}/seed_{n}`
+///
+/// The optional model stem (typically the basename of the `.camdl` file,
+/// slugified via [`hashing::path_stem_slug`]) lets `ls output/sims/` surface
+/// recognisable names alongside their content hashes. The hash still fully
+/// discriminates — two models with the same stem but different content
+/// land in different directories.
 ///
 /// `sim_hash` must be the full 64-char hex string from `hashing::sim_hash`.
-/// The enable/disable/params trio is hashed here so the caller doesn't have
-/// to precompute scen_hash separately.
 pub fn run_path_relative(
     sim_hash: &str,
+    model_stem: Option<&str>,
     scenario_name: &str,
     enable: &[String],
     disable: &[String],
@@ -47,7 +55,12 @@ pub fn run_path_relative(
     seed: u64,
 ) -> String {
     let sh = scen_hash(enable, disable, params);
-    format!("{}/{}-{}/seed_{}", &sim_hash[..8], slug(scenario_name), &sh[..8], seed)
+    let hash_prefix = &sim_hash[..8.min(sim_hash.len())];
+    let head = match model_stem {
+        Some(s) if !s.is_empty() => format!("{}-{}", s, hash_prefix),
+        _ => hash_prefix.to_string(),
+    };
+    format!("{}/{}-{}/seed_{}", head, slug(scenario_name), &sh[..8], seed)
 }
 
 /// Absolute path to the simulate run directory for a given root and
@@ -241,6 +254,7 @@ mod tests {
         let params: HashMap<String, f64> = HashMap::new();
         let path = run_path_relative(
             "abc12345000000000000000000000000000000000000000000000000",
+            None,
             "baseline",
             &[],
             &[],
@@ -256,8 +270,24 @@ mod tests {
     fn run_path_slugifies_scenario() {
         let params: HashMap<String, f64> = HashMap::new();
         let sim = "a".repeat(64);
-        let path = run_path_relative(&sim, "With SIA!", &[], &[], &params, 1);
+        let path = run_path_relative(&sim, None, "With SIA!", &[], &[], &params, 1);
         assert!(path.contains("/with_sia_-"), "got: {}", path);
+    }
+
+    #[test]
+    fn run_path_uses_model_stem_prefix() {
+        let params: HashMap<String, f64> = HashMap::new();
+        let sim = "a".repeat(64);
+        let path = run_path_relative(&sim, Some("sir_basic"), "baseline", &[], &[], &params, 1);
+        assert!(path.starts_with("sir_basic-aaaaaaaa/"), "got: {}", path);
+    }
+
+    #[test]
+    fn run_path_empty_stem_falls_back_to_hash_only() {
+        let params: HashMap<String, f64> = HashMap::new();
+        let sim = "b".repeat(64);
+        let path = run_path_relative(&sim, Some(""), "baseline", &[], &[], &params, 1);
+        assert!(path.starts_with("bbbbbbbb/"), "got: {}", path);
     }
 
     #[test]

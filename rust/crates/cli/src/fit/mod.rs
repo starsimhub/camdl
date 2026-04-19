@@ -153,11 +153,17 @@ pub fn cmd_fit_status(args: &[String]) {
             // Try v2 config format
             match config_v2::FitConfigV2::load(path) {
                 Ok(config) => {
-                    let fit_dir = config.fit_dir(path);
-                    if fit_dir.exists() {
-                        run_status_v2_dir(&fit_dir.to_string_lossy());
-                    } else {
-                        eprintln!("no results found at {}", fit_dir.display());
+                    match config.fit_dir(path) {
+                        Ok(fit_dir) if fit_dir.exists() => {
+                            run_status_v2_dir(&fit_dir.to_string_lossy());
+                        }
+                        Ok(fit_dir) => {
+                            eprintln!("no results found at {}", fit_dir.display());
+                        }
+                        Err(e) => {
+                            eprintln!("error computing fit directory: {}", e);
+                            std::process::exit(1);
+                        }
                     }
                     return;
                 }
@@ -409,7 +415,10 @@ pub fn cmd_fit_run_v2(args: &[String]) {
         config.stages.iter().map(|(k, v)| (k.as_str(), v)).collect()
     };
 
-    let fit_dir = config.fit_dir(&fit_path);
+    let fit_dir = config.fit_dir(&fit_path).unwrap_or_else(|e| {
+        eprintln!("error: {}", e);
+        std::process::exit(1);
+    });
 
     eprintln!("fit: {} ({} stage{})",
         fit_path,
@@ -1299,7 +1308,13 @@ pub fn cmd_fit_new(args: &[String]) {
     // Find the first stage and update starts_from to point to source's results
     let source_config = config_v2::FitConfigV2::load(&from).ok();
     if let Some(ref cfg) = source_config {
-        let source_fit_dir = cfg.fit_dir(&from);
+        let source_fit_dir = match cfg.fit_dir(&from) {
+            Ok(d) => d,
+            Err(e) => {
+                eprintln!("warning: could not compute source fit dir: {}", e);
+                return;
+            }
+        };
         if let Some(last_stage) = cfg.stages.keys().last() {
             let starts_path = source_fit_dir.join(last_stage);
             if starts_path.exists() {
