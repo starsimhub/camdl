@@ -628,25 +628,42 @@ fn run_simulate(args: &[String]) {
     let cas_sim_t0 = std::time::Instant::now();
 
     if let Some(ref ctx) = cas_ctx {
-        if cas::has_cached_traj(&ctx.run_dir) {
-            let cached = std::fs::read(ctx.run_dir.join("traj.tsv"))
-                .unwrap_or_else(|e| {
-                    eprintln!("error reading cached traj.tsv: {}", e);
-                    std::process::exit(1);
-                });
-            // Emit cached bytes to user's chosen destination
-            if !suppress_trajectory {
-                match &output_path {
-                    Some(path) => std::fs::write(path, &cached).unwrap_or_else(|e| {
-                        eprintln!("cannot write {}: {}", path, e); std::process::exit(1);
-                    }),
-                    None => {
-                        std::io::stdout().write_all(&cached).unwrap();
+        // Hash-aware cache check: we don't trust "traj.tsv exists" alone.
+        // If run.json is missing or its hash doesn't match the current
+        // sim config, fall through to re-run rather than serve a stale
+        // trajectory. Missing traj.tsv is always a miss regardless of
+        // the metadata.
+        use crate::run_meta::CacheStatus;
+        let traj_present = cas::has_cached_traj(&ctx.run_dir);
+        let meta_status = crate::run_meta::Run::check_cache(&ctx.run_dir, &ctx.run.hash);
+        match (traj_present, &meta_status) {
+            (true, CacheStatus::Hit { .. }) => {
+                let cached = std::fs::read(ctx.run_dir.join("traj.tsv"))
+                    .unwrap_or_else(|e| {
+                        eprintln!("error reading cached traj.tsv: {}", e);
+                        std::process::exit(1);
+                    });
+                if !suppress_trajectory {
+                    match &output_path {
+                        Some(path) => std::fs::write(path, &cached).unwrap_or_else(|e| {
+                            eprintln!("cannot write {}: {}", path, e); std::process::exit(1);
+                        }),
+                        None => { std::io::stdout().write_all(&cached).unwrap(); }
                     }
                 }
+                eprintln!("{} {}", "cache hit:".bright_green().bold(), ctx.relative.cyan());
+                return;
             }
-            eprintln!("{} {}", "cache hit:".bright_green().bold(), ctx.relative.cyan());
-            return;
+            (true, CacheStatus::Stale { stored, current }) => {
+                eprintln!("{} stored hash {} ≠ current {} — re-running",
+                    "stale cache:".yellow().bold(),
+                    &stored[..8.min(stored.len())],
+                    &current[..8.min(current.len())]);
+            }
+            // (true, Miss) — traj.tsv exists without run.json. Happens
+            // on interrupted runs or older binaries; treat as miss.
+            // (false, _) — nothing cached; miss.
+            _ => {}
         }
     }
 

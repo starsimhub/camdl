@@ -41,13 +41,13 @@ order; each is a self-contained commit.
       replaces eight hand-rolled sites) **or delete the module**.
       Recommend wiring in.
 
-- [ ] **S2 — Two `CacheStatus` enums still exist**
-      `run_meta::CacheStatus { Hit | Stale | Miss }` (v2 fit stage)
-      co-exists with `fit::provenance::CacheStatus { Match | Mismatch |
-      NotFound }` (v1 scout/refine/validate). Simulate `--cas` has no
-      cache-staleness check at all — just `has_cached_traj(run_dir)`
-      which checks file existence, not hash. Unify, or at minimum make
-      sim cache check hash-aware.
+- [~] **S2 — Two `CacheStatus` enums still exist** (partial)
+      Simulate `--cas` now uses hash-aware `Run::check_cache` and warns
+      on stale metadata. `fit::provenance::CacheStatus { Match |
+      Mismatch | NotFound }` is still there for v1 scout/refine/validate
+      because their cache key lives in fit_state.toml (`input_hash`)
+      rather than in a run.json. Full unification is bundled with
+      **L1** (v1 subcommands migration).
 
 - [x] **S3 — Dead `ObsMeta` in `cas.rs`**
       `pub struct ObsMeta` + `pub fn write_obs_meta` have zero callers
