@@ -154,7 +154,33 @@ pub struct FitStageMeta {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StartsFromRef {
     pub stage: String,
-    pub stage_hash: String,
+    /// Content hash of the upstream stage, if its `run.json` could be
+    /// read at write time. `None` when the upstream directory was a
+    /// legacy path (no run.json) or the file was unreadable — absent
+    /// rather than empty so the provenance chain doesn't silently
+    /// corrupt into "has a parent, but we don't know its hash."
+    ///
+    /// A custom `Deserialize` shim maps legacy `""` (the sentinel used
+    /// by pre-hardening writes) to `None`, so old run.json files round-
+    /// trip cleanly. See `deserialize_empty_as_none`.
+    #[serde(default, deserialize_with = "deserialize_empty_as_none",
+            skip_serializing_if = "Option::is_none")]
+    pub stage_hash: Option<String>,
+}
+
+/// Treat legacy empty-string values as `None`. Pre-hardening
+/// `StartsFromRef.stage_hash` was `String` with an empty-string
+/// fallback on read error; the hardening pass changed it to
+/// `Option<String>` and writes either a real hash or omits the field.
+/// This deserializer makes old records consistent with the new schema.
+fn deserialize_empty_as_none<'de, D>(deser: D) -> Result<Option<String>, D::Error>
+where D: serde::Deserializer<'de>,
+{
+    let opt = <Option<String>>::deserialize(deser)?;
+    Ok(match opt {
+        Some(s) if s.is_empty() => None,
+        other => other,
+    })
 }
 
 /// Unified cache status: result of comparing an expected content hash
@@ -286,7 +312,7 @@ mod tests {
                 best_chain: Some(1),
                 starts_from: Some(StartsFromRef {
                     stage: "scout".into(),
-                    stage_hash: "beef1234".repeat(8),
+                    stage_hash: Some("beef1234".repeat(8)),
                 }),
                 derived_from: None,
             }),
@@ -427,6 +453,60 @@ mod tests {
             RunKind::FitStage(m) => assert_eq!(m.fit_hash, parent_hash),
             _ => panic!("expected FitStage"),
         }
+    }
+
+    #[test]
+    fn legacy_empty_stage_hash_deserializes_to_none() {
+        // Pre-hardening run.json files wrote "stage_hash": "" as an
+        // error-path sentinel. The custom deserializer maps that to
+        // None so legacy records round-trip consistently with new
+        // writes.
+        let json = r#"{
+            "hash": "xxx", "version": "v", "created_at": "t",
+            "argv": [], "wall_time_seconds": 0.0,
+            "kind": {"kind": "fit-stage", "fit_hash": "fff", "stage": "refine",
+                     "method": "if2", "seed": 1, "n_chains": 4,
+                     "starts_from": {"stage": "scout", "stage_hash": ""}}
+        }"#;
+        let parsed: Run = serde_json::from_str(json).unwrap();
+        match parsed.kind {
+            RunKind::FitStage(m) => {
+                let sf = m.starts_from.expect("starts_from present");
+                assert_eq!(sf.stage, "scout");
+                assert!(sf.stage_hash.is_none(),
+                    "empty-string stage_hash must deserialize to None, got {:?}",
+                    sf.stage_hash);
+            }
+            _ => panic!("expected FitStage"),
+        }
+    }
+
+    #[test]
+    fn modern_stage_hash_omits_the_field_when_none() {
+        // New writes omit the field entirely (skip_serializing_if).
+        // Regression guard against someone re-introducing empty-string
+        // writes.
+        let r = Run {
+            hash: "x".repeat(64), version: "v".into(), created_at: "t".into(),
+            argv: vec![], wall_time_seconds: 0.0,
+            kind: RunKind::FitStage(FitStageMeta {
+                fit_hash: "f".repeat(64),
+                stage: "refine".into(), method: "if2".into(),
+                seed: 1, n_chains: 1,
+                algorithm: serde_json::Value::Null,
+                best_loglik: None, best_chain: None,
+                starts_from: Some(StartsFromRef {
+                    stage: "scout".into(), stage_hash: None,
+                }),
+                derived_from: None,
+            }),
+        };
+        let json = serde_json::to_string(&r).unwrap();
+        // The `stage_hash` key should NOT appear when it's None —
+        // otherwise the schema is silently round-tripping an empty
+        // value.
+        assert!(!json.contains("\"stage_hash\""),
+            "None stage_hash should be omitted entirely, got {}", json);
     }
 
     #[test]

@@ -1128,9 +1128,19 @@ pub fn cmd_fit_run_v2(args: &[String]) {
                 .and_then(|s| s.to_str())
                 .unwrap_or("unknown")
                 .to_string();
-            let stage_hash = crate::run_meta::Run::read(p)
-                .map(|r| r.hash)
-                .unwrap_or_default();
+            // Try to read the upstream run.json. On failure, record
+            // `None` + warn — absent is the honest signal for "we
+            // can't prove what this refers to", as distinct from empty
+            // string which used to masquerade as a real hash.
+            let stage_hash = match crate::run_meta::Run::read(p) {
+                Ok(r) => Some(r.hash),
+                Err(e) => {
+                    eprintln!("warning: starts_from = {} has no readable \
+                              run.json ({}); provenance chain will record \
+                              stage_hash: null", dir_path, e);
+                    None
+                }
+            };
             crate::run_meta::StartsFromRef { stage: stage_name, stage_hash }
         });
         let algo_json = match stage {
@@ -1357,8 +1367,15 @@ fn write_v1_stage_run(
         let p = std::path::Path::new(dir_path);
         let stage_name = p.file_name()
             .and_then(|s| s.to_str()).unwrap_or("unknown").to_string();
-        let stage_hash = crate::run_meta::Run::read(p)
-            .map(|r| r.hash).unwrap_or_default();
+        let stage_hash = match crate::run_meta::Run::read(p) {
+            Ok(r) => Some(r.hash),
+            Err(e) => {
+                eprintln!("warning: starts_from = {} has no readable \
+                          run.json ({}); provenance chain will record \
+                          stage_hash: null", dir_path, e);
+                None
+            }
+        };
         crate::run_meta::StartsFromRef { stage: stage_name, stage_hash }
     });
     // Hash scope: (stage name + seed + stage output hash). Enough
