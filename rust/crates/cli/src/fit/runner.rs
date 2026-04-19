@@ -133,15 +133,17 @@ impl FitRunConfig {
             .map_err(|e| format!("compile error: {:?}", e))?;
         let mut base_params = compiled.default_params.clone();
 
-        // Apply start overrides from fit_state if provided (overrides model defaults)
-        if let Some(state) = prior_state {
-            for (name, &value) in &state.start_values {
-                if let Some(&idx) = compiled.param_index.get(name.as_str()) {
-                    base_params[idx] = value;
-                }
-            }
-        }
-        // Apply estimate start values to base_params (may override model defaults)
+        // Priority: prior_state > estimate.start > fixed > model default.
+        // `base_params` is the single source of truth for IF2's starting
+        // point: run_if2_with_progress initialises its particle cloud
+        // from `base_params`, not from `EstimatedParam::initial`. If
+        // prior_state is applied before est.start (as was the case
+        // before 2026-04-18), the est.start write silently overwrites
+        // the scout-best values, and `starts_from = "scout"` becomes a
+        // no-op for refine's iter-0 parameters. See
+        // docs/dev/incidents/2026-04-18-starts-from-scout-ignored.md.
+
+        // 1. Apply estimate start values to base_params (override model defaults).
         for (name, spec) in &fit.estimate {
             if let Some(start) = spec.start {
                 if let Some(&idx) = compiled.param_index.get(name.as_str()) {
@@ -149,11 +151,21 @@ impl FitRunConfig {
                 }
             }
         }
-        // Apply fixed numeric values to base_params
+        // 2. Apply fixed numeric values (override model defaults).
         for (name, val) in &fit.fixed {
             if let Some(v) = val.as_float().or_else(|| val.as_integer().map(|i| i as f64)) {
                 if let Some(&idx) = compiled.param_index.get(name.as_str()) {
                     base_params[idx] = v;
+                }
+            }
+        }
+        // 3. Apply prior_state last so it wins over config start/fixed.
+        //    This is what makes `starts_from = "scout"` actually seed
+        //    the IF2 search from scout's best MLE.
+        if let Some(state) = prior_state {
+            for (name, &value) in &state.start_values {
+                if let Some(&idx) = compiled.param_index.get(name.as_str()) {
+                    base_params[idx] = value;
                 }
             }
         }
@@ -1239,6 +1251,96 @@ mod tests {
     /// Regression guard for the asymmetry bug where fit.toml could only override
     /// 4 of the 7 IR distributions.
     /// End-to-end: priors declared in a .camdl file survive compilation to
+    /// Regression for the `starts_from = "scout"` bug: when a FitState
+    /// (scout's output) is supplied to `FitRunConfig::build`, the
+    /// resulting `base_params` must reflect the scout-best values —
+    /// NOT the fit.toml `[estimate].*.start` values. The fix for this
+    /// was reversing the application order in build. See
+    /// docs/dev/incidents/2026-04-18-starts-from-scout-ignored.md.
+    ///
+    /// IF2 uses `config.base_params` as its starting point for the
+    /// particle cloud (if2.rs:338, `current_params = base_params`).
+    /// If the priority inversion lets est.start overwrite scout's
+    /// best, refine starts from scratch instead of from scout's MLE.
+    #[test]
+    fn fit_state_overrides_config_start_in_base_params() {
+        use crate::fit::state::FitState;
+        use std::collections::HashMap;
+
+        // Tiny fit.toml referencing the sir_priors golden. We set
+        // beta's `start = 1.5`; prior_state will supply 9.9. The
+        // bug has `start` winning; the fix has `prior_state` winning.
+        let manifest = std::env::var("CARGO_MANIFEST_DIR").unwrap();
+        let ir_path = format!("{}/../../../ocaml/golden/seir_observations.ir.json", manifest);
+        let data_dir = std::env::temp_dir().join(format!(
+            "camdl_starts_from_test_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        std::fs::create_dir_all(&data_dir).unwrap();
+        let data_path = data_dir.join("obs.tsv");
+        std::fs::write(&data_path,
+            "time\tweekly_cases\n7\t1\n14\t2\n21\t3\n28\t4\n35\t5\n").unwrap();
+
+        let toml = format!(r#"
+[fit]
+model = "{}"
+output_dir = "{}"
+seed = 1
+[config]
+backend = "gillespie"
+dt = 1.0
+[data]
+weekly_cases = "{}"
+[fixed]
+sigma    = 0.25
+gamma    = 0.3
+rho      = 0.5
+k        = 10.0
+p_detect = 0.5
+N0       = 1000
+I0       = 1
+[estimate]
+beta = {{ start = 1.5 }}
+[scout]
+chains = 1
+particles = 100
+iterations = 1
+cooling = 0.5
+"#, ir_path, data_dir.display(), data_path.display());
+        let fit: FitToml = toml::from_str(&toml).unwrap();
+
+        // Scout produced a very different "best" — a clearly
+        // distinguishable value so a win/loss is unambiguous.
+        let mut start_values = HashMap::new();
+        start_values.insert("beta".to_string(), 9.9);
+        let prior_state = FitState {
+            stage: "scout".into(), seed: 1,
+            timestamp: "2026-04-18T00:00:00Z".into(),
+            input_hash: None, camdl_version: None,
+            best_loglik: -100.0, initial_loglik: f64::NEG_INFINITY,
+            best_chain: 0, n_chains: 1, n_good_chains: Some(1),
+            start_values,
+            rw_sd: HashMap::new(),
+            loglik_type: Some("if2".into()),
+            acceptance_rate: None,
+        };
+
+        let config = FitRunConfig::build(
+            &fit, Some(&prior_state),
+            1, 100, 1, 0.5, 1, false,
+        ).expect("build must succeed");
+
+        let beta_idx = config.compiled.param_index.get("beta").copied()
+            .expect("beta present");
+        assert!((config.base_params[beta_idx] - 9.9).abs() < 1e-9,
+            "prior_state must win over est.start — got {}, expected 9.9 \
+             (scout's best). 1.5 means est.start overwrote scout — the \
+             pre-fix bug is back.",
+            config.base_params[beta_idx]);
+
+        std::fs::remove_dir_all(&data_dir).ok();
+    }
+
     /// IR JSON, deserialization back into ir::Model, and the resolve_prior
     /// pipeline that pgas.rs / pmmh.rs use to build the Prior vector.
     ///
