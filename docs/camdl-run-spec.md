@@ -255,6 +255,25 @@ For multi-parameter sweeps, directory names concatenate with double underscores:
 `rho_0.500__k_5.000/`. Within each sweep point directory, the stage layout is
 identical to a non-swept fit.
 
+### 2.3.1 Single-writer-per-fit-dir contract
+
+A `fit_dir` (`results/fits/<stem>-<hash[:8]>/`) is implicitly single-
+writer. Concurrent camdl processes writing into the same fit_dir are
+not supported and produce undefined behavior — in practice, one
+writer's stage outputs may silently clobber another's.
+
+Batch workflows that parallelize across cells or fits **must**
+partition by `fit_hash`: either run distinct fit.tomls (different
+hashes → different directories) in parallel, or sequence runs that
+target the same fit_dir. `camdl fit run` guards the obvious collision
+case — when a stage directory already exists, `--force` is required
+to re-run — but this check is advisory, not a lock.
+
+Real concurrent-writer support (lockfile discipline, partial-write
+recovery) is tracked in the 2026-04-19 output-tree-hardening
+proposal §defer/D1; until that lands, treat the single-writer
+contract as a hard requirement.
+
 ### 2.4 Simulation Result Layout
 
 ```

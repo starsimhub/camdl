@@ -1,7 +1,17 @@
 ---
-status: proposal
+status: implemented
 date: 2026-04-19
 supersedes-partially: 2026-04-19-unified-output-tree.md
+shipped:
+  - c72d2ae  fix(fit): guard PGAS rename with error-on-collision
+  - e3cbed9  fix(run_meta): StartsFromRef.stage_hash → Option<String>
+  - facd40c  revert: default output root back to 'results/'
+  - 6c605e2  fix(hashing): widen fit_content_hash to full 64-char hex
+  - a4eb51e  fix(fit): mle_params.toml.input_hash uses full fit Run.hash
+  - 7077df7  fix(hashing): canonicalise TOML before hashing
+  - fe9ab65  fix(run_meta): atomic run.json write via .tmp + rename
+  - 885d1ca  feat(fit): `camdl fit where FIT.toml [--seed N]`
+  - 6a5993e  feat(fit): --starts-from accepts short-hash prefix
 ---
 
 # Output-Tree Hardening
