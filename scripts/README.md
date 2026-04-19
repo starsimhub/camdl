@@ -6,6 +6,10 @@ external code reviewer (another LLM agent, a collaborator, whoever).
 Everything else about review packaging has been deliberately
 consolidated here.
 
+Paste-ready reviewer prompt + staging order lives in
+[`review-request.md`](review-request.md) — copy from there when
+handing a zip to an agent.
+
 ## Usage
 
 ```
