@@ -1,11 +1,11 @@
 //! Content-addressable storage helpers shared between `camdl simulate --cas`
 //! (one-shot cache opt-in) and `camdl simulate --batch` (bulk experiments).
 //!
-//! Canonical layout:
+//! Canonical layout (as of the 2026-04-19 output-tree unification):
 //!
 //! ```text
 //! <root>/                                     # default: ./output
-//!   runs/
+//!   sims/                                     # was `runs/` before 2026-04-19
 //!     {sim_hash[:8]}/                         # model + base params + backend + dt + version
 //!       {scenario_slug}-{scen_hash[:8]}/      # scenario delta (enable/disable/overrides)
 //!         seed_{n}/
@@ -15,7 +15,12 @@
 //!             {obs_hash[:8]}-{obs_seed}/
 //!               <stream>.tsv                  # observation draws (wide or per-stream)
 //!               obs.json                      # obs metadata
+//!   fits/                                     # was `results/fits/` before 2026-04-19
+//!     <config_stem>/
+//!       real/fit_<seed>/<stage>/              # or synthetic/ds_NN/fit_<seed>/<stage>/
 //! ```
+//!
+//! Browsed uniformly by `camdl list / show / cat`.
 //!
 //! The split between `traj.tsv` (outer run dir) and `obs/{obs_hash}-{obs_seed}/`
 //! lets users iterate observation draws without recomputing the trajectory —
@@ -45,12 +50,16 @@ pub fn run_path_relative(
     format!("{}/{}-{}/seed_{}", &sim_hash[..8], slug(scenario_name), &sh[..8], seed)
 }
 
-/// Absolute path to the run directory for a given root and relative path.
+/// Absolute path to the simulate run directory for a given root and
+/// relative path.
 ///
 /// E.g. `run_dir(Path::new("./output"), "abc12345/baseline-def45678/seed_42")`
-/// → `./output/runs/abc12345/baseline-def45678/seed_42`.
+/// → `./output/sims/abc12345/baseline-def45678/seed_42`.
+///
+/// Before 2026-04-19 this was `./output/runs/…`; the rename unifies
+/// the path vocabulary with fits which live at `./output/fits/…`.
 pub fn run_dir(root: &Path, relative: &str) -> PathBuf {
-    root.join("runs").join(relative)
+    root.join("sims").join(relative)
 }
 
 /// Does this run have a cached trajectory?
@@ -254,7 +263,7 @@ mod tests {
     #[test]
     fn has_cached_traj_detects_file() {
         let tmp = tempfile::tempdir().unwrap();
-        let dir = tmp.path().join("runs").join("abc/baseline-def/seed_1");
+        let dir = tmp.path().join("sims").join("abc/baseline-def/seed_1");
         std::fs::create_dir_all(&dir).unwrap();
         assert!(!has_cached_traj(&dir));
         std::fs::write(dir.join("traj.tsv"), "t\tS\n0\t100\n").unwrap();
@@ -306,8 +315,8 @@ mod tests {
 
     #[test]
     fn obs_dir_layout() {
-        let run = Path::new("/tmp/runs/abc/baseline-def/seed_1");
+        let run = Path::new("/tmp/sims/abc/baseline-def/seed_1");
         let od = obs_dir(run, "obsaaaa11111111000000000000000000000000000000000000000000000000", 99);
-        assert_eq!(od, Path::new("/tmp/runs/abc/baseline-def/seed_1/obs/obsaaaa1-99"));
+        assert_eq!(od, Path::new("/tmp/sims/abc/baseline-def/seed_1/obs/obsaaaa1-99"));
     }
 }

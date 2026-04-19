@@ -649,7 +649,7 @@ impl FitConfigV2 {
         Ok(FitToml {
             fit: FitSection {
                 model: self.model.camdl.clone(),
-                output_dir: self.output_dir.clone().unwrap_or_else(|| "results".to_string()),
+                output_dir: self.output_dir.clone().unwrap_or_else(|| "output".to_string()),
                 seed: None,
                 scenario: self.scenario.clone(),
                 enable: self.enable.clone(),
@@ -691,7 +691,7 @@ impl FitConfigV2 {
             .file_stem()
             .and_then(|s| s.to_str())
             .unwrap_or("fit");
-        let output_root = self.output_dir.as_deref().unwrap_or("results");
+        let output_root = self.output_dir.as_deref().unwrap_or("output");
         PathBuf::from(output_root).join("fits").join(name)
     }
 

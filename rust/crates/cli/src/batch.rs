@@ -514,7 +514,7 @@ pub fn cmd_batch_run(args: &[String]) {
         exp.scenario
     };
 
-    let runs_dir = format!("{}/runs", output_dir);
+    let runs_dir = format!("{}/sims", output_dir);
 
     // Classify every (sweep_point, scenario, seed) triple before any
     // fs writes. plan_runs only probes file existence — it's safe to
@@ -772,7 +772,7 @@ fn run_design_experiment(
         }
 
         // Run all (point, scenario, seed) combinations
-        let runs_dir = format!("{}/designs/{}/runs", output_dir, design_name);
+        let runs_dir = format!("{}/designs/{}/sims", output_dir, design_name);
         std::fs::create_dir_all(&runs_dir).unwrap_or_else(|e| {
             eprintln!("error: cannot create runs dir {}: {}", runs_dir, e);
             std::process::exit(1);
@@ -933,7 +933,7 @@ pub fn cmd_batch_status(args: &[String]) {
                 };
                 let seeds   = exp.config.seeds.resolve().unwrap_or_default();
                 let sweep_points = expand_sweep(&exp.sweep);
-                let runs_dir = format!("{}/runs", output_dir);
+                let runs_dir = format!("{}/sims", output_dir);
                 let plans   = plan_runs(&scenarios, &sweep_points, &seeds, &shash, &runs_dir, false);
                 let live_hits = plans.iter().filter(|p| p.decision == RunDecision::CacheHit).count();
                 println!("  Live count: {}/{} traj.tsv files present", live_hits, plans.len());

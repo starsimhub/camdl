@@ -216,12 +216,30 @@ pub fn cmd_cat(args: &[String]) {
 
 // ── Internals: discovery + resolution ────────────────────────────────────────
 
-/// Walk `root/runs/` and collect all runs (directories containing run.json).
+/// Walk `root/sims/` and collect all simulate runs (directories
+/// containing run.json). Fits live under `root/fits/` and are
+/// surfaced separately by `discover_fits`.
+///
+/// Backward-compat: if `root/sims/` doesn't exist but `root/runs/`
+/// does, walks the legacy tree. Users with pre-2026-04-19 output
+/// dirs see their old results without re-running. Migration path:
+/// `mv output/runs output/sims`.
 fn discover_runs(root: &str) -> Result<Vec<RunEntry>, String> {
-    let runs_dir = Path::new(root).join("runs");
-    if !runs_dir.exists() {
-        return Ok(Vec::new());
-    }
+    let runs_dir = {
+        let new_path = Path::new(root).join("sims");
+        if new_path.exists() {
+            new_path
+        } else {
+            let legacy = Path::new(root).join("runs");
+            if legacy.exists() {
+                eprintln!("\x1b[33mnote:\x1b[0m walking legacy `runs/` tree. \
+                           Rename to `sims/` when convenient.");
+                legacy
+            } else {
+                return Ok(Vec::new());
+            }
+        }
+    };
     let mut out = Vec::new();
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
 
@@ -260,7 +278,7 @@ fn discover_runs(root: &str) -> Result<Vec<RunEntry>, String> {
 }
 
 /// Resolve a user-supplied key to a single run. Accepts:
-/// - Full relative path: `output/runs/abc12345/baseline-def45/seed_42`
+/// - Full relative path: `output/sims/abc12345/baseline-def45/seed_42`
 /// - A short hash prefix (git-style): `abc1234` → the unique run whose
 ///   sim_hash starts with `abc1234`
 /// - `{sim_hash_prefix}/{scenario}` or `{prefix}/{scenario}/{seed}`
