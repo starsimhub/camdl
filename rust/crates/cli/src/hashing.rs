@@ -177,11 +177,17 @@ pub fn fit_content_hash(
     h.update(fit_toml_bytes);
     h.update(b"\x00version\x00");
     h.update(version::VERSION_SHORT.as_bytes());
-    hex::encode(&h.finalize()[..4]) // 8 hex chars
+    // Full 64-char hex. Directory-name truncation happens at the
+    // path layer via `run_paths::fit_run_dir`, not here —
+    // decoupling storage key from display prefix. Prior versions
+    // truncated to 8 chars here, which made `Run.hash`'s "full
+    // 64-char hex" docstring a lie for FitMeta and created
+    // collision risk at ~65k fits. Hardening proposal ship-now #1.
+    hex::encode(h.finalize())
 }
 
 /// Fit-level input hash: `(model IR bytes, data files, fit.toml bytes,
-/// seed, version)` → 8 hex chars. Identifies the whole fit as a
+/// seed, version)` → full 64-char hex. Identifies the whole fit as a
 /// computation; written into `fit_state.toml.input_hash`. A change to
 /// any of (model, data, fit.toml, seed, camdl version) invalidates
 /// the cache.
@@ -216,7 +222,10 @@ pub fn fit_input_hash(
     h.update(seed.to_le_bytes());
     h.update(b"\x00version\x00");
     h.update(version::VERSION_SHORT.as_bytes());
-    hex::encode(&h.finalize()[..4]) // 8 hex chars
+    // Full 64-char hex, symmetric with fit_content_hash. v1
+    // fit_state.toml readers consume the hash as opaque string —
+    // no structural dependence on the 8-char width.
+    hex::encode(h.finalize())
 }
 
 /// Extract a directory-safe stem from a file path: basename without
@@ -300,6 +309,29 @@ mod tests {
         // Two calls in the same process must equal.
         assert_eq!(sim_hash(&mh, "beta=0.3", "gillespie", 1.0),
                    sim_hash(&mh, "beta=0.3", "gillespie", 1.0));
+    }
+
+    #[test]
+    fn golden_hash_fit_content_hash_is_full_64_chars() {
+        // Hardening #1: fit_content_hash used to truncate to 8 hex
+        // chars, contradicting the Run.hash docstring. Lock the new
+        // full-width output here so a future truncation regression
+        // fails CI instead of silently reinstating collision risk.
+        let model_ir = r#"{"compartments":["S","I"],"parameters":[]}"#;
+        let fit_toml = b"[estimate]\nbeta = { bounds = [0.1, 2.0] }\n";
+        let mut data: Vec<(String, Vec<u8>)> = vec![
+            ("cases".into(), b"time\tvalue\n1\t5\n2\t7\n".to_vec()),
+        ];
+        let h = fit_content_hash(model_ir.as_bytes(), &mut data, fit_toml);
+        assert_eq!(h.len(), 64,
+            "fit_content_hash must return full 64-char hex (was truncated \
+             to 8 pre-hardening; see hardening-proposal §ship-now/#1)");
+        // Call it twice — must be deterministic.
+        let mut data2: Vec<(String, Vec<u8>)> = vec![
+            ("cases".into(), b"time\tvalue\n1\t5\n2\t7\n".to_vec()),
+        ];
+        let h2 = fit_content_hash(model_ir.as_bytes(), &mut data2, fit_toml);
+        assert_eq!(h, h2);
     }
 
     #[test]
@@ -494,7 +526,9 @@ mod tests {
         let h1 = fit_input_hash(model, &mut data.clone(), fit, 42);
         let h2 = fit_input_hash(model, &mut data, fit, 42);
         assert_eq!(h1, h2, "same inputs → same hash");
-        assert_eq!(h1.len(), 8);
+        assert_eq!(h1.len(), 64,
+            "fit_input_hash returns full 64-char hex (widened in hardening \
+             ship-now #1; was 8 pre-hardening)");
     }
 
     #[test]
