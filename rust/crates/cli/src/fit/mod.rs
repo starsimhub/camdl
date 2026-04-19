@@ -665,6 +665,15 @@ pub fn cmd_fit_run_v2(args: &[String]) {
                     &run_config.estimated_params, &param_names,
                     &run_config.base_params, &run_config.compiled,
                 ).unwrap_or_else(|e| eprintln!("warning: {}", e));
+                // Pre-filter starts — every chain here starts from the
+                // same `config.estimated_params` (IF2 dispatch path uses
+                // run_chains_with_diagnostics, no per-chain override).
+                // Still written for symmetry with scout and so diagnostic
+                // tooling doesn't special-case stage type.
+                runner::write_chain_starts(
+                    &stage_dir.to_string_lossy(), None,
+                    &run_config.estimated_params, *chains,
+                ).unwrap_or_else(|e| eprintln!("warning: {}", e));
                 runner::write_diagnostics(&stage_dir.to_string_lossy(), &chain_results.results)
                     .unwrap_or_else(|e| eprintln!("warning: {}", e));
 

@@ -140,6 +140,9 @@ pub fn run_refine(fit: &FitToml, starts_from: &str, seed: u64, force: bool) -> R
         &stage_dir, &chain_results.results, &config.estimated_params,
         &param_names, &config.base_params, &config.compiled,
     )?;
+    runner::write_chain_starts(
+        &stage_dir, None, &config.estimated_params, n_chains,
+    )?;
     runner::write_diagnostics(&stage_dir, &chain_results.results)?;
 
     // Write mle_params.toml

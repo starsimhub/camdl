@@ -100,6 +100,15 @@ pub fn run_scout(fit: &FitToml, seed: u64, force: bool) -> Result<(), String> {
     let chain_results = runner::run_chains_with_per_chain_params(&config, Some(&per_chain_params), &collector);
     let elapsed = t0.elapsed();
 
+    // Record each chain's pre-filter start — diagnostics use this to
+    // check "did chains span the bounds?" and "did all chains collapse
+    // to the same basin in one filter pass?"
+    std::fs::create_dir_all(&stage_dir).ok();
+    runner::write_chain_starts(
+        &stage_dir, Some(&per_chain_params),
+        &config.estimated_params, n_chains,
+    ).unwrap_or_else(|e| eprintln!("warning: {}", e));
+
     // Check for degenerate filter: if best chain's loglik at early iterations is -inf,
     // the particle count is too low for this model's dimensionality.
     let early_check_iter = 5.min(n_iterations.saturating_sub(1));
