@@ -43,11 +43,12 @@ order; each is a self-contained commit.
 
 - [~] **S2 — Two `CacheStatus` enums still exist** (partial)
       Simulate `--cas` now uses hash-aware `Run::check_cache` and warns
-      on stale metadata. `fit::provenance::CacheStatus { Match |
-      Mismatch | NotFound }` is still there for v1 scout/refine/validate
-      because their cache key lives in fit_state.toml (`input_hash`)
-      rather than in a run.json. Full unification is bundled with
-      **L1** (v1 subcommands migration).
+      on stale metadata. `fit::provenance::CacheStatus` stays for v1
+      scout/refine/validate cache checks (via fit_state.toml's
+      input_hash). Post-L1 the v1 stages also write a Run::FitStage
+      run.json, so a follow-up can replace the fit_state-based cache
+      check with Run::check_cache — deferred. Low priority since the
+      v1 subcommands aren't currently dispatched.
 
 - [x] **S3 — Dead `ObsMeta` in `cas.rs`**
       `pub struct ObsMeta` + `pub fn write_obs_meta` have zero callers
@@ -174,11 +175,18 @@ order; each is a self-contained commit.
 
 ## Lower-priority / defer decisions
 
-- [ ] **L1 — v1 `camdl fit scout | refine | validate` migration**
-      These still write to flat `<output_dir>/scout/` via their own
-      v1 cache path. Either migrate to the unified tree or document
-      them as explicitly legacy (kept working, not surfaced by
-      `camdl list`). Separate piece of work.
+- [x] **L1 — v1 `camdl fit scout | refine | validate` migration**
+      Each `cmd_fit_{scout,refine,validate,pmmh,pgas}` now:
+      (a) computes `<output_root>/fits/<stem>-<hash[:8]>/real/fit_<seed>/`
+      via the new `FitToml::cell_dir` / `fit_root` / `fit_content_hash`
+      methods, (b) writes a top-level `Run::Fit` idempotently at the
+      fit root, (c) invokes the legacy stage writer with output_dir
+      reshaped to the cell dir, (d) wraps with a post-stage
+      `Run::FitStage` writer. v1 status routes through `run_status_v2_dir`
+      on the cell dir.
+      **Caveat:** the v1 subcommands are not currently dispatched from
+      `main.rs` (only `fit run/status/diff/new` are). The migration is
+      dormant until they're re-exposed, but correct by construction.
 
 - [x] **L2 — `camdl list --kind sim|fit|both` filter**
       Added. `fit-stage` variant deferred (stages are surfaced by
@@ -190,11 +198,9 @@ order; each is a self-contained commit.
       `camdl show <fit-dir>` works via path. Short-hash prefix
       resolution for fits and `camdl cat <fit>` still unsupported.
 
-- [ ] **L4 — `manifest.json` location**
-      Batch writes it to `output/manifest.json`; proposal said
-      `output/sims/manifest.json`. Trivial move but changes the
-      browse URL in `camdl serve` and in book snippets — bundle
-      with L5.
+- [x] **L4 — `manifest.json` location**
+      Moved to `<output>/sims/manifest.json` — batch writer, status
+      reader, serve usage, and integration test updated in lockstep.
 
 - [ ] **L5 — `camdl-book` fit paths**
       Book snippets hard-code `results/fits/fit_sir/refine/…`. These

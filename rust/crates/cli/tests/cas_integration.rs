@@ -472,9 +472,10 @@ beta = [0.2, 0.3, 0.4]
     assert!((beta_values[1] - 0.3).abs() < 1e-9);
     assert!((beta_values[2] - 0.4).abs() < 1e-9);
 
-    // manifest.json must also carry sweep_point on each entry
+    // manifest.json must also carry sweep_point on each entry.
+    // Manifest lives under sims/ after the 2026-04-19 unification.
     let manifest: serde_json::Value = serde_json::from_str(
-        &std::fs::read_to_string(output.join("manifest.json")).unwrap()
+        &std::fs::read_to_string(output.join("sims").join("manifest.json")).unwrap()
     ).unwrap();
     let runs = manifest["runs"].as_array().expect("manifest.runs should be an array");
     assert_eq!(runs.len(), 3);

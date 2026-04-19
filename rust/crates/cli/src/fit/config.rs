@@ -169,6 +169,53 @@ pub struct PGASSampleConfig {
 }
 
 impl FitToml {
+    /// Seed-independent content hash for a v1 fit: hashes the fit.toml
+    /// bytes, model IR, and every data file (train + holdout) referenced
+    /// by the config. Used for the `<stem>-<hash[:8]>` suffix on the
+    /// top-level fit directory. Mirrors `FitConfigV2::fit_content_hash`
+    /// so v1 and v2 fits with the same inputs produce the same hash.
+    pub fn fit_content_hash(&self, toml_path: &str) -> Result<String, String> {
+        let fit_bytes = std::fs::read(toml_path)
+            .map_err(|e| format!("cannot read fit.toml at '{}': {}", toml_path, e))?;
+        let model_ir_bytes = std::fs::read(&self.fit.model)
+            .map_err(|e| format!("cannot read model at '{}': {}", self.fit.model, e))?;
+        let mut data_files: Vec<(String, Vec<u8>)> = Vec::new();
+        for (name, path) in &self.data {
+            let bytes = std::fs::read(path)
+                .map_err(|e| format!("cannot read data file '{}' ({}): {}", name, path, e))?;
+            data_files.push((name.clone(), bytes));
+        }
+        if let Some(ref holdout) = self.holdout {
+            for (name, path) in holdout {
+                let bytes = std::fs::read(path)
+                    .map_err(|e| format!("cannot read holdout file '{}' ({}): {}", name, path, e))?;
+                data_files.push((format!("holdout:{}", name), bytes));
+            }
+        }
+        Ok(crate::hashing::fit_content_hash(&model_ir_bytes, &mut data_files, &fit_bytes))
+    }
+
+    /// The top-level fit directory under the unified output tree:
+    /// `<output_root>/fits/<stem>-<fit_hash[:8]>/`. `output_root`
+    /// takes the fit.toml's `[fit] output_dir` value (default
+    /// `"output"`). This matches the v2 layout so `camdl list` sees
+    /// v1 and v2 fits identically.
+    pub fn fit_root(&self, toml_path: &str) -> Result<std::path::PathBuf, String> {
+        let stem = crate::hashing::path_stem_slug(toml_path);
+        let hash = self.fit_content_hash(toml_path)?;
+        let root = crate::run_paths::output_root(None, Some(&self.fit.output_dir));
+        Ok(crate::run_paths::fit_run_dir(&root, stem.as_deref(), &hash))
+    }
+
+    /// Per-fit cell directory: `<fit_root>/real/fit_<seed>/`. Stage
+    /// subdirectories (`scout/`, `refine/`, `validate/`, `pmmh/`,
+    /// `pgas/`) live immediately under this path. v1 doesn't have
+    /// synthetic-data fits, so the source is always `Real`.
+    pub fn cell_dir(&self, toml_path: &str, seed: u64) -> Result<std::path::PathBuf, String> {
+        let fit_root = self.fit_root(toml_path)?;
+        Ok(fit_root.join("real").join(format!("fit_{}", seed)))
+    }
+
     pub fn load(path: &str) -> Result<Self, String> {
         let contents = std::fs::read_to_string(path)
             .map_err(|e| format!("cannot read {}: {}", path, e))?;

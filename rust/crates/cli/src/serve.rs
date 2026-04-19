@@ -10,7 +10,7 @@ fn usage() -> ! {
     eprintln!("  --port N   port to listen on (default: 4280)");
     eprintln!();
     eprintln!("Serves an output/ directory as static HTTP files with CORS enabled.");
-    eprintln!("  GET /manifest.json                                      → batch manifest (if present)");
+    eprintln!("  GET /sims/manifest.json                                 → batch manifest (if present)");
     eprintln!("  GET /sims/<stem>-<sim8>/<scen_slug>-<scen8>/seed_<N>/   → simulate run + run.json");
     eprintln!("  GET /fits/<stem>-<fit8>/                                → fit root + run.json");
     eprintln!("  GET /geo/<file>                                         → GeoJSON boundary files (if present)");

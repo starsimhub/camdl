@@ -1,4 +1,13 @@
 //! `camdl fit status` — colored summary of fit progress and convergence.
+//!
+//! This module's `run_status` is the pre-2026-04-19 v1 status printer.
+//! `cmd_fit_status` now routes both v1 and v2 through
+//! `run_status_v2_dir` in `mod.rs`, which walks the unified output
+//! tree. `run_status` is kept for possible future v1-specific
+//! reporting but has no live callers today. Module allows dead code
+//! to reflect that.
+
+#![allow(dead_code)]
 
 use crate::fit::config::FitToml;
 use crate::fit::state::FitState;

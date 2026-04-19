@@ -690,7 +690,13 @@ pub fn cmd_batch_run(args: &[String]) {
         params_provenance,
         runs: completed_runs,
     };
-    let manifest_path = format!("{}/manifest.json", output_dir);
+    // Manifest lives under `sims/` so the output root contains only
+    // the two subtree roots (sims/, fits/) plus optional geo/. Was
+    // `<output>/manifest.json` before 2026-04-19.
+    let manifest_path = format!("{}/sims/manifest.json", output_dir);
+    if let Some(parent) = std::path::Path::new(&manifest_path).parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
     std::fs::write(&manifest_path, serde_json::to_string_pretty(&manifest).unwrap_or_default())
         .unwrap_or_else(|e| eprintln!("warning: could not write manifest.json: {}", e));
 
@@ -921,7 +927,7 @@ pub fn cmd_batch_status(args: &[String]) {
     });
 
     let output_dir   = exp.config.output_dir.clone();
-    let manifest_path = format!("{}/manifest.json", output_dir);
+    let manifest_path = format!("{}/sims/manifest.json", output_dir);
 
     if let Ok(src) = std::fs::read_to_string(&manifest_path) {
         if let Ok(manifest) = serde_json::from_str::<Manifest>(&src) {
