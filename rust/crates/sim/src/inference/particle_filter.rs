@@ -49,6 +49,10 @@ pub struct PFilterResult {
     /// Final particle states after the last observation (post-resampling).
     /// Only populated when `save_final_state` is true.
     pub final_states: Option<Vec<ParticleState>>,
+    /// Per-step pre-resample particle states + ancestry, populated
+    /// when `SMCConfig.record_ancestry = true`. Feed this to
+    /// `ancestor_trace::sample_paths` for smoothing draws.
+    pub ancestry: Option<super::ancestor_trace::AncestorTrace>,
 }
 
 /// Run the bootstrap particle filter.
@@ -115,6 +119,20 @@ pub fn bootstrap_filter<P: ProcessModel<State = ParticleState>>(
     // Resampling RNG (separate from particle RNGs)
     let mut resample_rng = StatefulRng::new(seed.wrapping_add(0xdeadbeef));
 
+    // Ancestry recording (allocated only if requested).
+    let mut history_states: Vec<Vec<Vec<f64>>> = if config.record_ancestry {
+        Vec::with_capacity(n_obs)
+    } else { Vec::new() };
+    let mut history_lw: Vec<Vec<f64>> = if config.record_ancestry {
+        Vec::with_capacity(n_obs)
+    } else { Vec::new() };
+    let mut history_ancestors: Vec<Vec<usize>> = if config.record_ancestry {
+        Vec::with_capacity(n_obs.saturating_sub(1))
+    } else { Vec::new() };
+    let mut history_times: Vec<f64> = if config.record_ancestry {
+        Vec::with_capacity(n_obs)
+    } else { Vec::new() };
+
     for obs_idx in 0..n_obs {
         let obs_time = obs_model.obs_time(obs_idx);
 
@@ -161,6 +179,25 @@ pub fn bootstrap_filter<P: ProcessModel<State = ParticleState>>(
             swarm.log_weights[i] = obs_model.log_likelihood(state, obs_idx, params);
         }
 
+        // Record pre-resample filtering state (states + weights) so
+        // the caller can reconstruct filtering marginals or, paired
+        // with the ancestor indices recorded below, sample smoothing
+        // paths. Allocates N×K counts + N weights per obs step; only
+        // enabled when the caller opts in.
+        if config.record_ancestry {
+            // Convert i64 compartment counts → f64 at record time;
+            // downstream (path sampling, quantile ribbons) wants
+            // real-valued arithmetic. Real-compartment backends would
+            // already be f64 conceptually and fall into the same
+            // representation here.
+            let step_states: Vec<Vec<f64>> = swarm.states.iter()
+                .map(|s| s.counts.iter().map(|&c| c as f64).collect())
+                .collect();
+            history_states.push(step_states);
+            history_lw.push(swarm.log_weights.clone());
+            history_times.push(obs_time);
+        }
+
         // Log-marginal increment. Under IC-free inference
         // (`skip_first_obs_from_loglik`), we still compute the
         // reweight-and-resample at the first observation — that's what
@@ -184,6 +221,13 @@ pub fn bootstrap_filter<P: ProcessModel<State = ParticleState>>(
         }
         std::mem::swap(&mut swarm.states, &mut states_buf);
 
+        // Record the resampling indices as the ancestor map for the
+        // NEXT step. Not needed after the last observation (no step
+        // t+1 to map into), so we skip recording on the final pass.
+        if config.record_ancestry && obs_idx + 1 < n_obs {
+            history_ancestors.push(indices);
+        }
+
         // Reset flow accumulators for next observation interval
         for state in &mut swarm.states {
             state.reset_flows();
@@ -193,12 +237,25 @@ pub fn bootstrap_filter<P: ProcessModel<State = ParticleState>>(
         for lw in &mut swarm.log_weights { *lw = 0.0; }
     }
 
+    let ancestry = if config.record_ancestry {
+        Some(super::ancestor_trace::AncestorTrace {
+            n_compartments: n_int,
+            states: history_states,
+            log_weights: history_lw,
+            ancestors: history_ancestors,
+            obs_times: history_times,
+        })
+    } else {
+        None
+    };
+
     Ok(PFilterResult {
         log_likelihood: total_loglik,
         predictions: if has_predictions { Some(predictions) } else { None },
         ess_trace,
         ll_increments,
         final_states: Some(swarm.states),
+        ancestry,
     })
 }
 

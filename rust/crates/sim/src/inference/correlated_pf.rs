@@ -370,6 +370,12 @@ pub fn bootstrap_filter_correlated(
         ll_increments,
         predictions: None,
         final_states: Some(swarm.states),
+        // Correlated PF is used by PMMH; ancestry recording there is
+        // a separate feature (smoothing via CSMC with ancestor
+        // sampling lives in pgas.rs already). Leaving as None keeps
+        // this code path out of scope for the 2026-04-19 PF-traj
+        // proposal.
+        ancestry: None,
     })
 }
 

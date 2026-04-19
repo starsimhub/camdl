@@ -171,4 +171,14 @@ pub struct SMCConfig {
     /// fit-config layer. See
     /// docs/dev/proposals/2026-04-18-ic-free-inference.md.
     pub skip_first_obs_from_loglik: bool,
+
+    /// Record per-step pre-resample particle states + log-weights and
+    /// per-step ancestor indices so the caller can reconstruct
+    /// filtering marginals or sample smoothing paths via ancestor
+    /// tracing. Off by default (extra memory + copy cost). See
+    /// `sim::inference::ancestor_trace` for the consumer side and
+    /// `docs/dev/proposals/2026-04-19-pf-latent-trajectories.md`
+    /// for why this is gated.
+    #[doc(alias = "save_trajectories")]
+    pub record_ancestry: bool,
 }

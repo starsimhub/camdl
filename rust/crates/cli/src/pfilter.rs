@@ -211,6 +211,7 @@ pub fn cmd_pfilter(args: &[String]) {
         dt,
         t_start: compiled.model.simulation.t_start,
         skip_first_obs_from_loglik: false,
+            record_ancestry: false,
     };
 
     // ── Replicates mode: run N independent pfilters, output loglik summary ──

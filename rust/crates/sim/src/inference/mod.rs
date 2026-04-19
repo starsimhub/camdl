@@ -15,6 +15,7 @@ pub mod traits;
 pub mod obs_loglik;
 pub mod resampling;
 pub mod particle_filter;
+pub mod ancestor_trace;
 pub mod if2;
 pub mod types;
 pub mod obs_model;
