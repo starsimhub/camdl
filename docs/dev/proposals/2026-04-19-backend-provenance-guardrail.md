@@ -1,7 +1,8 @@
 ---
-status: proposal
+status: implemented
 date: 2026-04-19
 incident: docs/dev/incidents/2026-04-19-backend-default-mismatch.md
+shipped: 3b02249  feat(simulate): backend-provenance guardrail for --params from a fit MLE
 ---
 
 # Backend-provenance guardrail for `camdl simulate --params`
