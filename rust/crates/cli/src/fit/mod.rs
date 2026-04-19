@@ -358,7 +358,10 @@ pub fn cmd_fit_run_v2(args: &[String]) {
             "--seed" => { i += 1; seed = args[i].parse().expect("--seed needs integer"); has_seed_flag = true; }
             "--force" => { force = true; }
             "--stage" => { i += 1; stage_filter = Some(args[i].clone()); }
-            "--starts-from" => { i += 1; starts_from_override = Some(args[i].clone()); }
+            "--starts-from" => {
+                i += 1;
+                starts_from_override = Some(resolve_starts_from_arg(&args[i]));
+            }
             "--sweep" => { i += 1; sweep_args.push(args[i].clone()); }
             "--allow-nonconverged-scout" => { allow_nonconverged_scout = true; }
             "--resume" => {
@@ -1826,13 +1829,40 @@ fn parse_fit_args(args: &[String], _needs_starts_from: bool) -> (FitToml, String
 }
 
 #[allow(dead_code)]
+/// Accept either a directory path or a git-style short hash for
+/// `--starts-from`. The heuristic: contains `/` or `\\` → path
+/// (today's behavior); else → resolve as Run.hash prefix via
+/// `browse::resolve_stage_by_hash` against the default output
+/// root. Errors on zero or multiple matches.
+///
+/// Hardening proposal ship-now #9.
+fn resolve_starts_from_arg(raw: &str) -> String {
+    if raw.contains('/') || raw.contains('\\') || raw == "." || raw == ".." {
+        return raw.to_string();
+    }
+    // Treat as a short hash prefix. Resolve against the default
+    // output root; if the user has a non-default output location
+    // they can still pass the full path.
+    let root = format!("./{}", crate::run_paths::DEFAULT_OUTPUT_ROOT);
+    match crate::browse::resolve_stage_by_hash(&root, raw) {
+        Ok(path) => path.to_string_lossy().to_string(),
+        Err(e) => {
+            eprintln!("error: --starts-from '{}': {}", raw, e);
+            eprintln!("  Tip: pass a full path (e.g. results/fits/FOO/real/fit_1/scout)");
+            eprintln!("  or a longer hash prefix.");
+            std::process::exit(1);
+        }
+    }
+}
+
 fn parse_optional_starts_from(args: &[String]) -> Option<String> {
     for (i, arg) in args.iter().enumerate() {
         if arg == "--starts-from" {
-            return Some(args.get(i + 1).cloned().unwrap_or_else(|| {
-                eprintln!("--starts-from requires a directory path");
+            let raw = args.get(i + 1).cloned().unwrap_or_else(|| {
+                eprintln!("--starts-from requires a path or short hash");
                 std::process::exit(1);
-            }));
+            });
+            return Some(resolve_starts_from_arg(&raw));
         }
     }
     None
@@ -1842,14 +1872,15 @@ fn parse_optional_starts_from(args: &[String]) -> Option<String> {
 fn parse_starts_from(args: &[String]) -> String {
     for (i, arg) in args.iter().enumerate() {
         if arg == "--starts-from" {
-            return args.get(i + 1).cloned().unwrap_or_else(|| {
-                eprintln!("--starts-from requires a directory path");
+            let raw = args.get(i + 1).cloned().unwrap_or_else(|| {
+                eprintln!("--starts-from requires a path or short hash");
                 std::process::exit(1);
             });
+            return resolve_starts_from_arg(&raw);
         }
     }
     eprintln!("error: --starts-from required for refine/validate");
-    eprintln!("  usage: camdl fit refine fit.toml --starts-from scout/");
+    eprintln!("  usage: camdl fit refine fit.toml --starts-from <path or short-hash>");
     std::process::exit(1);
 }
 

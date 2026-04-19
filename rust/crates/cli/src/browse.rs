@@ -483,6 +483,72 @@ fn resolve_any(root: &str, key: &str) -> Result<Resolved, String> {
     }
 }
 
+/// Find the fit-stage directory whose `run.json` has `Run.hash`
+/// starting with `hash_prefix`. Walks every
+/// `<root>/fits/**/run.json` file — stage-level (FitStage kind)
+/// only; the top-level `Run::Fit` at the fit root is skipped.
+///
+/// Returns `Ok(path)` for exactly one match, `Err` on zero or
+/// multiple matches (with the candidates enumerated in the
+/// multiple-match error). Used by `--starts-from <hash>` to let
+/// users reference a stage by git-style short hash without
+/// knowing the directory layout.
+pub fn resolve_stage_by_hash(root: &str, hash_prefix: &str)
+    -> Result<std::path::PathBuf, String>
+{
+    let fits = std::path::Path::new(root).join("fits");
+    if !fits.exists() {
+        return Err(format!("no fits/ tree under {}", root));
+    }
+    let mut matches = Vec::new();
+    for entry in walkdir_all(&fits) {
+        let run_json = entry.join("run.json");
+        if !run_json.is_file() { continue; }
+        let Ok(run) = Run::read(&entry) else { continue; };
+        // We only want FitStage runs, not the top-level Fit run.
+        if !matches!(run.kind, RunKind::FitStage(_)) { continue; }
+        if run.hash.starts_with(hash_prefix) {
+            matches.push(entry.clone());
+        }
+    }
+    match matches.len() {
+        0 => Err(format!("no fit stage matching hash prefix '{}' under {}",
+            hash_prefix, root)),
+        1 => Ok(matches.into_iter().next().unwrap()),
+        n => {
+            let mut msg = format!(
+                "hash prefix '{}' is ambiguous, matches {} stages:\n",
+                hash_prefix, n);
+            for p in &matches {
+                msg.push_str(&format!("  {}\n", p.display()));
+            }
+            msg.push_str("refine by passing a longer hash prefix");
+            Err(msg)
+        }
+    }
+}
+
+/// Walk a directory tree returning every directory encountered. Depth-
+/// unbounded; used by `resolve_stage_by_hash`. Dedicated because the
+/// walkdir crate isn't a direct dep of this module and we only need
+/// the simplest possible recursion.
+fn walkdir_all(root: &std::path::Path) -> Vec<std::path::PathBuf> {
+    let mut out = Vec::new();
+    let mut stack = vec![root.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        if let Ok(entries) = std::fs::read_dir(&dir) {
+            for e in entries.flatten() {
+                let p = e.path();
+                if p.is_dir() {
+                    out.push(p.clone());
+                    stack.push(p);
+                }
+            }
+        }
+    }
+    out
+}
+
 /// Sim-only resolver (legacy entry). `cmd_cat` keeps using this
 /// because `cat` on a fit has no single-file meaning.
 fn resolve_run(root: &str, key: &str) -> Result<RunEntry, String> {

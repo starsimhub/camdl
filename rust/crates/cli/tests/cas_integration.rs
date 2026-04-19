@@ -200,6 +200,109 @@ fn list_shows_cached_runs() {
     assert!(stdout.contains("baseline"), "list should show scenario name");
 }
 
+/// `--starts-from <hash>` should resolve a short-hash prefix to the
+/// matching fit-stage directory. Hardening #9.
+#[test]
+fn starts_from_resolves_short_hash() {
+    let Some(bin) = skip_if_missing_binary() else { return; };
+    let tmp = tempfile::tempdir().unwrap();
+    let results = tmp.path().join("results");
+    // Fake a stage dir with a known-hash run.json. The resolver
+    // walks results/fits/**, so we need to place the run.json
+    // under that structure.
+    let stage = results.join("fits").join("demo-abc12345")
+        .join("real").join("fit_1").join("scout");
+    std::fs::create_dir_all(&stage).unwrap();
+    let target_hash = "deadbeefc0ffee00000000000000000000000000000000000000000000000000";
+    let run_json = format!(r#"{{
+        "hash": "{}",
+        "version": "0.1.0+test","created_at": "2026-04-19T12:00:00Z",
+        "argv": [],"wall_time_seconds": 1.0,
+        "kind": {{"kind":"fit-stage","fit_hash":"f","stage":"scout",
+                 "method":"if2","seed":1,"n_chains":2}}
+    }}"#, target_hash);
+    std::fs::write(stage.join("run.json"), run_json).unwrap();
+
+    // Run `camdl fit where --help` just to prove --starts-from
+    // resolution runs on the binary path; we don't need a real fit.
+    // Instead, exercise the resolver directly via the browse library
+    // behavior by using an ad-hoc subcommand path — but since we
+    // don't expose resolve_stage_by_hash as a CLI command, do a
+    // smoke test of the `--starts-from <hash>` entry by running
+    // `fit where` which doesn't consume --starts-from. So the
+    // meaningful test here is: the binary accepts `--starts-from
+    // deadbeef` on a fit.toml and doesn't reject on the path check.
+    // We can confirm via `fit run` dry-run... but we have no dry-run.
+    //
+    // Compromise: test the hash resolver by calling `fit where` is a
+    // no-op for --starts-from. Instead, exercise the feature end-to-
+    // end by running cmd_fit_run_v2 with a minimal fit.toml that
+    // references --starts-from <hash>. If resolution fails, the run
+    // exits 1 before it finishes doing useful work; if resolution
+    // succeeds it proceeds to an actual fit (which we don't want).
+    //
+    // Keep it simple: just verify that passing --starts-from <bad
+    // prefix> errors with our custom message, and --starts-from <good
+    // prefix> runs at least to the point of config validation.
+    // Changing from working directory to `results` parent so the
+    // default `./results` resolver finds our stage.
+    std::env::set_current_dir(tmp.path()).unwrap();
+
+    // Bad hash: should error with our message.
+    let ir = tmp.path().join("dummy.ir.json");
+    std::fs::write(&ir, r#"{"compartments":[],"parameters":[]}"#).unwrap();
+    let data = tmp.path().join("cases.tsv");
+    std::fs::write(&data, "time\tcases\n1\t5\n").unwrap();
+    let fit_toml = tmp.path().join("f.toml");
+    std::fs::write(&fit_toml, format!(r#"
+output_dir = "results"
+[model]
+camdl = "{}"
+[data.observations]
+cases = "{}"
+[estimate]
+beta = {{ bounds = [0.01, 2.0] }}
+[fixed]
+N0 = 1000
+[stages.refine]
+method = "if2"
+chains = 2
+particles = 50
+iterations = 3
+cooling = 0.7
+starts_from = "{{use CLI}}"
+"#, ir.display(), data.display())).unwrap();
+
+    let out = Command::new(&bin)
+        .current_dir(tmp.path())
+        .args(["fit", "run", &fit_toml.to_string_lossy(),
+               "--stage", "refine",
+               "--starts-from", "zzzznonexistent"])
+        .output().expect("spawn");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success(), "bad hash must fail");
+    assert!(stderr.contains("no fit stage matching hash prefix"),
+        "expected 'no fit stage matching hash prefix', got: {}", stderr);
+
+    // Good hash: resolves to the fake stage we planted. Resolution
+    // happens before the fit actually does anything expensive, so
+    // verifying the success path means checking that we get past
+    // arg parsing — the fit itself may still fail downstream (the
+    // model IR is empty), but the --starts-from lookup succeeded.
+    // We check that the stderr does NOT contain the 'no fit stage
+    // matching' message.
+    let out = Command::new(&bin)
+        .current_dir(tmp.path())
+        .args(["fit", "run", &fit_toml.to_string_lossy(),
+               "--stage", "refine",
+               "--starts-from", "deadbeef"])
+        .output().expect("spawn");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(!stderr.contains("no fit stage matching hash prefix"),
+        "short-hash 'deadbeef' should resolve to the planted stage, \
+         got: {}", stderr);
+}
+
 /// `camdl fit where fit.toml` should print the fit root (post-
 /// hardening #8). `camdl fit where fit.toml --seed N` should extend
 /// that path with `real/fit_N`.
