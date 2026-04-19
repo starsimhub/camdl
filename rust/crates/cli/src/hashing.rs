@@ -108,6 +108,59 @@ pub fn canonical_params(params: &HashMap<String, f64>) -> String {
         .join(";")
 }
 
+/// Hash the contents of a file (first 4 bytes of SHA256, 8 hex chars).
+/// Returns `None` when the file can't be read — callers use this to
+/// surface `<unreadable>` in provenance records rather than failing
+/// the whole run.
+///
+/// Shared between simulate (data-file hashing for scen_hash / run
+/// metadata) and fit (data-file hashing for fit_stage_hash /
+/// per-stage provenance). Was `fit::provenance::file_content_hash`
+/// before the 2026-04-19 unification.
+pub fn file_hash(path: &str) -> Option<String> {
+    let bytes = std::fs::read(path).ok()?;
+    Some(hex::encode(&Sha256::digest(&bytes)[..4]))
+}
+
+/// Fit-level input hash: `(model IR bytes, data files, fit.toml bytes,
+/// seed, version)` → 8 hex chars. Identifies the whole fit as a
+/// computation; written into `fit_state.toml.input_hash`. A change to
+/// any of (model, data, fit.toml, seed, camdl version) invalidates
+/// the cache.
+///
+/// Operates on raw byte slices (caller reads the files), matching the
+/// v1 `FitToml` world where fit.toml is hashed whole. The v2
+/// `FitConfigV2` world uses [`fit_stage_hash`] below, which
+/// decomposes the config into structured fields.
+///
+/// Was `fit::provenance::compute_input_hash` before the 2026-04-19
+/// unification.
+pub fn fit_input_hash(
+    model_ir_bytes: &[u8],
+    data_files: &mut [(String, Vec<u8>)],
+    fit_toml_bytes: &[u8],
+    seed: u64,
+) -> String {
+    let mut h = Sha256::new();
+    h.update(b"model\x00");
+    h.update(model_ir_bytes);
+    h.update(b"\x00data\x00");
+    data_files.sort_by(|a, b| a.0.cmp(&b.0));
+    for (name, bytes) in data_files.iter() {
+        h.update(name.as_bytes());
+        h.update(b"\x00");
+        h.update(bytes);
+        h.update(b"\x00");
+    }
+    h.update(b"fit\x00");
+    h.update(fit_toml_bytes);
+    h.update(b"\x00seed\x00");
+    h.update(seed.to_le_bytes());
+    h.update(b"\x00version\x00");
+    h.update(version::VERSION_SHORT.as_bytes());
+    hex::encode(&h.finalize()[..4]) // 8 hex chars
+}
+
 /// Convert a scenario name to a filesystem-safe slug: lowercase, non-[a-z0-9_] → '_'.
 pub fn slug(name: &str) -> String {
     name.to_lowercase()
@@ -248,5 +301,72 @@ mod tests {
     #[test]
     fn canonical_params_empty() {
         assert_eq!(canonical_params(&HashMap::new()), "");
+    }
+
+    // ── file_hash / fit_input_hash (relocated from fit::provenance) ─────────
+
+    #[test]
+    fn file_hash_returns_8_hex() {
+        let tmp = std::env::temp_dir().join(format!(
+            "camdl_hash_test_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        std::fs::write(&tmp, b"hello world").unwrap();
+        let h = file_hash(tmp.to_str().unwrap()).unwrap();
+        assert_eq!(h.len(), 8, "file_hash should return 8 hex chars");
+        // SHA256("hello world")[..4] is b94d27b9 in hex.
+        assert_eq!(h, "b94d27b9");
+        std::fs::remove_file(&tmp).ok();
+    }
+
+    #[test]
+    fn file_hash_returns_none_for_missing() {
+        assert!(file_hash("/does/not/exist/at/all").is_none());
+    }
+
+    #[test]
+    fn fit_input_hash_deterministic() {
+        let model = b"ir:{}";
+        let mut data = vec![("cases".to_string(), b"t\ty\n1\t2\n".to_vec())];
+        let fit = b"[fit]\nmodel = \"x\"";
+        let h1 = fit_input_hash(model, &mut data.clone(), fit, 42);
+        let h2 = fit_input_hash(model, &mut data, fit, 42);
+        assert_eq!(h1, h2, "same inputs → same hash");
+        assert_eq!(h1.len(), 8);
+    }
+
+    #[test]
+    fn fit_input_hash_sensitivity() {
+        let model = b"ir:{}";
+        let data = vec![("cases".to_string(), b"a".to_vec())];
+        let fit = b"[fit]";
+        let base = fit_input_hash(model, &mut data.clone(), fit, 1);
+        // Change each input independently; hash must differ every time.
+        let diff_model = fit_input_hash(b"ir:{changed}", &mut data.clone(), fit, 1);
+        let diff_data  = fit_input_hash(model, &mut vec![("cases".into(), b"b".to_vec())], fit, 1);
+        let diff_fit   = fit_input_hash(model, &mut data.clone(), b"[fit]\nseed=1", 1);
+        let diff_seed  = fit_input_hash(model, &mut data.clone(), fit, 2);
+        assert_ne!(base, diff_model, "model change must invalidate");
+        assert_ne!(base, diff_data,  "data change must invalidate");
+        assert_ne!(base, diff_fit,   "fit.toml change must invalidate");
+        assert_ne!(base, diff_seed,  "seed change must invalidate");
+    }
+
+    #[test]
+    fn fit_input_hash_data_order_invariant() {
+        // Multi-stream fits can register streams in any order; hash must
+        // not depend on that. Regression guard on the sort-before-hash.
+        let model = b"ir";
+        let mut order_a = vec![
+            ("a".to_string(), b"1".to_vec()),
+            ("b".to_string(), b"2".to_vec()),
+        ];
+        let mut order_b = vec![
+            ("b".to_string(), b"2".to_vec()),
+            ("a".to_string(), b"1".to_vec()),
+        ];
+        let h_a = fit_input_hash(model, &mut order_a, b"", 1);
+        let h_b = fit_input_hash(model, &mut order_b, b"", 1);
+        assert_eq!(h_a, h_b, "stream order must not affect hash");
     }
 }

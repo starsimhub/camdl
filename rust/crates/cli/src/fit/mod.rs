@@ -603,7 +603,7 @@ pub fn cmd_fit_run_v2(args: &[String]) {
             eprintln!("error: {}", e);
             std::process::exit(1);
         });
-        let config_hash = provenance::compute_config_hash_v2(
+        let config_hash = provenance::fit_stage_hash(
             &model_json, &data_spec.observations, &sweep_config.estimate,
             &fixed_resolved, stage_name, stage, seed,
         ).unwrap_or_else(|e| {
@@ -1030,7 +1030,7 @@ pub fn cmd_fit_run_v2(args: &[String]) {
                 .unwrap_or_else(|e| { eprintln!("error: {}", e); std::process::exit(1); })
                 .observations.iter()
                 .map(|(name, path)| {
-                    let hash = provenance::file_content_hash(path)
+                    let hash = crate::hashing::file_hash(path)
                         .unwrap_or_else(|| {
                             eprintln!("warning: cannot hash data file '{}' for provenance", path);
                             "<unreadable>".to_string()

@@ -1731,7 +1731,7 @@ pub fn compute_fit_input_hash(fit: &FitToml, config: &FitRunConfig, seed: u64) -
     let mut data_files: Vec<(String, Vec<u8>)> = fit.data.iter().map(|(name, path)| {
         (name.clone(), std::fs::read(path).unwrap_or_default())
     }).collect();
-    crate::fit::provenance::compute_input_hash(
+    crate::hashing::fit_input_hash(
         config.model_ir_json.as_bytes(),
         &mut data_files,
         &fit_toml_bytes,

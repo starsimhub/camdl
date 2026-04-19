@@ -206,7 +206,7 @@ pub fn run_status(fit: &FitToml) -> Result<(), String> {
                     for name in &primary {
                         if let Some(expected) = outputs.get(*name).and_then(|v| v.as_str()) {
                             let file_path = format!("{}/{}", validate_dir, name);
-                            match provenance::file_content_hash(&file_path) {
+                            match crate::hashing::file_hash(&file_path) {
                                 Some(actual) if actual == expected => {
                                     println!("    {}: \x1b[32m✓\x1b[0m {}", name, expected);
                                 }
@@ -225,7 +225,7 @@ pub fn run_status(fit: &FitToml) -> Result<(), String> {
                         if name.starts_with("profiles/") {
                             if let Some(expected) = hash_val.as_str() {
                                 let file_path = format!("{}/{}", validate_dir, name);
-                                match provenance::file_content_hash(&file_path) {
+                                match crate::hashing::file_hash(&file_path) {
                                     Some(actual) if actual == expected => {
                                         println!("    {}: \x1b[32m✓\x1b[0m", name);
                                     }
