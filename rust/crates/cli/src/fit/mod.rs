@@ -1492,6 +1492,86 @@ fn format_prior(p: &Option<config_v2::PriorSpec>) -> String {
     }
 }
 
+/// `camdl fit where FIT.toml [--seed N]`
+///
+/// Resolves a fit.toml to its fit directory under the content-
+/// addressable output tree and prints the path on stdout. Without
+/// `--seed`, prints the top-level fit root
+/// (`results/fits/<stem>-<hash[:8]>/`); with `--seed N`, prints the
+/// cell dir (`.../real/fit_N/`).
+///
+/// Doesn't run anything — pure path resolution. Useful for scripts
+/// that need to find the fit dir programmatically without globbing
+/// on the stem prefix.
+///
+/// Hardening proposal ship-now #8.
+pub fn cmd_fit_where(args: &[String]) {
+    let mut fit_path: Option<String> = None;
+    let mut seed: Option<u64> = None;
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--seed" => {
+                i += 1;
+                seed = Some(args.get(i).and_then(|s| s.parse().ok()).unwrap_or_else(|| {
+                    eprintln!("error: --seed needs an integer");
+                    std::process::exit(1);
+                }));
+            }
+            "--help" | "-h" => {
+                eprintln!("usage: camdl fit where FIT.toml [--seed N]");
+                eprintln!();
+                eprintln!("Prints the fit directory for FIT.toml on stdout.");
+                eprintln!("Without --seed: the fit root.");
+                eprintln!("With --seed N: the per-seed cell (real/fit_N/).");
+                std::process::exit(0);
+            }
+            s if s.starts_with("--") => {
+                eprintln!("unknown flag: {}", s);
+                std::process::exit(1);
+            }
+            path => { fit_path = Some(path.to_string()); }
+        }
+        i += 1;
+    }
+    let fit_path = fit_path.unwrap_or_else(|| {
+        eprintln!("usage: camdl fit where FIT.toml [--seed N]");
+        std::process::exit(1);
+    });
+
+    // Try v2 first (the common path); fall through to v1 on parse
+    // failure. Mirrors the detection logic in cmd_fit_status.
+    let v2 = config_v2::FitConfigV2::load(&fit_path);
+    let dir = match v2 {
+        Ok(config) => {
+            let root = config.fit_dir(&fit_path).unwrap_or_else(|e| {
+                eprintln!("error: {}", e);
+                std::process::exit(1);
+            });
+            match seed {
+                None => root,
+                Some(s) => root.join("real").join(format!("fit_{}", s)),
+            }
+        }
+        Err(v2_err) => {
+            let fit = FitToml::load(&fit_path).unwrap_or_else(|_| {
+                eprintln!("error: {} is neither a v1 nor v2 fit.toml", fit_path);
+                eprintln!("  v2 parse error: {}", v2_err);
+                std::process::exit(1);
+            });
+            match seed {
+                None => fit.fit_root(&fit_path).unwrap_or_else(|e| {
+                    eprintln!("error: {}", e); std::process::exit(1);
+                }),
+                Some(s) => fit.cell_dir(&fit_path, s).unwrap_or_else(|e| {
+                    eprintln!("error: {}", e); std::process::exit(1);
+                }),
+            }
+        }
+    };
+    println!("{}", dir.display());
+}
+
 pub fn cmd_fit_diff(args: &[String]) {
     use config_v2::FitConfigV2;
 

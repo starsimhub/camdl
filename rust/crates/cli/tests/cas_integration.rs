@@ -200,6 +200,64 @@ fn list_shows_cached_runs() {
     assert!(stdout.contains("baseline"), "list should show scenario name");
 }
 
+/// `camdl fit where fit.toml` should print the fit root (post-
+/// hardening #8). `camdl fit where fit.toml --seed N` should extend
+/// that path with `real/fit_N`.
+#[test]
+fn fit_where_prints_fit_root_and_cell_dir() {
+    let Some(bin) = skip_if_missing_binary() else { return; };
+    let tmp = tempfile::tempdir().unwrap();
+    let ir = tmp.path().join("dummy.ir.json");
+    // A minimal-but-valid IR so FitConfigV2 can load and hash the
+    // referenced file. Actual content doesn't matter — where doesn't
+    // run anything.
+    std::fs::write(&ir, r#"{"compartments":[],"parameters":[]}"#).unwrap();
+    let data = tmp.path().join("cases.tsv");
+    std::fs::write(&data, "time\tcases\n1\t5\n").unwrap();
+    let fit_toml = tmp.path().join("myfit.toml");
+    std::fs::write(&fit_toml, format!(r#"
+output_dir = "{}/out"
+
+[model]
+camdl = "{}"
+
+[data.observations]
+cases = "{}"
+
+[estimate]
+beta = {{ bounds = [0.01, 2.0] }}
+
+[fixed]
+N0 = 1000
+
+[stages.mle]
+method = "if2"
+chains = 2
+particles = 50
+iterations = 3
+cooling = 0.7
+"#, tmp.path().display(), ir.display(), data.display())).unwrap();
+
+    // No --seed: should print the fit root, ending with `/out/fits/myfit-<8hash>`
+    let out = Command::new(&bin)
+        .args(["fit", "where", &fit_toml.to_string_lossy()])
+        .output().expect("spawn");
+    assert!(out.status.success(), "stderr: {}",
+        String::from_utf8_lossy(&out.stderr));
+    let path = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    assert!(path.contains("/out/fits/myfit-"),
+        "expected .../out/fits/myfit-<hash>, got {}", path);
+
+    // --seed 42: should append real/fit_42.
+    let out = Command::new(&bin)
+        .args(["fit", "where", &fit_toml.to_string_lossy(), "--seed", "42"])
+        .output().expect("spawn");
+    assert!(out.status.success());
+    let path = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    assert!(path.ends_with("/real/fit_42"),
+        "expected .../real/fit_42, got {}", path);
+}
+
 /// `camdl list --kind fit` should hide sim rows entirely; `--kind sim`
 /// should hide fit rows. Covers cleanup.md:L2.
 #[test]

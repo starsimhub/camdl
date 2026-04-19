@@ -323,6 +323,7 @@ fn main() {
                 Some("status") => fit::cmd_fit_status(&all_args[2..]),
                 Some("diff")   => fit::cmd_fit_diff(&all_args[2..]),
                 Some("new")    => fit::cmd_fit_new(&all_args[2..]),
+                Some("where")  => fit::cmd_fit_where(&all_args[2..]),
                 _ => fit_help(),
             }
         }
