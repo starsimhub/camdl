@@ -1070,11 +1070,22 @@ pub fn cmd_fit_run_v2(args: &[String]) {
 
         // ── Shared run.json write (all stage types) ─────────────────────────
         let stage_elapsed = stage_t0.elapsed();
-        let starts_from_ref = effective_starts.as_ref().map(|s| {
-            crate::run_meta::StartsFromRef {
-                stage: s.clone(),
-                stage_hash: String::new(),
-            }
+        // Resolve the upstream stage's name + hash from its run.json
+        // (if it exists). `effective_starts` is a directory path — for
+        // in-fit references it points to a sibling stage that's already
+        // written its run.json by the time we run; for external
+        // `--starts-from` it points to an arbitrary directory whose
+        // run.json may or may not exist.
+        let starts_from_ref = effective_starts.as_ref().map(|dir_path| {
+            let p = std::path::Path::new(dir_path);
+            let stage_name = p.file_name()
+                .and_then(|s| s.to_str())
+                .unwrap_or("unknown")
+                .to_string();
+            let stage_hash = crate::run_meta::Run::read(p)
+                .map(|r| r.hash)
+                .unwrap_or_default();
+            crate::run_meta::StartsFromRef { stage: stage_name, stage_hash }
         });
         let algo_json = match stage {
             Stage::IF2 { chains, particles, iterations, cooling, .. } =>

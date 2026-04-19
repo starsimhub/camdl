@@ -8,7 +8,7 @@ order; each is a self-contained commit.
 
 ## Bugs (correctness)
 
-- [ ] **B1 — `StartsFromRef.stage_hash` hardcoded empty**
+- [x] **B1 — `StartsFromRef.stage_hash` hardcoded empty**
       `fit/mod.rs:1075` writes `stage_hash: String::new()`. Defeats the
       proposal's "stable reference that survives tree reorg". Fix: when
       writing a stage whose `effective_starts` references another
