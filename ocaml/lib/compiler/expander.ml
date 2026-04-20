@@ -346,7 +346,17 @@ let load_table_data ctx path ~dims ~n_values ~default_val =
             ~message:(Printf.sprintf "missing entry for (%s) in %s" coord_str path)
             ()
         end
-      done
+      done;
+      (* M6 in 2026-04-19 review: replace any remaining NaN sentinels
+         with 0.0 so that a caller who ignores has_errors can't emit
+         NaN values into the IR. Diagnostics are still attached; the
+         pipeline will report_and_exit on E211 before the IR is
+         serialized. *)
+      Array.iter (fun arr ->
+        for i = 0 to Array.length arr - 1 do
+          if Float.is_nan arr.(i) then arr.(i) <- 0.0
+        done
+      ) arrays
     end;
     Array.to_list arrays
   in
