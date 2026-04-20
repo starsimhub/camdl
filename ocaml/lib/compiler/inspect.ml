@@ -586,11 +586,10 @@ let run_transition_count ppf (model : Ir.model) ctx (pattern : string option) ~a
 
 (* ── --let NAME ──────────────────────────────────────────────────────────── *)
 
-let run_let ppf (model : Ir.model) ctx name =
+let run_let ppf ctx name =
   let split = make_split ctx in
   let ascii = false in
   let bar = "\xe2\x94\x82" in
-  ignore model;
   match List.find_opt (fun lb -> lb.lname = name) ctx.Expander.let_bindings with
   | None ->
     Fmt.epr "error: no let binding named '%s'@\n" name
@@ -802,7 +801,8 @@ let run_inspect path opts =
     Fmt.set_style_renderer Fmt.stderr `Ansi_tty
   );
   match Compiler.compile_detail_result ~name ~filename:path src with
-  | Error "" -> exit 1
+  | Error e when e = "compilation failed"
+              || (String.length e > 0 && e.[0] = '[') -> exit 1
   | Error e ->
     Fmt.epr "Error: %s@\n" e;
     exit 1
@@ -827,7 +827,7 @@ let run_inspect path opts =
      | TransitionCount pat ->
        run_transition_count ppf model ctx pat ~ascii:opts.ascii
      | LetBinding name ->
-       run_let ppf model ctx name
+       run_let ppf ctx name
      | Dims ->
        run_dims ppf model ctx)
 
@@ -838,7 +838,8 @@ let run_check path =
   Fmt.set_style_renderer Fmt.stdout `Ansi_tty;
   Fmt.set_style_renderer Fmt.stderr `Ansi_tty;
   match Compiler.compile_detail_result ~name ~filename:path src with
-  | Error "" -> exit 1
+  | Error e when e = "compilation failed"
+              || (String.length e > 0 && e.[0] = '[') -> exit 1
   | Error e ->
     Fmt.epr "Error: %s@\n" e;
     exit 1

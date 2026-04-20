@@ -128,9 +128,11 @@ let () =
          Bytes.to_string s
        in
        match Compiler.compile ~name ~filename:path src with
-       | Error "" ->
-         (* Sentinel: diagnostics already rendered by report_and_exit
-            (m5 in the 2026-04-19 compiler review). *)
+       | Error e when e = "compilation failed"
+                   || (String.length e > 0 && e.[0] = '[') ->
+         (* Diagnostics already rendered (text or JSON) by
+            Diagnostics.report_and_exit — don't re-print on a fresh
+            line (m5 in the 2026-04-19 compiler review). *)
          exit 1
        | Error e -> Printf.eprintf "Error: %s\n" e; exit 1
        | Ok m ->
