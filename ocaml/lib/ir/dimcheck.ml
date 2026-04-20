@@ -335,12 +335,20 @@ and infer_unop st ~ctx (u : un_op_expr) : dim =
      | Unknown _ -> fresh_var st)
 
 and infer_cond st ~ctx (c : cond_expr) : dim =
-  let dp = infer st ~ctx c.pred in
+  (* M18 in the 2026-04-19 review: the predicate can carry any
+     dimension. The IR spec's canonical guard form
+     `Cond(Pop("S"), beta * S * I / N, Const 0.0)` — prevent
+     division-by-zero by using the population-valued S as a "is S
+     empty?" guard — has dim(pred) = population, not dimensionless.
+     Previously this site forced pred to be dimensionless via E302,
+     producing a spurious false positive for that exact idiom.
+     `Cond` semantics is "predicate is truthy iff > 0", which works
+     for both population (positive ⇔ non-empty) and boolean (0/1).
+     Drop the predicate dim constraint; keep the branch unification
+     since then/else must still agree dimensionally. *)
+  let _ = infer st ~ctx c.pred in
   let dt = infer st ~ctx c.then_ in
   let de = infer st ~ctx c.else_ in
-  constrain_known st ~code:"E302"
-    ~message:(Printf.sprintf "condition predicate in '%s' must be dimensionless" ctx)
-    dp dimensionless;
   unify st ~loc:ctx dt de
 
 (* ── Top-down propagation ───────────────────────────────────────────────── *)
@@ -560,13 +568,22 @@ and read_dim_binop st (b : bin_op_expr) : dim =
        | Known v1, Known v2 -> Known (dim_div v1 v2)
        | _ -> Unknown (-1))
   | Pow ->
+    (* M19 in 2026-04-19 review: the inference phase correctly
+       emits E301 for Pow with a non-integer-literal exponent
+       when the base carries a non-zero dimension. The read-only
+       phase used to silently return `Known dimensionless` for the
+       same case, masking the error if `read_dim` was the first to
+       see this node (via implied_param_dim → read_dim calls during
+       the E303 cross-transition check). Return Unknown (-1) here so
+       no wrong dimension escapes the read phase; the dimension will
+       be inferred / errored on the main pass. *)
     (match resolve st dl with
      | Any -> Any
      | Known v when dim_is_zero v -> Known dimensionless
      | Known v ->
        (match b.right with
         | Const n when Float.is_integer n -> Known (dim_scale (Float.to_int n) v)
-        | _ -> Known dimensionless)
+        | _ -> Unknown (-1))
      | _ -> Unknown (-1))
   | Eq | Neq | Lt | Gt | Le | Ge -> Known dimensionless
 
