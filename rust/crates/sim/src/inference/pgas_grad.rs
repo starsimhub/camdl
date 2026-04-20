@@ -68,16 +68,29 @@ pub fn log_transition_density_grad(
             continue;
         }
 
-        // Compute effective per-capita rates AND their gradients
+        // Compute effective per-capita rates AND their gradients.
+        //
+        // IM7+IM9 (2026-04-19 inference review): previously this loop
+        // (a) skipped transitions with `rate <= 0.0` rather than
+        // `rate <= RATE_EPSILON` — diverging from chain_binomial's
+        // step_one and pgas.rs's density, and (b) advanced
+        // `gamma_idx` once per source group rather than once per
+        // overdispersed transition with rate above the threshold.
+        // Either drift made the gradient disagree with the density
+        // for any model with multiple overdispersed transitions in
+        // one source group (spatial polio, multi-strain, competing
+        // overdispersed reporting streams). Now mirrors pgas.rs
+        // exactly.
         let mut probs: Vec<(usize, f64, Vec<f64>)> = Vec::new(); // (tr_idx, eff_rate, d_eff_rate/dθ)
         let mut total_rate = 0.0_f64;
         let mut total_rate_grad = vec![0.0; d];
-        let mut group_has_overdispersion = false;
 
         for &tr_idx in group {
             let rate = propensities[tr_idx];
-            if rate <= 0.0 || matches!(model.model.transitions[tr_idx].draw_method,
-                ir::transition::DrawMethod::Deterministic) {
+            if rate <= crate::chain_binomial::RATE_EPSILON
+                || matches!(model.model.transitions[tr_idx].draw_method,
+                    ir::transition::DrawMethod::Deterministic)
+            {
                 handled[tr_idx] = true;
                 continue;
             }
@@ -94,8 +107,12 @@ pub fn log_transition_density_grad(
             let (effective, d_effective) = if let ir::transition::DrawMethod::Overdispersed(_) =
                 &model.model.transitions[tr_idx].draw_method
             {
-                group_has_overdispersion = true;
+                // Consume one gamma per overdispersed transition —
+                // matches step_one's gamma_used.push(...) and
+                // pgas.rs's gamma_idx += 1 inside the per-transition
+                // Overdispersed arm.
                 let g = if gamma_idx < gammas.len() { gammas[gamma_idx] } else { 1.0 };
+                gamma_idx += 1;
                 let eff = per_capita * g;
                 let d_eff: Vec<f64> = d_rate.iter().map(|&dr| dr * g).collect();
                 (eff, d_eff)
@@ -107,9 +124,8 @@ pub fn log_transition_density_grad(
             for i in 0..d { total_rate_grad[i] += d_effective[i]; }
             probs.push((tr_idx, effective, d_effective));
         }
-        if group_has_overdispersion { gamma_idx += 1; }
 
-        if total_rate <= 0.0 || probs.is_empty() { continue; }
+        if total_rate <= crate::chain_binomial::RATE_EPSILON || probs.is_empty() { continue; }
 
         // Total exits: Binom(n_exit; n_src, p_total)
         let p_total = (1.0 - (-total_rate * dt).exp()).clamp(1e-15, 1.0 - 1e-15);
