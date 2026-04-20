@@ -99,7 +99,6 @@ An event is the atomic unit of state change. It has:
 - **Stoichiometry:** which compartments change, and by how much
 - **Rate expression:** a function `(state, params, t) → ℝ≥0` that determines the
   event's rate (propensity)
-- **Event key:** a stable identifier for EKRNG (see §10)
 
 That's the whole contract with the stochastic runtime. The rate expression is
 the _total_ rate (propensity), not a per-capita rate — any per-capita structure
@@ -195,8 +194,7 @@ execute in document order (order in the `interventions` list).
 **Stochastic interventions (v0.3).** The current IR restricts interventions to
 deterministic actions. Stochastic interventions (e.g., per-individual
 vaccination probability during an SIA) can be approximated as temporary
-high-rate transitions via `TimeFunc` in rate expressions. A `FractionTransfer`
-with stochastic fraction (drawing from EKRNG) is a cleaner future extension.
+high-rate transitions via `TimeFunc` in rate expressions.
 
 **Interventions and real compartments.** The `Set(compartment, value)` action
 may target real compartments, producing an instantaneous jump in the ODE state.
@@ -701,8 +699,7 @@ transition: {
   name: string,
   stoichiometry: (string * int) list,
   rate: expr,
-  event_key: string | null,            -- EKRNG key template (§10)
-  
+
   metadata: {                          -- advisory, runtime ignores
     origin_kind: string | null,
     source_compartment: string | null,
@@ -760,8 +757,6 @@ struct Trajectory {
     flows: Vec<FlowVec>,
     /// Simulation status
     status: SimulationStatus,
-    /// Optional EKRNG trace (§10)
-    trace: Option<EventTrace>,
 }
 
 struct SyntheticData {
@@ -813,72 +808,19 @@ runtime should detect and apply this automatically when needed.
 
 ---
 
-## 10. Event-Keyed Random Number Generation (EKRNG) `[v0.1]`
+## 10. Random Number Generation
 
-### 10.1 Motivation
+The runtime uses a plain ChaCha8 stateful PRNG (`StatefulRng`).
+Seeded simulations are reproducible: running with the same seed and
+identical control flow produces bitwise-identical trajectories.
 
-Standard stateful PRNGs create execution-path-dependent draw indexing: the
-random value for a modeled event depends on how many prior draws were consumed,
-not on the event's identity. When comparing scenarios with the same seed, any
-change in control flow shifts downstream draws, violating the SCM semantics for
-counterfactual reasoning. See the EKRNG paper (Buffalo, Pearson, Klein 2026) for
-the formal treatment.
-
-EKRNG is v0.1 because it affects forward simulation correctness for paired
-scenario comparisons, not just inference.
-
-### 10.2 Design
-
-Each transition carries an `event_key` template. The runtime uses it with the
-base seed as input to a counter-based PRNG (Philox/Threefry):
-
-```
-U_e = g(seed, event_key_e)
-```
-
-For compartmental model transition firings:
-
-```
-event_key template: "{transition_name}:{firing_index}"
-```
-
-The `firing_index` is a monotonically increasing counter per transition over the
-entire simulation. Combined with the seed, every event firing gets a globally
-unique key.
-
-Backend-specific:
-
-- **Gillespie**: each individual event firing gets its own key
-- **Tau-leaping**: EKRNG applies to each Poisson draw (keyed by transition
-  name + tau step index)
-- **Discrete-time**: keyed by transition name + time step
-- **ODE**: not applicable (deterministic)
-
-If `event_key` is null, the runtime falls back to stateful PRNG (backward
-compatibility).
-
-### 10.3 Probabilistic Traces `[v0.1 recording; v0.2+ replay for inference]`
-
-The event key is a **trace address** in the probabilistic programming sense
-(Gen.jl, Pyro). Recording `{event_key → random_value}` for every firing
-constitutes a probabilistic trace.
-
-**v0.1 uses:** Diagnostics. Identify "close call" events (U_e ≈ threshold).
-Compare traces across scenarios to verify EKRNG alignment. Debug stochastic
-behavior.
-
-**v0.2+ uses:** Replay-based proposals for PGAS. Conditional simulation (fix
-some random choices, resample others). Block Gibbs over trace addresses.
-Informed SMC proposals targeting specific events.
-
-```rust
-struct EventTrace {
-    entries: Vec<(EventKey, f64)>,
-}
-```
-
-Optional — traces can be large. Enabled for diagnostics and advanced inference,
-disabled for production runs.
+An earlier design (EKRNG — event-keyed counter-based PRNG) was
+specified here but was not implemented. The "placebo test" and
+scenario-coupling guarantees that section described are NOT upheld
+by the current runtime: two scenarios that differ in any way
+affecting even one draw's ordering will diverge entirely, even with
+the same seed. Counterfactual comparisons should be treated as
+paired-seed approximations, not as exact couplings.
 
 ---
 
@@ -1438,7 +1380,6 @@ The compartmental IR operates at population level.
 | Contacts          | Explicit relations (patch, network) | Contact matrices in rate expressions       |
 | Stochasticity     | Per-agent Bernoulli draws           | Gillespie / tau-leaping / chain binomial   |
 | Spatial structure | Agent-to-patch assignment           | Stratification (expanded at compile time)  |
-| EKRNG             | Keys = (agent_id, event_type, t)    | Keys = (transition_name, firing_index)     |
 | Time              | Tick-based (discrete, fixed dt)     | Continuous or discrete                     |
 
 The correct architecture is **two IRs, one inference engine**: both compile to
@@ -1453,8 +1394,13 @@ inference interface.
 
 ## 13. Scenario Comparison and Counterfactual Analysis `[v0.1 basic; v0.3 full]`
 
-Even in v0.1, EKRNG enables paired scenario comparisons: simulate baseline and
-intervention with the same seed, compare trajectories. The tooling is simple:
+In v0.1, paired scenario comparisons are run by simulating baseline
+and intervention with the same seed. Because the runtime uses a
+stateful PRNG, pre-intervention trajectories are identical only when
+both runs consume the RNG in the same order; any RNG-order
+divergence (from a structural change, a different overdispersion
+σ, etc.) breaks the coupling. Treat the comparison as a
+paired-seed approximation, not an exact coupling.
 
 ```bash
 # v0.1 workflow
@@ -1479,7 +1425,6 @@ probability.
 - Synthetic observation TSV (projected + sampled values)
 - Summary statistics to stdout (peak incidence, total cases, final state, R₀ at
   t=0)
-- Optional EKRNG trace dump (for debugging paired scenarios)
 
 ### v0.2+ Outputs
 
@@ -1558,7 +1503,7 @@ breaks.
 ## Appendix: Runtime Testing and Verification Strategy
 
 **Applies to:** The Rust backend (simulation, observation sampling, expression
-evaluation, EKRNG). This is designed to catch the specific classes of bugs that
+evaluation). This is designed to catch the specific classes of bugs that
 occur in stochastic simulation runtimes — bugs that are invisible in single runs
 because the output is _supposed_ to be noisy.
 
@@ -1769,20 +1714,20 @@ the absolute rate in ODE.
 #### A.2.6 Tau-Leaping vs. Gillespie Agreement
 
 For small enough `τ`, tau-leaping should approximate Gillespie closely. Run both
-on the same model with the same seeds (EKRNG ensures matching):
+on the same model with the same seeds:
 
 **Test procedure:**
 
 1. SIR model, `N = 1000`, `β = 0.3`, `γ = 0.1`.
 2. Gillespie: 1,000 seeds.
-3. Tau-leaping with `τ = 0.01`: 1,000 seeds (same EKRNG seeds).
+3. Tau-leaping with `τ = 0.01`: 1,000 seeds (same seeds).
 4. Compare distributions of `R(t=50)` via two-sample KS test. Should not reject
    at p=0.01.
 5. Repeat with `τ = 1.0` — should show larger divergence (documenting the
    approximation error).
 
 **What it catches:** Bugs in the tau-leaping Poisson sampling, errors in the
-multinomial competing-risks correction, EKRNG inconsistency between backends.
+multinomial competing-risks correction.
 
 ---
 
@@ -1842,95 +1787,7 @@ integration with large steps can violate this.
 
 ---
 
-### A.3 EKRNG-Specific Tests
-
-EKRNG is central to the design and subtle to get right. These tests verify
-execution invariance.
-
-#### A.3.1 Determinism (Same Seed + Key → Same Value)
-
-```rust
-for _ in 0..10_000 {
-    let seed = 42u64;
-    let key = "infection_child:1337";
-    let v1 = ekrng(seed, key);
-    let v2 = ekrng(seed, key);
-    assert_eq!(v1, v2);  // bitwise identical
-}
-```
-
-Also: different keys produce different values (with high probability — test that
-collisions are < 1 in 10⁶ for 10⁶ random key pairs).
-
-#### A.3.2 Order Independence
-
-The defining property of EKRNG vs. stateful PRNG: calling keys in different
-orders produces the same per-key values.
-
-```rust
-let seed = 42;
-let keys = ["infection:0", "recovery:0", "birth:0", "infection:1"];
-
-// Order A
-let values_a: Vec<f64> = keys.iter().map(|k| ekrng(seed, k)).collect();
-
-// Order B (reversed)
-let values_b: Vec<f64> = keys.iter().rev().map(|k| ekrng(seed, k)).collect();
-values_b.reverse();
-
-assert_eq!(values_a, values_b);  // bitwise identical
-```
-
-#### A.3.3 Placebo Test (Execution Invariance)
-
-The acid test from the EKRNG paper: a "placebo" intervention that adds a
-mechanistically irrelevant extra draw should produce **identical** trajectories
-to baseline when using EKRNG, but **different** trajectories when using stateful
-PRNG.
-
-**Test procedure:**
-
-1. Construct SIR model (baseline).
-2. Construct SIR model + a "placebo" transition that fires at rate ε ≈ 0 (or a
-   scheduled intervention that does nothing but would consume a draw under
-   stateful PRNG).
-3. Simulate both with EKRNG, same seed. Assert trajectories are identical
-   (bitwise, for Gillespie; statistically, for tau-leaping if τ differs).
-4. (Optional, for documentation:) Simulate both with stateful PRNG fallback.
-   Show that trajectories _diverge_. This is the demonstration of why EKRNG
-   matters.
-
-#### A.3.4 Scenario Coupling
-
-Two models differing only in an intervention (baseline SIR vs. SIR + vaccination
-at t=100) should share identical trajectories up to t=100 when using the same
-EKRNG seed, then diverge:
-
-**Test procedure:**
-
-1. Baseline: SIR for t ∈ [0, 200].
-2. Intervention: SIR + move 50% of S to R at t=100.
-3. Same seed, EKRNG enabled.
-4. Assert: trajectories are identical for t < 100 (bitwise comparison of state
-   vectors at each event).
-5. Assert: trajectories diverge for t > 100 (intervention changed the state,
-   which changes propensities, which changes which events fire — but each event
-   still gets the correct noise for its key).
-
-#### A.3.5 Trace Round-Trip
-
-If EKRNG traces are recorded, replaying the trace should reproduce the
-trajectory exactly:
-
-```rust
-let (traj1, trace1) = simulate_with_trace(model, seed);
-let traj2 = replay_from_trace(model, trace1);
-assert_eq!(traj1, traj2);  // bitwise identical states and flows
-```
-
----
-
-### A.4 Expression Evaluator Tests
+### A.3 Expression Evaluator Tests
 
 The expression evaluator is called on every propensity evaluation (millions of
 times per simulation). Bugs here are the hardest to detect because they produce
@@ -2192,7 +2049,6 @@ error). Validated via distributional comparison.
 | Expression evaluator      | `rust/crates/sim/tests/expr_*`           | `cargo test`             |
 | Golden model deser        | `rust/tests/golden_deser.rs`             | `cargo test`             |
 | Golden model simulation   | `rust/tests/golden_simulate.rs`          | `cargo test`             |
-| EKRNG determinism         | `rust/crates/sim/tests/ekrng_*`          | `cargo test`             |
 | Intervention correctness  | `rust/crates/sim/tests/intervention_*`   | `cargo test`             |
 | Observation sampling      | `rust/crates/observe/tests/*`            | `cargo test`             |
 | Statistical distribution  | `rust/tests/statistical_*.rs`            | Nightly CI (`--ignored`) |
@@ -2218,5 +2074,4 @@ error). Validated via distributional comparison.
 | `sir_discrete`          | Chain binomial variant                     | ChainBinomial        |
 | `sir_competing_hazards` | Multiple outflows from same compartment    | ChainBinomial, G, TL |
 | `sir_absorbing`         | Starts in absorbing state                  | All                  |
-| `sir_placebo_ekrng`     | EKRNG placebo test                         | Gillespie            |
-| `sir_scenario_pair`     | Baseline + intervention for EKRNG coupling | Gillespie            |
+| `sir_scenario_pair`     | Baseline + intervention (paired-seed)      | Gillespie            |

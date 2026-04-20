@@ -109,7 +109,6 @@
           }
         }
       },
-      "event_key": "infection_age_0_5:{firing_index}",
       "metadata": {
         "origin_kind": "transmission",
         "source_compartment": "S_age_0_5",
@@ -287,7 +286,6 @@
           }
         }
       },
-      "event_key": "infection_age_5_15:{firing_index}",
       "metadata": {
         "origin_kind": "transmission",
         "source_compartment": "S_age_5_15",
@@ -465,7 +463,6 @@
           }
         }
       },
-      "event_key": "infection_age_15_50:{firing_index}",
       "metadata": {
         "origin_kind": "transmission",
         "source_compartment": "S_age_15_50",
@@ -643,7 +640,6 @@
           }
         }
       },
-      "event_key": "infection_age_50_65:{firing_index}",
       "metadata": {
         "origin_kind": "transmission",
         "source_compartment": "S_age_50_65",
@@ -821,7 +817,6 @@
           }
         }
       },
-      "event_key": "infection_age_65p:{firing_index}",
       "metadata": {
         "origin_kind": "transmission",
         "source_compartment": "S_age_65p",
@@ -921,7 +916,6 @@
           "right": { "pop": "I_age_0_5" }
         }
       },
-      "event_key": "recovery_age_0_5:{firing_index}",
       "metadata": {
         "origin_kind": "intrinsic",
         "source_compartment": "I_age_0_5",
@@ -943,7 +937,6 @@
           "right": { "pop": "I_age_5_15" }
         }
       },
-      "event_key": "recovery_age_5_15:{firing_index}",
       "metadata": {
         "origin_kind": "intrinsic",
         "source_compartment": "I_age_5_15",
@@ -965,7 +958,6 @@
           "right": { "pop": "I_age_15_50" }
         }
       },
-      "event_key": "recovery_age_15_50:{firing_index}",
       "metadata": {
         "origin_kind": "intrinsic",
         "source_compartment": "I_age_15_50",
@@ -987,7 +979,6 @@
           "right": { "pop": "I_age_50_65" }
         }
       },
-      "event_key": "recovery_age_50_65:{firing_index}",
       "metadata": {
         "origin_kind": "intrinsic",
         "source_compartment": "I_age_50_65",
@@ -1009,7 +1000,6 @@
           "right": { "pop": "I_age_65p" }
         }
       },
-      "event_key": "recovery_age_65p:{firing_index}",
       "metadata": {
         "origin_kind": "intrinsic",
         "source_compartment": "I_age_65p",
@@ -1042,7 +1032,6 @@
           "right": { "pop": "S_age_0_5" }
         }
       },
-      "event_key": "aging_S_age_0_5:{firing_index}",
       "metadata": {
         "origin_kind": "intrinsic",
         "source_compartment": "S_age_0_5",
@@ -1075,7 +1064,6 @@
           "right": { "pop": "S_age_5_15" }
         }
       },
-      "event_key": "aging_S_age_5_15:{firing_index}",
       "metadata": {
         "origin_kind": "intrinsic",
         "source_compartment": "S_age_5_15",
@@ -1108,7 +1096,6 @@
           "right": { "pop": "S_age_15_50" }
         }
       },
-      "event_key": "aging_S_age_15_50:{firing_index}",
       "metadata": {
         "origin_kind": "intrinsic",
         "source_compartment": "S_age_15_50",
@@ -1141,7 +1128,6 @@
           "right": { "pop": "S_age_50_65" }
         }
       },
-      "event_key": "aging_S_age_50_65:{firing_index}",
       "metadata": {
         "origin_kind": "intrinsic",
         "source_compartment": "S_age_50_65",
@@ -1174,7 +1160,6 @@
           "right": { "pop": "I_age_0_5" }
         }
       },
-      "event_key": "aging_I_age_0_5:{firing_index}",
       "metadata": {
         "origin_kind": "intrinsic",
         "source_compartment": "I_age_0_5",
@@ -1207,7 +1192,6 @@
           "right": { "pop": "I_age_5_15" }
         }
       },
-      "event_key": "aging_I_age_5_15:{firing_index}",
       "metadata": {
         "origin_kind": "intrinsic",
         "source_compartment": "I_age_5_15",
@@ -1240,7 +1224,6 @@
           "right": { "pop": "I_age_15_50" }
         }
       },
-      "event_key": "aging_I_age_15_50:{firing_index}",
       "metadata": {
         "origin_kind": "intrinsic",
         "source_compartment": "I_age_15_50",
@@ -1273,7 +1256,6 @@
           "right": { "pop": "I_age_50_65" }
         }
       },
-      "event_key": "aging_I_age_50_65:{firing_index}",
       "metadata": {
         "origin_kind": "intrinsic",
         "source_compartment": "I_age_50_65",
@@ -1306,7 +1288,6 @@
           "right": { "pop": "R_age_0_5" }
         }
       },
-      "event_key": "aging_R_age_0_5:{firing_index}",
       "metadata": {
         "origin_kind": "intrinsic",
         "source_compartment": "R_age_0_5",
@@ -1339,7 +1320,6 @@
           "right": { "pop": "R_age_5_15" }
         }
       },
-      "event_key": "aging_R_age_5_15:{firing_index}",
       "metadata": {
         "origin_kind": "intrinsic",
         "source_compartment": "R_age_5_15",
@@ -1372,7 +1352,6 @@
           "right": { "pop": "R_age_15_50" }
         }
       },
-      "event_key": "aging_R_age_15_50:{firing_index}",
       "metadata": {
         "origin_kind": "intrinsic",
         "source_compartment": "R_age_15_50",
@@ -1405,7 +1384,6 @@
           "right": { "pop": "R_age_50_65" }
         }
       },
-      "event_key": "aging_R_age_50_65:{firing_index}",
       "metadata": {
         "origin_kind": "intrinsic",
         "source_compartment": "R_age_50_65",
@@ -1427,7 +1405,6 @@
           "right": { "pop": "S_age_0_5" }
         }
       },
-      "event_key": "death_S_age_0_5:{firing_index}",
       "metadata": {
         "origin_kind": "outflow",
         "source_compartment": "S_age_0_5",
@@ -1449,7 +1426,6 @@
           "right": { "pop": "S_age_5_15" }
         }
       },
-      "event_key": "death_S_age_5_15:{firing_index}",
       "metadata": {
         "origin_kind": "outflow",
         "source_compartment": "S_age_5_15",
@@ -1471,7 +1447,6 @@
           "right": { "pop": "S_age_15_50" }
         }
       },
-      "event_key": "death_S_age_15_50:{firing_index}",
       "metadata": {
         "origin_kind": "outflow",
         "source_compartment": "S_age_15_50",
@@ -1493,7 +1468,6 @@
           "right": { "pop": "S_age_50_65" }
         }
       },
-      "event_key": "death_S_age_50_65:{firing_index}",
       "metadata": {
         "origin_kind": "outflow",
         "source_compartment": "S_age_50_65",
@@ -1515,7 +1489,6 @@
           "right": { "pop": "S_age_65p" }
         }
       },
-      "event_key": "death_S_age_65p:{firing_index}",
       "metadata": {
         "origin_kind": "outflow",
         "source_compartment": "S_age_65p",
@@ -1537,7 +1510,6 @@
           "right": { "pop": "I_age_0_5" }
         }
       },
-      "event_key": "death_I_age_0_5:{firing_index}",
       "metadata": {
         "origin_kind": "outflow",
         "source_compartment": "I_age_0_5",
@@ -1559,7 +1531,6 @@
           "right": { "pop": "I_age_5_15" }
         }
       },
-      "event_key": "death_I_age_5_15:{firing_index}",
       "metadata": {
         "origin_kind": "outflow",
         "source_compartment": "I_age_5_15",
@@ -1581,7 +1552,6 @@
           "right": { "pop": "I_age_15_50" }
         }
       },
-      "event_key": "death_I_age_15_50:{firing_index}",
       "metadata": {
         "origin_kind": "outflow",
         "source_compartment": "I_age_15_50",
@@ -1603,7 +1573,6 @@
           "right": { "pop": "I_age_50_65" }
         }
       },
-      "event_key": "death_I_age_50_65:{firing_index}",
       "metadata": {
         "origin_kind": "outflow",
         "source_compartment": "I_age_50_65",
@@ -1625,7 +1594,6 @@
           "right": { "pop": "I_age_65p" }
         }
       },
-      "event_key": "death_I_age_65p:{firing_index}",
       "metadata": {
         "origin_kind": "outflow",
         "source_compartment": "I_age_65p",
@@ -1647,7 +1615,6 @@
           "right": { "pop": "R_age_0_5" }
         }
       },
-      "event_key": "death_R_age_0_5:{firing_index}",
       "metadata": {
         "origin_kind": "outflow",
         "source_compartment": "R_age_0_5",
@@ -1669,7 +1636,6 @@
           "right": { "pop": "R_age_5_15" }
         }
       },
-      "event_key": "death_R_age_5_15:{firing_index}",
       "metadata": {
         "origin_kind": "outflow",
         "source_compartment": "R_age_5_15",
@@ -1691,7 +1657,6 @@
           "right": { "pop": "R_age_15_50" }
         }
       },
-      "event_key": "death_R_age_15_50:{firing_index}",
       "metadata": {
         "origin_kind": "outflow",
         "source_compartment": "R_age_15_50",
@@ -1713,7 +1678,6 @@
           "right": { "pop": "R_age_50_65" }
         }
       },
-      "event_key": "death_R_age_50_65:{firing_index}",
       "metadata": {
         "origin_kind": "outflow",
         "source_compartment": "R_age_50_65",
@@ -1735,7 +1699,6 @@
           "right": { "pop": "R_age_65p" }
         }
       },
-      "event_key": "death_R_age_65p:{firing_index}",
       "metadata": {
         "origin_kind": "outflow",
         "source_compartment": "R_age_65p",
@@ -1764,7 +1727,6 @@
           }
         }
       },
-      "event_key": "birth:{firing_index}",
       "metadata": {
         "origin_kind": "inflow",
         "source_compartment": null,

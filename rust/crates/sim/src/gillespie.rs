@@ -69,13 +69,11 @@ fn run_gillespie(
     // Propensity buffer — allocated once, reused
     let mut propensities: Vec<f64> = Vec::with_capacity(n_transitions);
 
-    // Scenario coupling via Common Random Numbers (CRN): run baseline and intervention
-    // with the same seed. Before the intervention time, states and propensities are
-    // identical → sequential draws are identical → trajectories are identical.
-    // After the intervention, trajectories diverge naturally.
-    // EKRNG (per-transition keyed draws) would add per-event hash overhead with marginal
-    // variance reduction for compartmental models — reserved for future ABM / conditional
-    // SMC use cases (ekrng.rs is available if needed).
+    // Paired-seed coupling: running baseline and intervention with the same
+    // seed produces identical trajectories up to the first state divergence,
+    // because the stateful PRNG's output only depends on its prior consumption
+    // sequence. Any change that reorders or adds draws before that point also
+    // breaks the coupling — this is NOT event-keyed RNG.
     let mut stateful_rng = StatefulRng::new(seed);
 
     // Sorted output times

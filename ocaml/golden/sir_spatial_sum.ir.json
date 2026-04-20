@@ -144,7 +144,6 @@
           }
         }
       },
-      "event_key": "infection_p0:{firing_index}",
       "metadata": {
         "origin_kind": "transmission",
         "source_compartment": "S_p0",
@@ -502,7 +501,6 @@
           }
         }
       },
-      "event_key": "infection_p1:{firing_index}",
       "metadata": {
         "origin_kind": "transmission",
         "source_compartment": "S_p1",
@@ -860,7 +858,6 @@
           }
         }
       },
-      "event_key": "infection_p2:{firing_index}",
       "metadata": {
         "origin_kind": "transmission",
         "source_compartment": "S_p2",
@@ -1218,7 +1215,6 @@
           }
         }
       },
-      "event_key": "infection_p3:{firing_index}",
       "metadata": {
         "origin_kind": "transmission",
         "source_compartment": "S_p3",
@@ -1460,7 +1456,6 @@
           "right": { "pop": "I_p0" }
         }
       },
-      "event_key": "recovery_p0:{firing_index}",
       "metadata": {
         "origin_kind": "intrinsic",
         "source_compartment": "I_p0",
@@ -1482,7 +1477,6 @@
           "right": { "pop": "I_p1" }
         }
       },
-      "event_key": "recovery_p1:{firing_index}",
       "metadata": {
         "origin_kind": "intrinsic",
         "source_compartment": "I_p1",
@@ -1504,7 +1498,6 @@
           "right": { "pop": "I_p2" }
         }
       },
-      "event_key": "recovery_p2:{firing_index}",
       "metadata": {
         "origin_kind": "intrinsic",
         "source_compartment": "I_p2",
@@ -1526,7 +1519,6 @@
           "right": { "pop": "I_p3" }
         }
       },
-      "event_key": "recovery_p3:{firing_index}",
       "metadata": {
         "origin_kind": "intrinsic",
         "source_compartment": "I_p3",

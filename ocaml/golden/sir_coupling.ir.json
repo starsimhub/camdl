@@ -68,7 +68,6 @@
           }
         }
       },
-      "event_key": "infection_young:{firing_index}",
       "metadata": {
         "origin_kind": "transmission",
         "source_compartment": "S_young",
@@ -185,7 +184,6 @@
           }
         }
       },
-      "event_key": "infection_old:{firing_index}",
       "metadata": {
         "origin_kind": "transmission",
         "source_compartment": "S_old",
@@ -256,7 +254,6 @@
           "right": { "pop": "I_young" }
         }
       },
-      "event_key": "recovery_young:{firing_index}",
       "metadata": {
         "origin_kind": "intrinsic",
         "source_compartment": "I_young",
@@ -279,7 +276,6 @@
           "right": { "pop": "I_old" }
         }
       },
-      "event_key": "recovery_old:{firing_index}",
       "metadata": {
         "origin_kind": "intrinsic",
         "source_compartment": "I_old",

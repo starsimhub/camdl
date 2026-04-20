@@ -42,7 +42,6 @@ pub struct Transition {
     pub name:           String,
     pub stoichiometry:  Vec<StoichiometryEntry>,
     pub rate:           Expr,
-    pub event_key:      Option<String>,
     pub metadata:       Option<TransitionMetadata>,
     /// How event counts are drawn. Defaults to Poisson.
     #[serde(default, skip_serializing_if = "is_poisson")]

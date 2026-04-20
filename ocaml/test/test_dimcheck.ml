@@ -78,7 +78,7 @@ let mk_param ?(kind = None) ?(dim = None) ?(value = None) name : parameter =
     initial_value = None; param_kind = kind; param_dim = dim }
 
 let mk_transition ?(stoich = []) name rate : transition =
-  { name; stoichiometry = stoich; rate; event_key = None;
+  { name; stoichiometry = stoich; rate;
     metadata = None; draw_method = DrawPoisson; rate_grad = [] }
 
 (* Shorthand constructors for expressions *)

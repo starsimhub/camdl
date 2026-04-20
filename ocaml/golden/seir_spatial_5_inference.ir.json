@@ -90,7 +90,6 @@
           "right": { "pop_sum": [ "S_p1", "E_p1", "I_p1", "R_p1" ] }
         }
       },
-      "event_key": "infection_p1:{firing_index}",
       "metadata": {
         "origin_kind": "transmission",
         "source_compartment": "S_p1",
@@ -438,7 +437,6 @@
           "right": { "pop_sum": [ "S_p2", "E_p2", "I_p2", "R_p2" ] }
         }
       },
-      "event_key": "infection_p2:{firing_index}",
       "metadata": {
         "origin_kind": "transmission",
         "source_compartment": "S_p2",
@@ -786,7 +784,6 @@
           "right": { "pop_sum": [ "S_p3", "E_p3", "I_p3", "R_p3" ] }
         }
       },
-      "event_key": "infection_p3:{firing_index}",
       "metadata": {
         "origin_kind": "transmission",
         "source_compartment": "S_p3",
@@ -1134,7 +1131,6 @@
           "right": { "pop_sum": [ "S_p4", "E_p4", "I_p4", "R_p4" ] }
         }
       },
-      "event_key": "infection_p4:{firing_index}",
       "metadata": {
         "origin_kind": "transmission",
         "source_compartment": "S_p4",
@@ -1482,7 +1478,6 @@
           "right": { "pop_sum": [ "S_p5", "E_p5", "I_p5", "R_p5" ] }
         }
       },
-      "event_key": "infection_p5:{firing_index}",
       "metadata": {
         "origin_kind": "transmission",
         "source_compartment": "S_p5",
@@ -1799,7 +1794,6 @@
           "right": { "pop_sum": [ "S_p2", "E_p2", "I_p2", "R_p2" ] }
         }
       },
-      "event_key": "importation_p1_p2:{firing_index}",
       "metadata": {
         "origin_kind": "transmission",
         "source_compartment": "S_p1",
@@ -1890,7 +1884,6 @@
           "right": { "pop_sum": [ "S_p3", "E_p3", "I_p3", "R_p3" ] }
         }
       },
-      "event_key": "importation_p1_p3:{firing_index}",
       "metadata": {
         "origin_kind": "transmission",
         "source_compartment": "S_p1",
@@ -1981,7 +1974,6 @@
           "right": { "pop_sum": [ "S_p4", "E_p4", "I_p4", "R_p4" ] }
         }
       },
-      "event_key": "importation_p1_p4:{firing_index}",
       "metadata": {
         "origin_kind": "transmission",
         "source_compartment": "S_p1",
@@ -2072,7 +2064,6 @@
           "right": { "pop_sum": [ "S_p5", "E_p5", "I_p5", "R_p5" ] }
         }
       },
-      "event_key": "importation_p1_p5:{firing_index}",
       "metadata": {
         "origin_kind": "transmission",
         "source_compartment": "S_p1",
@@ -2163,7 +2154,6 @@
           "right": { "pop_sum": [ "S_p1", "E_p1", "I_p1", "R_p1" ] }
         }
       },
-      "event_key": "importation_p2_p1:{firing_index}",
       "metadata": {
         "origin_kind": "transmission",
         "source_compartment": "S_p2",
@@ -2254,7 +2244,6 @@
           "right": { "pop_sum": [ "S_p3", "E_p3", "I_p3", "R_p3" ] }
         }
       },
-      "event_key": "importation_p2_p3:{firing_index}",
       "metadata": {
         "origin_kind": "transmission",
         "source_compartment": "S_p2",
@@ -2345,7 +2334,6 @@
           "right": { "pop_sum": [ "S_p4", "E_p4", "I_p4", "R_p4" ] }
         }
       },
-      "event_key": "importation_p2_p4:{firing_index}",
       "metadata": {
         "origin_kind": "transmission",
         "source_compartment": "S_p2",
@@ -2436,7 +2424,6 @@
           "right": { "pop_sum": [ "S_p5", "E_p5", "I_p5", "R_p5" ] }
         }
       },
-      "event_key": "importation_p2_p5:{firing_index}",
       "metadata": {
         "origin_kind": "transmission",
         "source_compartment": "S_p2",
@@ -2527,7 +2514,6 @@
           "right": { "pop_sum": [ "S_p1", "E_p1", "I_p1", "R_p1" ] }
         }
       },
-      "event_key": "importation_p3_p1:{firing_index}",
       "metadata": {
         "origin_kind": "transmission",
         "source_compartment": "S_p3",
@@ -2618,7 +2604,6 @@
           "right": { "pop_sum": [ "S_p2", "E_p2", "I_p2", "R_p2" ] }
         }
       },
-      "event_key": "importation_p3_p2:{firing_index}",
       "metadata": {
         "origin_kind": "transmission",
         "source_compartment": "S_p3",
@@ -2709,7 +2694,6 @@
           "right": { "pop_sum": [ "S_p4", "E_p4", "I_p4", "R_p4" ] }
         }
       },
-      "event_key": "importation_p3_p4:{firing_index}",
       "metadata": {
         "origin_kind": "transmission",
         "source_compartment": "S_p3",
@@ -2800,7 +2784,6 @@
           "right": { "pop_sum": [ "S_p5", "E_p5", "I_p5", "R_p5" ] }
         }
       },
-      "event_key": "importation_p3_p5:{firing_index}",
       "metadata": {
         "origin_kind": "transmission",
         "source_compartment": "S_p3",
@@ -2891,7 +2874,6 @@
           "right": { "pop_sum": [ "S_p1", "E_p1", "I_p1", "R_p1" ] }
         }
       },
-      "event_key": "importation_p4_p1:{firing_index}",
       "metadata": {
         "origin_kind": "transmission",
         "source_compartment": "S_p4",
@@ -2982,7 +2964,6 @@
           "right": { "pop_sum": [ "S_p2", "E_p2", "I_p2", "R_p2" ] }
         }
       },
-      "event_key": "importation_p4_p2:{firing_index}",
       "metadata": {
         "origin_kind": "transmission",
         "source_compartment": "S_p4",
@@ -3073,7 +3054,6 @@
           "right": { "pop_sum": [ "S_p3", "E_p3", "I_p3", "R_p3" ] }
         }
       },
-      "event_key": "importation_p4_p3:{firing_index}",
       "metadata": {
         "origin_kind": "transmission",
         "source_compartment": "S_p4",
@@ -3164,7 +3144,6 @@
           "right": { "pop_sum": [ "S_p5", "E_p5", "I_p5", "R_p5" ] }
         }
       },
-      "event_key": "importation_p4_p5:{firing_index}",
       "metadata": {
         "origin_kind": "transmission",
         "source_compartment": "S_p4",
@@ -3255,7 +3234,6 @@
           "right": { "pop_sum": [ "S_p1", "E_p1", "I_p1", "R_p1" ] }
         }
       },
-      "event_key": "importation_p5_p1:{firing_index}",
       "metadata": {
         "origin_kind": "transmission",
         "source_compartment": "S_p5",
@@ -3346,7 +3324,6 @@
           "right": { "pop_sum": [ "S_p2", "E_p2", "I_p2", "R_p2" ] }
         }
       },
-      "event_key": "importation_p5_p2:{firing_index}",
       "metadata": {
         "origin_kind": "transmission",
         "source_compartment": "S_p5",
@@ -3437,7 +3414,6 @@
           "right": { "pop_sum": [ "S_p3", "E_p3", "I_p3", "R_p3" ] }
         }
       },
-      "event_key": "importation_p5_p3:{firing_index}",
       "metadata": {
         "origin_kind": "transmission",
         "source_compartment": "S_p5",
@@ -3528,7 +3504,6 @@
           "right": { "pop_sum": [ "S_p4", "E_p4", "I_p4", "R_p4" ] }
         }
       },
-      "event_key": "importation_p5_p4:{firing_index}",
       "metadata": {
         "origin_kind": "transmission",
         "source_compartment": "S_p5",
@@ -3596,7 +3571,6 @@
           "right": { "pop": "E_p1" }
         }
       },
-      "event_key": "progression_p1:{firing_index}",
       "metadata": {
         "origin_kind": "intrinsic",
         "source_compartment": "E_p1",
@@ -3629,7 +3603,6 @@
           "right": { "pop": "E_p2" }
         }
       },
-      "event_key": "progression_p2:{firing_index}",
       "metadata": {
         "origin_kind": "intrinsic",
         "source_compartment": "E_p2",
@@ -3662,7 +3635,6 @@
           "right": { "pop": "E_p3" }
         }
       },
-      "event_key": "progression_p3:{firing_index}",
       "metadata": {
         "origin_kind": "intrinsic",
         "source_compartment": "E_p3",
@@ -3695,7 +3667,6 @@
           "right": { "pop": "E_p4" }
         }
       },
-      "event_key": "progression_p4:{firing_index}",
       "metadata": {
         "origin_kind": "intrinsic",
         "source_compartment": "E_p4",
@@ -3728,7 +3699,6 @@
           "right": { "pop": "E_p5" }
         }
       },
-      "event_key": "progression_p5:{firing_index}",
       "metadata": {
         "origin_kind": "intrinsic",
         "source_compartment": "E_p5",
@@ -3761,7 +3731,6 @@
           "right": { "pop": "I_p1" }
         }
       },
-      "event_key": "recovery_p1:{firing_index}",
       "metadata": {
         "origin_kind": "intrinsic",
         "source_compartment": "I_p1",
@@ -3794,7 +3763,6 @@
           "right": { "pop": "I_p2" }
         }
       },
-      "event_key": "recovery_p2:{firing_index}",
       "metadata": {
         "origin_kind": "intrinsic",
         "source_compartment": "I_p2",
@@ -3827,7 +3795,6 @@
           "right": { "pop": "I_p3" }
         }
       },
-      "event_key": "recovery_p3:{firing_index}",
       "metadata": {
         "origin_kind": "intrinsic",
         "source_compartment": "I_p3",
@@ -3860,7 +3827,6 @@
           "right": { "pop": "I_p4" }
         }
       },
-      "event_key": "recovery_p4:{firing_index}",
       "metadata": {
         "origin_kind": "intrinsic",
         "source_compartment": "I_p4",
@@ -3893,7 +3859,6 @@
           "right": { "pop": "I_p5" }
         }
       },
-      "event_key": "recovery_p5:{firing_index}",
       "metadata": {
         "origin_kind": "intrinsic",
         "source_compartment": "I_p5",
@@ -3932,7 +3897,6 @@
           "right": { "pop": "R_p1" }
         }
       },
-      "event_key": "waning_p1:{firing_index}",
       "metadata": {
         "origin_kind": "intrinsic",
         "source_compartment": "R_p1",
@@ -3971,7 +3935,6 @@
           "right": { "pop": "R_p2" }
         }
       },
-      "event_key": "waning_p2:{firing_index}",
       "metadata": {
         "origin_kind": "intrinsic",
         "source_compartment": "R_p2",
@@ -4010,7 +3973,6 @@
           "right": { "pop": "R_p3" }
         }
       },
-      "event_key": "waning_p3:{firing_index}",
       "metadata": {
         "origin_kind": "intrinsic",
         "source_compartment": "R_p3",
@@ -4049,7 +4011,6 @@
           "right": { "pop": "R_p4" }
         }
       },
-      "event_key": "waning_p4:{firing_index}",
       "metadata": {
         "origin_kind": "intrinsic",
         "source_compartment": "R_p4",
@@ -4088,7 +4049,6 @@
           "right": { "pop": "R_p5" }
         }
       },
-      "event_key": "waning_p5:{firing_index}",
       "metadata": {
         "origin_kind": "intrinsic",
         "source_compartment": "R_p5",

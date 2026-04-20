@@ -31,7 +31,6 @@
           "right": { "pop_sum": [ "S", "I", "R" ] }
         }
       },
-      "event_key": "infection:{firing_index}",
       "metadata": {
         "origin_kind": "transmission",
         "source_compartment": "S",
@@ -80,7 +79,6 @@
           "right": { "pop": "I" }
         }
       },
-      "event_key": "recovery:{firing_index}",
       "metadata": {
         "origin_kind": "intrinsic",
         "source_compartment": "I",

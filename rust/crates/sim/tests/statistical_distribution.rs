@@ -120,7 +120,6 @@ fn birth_death_model(birth_rate: f64, death_rate: f64) -> Model {
                 name: "birth".into(),
                 stoichiometry: vec![StoichiometryEntry("N".into(), 1)],
                 rate: Expr::Param(ParamExpr { param: "lambda".into() }),
-                event_key: None,
                 metadata: None,
                 draw_method: ir::transition::DrawMethod::Poisson, rate_grad: Default::default(),
             },
@@ -128,7 +127,6 @@ fn birth_death_model(birth_rate: f64, death_rate: f64) -> Model {
                 name: "death".into(),
                 stoichiometry: vec![StoichiometryEntry("N".into(), -1)],
                 rate: Expr::Param(ParamExpr { param: "mu_times_n".into() }),
-                event_key: None,
                 metadata: None,
                 draw_method: ir::transition::DrawMethod::Poisson, rate_grad: Default::default(),
             },
@@ -249,7 +247,6 @@ fn test_overdispersion_variance_tau_leap() {
                         right: Box::new(Expr::Pop(PopExpr { pop: "S".into() })),
                     },
                 }),
-                event_key: None,
                 metadata: None,
                 draw_method: ir::transition::DrawMethod::Overdispersed(
                     Expr::Param(ParamExpr { param: "sigma_sq".into() })),

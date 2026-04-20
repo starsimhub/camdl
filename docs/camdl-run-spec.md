@@ -1054,7 +1054,7 @@ name = "baseline"
 name = "with_sia"
 enable = ["sia"]
 # Total: n_draws × 2 scenarios × 10 seeds
-# Scenarios are EKRNG-coupled within each (draw, seed) pair
+# Scenarios share seeds within each (draw, seed) pair (paired-seed coupling)
 ```
 
 ### 5.6 Execution Flow
@@ -2007,10 +2007,12 @@ camdl simulate models/sir.camdl \
     --replicates 10 --obs-dir obs/
 ```
 
-For each (draw, seed) pair, both scenarios are simulated with the same EKRNG
-state, producing coupled counterfactual trajectories. This enables paired
-comparisons (cases_averted = baseline - with_sia) that properly propagate
-posterior uncertainty.
+For each (draw, seed) pair, both scenarios are simulated with the same seed.
+This gives paired comparisons (cases_averted = baseline - with_sia) that
+propagate posterior uncertainty. Note that the runtime uses a stateful
+PRNG rather than event-keyed RNG — pre-intervention trajectories match
+only when both runs consume the RNG in the same order; any structural
+difference that shifts RNG ordering also breaks the coupling.
 
 ### 11.4 Uniform Exploration
 

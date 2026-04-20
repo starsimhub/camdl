@@ -28,7 +28,6 @@
       "name": "birth_H",
       "stoichiometry": [ [ "S_H", 1 ] ],
       "rate": { "param": "Pi_H" },
-      "event_key": "birth_H:{firing_index}",
       "metadata": {
         "origin_kind": "inflow",
         "source_compartment": null,
@@ -75,7 +74,6 @@
           "right": { "pop": "S_H" }
         }
       },
-      "event_key": "death_S_H:{firing_index}",
       "metadata": {
         "origin_kind": "outflow",
         "source_compartment": "S_H",
@@ -122,7 +120,6 @@
           "right": { "pop": "E_H" }
         }
       },
-      "event_key": "death_E_H:{firing_index}",
       "metadata": {
         "origin_kind": "outflow",
         "source_compartment": "E_H",
@@ -175,7 +172,6 @@
           "right": { "pop": "I_H" }
         }
       },
-      "event_key": "death_I_H:{firing_index}",
       "metadata": {
         "origin_kind": "outflow",
         "source_compartment": "I_H",
@@ -222,7 +218,6 @@
           "right": { "pop": "R_H" }
         }
       },
-      "event_key": "death_R_H:{firing_index}",
       "metadata": {
         "origin_kind": "outflow",
         "source_compartment": "R_H",
@@ -293,7 +288,6 @@
           "right": { "pop": "S_H" }
         }
       },
-      "event_key": "infection_H:{firing_index}",
       "metadata": {
         "origin_kind": "transmission",
         "source_compartment": "S_H",
@@ -388,7 +382,6 @@
           "right": { "pop": "E_H" }
         }
       },
-      "event_key": "progression_H:{firing_index}",
       "metadata": {
         "origin_kind": "intrinsic",
         "source_compartment": "E_H",
@@ -435,7 +428,6 @@
           "right": { "pop": "I_H" }
         }
       },
-      "event_key": "recovery_H:{firing_index}",
       "metadata": {
         "origin_kind": "intrinsic",
         "source_compartment": "I_H",
@@ -482,7 +474,6 @@
           "right": { "pop": "R_H" }
         }
       },
-      "event_key": "waning_H:{firing_index}",
       "metadata": {
         "origin_kind": "intrinsic",
         "source_compartment": "R_H",
@@ -523,7 +514,6 @@
       "name": "birth_L_B",
       "stoichiometry": [ [ "L_B", 1 ] ],
       "rate": { "param": "pi_B" },
-      "event_key": "birth_L_B:{firing_index}",
       "metadata": {
         "origin_kind": "inflow",
         "source_compartment": null,
@@ -570,7 +560,6 @@
           "right": { "pop": "L_B" }
         }
       },
-      "event_key": "death_L_B:{firing_index}",
       "metadata": {
         "origin_kind": "outflow",
         "source_compartment": "L_B",
@@ -629,7 +618,6 @@
           "right": { "pop": "L_B" }
         }
       },
-      "event_key": "emerge_S_B:{firing_index}",
       "metadata": {
         "origin_kind": "intrinsic",
         "source_compartment": "L_B",
@@ -706,7 +694,6 @@
           "right": { "pop": "L_B" }
         }
       },
-      "event_key": "emerge_S_R:{firing_index}",
       "metadata": {
         "origin_kind": "intrinsic",
         "source_compartment": "L_B",
@@ -765,7 +752,6 @@
           "right": { "pop": "S_B" }
         }
       },
-      "event_key": "death_S_B:{firing_index}",
       "metadata": {
         "origin_kind": "outflow",
         "source_compartment": "S_B",
@@ -824,7 +810,6 @@
           "right": { "pop": "S_B" }
         }
       },
-      "event_key": "infection_B:{firing_index}",
       "metadata": {
         "origin_kind": "transmission",
         "source_compartment": "S_B",
@@ -895,7 +880,6 @@
           "right": { "pop": "E_B" }
         }
       },
-      "event_key": "death_E_B:{firing_index}",
       "metadata": {
         "origin_kind": "outflow",
         "source_compartment": "E_B",
@@ -942,7 +926,6 @@
           "right": { "pop": "E_B" }
         }
       },
-      "event_key": "incubation_B:{firing_index}",
       "metadata": {
         "origin_kind": "intrinsic",
         "source_compartment": "E_B",
@@ -989,7 +972,6 @@
           "right": { "pop": "I_B" }
         }
       },
-      "event_key": "death_I_B:{firing_index}",
       "metadata": {
         "origin_kind": "outflow",
         "source_compartment": "I_B",
@@ -1036,7 +1018,6 @@
           "right": { "pop": "I_B" }
         }
       },
-      "event_key": "biting_rest_B:{firing_index}",
       "metadata": {
         "origin_kind": "intrinsic",
         "source_compartment": "I_B",
@@ -1083,7 +1064,6 @@
           "right": { "pop": "S_R" }
         }
       },
-      "event_key": "death_S_R:{firing_index}",
       "metadata": {
         "origin_kind": "outflow",
         "source_compartment": "S_R",
@@ -1142,7 +1122,6 @@
           "right": { "pop": "S_R" }
         }
       },
-      "event_key": "infection_R:{firing_index}",
       "metadata": {
         "origin_kind": "transmission",
         "source_compartment": "S_R",
@@ -1213,7 +1192,6 @@
           "right": { "pop": "E_R" }
         }
       },
-      "event_key": "death_E_R:{firing_index}",
       "metadata": {
         "origin_kind": "outflow",
         "source_compartment": "E_R",
@@ -1260,7 +1238,6 @@
           "right": { "pop": "E_R" }
         }
       },
-      "event_key": "incubation_R:{firing_index}",
       "metadata": {
         "origin_kind": "intrinsic",
         "source_compartment": "E_R",
@@ -1307,7 +1284,6 @@
           "right": { "pop": "I_R" }
         }
       },
-      "event_key": "death_I_R:{firing_index}",
       "metadata": {
         "origin_kind": "outflow",
         "source_compartment": "I_R",
@@ -1354,7 +1330,6 @@
           "right": { "pop": "I_R" }
         }
       },
-      "event_key": "rest_biting_B:{firing_index}",
       "metadata": {
         "origin_kind": "intrinsic",
         "source_compartment": "I_R",
@@ -1395,7 +1370,6 @@
       "name": "birth_L_A",
       "stoichiometry": [ [ "L_A", 1 ] ],
       "rate": { "param": "pi_A" },
-      "event_key": "birth_L_A:{firing_index}",
       "metadata": {
         "origin_kind": "inflow",
         "source_compartment": null,
@@ -1442,7 +1416,6 @@
           "right": { "pop": "L_A" }
         }
       },
-      "event_key": "death_L_A:{firing_index}",
       "metadata": {
         "origin_kind": "outflow",
         "source_compartment": "L_A",
@@ -1501,7 +1474,6 @@
           "right": { "pop": "L_A" }
         }
       },
-      "event_key": "emerge_S_A:{firing_index}",
       "metadata": {
         "origin_kind": "intrinsic",
         "source_compartment": "L_A",
@@ -1578,7 +1550,6 @@
           "right": { "pop": "L_A" }
         }
       },
-      "event_key": "emerge_S_r:{firing_index}",
       "metadata": {
         "origin_kind": "intrinsic",
         "source_compartment": "L_A",
@@ -1637,7 +1608,6 @@
           "right": { "pop": "S_A" }
         }
       },
-      "event_key": "death_S_A:{firing_index}",
       "metadata": {
         "origin_kind": "outflow",
         "source_compartment": "S_A",
@@ -1696,7 +1666,6 @@
           "right": { "pop": "S_A" }
         }
       },
-      "event_key": "infection_A:{firing_index}",
       "metadata": {
         "origin_kind": "transmission",
         "source_compartment": "S_A",
@@ -1767,7 +1736,6 @@
           "right": { "pop": "E_A" }
         }
       },
-      "event_key": "death_E_A:{firing_index}",
       "metadata": {
         "origin_kind": "outflow",
         "source_compartment": "E_A",
@@ -1814,7 +1782,6 @@
           "right": { "pop": "E_A" }
         }
       },
-      "event_key": "incubation_A:{firing_index}",
       "metadata": {
         "origin_kind": "intrinsic",
         "source_compartment": "E_A",
@@ -1861,7 +1828,6 @@
           "right": { "pop": "I_A" }
         }
       },
-      "event_key": "death_I_A:{firing_index}",
       "metadata": {
         "origin_kind": "outflow",
         "source_compartment": "I_A",
@@ -1908,7 +1874,6 @@
           "right": { "pop": "I_A" }
         }
       },
-      "event_key": "biting_rest_A:{firing_index}",
       "metadata": {
         "origin_kind": "intrinsic",
         "source_compartment": "I_A",
@@ -1955,7 +1920,6 @@
           "right": { "pop": "S_r" }
         }
       },
-      "event_key": "death_S_r:{firing_index}",
       "metadata": {
         "origin_kind": "outflow",
         "source_compartment": "S_r",
@@ -2014,7 +1978,6 @@
           "right": { "pop": "S_r" }
         }
       },
-      "event_key": "infection_r:{firing_index}",
       "metadata": {
         "origin_kind": "transmission",
         "source_compartment": "S_r",
@@ -2085,7 +2048,6 @@
           "right": { "pop": "E_r" }
         }
       },
-      "event_key": "death_E_r:{firing_index}",
       "metadata": {
         "origin_kind": "outflow",
         "source_compartment": "E_r",
@@ -2132,7 +2094,6 @@
           "right": { "pop": "E_r" }
         }
       },
-      "event_key": "incubation_r:{firing_index}",
       "metadata": {
         "origin_kind": "intrinsic",
         "source_compartment": "E_r",
@@ -2179,7 +2140,6 @@
           "right": { "pop": "I_r" }
         }
       },
-      "event_key": "death_I_r:{firing_index}",
       "metadata": {
         "origin_kind": "outflow",
         "source_compartment": "I_r",
@@ -2226,7 +2186,6 @@
           "right": { "pop": "I_r" }
         }
       },
-      "event_key": "rest_biting_A:{firing_index}",
       "metadata": {
         "origin_kind": "intrinsic",
         "source_compartment": "I_r",

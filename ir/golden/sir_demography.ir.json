@@ -61,7 +61,6 @@
           }
         }
       },
-      "event_key": "infection:{firing_index}",
       "metadata": {
         "origin_kind": "transmission",
         "source_compartment": "S",
@@ -91,7 +90,6 @@
           }
         }
       },
-      "event_key": "recovery:{firing_index}",
       "metadata": {
         "origin_kind": "intrinsic",
         "source_compartment": "I",
@@ -121,7 +119,6 @@
           }
         }
       },
-      "event_key": "birth:{firing_index}",
       "metadata": {
         "origin_kind": "inflow",
         "source_compartment": null,
@@ -147,7 +144,6 @@
           }
         }
       },
-      "event_key": "death_S:{firing_index}",
       "metadata": {
         "origin_kind": "outflow",
         "source_compartment": "S",
@@ -173,7 +169,6 @@
           }
         }
       },
-      "event_key": "death_I:{firing_index}",
       "metadata": {
         "origin_kind": "outflow",
         "source_compartment": "I",
@@ -199,7 +194,6 @@
           }
         }
       },
-      "event_key": "death_R:{firing_index}",
       "metadata": {
         "origin_kind": "outflow",
         "source_compartment": "R",

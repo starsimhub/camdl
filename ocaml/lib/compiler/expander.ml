@@ -1368,17 +1368,10 @@ let expand_transitions_counted ctx =
           if parts = [] then tr.trname
           else tr.trname ^ "_" ^ String.concat "_" parts
         in
-        let event_key =
-          if parts = [] then
-            Printf.sprintf "%s:{firing_index}" tr.trname
-          else
-            Printf.sprintf "%s_%s:{firing_index}" tr.trname (String.concat "_" parts)
-        in
         Some {
           Ir.name            = tr_name;
           Ir.stoichiometry   = stoich;
           Ir.rate            = rate;
-          Ir.event_key       = Some event_key;
           Ir.metadata        = Some {
             Ir.origin_kind        = Some origin_kind;
             Ir.source_compartment = src_name;

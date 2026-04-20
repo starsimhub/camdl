@@ -1150,7 +1150,7 @@ mod tests {
             expr::{BinOpExpr, BinOpWrap, BinOp, Expr, ParamExpr, PopExpr},
             model::{Compartment, CompartmentKind, InitialConditions, OutputConfig, OutputSchedule, SimulationConfig},
             parameter::Parameter,
-            transition::{Transition, StoichiometryEntry, DrawMethod},
+            transition::{Transition, StoichiometryEntry},
             Model,
         };
 
@@ -1174,7 +1174,7 @@ mod tests {
                         left: Box::new(Expr::Param(ParamExpr { param: "beta".into() })),
                         right: Box::new(Expr::Pop(PopExpr { pop: "I".into() })),
                     }}),
-                    event_key: None, metadata: None, draw_method: DrawMethod::Poisson,
+                    metadata: None, draw_method: ir::transition::DrawMethod::Poisson,
                     rate_grad: Default::default(),
                 },
                 Transition {
@@ -1185,7 +1185,7 @@ mod tests {
                         left: Box::new(Expr::Param(ParamExpr { param: "gamma".into() })),
                         right: Box::new(Expr::Pop(PopExpr { pop: "I".into() })),
                     }}),
-                    event_key: None, metadata: None, draw_method: DrawMethod::Poisson,
+                    metadata: None, draw_method: ir::transition::DrawMethod::Poisson,
                     rate_grad: Default::default(),
                 },
             ],

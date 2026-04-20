@@ -1186,28 +1186,7 @@ Names are resolved in order: **compartments → parameters → let bindings →
 forcing → tables**. The compiler reports an error if a name exists in multiple
 namespaces. User names cannot shadow reserved identifiers (see §15).
 
-### 9.8 Event-Keyed Random Number Generation (EKRNG)
-
-Each transition in the IR carries an event key — a stable identifier for
-counter-based RNG (Philox/Threefry). This decouples random draws from execution
-order, enabling valid counterfactual coupling between scenario pairs (Buffalo,
-Pearson, Klein 2026).
-
-The compiler generates event keys from the transition name and index values:
-
-```
-# infection[child, p1] → event key "infection_child_p1:{firing_index}"
-# recovery[adult, p3]  → event key "recovery_adult_p3:{firing_index}"
-```
-
-The `{firing_index}` is a monotonically increasing counter per transition,
-filled by the runtime. Combined with the base seed, every event firing gets a
-globally unique key.
-
-EKRNG is automatic — the user does not write event keys. The compiler generates
-them from the transition's name and index bindings.
-
-### 9.9 Extra-Demographic Stochasticity (`overdispersed`)
+### 9.8 Extra-Demographic Stochasticity (`overdispersed`)
 
 Demographic stochasticity (Poisson event draws) scales as 1/√N and is negligible
 for large populations. Extra-demographic stochasticity models rate-level noise —
@@ -2119,13 +2098,15 @@ experiment("Nigeria SIA evaluation") {
 
 ### 18.5 Compare Block Semantics
 
-The `compare` block drives paired scenario simulation with EKRNG coupling:
+The `compare` block drives paired scenario simulation with matched
+seeds:
 
 - `pairs` lists 2-tuples of `(reference_scenario, test_scenario)`. The keyword
   `baseline` refers to the identity patch (no scenario modifications).
 - `seeds = N to M` is range syntax generating integers N, N+1, ..., M.
-- For each pair and each seed, both scenarios are simulated with the same EKRNG
-  seed, producing coupled trajectories.
+- For each pair and each seed, both scenarios are simulated with the same seed.
+  Because the runtime uses a stateful PRNG, pre-divergence coupling holds only
+  when both runs consume the RNG in the same order.
 
 Inside the experiment's `output.summary`, two special names are available:
 

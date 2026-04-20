@@ -506,14 +506,7 @@ let run_transition_rate ppf (model : Ir.model) ctx name =
        Fmt.pf ppf "@\n  ";
        Term_style.dim_style Fmt.string ppf "origin:     ";
        (match m.origin_kind with Some s -> Fmt.pf ppf "%s" s | None -> ());
-       Fmt.pf ppf "@\n");
-    (* Event key *)
-    (match t.event_key with
-     | None -> ()
-     | Some k ->
-       Fmt.pf ppf "  ";
-       Term_style.dim_style Fmt.string ppf "event key:  ";
-       Fmt.pf ppf "%s@\n" k)
+       Fmt.pf ppf "@\n")
 
 (* ── --transition PATTERN --count ───────────────────────────────────────── *)
 

@@ -40,7 +40,6 @@
           "right": { "param": "N_urban" }
         }
       },
-      "event_key": "infection_urban:{firing_index}",
       "metadata": {
         "origin_kind": "transmission",
         "source_compartment": "S_urban",
@@ -177,7 +176,6 @@
           "right": { "param": "N_rural" }
         }
       },
-      "event_key": "infection_rural:{firing_index}",
       "metadata": {
         "origin_kind": "transmission",
         "source_compartment": "S_rural",
@@ -296,7 +294,6 @@
           "right": { "pop": "I_urban" }
         }
       },
-      "event_key": "recovery_urban:{firing_index}",
       "metadata": {
         "origin_kind": "intrinsic",
         "source_compartment": "I_urban",
@@ -320,7 +317,6 @@
           "right": { "pop": "I_rural" }
         }
       },
-      "event_key": "recovery_rural:{firing_index}",
       "metadata": {
         "origin_kind": "intrinsic",
         "source_compartment": "I_rural",

@@ -33,7 +33,6 @@
           "right": { "pop_sum": [ "S", "E", "I", "R", "V" ] }
         }
       },
-      "event_key": "infection:{firing_index}",
       "metadata": {
         "origin_kind": "transmission",
         "source_compartment": "S",
@@ -83,7 +82,6 @@
           "right": { "pop": "E" }
         }
       },
-      "event_key": "progression:{firing_index}",
       "metadata": {
         "origin_kind": "intrinsic",
         "source_compartment": "E",
@@ -109,7 +107,6 @@
           "right": { "pop": "I" }
         }
       },
-      "event_key": "recovery:{firing_index}",
       "metadata": {
         "origin_kind": "intrinsic",
         "source_compartment": "I",
@@ -135,7 +132,6 @@
           "right": { "pop": "V" }
         }
       },
-      "event_key": "waning:{firing_index}",
       "metadata": {
         "origin_kind": "intrinsic",
         "source_compartment": "V",

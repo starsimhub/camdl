@@ -61,7 +61,6 @@
           }
         }
       },
-      "event_key": "infection:{firing_index}",
       "metadata": {
         "origin_kind": "transmission",
         "source_compartment": "S",
@@ -91,7 +90,6 @@
           }
         }
       },
-      "event_key": "recovery:{firing_index}",
       "metadata": {
         "origin_kind": "intrinsic",
         "source_compartment": "I",

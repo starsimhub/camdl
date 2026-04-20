@@ -74,7 +74,6 @@
           }
         }
       },
-      "event_key": "infection_child:{firing_index}",
       "metadata": {
         "origin_kind": "transmission",
         "source_compartment": "S_child",
@@ -200,7 +199,6 @@
           }
         }
       },
-      "event_key": "infection_adult:{firing_index}",
       "metadata": {
         "origin_kind": "transmission",
         "source_compartment": "S_adult",
@@ -276,7 +274,6 @@
           "right": { "pop": "E_child" }
         }
       },
-      "event_key": "progression_child:{firing_index}",
       "metadata": {
         "origin_kind": "intrinsic",
         "source_compartment": "E_child",
@@ -298,7 +295,6 @@
           "right": { "pop": "E_adult" }
         }
       },
-      "event_key": "progression_adult:{firing_index}",
       "metadata": {
         "origin_kind": "intrinsic",
         "source_compartment": "E_adult",
@@ -320,7 +316,6 @@
           "right": { "pop": "I_child" }
         }
       },
-      "event_key": "recovery_child:{firing_index}",
       "metadata": {
         "origin_kind": "intrinsic",
         "source_compartment": "I_child",
@@ -342,7 +337,6 @@
           "right": { "pop": "I_adult" }
         }
       },
-      "event_key": "recovery_adult:{firing_index}",
       "metadata": {
         "origin_kind": "intrinsic",
         "source_compartment": "I_adult",

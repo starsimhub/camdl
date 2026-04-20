@@ -54,7 +54,6 @@ fn model_with_obs_param() -> (Arc<CompiledModel>, Vec<f64>) {
                         right: Box::new(Expr::Pop(PopExpr { pop: "N".into() })),
                     },
                 }),
-                event_key: None,
                 metadata: None,
                 draw_method: DrawMethod::Poisson,
                 rate_grad: Default::default(),

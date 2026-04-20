@@ -37,7 +37,6 @@
           "right": { "pop_sum": [ "S_north", "I_north", "R_north" ] }
         }
       },
-      "event_key": "infection_north:{firing_index}",
       "metadata": {
         "origin_kind": "transmission",
         "source_compartment": "S_north",
@@ -95,7 +94,6 @@
           "right": { "pop_sum": [ "S_south", "I_south", "R_south" ] }
         }
       },
-      "event_key": "infection_south:{firing_index}",
       "metadata": {
         "origin_kind": "transmission",
         "source_compartment": "S_south",
@@ -153,7 +151,6 @@
           "right": { "pop_sum": [ "S_east", "I_east", "R_east" ] }
         }
       },
-      "event_key": "infection_east:{firing_index}",
       "metadata": {
         "origin_kind": "transmission",
         "source_compartment": "S_east",
@@ -199,7 +196,6 @@
           "right": { "pop": "I_north" }
         }
       },
-      "event_key": "recovery_north:{firing_index}",
       "metadata": {
         "origin_kind": "intrinsic",
         "source_compartment": "I_north",
@@ -221,7 +217,6 @@
           "right": { "pop": "I_south" }
         }
       },
-      "event_key": "recovery_south:{firing_index}",
       "metadata": {
         "origin_kind": "intrinsic",
         "source_compartment": "I_south",
@@ -243,7 +238,6 @@
           "right": { "pop": "I_east" }
         }
       },
-      "event_key": "recovery_east:{firing_index}",
       "metadata": {
         "origin_kind": "intrinsic",
         "source_compartment": "I_east",

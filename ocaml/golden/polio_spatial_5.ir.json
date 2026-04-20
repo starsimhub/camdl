@@ -63,7 +63,6 @@
           }
         }
       },
-      "event_key": "infection_north:{firing_index}",
       "metadata": {
         "origin_kind": "transmission",
         "source_compartment": "S_north",
@@ -204,7 +203,6 @@
           }
         }
       },
-      "event_key": "infection_south:{firing_index}",
       "metadata": {
         "origin_kind": "transmission",
         "source_compartment": "S_south",
@@ -343,7 +341,6 @@
           }
         }
       },
-      "event_key": "infection_east:{firing_index}",
       "metadata": {
         "origin_kind": "transmission",
         "source_compartment": "S_east",
@@ -482,7 +479,6 @@
           }
         }
       },
-      "event_key": "infection_west:{firing_index}",
       "metadata": {
         "origin_kind": "transmission",
         "source_compartment": "S_west",
@@ -623,7 +619,6 @@
           }
         }
       },
-      "event_key": "infection_center:{firing_index}",
       "metadata": {
         "origin_kind": "transmission",
         "source_compartment": "S_center",
@@ -775,7 +770,6 @@
           }
         }
       },
-      "event_key": "importation_north_south:{firing_index}",
       "metadata": {
         "origin_kind": "transmission",
         "source_compartment": "S_north",
@@ -882,7 +876,6 @@
           }
         }
       },
-      "event_key": "importation_north_east:{firing_index}",
       "metadata": {
         "origin_kind": "transmission",
         "source_compartment": "S_north",
@@ -989,7 +982,6 @@
           }
         }
       },
-      "event_key": "importation_north_west:{firing_index}",
       "metadata": {
         "origin_kind": "transmission",
         "source_compartment": "S_north",
@@ -1098,7 +1090,6 @@
           }
         }
       },
-      "event_key": "importation_north_center:{firing_index}",
       "metadata": {
         "origin_kind": "transmission",
         "source_compartment": "S_north",
@@ -1210,7 +1201,6 @@
           }
         }
       },
-      "event_key": "importation_south_north:{firing_index}",
       "metadata": {
         "origin_kind": "transmission",
         "source_compartment": "S_south",
@@ -1317,7 +1307,6 @@
           }
         }
       },
-      "event_key": "importation_south_east:{firing_index}",
       "metadata": {
         "origin_kind": "transmission",
         "source_compartment": "S_south",
@@ -1424,7 +1413,6 @@
           }
         }
       },
-      "event_key": "importation_south_west:{firing_index}",
       "metadata": {
         "origin_kind": "transmission",
         "source_compartment": "S_south",
@@ -1533,7 +1521,6 @@
           }
         }
       },
-      "event_key": "importation_south_center:{firing_index}",
       "metadata": {
         "origin_kind": "transmission",
         "source_compartment": "S_south",
@@ -1645,7 +1632,6 @@
           }
         }
       },
-      "event_key": "importation_east_north:{firing_index}",
       "metadata": {
         "origin_kind": "transmission",
         "source_compartment": "S_east",
@@ -1754,7 +1740,6 @@
           }
         }
       },
-      "event_key": "importation_east_south:{firing_index}",
       "metadata": {
         "origin_kind": "transmission",
         "source_compartment": "S_east",
@@ -1861,7 +1846,6 @@
           }
         }
       },
-      "event_key": "importation_east_west:{firing_index}",
       "metadata": {
         "origin_kind": "transmission",
         "source_compartment": "S_east",
@@ -1970,7 +1954,6 @@
           }
         }
       },
-      "event_key": "importation_east_center:{firing_index}",
       "metadata": {
         "origin_kind": "transmission",
         "source_compartment": "S_east",
@@ -2082,7 +2065,6 @@
           }
         }
       },
-      "event_key": "importation_west_north:{firing_index}",
       "metadata": {
         "origin_kind": "transmission",
         "source_compartment": "S_west",
@@ -2191,7 +2173,6 @@
           }
         }
       },
-      "event_key": "importation_west_south:{firing_index}",
       "metadata": {
         "origin_kind": "transmission",
         "source_compartment": "S_west",
@@ -2298,7 +2279,6 @@
           }
         }
       },
-      "event_key": "importation_west_east:{firing_index}",
       "metadata": {
         "origin_kind": "transmission",
         "source_compartment": "S_west",
@@ -2407,7 +2387,6 @@
           }
         }
       },
-      "event_key": "importation_west_center:{firing_index}",
       "metadata": {
         "origin_kind": "transmission",
         "source_compartment": "S_west",
@@ -2519,7 +2498,6 @@
           }
         }
       },
-      "event_key": "importation_center_north:{firing_index}",
       "metadata": {
         "origin_kind": "transmission",
         "source_compartment": "S_center",
@@ -2628,7 +2606,6 @@
           }
         }
       },
-      "event_key": "importation_center_south:{firing_index}",
       "metadata": {
         "origin_kind": "transmission",
         "source_compartment": "S_center",
@@ -2735,7 +2712,6 @@
           }
         }
       },
-      "event_key": "importation_center_east:{firing_index}",
       "metadata": {
         "origin_kind": "transmission",
         "source_compartment": "S_center",
@@ -2842,7 +2818,6 @@
           }
         }
       },
-      "event_key": "importation_center_west:{firing_index}",
       "metadata": {
         "origin_kind": "transmission",
         "source_compartment": "S_center",
@@ -2924,7 +2899,6 @@
           "right": { "pop": "E_north" }
         }
       },
-      "event_key": "progression_north:{firing_index}",
       "metadata": {
         "origin_kind": "intrinsic",
         "source_compartment": "E_north",
@@ -2959,7 +2933,6 @@
           "right": { "pop": "E_south" }
         }
       },
-      "event_key": "progression_south:{firing_index}",
       "metadata": {
         "origin_kind": "intrinsic",
         "source_compartment": "E_south",
@@ -2994,7 +2967,6 @@
           "right": { "pop": "E_east" }
         }
       },
-      "event_key": "progression_east:{firing_index}",
       "metadata": {
         "origin_kind": "intrinsic",
         "source_compartment": "E_east",
@@ -3029,7 +3001,6 @@
           "right": { "pop": "E_west" }
         }
       },
-      "event_key": "progression_west:{firing_index}",
       "metadata": {
         "origin_kind": "intrinsic",
         "source_compartment": "E_west",
@@ -3064,7 +3035,6 @@
           "right": { "pop": "E_center" }
         }
       },
-      "event_key": "progression_center:{firing_index}",
       "metadata": {
         "origin_kind": "intrinsic",
         "source_compartment": "E_center",
@@ -3099,7 +3069,6 @@
           "right": { "pop": "I_north" }
         }
       },
-      "event_key": "recovery_north:{firing_index}",
       "metadata": {
         "origin_kind": "intrinsic",
         "source_compartment": "I_north",
@@ -3134,7 +3103,6 @@
           "right": { "pop": "I_south" }
         }
       },
-      "event_key": "recovery_south:{firing_index}",
       "metadata": {
         "origin_kind": "intrinsic",
         "source_compartment": "I_south",
@@ -3169,7 +3137,6 @@
           "right": { "pop": "I_east" }
         }
       },
-      "event_key": "recovery_east:{firing_index}",
       "metadata": {
         "origin_kind": "intrinsic",
         "source_compartment": "I_east",
@@ -3204,7 +3171,6 @@
           "right": { "pop": "I_west" }
         }
       },
-      "event_key": "recovery_west:{firing_index}",
       "metadata": {
         "origin_kind": "intrinsic",
         "source_compartment": "I_west",
@@ -3239,7 +3205,6 @@
           "right": { "pop": "I_center" }
         }
       },
-      "event_key": "recovery_center:{firing_index}",
       "metadata": {
         "origin_kind": "intrinsic",
         "source_compartment": "I_center",
@@ -3274,7 +3239,6 @@
           "right": { "pop": "V_north" }
         }
       },
-      "event_key": "waning_north:{firing_index}",
       "metadata": {
         "origin_kind": "intrinsic",
         "source_compartment": "V_north",
@@ -3309,7 +3273,6 @@
           "right": { "pop": "V_south" }
         }
       },
-      "event_key": "waning_south:{firing_index}",
       "metadata": {
         "origin_kind": "intrinsic",
         "source_compartment": "V_south",
@@ -3344,7 +3307,6 @@
           "right": { "pop": "V_east" }
         }
       },
-      "event_key": "waning_east:{firing_index}",
       "metadata": {
         "origin_kind": "intrinsic",
         "source_compartment": "V_east",
@@ -3379,7 +3341,6 @@
           "right": { "pop": "V_west" }
         }
       },
-      "event_key": "waning_west:{firing_index}",
       "metadata": {
         "origin_kind": "intrinsic",
         "source_compartment": "V_west",
@@ -3414,7 +3375,6 @@
           "right": { "pop": "V_center" }
         }
       },
-      "event_key": "waning_center:{firing_index}",
       "metadata": {
         "origin_kind": "intrinsic",
         "source_compartment": "V_center",

@@ -37,7 +37,6 @@
           }
         }
       },
-      "event_key": "forward:{firing_index}",
       "metadata": {
         "origin_kind": "transfer",
         "source_compartment": "A",
@@ -67,7 +66,6 @@
           }
         }
       },
-      "event_key": "backward:{firing_index}",
       "metadata": {
         "origin_kind": "transfer",
         "source_compartment": "B",

@@ -38,7 +38,6 @@ type transition = {
   name:            string;
   stoichiometry:   stoichiometry_entry list;
   rate:            expr;
-  event_key:       string option;
   metadata:        transition_metadata option;
   draw_method:     draw_method;
   rate_grad:       (string * expr) list;

@@ -251,7 +251,6 @@ let transition_to_json (t : transition) : Yojson.Safe.t =
     [ ("name",         str t.name);
       ("stoichiometry", arr (List.map stoich_entry_to_json t.stoichiometry));
       ("rate",         expr_to_json t.rate);
-      ("event_key",    match t.event_key with None -> null | Some s -> str s);
       ("metadata",     match t.metadata  with None -> null | Some m -> metadata_to_json m);
     ]
     @ (match t.draw_method with
@@ -266,7 +265,6 @@ let transition_of_json j =
   { name         = as_string (member "name" j);
     stoichiometry = List.map stoich_entry_of_json (as_list (member "stoichiometry" j));
     rate         = expr_of_json (member "rate" j);
-    event_key    = opt_null as_string (match member_opt "event_key" j with Some v -> v | None -> `Null);
     metadata     = (match member_opt "metadata" j with
                     | None | Some `Null -> None
                     | Some m -> Some (metadata_of_json m));

@@ -29,7 +29,6 @@
           }
         }
       },
-      "event_key": "death:{firing_index}",
       "metadata": {
         "origin_kind": "outflow",
         "source_compartment": "N",

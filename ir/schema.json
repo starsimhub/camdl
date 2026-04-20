@@ -226,7 +226,6 @@
           "items": { "$ref": "#/definitions/stoichiometry_entry" }
         },
         "rate": { "$ref": "#/definitions/expr" },
-        "event_key": { "type": ["string", "null"] },
         "metadata": {
           "oneOf": [
             { "type": "null" },

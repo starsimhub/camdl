@@ -109,16 +109,16 @@ expand → dsl → ir
 - `expand`: base model × stratification spec → flat expanded IR (the core
   compiler logic)
 
-### RNG and CRN coupling
+### RNG and paired-seed coupling
 
-Scenario coupling uses Common Random Numbers (CRN): same seed → same sequential
-RNG stream → identical trajectories as long as states and propensities match.
-Pre-intervention trajectories are byte-identical for `enable`/`disable`
-scenarios. For `set`/`scale` scenarios that modify propensities from t=0,
-trajectories are correlated but not identical.
-
-The `event_key` field in the IR is populated by the compiler but ignored
-at runtime.
+The runtime uses a plain ChaCha8 `StatefulRng`. Paired scenarios with
+the same seed produce identical trajectories only while the RNG is
+consumed in the same order on both sides: pre-intervention
+trajectories are byte-identical for `enable`/`disable` scenarios,
+and correlated-but-not-identical for `set`/`scale` scenarios that
+modify propensities from t=0. Any structural change that reorders
+draws also breaks the coupling — this is paired-seed CRN, NOT
+event-keyed RNG.
 
 ### Implementation phases
 

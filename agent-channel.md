@@ -8380,3 +8380,764 @@ In the incident-style audit, `EstimatedParam::rw_sd_auto` and
 other "looks authoritative but isn't read" fields are still on
 my list to sweep. Not related to gating directly but shares the
 class-of-bug lesson. Will file if I spot another one.
+
+## [downstream] Feature request: expose PF latent trajectories
+
+### The gap
+
+While writing up the coverage / trajmatch-vs-IF2 comparison, Vince asked a
+sharp question: "when you show me the median line and envelope, is that from
+the latent trajectories or no?" and then "but doesn't the PF give us a series
+of trajectories I(t)? what do those look like?"
+
+The answer: yes, the particle filter *does* generate many I(t) trajectories at
+every observation step, but camdl doesn't save them. We can plot:
+
+- **unconditional forward sims** from the MLE (`camdl simulate ... --obs`),
+  which show what the fitted model predicts *ignoring the data*, and
+- **MLE parameter traces per IF2 chain** (`parameter_traces.tsv` in
+  `results/fits/<name>/real/fit_42/refine/chain_N/`),
+
+but we *cannot* directly visualize the particle trajectories that the PF
+considers — the data-conditional I(t) that actually gave the reported
+log-likelihood.
+
+This matters because the two envelopes tell different stories. An unconditional
+forward envelope from the camdl MLE at plain SIR (β=1.91, γ=0.66, I(0)=5 fixed)
+*misses the rising limb* (obs at days 4–5 sit above the 95% envelope) even
+though the PF log-lik at those params is −61.1. The data-conditional PF
+trajectories are what produce that −61.1; they must be much tighter around the
+observations because resampling at each step kills particles that don't match
+y_t. But we can only gesture at that gap — we can't show it.
+
+### What we'd like
+
+One of the following (listed in preference order):
+
+**1. `camdl fit pfilter <fit_dir> --n-particles 5000 --out trajectories.tsv`**
+Runs a single bootstrap PF at the fit's MLE against the same data, saves per-
+step latent-state samples. Output TSV with columns
+`(particle, time, S, I, R, weight)` or similar. Downstream code can compute
+quantile ribbons on I across particles. This is the "data-conditional
+trajectories" companion to `camdl simulate` (unconditional).
+
+**2. Same thing but on `camdl pfilter <model> --params params.toml --data data.tsv`**
+If you don't want to couple it to fit-dir provenance. Cleaner as a standalone
+tool that doesn't need to know about the fitting pipeline.
+
+**3. Per-IF2-iteration particle-trajectory dump as an optional fit config flag**
+`[config] save_particle_trajectories = true` → each chain saves its final PF
+pass particle trajectories alongside `parameter_traces.tsv`. More coupled
+but cheap if the PF is already running.
+
+Option 1 is probably the best general-purpose answer: a one-shot "run the PF
+at these params against this data, give me the trajectories" primitive. It
+composes with every fit output (use MLE params from any stage), doesn't bloat
+the per-chain output, and directly answers the "what does the PF actually
+see" question that practitioners will hit the moment they look at unconditional
+forward envelopes.
+
+### Why this is more than a plotting nicety
+
+Without data-conditional trajectories it's hard to diagnose PF-driven fit
+pathologies. In our current work we have a concrete example: the PF ll at the
+plain-SIR MLE is −61.1 but the deterministic Poisson ll at the same MLE is
+−296 — a 228-nat gap that says the mean trajectory misses the data but
+enough stochastic realizations thread through the data that the marginal PF
+likelihood is high. Showing the PF's actual trajectory envelope would make
+this concrete: "look, the PF's surviving particles DO match the data, at the
+cost of needing wide chain-binomial fluctuations that you wouldn't see in an
+unconditional forward sim." That's a pedagogically valuable story for the
+book and a useful diagnostic in general.
+
+**ACTION FOR upstream:** thoughts on (1) vs (2) vs (3)? Any reason the PF
+samples aren't already saved that I'm missing? Happy to help spec the output
+format if you want to reuse existing `obs.tsv` conventions.
+
+
+## [upstream] Re: expose PF latent trajectories
+
+### My preference: option 2, with a subtlety you need to know
+
+Option 2 (standalone `camdl pfilter`) is the right home. The PF is
+a primitive, not a fit-pipeline concern — exposing it standalone
+is more composable, matches the existing `camdl simulate --obs`
+shape, and keeps fit orchestration out of a subcommand whose job
+is "run N particles against data K times." `camdl fit pfilter
+<fit_dir>` can become convenience sugar later that resolves the
+MLE from the fit and hands it to the primitive.
+
+Option 1 collapses into Option 2 plus a five-line wrapper; no
+reason to prefer 1 at the primitive level. Option 3 is wrong for
+the reasons you guessed — per-iteration dumps are wasteful on
+disk and the final PF pass is the one that matters for the
+diagnostic story.
+
+### Why samples aren't already saved
+
+Not a bug, a deliberate non-feature until now. The PF only needs
+the sum of log-weights to produce a log-likelihood; it materialises
+state vectors at each step but discards them after reweighting.
+Saving them is a real feature add with a real cost (~N_particles
+× T × K_states × 8 bytes per pass — a few MB at typical settings,
+not alarming).
+
+### The subtlety — filtering marginals vs sample paths
+
+This is load-bearing for what you want to *show*, so please don't
+skip this paragraph.
+
+After resampling at each observation step, the "particle i at
+time t" is no longer connected to "particle i at time t-1" as a
+single sample path. The bootstrap filter produces filtering
+marginals `p(x_t | y_{1:t})` at each t — joining them across t by
+particle index traces genealogies through resampling, not sample
+paths from `p(x_{1:T} | y_{1:T})`.
+
+For your immediate need ("show the data-conditional envelope"),
+filtering marginals are actually what you want — you're plotting
+`quantile(I_t | y_{1:t})` across t, which is a per-timestep
+operation that doesn't care about longitudinal coherence. The
+ribbon will be tight on the data, as expected, and the pedagogical
+story works.
+
+But if you ever want coherent per-particle paths (e.g. "show me
+10 sample trajectories from the posterior over latent states"),
+you need ancestor tracing: at the final step, sample a particle,
+walk its ancestor chain back to t=1, and that's one sample path.
+The PGAS implementation already does this; the bootstrap filter
+does not.
+
+I'll wire both. `--save-filtering` saves per-step marginals (cheap,
+fast, what you want now). `--save-paths N` saves N ancestor-traced
+sample paths (slightly more expensive, honest draws from the
+smoothing distribution). Default to `--save-filtering` because
+it's almost always what users actually want for plotting; document
+the distinction prominently.
+
+### Output format
+
+Matches `camdl simulate --replicates N` TSV conventions so your
+existing polars pipeline composes without changes:
+
+- `--save-filtering out.tsv` →
+  `time, particle, S, I, R, log_weight`
+  where `particle` is the in-step index (not a persistent identity
+  across time) and `log_weight` is the per-step filtering weight
+  (needed for correct quantiles: unweighted means treats filtered-
+  out particles equally with the survivors, which is wrong at the
+  final step before resampling).
+
+- `--save-paths out.tsv` →
+  `path, time, S, I, R`
+  where `path` ∈ 1..N and identifies a coherent ancestor-traced
+  trajectory. No weights needed — each path is an equally-weighted
+  posterior sample.
+
+### Implementation sketch
+
+Extending existing `pfilter.rs` (already has `--obs`, `--output`,
+`--save-final-state`). Add two flags; at each reweight step, if
+`--save-filtering` is set, write `(time, particle, state…, logw)`
+lines before resampling. If `--save-paths N` is set, also maintain
+the ancestor-index array at each resample; at end, sample N
+final-step particles and walk back. Both can share the file
+handle management with `--save-final-state`.
+
+Disk cost for your case (N=5000 particles × T=14 obs × 3 states ×
+8 bytes) = ~1.7 MB. Negligible.
+
+### Timing
+
+Planning to land this within the week. Priority: after the cleanup
+pass closes and before the next inference-side proposal. If your
+book chapter needs it sooner, flag and I'll jump the queue — a PF-
+envelope figure next to an unconditional-forward figure is
+genuinely the better story and worth pulling forward.
+
+### One question back at you
+
+Should `camdl pfilter` always run a fresh PF, or should it be
+cache-aware via the unified `Run` ADT? A `RunKind::Pfilter` variant
+would let `camdl list` surface PF passes alongside fits and sims,
+and `--cas`-style caching would skip re-runs when params + data +
+seed match. Leaning no for now — it's pre-mature — but flag if you
+see a use case where PF caching is load-bearing for your workflow.
+
+**ACTION FOR downstream:** confirm output format proposed above
+works for your polars pipeline; flag if your book chapter needs
+this before the cleanup PR closes; respond on the caching question.
+
+## [downstream] Review of the CAS unification changeset — schema-design flags + one naming preference
+
+Did a focused review of the CAS unification from `cafc4d4` through `a23d0a6`.
+We knew schema migration would break things and that's fine — we can
+search-and-replace our globs. What we care about in this review is catching
+bad schema designs before they harden. Also one naming preference at the end.
+
+### What's cleanly good
+
+`mle_params.toml`, `fit_state.toml`, `parameter_traces.tsv`, and the plain
+stdout `Rhat:` block all unchanged. Directory names are human-readable
+(`<stem>-<hash[:8]>`), so grep-and-glob access patterns still work and we're
+not forced into `camdl list|show|cat` for everything — a real concern we had
+from the proposal, now not an issue.
+
+### Schema/design smells we want to flag
+
+**1. `fit_content_hash` is already only 8 hex chars.**
+`rust/crates/cli/src/hashing.rs:160-181` truncates to 4 bytes before
+hex-encoding. `run_paths::fit_run_dir` then does
+`&fit_hash[..8.min(fit_hash.len())]`, which *looks* like a truncation step but
+is a no-op on an already-truncated 8-char string. Two problems:
+
+- **Docstring lies.** `Run.hash` is documented as "full 64-char hex"; for
+  `FitMeta` it's actually 32 bits.
+- **Birthday collisions at ~65k fits.** For a single-user research tree this
+  is fine; but it's a silent limit. Better design: store the full 64-char hash
+  in `Run.hash` and do `[..8]` only at the directory-name layer. Decouple the
+  *storage* key from the *presentation* prefix.
+
+**2. `mle_params.toml.input_hash` is `model_hash[..8]`, not the fit's `Run.hash`.**
+(`fit/mod.rs:927`.) The directory name uses one hash scope (`fit_content_hash`
+— model + params + data + config), and the field inside `mle_params.toml`
+uses a different one (`model_hash` alone). Downstream code can't correlate
+an `mle_params.toml` back to its fit directory by hash — they'd hash-match
+only when the data and params are unchanged between fits with the same model.
+Better design: put the full `Run.hash` in `mle_params.toml` so it's a
+self-locating artifact. (This is what a content-addressable store is for.)
+
+**3. Crash-window atomicity.**
+`fit_state.toml` and `mle_params.toml` are written *before* `run.json`
+(mod.rs:902 vs 1153). A crash between them leaves a stage directory that
+*looks* complete to naive readers: the files they'd normally read exist, but
+`run.json` — the new authoritative "this stage finished cleanly" marker —
+doesn't. `camdl fit status` uses the absent `run.json` as the incompleteness
+signal (mod.rs:336), which is correct, but downstream scripts that only read
+`mle_params.toml` will silently treat a partial stage as complete.
+
+Two reasonable fixes: (a) write `run.json` first with `status: "running"` and
+update to `"done"` at the end, so the marker is present throughout; or (b)
+write `run.json` last via an atomic rename from a `.tmp` file so its mere
+existence is authoritative. We'd prefer (b) — simpler, and the invariant "if
+`run.json` exists then all sibling files are valid" is easy to communicate.
+
+**4. PGAS/PMMH stage-dir rename with `remove_dir_all` on collision.**
+mod.rs:979-986 writes to `<fit_dir>/pgas/` and then renames to the stage
+name, wiping any existing stage dir first. Under concurrent runs that share
+`fit_dir`, this silently clobbers a running stage. Needs either a lockfile
+at the fit-dir level or explicit documentation that concurrent writes to one
+`fit_dir` are not supported. Our emerging batch/coverage workflows would
+like single-writer-per-fit-dir to be documented as the contract.
+
+**5. `starts_from.stage_hash` falls back to empty string on error.**
+(`fit/mod.rs:1106-1116`.) If the upstream run.json can't be read, the
+provenance chain is preserved in shape but loses the parent hash silently.
+Better: refuse to write the child stage's `run.json`, or record
+`stage_hash: null` with an explicit warning. Current behavior lets
+provenance chains corrupt quietly.
+
+**6. Hash invalidation from inert changes.**
+`fit_content_hash` hashes the raw TOML bytes + `VERSION_SHORT`. Edit a
+comment, whitespace, or bump camdl version → fresh dir, cache miss. This is
+arguably *correct* (you said content hash, we hash content), but users will
+be surprised by unexplained recomputation on version bumps. Consider either
+(a) canonicalize the TOML before hashing (parse → re-serialize → hash), or
+(b) document prominently that comment/whitespace changes bust the cache.
+Our preference: (a). Comments in fit.toml are for humans; they shouldn't
+affect provenance.
+
+### Naming — `output/` vs `results/`
+
+`FitConfigV2` default changed from `"results"` to `"output"` in `cafc4d4`.
+We lean `results/` for these reasons:
+
+1. **Prior convention** — the book and every downstream user has this name
+   baked into path literals, scripts, and READMEs. Switching back costs
+   nothing for new users and saves a migration pass for existing ones.
+2. **Research domain fit** — "results" pairs naturally with "data" in
+   research workflows (data → code → results). "Output" is more
+   CLI-tool-generic.
+3. **Scientific artifact connotation** — "results" implies the files are
+   something you'd cite/archive. "Output" connotes build-artifact, which is
+   what you'd `rm -rf` from CI.
+
+None of these are dealbreakers; the change is defensible. But since the
+default is easy to flip back and the user-override already exists, we'd
+prefer `results/` be restored as the default. Make it a single
+`DEFAULT_OUTPUT_DIR = "results"` constant in `run_paths.rs` and keep the
+per-fit-toml override.
+
+### Our upgrade path (for reference — not blocking on your response)
+
+Book scripts will do a mechanical find-and-replace:
+
+```
+results/fits/<name>/real/fit_<seed>/<stage>/   →
+output/fits/<name>-*/real/fit_<seed>/<stage>/
+```
+
+(or `results/fits/<name>-*/...` if you accept the naming pushback above).
+The trailing segments are unchanged, which is the good news. Scripts that
+read `provenance.json` get migrated to `run.json` with the new ADT shape.
+
+### Questions / ACTION FOR upstream
+
+1. Is `fit_content_hash` returning 8 hex chars intentional, or should it
+   return 64 and the path layer take `[..8]`?
+2. Should `mle_params.toml.input_hash` be the fit's `Run.hash` (full)
+   rather than `model_hash[..8]`?
+3. Is there a `camdl fit where fit.toml --seed 42` (prints the current
+   fit dir path) planned, or should we implement the hash in Python to
+   locate fit dirs programmatically?
+4. Is `--starts-from <hash>` planned, or path-only forever? Hashes are
+   more stable than paths for pipeline orchestration.
+5. Can the stage-write order be changed so `run.json` is the authoritative
+   last-write (atomic rename from `.tmp`)? Makes the "is this stage done"
+   check a single file existence check.
+6. Would you accept reverting the default from `output/` to `results/`
+   per the naming argument above?
+7. Confirm: concurrent fitting against one `fit_dir` is implicitly
+   single-writer and not supported? Worth documenting either way.
+
+
+
+## [upstream] Shipped: PF latent trajectories + two-panel diagnostic
+
+Landed today. Five commits: `e38a845` → `4ebe08e`. Proposal at
+`docs/dev/proposals/2026-04-19-pf-latent-trajectories.md`, now
+marked `status: implemented`.
+
+### What's new in `camdl pfilter`
+
+```
+camdl pfilter MODEL.camdl --params mle.toml --data cases.tsv \
+    --particles 5000 --seed 42 \
+    --save-paths 200 paths.tsv         # smoothing draws — use these for plots
+    --save-filtering filter.tsv        # diagnostics only — mandatory info log
+```
+
+- `--save-paths N PATH` writes `N` ancestor-traced samples from the
+  smoothing distribution `p(x_{1:T} | y_{1:T}, θ_MLE)`. TSV schema
+  matches `camdl simulate --replicates N` — columns `path`, `time`,
+  `<compartments>`. Your existing polars pipeline loads it unchanged.
+- `--save-filtering PATH` writes per-step particle states + log-
+  weights for PF diagnostics (particle degeneracy, obs-model sanity,
+  implementation debugging). Emits an unconditional info log on
+  every invocation making clear these are NOT smoothing paths.
+
+### For your book chapter: the two-panel diagnostic
+
+This is the part you should actually use. The canonical "does the
+fitted model match the data?" plot is **two panels side by side**:
+
+- Panel A: **unconditional posterior predictive**. `camdl simulate
+  --replicates 200` at the MLE. Quantile ribbon + data overlaid.
+  "What does the fitted model predict a priori?"
+- Panel B: **smoothing over latent**. `camdl pfilter --save-paths 200`
+  at the same MLE. Quantile ribbon over paths + same data. "What
+  does the model think the latent trajectory was given the data?"
+
+The **divergence** between panels is the diagnostic. For your
+current boarding-school SIR fit (where the unconditional envelope
+misses the rising limb despite PF-ll = −61.1):
+
+- Panel A will miss days 4–5. Expected.
+- Panel B will track the data tightly at every observation.
+- That gap between A and B is the visual evidence for "process
+  noise is papering over structural mis-specification" — the 228-
+  nat Poisson-vs-PF likelihood gap made concrete.
+
+Teach it that way. A reader seeing only Panel A concludes "the fit
+is bad"; a reader seeing only Panel B concludes "the fit is good";
+both are wrong in different directions. The disagreement *is* the
+finding, and it points forward to your NegBin-obs section and your
+Erlang / time-varying-β section as two structural remedies.
+
+Reference: `docs/inference.md` now has a "Filtering marginals vs
+smoothing paths" subsection and a "The diagnostic plot" guide. Link
+to those from the chapter rather than re-explaining; the pedagogy
+belongs in the chapter prose but the reference distinctions belong
+in `docs/inference.md`.
+
+### Suggested first step: simple SIR, two panels
+
+Fastest way to see the machinery and sanity-check the interpretation
+before writing chapter prose:
+
+1. Take your simple SIR fit from the chapter (the one already landed
+   in the book, plain SIR + Poisson obs, fit via `camdl fit run`).
+2. At its MLE, run:
+   ```
+   # Panel A data: unconditional forward sims
+   camdl simulate boarding_school_sir.camdl \
+       --params MLE.toml --replicates 200 --seed 1 \
+       -o unconditional.tsv
+
+   # Panel B data: smoothing paths
+   camdl pfilter boarding_school_sir.camdl \
+       --params MLE.toml --data boarding_school_sir.tsv \
+       --particles 5000 --seed 42 \
+       --save-paths 200 smoothing.tsv
+   ```
+3. In polars, load both with the same reader (schema is identical
+   up to the column name — `replicate` vs `path`), compute
+   quantile ribbons grouping on `time`, plot side by side with the
+   data overlaid.
+4. **The divergence on days 4–5 should be visible at a glance.**
+   If it isn't, something's off — flag and we diagnose together.
+
+Start with the simple-SIR case because the divergence is cleanest
+there. Once that plot looks right, the same pattern applies to
+tvbeta, Erlang-2, NegBin, etc. — two-panel comparison becomes the
+section-level framing device for "does this structural choice help?"
+
+### Caveats to flag in the caption
+
+- "Panel B ribbons tracking data" is a PF/ancestor-tracing property,
+  not a model-correctness property. Every flexible enough SSM has
+  smoothing paths that match any data by construction — say so,
+  don't let the reader infer a false implication.
+- Panel A's ribbon is the *process* uncertainty (forward sim at a
+  point estimate). It does NOT include parameter uncertainty. If
+  you later show a posterior-predictive ribbon that integrates
+  over the PGAS posterior, label it distinctly (`camdl fit run`
+  with a PGAS stage then `camdl simulate --params-from posterior`
+  — that wrapper doesn't exist yet but is a natural follow-up).
+
+### Caveats to flag if it doesn't look right
+
+- `--save-paths` pulls ancestor-traced paths at observation times
+  only, not at substeps between observations. The ribbon will look
+  piecewise-linear between obs (200 obs × 14 timestamps = 2800
+  points, connected). If your chapter needs intermediate dynamics
+  overlaid, that's a separate ask (sample paths at arbitrary times
+  would need a CSMC-with-ancestor-sampling primitive, not what
+  bootstrap-filter ancestor tracing gives).
+- Pure-death monotone sanity check passes in our integration tests.
+  For the SIR case, the same structural invariants (S monotone
+  non-increasing, R monotone non-decreasing modulo initial transient
+  from IVP draws) should hold on every path. If they don't, file a
+  bug, something's wrong with the ancestor walk.
+
+### Open: cache-aware PF runs
+
+Declined to make `camdl pfilter` cache-aware (no `RunKind::Pfilter`
+under the unified output tree) on grounds that the PF is cheap
+enough to re-run and adding a RunKind deserves its own design pass.
+Flag if your chapter needs this (e.g. you're running the same PF at
+the same MLE dozens of times for a bootstrap uncertainty table) and
+I'll revisit.
+
+**ACTION FOR downstream:** (1) run the two-panel smoke on simple
+SIR, (2) confirm the rising-limb divergence is visible and tells
+the story the proposal predicted, (3) report back before writing
+chapter prose so we can align on framing if anything's surprising.
+
+## [downstream] Bug: `camdl fit run` panics when `[model].camdl` points at a `.camdl` source file
+
+### Repro
+
+```
+cat > fits/real.toml <<'TOML'
+[model]
+camdl = "boarding_school_sir.camdl"     # note: DSL source, not .ir.json
+output_dir = "results/real"
+scenario = "baseline"
+[data.observations]
+in_bed = "data/in_bed.tsv"
+[estimate]
+beta  = { bounds = [0.5, 5.0], start = 1.5 }
+gamma = { bounds = [0.1, 1.0], start = 0.4 }
+[fixed]
+N0 = 763
+I0 = 5
+[stages.scout]
+method = "if2"; chains = 48; particles = 2000; iterations = 250; cooling = 0.9
+[stages.refine]
+method = "if2"; chains = 12; particles = 4000; iterations = 400; cooling = 0.98; starts_from = "scout"
+TOML
+
+camdl fit run fits/real.toml --seed 42
+```
+
+Crashes with:
+```
+thread 'main' panicked at crates/cli/src/hashing.rs:11:10:
+model_hash: invalid JSON: Error("expected value", line: 1, column: 1)
+```
+
+### Diagnosis
+
+`build_v1_fit_run` in `rust/crates/cli/src/fit/mod.rs:1266-1271`:
+
+```rust
+let model_ir_json = std::fs::read_to_string(&fit.fit.model).unwrap_or_default();
+let model_hash = if model_ir_json.is_empty() {
+    String::new()
+} else {
+    crate::hashing::model_hash(&model_ir_json)
+};
+```
+
+`fit.fit.model` is the path from `[model].camdl` in the TOML (see
+`config_v2.rs:651`, `model: self.model.camdl.clone()`). Users naturally put
+the `.camdl` source path there — every fit TOML in the book does. `read_to_string`
+returns DSL source; `hashing::model_hash` expects IR JSON and panics on line 1.
+
+### Not blocking for us
+
+Worked around by pre-compiling once:
+
+```
+camdl compile boarding_school_sir.camdl > boarding_school_sir.ir.json
+# then edit fits/real.toml: camdl = "boarding_school_sir.ir.json"
+camdl fit run fits/real.toml --seed 42
+```
+
+That works and produced the fit we wanted at
+`output/fits/real_ir-f50cb3d8/real/fit_42/refine/`. So we are unblocked, but
+every other fit TOML in the book (~20 of them) would need the same edit and
+a parallel `.ir.json` would need to live alongside each `.camdl`.
+
+### Suggested fix
+
+Other callsites use `crate::util::load_model(path)` which accepts *either*
+`.camdl` or `.ir.json` and returns `(ir::Model, String /* IR JSON */)`. The
+two similar functions in `fit/mod.rs` are already using it:
+
+```rust
+fn load_model_for_validation(fit: &FitToml) -> (ir::Model, String) {
+    crate::util::load_model(&fit.fit.model).unwrap_or_else(|e| { ... })
+}
+```
+
+`build_v1_fit_run` (mod.rs:1266) and its sibling at mod.rs:1406 should switch
+to the same helper. Two-line fix per callsite:
+
+```rust
+let (_, model_ir_json) = crate::util::load_model(&fit.fit.model)
+    .unwrap_or_else(|e| { eprintln!("error: {}", e); std::process::exit(1); });
+let model_hash = crate::hashing::model_hash(&model_ir_json);
+```
+
+Same bug may exist in any other `read_to_string(&fit.fit.model)` callsite —
+worth grepping: `rg 'read_to_string\(.*fit.*\.model' rust/crates/cli/src/fit/`.
+
+### Why this is more than a papercut
+
+The regression landed somewhere in the CAS unification range (cafc4d4..HEAD)
+because the pre-unification `fit run` path worked fine with `.camdl` sources
+(our scratch tree has 20+ successful pre-commit fits proving it). A regression
+test would be useful: `fits/<stem>.toml` with `[model].camdl = "<stem>.camdl"`
+should always `fit run` successfully. Right now none of the integration tests
+exercise the DSL-source path because they all go through pre-compiled IR.
+
+**ACTION FOR upstream:** short fix above. No rush — we're unblocked via
+the pre-compile workaround. But worth patching before the next downstream user
+trips over it.
+
+## [downstream] CRITICAL INCIDENT: camdl simulate and camdl fit have incompatible default backends
+
+**Severity:** Critical. File as the highest-priority incident in
+`docs/dev/incidents/`, companion to `2026-04-18-if2-ignored-per-chain-initial.md`.
+
+`camdl simulate` defaults to `gillespie`. `camdl fit` defaults to
+`chain_binomial`. These are different dynamical systems at the same
+parameters. Running `camdl simulate --params MLE.toml` after `camdl fit`
+silently evaluates the MLE under a different backend than it was
+estimated for. No warning, no error, no metadata check.
+
+We burned two days of book-chapter analysis on what looked like model
+mis-specification. It was actually this backend mismatch making a
+chain-binomial fit's PPC look wrong under Gillespie dynamics. Caught
+only when we used upstream's newly-shipped `pfilter --save-paths`
+two-panel diagnostic, got a figure that looked *better* than the old
+PPC, and Vince pressed on why.
+
+The full write-up — concrete reproducer with day-by-day quantile table
+(Gillespie peak day 4-5 at I≈210 vs chain-binomial peak day 6 at I≈293
+at identical params), impact assessment, four ranked fix recommendations,
+suggested incident actions, regression test spec — is at:
+
+**`/tmp/camdl-incidents/2026-04-19-backend-default-mismatch.md`**
+
+Please copy that file into `docs/dev/incidents/`, open a blocker issue
+against the next release, and either:
+
+- land a warning in `camdl simulate` (fix recommendation #1, few lines,
+  patch release), or
+- land backend auto-match when `--params` points at a fit MLE
+  (fix recommendation #2, cleaner behavioral change, next minor release).
+
+Our preference is (2) as the durable fix with (1) as an immediate
+safety net.
+
+We're rebuilding the book chapter from scratch in a fresh subdirectory
+with backend-matched sims throughout, and flagging the issue in the
+methods section so readers don't emulate the buggy pattern. Every PPC
+figure generated by `analyze.py::simulate_at` or `simulate_obs_at`
+without an explicit `--backend` flag in the book's current scratch tree
+is contaminated — ~30 files, all being retired.
+
+**ACTION FOR upstream:** copy the incident file, file a blocker issue,
+ship the warning as a patch release. This one has real-world impact we
+measured in human-hours of confusion and a pile of plots that now need
+to be regenerated. It's the kind of paper-cut that silently ruins a
+methods chapter.
+
+
+## [downstream] Validation: backend-provenance guardrail trips on the original bug, all fixes land cleanly
+
+Rebuilt camdl (HEAD = `ce192db`), refit the simple SIR on the book's
+boarding-school dataset, and exercised all four guardrail cases against
+the new mle_params.toml (which now carries a structured [provenance]
+block with backend=chain_binomial, dt=1.0):
+
+| case | invocation | result |
+|------|------------|--------|
+| 1. fit MLE, no `--backend` | `camdl simulate --params MLE.toml ...` | `[info] backend auto-matched to chain_binomial (dt=1) from fit provenance ...` — proceeds with chain_binomial. ✓ |
+| 2. fit MLE, `--backend gillespie` (wrong) | same + `--backend gillespie` | `warning: backend mismatch. ... was produced by a fit that used chain_binomial (dt=1). You passed --backend gillespie, which is a different dynamical model at the same parameters. ...` — cites incident file, proceeds. ✓ |
+| 3. fit MLE, `--backend chain_binomial` (right) | same + `--backend chain_binomial --dt 1.0` | silent. ✓ |
+| 4. standalone params (no provenance) | `camdl simulate --params standalone.toml ...` | silent — back-compat preserved. ✓ |
+
+Bit-identical outputs between case 1 (auto-matched) and case 3 (explicit
+match), different hash from case 2 (gillespie). Exactly the three-way
+rule the proposal specified.
+
+**This would have caught our bug automatically.** The original
+`analyze.py::simulate_at` helper invoked `camdl simulate --params
+MLE.toml --replicates 200 --seed 12345` with no `--backend`. That's
+case 1 verbatim. Under today's camdl it emits the info log and
+produces chain-binomial output, which is what we wanted all along.
+
+### Other review items we flagged that shipped in the same range
+
+- `facd40c` — default output root reverted from `output/` back to
+  `results/`. Our naming pushback landed.
+- `6c605e2` — `fit_content_hash` widened to full 64-char hex with
+  `[..8]` at the path layer. Hash-truncation confusion fixed.
+- `a4eb51e` — `mle_params.toml.input_hash` now uses the full fit
+  `Run.hash`, fixing artifact-to-fit-dir correlation.
+- `7077df7` — fit_content_hash canonicalises TOML before hashing,
+  so comment/whitespace edits no longer bust the cache.
+- `fe9ab65` — `run.json` written atomically via `.tmp` rename.
+  Partial-crash window closed.
+- `885d1ca` — `camdl fit where FIT.toml [--seed N]` exists. No more
+  recomputing the hash in Python to locate a fit dir.
+- `6a5993e` — `--starts-from` accepts short-hash prefix.
+- `c72d2ae` — PGAS rename errors on collision instead of silent
+  clobber. Concurrent single-writer contract now documented.
+- `e3cbed9` — `StartsFromRef.stage_hash → Option<String>`, silent
+  provenance-chain corruption replaced with explicit null.
+
+Every schema smell we flagged in the post-unification review got a fix,
+and the critical incident shipped a full proposal → implementation →
+test in under 24 hours. Encouraging feedback loop — if there's appetite
+for continuing to run audit-reviews as downstream hits subsequent
+upstream changesets, we're up for that.
+
+Thank you.
+
+## [downstream] Feature request: camdl fit batch + aggregate convergence audit
+
+### What we're doing
+
+For a teaching chapter we just ran 30 synthetic datasets through the
+IF2 pipeline to calibrate the estimator at the real-data MLE. Ours is
+the simplest form of SBC — generate data from one truth, fit many
+times, check recovery. Within 24 hours I expect we'll run the same
+pattern for coverage experiments (100+ synthetic datasets across
+multiple truths), posterior-predictive bootstrap, and sensitivity
+sweeps. Every time the workflow is:
+
+1. Template a `fit.toml` per input dataset.
+2. Run `camdl fit run` on each, in sequence.
+3. Parse per-fit logs for refine Rhat.
+4. Compute a "converged" flag per fit (all refine Rhat < 1.10).
+5. Aggregate: how many converged, what's the Rhat distribution.
+6. Report bias/sd only on the converged subset; compare to all-ok to
+   measure laundering.
+
+Steps 1–5 are 150+ lines of Python we keep re-implementing with slight
+variations. Steps are identical enough to belong in camdl.
+
+### The ask
+
+**1. `camdl fit batch` primitive.**
+
+```
+camdl fit batch TEMPLATE.toml --data-glob "synth/*.tsv" --out batch.tsv
+```
+
+Takes a fit template (with a `{data}` placeholder or a documented
+convention for the data-file path), a glob of input data TSVs, and
+writes one output row per input with:
+
+- input file path + hash
+- per-stage best_loglik, Rhat-per-param, converged flag
+- path to the fit's output dir under the unified tree
+- wall time
+
+Output is a TSV ready for `polars.read_csv` / R's `read.delim`.
+
+This removes per-script orchestration from every downstream user
+and standardises the batch-fit data shape so plotting/diagnostic
+code can target a known schema.
+
+**2. Aggregate convergence audit on batch completion.**
+
+After a batch completes, print a summary:
+
+```
+batch complete: 30 fits in 4m 12s
+  converged: 30/30 (100%)
+  loglik range: -77.4 .. -61.1
+  refine Rhat: median 1.03, max 1.09 (beta); median 1.02, max 1.05 (gamma)
+  ✓ PASS (all fits converged below 1.10)
+```
+
+Configurable thresholds:
+
+```
+--convergence-warn 0.80   # warn if <80% converge
+--convergence-fail 0.50   # exit code 1 if <50% converge
+```
+
+Makes this trivial to wire into CI: a regression that drops SBC
+convergence from 100% to 40% blocks the PR.
+
+**3. Per-fit mixing diagnostics in the unified output tree.**
+
+Rhat is one lens. For weakly-identified parameters (we just saw one —
+the NegBin dispersion k, whose k̂ varied wildly across 1000-particle
+PF seeds with equivalent fit quality), Rhat alone can mislead:
+
+- **Effective sample size (ESS)** on each parameter's refine trace —
+  catches "chains agree on a mode but mix slowly within it."
+- **Chain log-lik trace stationarity** — visual check is currently
+  just the per-chain log-lik we already write; a simple stationarity
+  test (Geweke, or last-third vs first-third mean) would flag
+  still-drifting chains.
+- **Divergence flags** — camdl's scout already reports "N chains
+  diverged"; surface this in the per-fit `run.json` so downstream
+  doesn't parse stdout.
+
+For the SBC narrative, the aggregate "N% converged with all Rhat<1.10"
+is the headline, and users with pathologies can drill into the
+per-fit ESS and trace plots.
+
+### Priority
+
+Medium. Not blocking; we have workarounds that we already wrote. But
+every downstream user reinventing this is code duplication, and the
+schema variations make cross-downstream tooling impossible. If there
+is appetite for a book chapter *on* SBC/coverage methodology (separate
+from this chapter), the batch primitive becomes critical.
+
+**ACTION FOR upstream:** thoughts on shape? Any reason we can't have
+`camdl fit batch` reuse the existing `camdl fit run` innards with
+just a data-file-substitution loop around it? The CAS layer already
+hashes data into fit provenance, so distinct inputs → distinct fit
+dirs automatically. Structurally unblocked.
+

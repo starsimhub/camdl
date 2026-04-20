@@ -29,7 +29,6 @@
           }
         }
       },
-      "event_key": "birth:{firing_index}",
       "metadata": {
         "origin_kind": "inflow",
         "source_compartment": null,
@@ -55,7 +54,6 @@
           }
         }
       },
-      "event_key": "death:{firing_index}",
       "metadata": {
         "origin_kind": "outflow",
         "source_compartment": "X",
