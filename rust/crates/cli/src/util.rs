@@ -140,6 +140,18 @@ pub fn load_model(path: &str) -> Result<(ir::Model, String), String> {
     };
     let model: ir::Model = serde_json::from_str(&json)
         .map_err(|e| format!("parse error: {}", e))?;
+    // RC1 in 2026-04-19 engine review: run the structural integrity
+    // battery on every load. Catches silent-wrong-IR emitted by the
+    // compiler (unknown references, missing ODE, duplicate names,
+    // real compartments in stoichiometry, etc.) before simulation
+    // starts — not after the answer is already wrong.
+    ir::validate::validate(&model).map_err(|errs| {
+        let mut msg = format!("IR validation failed ({} error(s)):\n", errs.len());
+        for e in &errs {
+            msg.push_str(&format!("  - {}\n", e));
+        }
+        msg
+    })?;
     Ok((model, json))
 }
 
@@ -541,6 +553,12 @@ pub fn run_simulation(run: &SimRun) -> Result<(Trajectory, ir::Model), String> {
         .map_err(|e| format!("cannot read {}: {}", ir_path_resolved, e))?;
     let mut model: ir::Model = serde_json::from_str(&src)
         .map_err(|e| format!("IR parse error: {}", e))?;
+    // RC1 in 2026-04-19 engine review.
+    ir::validate::validate(&model).map_err(|errs| {
+        let mut msg = format!("IR validation failed ({} error(s)):\n", errs.len());
+        for e in &errs { msg.push_str(&format!("  - {}\n", e)); }
+        msg
+    })?;
 
     // Apply scenario patch
     {
