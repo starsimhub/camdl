@@ -239,6 +239,29 @@ pub fn binom_logpmf(k: u64, n: u64, p: f64) -> f64 {
         + k as f64 * p.ln() + (n - k) as f64 * (1.0 - p).ln()
 }
 
+/// Beta-Binomial log-PMF.
+///
+/// log p(k | n, alpha, beta) = lgamma(n+1) - lgamma(k+1) - lgamma(n-k+1)
+///                            + log B(k+alpha, n-k+beta) - log B(alpha, beta)
+///
+/// where log B(a, b) = lgamma(a) + lgamma(b) - lgamma(a+b).
+///
+/// Models overdispersed count observations when the per-trial
+/// success probability itself varies (e.g., household- or
+/// cluster-level variation in reporting probability).
+///
+/// IC1 in the 2026-04-19 inference review: previously this was
+/// a `log::warn!` + `-inf` stub that made every BetaBinomial
+/// observation corrupt the fit.
+pub fn beta_binomial_logpmf(k: u64, n: u64, alpha: f64, beta: f64) -> f64 {
+    if k > n { return f64::NEG_INFINITY; }
+    if alpha <= 0.0 || beta <= 0.0 { return f64::NEG_INFINITY; }
+    let lbeta = |a: f64, b: f64| lgamma(a) + lgamma(b) - lgamma(a + b);
+    lgamma(n as f64 + 1.0) - lgamma(k as f64 + 1.0) - lgamma((n - k) as f64 + 1.0)
+        + lbeta(k as f64 + alpha, (n - k) as f64 + beta)
+        - lbeta(alpha, beta)
+}
+
 /// Poisson log-PMF.
 ///
 /// log p(y | lambda) = y·log(lambda) - lambda - lgamma(y+1)

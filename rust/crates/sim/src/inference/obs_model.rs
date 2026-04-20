@@ -105,9 +105,13 @@ pub(crate) fn eval_likelihood_resolved(
             let n_int = n_val.round().max(0.0) as u64;
             crate::inference::obs_loglik::binom_logpmf(k, n_int, p_val)
         }
-        ResolvedLikelihood::BetaBinomial { .. } => {
-            log::warn!("BetaBinomial obs_loglik not implemented — returning -inf");
-            f64::NEG_INFINITY
+        ResolvedLikelihood::BetaBinomial { n, alpha, beta } => {
+            let n_val = eval_resolved(n, &ctx(projected));
+            let alpha_val = eval_resolved(alpha, &ctx(projected));
+            let beta_val = eval_resolved(beta, &ctx(projected));
+            let k = observed.round().max(0.0) as u64;
+            let n_int = n_val.round().max(0.0) as u64;
+            crate::inference::obs_loglik::beta_binomial_logpmf(k, n_int, alpha_val, beta_val)
         }
         ResolvedLikelihood::Bernoulli { p } => {
             let p_val = eval_resolved(p, &ctx(projected));
@@ -190,8 +194,20 @@ pub(crate) fn sample_obs_resolved(
             let p_val = eval_resolved(p, &ctx(projected));
             rng.binomial(n_val.round().max(0.0) as u64, p_val.clamp(0.0, 1.0)) as f64
         }
-        ResolvedLikelihood::BetaBinomial { .. } => {
-            log::warn!("BetaBinomial rmeasure not implemented — returning 0"); 0.0
+        ResolvedLikelihood::BetaBinomial { n, alpha, beta } => {
+            // Draw BetaBinomial(n, alpha, beta): p ~ Beta(alpha, beta),
+            // then k ~ Binomial(n, p). Uses the inner RNG directly for
+            // the Beta draw (Gamma(a,1)/(Gamma(a,1)+Gamma(b,1))).
+            let n_val = eval_resolved(n, &ctx(projected));
+            let alpha_val = eval_resolved(alpha, &ctx(projected)).max(1e-300);
+            let beta_val  = eval_resolved(beta,  &ctx(projected)).max(1e-300);
+            let n_int = n_val.round().max(0.0) as u64;
+            use rand_distr::{Gamma, Distribution};
+            let inner = rng.inner_mut();
+            let a = Gamma::new(alpha_val, 1.0).map(|d| d.sample(inner)).unwrap_or(1.0);
+            let b = Gamma::new(beta_val,  1.0).map(|d| d.sample(inner)).unwrap_or(1.0);
+            let p = a / (a + b);
+            rng.binomial(n_int, p.clamp(0.0, 1.0)) as f64
         }
         ResolvedLikelihood::Bernoulli { p } => {
             let p_val = eval_resolved(p, &ctx(projected));
@@ -228,8 +244,13 @@ pub(crate) fn eval_obs_mean_resolved(
             let p_val = eval_resolved(p, &ctx(projected));
             n_val * p_val
         }
-        ResolvedLikelihood::BetaBinomial { .. } => {
-            log::warn!("BetaBinomial obs_mean not implemented — returning projected"); projected
+        ResolvedLikelihood::BetaBinomial { n, alpha, beta } => {
+            // E[BetaBinomial(n, α, β)] = n · α / (α + β)
+            let n_val = eval_resolved(n, &ctx(projected));
+            let alpha_val = eval_resolved(alpha, &ctx(projected));
+            let beta_val  = eval_resolved(beta,  &ctx(projected));
+            let denom = (alpha_val + beta_val).max(1e-300);
+            n_val * (alpha_val / denom)
         }
         ResolvedLikelihood::Bernoulli { p } => {
             eval_resolved(p, &ctx(projected))
