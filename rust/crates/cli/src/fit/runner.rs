@@ -782,7 +782,30 @@ pub fn run_chains_with_per_chain_params(
     ChainResults { results, best_chain, best_loglik, rhat }
 }
 
+/// Compute Gelman-Rubin 1992 R-hat across chains (last half of
+/// iterations). IM13 in 2026-04-19 inference review batch 3: this
+/// is the original 1992 formula, not Vehtari et al. 2021's
+/// split-chain + rank-normalized version. For IF2's per-iteration
+/// parameter-means trajectory (an EM-like smoothed sequence, not
+/// posterior samples) the 1992 formula is conservatively OK. Users
+/// coming from Stan/PyMC should interpret the returned R-hat
+/// accordingly.
+///
+/// Aliased as `gelman_rubin_1992` so consumers can name the
+/// intent.
+#[allow(dead_code)]
+pub fn gelman_rubin_1992(
+    results: &[(usize, IF2Result)],
+    if2_params: &[EstimatedParam],
+    n_iterations: usize,
+) -> HashMap<String, f64> {
+    compute_rhat(results, if2_params, n_iterations)
+}
+
 /// Compute Rhat across chains (last half of iterations).
+///
+/// See [`gelman_rubin_1992`] for the split-chain / rank-norm
+/// caveat.
 pub fn compute_rhat(
     results: &[(usize, IF2Result)],
     if2_params: &[EstimatedParam],
@@ -826,18 +849,31 @@ pub fn compute_rhat(
     rhat_map
 }
 
-/// Compute Rhat and ESS from per-chain parameter traces.
+/// Compute R-hat and ESS from per-chain parameter traces.
 /// `chains[chain_id]` is a Vec of param values (one per sample).
-/// Returns `(rhat, ess)`. Rhat requires >= 2 chains with >= 4 samples each;
-/// returns NaN if the precondition is not met.
+/// Returns `(rhat, ess)`. R-hat requires >= 2 chains with >= 4
+/// samples each, all chains equal length (Im24 in the 2026-04-19
+/// inference review); returns `(NaN, NaN)` when not met.
+///
+/// IM12 in the same review: total ESS is only meaningful when R-hat
+/// indicates convergence. If R-hat > 1.1, chains are effectively
+/// sampling different distributions and summing their per-chain
+/// ESS estimates is not interpretable — return `NaN` for ESS so
+/// the caller doesn't display a misleading "total ESS" number that
+/// makes a non-converged run look adequately sampled.
 pub fn compute_rhat_ess(chains: &[Vec<f64>]) -> (f64, f64) {
     use sim::inference::pmmh::mcmc_ess;
 
-    let total_ess: f64 = chains.iter().map(|c| mcmc_ess(c)).sum();
-
     let n_chains = chains.len();
-    if n_chains < 2 || !chains.iter().all(|c| c.len() >= 4) {
-        return (f64::NAN, total_ess);
+    // Im24: enforce equal chain lengths (the between-chain variance
+    // formula below uses `chains[0].len()` as the sample count;
+    // with unequal lengths it becomes biased).
+    let equal_lengths = chains.first()
+        .map(|first| chains.iter().all(|c| c.len() == first.len()))
+        .unwrap_or(false);
+
+    if n_chains < 2 || !equal_lengths || !chains.iter().all(|c| c.len() >= 4) {
+        return (f64::NAN, f64::NAN);
     }
 
     let chain_means: Vec<f64> = chains.iter().map(|c| {
@@ -856,6 +892,14 @@ pub fn compute_rhat_ess(chains: &[Vec<f64>]) -> (f64, f64) {
     let rhat = if within > 0.0 {
         (((n_samples - 1.0) / n_samples * within + between / n_samples) / within).sqrt()
     } else { f64::NAN };
+
+    // IM12: gate ESS on R-hat. 1.1 is the standard threshold (BDA3).
+    const RHAT_THRESHOLD: f64 = 1.1;
+    let total_ess = if rhat.is_finite() && rhat <= RHAT_THRESHOLD {
+        chains.iter().map(|c| mcmc_ess(c)).sum()
+    } else {
+        f64::NAN
+    };
 
     (rhat, total_ess)
 }
