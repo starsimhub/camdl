@@ -133,7 +133,7 @@ fn obs_model(compiled: &Arc<CompiledModel>) -> MultiStreamObsModel {
             obs_times: obs.iter().map(|o| o.time).collect(),
         }],
         compiled.clone(),
-    )
+    ).unwrap()
 }
 
 /// T1: Single rung [1.0] is deterministic — same seed gives same results.

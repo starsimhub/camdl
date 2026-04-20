@@ -243,7 +243,10 @@ pub fn cmd_profile(args: &[String]) {
                     obs_times: observations.iter().map(|o| o.time).collect(),
                 }],
                 compiled.clone(),
-            ))
+            ).unwrap_or_else(|e| {
+                eprintln!("error: observation model construction failed: {:?}", e);
+                std::process::exit(1);
+            }))
         } else {
             eprintln!("error: model has no observations block");
             std::process::exit(1);

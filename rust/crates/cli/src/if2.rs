@@ -385,7 +385,10 @@ pub fn cmd_if2(args: &[String]) {
                 obs_times,
             }],
             compiled.clone(),
-        ))
+        ).unwrap_or_else(|e| {
+            eprintln!("error: observation model construction failed: {:?}", e);
+            std::process::exit(1);
+        }))
     } else {
         eprintln!("error: model has no observations block");
         std::process::exit(1);

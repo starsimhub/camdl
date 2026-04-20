@@ -20,7 +20,8 @@ pub fn compile_obs_loglik_if2(
     obs_model: &ObservationModel,
     compiled: Arc<CompiledModel>,
 ) -> Box<dyn Fn(f64, f64, &[f64]) -> f64 + Send + Sync> {
-    let resolved = resolve_likelihood_from_model(&obs_model.likelihood, &compiled);
+    let resolved = resolve_likelihood_from_model(&obs_model.likelihood, &compiled)
+        .unwrap_or_else(|e| panic!("observation likelihood resolution failed: {:?}", e));
     let int_s = IntState::new(compiled.int_local_to_global.len());
     let real_s = RealState::new(compiled.real_local_to_global.len());
 
@@ -36,7 +37,8 @@ pub fn compile_obs_loglik_pf(
     compiled: Arc<CompiledModel>,
     params: &[f64],
 ) -> Box<dyn Fn(f64, f64) -> f64 + Send + Sync> {
-    let resolved = resolve_likelihood_from_model(&obs_model.likelihood, &compiled);
+    let resolved = resolve_likelihood_from_model(&obs_model.likelihood, &compiled)
+        .unwrap_or_else(|e| panic!("observation likelihood resolution failed: {:?}", e));
     let params = params.to_vec();
     let int_s = IntState::new(compiled.int_local_to_global.len());
     let real_s = RealState::new(compiled.real_local_to_global.len());
@@ -47,10 +49,16 @@ pub fn compile_obs_loglik_pf(
 }
 
 /// Resolve a Likelihood using the compiled model's index maps.
+///
+/// IM3 in 2026-04-19 inference review: previously used `.expect`,
+/// which panicked the whole process on construction-time resolve
+/// failures (unknown parameter / compartment / table name inside a
+/// likelihood expression). Now returns the underlying `SimError` so
+/// the CLI can surface a proper diagnostic.
 pub(crate) fn resolve_likelihood_from_model(
     likelihood: &ir::observation::Likelihood,
     compiled: &CompiledModel,
-) -> ResolvedLikelihood {
+) -> Result<ResolvedLikelihood, crate::error::SimError> {
     use ir::table::OobPolicy;
     let table_meta: Vec<(OobPolicy, usize)> = compiled.model.tables.iter()
         .zip(&compiled.table_values_cache)
@@ -66,7 +74,6 @@ pub(crate) fn resolve_likelihood_from_model(
         table_meta: &table_meta,
     };
     resolve_likelihood(likelihood, &ctx)
-        .expect("observation likelihood resolution failed — this is a model construction bug")
 }
 
 /// Evaluate a resolved likelihood at (projected, observed, params).
@@ -148,7 +155,8 @@ pub fn compile_obs_sample_pf(
     compiled: Arc<CompiledModel>,
     params: &[f64],
 ) -> Box<dyn Fn(f64, &mut crate::rng::StatefulRng) -> f64> {
-    let resolved = resolve_likelihood_from_model(&obs_model.likelihood, &compiled);
+    let resolved = resolve_likelihood_from_model(&obs_model.likelihood, &compiled)
+        .unwrap_or_else(|e| panic!("observation likelihood resolution failed: {:?}", e));
     let params = params.to_vec();
     let int_s = IntState::new(compiled.int_local_to_global.len());
     let real_s = RealState::new(compiled.real_local_to_global.len());
@@ -166,7 +174,8 @@ pub fn compile_obs_mean_pf(
     compiled: Arc<CompiledModel>,
     params: &[f64],
 ) -> Box<dyn Fn(f64) -> f64> {
-    let resolved = resolve_likelihood_from_model(&obs_model.likelihood, &compiled);
+    let resolved = resolve_likelihood_from_model(&obs_model.likelihood, &compiled)
+        .unwrap_or_else(|e| panic!("observation likelihood resolution failed: {:?}", e));
     let params = params.to_vec();
     let int_s = IntState::new(compiled.int_local_to_global.len());
     let real_s = RealState::new(compiled.real_local_to_global.len());

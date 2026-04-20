@@ -126,7 +126,7 @@ fn test_obs_param_changes_loglik() {
             obs_times,
         }],
         compiled.clone(),
-    );
+    ).unwrap();
 
     // Create a particle state with some flow accumulator values
     let mut state = ParticleState::new(1, 1);
@@ -179,7 +179,7 @@ fn test_obs_param_from_flows() {
             obs_times: vec![10.0],
         }],
         compiled.clone(),
-    );
+    ).unwrap();
 
     let cum_flows: Vec<u64> = vec![10];
 
@@ -213,7 +213,7 @@ fn test_obs_model_consistency() {
             obs_times: vec![10.0, 20.0],
         }],
         compiled.clone(),
-    );
+    ).unwrap();
 
     let mut state = ParticleState::new(1, 1);
     state.flow_accumulators[0] = 15;

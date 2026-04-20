@@ -219,34 +219,55 @@ impl MultiStreamObsModel {
         }
     }
 
+    /// IM3 in 2026-04-19 inference review: previously this was infallible
+    /// and panicked inside `resolve_likelihood_from_model` when any
+    /// stream's likelihood expression referenced an unknown parameter /
+    /// compartment / table. Now returns `Result<Self, SimError>` so the
+    /// CLI can surface a diagnostic. Im3 (multi-stream obs_times
+    /// mismatch) is now also checked here: all streams must share the
+    /// same obs_times as stream 0; heterogeneous schedules are rejected
+    /// at construction rather than silently ignored.
     pub fn new(
         stream_specs: Vec<StreamSpec>,
         compiled: Arc<CompiledModel>,
-    ) -> Self {
-        assert!(!stream_specs.is_empty(), "at least one observation stream required");
+    ) -> Result<Self, crate::error::SimError> {
+        if stream_specs.is_empty() {
+            return Err(crate::error::SimError::Validation(
+                "at least one observation stream required".to_string()
+            ));
+        }
         let obs_times = stream_specs[0].obs_times.clone();
+        for (si, spec) in stream_specs.iter().enumerate().skip(1) {
+            if spec.obs_times != obs_times {
+                return Err(crate::error::SimError::Validation(format!(
+                    "observation stream {} has obs_times that differ from stream 0; \
+                     heterogeneous schedules are not supported yet", si
+                )));
+            }
+        }
 
-        let streams = stream_specs.into_iter().map(|spec| {
+        let mut streams = Vec::with_capacity(stream_specs.len());
+        for spec in stream_specs {
             let resolved = resolve_likelihood_from_model(
                 &spec.ir_model.likelihood, &compiled,
-            );
-            Stream {
+            )?;
+            streams.push(Stream {
                 projection: spec.projection,
                 resolved,
                 observations: spec.observations,
-            }
-        }).collect();
+            });
+        }
 
         let n_int = compiled.int_local_to_global.len();
         let real_s = RealState::new(compiled.real_local_to_global.len());
 
-        MultiStreamObsModel {
+        Ok(MultiStreamObsModel {
             streams,
             obs_times,
             compiled,
             n_int,
             real_s,
-        }
+        })
     }
 
     /// Evaluate a stream's projection given current particle state and

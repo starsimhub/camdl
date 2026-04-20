@@ -294,7 +294,10 @@ impl FitRunConfig {
                 obs_times: self.observations.iter().map(|o| o.time).collect(),
             }).collect(),
             self.compiled.clone(),
-        )
+        ).unwrap_or_else(|e| {
+            eprintln!("error: observation model construction failed: {:?}", e);
+            std::process::exit(1);
+        })
     }
     pub fn smc_config(&self) -> sim::inference::traits::SMCConfig {
         sim::inference::traits::SMCConfig {

@@ -234,7 +234,10 @@ pub fn cmd_pfilter(args: &[String]) {
             obs_times,
         }],
         compiled.clone(),
-    );
+    ).unwrap_or_else(|e| {
+        eprintln!("error: observation model construction failed: {:?}", e);
+        std::process::exit(1);
+    });
 
     // Record ancestry when either --save-paths or --save-filtering is
     // active. Both flags consume the same per-step snapshot data; the

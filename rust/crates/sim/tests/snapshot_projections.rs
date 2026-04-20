@@ -101,7 +101,7 @@ fn build_obs_model(compiled: &Arc<CompiledModel>, projection: StreamProjection, 
             obs_times: vec![5.0],
         }],
         compiled.clone(),
-    )
+    ).unwrap()
 }
 
 /// `CurrentPopSum(["E_e1", "E_e2", "E_e3"])` — the IR shape the compiler
@@ -147,7 +147,7 @@ fn current_pop_sum_from_ir_resolves_stratified_compartments() {
             obs_times: vec![5.0],
         }],
         compiled.clone(),
-    );
+    ).unwrap();
     // Poisson(observed=20, rate=projected+0.1) peaks at projected≈20.
     let ll_at_truth = obs_model.log_likelihood(&state, 0, &params);
     assert!(ll_at_truth.is_finite(), "log-lik must be finite: {}", ll_at_truth);
@@ -390,7 +390,7 @@ fn snapshot_reads_post_intervention_state() {
             obs_times: vec![5.0],
         }],
         compiled.clone(),
-    );
+    ).unwrap();
 
     let cum_flows = vec![0u64; compiled.model.transitions.len()];
     let ll_at_post = obs_model.log_likelihood_from_flows_and_counts(
