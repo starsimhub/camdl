@@ -2337,6 +2337,25 @@ let expand_scheduled_actions ctx decls ~always_active =
           let idx_vals = List.map (index_item_to_str env) idxs in
           let concrete = if idx_vals = [] then comp
             else String.concat "_" (comp :: idx_vals) in
+          (* m13 in 2026-04-19 review: the parser's iv_kv catch-all
+             produces `ASet(unknown_key, [], expr)` for any
+             `foo = expr` inside an intervention body, so a typo like
+             `fraction` vs `fracton` silently becomes an action on a
+             non-existent compartment. Flag here with a specific
+             E-code instead of letting it pass through and surface
+             downstream as a generic E503 unknown-compartment. *)
+          if not (Hashtbl.mem ctx.expanded_comp_tbl concrete
+                  || Hashtbl.mem ctx.comp_tbl comp) then
+            Diagnostics.error ctx.diags
+              ~code:"E265"
+              ~loc:Diagnostics.no_loc
+              ~message:(Printf.sprintf
+                "intervention '%s' sets '%s' which is not a declared \
+                 compartment"
+                iv_name concrete)
+              ~hint:"check the compartments block, or fix the kwarg name \
+                     (e.g. fraction, count, from, to)"
+              ();
           [Ir.Set { Ir.compartment = concrete; Ir.value = resolve_expr ctx env expr }]
         | AAdd (comp, idxs, expr) ->
           let idx_vals = List.map (index_item_to_str env) idxs in
