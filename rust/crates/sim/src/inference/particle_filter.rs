@@ -231,7 +231,19 @@ pub fn bootstrap_filter<P: ProcessModel<State = ParticleState>>(
             history_ancestors.push(indices);
         }
 
-        // Reset flow accumulators for next observation interval
+        // Reset flow accumulators for next observation interval.
+        //
+        // Im5 in 2026-04-19 inference review: resets ALL flow
+        // accumulators indiscriminately, not only those referenced by
+        // FlowSum-projected streams. Safe because:
+        //   (a) snapshot/prevalence streams don't consume flows;
+        //   (b) disjoint FlowSum subsets don't share accumulator
+        //       indices;
+        //   (c) overlapping subsets both reset to zero anyway.
+        // If a future feature ever stores "flow since the most recent
+        // per-stream observation" at different cadences per stream,
+        // this reset needs to become per-flow and indexed by which
+        // stream last observed. Keep this comment as the canary.
         for state in &mut swarm.states {
             state.reset_flows();
         }

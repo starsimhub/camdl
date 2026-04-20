@@ -331,6 +331,36 @@ mod tests {
     }
 
     #[test]
+    fn test_negbin_mu_zero_k_zero_y_zero() {
+        // In4 in 2026-04-19 inference review: NegBin(μ=0, k=0) is
+        // ill-defined (Gamma(0,·) is degenerate), but for y=0 the
+        // μ==0 branch short-circuits to 0. Document the contract so
+        // callers know "no cases expected, none observed" is a
+        // degeneracy-safe log-prob of 0 regardless of k.
+        assert_eq!(negbin_logpmf(0.0, 0.0, 0.0), 0.0);
+        // y > 0 with μ=0 is still impossible, k irrelevant.
+        assert_eq!(negbin_logpmf(1.0, 0.0, 0.0), f64::NEG_INFINITY);
+    }
+
+    #[test]
+    fn test_beta_binomial_known_values() {
+        // IC1 regression: BetaBinomial(k=5 | n=10, α=2, β=3).
+        //   log C(10,5) = log 252 ≈ 5.5294
+        //   log B(7, 8) = lgamma(7)+lgamma(8)-lgamma(15) ≈ -10.087
+        //   log B(2, 3) = lgamma(2)+lgamma(3)-lgamma(5)   ≈ -2.485
+        //   ll = 5.5294 - 10.087 + 2.485 ≈ -2.073
+        let ll = beta_binomial_logpmf(5, 10, 2.0, 3.0);
+        assert!((ll - (-2.072473)).abs() < 1e-5,
+            "beta_binomial_logpmf(5, 10, 2, 3) = {}, expected -2.072", ll);
+
+        // k > n is -inf.
+        assert_eq!(beta_binomial_logpmf(11, 10, 2.0, 3.0), f64::NEG_INFINITY);
+        // α <= 0 or β <= 0 is -inf.
+        assert_eq!(beta_binomial_logpmf(5, 10, 0.0, 3.0), f64::NEG_INFINITY);
+        assert_eq!(beta_binomial_logpmf(5, 10, 2.0, -1.0), f64::NEG_INFINITY);
+    }
+
+    #[test]
     fn test_normal_cdf_known() {
         assert!((normal_cdf(0.0) - 0.5).abs() < 1e-6);
         assert!((normal_cdf(1.96) - 0.975).abs() < 1e-3);
