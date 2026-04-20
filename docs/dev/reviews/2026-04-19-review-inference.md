@@ -840,7 +840,17 @@ posterior means from PMMH/PGAS.
 
 **Deferred:**
 - Im21 — Mutex per push in DiagnosticCollector (low-frequency).
-- Im22 — single-observation pfilter CLI (docs concern).
-- Im23 — Hinnant link comment (trivial).
-- Im25 — per-chain n_tail for resumed chains (same class as Im24,
-  but only affects non-standard resume patterns).
+
+**Addressed in follow-up pass (2026-04-20):**
+- IM6 — CSMC-AS ancestor-sampling weight drops stale `log_weights[j]`
+  term (post-resample slots carry uniform weight). PGAS posteriors
+  over models with >1 observation previously skewed toward
+  high-pre-resample-weight slots regardless of whether the
+  ancestor-source state was a good precursor; now the ancestor
+  categorical is driven by transition density alone.
+- Im18 — heated-rung re-warmup on resume documented + logged.
+- Im22/Im23 — pfilter single-stream doc comment + Hinnant
+  algorithms link comment.
+- Im25 — `compute_rhat` now uses each chain's own last-half window;
+  G-R formula uses the shortest chain's tail length.
+- Im2 — `log_sum_exp` distinguishes +∞ from −∞.
