@@ -74,7 +74,6 @@ fn model_with_obs(
             }),
         }],
         parameters: vec![],
-        parameter_groups: vec![],
         initial_conditions: InitialConditions::Explicit(initial),
         output: OutputConfig {
             times: OutputSchedule::AtTimes(vec![0.0, 5.0]),
@@ -338,7 +337,6 @@ fn snapshot_reads_post_intervention_state() {
             }),
         }],
         parameters: vec![],
-        parameter_groups: vec![],
         initial_conditions: InitialConditions::Explicit(init),
         output: OutputConfig {
             times: OutputSchedule::AtTimes(vec![5.0]),

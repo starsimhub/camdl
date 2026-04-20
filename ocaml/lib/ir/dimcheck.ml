@@ -209,7 +209,6 @@ let param_dim_of_kind st kind =
   match kind with
   | Some "rate"           -> Known (make 0 (-1))
   | Some "probability"    -> Known dimensionless
-  | Some "simplex_member" -> Known dimensionless
   | Some "count"          -> Known population
   | _                     -> fresh_var st
 

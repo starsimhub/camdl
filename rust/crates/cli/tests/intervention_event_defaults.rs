@@ -38,7 +38,6 @@ fn mixed_model_ir() -> String {
       "ode_equations": [], "time_functions": [], "tables": [],
       "observations": [],
       "parameters": [],
-      "parameter_groups": [],
       "initial_conditions": { "explicit": { "S": 1000.0, "V": 0.0 } },
       "output": {
         "times": { "regular": { "start": 0.0, "step": 1.0, "end": 20.0 } },

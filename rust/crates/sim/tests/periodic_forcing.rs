@@ -35,7 +35,6 @@ fn model_with_periodic(period: f64, values: Vec<f64>) -> CompiledModel {
         interventions: vec![],
         observations: vec![],
         parameters: vec![],
-            parameter_groups: vec![],
         initial_conditions: InitialConditions::Parameterized(HashMap::new()),
         output: OutputConfig {
             times: OutputSchedule::AtTimes(vec![0.0]),

@@ -2011,7 +2011,6 @@ mod tests {
                  "param_kind": "rate", "param_dim": null }}
               {extras}
             ],
-            "parameter_groups": [],
             "initial_conditions": {{ "explicit": {{ "S": 1.0 }} }},
             "output": {{ "times": {{ "at_times": [0.0, 1.0] }},
                          "format": "tsv", "trajectory": true, "observations": false }},
@@ -2088,7 +2087,6 @@ mod tests {
                 "prior": null, "transform": null, "initial_value": null,
                 "param_kind": "count", "param_dim": null }
             ],
-            "parameter_groups": [],
             "initial_conditions": { "explicit": { "S": 1.0 } },
             "output": { "times": { "at_times": [0.0, 1.0] },
                         "format": "tsv", "trajectory": true, "observations": false },

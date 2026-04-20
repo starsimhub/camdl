@@ -35,7 +35,6 @@ fn minimal_model(compartments: Vec<Compartment>, params: Vec<Parameter>) -> Mode
         interventions: vec![],
         observations: vec![],
         parameters: params,
-        parameter_groups: vec![],
         initial_conditions: InitialConditions::Parameterized(HashMap::new()),
         output: OutputConfig {
             times: OutputSchedule::AtTimes(vec![0.0]),

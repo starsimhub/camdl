@@ -4339,7 +4339,6 @@
       "param_kind": "positive"
     }
   ],
-  "parameter_groups": [],
   "initial_conditions": {
     "parameterized": {
       "S_p1": {

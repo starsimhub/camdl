@@ -1122,7 +1122,7 @@ mod tests {
             description: None, origin: None,
             compartments: vec![], transitions: vec![], ode_equations: vec![],
             time_functions: vec![], tables: vec![], observations: vec![],
-            parameters: vec![], parameter_groups: vec![],
+            parameters: vec![],
             initial_conditions: ir::model::InitialConditions::Explicit(
                 std::collections::HashMap::new()),
             output: ir::model::OutputConfig {

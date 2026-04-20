@@ -37,7 +37,6 @@ fn minimal_model_with_interventions(
         interventions,
         observations: vec![],
         parameters: params,
-        parameter_groups: vec![],
         initial_conditions: InitialConditions::Parameterized(HashMap::new()),
         output: OutputConfig {
             times: OutputSchedule::AtTimes(vec![0.0]),
@@ -166,7 +165,6 @@ fn chain_binomial_fires_scheduled_intervention_exactly_once() {
         tables: vec![],
         observations: vec![],
         parameters: vec![],
-        parameter_groups: vec![],
         initial_conditions: InitialConditions::Explicit(init),
         output: OutputConfig {
             times: OutputSchedule::AtTimes((0..=20).map(|t| t as f64).collect()),

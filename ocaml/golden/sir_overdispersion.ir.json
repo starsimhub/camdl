@@ -152,7 +152,6 @@
       "param_dim": null
     }
   ],
-  "parameter_groups": [],
   "initial_conditions": {
     "parameterized": {
       "S": {

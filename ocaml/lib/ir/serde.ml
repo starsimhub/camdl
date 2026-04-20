@@ -701,17 +701,6 @@ let parameter_of_json j =
       | _ -> None);
   }
 
-let parameter_group_to_json (g : parameter_group) : Yojson.Safe.t =
-  obj [
-    ("kind",    str g.kind);
-    ("members", arr (List.map str g.members));
-  ]
-
-let parameter_group_of_json j =
-  { kind    = as_string (member "kind" j);
-    members = List.map as_string (as_list (member "members" j));
-  }
-
 (* ── Initial conditions ──────────────────────────────────────────────────── *)
 
 let initial_conditions_to_json (ic : initial_conditions) : Yojson.Safe.t =
@@ -876,7 +865,6 @@ let model_to_json (m : model) : Yojson.Safe.t =
     ("interventions",      arr (List.map intervention_to_json m.interventions));
     ("observations",       arr (List.map observation_model_to_json m.observations));
     ("parameters",         arr (List.map parameter_to_json m.parameters));
-    ("parameter_groups",   arr (List.map parameter_group_to_json m.parameter_groups));
     ("initial_conditions", initial_conditions_to_json m.initial_conditions);
     ("output",             output_config_to_json m.output);
     ("simulation",         simulation_config_to_json m.simulation);
@@ -904,9 +892,6 @@ let model_of_json (j : Yojson.Safe.t) : model =
     interventions      = List.map intervention_of_json     (as_list (member "interventions"  j));
     observations       = List.map observation_model_of_json (as_list (member "observations"  j));
     parameters         = List.map parameter_of_json        (as_list (member "parameters"     j));
-    parameter_groups   = (match member_opt "parameter_groups" j with
-      | Some `Null | None -> []
-      | Some gs -> List.map parameter_group_of_json (as_list gs));
     initial_conditions = initial_conditions_of_json (member "initial_conditions" j);
     output             = output_config_of_json     (member "output"     j);
     simulation         = simulation_config_of_json (member "simulation" j);

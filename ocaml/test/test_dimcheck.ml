@@ -52,7 +52,6 @@ let empty_model
     interventions = [];
     observations;
     parameters;
-    parameter_groups = [];
     initial_conditions = Explicit [];
     output = {
       times = OutRegular { start = 0.0; step = 1.0; end_ = 100.0 };

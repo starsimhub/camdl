@@ -142,7 +142,6 @@ fn birth_death_model(birth_rate: f64, death_rate: f64) -> Model {
             Parameter { name: "lambda".into(), value: Some(birth_rate), bounds: None, prior: None, transform: None, initial_value: None, param_kind: None, param_dim: None },
             Parameter { name: "mu_times_n".into(), value: Some(death_rate), bounds: None, prior: None, transform: None, initial_value: None, param_kind: None, param_dim: None },
         ],
-        parameter_groups: vec![],
         initial_conditions: InitialConditions::Explicit({
             let mut m = HashMap::new(); m.insert("N".into(), 50.0); m
         }),
@@ -266,7 +265,6 @@ fn test_overdispersion_variance_tau_leap() {
             Parameter { name: "beta".into(), value: Some(0.01), bounds: None, prior: None, transform: None, initial_value: None, param_kind: None, param_dim: None },
             Parameter { name: "sigma_sq".into(), value: Some(0.5), bounds: None, prior: None, transform: None, initial_value: None, param_kind: None, param_dim: None },
         ],
-        parameter_groups: vec![],
         // Start with S=10000, I=0. After one dt=1 step, about 100 events.
         initial_conditions: InitialConditions::Explicit({
             let mut m = HashMap::new(); m.insert("S".into(), 10000.0); m.insert("I".into(), 0.0); m
@@ -362,7 +360,6 @@ fn test_fraction_transfer_edge_cases() {
             interventions: vec![iv],
             observations: vec![],
             parameters: vec![],
-            parameter_groups: vec![],
             initial_conditions: InitialConditions::Parameterized(HashMap::new()),
             output: OutputConfig {
                 times: OutputSchedule::AtTimes(vec![0.0]),

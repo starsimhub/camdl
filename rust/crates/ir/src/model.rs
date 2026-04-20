@@ -144,8 +144,6 @@ pub struct Model {
     pub interventions:      Vec<Intervention>,
     pub observations:       Vec<ObservationModel>,
     pub parameters:         Vec<Parameter>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub parameter_groups:   Vec<crate::parameter::ParameterGroup>,
     pub initial_conditions: InitialConditions,
     pub output:             OutputConfig,
     pub simulation:         SimulationConfig,

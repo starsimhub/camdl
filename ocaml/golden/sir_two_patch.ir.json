@@ -392,7 +392,6 @@
       "param_dim": null
     }
   ],
-  "parameter_groups": [],
   "initial_conditions": {
     "explicit": {
       "S_urban": 990.0,
