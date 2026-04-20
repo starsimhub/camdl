@@ -587,9 +587,11 @@ init_list:
 
 init_entry:
   | comp = IDENT LBRACKET ibs = separated_nonempty_list(COMMA, index_binding) RBRACKET EQ v = expr
-      { { icomp = comp; iindices = []; ibindings = ibs; ivalue = v } }
+      { { icomp = comp; iindices = []; ibindings = ibs; ivalue = v;
+          iloc = Parser_errors.ast_loc_of ~sp:$startpos ~ep:$endpos } }
   | comp = IDENT idxs = index_items_opt EQ v = expr
-      { { icomp = comp; iindices = idxs; ibindings = []; ivalue = v } }
+      { { icomp = comp; iindices = idxs; ibindings = []; ivalue = v;
+          iloc = Parser_errors.ast_loc_of ~sp:$startpos ~ep:$endpos } }
 
 (* ── Timepoints block ────────────────────────────────────────────────────── *)
 

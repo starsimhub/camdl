@@ -116,6 +116,7 @@ type init_entry = {
   iindices  : index_item list;       (* positional: S[child] *)
   ibindings : index_binding list;    (* loop: [p in patch] *)
   ivalue    : expr;
+  iloc      : loc;
 }
 
 type obs_schedule =
