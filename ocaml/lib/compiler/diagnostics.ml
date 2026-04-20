@@ -2,7 +2,15 @@
 
 (* ── Types ─────────────────────────────────────────────────────────────────── *)
 
-type severity = Error | Warning
+(** Three-level severity — M5 in the 2026-04-19 compiler review.
+    Previously only Error | Warning existed, and the dimcheck Info
+    diagnostic (I300 "undetermined dimension") was emitted as a
+    Warning here, which confused `--json-errors` clients (they saw
+    `"severity": "warning"` for what the compiler intended as non-
+    blocking informational) and promoted Info to a blocking level in
+    any `-Werror`-style workflow. Info sits below Warning, never
+    blocks compilation, and renders in a distinct style. *)
+type severity = Error | Warning | Info
 
 type loc = {
   file     : string;
@@ -58,6 +66,10 @@ let pp_sev_code ppf (sev, code) =
   | Warning ->
     Term_style.warning_style
       (Term_style.bold (fun ppf () -> Fmt.pf ppf "warning[%s]" code)) ppf ()
+  | Info ->
+    (* Info uses dimmed style — non-blocking, informational. *)
+    Term_style.dim_style
+      (Term_style.bold (fun ppf () -> Fmt.pf ppf "info[%s]" code)) ppf ()
 
 (** Render one ┌─ source block at the given location. *)
 let pp_block ppf (cache : Source_cache.t) sev (l : loc) (label : string option) =
@@ -90,7 +102,8 @@ let pp_block ppf (cache : Source_cache.t) sev (l : loc) (label : string option) 
        Fmt.pf ppf "  %s  %s" box_v (String.make col0 ' ');
        (match sev with
         | Error   -> Term_style.error_style   Fmt.string ppf ul
-        | Warning -> Term_style.warning_style Fmt.string ppf ul);
+        | Warning -> Term_style.warning_style Fmt.string ppf ul
+        | Info    -> Term_style.dim_style     Fmt.string ppf ul);
        (match label with Some s -> Fmt.pf ppf " %s" s | None -> ());
        Fmt.pf ppf "@\n"
     );
@@ -131,6 +144,7 @@ let json_errors_mode = ref false
 let severity_string = function
   | Error   -> "error"
   | Warning -> "warning"
+  | Info    -> "info"
 
 let loc_to_json (l : loc) : Yojson.Safe.t =
   `Assoc [
@@ -217,3 +231,8 @@ let error t ~code ~loc ~message ?detail ?hint ?(related=[]) () =
 
 let warning t ~code ~loc ~message ?detail ?hint ?(related=[]) () =
   emit t { severity=Warning; code; loc; message; detail; hint; related }
+
+(** Info diagnostic — non-blocking, dimmed style, distinct from
+    Warning in JSON output. See `severity` type above. *)
+let info t ~code ~loc ~message ?detail ?hint ?(related=[]) () =
+  emit t { severity=Info; code; loc; message; detail; hint; related }

@@ -170,7 +170,12 @@ let compile ?(name = "model") ?(filename = "<input>") (src : string) : (Ir.model
             ~code:dc.code ~loc:Diagnostics.no_loc
             ~message:dc.message ?detail:dc.detail ?hint:dc.hint ()
         | Dimcheck.Info ->
-          Diagnostics.warning d.ctx.diags
+          (* M5 in 2026-04-19 review: previously promoted to Warning,
+             which confused JSON clients (I300 appeared as
+             `"severity": "warning"`) and triggered `-Werror`-style
+             CI. Now routes through the new Info level — non-blocking,
+             dimmed style, `"severity": "info"` in JSON. *)
+          Diagnostics.info d.ctx.diags
             ~code:dc.code ~loc:Diagnostics.no_loc
             ~message:dc.message ?detail:dc.detail ?hint:dc.hint ()
       ) dc_result.diagnostics;
