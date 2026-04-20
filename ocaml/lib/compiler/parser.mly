@@ -134,7 +134,8 @@ compartment_list:
 
 compartment_decl:
   | name = IDENT kind = compartment_kind_opt
-      { { cname = name; ckind = kind } }
+      { { cname = name; ckind = kind;
+          cloc = Parser_errors.ast_loc_of ~sp:$startpos ~ep:$endpos } }
 
 compartment_kind_opt:
   | (* empty *)  { Integer }
@@ -149,28 +150,36 @@ param_list:
 param_decl:
   (* scalar, no bounds, no prior *)
   | name = IDENT COLON pk = param_kind da = dim_annotation_opt
-      { PScalar { pname = name; pkind = pk; pdim = da; pbounds = None; pprior = None } }
+      { PScalar { pname = name; pkind = pk; pdim = da; pbounds = None; pprior = None;
+                  ploc = Parser_errors.ast_loc_of ~sp:$startpos ~ep:$endpos } }
   (* scalar, no bounds, with prior *)
   | name = IDENT COLON pk = param_kind da = dim_annotation_opt TILDE pr = prior_clause
-      { PScalar { pname = name; pkind = pk; pdim = da; pbounds = None; pprior = Some pr } }
+      { PScalar { pname = name; pkind = pk; pdim = da; pbounds = None; pprior = Some pr;
+                  ploc = Parser_errors.ast_loc_of ~sp:$startpos ~ep:$endpos } }
   (* scalar, with bounds, no prior *)
   | name = IDENT COLON pk = param_kind da = dim_annotation_opt IN LBRACKET lo = expr COMMA hi = expr RBRACKET
-      { PScalar { pname = name; pkind = pk; pdim = da; pbounds = Some (lo, hi); pprior = None } }
+      { PScalar { pname = name; pkind = pk; pdim = da; pbounds = Some (lo, hi); pprior = None;
+                  ploc = Parser_errors.ast_loc_of ~sp:$startpos ~ep:$endpos } }
   (* scalar, with bounds, with prior *)
   | name = IDENT COLON pk = param_kind da = dim_annotation_opt IN LBRACKET lo = expr COMMA hi = expr RBRACKET TILDE pr = prior_clause
-      { PScalar { pname = name; pkind = pk; pdim = da; pbounds = Some (lo, hi); pprior = Some pr } }
+      { PScalar { pname = name; pkind = pk; pdim = da; pbounds = Some (lo, hi); pprior = Some pr;
+                  ploc = Parser_errors.ast_loc_of ~sp:$startpos ~ep:$endpos } }
   (* indexed, no bounds, no prior *)
   | name = IDENT LBRACKET dim = IDENT RBRACKET COLON pk = param_kind da = dim_annotation_opt
-      { PIndexed { pname = name; pdims = [dim]; pkind = pk; pdim = da; pbounds = None; pprior = None } }
+      { PIndexed { pname = name; pdims = [dim]; pkind = pk; pdim = da; pbounds = None; pprior = None;
+                   ploc = Parser_errors.ast_loc_of ~sp:$startpos ~ep:$endpos } }
   (* indexed, no bounds, with prior *)
   | name = IDENT LBRACKET dim = IDENT RBRACKET COLON pk = param_kind da = dim_annotation_opt TILDE pr = prior_clause
-      { PIndexed { pname = name; pdims = [dim]; pkind = pk; pdim = da; pbounds = None; pprior = Some pr } }
+      { PIndexed { pname = name; pdims = [dim]; pkind = pk; pdim = da; pbounds = None; pprior = Some pr;
+                   ploc = Parser_errors.ast_loc_of ~sp:$startpos ~ep:$endpos } }
   (* indexed, with bounds, no prior *)
   | name = IDENT LBRACKET dim = IDENT RBRACKET COLON pk = param_kind da = dim_annotation_opt IN LBRACKET lo = expr COMMA hi = expr RBRACKET
-      { PIndexed { pname = name; pdims = [dim]; pkind = pk; pdim = da; pbounds = Some (lo, hi); pprior = None } }
+      { PIndexed { pname = name; pdims = [dim]; pkind = pk; pdim = da; pbounds = Some (lo, hi); pprior = None;
+                   ploc = Parser_errors.ast_loc_of ~sp:$startpos ~ep:$endpos } }
   (* indexed, with bounds, with prior *)
   | name = IDENT LBRACKET dim = IDENT RBRACKET COLON pk = param_kind da = dim_annotation_opt IN LBRACKET lo = expr COMMA hi = expr RBRACKET TILDE pr = prior_clause
-      { PIndexed { pname = name; pdims = [dim]; pkind = pk; pdim = da; pbounds = Some (lo, hi); pprior = Some pr } }
+      { PIndexed { pname = name; pdims = [dim]; pkind = pk; pdim = da; pbounds = Some (lo, hi); pprior = Some pr;
+                   ploc = Parser_errors.ast_loc_of ~sp:$startpos ~ep:$endpos } }
 
 prior_clause:
   | name = prior_name LPAREN args = separated_list(COMMA, prior_kwarg) RPAREN
@@ -308,13 +317,15 @@ transition_decl:
   | name = IDENT ibs = index_bindings_opt COLON src = stoich_ref_opt ARROW dst = stoich_ref_opt AT rate = expr guard = where_clause_opt
       { { trname = name; trindices = ibs;
           trsrc = src; trdst = dst;
-          trrate = rate; trguard = guard; trtag = None } }
+          trrate = rate; trguard = guard; trtag = None;
+          trloc = Parser_errors.ast_loc_of ~sp:$startpos ~ep:$endpos } }
   (* block form: name[...] : src --> dst { rate = ...; tag = ... } *)
   | name = IDENT ibs = index_bindings_opt COLON src = stoich_ref_opt ARROW dst = stoich_ref_opt LBRACE tbody = transition_body RBRACE
       { let (rate, guard, tag) = tbody in
         { trname = name; trindices = ibs;
           trsrc = src; trdst = dst;
-          trrate = rate; trguard = guard; trtag = tag } }
+          trrate = rate; trguard = guard; trtag = tag;
+          trloc = Parser_errors.ast_loc_of ~sp:$startpos ~ep:$endpos } }
 
 stoich_ref_opt:
   | (* empty *) { None }

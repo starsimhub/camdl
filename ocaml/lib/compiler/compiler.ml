@@ -44,7 +44,7 @@ let compile_detail_result ?(name = "model") ?(filename = "<input>") (src : strin
       if filename = "<input>" then ""
       else Filename.dirname filename
     in
-    let (model, ctx, summary) = Expander.expand_detail ~source_dir name decls in
+    let (model, ctx, summary) = Expander.expand_detail ~source_dir ~filename name decls in
     (* Drain any lex-phase warnings (e.g. inconsistent digit grouping) collected
        before the expander's ctx.diags was available. *)
     List.iter (fun (sp, ep, msg) ->

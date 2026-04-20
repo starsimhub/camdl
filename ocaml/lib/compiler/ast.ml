@@ -55,7 +55,7 @@ type guard =
 
 type compartment_kind = Integer | Real
 
-type compartment_decl = { cname: string; ckind: compartment_kind }
+type compartment_decl = { cname: string; ckind: compartment_kind; cloc: loc }
 
 type param_type = PRate | PProbability | PPositive | PCount | PReal
 
@@ -69,8 +69,8 @@ type prior_spec = {
 }
 
 type param_decl =
-  | PScalar  of { pname: string; pkind: param_type; pdim: dim_annotation option; pbounds: (expr * expr) option; pprior: prior_spec option }
-  | PIndexed of { pname: string; pdims: string list; pkind: param_type; pdim: dim_annotation option; pbounds: (expr * expr) option; pprior: prior_spec option }
+  | PScalar  of { pname: string; pkind: param_type; pdim: dim_annotation option; pbounds: (expr * expr) option; pprior: prior_spec option; ploc: loc }
+  | PIndexed of { pname: string; pdims: string list; pkind: param_type; pdim: dim_annotation option; pbounds: (expr * expr) option; pprior: prior_spec option; ploc: loc }
 
 (** Table dimension entry: bare dim name, or dim + unit *)
 type table_dim_entry =
@@ -95,6 +95,7 @@ type transition_decl = {
   trrate    : expr;
   trguard   : guard option;
   trtag     : string option;
+  trloc     : loc;
 }
 
 type let_binding = {

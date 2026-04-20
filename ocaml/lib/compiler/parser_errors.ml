@@ -14,3 +14,15 @@ let pending_errors
 
 let push_error ~sp ~ep ~code ~msg =
   pending_errors := (sp, ep, code, msg) :: !pending_errors
+
+(* Helper for parser semantic actions: convert menhir $startpos/$endpos
+   into an Ast.loc suitable for stashing in decl records so the
+   expander can thread source locations into diagnostics without
+   re-walking the parse tree (M9 in the 2026-04-19 compiler review). *)
+let ast_loc_of ~(sp : Lexing.position) ~(ep : Lexing.position) : Ast.loc =
+  { Ast.file     = "";
+    line         = sp.pos_lnum;
+    col          = sp.pos_cnum - sp.pos_bol + 1;
+    end_line     = ep.pos_lnum;
+    end_col      = ep.pos_cnum - ep.pos_bol + 1;
+  }

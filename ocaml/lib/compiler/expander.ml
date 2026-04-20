@@ -26,6 +26,7 @@ type context = {
   mutable event_decls     : intervention_decl list;
   mutable diags           : Diagnostics.t;  (* collected errors/warnings *)
   mutable source_dir      : string;         (* directory of the source file *)
+  mutable filename        : string;         (* source filename for diagnostic locs *)
   mutable expanded_comp_cache : string list;
   mutable dim_decls       : dimensions_entry list;
   mutable dim_registry    : (string * string list) list;
@@ -41,7 +42,7 @@ type context = {
   mutable expanded_comp_tbl  : (string, unit) Hashtbl.t;
 }
 
-let empty_context ?(source_dir = "") () = {
+let empty_context ?(source_dir = "") ?(filename = "<input>") () = {
   time_unit        = Days;
   description      = None;
   comp_decls       = [];
@@ -63,6 +64,7 @@ let empty_context ?(source_dir = "") () = {
   event_decls          = [];
   diags                = Diagnostics.create ();
   source_dir;
+  filename;
   expanded_comp_cache  = [];
   dim_decls            = [];
   dim_registry         = [];
@@ -364,11 +366,20 @@ let load_table_data ctx path ~dims ~n_values ~default_val =
   | Some result -> result
   | None -> List.init n_values (fun _ -> [||])
 
+(* Convert an Ast.loc into a Diagnostics.loc. If the AST loc's file
+   field is empty (parser didn't know the filename), substitute the
+   ctx's filename so diagnostics show the correct `file:line:col`
+   header. *)
+let diag_loc_of_ast_ctx ctx (l : Ast.loc) : Diagnostics.loc =
+  let file = if l.file = "" then ctx.filename else l.file in
+  { Diagnostics.file; line = l.line; col = l.col;
+    end_line = l.end_line; end_col = l.end_col }
+
 let reserved_time_names = ["t"; "t_start"; "t_end"]
 
-let check_reserved ctx name kind =
+let check_reserved ?(loc = Diagnostics.no_loc) ctx name kind =
   if List.mem name reserved_time_names then
-    Diagnostics.error ctx.diags ~code:"E100" ~loc:Diagnostics.no_loc
+    Diagnostics.error ctx.diags ~code:"E100" ~loc
       ~message:(Printf.sprintf "%s name '%s' is reserved for simulation time" kind name)
       ~hint:"choose a different name" ()
 
@@ -381,12 +392,13 @@ let collect_declarations ctx decls =
     | DOrigin s          -> ctx.origin <- Some s
     | DDimensions es     -> ctx.dim_decls <- List.rev_append es ctx.dim_decls
     | DCompartments cs   ->
-      List.iter (fun (c : compartment_decl) -> check_reserved ctx c.cname "compartment") cs;
+      List.iter (fun (c : compartment_decl) ->
+        check_reserved ctx ~loc:(diag_loc_of_ast_ctx ctx c.cloc) c.cname "compartment") cs;
       ctx.comp_decls <- List.rev_append cs ctx.comp_decls
     | DParameters ps     ->
       List.iter (fun p -> match p with
-        | PScalar s  -> check_reserved ctx s.pname "parameter"
-        | PIndexed s -> check_reserved ctx s.pname "parameter") ps;
+        | PScalar s  -> check_reserved ctx ~loc:(diag_loc_of_ast_ctx ctx s.ploc) s.pname "parameter"
+        | PIndexed s -> check_reserved ctx ~loc:(diag_loc_of_ast_ctx ctx s.ploc) s.pname "parameter") ps;
       ctx.param_decls <- List.rev_append ps ctx.param_decls
     | DLet lb            ->
       check_reserved ctx lb.lname "let binding";
@@ -770,10 +782,6 @@ let resolve_index ctx (env : (string * string) list) idx =
 
 (* ── Expression resolver ─────────────────────────────────────────────────── *)
 
-let diag_loc_of_ast (l : Ast.loc) : Diagnostics.loc =
-  { Diagnostics.file = l.file; line = l.line; col = l.col;
-    end_line = l.end_line; end_col = l.end_col }
-
 let index_item_to_str env item =
   match item with
   | IPosn (EIdent (s, _))     -> (match List.assoc_opt s env with Some v -> v | None -> s)
@@ -861,7 +869,7 @@ let rec resolve_expr ctx (env : (string * string) list) (e : expr) : Ir.expr =
        else Ir.BinOp { op = Div; left = Ir.Const f; right = Ir.Const divisor }
      | _ -> Ir.Const (unit_to_model_time ctx f u))
   | EIdent (name, l) -> (
-    let loc = diag_loc_of_ast l in
+    let loc = diag_loc_of_ast_ctx ctx l in
     match List.assoc_opt name env with
     | Some concrete -> resolve_ident_name ctx concrete ~loc
     | None          -> resolve_ident_name ctx name ~loc
@@ -1228,7 +1236,7 @@ let rec eval_guard env = function
     a dimension level value, or an unknown name — but NOT a parameter or
     compartment name (which cannot be meaningfully compared at compile time).
     Emits E217 for each bad identifier found. *)
-let check_guard_compile_time ctx decl_name loop_vars guard =
+let check_guard_compile_time ?(loc = Diagnostics.no_loc) ctx decl_name loop_vars guard =
   let all_dim_levels = List.concat_map snd ctx.dim_registry in
   let param_names = List.filter_map (function
     | PScalar  p -> Some p.pname
@@ -1239,14 +1247,14 @@ let check_guard_compile_time ctx decl_name loop_vars guard =
     if List.mem ident loop_vars || List.mem ident all_dim_levels then ()
     else if List.mem ident param_names then
       Diagnostics.error ctx.diags
-        ~code:"E217" ~loc:Diagnostics.no_loc
+        ~code:"E217" ~loc
         ~message:(Printf.sprintf
           "%s: where guard references '%s', which is a parameter; \
            use it in the rate expression instead"
           decl_name ident) ()
     else if List.mem ident comp_names then
       Diagnostics.error ctx.diags
-        ~code:"E217" ~loc:Diagnostics.no_loc
+        ~code:"E217" ~loc
         ~message:(Printf.sprintf
           "%s: where guard references '%s', which is a compartment; \
            use it in the rate expression instead"
@@ -1271,8 +1279,8 @@ let check_guards ctx =
     match tr.trguard with
     | None -> ()
     | Some g ->
-      check_guard_compile_time ctx tr.trname
-        (loop_vars_of_indices tr.trindices) g
+      check_guard_compile_time ctx ~loc:(diag_loc_of_ast_ctx ctx tr.trloc)
+        tr.trname (loop_vars_of_indices tr.trindices) g
   ) ctx.transitions;
   List.iter (fun iv ->
     match iv.ivguard with
@@ -1511,7 +1519,7 @@ let validate_prior_values dist_name vals =
   | "exponential" -> pos_check "rate"
   | _ -> None
 
-let resolve_prior_spec ctx ~pname (ps : prior_spec) : Ir.prior_dist =
+let resolve_prior_spec ?(loc = Diagnostics.no_loc) ctx ~pname (ps : prior_spec) : Ir.prior_dist =
   (* Prefix every diagnostic message with the parameter name so users
      can locate bad priors in models with many parameters. *)
   let qualify msg = Printf.sprintf "parameter '%s': %s" pname msg in
@@ -1522,7 +1530,7 @@ let resolve_prior_spec ctx ~pname (ps : prior_spec) : Ir.prior_dist =
     | Some args -> args
     | None ->
       Diagnostics.error ctx.diags
-        ~code:"E232" ~loc:Diagnostics.no_loc
+        ~code:"E232" ~loc
         ~message:(qualify (Printf.sprintf "unknown prior distribution '%s'" ps.ps_name))
         ~detail:"Valid distributions: uniform, normal, log_normal, half_normal, beta, gamma, exponential."
         ~hint:"Check the spelling and available distributions."
@@ -1537,7 +1545,7 @@ let resolve_prior_spec ctx ~pname (ps : prior_spec) : Ir.prior_dist =
     List.iter (fun (k, _) ->
       if Hashtbl.mem seen k then
         Diagnostics.error ctx.diags
-          ~code:"E234" ~loc:Diagnostics.no_loc
+          ~code:"E234" ~loc
           ~message:(qualify (Printf.sprintf "duplicate argument '%s' in prior '%s'" k ps.ps_name))
           ~hint:"Keyword arguments may appear at most once."
           ()
@@ -1568,7 +1576,7 @@ let resolve_prior_spec ctx ~pname (ps : prior_spec) : Ir.prior_dist =
           | None   -> "Remove the unknown argument or check the spelling."
         in
         Diagnostics.error ctx.diags
-          ~code:"E233" ~loc:Diagnostics.no_loc
+          ~code:"E233" ~loc
           ~message:(qualify (Printf.sprintf "unknown argument '%s' for prior '%s'" k ps.ps_name))
           ~detail:(Printf.sprintf "Distribution '%s' accepts: %s." ps.ps_name (String.concat ", " expected_args))
           ~hint
@@ -1582,7 +1590,7 @@ let resolve_prior_spec ctx ~pname (ps : prior_spec) : Ir.prior_dist =
         if is_const_expr e then eval_const_expr ctx e
         else begin
           Diagnostics.error ctx.diags
-            ~code:"E230" ~loc:Diagnostics.no_loc
+            ~code:"E230" ~loc
             ~message:(qualify (Printf.sprintf "prior argument '%s' must be a compile-time constant" key))
             ~detail:(Printf.sprintf "In ~ %s(...), the argument '%s' is not a constant expression. \
                                      Prior arguments must be numeric literals, arithmetic of literals, \
@@ -1593,7 +1601,7 @@ let resolve_prior_spec ctx ~pname (ps : prior_spec) : Ir.prior_dist =
         end
       | None ->
         Diagnostics.error ctx.diags
-          ~code:"E231" ~loc:Diagnostics.no_loc
+          ~code:"E231" ~loc
           ~message:(qualify (Printf.sprintf "prior '%s' missing required argument '%s'" ps.ps_name key))
           ~detail:(Printf.sprintf "The distribution %s requires a '%s' argument." ps.ps_name key)
           ~hint:(Printf.sprintf "Add '%s = <value>' to the prior arguments." key)
@@ -1607,7 +1615,7 @@ let resolve_prior_spec ctx ~pname (ps : prior_spec) : Ir.prior_dist =
      | None -> ()
      | Some msg ->
        Diagnostics.error ctx.diags
-         ~code:"E235" ~loc:Diagnostics.no_loc
+         ~code:"E235" ~loc
          ~message:(qualify (Printf.sprintf "invalid prior '%s': %s" ps.ps_name msg))
          ~hint:"Check the distribution's domain: shapes/rates/sigmas must be positive, uniform lower < upper."
          ());
@@ -1627,10 +1635,11 @@ let resolve_prior_spec ctx ~pname (ps : prior_spec) : Ir.prior_dist =
 let expand_parameters ctx =
   let from_params = List.concat_map (fun pd ->
     match pd with
-    | PScalar { pname; pbounds; pkind; pdim; pprior } ->
+    | PScalar { pname; pbounds; pkind; pdim; pprior; ploc } ->
       let bounds = resolve_bounds ctx pbounds in
       let pk = Some (param_kind_to_string pkind) in
-      let prior = Option.map (resolve_prior_spec ctx ~pname) pprior in
+      let loc = diag_loc_of_ast_ctx ctx ploc in
+      let prior = Option.map (resolve_prior_spec ctx ~loc ~pname) pprior in
       [{ Ir.name          = pname;
          Ir.value         = None;
          Ir.bounds        = bounds;
@@ -1640,11 +1649,12 @@ let expand_parameters ctx =
          Ir.param_kind    = pk;
          Ir.param_dim     = pdim;
        }]
-    | PIndexed { pname; pdims = [dim]; pbounds; pkind; pdim; pprior } ->
+    | PIndexed { pname; pdims = [dim]; pbounds; pkind; pdim; pprior; ploc } ->
       let vals = dim_values ctx dim in
       let bounds = resolve_bounds ctx pbounds in
       let pk = Some (param_kind_to_string pkind) in
-      let prior = Option.map (resolve_prior_spec ctx ~pname) pprior in
+      let loc = diag_loc_of_ast_ctx ctx ploc in
+      let prior = Option.map (resolve_prior_spec ctx ~loc ~pname) pprior in
       List.map (fun v ->
         { Ir.name          = pname ^ "_" ^ v;
           Ir.value         = None;
@@ -3002,9 +3012,9 @@ let build_model_structure ctx expanded_trs =
     Ir.infectious_compartments  = List.rev !infectious_compartments;
   }
 
-let expand_detail ?(source_dir = "") (name : string) (decls : declaration list)
+let expand_detail ?(source_dir = "") ?(filename = "<input>") (name : string) (decls : declaration list)
     : Ir.model * context * model_summary =
-  let ctx = empty_context ~source_dir () in
+  let ctx = empty_context ~source_dir ~filename () in
   collect_declarations ctx decls;
   (* Pass 1: resolve dimensions {} block, build dim_registry *)
   resolve_dimensions ctx;
@@ -3059,6 +3069,6 @@ let expand_detail ?(source_dir = "") (name : string) (decls : declaration list)
   } in
   (model, ctx, summary)
 
-let expand ?(source_dir = "") (name : string) (decls : declaration list) : Ir.model =
-  let (model, _, _) = expand_detail ~source_dir name decls in
+let expand ?(source_dir = "") ?(filename = "<input>") (name : string) (decls : declaration list) : Ir.model =
+  let (model, _, _) = expand_detail ~source_dir ~filename name decls in
   model
