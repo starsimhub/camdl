@@ -30,174 +30,6 @@ pub mod gating;
 
 use config::FitToml;
 
-// Old per-stage CLI entry points. Superseded by cmd_fit_run_v2 but kept
-// because the legacy bridge and internal runners still reference FitToml.
-#[allow(dead_code)]
-pub fn cmd_fit_scout(args: &[String]) {
-    let (fit, fit_path, seed, force) = parse_fit_args(args, false);
-
-    // Validate partition
-    let (model, _) = load_model_for_validation(&fit);
-    let model_params: Vec<String> = model.parameters.iter().map(|p| p.name.clone()).collect();
-    fit.validate_partition(&model_params).unwrap_or_else(|e| {
-        eprintln!("error: {}", e);
-        std::process::exit(1);
-    });
-    fit.validate_bounds(&model).unwrap_or_else(|e| {
-        eprintln!("error: {}", e);
-        std::process::exit(1);
-    });
-
-    let fit_hash = fit.fit_content_hash(&fit_path).unwrap_or_else(|e| {
-        eprintln!("error: {}", e); std::process::exit(1);
-    });
-    let (fit, _fit_root) = prepare_v1_cell(&fit, &fit_path, seed);
-    let t0 = std::time::Instant::now();
-    scout::run_scout(&fit, seed, force).unwrap_or_else(|e| {
-        eprintln!("error: {}", e);
-        std::process::exit(1);
-    });
-    let stage_dir = std::path::PathBuf::from(&fit.fit.output_dir).join("scout");
-    let (best_ll, best_c) = read_v1_stage_best(&stage_dir);
-    let n_chains = fit.scout.as_ref().and_then(|s| s.chains).unwrap_or(4);
-    let algo = serde_json::json!({ "method": "if2-scout", "chains": n_chains });
-    write_v1_stage_run(&stage_dir, &fit_hash, "scout", "if2", seed,
-        n_chains, algo, best_ll, best_c, t0.elapsed().as_secs_f64(), None);
-}
-
-#[allow(dead_code)]
-pub fn cmd_fit_refine(args: &[String]) {
-    let (fit, fit_path, seed, force) = parse_fit_args(args, true);
-    let starts_from = parse_starts_from(args);
-    let allow_nonconverged_scout = args.iter().any(|a| a == "--allow-nonconverged-scout");
-
-    let (model, _) = load_model_for_validation(&fit);
-    let model_params: Vec<String> = model.parameters.iter().map(|p| p.name.clone()).collect();
-    fit.validate_partition(&model_params).unwrap_or_else(|e| {
-        eprintln!("error: {}", e);
-        std::process::exit(1);
-    });
-
-    let fit_hash = fit.fit_content_hash(&fit_path).unwrap_or_else(|e| {
-        eprintln!("error: {}", e); std::process::exit(1);
-    });
-    let (fit, _fit_root) = prepare_v1_cell(&fit, &fit_path, seed);
-    let t0 = std::time::Instant::now();
-    refine::run_refine(&fit, &starts_from, seed, force, allow_nonconverged_scout)
-        .unwrap_or_else(|e| {
-            eprintln!("error: {}", e);
-            std::process::exit(1);
-        });
-    let stage_dir = std::path::PathBuf::from(&fit.fit.output_dir).join("refine");
-    let (best_ll, best_c) = read_v1_stage_best(&stage_dir);
-    let n_chains = fit.refine.as_ref().and_then(|s| s.chains).unwrap_or(4);
-    let algo = serde_json::json!({ "method": "if2-refine", "chains": n_chains });
-    write_v1_stage_run(&stage_dir, &fit_hash, "refine", "if2", seed,
-        n_chains, algo, best_ll, best_c, t0.elapsed().as_secs_f64(),
-        Some(&starts_from));
-}
-
-#[allow(dead_code)]
-pub fn cmd_fit_validate(args: &[String]) {
-    let (fit, fit_path, seed, force) = parse_fit_args(args, true);
-    let starts_from = parse_starts_from(args);
-
-    let (model, _) = load_model_for_validation(&fit);
-    let model_params: Vec<String> = model.parameters.iter().map(|p| p.name.clone()).collect();
-    fit.validate_partition(&model_params).unwrap_or_else(|e| {
-        eprintln!("error: {}", e);
-        std::process::exit(1);
-    });
-
-    let fit_hash = fit.fit_content_hash(&fit_path).unwrap_or_else(|e| {
-        eprintln!("error: {}", e); std::process::exit(1);
-    });
-    let (fit, _fit_root) = prepare_v1_cell(&fit, &fit_path, seed);
-    let t0 = std::time::Instant::now();
-    validate::run_validate(&fit, &starts_from, seed, force).unwrap_or_else(|e| {
-        eprintln!("error: {}", e);
-        std::process::exit(1);
-    });
-    let stage_dir = std::path::PathBuf::from(&fit.fit.output_dir).join("validate");
-    let (best_ll, best_c) = read_v1_stage_best(&stage_dir);
-    let n_chains = fit.validate.as_ref().and_then(|s| s.chains).unwrap_or(4);
-    let algo = serde_json::json!({ "method": "if2-validate", "chains": n_chains });
-    write_v1_stage_run(&stage_dir, &fit_hash, "validate", "if2", seed,
-        n_chains, algo, best_ll, best_c, t0.elapsed().as_secs_f64(),
-        Some(&starts_from));
-}
-
-#[allow(dead_code)]
-pub fn cmd_fit_pmmh(args: &[String]) {
-    let (fit, fit_path, seed, force) = parse_fit_args(args, false);
-    let starts_from = parse_optional_starts_from(args);
-    let check_variance = args.iter().any(|a| a == "--check-variance");
-    let resume = args.iter().any(|a| a == "--resume");
-
-    let (model, _) = load_model_for_validation(&fit);
-    let model_params: Vec<String> = model.parameters.iter().map(|p| p.name.clone()).collect();
-    fit.validate_partition(&model_params).unwrap_or_else(|e| {
-        eprintln!("error: {}", e);
-        std::process::exit(1);
-    });
-    fit.validate_bounds(&model).unwrap_or_else(|e| {
-        eprintln!("error: {}", e);
-        std::process::exit(1);
-    });
-
-    let fit_hash = fit.fit_content_hash(&fit_path).unwrap_or_else(|e| {
-        eprintln!("error: {}", e); std::process::exit(1);
-    });
-    let (fit, _fit_root) = prepare_v1_cell(&fit, &fit_path, seed);
-    let t0 = std::time::Instant::now();
-    pmmh::run_pmmh_cli(&fit, starts_from.as_deref(), seed, force, check_variance, resume).unwrap_or_else(|e| {
-        eprintln!("error: {}", e);
-        std::process::exit(1);
-    });
-    let stage_dir = std::path::PathBuf::from(&fit.fit.output_dir).join("pmmh");
-    let n_chains = fit.pmmh.as_ref().and_then(|s| s.chains).unwrap_or(4);
-    let algo = serde_json::json!({ "method": "pmmh", "chains": n_chains });
-    write_v1_stage_run(&stage_dir, &fit_hash, "pmmh", "pmmh", seed,
-        n_chains, algo, None, None, t0.elapsed().as_secs_f64(),
-        starts_from.as_deref());
-}
-
-#[allow(dead_code)]
-pub fn cmd_fit_pgas(args: &[String]) {
-    let (fit, fit_path, seed, force) = parse_fit_args(args, false);
-    let starts_from = parse_optional_starts_from(args);
-    let no_nuts = args.iter().any(|a| a == "--no-nuts");
-    let diagonal_mass = args.iter().any(|a| a == "--diagonal-mass");
-    let resume = args.iter().any(|a| a == "--resume");
-
-    let (model, _) = load_model_for_validation(&fit);
-    let model_params: Vec<String> = model.parameters.iter().map(|p| p.name.clone()).collect();
-    fit.validate_partition(&model_params).unwrap_or_else(|e| {
-        eprintln!("error: {}", e);
-        std::process::exit(1);
-    });
-    fit.validate_bounds(&model).unwrap_or_else(|e| {
-        eprintln!("error: {}", e);
-        std::process::exit(1);
-    });
-
-    let fit_hash = fit.fit_content_hash(&fit_path).unwrap_or_else(|e| {
-        eprintln!("error: {}", e); std::process::exit(1);
-    });
-    let (fit, _fit_root) = prepare_v1_cell(&fit, &fit_path, seed);
-    let t0 = std::time::Instant::now();
-    pgas::run_pgas_cli(&fit, starts_from.as_deref(), seed, force, !no_nuts, !diagonal_mass, resume).unwrap_or_else(|e| {
-        eprintln!("error: {}", e);
-        std::process::exit(1);
-    });
-    let stage_dir = std::path::PathBuf::from(&fit.fit.output_dir).join("pgas");
-    let n_chains = fit.pgas.as_ref().and_then(|s| s.chains).unwrap_or(4);
-    let algo = serde_json::json!({ "method": "pgas", "chains": n_chains });
-    write_v1_stage_run(&stage_dir, &fit_hash, "pgas", "pgas", seed,
-        n_chains, algo, None, None, t0.elapsed().as_secs_f64(),
-        starts_from.as_deref());
-}
-
 pub fn cmd_fit_status(args: &[String]) {
     if let Some(path) = args.first() {
         if !path.starts_with("--") {
@@ -1351,6 +1183,7 @@ pub fn cmd_fit_run_v2(args: &[String]) {
 /// v2 without touching the stage-writer internals. Also writes (once)
 /// the top-level Run::Fit at the fit root so `camdl list` can surface
 /// the fit even before the first stage completes.
+#[allow(dead_code)] // v1 helper; the cmd_fit_scout/refine/... entry points that used it were removed 2026-04-20. Retained in case a fit-bridge path re-uses it.
 fn prepare_v1_cell(fit: &FitToml, fit_path: &str, seed: u64) -> (FitToml, std::path::PathBuf) {
     let cell = fit.cell_dir(fit_path, seed).unwrap_or_else(|e| {
         eprintln!("error: {}", e);
@@ -1379,6 +1212,7 @@ fn prepare_v1_cell(fit: &FitToml, fit_path: &str, seed: u64) -> (FitToml, std::p
 /// Build a Run::Fit record from a v1 FitToml. Analogous to
 /// `build_fit_run` for v2; emits the same schema so `camdl list`
 /// treats v1 fits identically.
+#[allow(dead_code)]
 fn build_v1_fit_run(fit: &FitToml, fit_path: &str) -> crate::run_meta::Run {
     let fit_hash = fit.fit_content_hash(fit_path).unwrap_or_else(|e| {
         eprintln!("error: {}", e);
@@ -1434,6 +1268,7 @@ fn build_v1_fit_run(fit: &FitToml, fit_path: &str) -> crate::run_meta::Run {
 /// After a v1 stage writer (scout / refine / …) has completed, write
 /// the unified-schema Run::FitStage `run.json` at the stage dir.
 /// Idempotent: re-running overwrites with fresh timing + hash.
+#[allow(dead_code)]
 fn write_v1_stage_run(
     stage_dir: &std::path::Path,
     fit_hash: &str,
@@ -1508,6 +1343,7 @@ fn write_v1_stage_run(
 /// Read `best_loglik` and `best_chain` from a v1 stage's
 /// `fit_state.toml`. Returns `(None, None)` when unavailable (e.g.
 /// the stage didn't produce fit_state).
+#[allow(dead_code)]
 fn read_v1_stage_best(stage_dir: &std::path::Path) -> (Option<f64>, Option<usize>) {
     use crate::fit::state::FitState;
     match FitState::load(&stage_dir.to_string_lossy()) {
@@ -1942,6 +1778,7 @@ fn resolve_starts_from_arg(raw: &str) -> String {
     }
 }
 
+#[allow(dead_code)]
 fn parse_optional_starts_from(args: &[String]) -> Option<String> {
     for (i, arg) in args.iter().enumerate() {
         if arg == "--starts-from" {
