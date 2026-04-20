@@ -71,8 +71,37 @@ let rec differentiate (e : expr) (param : string) : expr =
                     then_ = differentiate b.left param;
                     else_ = differentiate b.right param }
 
-    (* Mod: not differentiable. Return 0. *)
-    | Mod -> Const 0.0
+    (* Mod: `d(f mod g)/dθ` almost everywhere is `f' - g' * floor(f/g)`,
+       but the IR expr grammar has no `floor`, and `Mod` is rare in
+       rate expressions anyway. Compromise: if neither operand
+       mentions the diff param, the derivative is genuinely 0
+       (original behavior, correct). If either side depends on the
+       param, raise — returning 0 there is the "silent wrong answer"
+       pattern flagged as M4 in the 2026-04-19 compiler review, and
+       would make any parameter inside a Mod expression unidentifiable
+       to gradient-based inference (NUTS flat directions).
+       Callers differentiate rate-by-rate across every estimated
+       parameter; a user whose model depends on Mod over a param will
+       see a clear error at compile time rather than silently-wrong
+       posteriors at sample time. *)
+    | Mod ->
+      let rec mentions p = function
+        | Param n       -> n = p
+        | Const _ | Pop _ | Time | Projected -> false
+        | PopSum _      -> false
+        | BinOp bb      -> mentions p bb.left || mentions p bb.right
+        | UnOp uu       -> mentions p uu.arg
+        | Cond c        -> mentions p c.pred || mentions p c.then_ || mentions p c.else_
+        | TimeFunc _    -> false
+        | TableLookup (_, args) -> List.exists (mentions p) args
+      in
+      if mentions param b.left || mentions param b.right then
+        failwith (Printf.sprintf
+          "autodiff: derivative of `mod` w.r.t. parameter '%s' is not \
+           representable in the IR expression grammar (floor is needed). \
+           Mod is not supported inside rate expressions that participate in \
+           gradient-based inference." param)
+      else Const 0.0
 
     (* Comparison ops: piecewise constant, derivative is 0 *)
     | Eq | Neq | Lt | Gt | Le | Ge -> Const 0.0

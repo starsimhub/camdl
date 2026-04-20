@@ -605,14 +605,39 @@ let table_dims ctx tname =
   | Some td -> List.map dim_name_of_entry td.tdims
   | None    -> []
 
+(** Return the 0-based index of `value_name` within dimension
+    `dim_name`'s ordered level list, as a float. Emits E263 + returns
+    0 when the value isn't a level.
+
+    Previously returned 0 silently on a miss (C2 in the 2026-04-19
+    review), so `C_age[typo]` quietly resolved to `C_age[0]` — a
+    stratified contact matrix with a typoed key silently used the
+    wrong entry. Fix: emit a diagnostic naming the bad value and
+    listing the valid levels. We still return 0 so downstream
+    traversal can continue and surface any additional errors in a
+    single pass; the diagnostic blocks compilation at exit.
+
+    Levenshtein-distance "did you mean" hinting is possible but not
+    implemented here — the levels list is small enough to eyeball. *)
 let dim_value_index ctx dim_name value_name =
   let values = dim_values ctx dim_name in
   let rec find i = function
-    | []                         -> 0
-    | v :: _ when v = value_name -> i
+    | []                         -> None
+    | v :: _ when v = value_name -> Some i
     | _ :: rest                  -> find (i + 1) rest
   in
-  float_of_int (find 0 values)
+  match find 0 values with
+  | Some i -> float_of_int i
+  | None ->
+    Diagnostics.error ctx.diags
+      ~code:"E263"
+      ~loc:Diagnostics.no_loc
+      ~message:(Printf.sprintf
+        "'%s' is not a level of dimension '%s'" value_name dim_name)
+      ~hint:(Printf.sprintf "valid levels: %s"
+        (if values = [] then "(none)" else String.concat ", " values))
+      ();
+    0.0
 
 (* ── Normalize expr ──────────────────────────────────────────────────────── *)
 
@@ -1722,10 +1747,42 @@ let expand_output ctx =
 
 (* ── Intervention expansion ──────────────────────────────────────────────── *)
 
+(** Resolve an AST expression to a bare compartment name. Used for
+    `from =` / `to =` kwargs in transfer actions.
+
+    Previously returned `"?"` silently when the expression resolved
+    to anything other than `Ir.Pop` (C7 in the 2026-04-19 review).
+    The resulting intervention had `src: "?"` / `dst: "?"` — a
+    compartment name that doesn't exist — and downstream consumers
+    happily carried the garbage. Fix: emit E264 naming the kind of
+    expression we actually got, returning "?" as the continuation
+    so any other errors in the same intervention surface too. *)
 let resolve_comp_name ctx env e =
   match resolve_expr ctx env e with
   | Ir.Pop name -> name
-  | _ -> "?"
+  | other ->
+    let kind = match other with
+      | Ir.Param p    -> Printf.sprintf "parameter reference ('%s')" p
+      | Ir.PopSum _   -> "a sum of populations (PopSum)"
+      | Ir.BinOp _    -> "an arithmetic expression"
+      | Ir.UnOp _     -> "a unary expression"
+      | Ir.Const _    -> "a constant"
+      | Ir.Cond _     -> "a conditional"
+      | Ir.TimeFunc _ -> "a time-function reference"
+      | Ir.TableLookup _ -> "a table lookup"
+      | Ir.Time       -> "the time symbol"
+      | Ir.Projected  -> "a projected value"
+      | Ir.Pop _      -> "a compartment" (* unreachable by pattern *)
+    in
+    Diagnostics.error ctx.diags
+      ~code:"E264"
+      ~loc:Diagnostics.no_loc
+      ~message:(Printf.sprintf
+        "expected a bare compartment name, got %s" kind)
+      ~hint:"`from =` / `to =` in a transfer action must name a \
+             compartment directly (e.g. `from = S`, not `from = S + R`)"
+      ();
+    "?"
 
 (* ── Time function expansion ──────────────────────────────────────────────── *)
 
