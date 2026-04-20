@@ -404,7 +404,8 @@ obs_decl:
           | `Lik l        -> lik := Some l
         ) obs_kvs;
         { oname = name; oindices = ibs; odata_stream = !ds;
-          oschedule = !sched; oprojection = !proj; olikelihood = !lik } }
+          oschedule = !sched; oprojection = !proj; olikelihood = !lik;
+          oloc = Parser_errors.ast_loc_of ~sp:$startpos ~ep:$endpos } }
 
 obs_kv:
   | IDENT EQ s = STRING { `DataStream s }
@@ -447,21 +448,27 @@ intervention_decl:
           | `Action a -> action := a
           | `Schedule s -> sched := s
         ) iv_kvs;
-        { ivname = name; ivindices = ibs; ivaction = !action; ivschedule = !sched; ivguard = guard } }
+        { ivname = name; ivindices = ibs; ivaction = !action; ivschedule = !sched; ivguard = guard;
+          ivloc = Parser_errors.ast_loc_of ~sp:$startpos ~ep:$endpos } }
   | name = IDENT ibs = index_bindings_opt COLON TRANSFER LPAREN kwargs = separated_list(COMMA, transfer_kwarg) RPAREN AT_KW LBRACKET ts = separated_list(COMMA, expr) RBRACKET guard = where_clause_opt
-      { { ivname = name; ivindices = ibs; ivaction = ATransfer kwargs; ivschedule = SAtTimes ts; ivguard = guard } }
+      { { ivname = name; ivindices = ibs; ivaction = ATransfer kwargs; ivschedule = SAtTimes ts; ivguard = guard;
+          ivloc = Parser_errors.ast_loc_of ~sp:$startpos ~ep:$endpos } }
   (* transfer(...) { every = T, from = T0, until = T1 } — recurring schedule *)
   | name = IDENT ibs = index_bindings_opt COLON TRANSFER LPAREN kwargs = separated_list(COMMA, transfer_kwarg) RPAREN LBRACE sched = recurring_body RBRACE guard = where_clause_opt
-      { { ivname = name; ivindices = ibs; ivaction = ATransfer kwargs; ivschedule = sched; ivguard = guard } }
+      { { ivname = name; ivindices = ibs; ivaction = ATransfer kwargs; ivschedule = sched; ivguard = guard;
+          ivloc = Parser_errors.ast_loc_of ~sp:$startpos ~ep:$endpos } }
   (* add(COMP, EXPR) at [...] *)
   | name = IDENT ibs = index_bindings_opt COLON ADD LPAREN comp = IDENT COMMA count = expr RPAREN AT_KW LBRACKET ts = separated_list(COMMA, expr) RBRACKET guard = where_clause_opt
-      { { ivname = name; ivindices = ibs; ivaction = AAdd (comp, [], count); ivschedule = SAtTimes ts; ivguard = guard } }
+      { { ivname = name; ivindices = ibs; ivaction = AAdd (comp, [], count); ivschedule = SAtTimes ts; ivguard = guard;
+          ivloc = Parser_errors.ast_loc_of ~sp:$startpos ~ep:$endpos } }
   (* add(COMP, EXPR) { every = T, from = T0, until = T1 } — recurring schedule *)
   | name = IDENT ibs = index_bindings_opt COLON ADD LPAREN comp = IDENT COMMA count = expr RPAREN LBRACE sched = recurring_body RBRACE guard = where_clause_opt
-      { { ivname = name; ivindices = ibs; ivaction = AAdd (comp, [], count); ivschedule = sched; ivguard = guard } }
+      { { ivname = name; ivindices = ibs; ivaction = AAdd (comp, [], count); ivschedule = sched; ivguard = guard;
+          ivloc = Parser_errors.ast_loc_of ~sp:$startpos ~ep:$endpos } }
   (* add(COMP, EXPR) every PERIOD at_day DAY *)
   | name = IDENT ibs = index_bindings_opt COLON ADD LPAREN comp = IDENT COMMA count = expr RPAREN EVERY period = expr AT_DAY day = expr guard = where_clause_opt
-      { { ivname = name; ivindices = ibs; ivaction = AAdd (comp, [], count); ivschedule = SEveryAtDay (period, day); ivguard = guard } }
+      { { ivname = name; ivindices = ibs; ivaction = AAdd (comp, [], count); ivschedule = SEveryAtDay (period, day); ivguard = guard;
+          ivloc = Parser_errors.ast_loc_of ~sp:$startpos ~ep:$endpos } }
 
 (* Recurring schedule body: kwargs in any order, newline-separated
    (matches the rest of camdl's block style — no commas required). *)

@@ -2234,6 +2234,7 @@ let expand_scheduled_actions ctx decls ~always_active =
     | Some sd -> resolve_float_expr ctx sd.sim_to
   in
   List.concat_map (fun iv ->
+    let iv_loc = diag_loc_of_ast_ctx ctx iv.ivloc in
     let base_name = if iv.ivindices = [] then None else Some iv.ivname in
     let combos = cartesian_product iv.ivindices ctx in
     List.filter_map (fun env ->
@@ -2266,13 +2267,13 @@ let expand_scheduled_actions ctx decls ~always_active =
           in
           if period <= 0.0 then
             Diagnostics.error ctx.diags
-              ~code:"E240" ~loc:Diagnostics.no_loc
+              ~code:"E240" ~loc:iv_loc
               ~message:(Printf.sprintf "intervention '%s': 'every' must be positive (got %g)" iv.ivname period)
               ~hint:"Use a positive interval, e.g. every = 30 'days"
               ();
           if start > end_ then
             Diagnostics.error ctx.diags
-              ~code:"E241" ~loc:Diagnostics.no_loc
+              ~code:"E241" ~loc:iv_loc
               ~message:(Printf.sprintf "intervention '%s': 'from' (%g) must be <= 'until' (%g)" iv.ivname start end_)
               ~hint:"Either reorder the values or check unit conversions (e.g. years → days)."
               ();
@@ -2282,7 +2283,7 @@ let expand_scheduled_actions ctx decls ~always_active =
             let n_fires = int_of_float (((end_ -. start) /. period) +. 1.0) in
             if n_fires > max_fires then
               Diagnostics.error ctx.diags
-                ~code:"E242" ~loc:Diagnostics.no_loc
+                ~code:"E242" ~loc:iv_loc
                 ~message:(Printf.sprintf "intervention '%s' schedule expands to %d firings (cap %d)"
                             iv.ivname n_fires max_fires)
                 ~hint:"Check units: e.g. every = 1 'days with until = 100 'years is 36_525 entries."
@@ -2370,7 +2371,7 @@ let expand_scheduled_actions ctx decls ~always_active =
                   || Hashtbl.mem ctx.comp_tbl comp) then
             Diagnostics.error ctx.diags
               ~code:"E265"
-              ~loc:Diagnostics.no_loc
+              ~loc:iv_loc
               ~message:(Printf.sprintf
                 "intervention '%s' sets '%s' which is not a declared \
                  compartment"
@@ -2403,11 +2404,12 @@ let expand_observations ctx =
        (afp_cases_kano, afp_cases_borno, ...) per IR spec §5.3.
        This is a common UX trap — users often want a single multi-
        column file keyed by the base name. Warn once per declaration. *)
+    let od_loc = diag_loc_of_ast_ctx ctx od.oloc in
     (match od.odata_stream with
      | None when od.oindices <> [] ->
        Diagnostics.warning ctx.diags
          ~code:"W203"
-         ~loc:Diagnostics.no_loc
+         ~loc:od_loc
          ~message:(Printf.sprintf
            "indexed observation '%s' has no explicit data_stream; \
             each stratum gets its own stream name"
@@ -2423,7 +2425,7 @@ let expand_observations ctx =
     let missing_field name =
       Diagnostics.error ctx.diags
         ~code:"E266"
-        ~loc:Diagnostics.no_loc
+        ~loc:od_loc
         ~message:(Printf.sprintf
           "observation '%s': missing required field '%s'" od.oname name)
         ~hint:(match name with
@@ -2553,7 +2555,7 @@ let expand_observations ctx =
     List.iter (fun (k, _) ->
       if k = "" then
         Diagnostics.error ctx.diags
-          ~code:"E250" ~loc:Diagnostics.no_loc
+          ~code:"E250" ~loc:od_loc
           ~message:(Printf.sprintf
             "observation '%s': likelihood '%s' requires named arguments \
              (got a positional argument)" od.oname lik_name)
@@ -2564,7 +2566,7 @@ let expand_observations ctx =
           ()
       else if not (List.mem k required_kwargs) then
         Diagnostics.error ctx.diags
-          ~code:"E251" ~loc:Diagnostics.no_loc
+          ~code:"E251" ~loc:od_loc
           ~message:(Printf.sprintf
             "observation '%s': likelihood '%s' has no argument '%s'"
             od.oname lik_name k)

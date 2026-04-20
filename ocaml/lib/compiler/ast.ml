@@ -148,6 +148,7 @@ type obs_decl = {
   oschedule   : obs_schedule option;
   oprojection : obs_projection option;
   olikelihood : likelihood_kind option;
+  oloc        : loc;
 }
 
 type action_decl =
@@ -168,6 +169,7 @@ type intervention_decl = {
   ivaction  : action_decl;
   ivschedule: schedule_decl;
   ivguard   : guard option;         (* where expr — compile-time filter *)
+  ivloc     : loc;
 }
 
 type ode_decl = { ocomp: string; oderiv: expr }
