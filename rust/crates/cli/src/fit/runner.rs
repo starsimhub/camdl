@@ -1989,6 +1989,23 @@ pub fn compute_config_hash(fit: &super::config::FitToml, config: &FitRunConfig) 
     h.update(config.if2_config.n_particles.to_le_bytes());
     h.update(config.if2_config.dt.to_bits().to_le_bytes());
 
+    // IM10 in 2026-04-19 inference review batch 3: hash
+    // `starts_from` across every stage config. Without this, a
+    // resumed fit pointed at a different prior stage's output
+    // hashes the same — the `config hash mismatch` check in PGAS
+    // / PMMH passes, and the chain silently continues from a wrong
+    // initial point. starts_from is effectively part of the
+    // statistical problem definition.
+    h.update(b"\x00starts_from\x00");
+    if let Some(ref s) = fit.pgas.as_ref().and_then(|p| p.starts_from.as_ref()) {
+        h.update(b"pgas=");
+        h.update(s.as_bytes());
+    }
+    if let Some(ref s) = fit.pmmh.as_ref().and_then(|p| p.proposal_from.as_ref()) {
+        h.update(b"\x00pmmh_proposal_from=");
+        h.update(s.as_bytes());
+    }
+
     // Pin the runtime version. Without this, a code change that alters
     // inference semantics but leaves the config bytes identical would
     // silently reuse stale cached state. Matches compute_config_hash_v2
