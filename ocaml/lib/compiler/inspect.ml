@@ -802,6 +802,7 @@ let run_inspect path opts =
     Fmt.set_style_renderer Fmt.stderr `Ansi_tty
   );
   match Compiler.compile_detail_result ~name ~filename:path src with
+  | Error "" -> exit 1
   | Error e ->
     Fmt.epr "Error: %s@\n" e;
     exit 1
@@ -837,6 +838,7 @@ let run_check path =
   Fmt.set_style_renderer Fmt.stdout `Ansi_tty;
   Fmt.set_style_renderer Fmt.stderr `Ansi_tty;
   match Compiler.compile_detail_result ~name ~filename:path src with
+  | Error "" -> exit 1
   | Error e ->
     Fmt.epr "Error: %s@\n" e;
     exit 1

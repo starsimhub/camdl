@@ -128,6 +128,10 @@ let () =
          Bytes.to_string s
        in
        match Compiler.compile ~name ~filename:path src with
+       | Error "" ->
+         (* Sentinel: diagnostics already rendered by report_and_exit
+            (m5 in the 2026-04-19 compiler review). *)
+         exit 1
        | Error e -> Printf.eprintf "Error: %s\n" e; exit 1
        | Ok m ->
          let overrides = List.rev !set_kvs in

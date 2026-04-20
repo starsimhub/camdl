@@ -63,6 +63,14 @@ let compile_detail_result ?(name = "model") ?(filename = "<input>") (src : strin
       Diagnostics.report_and_exit ctx.diags source;
     Ok { model; ctx; summary; source }
   with
+  | Diagnostics.Compile_error _ ->
+    (* Diagnostics were already rendered by report_and_exit; return a
+       sentinel so callers know not to re-print. Previously the generic
+       `exn ->` arm below caught this and returned
+       `Error "Compile_error(...)"`, which the CLI then re-printed as
+       a useless "Error: Compile_error(...)" line after the nicely
+       rendered diagnostic block (m5 in the 2026-04-19 review). *)
+    Error ""
   | Failure msg -> Error msg
   | exn -> Error (Printexc.to_string exn)
 
