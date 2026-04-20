@@ -498,8 +498,22 @@ pub fn run_pmmh(
 
 // ── MCMC diagnostics ───────────────────────────────────────────────
 
-/// Effective sample size from chain autocorrelation (Geyer 1992 initial
-/// positive sequence estimator).
+/// Effective sample size via Geyer (1992) initial-positive-sequence
+/// estimator with **pair-sum** truncation — the canonical variant
+/// used by Stan, PyMC, and BDA3.
+///
+/// IM11 in 2026-04-19 inference review batch 3: the previous
+/// implementation truncated on the first negative single-lag
+/// autocorrelation, which overestimates ESS by 2–5× on chains
+/// with non-monotonic autocorrelation (NUTS during tuning, PMMH
+/// near a mode boundary). Pair-sum is strictly more conservative:
+/// it stops when `ρ_{2k} + ρ_{2k+1} < 0`.
+///
+/// Formula:
+///   ESS = n / (1 + 2 · Σ_{k=1}^{K} ρ_k)
+/// where K is the largest odd index such that every consecutive
+/// pair sum ρ_{2j} + ρ_{2j+1} for j = 1, …, (K-1)/2 is
+/// non-negative.
 pub fn mcmc_ess(chain: &[f64]) -> f64 {
     let n = chain.len();
     if n < 4 { return n as f64; }
@@ -508,18 +522,25 @@ pub fn mcmc_ess(chain: &[f64]) -> f64 {
     let var = chain.iter().map(|&x| (x - mean).powi(2)).sum::<f64>() / n as f64;
     if var < 1e-30 { return 1.0; }
 
-    let mut sum_rho = 0.0;
-    let mut lag = 1;
-    while lag < n {
-        let rho: f64 = chain.iter().zip(chain.iter().skip(lag))
+    let rho_at = |lag: usize| -> f64 {
+        chain.iter().zip(chain.iter().skip(lag))
             .map(|(&a, &b)| (a - mean) * (b - mean))
-            .sum::<f64>() / (n as f64 * var);
-        // Initial positive sequence: stop when autocorrelation goes negative
-        // (Geyer recommends stopping at the first negative *pair* sum, but
-        // single-lag cutoff is standard and simpler)
-        if lag >= 2 && rho < 0.0 { break; }
-        sum_rho += rho;
-        lag += 1;
+            .sum::<f64>() / (n as f64 * var)
+    };
+
+    // Accumulate pair sums ρ_{2k−1} + ρ_{2k} for k = 1, 2, …
+    // Stop at the first non-positive pair sum. Include both lags
+    // that make up the positive pair in sum_rho.
+    let mut sum_rho = 0.0;
+    let mut k = 1;
+    while 2 * k < n {
+        let rho_a = rho_at(2 * k - 1);
+        let rho_b = rho_at(2 * k);
+        if rho_a + rho_b <= 0.0 {
+            break;
+        }
+        sum_rho += rho_a + rho_b;
+        k += 1;
     }
     (n as f64 / (1.0 + 2.0 * sum_rho)).max(1.0)
 }
