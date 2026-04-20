@@ -85,13 +85,16 @@ pub fn bootstrap_filter<P: ProcessModel<State = ParticleState>>(
 
     // Per-particle RNG streams (deterministic, derived from seed)
     let mut rngs: Vec<StatefulRng> = (0..n_particles)
-        .map(|i| StatefulRng::new(seed ^ (i as u64).wrapping_mul(0x517cc1b727220a95)))
+        .map(|i| StatefulRng::new_stream(seed, i as u64))
         .collect();
 
     // Separate RNG streams for diagnostic draws (rmeasure).
     // Process RNG streams must be identical whether or not predictions are computed.
     let mut diag_rngs: Vec<StatefulRng> = (0..n_particles)
-        .map(|i| StatefulRng::new(seed ^ (i as u64).wrapping_mul(0xbaadf00dcafebabe)))
+        // Diagnostic RNG stream — offset by 2^62 so process-RNG and
+        // diag-RNG streams never overlap (u64 stream id is 64 bits;
+        // 2^62 is a comfortable gap from the low-indexed process streams).
+        .map(|i| StatefulRng::new_stream(seed, (i as u64) | (1u64 << 62)))
         .collect();
 
     // Double-buffer for resampling (avoids clone allocation)

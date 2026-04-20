@@ -14,6 +14,22 @@ impl StatefulRng {
         StatefulRng(ChaCha8Rng::from_seed(seed_bytes))
     }
 
+    /// Per-stream derivation for embarrassingly parallel paths like
+    /// per-particle RNG. Same master seed + different `stream` gives
+    /// guaranteed-independent ChaCha8 output streams via the built-in
+    /// 64-bit stream counter. IM1 in the 2026-04-19 inference review:
+    /// particle_filter.rs and if2.rs previously seeded per-particle
+    /// RNGs via `seed ^ i.wrapping_mul(0x517cc...)`, which left
+    /// correlated low-bit structure for particles with predictable
+    /// index offsets. `set_stream` is the cipher's own documented
+    /// mechanism for parallel streams.
+    pub fn new_stream(seed: u64, stream: u64) -> Self {
+        let seed_bytes = expand_u64_to_seed(seed.wrapping_add(0xdeadbeef_cafebabe));
+        let mut rng = ChaCha8Rng::from_seed(seed_bytes);
+        rng.set_stream(stream);
+        StatefulRng(rng)
+    }
+
     pub fn poisson(&mut self, lambda: f64) -> u64 {
         if lambda <= 0.0 { return 0; }
         let lambda = lambda.min(1e15);

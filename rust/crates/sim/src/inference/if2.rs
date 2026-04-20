@@ -399,14 +399,18 @@ pub fn run_if2_with_progress<P: ProcessModel<State = ParticleState>>(
             pp.copy_from_slice(&current_params);
         }
 
-        // Per-particle RNGs (must differ per iteration for exploration)
+        // IM1 fix (2026-04-19 inference review): per-particle RNG
+        // streams via ChaCha8's stream counter. iter in the top
+        // 32 bits, particle i in the bottom 32 — fits 2^32
+        // iterations × 2^32 particles with room to spare. The
+        // resample RNG uses a non-overlapping high bit.
+        let stream_base = (iter as u64) << 32;
         let mut rngs: Vec<StatefulRng> = (0..n)
-            .map(|i| StatefulRng::new(
-                seed ^ ((iter as u64) << 32) ^ (i as u64).wrapping_mul(0x517cc1b727220a95)
-            ))
+            .map(|i| StatefulRng::new_stream(seed, stream_base | (i as u64)))
             .collect();
-        let mut resample_rng = StatefulRng::new(
-            seed.wrapping_add(0xdeadbeef).wrapping_add(iter as u64)
+        let mut resample_rng = StatefulRng::new_stream(
+            seed,
+            stream_base | (1u64 << 63),
         );
 
         // Diagnostic accumulators (averaged across observation times)

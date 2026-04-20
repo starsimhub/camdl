@@ -180,10 +180,9 @@ pub fn bootstrap_filter_correlated(
         p.counts.copy_from_slice(&init_int.counts);
     }
 
-    // Per-particle RNGs — used for binomial draws (not correlated).
-    // Seeded from the base seed for reproducibility.
+    // Per-particle RNGs via ChaCha8 stream counter (IM1 fix 2026-04-19).
     let mut rngs: Vec<StatefulRng> = (0..n_particles)
-        .map(|i| StatefulRng::new(seed ^ (i as u64).wrapping_mul(0x517cc1b727220a95)))
+        .map(|i| StatefulRng::new_stream(seed, i as u64))
         .collect();
 
     let mut states_buf: Vec<ParticleState> = (0..n_particles)
