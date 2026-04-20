@@ -2781,14 +2781,21 @@ let expand_scenarios ctx : Ir.preset list =
        case when a child overrides a parent's set — the later value
        wins in the final output. First-seen order is preserved. *)
     let resolve_fold vs =
+      (* m23 in 2026-04-19 review: previously this rebuilt `bindings`
+         via Hashtbl.fold on every iteration, making the fold O(N²).
+         Maintain bindings incrementally — `subst` only reads the
+         latest value per key, which is what Hashtbl.replace already
+         provides when we pass the full bindings list with most recent
+         entries first. *)
       let map = Hashtbl.create (List.length vs) in
       let order = ref [] in
+      let bindings = ref [] in
       List.iter (fun (k, e) ->
-        let bindings = Hashtbl.fold (fun k v acc -> (k, v) :: acc) map [] in
-        let e' = subst bindings e in
+        let e' = subst !bindings e in
         let v = resolve_float_expr ctx e' in
         if not (Hashtbl.mem map k) then order := k :: !order;
-        Hashtbl.replace map k v
+        Hashtbl.replace map k v;
+        bindings := (k, v) :: !bindings
       ) vs;
       List.rev !order |> List.map (fun k -> (k, Hashtbl.find map k))
     in
