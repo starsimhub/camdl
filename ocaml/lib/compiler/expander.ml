@@ -1021,13 +1021,38 @@ and resolve_ident_name ctx name ~loc =
 
 (* ── Stoichiometry ────────────────────────────────────────────────────────── *)
 
+(** Resolve a stoichiometry reference to a fully-qualified compartment
+    name. When the base has multiple stratified expansions but the
+    reference has no indices, previously returned the bare base name
+    (C3 in the 2026-04-19 review) — producing `("S", 1)` in IR
+    stoichiometry for a model where S was stratified into [S_child,
+    S_adult]. The bare name `S` isn't in the expanded compartments
+    list, so the emitted IR was structurally invalid.
+
+    Now: error out naming the transition's compartment and listing
+    the valid expansions. Still returns `base` as a continuation so
+    the caller can emit additional diagnostics before the compile
+    aborts. *)
 let resolve_stoich_ref ctx env (cname, items) =
   let base = match List.assoc_opt cname env with Some n -> n | None -> cname in
   let idx_vals = List.map (index_item_to_str env) items in
   if idx_vals = [] then begin
     let expansions = expand_compartment_name ctx base in
-    if List.length expansions = 1 then List.hd expansions
-    else base
+    match expansions with
+    | [single] -> single
+    | [] -> base  (* unknown compartment — caught downstream by Validate *)
+    | many ->
+      Diagnostics.error ctx.diags
+        ~code:"E272"
+        ~loc:Diagnostics.no_loc
+        ~message:(Printf.sprintf
+          "compartment '%s' is stratified but used without indices in \
+           stoichiometry" base)
+        ~hint:(Printf.sprintf
+          "pick an expansion or index the transition: %s"
+          (String.concat ", " many))
+        ();
+      base
   end else
     String.concat "_" (base :: idx_vals)
 
@@ -2690,19 +2715,33 @@ let expand_scenarios ctx : Ir.preset list =
 (** Recover the pre-expansion base name of an expanded transition name by
     prefix-matching against the known set from ctx. Relies on the compiler
     invariant that expanded names are {base}_{stratum_parts} with '_'. *)
+(* Longest-prefix wins — M15 in the 2026-04-19 review. If a model
+   declares both `foo` and `foo_bar`, then matches against expanded
+   name `foo_bar_child`, `List.find_opt` would return whichever was
+   declared first; if `foo` came first, the expanded name was
+   misattributed to base `foo` (when it actually belongs to
+   `foo_bar`). model_structure fields downstream
+   (transmission_transitions, infectious_compartments) then carried
+   wrong bases. Fix: sort candidates by base-name length descending
+   before find_opt, so the longest matching prefix wins. *)
 let find_base_trname ctx ename =
-  List.find_opt (fun td ->
+  List.sort (fun a b ->
+    compare (String.length b.trname) (String.length a.trname)) ctx.transitions
+  |> List.find_opt (fun td ->
     let b = td.trname and bl = String.length td.trname and el = String.length ename in
     ename = b || (el > bl && String.sub ename 0 bl = b && ename.[bl] = '_')
-  ) ctx.transitions
+  )
   |> Option.map (fun td -> td.trname)
 
-(** Same invariant: compartment expanded names are {base}_{dim_values}. *)
+(** Same invariant: compartment expanded names are {base}_{dim_values}.
+    Same longest-prefix-wins fix as find_base_trname above. *)
 let find_base_compname ctx expanded_name =
-  List.find_opt (fun cd ->
+  List.sort (fun a b ->
+    compare (String.length b.cname) (String.length a.cname)) ctx.comp_decls
+  |> List.find_opt (fun cd ->
     let b = cd.cname and bl = String.length cd.cname and el = String.length expanded_name in
     expanded_name = b || (el > bl && String.sub expanded_name 0 bl = b && expanded_name.[bl] = '_')
-  ) ctx.comp_decls
+  )
   |> Option.map (fun cd -> cd.cname)
 
 let build_model_structure ctx expanded_trs =
