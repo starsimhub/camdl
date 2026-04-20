@@ -127,7 +127,16 @@ pub fn log_transition_density_grad(
 
         if total_rate <= crate::chain_binomial::RATE_EPSILON || probs.is_empty() { continue; }
 
-        // Total exits: Binom(n_exit; n_src, p_total)
+        // Total exits: Binom(n_exit; n_src, p_total).
+        //
+        // Im17 in 2026-04-19 inference review: the clamp to
+        // [1e-15, 1-1e-15] keeps `dbinom_dp` finite (otherwise
+        // 1/0 → NaN) at the cost of accuracy right at the
+        // boundary — the gradient becomes ~±1e15 and NUTS
+        // divergences are expected there. Without the clamp the
+        // sampler would hit NaN and ICE; with it the sampler sees
+        // a huge-but-finite number, rejects the leapfrog step,
+        // and adapts step size down. Tolerated behavior.
         let p_total = (1.0 - (-total_rate * dt).exp()).clamp(1e-15, 1.0 - 1e-15);
         let n_exit: u64 = probs.iter().map(|&(tr_idx, _, _)| flows[tr_idx]).sum();
         log_p += binom_logpmf(n_exit, n_src as u64, p_total);

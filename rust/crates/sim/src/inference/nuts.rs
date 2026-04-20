@@ -278,6 +278,11 @@ pub fn nuts_step(
         if stop { break; }
     }
 
+    // Im14 in 2026-04-19 inference review: Vec!= here is bit-pattern
+    // equality on f64 elements. A multinomial tree move that happens
+    // to land on a numerically-equal proposal reports "rejected."
+    // Vanishingly improbable; the correct notion — "some actual move
+    // happened" — matches in practice.
     let accepted = z_proposal != current_z;
     let mean_accept_prob = if n_accept_steps > 0 {
         sum_accept_prob / n_accept_steps as f64

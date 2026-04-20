@@ -408,11 +408,11 @@ pub fn bootstrap_filter_correlated(
             .map(|&i| swarm.log_weights[i])
             .collect();
 
-        // Systematic resample with sorted weights and correlated uniform
-        let _resample_rng = StatefulRng::new(
-            seed.wrapping_add(0xdeadbeef).wrapping_add(obs_idx as u64)
-        );
-        // Override the uniform in systematic_resample — we need a custom version
+                // Systematic resample with sorted weights and correlated uniform.
+        // Im15 in 2026-04-19 inference review: previously a
+        // `_resample_rng` was constructed here and never read —
+        // `sorted_systematic_resample` takes the correlated
+        // `base_uniform` directly and needs no RNG. Deleted.
         let indices = sorted_systematic_resample(&sorted_weights, base_uniform);
 
         // Map sorted indices back to original particle indices
