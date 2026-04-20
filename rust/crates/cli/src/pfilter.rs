@@ -266,9 +266,14 @@ pub fn cmd_pfilter(args: &[String]) {
     // ── Replicates mode: run N independent pfilters, output loglik summary ──
     if n_replicates > 1 {
         eprintln!("pfilter: {} replicates × {} particles", n_replicates, n_particles);
+        // Im20 in 2026-04-19 inference review batch 3: replicate
+        // seeding was `seed + rep`, which gives highly correlated
+        // ChaCha8 initial states across replicates. Use the
+        // golden-ratio multiplier to decorrelate low bits.
+        const SEED_STRIDE: u64 = 0x9e3779b97f4a7c15;
         let mut logliks = Vec::with_capacity(n_replicates);
         for rep in 0..n_replicates {
-            let rep_seed = seed + rep as u64;
+            let rep_seed = seed.wrapping_add((rep as u64).wrapping_mul(SEED_STRIDE));
             let result = bootstrap_filter(
                 &process, &obs_model, &params, &smc_config, rep_seed,
             ).unwrap_or_else(|e| {
@@ -295,14 +300,14 @@ pub fn cmd_pfilter(args: &[String]) {
                     .unwrap_or_else(|e| { eprintln!("cannot create {}: {}", path, e); std::process::exit(1); });
                 writeln!(f, "seed\tloglik").unwrap();
                 for (rep, ll) in logliks.iter().enumerate() {
-                    writeln!(f, "{}\t{:.4}", seed + rep as u64, ll).unwrap();
+                    writeln!(f, "{}\t{:.4}", seed.wrapping_add((rep as u64).wrapping_mul(SEED_STRIDE)), ll).unwrap();
                 }
                 eprintln!("replicate logliks written to {}", path);
             }
             None => {
                 println!("seed\tloglik");
                 for (rep, ll) in logliks.iter().enumerate() {
-                    println!("{}\t{:.4}", seed + rep as u64, ll);
+                    println!("{}\t{:.4}", seed.wrapping_add((rep as u64).wrapping_mul(SEED_STRIDE)), ll);
                 }
             }
         }

@@ -1897,7 +1897,11 @@ fn parse_fit_args(args: &[String], _needs_starts_from: bool) -> (FitToml, String
         std::process::exit(1);
     });
 
-    // Seed priority: CLI --seed > fit.toml seed > random from entropy
+    // Seed priority: CLI --seed > fit.toml seed > random from entropy.
+    // Im19 in 2026-04-19 inference review batch 3: previously the
+    // fallback was `dur.as_nanos() % 1_000_000` — only 20 bits of
+    // entropy. Birthday bound: ~1000 concurrent runs → 50% seed
+    // collision. Use the full u64 from nanosecond entropy instead.
     let seed = if args.iter().any(|a| a == "--seed") {
         seed
     } else if let Some(s) = fit.fit.seed {
@@ -1905,7 +1909,7 @@ fn parse_fit_args(args: &[String], _needs_starts_from: bool) -> (FitToml, String
     } else {
         use std::time::SystemTime;
         let dur = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap();
-        dur.as_nanos() as u64 % 1_000_000
+        dur.as_nanos() as u64
     };
 
     (fit, fit_path, seed, force)
