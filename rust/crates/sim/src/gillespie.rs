@@ -242,10 +242,15 @@ fn run_gillespie(
         // Track flow
         current_flows.add(fired_idx, 1);
 
-        debug_assert!(
-            int_s.counts.iter().all(|&v| v >= 0),
-            "non-negativity violated at t={}", t
-        );
+        // RM10 in 2026-04-19 engine review: the earlier assert fired
+        // only AFTER clamp, so it always passed — useless. This one
+        // fires when the pre-clamp state would have been negative,
+        // i.e. when the stoichiometry actually tried to drive a
+        // compartment below zero. In Gillespie that can legitimately
+        // never happen (the firing transition's source has at least
+        // one individual), so this is a real invariant check.
+        debug_assert_eq!(clamped, 0,
+            "Gillespie: stoichiometry drove state negative pre-clamp at t={}", t);
 
         // --- Sparse propensity update ---
         event_count += 1;

@@ -319,7 +319,7 @@ pub struct CompiledModel {
     /// of step numbers where the event fires. Eliminates floating-point
     /// tolerance issues (double-fires, zero-fires) by rounding fire times
     /// to the nearest integer step at model init.
-    pub fire_steps: Vec<std::collections::HashSet<i64>>,
+    pub fire_steps: Vec<std::collections::BTreeSet<i64>>,
 
     /// Pre-resolved expression trees for all hot-path evaluations.
     pub resolved: ResolvedModel,
@@ -484,10 +484,18 @@ impl CompiledModel {
                     table_values_cache.push(vals?);
                 }
                 ir::table::TableSource::External { external } => {
-                    // Placeholder — CLI must replace these before simulation.
-                    // If still empty at simulation time, propensity eval will error.
-                    let _ = external;
-                    table_values_cache.push(vec![]);
+                    // Rm5 in 2026-04-19 engine review: the CLI is
+                    // responsible for replacing External with Inline
+                    // before calling CompiledModel::new — unreplaced
+                    // externals caused a panic when the empty cached
+                    // vec was indexed during propensity eval. Fail
+                    // loud at construction instead.
+                    return Err(SimError::Validation(format!(
+                        "table '{}' is declared external() but was not replaced \
+                         before CompiledModel::new; populate TableSource::Inline \
+                         from the runtime input first",
+                        external
+                    )));
                 }
             }
         }
@@ -542,7 +550,7 @@ impl CompiledModel {
         }
 
         // Precompute fire steps (integer grid) for all interventions/events
-        let fire_steps: Vec<std::collections::HashSet<i64>> = {
+        let fire_steps: Vec<std::collections::BTreeSet<i64>> = {
             use crate::intervention::intervention_fire_times;
             let dt = model.simulation.dt.unwrap_or(1.0);
             model.interventions.iter().map(|iv| {

@@ -44,6 +44,15 @@ pub fn apply_interventions_at(
     _tolerance: f64,
 ) -> Result<bool, SimError> {
     let dt = model.model.simulation.dt.unwrap_or(1.0);
+    // Rm4 in 2026-04-19 engine review: guard against NaN t silently
+    // rounding to step 0. NaN `as i64` is 0 on current rustc, which
+    // would make every intervention match step 0 if an upstream bug
+    // ever produced NaN.
+    if !t.is_finite() {
+        return Err(SimError::Validation(format!(
+            "apply_interventions_at: non-finite t = {}", t
+        )));
+    }
     let current_step = (t / dt).round() as i64;
     let mut any_fired = false;
     for (iv_idx, iv) in model.model.interventions.iter().enumerate() {

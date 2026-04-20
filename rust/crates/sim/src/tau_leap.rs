@@ -209,10 +209,13 @@ fn run_tau_leap(
         if clamped > 0 {
             log::warn!("tau-leap: clamped {} negative compartments at t={}", clamped, t);
         }
-        debug_assert!(
-            int_s.counts.iter().all(|&v| v >= 0),
-            "non-negativity violated after tau-leap step at t={}", t
-        );
+        // RM10 in 2026-04-19 engine review: with the RM1 multinomial
+        // fix landed, tau-leap's competing-exits path shouldn't drive
+        // any source below zero. If it ever does, the Poisson
+        // approximation failed, which is a bug worth panicking on in
+        // debug builds.
+        debug_assert_eq!(clamped, 0,
+            "tau-leap: state went negative pre-clamp at t={} (multinomial invariant broken)", t);
 
         // RK4 for real compartments (integer state now at end-of-step)
         if n_real > 0 {

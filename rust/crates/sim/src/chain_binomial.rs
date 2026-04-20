@@ -195,7 +195,7 @@ fn run_chain_binomial(
 pub fn trace_enabled() -> bool {
     use std::sync::OnceLock;
     static ENABLED: OnceLock<bool> = OnceLock::new();
-    *ENABLED.get_or_init(|| std::env::var("CAMDL_TRACE_STEPS").map_or(false, |v| v == "1"))
+    *ENABLED.get_or_init(|| std::env::var("CAMDL_TRACE_STEPS").is_ok_and(|v| v == "1"))
 }
 
 /// Advance integer compartment state by one chain-binomial step.
