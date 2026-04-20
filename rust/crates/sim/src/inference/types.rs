@@ -76,8 +76,14 @@ impl ParticleSwarm {
 }
 
 /// Numerically stable log-sum-exp.
+///
+/// Im2 in the 2026-04-19 inference review batch 1: distinguish
+/// +∞ vs −∞. If `max = +∞`, at least one entry is +∞ and the
+/// result is also +∞ (not −∞ as the old bulk-check produced).
+/// If `max = −∞`, every entry is −∞ and the result is −∞.
 pub fn log_sum_exp(log_values: &[f64]) -> f64 {
     let max = log_values.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
-    if max.is_infinite() { return f64::NEG_INFINITY; }
+    if max == f64::NEG_INFINITY { return f64::NEG_INFINITY; }
+    if max == f64::INFINITY { return f64::INFINITY; }
     max + log_values.iter().map(|&lv| (lv - max).exp()).sum::<f64>().ln()
 }
