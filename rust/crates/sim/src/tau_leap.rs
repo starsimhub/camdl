@@ -122,22 +122,89 @@ fn run_tau_leap(
                 })
                 .collect()
         };
+        // RM1 in 2026-04-19 engine review: for transitions that share
+        // a source compartment (competing exits), independent Poisson
+        // draws can produce more total exits than the source has
+        // individuals, silently violating population conservation via
+        // clamp_nonneg. Match chain-binomial's Euler-multinomial:
+        //  1. Draw total exits from Binomial(n_src, 1-exp(-Σr_k·dt)).
+        //  2. Split total multinomially with weights r_k/Σr_k.
+        // For ungrouped transitions (inflows, non-competing exits)
+        // keep the standard tau-leap independent Poisson draw.
+        let mut handled = vec![false; n_transitions];
+        let mut pending_deltas: Vec<(usize, i64)> = Vec::new();
+        for &(src_local, ref group) in &model.source_groups {
+            let n_src = int_s.counts[src_local].max(0);
+            if n_src == 0 {
+                for &tr_idx in group { handled[tr_idx] = true; }
+                continue;
+            }
+            // Compute effective per-capita rates (with overdispersion if any).
+            let mut effective: Vec<(usize, f64)> = Vec::with_capacity(group.len());
+            let mut total_rate = 0.0_f64;
+            for &tr_idx in group {
+                let rate = propensities[tr_idx];
+                if rate <= 0.0 { handled[tr_idx] = true; continue; }
+                let per_capita = rate / n_src as f64;
+                let eff = match draws[tr_idx] {
+                    ResolvedDraw::Deterministic => {
+                        // Handle deterministic separately below; don't compete.
+                        handled[tr_idx] = true;
+                        continue;
+                    }
+                    ResolvedDraw::Overdispersed(sigma_sq) => {
+                        per_capita * rng.gamma_multiplier(sigma_sq, dt)
+                    }
+                    ResolvedDraw::Poisson => per_capita,
+                };
+                total_rate += eff;
+                effective.push((tr_idx, eff));
+            }
+            if total_rate <= 0.0 || effective.is_empty() { continue; }
+            let p_total = (1.0 - (-total_rate * dt).exp()).clamp(0.0, 1.0);
+            let mut n_events = rng.binomial(n_src as u64, p_total);
+            let n_competing = effective.len();
+            let mut rate_remaining = total_rate;
+            for (k, &(tr_idx, eff_rate)) in effective.iter().enumerate() {
+                let count = if k == n_competing - 1 {
+                    n_events
+                } else if n_events > 0 && rate_remaining > 0.0 {
+                    let p_split = (eff_rate / rate_remaining).clamp(0.0, 1.0);
+                    let c = rng.binomial(n_events, p_split);
+                    n_events -= c;
+                    rate_remaining -= eff_rate;
+                    c
+                } else {
+                    0
+                };
+                for &(local, delta) in &model.transition_stoich[tr_idx] {
+                    pending_deltas.push((local, delta * count as i64));
+                }
+                current_flows.add(tr_idx, count);
+                handled[tr_idx] = true;
+            }
+        }
+
+        // Inflows and ungrouped transitions: independent draws per the
+        // standard tau-leap approximation.
         for (i, &lambda) in propensities.iter().enumerate() {
+            if handled[i] { continue; }
             let mean = lambda * dt;
             let count = match draws[i] {
                 ResolvedDraw::Poisson => rng.poisson(mean),
                 ResolvedDraw::Deterministic => mean.round() as u64,
                 ResolvedDraw::Overdispersed(sigma_sq) => rng.neg_binomial(mean, sigma_sq, dt),
             };
-
-            // Apply stoichiometry
             for &(local, delta) in &model.transition_stoich[i] {
-                int_s.counts[local] += delta * count as i64;
+                pending_deltas.push((local, delta * count as i64));
             }
             current_flows.add(i, count);
         }
 
-        // Clamp
+        for (local, delta) in pending_deltas.drain(..) {
+            int_s.counts[local] += delta;
+        }
+
         let clamped = int_s.clamp_nonneg();
         if clamped > 0 {
             log::warn!("tau-leap: clamped {} negative compartments at t={}", clamped, t);
