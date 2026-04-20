@@ -65,7 +65,11 @@ let test_golden model_name () =
   let camdl_path = Filename.concat golden_dir (model_name ^ ".camdl") in
   let ir_path    = Filename.concat golden_dir (model_name ^ ".ir.json") in
   let src = read_file camdl_path in
-  let ir = match Compiler.compile ~name:model_name src with
+  (* Pass ~filename so source_dir is the golden directory; fixtures
+     that reference `data/*.tsv` need this to find their data files.
+     Without it, source_dir defaults to "" and reads fail against the
+     test CWD. *)
+  let ir = match Compiler.compile ~name:model_name ~filename:camdl_path src with
     | Ok m    -> m
     | Error e -> Alcotest.failf "compile failed: %s" e
   in
@@ -2181,6 +2185,27 @@ let () =
       Alcotest.test_case "polio_age"               `Quick (test_golden "polio_age");
       Alcotest.test_case "polio_spatial_5"         `Quick (test_golden "polio_spatial_5");
       Alcotest.test_case "seir_seasonal_patch"     `Quick (test_golden "seir_seasonal_patch");
+      (* Goldens missing from the list as of 2026-04-19 (C8 in the
+         compiler review). Each has a committed .camdl + .ir.json but
+         the compile-and-roundtrip coverage was absent, so a
+         regression in (e.g.) the overdispersed-to-IR path or the
+         multi-species model would have shipped without signal.
+         sir_overdispersion specifically is the only fixture
+         exercising overdispersed() — without its registration,
+         the C1 silent-Poisson-fallback bug would have had no
+         regression guard even after being fixed. *)
+      Alcotest.test_case "sir_overdispersion"      `Quick (test_golden "sir_overdispersion");
+      Alcotest.test_case "sir_reservoir"           `Quick (test_golden "sir_reservoir");
+      Alcotest.test_case "sir_priors"              `Quick (test_golden "sir_priors");
+      Alcotest.test_case "sir_init_table"          `Quick (test_golden "sir_init_table");
+      Alcotest.test_case "sir_patches_5"           `Quick (test_golden "sir_patches_5");
+      Alcotest.test_case "sir_spatial_sum"         `Quick (test_golden "sir_spatial_sum");
+      Alcotest.test_case "sir_dim_annotated"       `Quick (test_golden "sir_dim_annotated");
+      Alcotest.test_case "seir_observations"       `Quick (test_golden "seir_observations");
+      Alcotest.test_case "seir_defines_adj"        `Quick (test_golden "seir_defines_adj");
+      Alcotest.test_case "seir_defines_patch"      `Quick (test_golden "seir_defines_patch");
+      Alcotest.test_case "seir_spatial_5_inference" `Quick (test_golden "seir_spatial_5_inference");
+      Alcotest.test_case "malaria_two_species"     `Quick (test_golden "malaria_two_species");
     ];
     "table_lookup_flattening", [
       Alcotest.test_case "single index per lookup" `Quick test_table_lookup_single_index;
