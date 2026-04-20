@@ -803,3 +803,44 @@ regenerate any PMMH/PGAS posterior that used log_normal priors.
 The He et al. measles benchmark wouldn't have caught IC3 because
 pomp's published MLE is tested against IF2 (no priors), not
 posterior means from PMMH/PGAS.
+
+## Batch 3 resolution status
+
+**Addressed:**
+- **IC3** — `TransformedNormal::log_density` now returns natural-
+  scale density. Caller-added `log_jacobian(z) = z` recovers the
+  correct z-scale density without double-counting. Two regression
+  tests (natural-scale integrates to 1; natural + jacobian = z-
+  scale normal). Posterior-mean bias for log_normal priors gone.
+  Any PMMH/PGAS posterior over log_normal-priored params should be
+  regenerated.
+- **IC4** — `validate_prior_transform_compat` in `runner.rs`,
+  called from the v2 fit entry point after config validation and
+  sweep-value substitution. Rejects incompatible combinations
+  (log_normal × not-Log, beta × not-Logit, half_normal × not-Log,
+  gamma × not-Log, exponential × not-Log). Error names the
+  parameter, prior, transform, prior source.
+- **IM10** — legacy `compute_config_hash` now hashes
+  `pgas.starts_from` and `pmmh.proposal_from`. v2 already covered
+  these via serde_json on the full Stage struct.
+- **IM11** — `mcmc_ess` now uses Geyer pair-sum truncation
+  (ρ_{2k−1} + ρ_{2k} ≤ 0) instead of single-lag negative. 2–5×
+  more conservative on non-monotonic chains.
+- **IM12** — `compute_rhat_ess` returns `NaN` for ESS when R-hat
+  > 1.1 (BDA3 threshold), so non-converged runs don't look
+  adequately-sampled in reports.
+- **IM13** — `compute_rhat` documented as 1992 G-R formula (no
+  split-chains, no rank-norm). Exported alias
+  `gelman_rubin_1992` for explicit naming.
+- **Im19** — default seed uses full u64 nanoseconds (was 20 bits).
+- **Im20** — pfilter replicate seeding uses golden-ratio stride
+  instead of `+ rep`.
+- **Im24** — `compute_rhat_ess` asserts equal chain lengths;
+  returns `(NaN, NaN)` when violated.
+
+**Deferred:**
+- Im21 — Mutex per push in DiagnosticCollector (low-frequency).
+- Im22 — single-observation pfilter CLI (docs concern).
+- Im23 — Hinnant link comment (trivial).
+- Im25 — per-chain n_tail for resumed chains (same class as Im24,
+  but only affects non-standard resume patterns).
