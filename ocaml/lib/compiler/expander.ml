@@ -1545,14 +1545,33 @@ let resolve_prior_spec ctx ~pname (ps : prior_spec) : Ir.prior_dist =
         Hashtbl.add seen k ()
     ) ps.ps_args;
 
-    (* Signature check: unknown kwargs. *)
+    (* Signature check: unknown kwargs.
+       m19/C4/C10 in 2026-04-19 review: observation likelihoods use
+       `normal(mean=..., sd=...)`; priors use `normal(mu=..., sigma=...)`.
+       Users routinely mix them up. If the typo is one of these, the
+       hint names the correct spelling explicitly. *)
+    let mean_mu_hint k =
+      match k, ps.ps_name with
+      | ("mean", ("normal" | "log_normal")) ->
+        Some "prior `normal` / `log_normal` uses `mu` (not `mean`); \
+              `mean`/`sd` are used in observation likelihoods"
+      | ("sd", ("normal" | "log_normal" | "half_normal")) ->
+        Some "prior `normal` / `log_normal` / `half_normal` uses \
+              `sigma` (not `sd`); `mean`/`sd` are used in observation \
+              likelihoods"
+      | _ -> None
+    in
     List.iter (fun (k, _) ->
       if not (List.mem k expected_args) then
+        let hint = match mean_mu_hint k with
+          | Some h -> h
+          | None   -> "Remove the unknown argument or check the spelling."
+        in
         Diagnostics.error ctx.diags
           ~code:"E233" ~loc:Diagnostics.no_loc
           ~message:(qualify (Printf.sprintf "unknown argument '%s' for prior '%s'" k ps.ps_name))
           ~detail:(Printf.sprintf "Distribution '%s' accepts: %s." ps.ps_name (String.concat ", " expected_args))
-          ~hint:"Remove the unknown argument or check the spelling."
+          ~hint
           ()
     ) ps.ps_args;
 
