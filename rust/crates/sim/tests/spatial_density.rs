@@ -133,7 +133,7 @@ fn test_density_matches_step_one_two_patch() {
 }
 
 /// Test: complete_data_loglik on polio_spatial_5 (5 patches, 5 transitions per S group)
-/// This is the exact pattern that causes -inf on the downstream agent's model.
+/// This is the exact pattern that caused -inf when testing camdl-vignettes.
 #[test]
 fn test_density_matches_step_one_polio_spatial_5() {
     let path = "../../../ocaml/golden/polio_spatial_5.ir.json";
@@ -187,12 +187,12 @@ fn test_density_matches_step_one_polio_spatial_5() {
          Run with CAMDL_TRACE_STEPS=1 for diagnostics.", ll);
 }
 
-/// Test: downstream agent's SEIR spatial 5-patch model.
-/// This model has waning immunity (R→S), seasonal forcing, and
-/// gives -inf in their PGAS runs. If this test fails, we've
-/// reproduced the bug.
+/// Test: SEIR spatial 5-patch model (reproduced when testing
+/// camdl-vignettes). The model has waning immunity (R→S),
+/// seasonal forcing, and used to produce -inf in PGAS runs. If
+/// this test fails, the underlying bug has returned.
 #[test]
-fn test_density_downstream_seir_spatial_5() {
+fn test_density_seir_spatial_5_vignette_regression() {
     // Uses the golden model with iota, overdispersion, seasonal forcing,
     // and high R0 — the exact combination that triggers spatial density bugs.
     // See docs/dev/incidents/2026-04-07-spatial-pgas-neg-inf.md.

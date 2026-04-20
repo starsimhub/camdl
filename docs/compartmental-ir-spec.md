@@ -913,7 +913,6 @@ and weekly observations.
           }
         ]
       },
-      "event_key": "infection_child:{firing_index}",
       "metadata": { "origin_kind": "transmission" }
     },
     {
@@ -962,7 +961,6 @@ and weekly observations.
           }
         ]
       },
-      "event_key": "infection_adult:{firing_index}",
       "metadata": { "origin_kind": "transmission" }
     },
 
@@ -973,7 +971,6 @@ and weekly observations.
         "op": "mul",
         "args": [{ "param": "sigma" }, { "pop": "E_child" }]
       },
-      "event_key": "progression_child:{firing_index}",
       "metadata": { "origin_kind": "intrinsic" }
     },
     {
@@ -983,7 +980,6 @@ and weekly observations.
         "op": "mul",
         "args": [{ "param": "sigma" }, { "pop": "E_adult" }]
       },
-      "event_key": "progression_adult:{firing_index}",
       "metadata": { "origin_kind": "intrinsic" }
     },
     {
@@ -993,7 +989,6 @@ and weekly observations.
         "op": "mul",
         "args": [{ "param": "gamma" }, { "pop": "I_child" }]
       },
-      "event_key": "recovery_child:{firing_index}",
       "metadata": { "origin_kind": "intrinsic" }
     },
     {
@@ -1003,7 +998,6 @@ and weekly observations.
         "op": "mul",
         "args": [{ "param": "gamma" }, { "pop": "I_adult" }]
       },
-      "event_key": "recovery_adult:{firing_index}",
       "metadata": { "origin_kind": "intrinsic" }
     },
 
@@ -1028,7 +1022,6 @@ and weekly observations.
           }
         ]
       },
-      "event_key": "birth:{firing_index}",
       "metadata": { "origin_kind": "inflow" }
     },
 
@@ -1039,7 +1032,6 @@ and weekly observations.
         "op": "mul",
         "args": [{ "param": "mu_child" }, { "pop": "S_child" }]
       },
-      "event_key": "death_S_child:{firing_index}",
       "metadata": { "origin_kind": "outflow" }
     },
     {
@@ -1049,7 +1041,6 @@ and weekly observations.
         "op": "mul",
         "args": [{ "param": "mu_child" }, { "pop": "E_child" }]
       },
-      "event_key": "death_E_child:{firing_index}",
       "metadata": { "origin_kind": "outflow" }
     },
     {
@@ -1059,7 +1050,6 @@ and weekly observations.
         "op": "mul",
         "args": [{ "param": "mu_child" }, { "pop": "I_child" }]
       },
-      "event_key": "death_I_child:{firing_index}",
       "metadata": { "origin_kind": "outflow" }
     },
     {
@@ -1069,7 +1059,6 @@ and weekly observations.
         "op": "mul",
         "args": [{ "param": "mu_child" }, { "pop": "R_child" }]
       },
-      "event_key": "death_R_child:{firing_index}",
       "metadata": { "origin_kind": "outflow" }
     },
     {
@@ -1079,7 +1068,6 @@ and weekly observations.
         "op": "mul",
         "args": [{ "param": "mu_adult" }, { "pop": "S_adult" }]
       },
-      "event_key": "death_S_adult:{firing_index}",
       "metadata": { "origin_kind": "outflow" }
     },
     {
@@ -1089,7 +1077,6 @@ and weekly observations.
         "op": "mul",
         "args": [{ "param": "mu_adult" }, { "pop": "E_adult" }]
       },
-      "event_key": "death_E_adult:{firing_index}",
       "metadata": { "origin_kind": "outflow" }
     },
     {
@@ -1099,7 +1086,6 @@ and weekly observations.
         "op": "mul",
         "args": [{ "param": "mu_adult" }, { "pop": "I_adult" }]
       },
-      "event_key": "death_I_adult:{firing_index}",
       "metadata": { "origin_kind": "outflow" }
     },
     {
@@ -1109,7 +1095,6 @@ and weekly observations.
         "op": "mul",
         "args": [{ "param": "mu_adult" }, { "pop": "R_adult" }]
       },
-      "event_key": "death_R_adult:{firing_index}",
       "metadata": { "origin_kind": "outflow" }
     },
 
@@ -1120,7 +1105,6 @@ and weekly observations.
         "op": "mul",
         "args": [{ "param": "aging_rate" }, { "pop": "S_child" }]
       },
-      "event_key": "aging_S:{firing_index}",
       "metadata": { "origin_kind": "transfer" }
     },
     {
@@ -1130,7 +1114,6 @@ and weekly observations.
         "op": "mul",
         "args": [{ "param": "aging_rate" }, { "pop": "E_child" }]
       },
-      "event_key": "aging_E:{firing_index}",
       "metadata": { "origin_kind": "transfer" }
     },
     {
@@ -1140,7 +1123,6 @@ and weekly observations.
         "op": "mul",
         "args": [{ "param": "aging_rate" }, { "pop": "I_child" }]
       },
-      "event_key": "aging_I:{firing_index}",
       "metadata": { "origin_kind": "transfer" }
     },
     {
@@ -1150,7 +1132,6 @@ and weekly observations.
         "op": "mul",
         "args": [{ "param": "aging_rate" }, { "pop": "R_child" }]
       },
-      "event_key": "aging_R:{firing_index}",
       "metadata": { "origin_kind": "transfer" }
     }
   ],
@@ -1293,7 +1274,6 @@ integer count.
           }
         ]
       },
-      "event_key": "infection_water:{firing_index}"
     },
     {
       "name": "infection_person",
@@ -1309,13 +1289,11 @@ integer count.
           }
         ]
       },
-      "event_key": "infection_person:{firing_index}"
     },
     {
       "name": "recovery",
       "stoichiometry": [["I", -1], ["R", 1]],
       "rate": { "op": "mul", "args": [{ "param": "gamma" }, { "pop": "I" }] },
-      "event_key": "recovery:{firing_index}"
     }
   ],
 

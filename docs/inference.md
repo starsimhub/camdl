@@ -742,11 +742,16 @@ three-stage workflow driven by a `fit.toml` configuration file:
 ```
 fit.toml + model.camdl + data.tsv
     │
-    ├── camdl fit scout fit.toml          → scout/fit_state.toml
-    ├── camdl fit refine fit.toml         → refine/mle_params.toml
-    ├── camdl fit validate fit.toml       → validate/mle_params.toml
-    └── camdl fit pgas fit.toml           → pgas/chain_N/trace.tsv + trajectories/
+    └── camdl fit run fit.toml
+            ├── scout/    fit_state.toml      (stage, starts_from = random)
+            ├── refine/   mle_params.toml     (stage, starts_from = scout)
+            ├── validate/ mle_params.toml     (stage, starts_from = refine)
+            └── pgas/     chain_N/trace.tsv   (stage, starts_from = refine)
 ```
+
+Each named block under `[stages.NAME]` in `fit.toml` chains via
+its `starts_from` field. The default set is scout → refine →
+validate (+ pgas), but users can define any sequence.
 
 **Scout** (8 chains, 200 particles, no cooling): random starts across the
 parameter space, MAD-based auto-calibration of rw_sd. Identifies the likelihood
@@ -764,11 +769,13 @@ final output is `mle_params.toml` — a standard params file with provenance
 hashing that feeds directly into `camdl simulate` and `camdl simulate batch`.
 
 ```bash
-# Full pipeline
-camdl fit scout    fit.toml --seed 1
-camdl fit refine   fit.toml --starts-from fit/he2010/scout/
-camdl fit validate fit.toml --starts-from fit/he2010/refine/
-camdl fit status   fit.toml
+# Full pipeline (all stages declared in fit.toml run in order)
+camdl fit run    fit.toml --seed 1
+
+# Re-run a single stage from a prior stage's output
+camdl fit run    fit.toml --stage refine --starts-from fit/he2010/scout/
+camdl fit run    fit.toml --stage validate
+camdl fit status fit.toml
 ```
 
 ### Out-of-sample validation

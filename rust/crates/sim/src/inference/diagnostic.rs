@@ -1,5 +1,6 @@
 //! Typed inference diagnostics — machine-readable, severity-classified,
-//! serializable to JSON for agent consumption.
+//! serializable to JSON for downstream tooling (camdl-book, camdl-vignettes,
+//! CI pipelines) to consume programmatically.
 //!
 //! Call sites push `DiagnosticKind` variants; the collector handles
 //! rendering, severity, hints, and serialization.
@@ -28,8 +29,8 @@ pub struct Diagnostic {
 /// Machine-readable diagnostic classification.
 ///
 /// Each variant carries exactly the data needed for programmatic decisions.
-/// The variant name is the stable identifier that agents and pipelines
-/// should match on.
+/// The variant name is the stable identifier that downstream tooling and
+/// CI pipelines should match on.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum DiagnosticKind {

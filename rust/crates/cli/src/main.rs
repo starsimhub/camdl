@@ -56,6 +56,7 @@ fn print_main_help() -> ! {
     eprintln!("  {}         Inference pipeline (MLE, posterior sampling, evaluation)", b("fit"));
     eprintln!("  {}     Standalone particle filter at fixed parameters", b("pfilter"));
     eprintln!("  {}         Standalone iterated filtering (IF2)", b("if2"));
+    eprintln!("  {}     Profile likelihood via parallel IF2 over a grid", b("profile"));
     eprintln!("  {}     Compile .camdl → IR JSON", b("compile"));
     eprintln!("  {}       Type-check a .camdl model", b("check"));
     eprintln!("  {}     Print model structure", b("inspect"));
@@ -341,11 +342,12 @@ fn main() {
             if2::cmd_if2(&all_args[1..]);
         }
         "profile" => {
-            // Rewired per agent-channel Issue 1 (2026-04-19). cmd_profile
-            // was fully built but lost dispatch in d609654's CLI cleanup
-            // when `fit run --sweep` was promoted as the replacement;
-            // the replacement halts on first scout-gate failure, making
-            // it unusable for the primary profile-likelihood use case
+            // Rewired 2026-04-19 after a camdl-book profile-likelihood
+            // chapter hit the gap: cmd_profile was fully built but
+            // lost dispatch in d609654's CLI cleanup when
+            // `fit run --sweep` was promoted as the replacement. The
+            // replacement halts on the first scout-gate failure,
+            // which defeats the primary profile-likelihood use case
             // (edge cells of a grid are expected to fail the gate).
             profile::cmd_profile(&all_args[1..]);
         }

@@ -1546,6 +1546,20 @@ camdl fit run fit.toml --sweep "rho=0.5,0.1,0.02"
 
 Each sweep point runs the full pipeline independently.
 
+**Gate failures do not halt the sweep.** When a single point's
+scout-convergence or regression gate fails, it is recorded and
+the next point runs. Failed cells are listed in
+`<fit_dir>/sweep_failures.tsv` with columns
+`cell, sweep_point, sweep_values, stage, reason`. Downstream
+plotting scripts should check this file alongside `summary.tsv`
+to distinguish "failed to converge" from "didn't run." Single-
+point fits retain the strict exit-on-gate-failure behavior —
+this relaxation applies only when `--sweep` is active.
+
+For a dedicated profile-likelihood workflow (fix a focal
+parameter, maximize over the rest at each grid point), see
+`camdl profile`.
+
 ---
 
 ## 8. fit.toml Examples

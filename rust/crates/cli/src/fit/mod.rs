@@ -637,7 +637,7 @@ pub fn cmd_fit_run_v2(args: &[String]) {
             if total_cells == 1 { "" } else { "s" });
     }
 
-    // Agent-channel Issue 2 (2026-04-19): collect per-sweep-point
+    // Fix 2026-04-19 (surfaced when testing camdl-book profiles): collect per-sweep-point
     // gate failures instead of exit(1). A sweep is explicitly a
     // grid of cells where edge values are expected to fail
     // convergence — treating the first failure as fatal destroys
@@ -793,7 +793,7 @@ pub fn cmd_fit_run_v2(args: &[String]) {
                                     eprintln!("\x1b[33m  warning:\x1b[0m {}", msg);
                                     eprintln!("\n  --allow-nonconverged-scout: proceeding anyway.");
                                 } else if has_sweep {
-                                    // Issue 2 (agent-channel 2026-04-19): don't
+                                    // Sweep-gate fix 2026-04-19 (testing camdl-book): don't
                                     // kill the whole sweep on one cell's gate
                                     // failure. Record, skip remaining stages for
                                     // this sweep point, continue to next point.
@@ -864,7 +864,7 @@ pub fn cmd_fit_run_v2(args: &[String]) {
                         &scout_chain_logliks_for_gate2,
                     ) {
                         if has_sweep {
-                            // Issue 2 (agent-channel 2026-04-19): same
+                            // Sweep-gate fix 2026-04-19 (testing camdl-book): same
                             // non-halting treatment as the scout gate.
                             eprintln!("\x1b[33m  sweep-skip:\x1b[0m {}", msg);
                             sweep_failures.push((
@@ -1230,7 +1230,7 @@ pub fn cmd_fit_run_v2(args: &[String]) {
     } // end sweep_points
     } // end cells
 
-    // Issue 2 (agent-channel 2026-04-19): emit a sweep summary when
+    // Sweep-gate fix 2026-04-19 (testing camdl-book): emit a sweep summary when
     // any cells were skipped due to gate failures. Also write a
     // machine-readable record to <fit_dir>/sweep_failures.tsv so
     // downstream tooling (profile-likelihood plots, etc.) can

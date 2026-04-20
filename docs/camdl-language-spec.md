@@ -2488,15 +2488,18 @@ cooling=0.5), `refine` (4 chains, 1000 particles, cooling=0.95),
 ### 22.6 Fit Workflow
 
 ```bash
-camdl fit scout    fit.toml [--seed N] [--force]
-camdl fit refine   fit.toml --starts-from scout/ [--seed N]
-camdl fit validate fit.toml --starts-from refine/ [--seed N]
-camdl fit status   fit.toml
+camdl fit run    fit.toml [--stage NAME] [--seed N] [--force] [--sweep "PARAM=V1,V2,..."]
+camdl fit status fit.toml
 ```
 
 Driven by `fit.toml` with `[estimate]`, `[fixed]`, `[data]`, and
-optional `[holdout]`, `[scout]`, `[refine]`, `[validate]` sections.
-See `docs/camdl-inference-spec.md`.
+one or more `[stages.NAME]` blocks. Stages are named by the user
+(by convention `scout`, `refine`, `validate`) and chain via each
+stage's optional `starts_from` field. `--stage NAME` runs a single
+stage; `--sweep` takes a Cartesian product over parameter grids
+and, when a cell fails the convergence gate, records the failure
+in `sweep_failures.tsv` and continues rather than halting. See
+`docs/camdl-inference-spec.md`.
 
 **Pfilter replicates:**
 

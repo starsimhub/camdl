@@ -85,7 +85,7 @@ run_batch_test() {
 
     # check manifest completed count
     local completed
-    completed=$(python3 -c "import json; m=json.load(open('$outdir/manifest.json')); print(m['completed'])")
+    completed=$(python3 -c "import json; m=json.load(open('$outdir/sims/manifest.json')); print(m['completed'])")
     if [ "$completed" -ne "$expected_runs" ]; then
         echo "FAIL [manifest] $name: expected $expected_runs runs, got $completed"
         FAIL=$((FAIL+1)); return

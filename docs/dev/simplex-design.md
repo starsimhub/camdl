@@ -1,5 +1,15 @@
 # Simplex Parameter Groups
 
+**Status (2026-04-19):** proposal / design doc only. The
+cross-language IR plumbing (`parameter_groups` field,
+`simplex_member` param_kind) was removed in M17/m24 of the
+2026-04-19 compiler review because no parser rule produced it and
+no runtime code consumed it end-to-end. The IF2 SimplexGroup
+runtime struct still exists and is instantiated with vec![]
+everywhere. When this feature is implemented, the IR plumbing will
+need to be re-added atomically — do not refer to this doc as a
+live schema description.
+
 ## What
 
 Parameters that sum to 1 (initial compartment fractions) should
