@@ -962,8 +962,24 @@ let rec resolve_expr ctx (env : (string * string) list) (e : expr) : Ir.expr =
         ~hint:"check spelling, or add a declaration in forcing { }" ();
       Ir.Const 0.0
     end
-  | EList _     -> Ir.Const 0.0
-  | ERange _    -> Ir.Const 0.0  (* ranges only valid inside periodic on = [...] *)
+  | EList _     ->
+    (* m17 in 2026-04-19 review: list literals are only valid as table
+       values, scheduled `at = [...]` times, or periodic `on = [...]`
+       specs — they have no meaning in a scalar rate expression.
+       Previously silently returned Const 0.0, which meant any use of
+       a list in the wrong context gave `rate = 0` and no diagnostic. *)
+    Diagnostics.error ctx.diags ~code:"E270" ~loc:Diagnostics.no_loc
+      ~message:"list literal not allowed in a scalar expression"
+      ~hint:"lists are valid as: table values, `at = [...]` times, \
+             or `on = [...]` periodic specs"
+      ();
+    Ir.Const 0.0
+  | ERange _    ->
+    Diagnostics.error ctx.diags ~code:"E271" ~loc:Diagnostics.no_loc
+      ~message:"range expression not allowed in a scalar expression"
+      ~hint:"ranges are only valid inside `periodic on = [...]`"
+      ();
+    Ir.Const 0.0
 
 and resolve_ident_name ctx name ~loc =
   (* 1. Let binding? Inline it — unless it's a typed const (emitted as Param). *)
@@ -1647,6 +1663,13 @@ let is_all_const e =
   in walk e
 
 let eval_const ctx e =
+  (* M14 in the 2026-04-19 review: before this, the UnOp arm was
+     missing here but present in `is_all_const`, so `init { S = -5 }`
+     produced `Ir.UnOp { Neg, Const 5.0 }`, passed the all_const
+     check, and then fell into the catch-all here, emitting a
+     false E402 and silently setting the init to 0.0. Same for
+     floor/ceil/abs/exp/log/sqrt of constants. Fix: mirror
+     autodiff's `simplify` by evaluating each UnOp arm directly. *)
   let rec eval = function
     | Ir.Const f -> f
     | Ir.BinOp { op = Ir.Add; left; right } -> eval left +. eval right
@@ -1654,6 +1677,13 @@ let eval_const ctx e =
     | Ir.BinOp { op = Ir.Mul; left; right } -> eval left *. eval right
     | Ir.BinOp { op = Ir.Div; left; right } -> eval left /. eval right
     | Ir.BinOp { op = Ir.Pow; left; right } -> eval left ** eval right
+    | Ir.UnOp  { op = Ir.Neg;   arg } -> -. (eval arg)
+    | Ir.UnOp  { op = Ir.Exp;   arg } -> exp (eval arg)
+    | Ir.UnOp  { op = Ir.Log;   arg } -> log (eval arg)
+    | Ir.UnOp  { op = Ir.Sqrt;  arg } -> sqrt (eval arg)
+    | Ir.UnOp  { op = Ir.Abs;   arg } -> abs_float (eval arg)
+    | Ir.UnOp  { op = Ir.Floor; arg } -> floor (eval arg)
+    | Ir.UnOp  { op = Ir.Ceil;  arg } -> ceil (eval arg)
     | _ ->
       Diagnostics.error ctx.diags ~code:"E402" ~loc:Diagnostics.no_loc
         ~message:"initial condition value is not a constant expression"
