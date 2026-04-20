@@ -725,18 +725,22 @@ let test_extends_w310_on_enable_dedup () =
     }
   |} in
   Diagnostics.json_errors_mode := true;
-  let r = Compiler.compile ~name:"w310_test" src in
+  let r = Compiler.compile_detail_result ~name:"w310_test" src in
   Diagnostics.json_errors_mode := false;
-  (* Note: compile succeeds (warning, not error) so diagnostics won't
-     be in Error variant. The warning is rendered to stderr; we can't
-     easily capture that without stream redirection. Instead, assert
-     the scenario resolves correctly (a; b) which is the observable
-     behavior of the rule firing. *)
+  (* T4 in 2026-04-19 review: previously this test only checked that
+     the enable list merged correctly, not that W310 actually fired.
+     Inspect ctx.diags to assert the warning is present. *)
   match r with
   | Error e -> Alcotest.failf "should compile despite W310: %s" e
-  | Ok m ->
-    let c = find_scenario m "c" in
-    Alcotest.(check (list string)) "merged enable" ["a"; "b"] c.preset_enable
+  | Ok d ->
+    let c = find_scenario d.model "c" in
+    Alcotest.(check (list string)) "merged enable" ["a"; "b"] c.preset_enable;
+    let has_w310 =
+      List.exists (fun (diag : Diagnostics.diagnostic) ->
+        diag.code = "W310" && diag.severity = Diagnostics.Warning
+      ) d.ctx.diags.diags
+    in
+    Alcotest.(check bool) "W310 warning was emitted" true has_w310
 
 (* ── Phase D (BUG-4): Time function expansion ────────────────────────────────
    Compile a model with a sinusoidal forcing function.
