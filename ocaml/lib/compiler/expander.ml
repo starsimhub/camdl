@@ -493,14 +493,25 @@ let resolve_dimensions ctx =
               ~hint:"valid keywords: column"
               ();
           let (vs, n_rows, n_dups) = read_dim_column_from_file ctx path col in
-          let msg = if n_dups = 0 then
-            Printf.sprintf "info: dimension '%s': %d levels from %s column \"%s\" (%d rows)"
-              de.dename (List.length vs) path col n_rows
-          else
-            Printf.sprintf "info: dimension '%s': %d levels from %s column \"%s\" (%d rows, %d duplicates)"
-              de.dename (List.length vs) path col n_rows n_dups
-          in
-          Printf.eprintf "%s\n%!" msg;
+          (* Previously this site printed an "info: dimension '%s': N
+             levels from..." line via Printf.eprintf — M7 in the
+             2026-04-19 review. That bypassed Diagnostics, couldn't
+             be silenced or JSONified, and always fired even in
+             `camdlc compile model.camdl > out.json` where the user
+             wants only JSON on stdout. Suppressed entirely; the same
+             information is surfaced via `camdlc inspect --dims`
+             when a user wants it. If the duplicate count is
+             informative (n_dups > 0), surface as a warning so it
+             rides the proper diagnostics channel. *)
+          if n_dups > 0 then
+            Diagnostics.warning ctx.diags
+              ~code:"W311"
+              ~loc:Diagnostics.no_loc
+              ~message:(Printf.sprintf
+                "dimension '%s' from %s column \"%s\": %d duplicate rows \
+                 collapsed to %d unique levels (of %d total)"
+                de.dename path col n_dups (List.length vs) n_rows)
+              ();
           vs
       in
       ctx.dim_registry <- ctx.dim_registry @ [(de.dename, levels)]
@@ -1672,17 +1683,29 @@ let expand_compartments ctx =
 
 (* ── Table expansion ─────────────────────────────────────────────────────── *)
 
-(** Extract a string path from the first positional argument of a function call. *)
+(** Extract a string path from the first *positional* argument of a
+    function call. Only positional args are considered — previously
+    (m22 in the 2026-04-19 review) this used List.find_map over all
+    args regardless of keyword, so `read("file.tsv", default =
+    "fallback.tsv")` could surface either string first depending on
+    evaluation order. Positional-only means the path must always be
+    the first arg by position, matching the documented
+    `read(PATH, column = ...)` surface syntax. *)
 let extract_path_arg ctx func_name args =
-  let path_opt = List.find_map (fun (_, e) ->
-    match e with EIdent (s, _) -> Some s | _ -> None
+  let path_opt = List.find_map (fun (kw, e) ->
+    if kw = "" then
+      match e with EIdent (s, _) -> Some s | _ -> None
+    else None
   ) args in
   (match path_opt with
    | None ->
      Diagnostics.error ctx.diags
        ~code:"E200"
        ~loc:Diagnostics.no_loc
-       ~message:(Printf.sprintf "%s: expected a string path argument" func_name)
+       ~message:(Printf.sprintf
+         "%s: expected a positional string path as the first argument"
+         func_name)
+       ~hint:"example: read(\"pop.tsv\", column = \"patch\")"
        ();
    | Some _ -> ());
   path_opt
@@ -2820,22 +2843,31 @@ let build_model_structure ctx expanded_trs =
     (cd.cname, comp_dims ctx cd.cname)
   ) ctx.comp_decls in
   (* Collect Pop/PopSum names from the numerator of a rate expression.
-     Descends through Mul and Cond but does NOT enter the right-hand side of Div,
-     so compartments that appear only in a denominator (e.g. N = S+I+R) are excluded.
-     For beta * S * I / N this yields {S, I}, not {S, I, R}. *)
+     Descends through every subexpression that isn't strictly a
+     denominator, so compartments that appear only in N = S+I+R
+     (denominator) are excluded but compartments inside Sub/Min/Max/
+     Pow/UnOp are included. For `beta * S * max(I - Q, 0) / N` this
+     yields {S, I, Q}, not {S} — M16 in the 2026-04-19 review.
+     Prior version fell through to `acc` for Sub/Min/Max/Pow/Mod/
+     UnOp/TimeFunc/TableLookup, missing infectious compartments
+     hidden behind any of those forms. *)
   let rec collect_numerator_pops acc = function
     | Ir.Pop n -> n :: acc
     | Ir.PopSum ns -> ns @ acc
-    | Ir.BinOp { op = Ir.Mul; left; right }
-    | Ir.BinOp { op = Ir.Add; left; right } ->
-      collect_numerator_pops (collect_numerator_pops acc left) right
     | Ir.BinOp { op = Ir.Div; left; _ } ->
+      (* Deliberately do NOT descend into the right operand — that's
+         the denominator and its pops aren't numerator contributions. *)
       collect_numerator_pops acc left
+    | Ir.BinOp b ->
+      collect_numerator_pops (collect_numerator_pops acc b.left) b.right
+    | Ir.UnOp u -> collect_numerator_pops acc u.arg
     | Ir.Cond c ->
       collect_numerator_pops
         (collect_numerator_pops (collect_numerator_pops acc c.pred) c.then_)
         c.else_
-    | _ -> acc
+    | Ir.TableLookup (_, args) ->
+      List.fold_left collect_numerator_pops acc args
+    | Ir.Const _ | Ir.Param _ | Ir.Time | Ir.Projected | Ir.TimeFunc _ -> acc
   in
   let seen_tr  = Hashtbl.create 4 in
   let seen_inf = Hashtbl.create 4 in
