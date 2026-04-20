@@ -21,7 +21,7 @@ pub mod version;
 // Modules kept for internal use but with no direct CLI entry points:
 #[allow(dead_code)] mod voi;
 #[allow(dead_code)] mod if2;
-#[allow(dead_code)] mod profile;
+mod profile;
 
 /// Terminal formatting helpers. Pure ANSI SGR codes, no dependencies.
 /// Respects NO_COLOR (https://no-color.org/) — when set, all formatting
@@ -339,6 +339,15 @@ fn main() {
                 if2_help();
             }
             if2::cmd_if2(&all_args[1..]);
+        }
+        "profile" => {
+            // Rewired per agent-channel Issue 1 (2026-04-19). cmd_profile
+            // was fully built but lost dispatch in d609654's CLI cleanup
+            // when `fit run --sweep` was promoted as the replacement;
+            // the replacement halts on first scout-gate failure, making
+            // it unusable for the primary profile-likelihood use case
+            // (edge cells of a grid are expected to fail the gate).
+            profile::cmd_profile(&all_args[1..]);
         }
         "voi" => {
             match all_args.get(1).map(|s| s.as_str()) {
