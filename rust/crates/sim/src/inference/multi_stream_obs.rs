@@ -16,12 +16,49 @@
 //! expression streams read current compartment counts and do not reset.
 //! See docs/dev/proposals/2026-04-17-state-snapshot-projections.md.
 
+use std::cell::RefCell;
 use std::sync::Arc;
 use crate::compiled_model::CompiledModel;
 use crate::rng::StatefulRng;
 use crate::propensity::EvalCtx;
 use crate::resolved_expr::{ResolvedExpr, ResolvedLikelihood, eval_resolved};
 use crate::state::{IntState, RealState};
+
+// IM2 fix (2026-04-19 inference review): per-thread scratch IntState
+// to eliminate per-particle, per-stream, per-observation heap
+// allocation in the PF/IF2/PGAS hot path. Rayon workers each get
+// their own IntState that's grown to the needed size once and reused.
+thread_local! {
+    static SCRATCH_INT: RefCell<IntState> = RefCell::new(IntState::from_vec(Vec::new()));
+}
+
+/// Run `f` with a mutable reference to this thread's scratch IntState,
+/// resized (zero-filled) to `n`. Avoids heap allocation in the obs
+/// hot path on steady-state calls.
+fn with_scratch_int<R>(n: usize, f: impl FnOnce(&IntState) -> R) -> R {
+    SCRATCH_INT.with(|cell| {
+        let mut borrow = cell.borrow_mut();
+        if borrow.counts.len() < n {
+            borrow.counts.resize(n, 0);
+        }
+        for v in borrow.counts[..n].iter_mut() { *v = 0; }
+        f(&borrow)
+    })
+}
+
+/// Run `f` with a mutable IntState whose first `n` entries mirror
+/// the given `counts` slice. Same reuse pattern as `with_scratch_int`.
+fn with_scratch_int_from_counts<R>(counts: &[i64], f: impl FnOnce(&IntState) -> R) -> R {
+    SCRATCH_INT.with(|cell| {
+        let mut borrow = cell.borrow_mut();
+        let n = counts.len();
+        if borrow.counts.len() < n {
+            borrow.counts.resize(n, 0);
+        }
+        borrow.counts[..n].copy_from_slice(counts);
+        f(&borrow)
+    })
+}
 use super::traits::ObservationModel;
 use super::types::ParticleState;
 use super::obs_model::{
@@ -230,17 +267,17 @@ impl MultiStreamObsModel {
                 idxs.iter().map(|&i| counts[i] as f64).sum()
             }
             StreamProjection::Expr(expr) => {
-                let mut scratch = IntState::new(self.n_int);
-                scratch.counts.copy_from_slice(counts);
-                let ctx = EvalCtx {
-                    model: &self.compiled,
-                    int_s: &scratch,
-                    real_s: &self.real_s,
-                    params,
-                    t: 0.0,
-                    projected: None, int_float_override: None,
-                };
-                eval_resolved(expr, &ctx)
+                with_scratch_int_from_counts(counts, |scratch| {
+                    let ctx = EvalCtx {
+                        model: &self.compiled,
+                        int_s: scratch,
+                        real_s: &self.real_s,
+                        params,
+                        t: 0.0,
+                        projected: None, int_float_override: None,
+                    };
+                    eval_resolved(expr, &ctx)
+                })
             }
         }
     }
@@ -258,11 +295,12 @@ impl MultiStreamObsModel {
         (0..self.streams.len()).map(|si| {
             let projected = self.project_stream_with_params(si, cum_flows, counts, params);
             let s = &self.streams[si];
-            let int_s = IntState::new(self.n_int);
-            eval_likelihood_resolved(
-                &s.resolved, projected, s.observations[obs_idx],
-                params, &self.compiled, &int_s, &self.real_s,
-            )
+            with_scratch_int(self.n_int, |int_s| {
+                eval_likelihood_resolved(
+                    &s.resolved, projected, s.observations[obs_idx],
+                    params, &self.compiled, int_s, &self.real_s,
+                )
+            })
         }).sum()
     }
 
@@ -287,11 +325,12 @@ impl ObservationModel<ParticleState> for MultiStreamObsModel {
                 si, &state.flow_accumulators, &state.counts, params,
             );
             let s = &self.streams[si];
-            let int_s = IntState::new(self.n_int);
-            eval_likelihood_resolved(
-                &s.resolved, projected, s.observations[obs_idx],
-                params, &self.compiled, &int_s, &self.real_s,
-            )
+            with_scratch_int(self.n_int, |int_s| {
+                eval_likelihood_resolved(
+                    &s.resolved, projected, s.observations[obs_idx],
+                    params, &self.compiled, int_s, &self.real_s,
+                )
+            })
         }).sum()
     }
 
@@ -308,11 +347,12 @@ impl ObservationModel<ParticleState> for MultiStreamObsModel {
                 si, &state.flow_accumulators, &state.counts, params,
             );
             let s = &self.streams[si];
-            let int_s = IntState::new(self.n_int);
-            sample_obs_resolved(
-                &s.resolved, projected, params,
-                &self.compiled, &int_s, &self.real_s, rng,
-            )
+            with_scratch_int(self.n_int, |int_s| {
+                sample_obs_resolved(
+                    &s.resolved, projected, params,
+                    &self.compiled, int_s, &self.real_s, rng,
+                )
+            })
         }).collect()
     }
 
@@ -324,11 +364,12 @@ impl ObservationModel<ParticleState> for MultiStreamObsModel {
                 si, &state.flow_accumulators, &state.counts, params,
             );
             let s = &self.streams[si];
-            let int_s = IntState::new(self.n_int);
-            eval_obs_mean_resolved(
-                &s.resolved, projected, params,
-                &self.compiled, &int_s, &self.real_s,
-            )
+            with_scratch_int(self.n_int, |int_s| {
+                eval_obs_mean_resolved(
+                    &s.resolved, projected, params,
+                    &self.compiled, int_s, &self.real_s,
+                )
+            })
         }).collect()
     }
 }
