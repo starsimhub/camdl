@@ -2357,6 +2357,24 @@ let expand_interventions ctx =
 
 let expand_observations ctx =
   List.concat_map (fun od ->
+    (* m25 in 2026-04-19 review: indexed obs with no explicit
+       data_stream defaults each stratum to its own stream name
+       (afp_cases_kano, afp_cases_borno, ...) per IR spec §5.3.
+       This is a common UX trap — users often want a single multi-
+       column file keyed by the base name. Warn once per declaration. *)
+    (match od.odata_stream with
+     | None when od.oindices <> [] ->
+       Diagnostics.warning ctx.diags
+         ~code:"W203"
+         ~loc:Diagnostics.no_loc
+         ~message:(Printf.sprintf
+           "indexed observation '%s' has no explicit data_stream; \
+            each stratum gets its own stream name"
+           od.oname)
+         ~hint:"add `data_stream = \"<name>\"` to share one stream, \
+                or set it explicitly per stratum to silence this warning"
+         ()
+     | _ -> ());
     let combos = cartesian_product od.oindices ctx in
     (* If no indices, combos = [[]] — one iteration with empty env *)
     List.filter_map (fun env ->
