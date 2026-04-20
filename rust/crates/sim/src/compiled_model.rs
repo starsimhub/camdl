@@ -709,7 +709,16 @@ impl CompiledModel {
                 }
             }
             InitialConditions::FromDistribution(_) => {
-                // Not supported in sim at runtime; use default zeros
+                // RC3 in 2026-04-19 engine review: this was a silent
+                // fall-through to "all zeros," which would start every
+                // compartment at 0 and not tell anyone. Hard-fail until
+                // the inference-side prior sampling path is wired in.
+                return Err(SimError::Validation(
+                    "initial_conditions::from_distribution is not yet \
+                     supported at the sim layer; draw initial values \
+                     via the inference pipeline and pass them in as \
+                     explicit initial_conditions instead".to_string()
+                ));
             }
         }
 
