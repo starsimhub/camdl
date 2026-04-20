@@ -566,6 +566,32 @@ opt-in.
   parameters using different priors, in the same fit. Fix
   alongside IC3.
 
+## Batch 2 resolution status
+
+**Addressed:**
+- IM7 — `pgas_grad.rs` now advances `gamma_idx` per overdispersed
+  transition (mirrors `pgas.rs`), drops the
+  `group_has_overdispersion` flag.
+- IM9 — `pgas_grad.rs` rate threshold aligned to `RATE_EPSILON`
+  via `pub const` from `chain_binomial`.
+- IM8 — `correlated_pf.rs` preflight rejects multi-overdispersion
+  per source group AND distinct σ² values across overdispersed
+  transitions. Matches the existing state-dependent-σ² preflight
+  pattern.
+- Im14 — comment added at `nuts.rs:281` on Vec-equality semantics.
+- Im15 — dead `_resample_rng` in `correlated_pf.rs` deleted.
+- Im17 — comment at `pgas_grad.rs:131` documenting the clamp
+  behavior at `p_total ∈ {0, 1}`.
+
+**Deferred:**
+- Im16 — `correlated_pf.rs` sort-by-Σ-flows projection note;
+  document rather than fix.
+- Im18 — `pgas.rs` resume-only-cold-rung; revisit with the
+  tempering resume refactor.
+- IC3 double-Jacobian (`log_normal` priors) + `map_log_posterior`
+  non-comparability — cross-cutting fix spanning `prior.rs`,
+  `pmmh.rs`, `pgas.rs`; track as its own work item.
+
 ## What's left after batch 2
 
 - `diagnostic.rs` (419 lines) — R-hat, ESS, multi-chain handling.
