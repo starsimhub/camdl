@@ -1,9 +1,54 @@
 ---
-status: open
+status: batch-1 addressed (pending PGAS + CLI review)
 date: 2026-04-19
 scope: rust/ sim inference crate — traits, types, linalg, resampling, priors, observation likelihoods (obs_loglik, obs_model, multi_stream_obs), chain_binomial_process adapter, particle_filter, if2
 reviewer: external (via `scripts/review-zip.sh engine`, round 5)
 ---
+
+## Resolution status
+
+**Addressed (behavior fixes):**
+- IC1 — BetaBinomial obs likelihood implemented
+  (`beta_binomial_logpmf` + sample + mean).
+- IC2 — Normal-likelihood count discretization documented in the
+  IR spec; runtime emits a once-per-process `log::warn!` on
+  fractional observations so silent coercion is visible.
+- IM1 — per-particle RNGs now use ChaCha8's stream counter via
+  new `StatefulRng::new_stream(seed, stream)`. Four call sites
+  in particle_filter / if2 / pgas / correlated_pf.
+- IM2 — thread-local scratch `IntState` eliminates
+  per-particle/per-stream/per-obs heap allocation in
+  `multi_stream_obs.rs`. Two helpers cover the common cases.
+- IM3 — `MultiStreamObsModel::new` and
+  `resolve_likelihood_from_model` now return `Result<_, SimError>`.
+  CLI call sites convert to a clean `exit 1` with diagnostic.
+- IM4 — IF2 skips non-finite ll_inc with a per-iteration skip
+  counter instead of poisoning `total_loglik`.
+
+**Addressed (docs + guards + tests):**
+- IM5 — cooling-approximation gap (small n_obs) documented at
+  the formula site.
+- Im3 — multi-stream `obs_times` consistency now validated at
+  construction (same as IM3 fix).
+- Im5 — `reset_flows` semantic invariant documented with a
+  canary note for future per-stream-cadence features.
+- In4 — NegBin(μ=0, k=0, y=0) = 0 contract test.
+- IC1 regression — `beta_binomial_logpmf` known-value test.
+
+**Deferred (not yet addressed):**
+- Im1 — reject `PriorDist::LogNormal` with `Transform::None` at
+  fit-config time. CLI-level; revisit in the CLI review batch.
+- Im2 — `log_sum_exp` +∞ handling. Defensive; low risk.
+- Im4 — systematic resampling `<` vs `<=`. Stylistic nit.
+- Im6 — SIGINT handling in IF2 loop. CLI-level.
+- Im7 — per-parameter progress callback payload. UX.
+- In1, In2, In3, In5 — naming/doc/perf nits.
+
+**Still unread:** PGAS (1718 lines), pgas_grad, nuts, pmmh,
+correlated_pf, diagnostic, CLI drivers. The PGAS review flagged
+a CSMC-AS ancestor-sampling concern that wasn't detailed in this
+batch — highest remaining risk surface for the next review.
+
 
 # Inference code review — 2026-04-19 (batch 1: foundations + PF + IF2)
 
