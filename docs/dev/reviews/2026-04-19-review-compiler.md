@@ -1,9 +1,61 @@
 ---
-status: open
+status: mostly-addressed
 date: 2026-04-19
 scope: ocaml/ compiler subsystem — parser, expander, dimcheck, autodiff, diagnostics, serde, inspect, camdlc CLI
 reviewer: external (via `scripts/review-zip.sh compiler`)
 ---
+
+## Resolution status
+
+**Addressed:** M1 (wire Validate), M2 (diag ordering), M3 (double-render),
+M4 (mod autodiff errors), M5 (Info severity), M6 (NaN sentinel scrub),
+M7 (eprintf → W311), M8 (Fun.protect on read_csv_rows), M10 (multi-dim
+PIndexed as diagnostic), M11 (DRead structured record + kwarg
+validation), M12/M13/m15 (IR spec drift), M14 (eval_const UnOp), M15
+(longest-prefix match in find_base_*), M16 (collect_numerator_pops
+descends all subexprs), M18 (Cond dim constraint), M19 (Pow read_dim),
+M20 (shape_index length check), M22 (deleted run_expansion), M23/M24
+(collect_let_refs_ast + expr_refs_name complete), M25 (transition_count
+arithmetic + label), M26 (--no-dim-check on check), M30 (exit 1 on
+missing transition), C1 (overdispersed shape validation E260),
+C2 (dim_value_index E263 on miss), C3 (resolve_stoich_ref E272),
+C5 (ode_equations expansion), C6 (transfer kwarg validation), C7
+(resolve_comp_name E264), C8 (registered 12 unlisted goldens), C9
+(sir_reservoir ODE fixture), m1 (--rate dead), m2 (tautology), m3
+(exit on unknown flag), m4 (pp_expr Const integer), m5 (Compile_error
+payload), m6 (Source_cache.load dead), m7 (dead records), m8 (lexer),
+m9/m10 (validate uniq_check + observation likelihood), m11 (ir.mli
+warning suppression), m14 (tag_opt empty), m17 (EList E270/E271),
+m20 not addressed, m22 (extract_path_arg positional-only), m23
+(O(N²) scenario fold → O(N)), m25 (W203 indexed obs hint),
+n1 (abs subgradient at 0), n11 (dead model param), n12 (dead rate_str).
+
+**Remaining open:**
+- M9 — expander diagnostics mostly use `no_loc`; needs wide source-loc
+  threading (incremental work, per-code).
+- M17 / m24 — dead simplex plumbing. Cross-language wire-format
+  removal; deferred.
+- M21 — scenario rs_scale dedup (behavioral no-op given Hashtbl
+  overwrite; left as-is with clarifying comment).
+- m12 — empty observation block defaults (needs parser option-threading).
+- m13 — iv_kv catch-all `ASet` on unknown keys (Validate catches
+  UnknownCompartment downstream; worth a dedicated E-code later).
+- m19 — observation `normal(mean/sd)` vs prior `normal(mu/sigma)` —
+  design choice, left as documentation task.
+- m20 — `data_contract` always None (cross-language field; defer).
+- m21 — `infectious_compartments` PopSum contribution is heuristic;
+  broader filter would lose legitimate cases (malaria_two_species).
+- m26 — Mod dimcheck is correct; autodiff is the one that was fixed.
+- m28, m29, m31 — UX / arithmetic nits; low priority.
+- n3 — parser `failwith` → Diagnostics needs ctx threading refactor.
+- T1, T2 — coverage gaps overlapping silent-fallback bugs now largely
+  closed by C-level fixes (which added tests); revisit once C1 tests
+  land.
+- T4 — W310 warning isn't asserted directly (json_errors_mode path
+  only captures errors, not warnings). Needs a diagnostics-inspection
+  API.
+- C4, C10 — normal/log_normal prior kwarg conventions; design question.
+
 
 # Compiler code review — 2026-04-19
 
