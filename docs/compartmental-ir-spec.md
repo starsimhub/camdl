@@ -448,12 +448,22 @@ projection and model parameters.
 likelihood :=
   | Poisson(rate: expr)
   | NegBinomial(mean: expr, dispersion: expr)
-  | Normal(mean: expr, sd: expr)
+  | Normal(mean: expr, sd: expr)              -- discretized-Normal count likelihood
   | Binomial(n: expr, p: expr)
   | BetaBinomial(n: expr, alpha: expr, beta: expr)
 
 -- within likelihood exprs, `Projected` refers to the projection output
 ```
+
+**`Normal` is a count likelihood, not a continuous one.** The
+runtime evaluates `log ∫_{k-0.5}^{k+0.5} ϕ((x − mean)/sd)/sd dx`
+on the rounded, non-negative observation `k`, following He et al.
+(2010) heteroscedastic modelling of weekly case reports. Using
+it for genuinely continuous observables (log-transformed viral
+load, antibody titer, etc.) silently truncates the observation
+to a non-negative integer. If you need a continuous-PDF Normal,
+either use a separate transformation pipeline or file a request
+for a `ContinuousNormal` variant.
 
 In **sampling mode** (v0.1), the runtime evaluates the projection, then draws a
 sample from the likelihood distribution. In **scoring mode** (v0.2+), it

@@ -90,6 +90,25 @@ pub(crate) fn eval_likelihood_resolved(
             negbin_logpmf(observed, m, k)
         }
         ResolvedLikelihood::Normal { mean, sd } => {
+            // IC2 in the 2026-04-19 inference review: `Normal` is
+            // pomp/He-et-al.'s discretized-Normal *count* likelihood.
+            // A clearly-fractional observation probably means the user
+            // intended a continuous Normal PDF; log once so the
+            // silent-coercion failure mode is visible.
+            if observed.is_finite() && (observed - observed.round()).abs() > 1e-6 {
+                use std::sync::atomic::{AtomicBool, Ordering};
+                static WARNED: AtomicBool = AtomicBool::new(false);
+                if !WARNED.swap(true, Ordering::Relaxed) {
+                    log::warn!(
+                        "Normal observation likelihood: observed value {:.6} is \
+                         not integer-valued. The `normal(...)` likelihood is a \
+                         discretized-count distribution (pomp/He et al.); your \
+                         data will be rounded to the nearest non-negative integer \
+                         before scoring. If you need a continuous Normal PDF, \
+                         file a request for a ContinuousNormal variant.",
+                        observed);
+                }
+            }
             let m = eval_resolved(mean, &ctx(projected));
             let s = eval_resolved(sd, &ctx(projected));
             discretized_normal_logpmf_tol(observed, m, s * s, DEFAULT_TOL)
