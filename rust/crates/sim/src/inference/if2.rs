@@ -457,6 +457,13 @@ pub fn run_if2_with_progress<P: ProcessModel<State = ParticleState>>(
 
         let mut log_weights = vec![0.0_f64; n];
         let mut total_loglik = 0.0;
+        // IM4 in 2026-04-19 inference review: count observations whose
+        // ll_inc came back non-finite (all N particles hit an
+        // impossible-state likelihood — NegBin on μ=0 with y>0, a
+        // dimension failure, a zero-weight swarm during early
+        // perturbation). Skip those from the total instead of
+        // poisoning the rest of the iteration with -inf.
+        let mut n_skipped_obs: usize = 0;
         let mut t = config.t_start;
 
         for obs_idx in 0..n_obs {
@@ -563,7 +570,11 @@ pub fn run_if2_with_progress<P: ProcessModel<State = ParticleState>>(
             // docs/dev/proposals/2026-04-18-ic-free-inference.md.
             let ll_inc = log_sum_exp(&log_weights) - (n as f64).ln();
             if !(config.skip_first_obs_from_loglik && obs_idx == 0) {
-                total_loglik += ll_inc;
+                if ll_inc.is_finite() {
+                    total_loglik += ll_inc;
+                } else {
+                    n_skipped_obs += 1;
+                }
             }
 
             // Resample states AND parameters jointly via double-buffer (no allocation)
@@ -616,6 +627,13 @@ pub fn run_if2_with_progress<P: ProcessModel<State = ParticleState>>(
         // Report progress
         if let Some(cb) = &on_iteration {
             cb(iter, total_loglik);
+        }
+        if n_skipped_obs > 0 {
+            log::debug!(
+                "if2 iter {}: skipped {}/{} observations with non-finite log-lik \
+                 increment (typically early-exploration particles hit \
+                 impossible states)",
+                iter, n_skipped_obs, n_obs);
         }
 
         // Feed filter mean back as next iteration's starting params
