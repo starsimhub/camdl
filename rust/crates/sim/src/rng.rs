@@ -38,14 +38,20 @@ impl StatefulRng {
     /// The dt scaling ensures aggregate noise is invariant to step size:
     /// halving dt halves per-step noise but doubles the number of steps.
     pub fn neg_binomial(&mut self, mean: f64, sigma_sq: f64, dt: f64) -> u64 {
-        if mean <= 0.0 || sigma_sq <= 0.0 { return self.poisson(mean); }
+        if mean <= 0.0 || sigma_sq <= 0.0 {
+            crate::eval_stats::inc_neg_binomial_pois();
+            return self.poisson(mean);
+        }
         let shape = dt / sigma_sq;
         // shape < 1e-6 means sigma_sq >> dt: the Gamma is degenerate
         // (nearly all mass at zero, occasional extreme spikes).
         // Fall back to Poisson (no multiplicative noise) rather than
         // producing nonsense draws. IF2 will push sigma_se away from
         // these extreme values via low likelihood.
-        if shape < 1e-6 { return self.poisson(mean); }
+        if shape < 1e-6 {
+            crate::eval_stats::inc_neg_binomial_pois();
+            return self.poisson(mean);
+        }
         let scale = sigma_sq / dt;
         let g = match Gamma::new(shape, scale) {
             Ok(g) => g.sample(&mut self.0),
@@ -89,7 +95,10 @@ impl StatefulRng {
         if p >= 1.0 { return n; }
         match Binomial::new(n, p.clamp(0.0, 1.0)) {
             Ok(b) => b.sample(&mut self.0),
-            Err(_) => if p > 0.5 { n } else { 0 },
+            Err(_) => {
+                crate::eval_stats::inc_binomial_fallback();
+                if p > 0.5 { n } else { 0 }
+            }
         }
     }
 

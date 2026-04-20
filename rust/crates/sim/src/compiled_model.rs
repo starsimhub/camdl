@@ -203,7 +203,15 @@ fn eval_table_expr(
                 BinOp::Sub => a - b,
                 BinOp::Mul => a * b,
                 BinOp::Div => if b == 0.0 { 0.0 } else { a / b },
-                BinOp::Pow => a.powf(b),
+                BinOp::Pow => {
+                    // RM6 in 2026-04-19 engine review: align with
+                    // eval_expr / eval_resolved, which both guard
+                    // NaN/Inf Pow results. Inline tables with Pow
+                    // expressions previously could cache NaN values
+                    // that fed the hot path as silent wrong answers.
+                    let r = a.powf(b);
+                    if r.is_nan() || r.is_infinite() { 0.0 } else { r }
+                }
                 BinOp::Mod => if b == 0.0 { 0.0 } else { a.rem_euclid(b) },
                 BinOp::Min => a.min(b),
                 BinOp::Max => a.max(b),
@@ -217,15 +225,16 @@ fn eval_table_expr(
         }
         Expr::UnOp(w) => {
             let a = eval_table_expr(&w.un_op.arg, param_index, params)?;
-            Ok(match w.un_op.op {
+            let r = match w.un_op.op {
                 UnOp::Neg   => -a,
                 UnOp::Exp   => a.exp(),
-                UnOp::Log   => a.ln(),
-                UnOp::Sqrt  => a.sqrt(),
+                UnOp::Log   => if a > 0.0 { a.ln() } else { f64::NEG_INFINITY },
+                UnOp::Sqrt  => if a >= 0.0 { a.sqrt() } else { 0.0 },
                 UnOp::Abs   => a.abs(),
                 UnOp::Floor => a.floor(),
                 UnOp::Ceil  => a.ceil(),
-            })
+            };
+            Ok(if r.is_nan() { 0.0 } else { r })
         }
         _ => Err(SimError::Validation(
             "unsupported expression type in table values (only Const and Param are valid)".to_string()

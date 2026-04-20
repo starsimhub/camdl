@@ -248,11 +248,17 @@ pub fn eval_resolved(expr: &ResolvedExpr, ctx: &EvalCtx<'_>) -> f64 {
                 BinOp::Sub => a - b,
                 BinOp::Mul => a * b,
                 BinOp::Div => {
-                    if b == 0.0 { 0.0 } else { a / b }
+                    if b == 0.0 {
+                        crate::eval_stats::inc_div_by_zero();
+                        0.0
+                    } else { a / b }
                 }
                 BinOp::Pow => {
                     let r = a.powf(b);
-                    if r.is_nan() || r.is_infinite() { 0.0 } else { r }
+                    if r.is_nan() || r.is_infinite() {
+                        crate::eval_stats::inc_pow_nan_inf();
+                        0.0
+                    } else { r }
                 }
                 BinOp::Mod => if b == 0.0 { 0.0 } else { a.rem_euclid(b) },
                 BinOp::Min => a.min(b),
@@ -277,7 +283,10 @@ pub fn eval_resolved(expr: &ResolvedExpr, ctx: &EvalCtx<'_>) -> f64 {
                 UnOp::Floor => a.floor(),
                 UnOp::Ceil  => a.ceil(),
             };
-            if result.is_nan() { 0.0 } else { result }
+            if result.is_nan() {
+                crate::eval_stats::inc_unop_nan();
+                0.0
+            } else { result }
         }
 
         ResolvedExpr::Cond { pred, then_, else_ } => {
@@ -304,19 +313,24 @@ pub fn eval_resolved(expr: &ResolvedExpr, ctx: &EvalCtx<'_>) -> f64 {
                     table_idx_val.rem_euclid(n)
                 }
                 OobPolicy::Error => {
-                    // Defensive: clamp instead of panic. The Error policy
-                    // means the model author wanted strict bounds, but in the
-                    // resolved hot path we can't return Result. This matches
-                    // the defensive approach used for div-by-zero and NaN.
+                    // RM3 in 2026-04-19 engine review: previously this
+                    // silently clamped + log::warn'd, defeating the
+                    // whole point of the Error policy. The compiler's
+                    // Error policy is a contract: "I assert the index
+                    // will never be out of range." A violation in the
+                    // hot path is a model bug, and the honest response
+                    // is to fail loud. The slow-path (eval_expr) and
+                    // construction-time (eval_table_expr) evaluators
+                    // already do so; this is alignment, not a new cost.
                     if table_idx_val < 0 || table_idx_val >= n {
-                        log::warn!(
-                            "resolved table lookup: index {} out of bounds [0, {}), clamping",
+                        panic!(
+                            "table lookup out of bounds: index {} not in [0, {}) \
+                             (oob_policy = Error). Either widen the bounds, change \
+                             the policy to Clamp/Wrap, or fix the index expression.",
                             table_idx_val, n
                         );
-                        table_idx_val.clamp(0, n - 1)
-                    } else {
-                        table_idx_val
                     }
+                    table_idx_val
                 }
             };
             cached[i as usize]
