@@ -138,9 +138,15 @@ type obs_decl = {
   oname       : string;
   oindices    : index_binding list;
   odata_stream: string option;
-  oschedule   : obs_schedule;
-  oprojection : obs_projection;
-  olikelihood : likelihood_kind;
+  (* m12 in 2026-04-19 review: each of schedule/projection/likelihood
+     is mandatory; an empty `cases: {}` block previously defaulted to
+     Poisson(rate=1) every 1 time unit on an incidence projection,
+     silently producing a meaningless but compile-green likelihood.
+     Represented as option here so the expander can emit a specific
+     diagnostic naming the missing field. *)
+  oschedule   : obs_schedule option;
+  oprojection : obs_projection option;
+  olikelihood : likelihood_kind option;
 }
 
 type action_decl =

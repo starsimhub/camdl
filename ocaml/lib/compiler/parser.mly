@@ -343,14 +343,14 @@ obs_list:
 obs_decl:
   | name = IDENT ibs = index_bindings_opt COLON LBRACE obs_kvs = list(obs_kv) RBRACE
       { let ds = ref None in
-        let sched = ref (ObsEvery (EConst 1.0)) in
-        let proj = ref (ProjIncidence (name, [])) in
-        let lik = ref (LikPoisson [("rate", EConst 1.0)]) in
+        let sched = ref None in
+        let proj = ref None in
+        let lik = ref None in
         List.iter (function
           | `DataStream s -> ds := Some s
-          | `Schedule sc  -> sched := sc
-          | `Proj p       -> proj := p
-          | `Lik l        -> lik := l
+          | `Schedule sc  -> sched := Some sc
+          | `Proj p       -> proj := Some p
+          | `Lik l        -> lik := Some l
         ) obs_kvs;
         { oname = name; oindices = ibs; odata_stream = !ds;
           oschedule = !sched; oprojection = !proj; olikelihood = !lik } }

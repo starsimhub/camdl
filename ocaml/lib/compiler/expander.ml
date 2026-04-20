@@ -2413,6 +2413,35 @@ let expand_observations ctx =
                 or set it explicitly per stratum to silence this warning"
          ()
      | _ -> ());
+    (* m12 in 2026-04-19 review: each of schedule / projection /
+       likelihood is required. Previously the parser filled in
+       Poisson(rate=1) / every=1 / incidence(name) defaults, so an
+       empty block compiled to a silently-meaningless likelihood. *)
+    let missing_field name =
+      Diagnostics.error ctx.diags
+        ~code:"E266"
+        ~loc:Diagnostics.no_loc
+        ~message:(Printf.sprintf
+          "observation '%s': missing required field '%s'" od.oname name)
+        ~hint:(match name with
+          | "schedule" -> "add `every = <period>` or `at = [t1, t2, ...]`"
+          | "projection" -> "add `incidence = <transition>` or `prevalence = <compartment>`"
+          | "likelihood" -> "add `likelihood = poisson(rate = ...)`, `neg_binomial(mean = ..., r = ...)`, etc."
+          | _ -> "required field")
+        ()
+    in
+    let sched_v = match od.oschedule with
+      | Some s -> s
+      | None -> missing_field "schedule"; ObsEvery (EConst 1.0)
+    in
+    let proj_v = match od.oprojection with
+      | Some p -> p
+      | None -> missing_field "projection"; ProjIncidence (od.oname, [])
+    in
+    let lik_v = match od.olikelihood with
+      | Some l -> l
+      | None -> missing_field "likelihood"; LikPoisson [("rate", EConst 1.0)]
+    in
     let combos = cartesian_product od.oindices ctx in
     (* If no indices, combos = [[]] — one iteration with empty env *)
     List.filter_map (fun env ->
@@ -2424,7 +2453,7 @@ let expand_observations ctx =
       | None    -> 100.0
       | Some sd -> resolve_float_expr ctx sd.sim_to
     in
-    let schedule = match od.oschedule with
+    let schedule = match sched_v with
       | ObsEvery every ->
         let step = resolve_float_expr ctx every in
         Ir.ObsRegular { Ir.start = t_start; Ir.step; Ir.end_ = t_end }
@@ -2451,7 +2480,7 @@ let expand_observations ctx =
       else
         Ir.CurrentPop concrete  (* Unknown — let the Rust side emit a clean diagnostic. *)
     in
-    let projection = match od.oprojection with
+    let projection = match proj_v with
       | ProjIncidence (name, idxs) ->
         let idx_vals = List.map (index_item_to_str env) idxs in
         let concrete = if idx_vals = [] then name
@@ -2497,7 +2526,7 @@ let expand_observations ctx =
          E250 — missing required kwarg (or only positional args supplied)
          E251 — unknown kwarg name (typo / wrong distribution)
        Mirrors E231/E233 on priors. *)
-    let lik_name = match od.olikelihood with
+    let lik_name = match lik_v with
       | LikNegBinomial _  -> "neg_binomial"
       | LikPoisson _      -> "poisson"
       | LikNormal _       -> "normal"
@@ -2505,7 +2534,7 @@ let expand_observations ctx =
       | LikBetaBinomial _ -> "beta_binomial"
       | LikBernoulli _    -> "bernoulli"
     in
-    let required_kwargs = match od.olikelihood with
+    let required_kwargs = match lik_v with
       | LikNegBinomial _  -> ["mean"; "r"]
       | LikPoisson _      -> ["rate"]
       | LikNormal _       -> ["mean"; "sd"]
@@ -2513,7 +2542,7 @@ let expand_observations ctx =
       | LikBetaBinomial _ -> ["n"; "alpha"; "beta"]
       | LikBernoulli _    -> ["p"]
     in
-    let current_kwargs = match od.olikelihood with
+    let current_kwargs = match lik_v with
       | LikNegBinomial k | LikPoisson k | LikNormal k
       | LikBinomial k | LikBetaBinomial k | LikBernoulli k -> k
     in
@@ -2554,7 +2583,7 @@ let expand_observations ctx =
           ();
         Ir.Const 0.0
     in
-    let likelihood = match od.olikelihood with
+    let likelihood = match lik_v with
       | LikNegBinomial kwargs ->
         Ir.NegBinomial {
           Ir.mean       = resolve_kw kwargs "mean";
