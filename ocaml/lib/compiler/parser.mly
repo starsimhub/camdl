@@ -265,10 +265,10 @@ transition_list:
 
 transition_decl:
   (* inline: name[...] : src --> dst @ rate where guard *)
-  | name = IDENT ibs = index_bindings_opt COLON src = stoich_ref_opt ARROW dst = stoich_ref_opt AT rate = expr guard = where_clause_opt tag = tag_opt
+  | name = IDENT ibs = index_bindings_opt COLON src = stoich_ref_opt ARROW dst = stoich_ref_opt AT rate = expr guard = where_clause_opt
       { { trname = name; trindices = ibs;
           trsrc = src; trdst = dst;
-          trrate = rate; trguard = guard; trtag = tag } }
+          trrate = rate; trguard = guard; trtag = None } }
   (* block form: name[...] : src --> dst { rate = ...; tag = ... } *)
   | name = IDENT ibs = index_bindings_opt COLON src = stoich_ref_opt ARROW dst = stoich_ref_opt LBRACE tbody = transition_body RBRACE
       { let (rate, guard, tag) = tbody in
@@ -291,9 +291,6 @@ index_item:
 where_clause_opt:
   | (* empty *) { None }
   | WHERE g = guard_expr { Some g }
-
-tag_opt:
-  | (* empty *) { None }
 
 let_shape_opt:
   | (* empty *) { None }
