@@ -11,6 +11,7 @@
   let pending_warnings
     : (Lexing.position * Lexing.position * string) list ref = ref []
 
+
   (* Warn on suspicious digit grouping with underscores.
      Fires on:
        10_00       — groups (2,2), trailing group not 3 digits

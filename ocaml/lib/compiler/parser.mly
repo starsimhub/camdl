@@ -65,7 +65,11 @@ declaration:
   | ORIGIN EQ e = expr
       { match e with
         | EFuncCall ("date", [("", EIdent (s, _))]) -> DOrigin s
-        | _ -> failwith "invalid origin declaration: expected origin = date(\"YYYY-MM-DD\")" }
+        | _ ->
+          Parser_errors.push_error ~sp:$startpos ~ep:$endpos
+            ~code:"E101"
+            ~msg:"invalid origin declaration: expected origin = date(\"YYYY-MM-DD\")";
+          DOrigin "" }
   | DIMENSIONS LBRACE es = list(dim_entry) RBRACE
       { DDimensions es }
   | COMPARTMENTS LBRACE cs = compartment_list RBRACE
@@ -117,7 +121,11 @@ unit_lit:
     | "per_week"  -> PerWeek
     | "per_month" -> PerMonth
     | "per_year"  -> PerYear
-    | s -> failwith (Printf.sprintf "unknown unit '%s': expected one of 'days, 'weeks, 'months, 'years, 'per_day, 'per_week, 'per_month, 'per_year" s) }
+    | s ->
+      Parser_errors.push_error ~sp:$startpos ~ep:$endpos
+        ~code:"E102"
+        ~msg:(Printf.sprintf "unknown unit '%s': expected one of 'days, 'weeks, 'months, 'years, 'per_day, 'per_week, 'per_month, 'per_year" s);
+      Days }
 
 (* ── Compartment block ──────────────────────────────────────────────────── *)
 
@@ -183,24 +191,43 @@ dim_annotation_opt:
 
 dim_literal:
   (* [1] — dimensionless *)
-  | n = INT { if n = 1 then (0, 0) else failwith (Printf.sprintf "unknown dimension '[%d]' — expected one of: [1], [P], [T], [T^-1], [1/T], [P/T], [P*T^-1]" n) }
+  | n = INT
+      { if n = 1 then (0, 0)
+        else begin
+          Parser_errors.push_error ~sp:$startpos ~ep:$endpos
+            ~code:"E103"
+            ~msg:(Printf.sprintf "unknown dimension '[%d]' — expected one of: [1], [P], [T], [T^-1], [1/T], [P/T], [P*T^-1]" n);
+          (0, 0)
+        end }
   (* [P] — population *)
   | id = IDENT { match id with
       | "P" -> (1, 0)
       | "T" -> (0, 1)
-      | _ -> failwith (Printf.sprintf "unknown dimension '[%s]' — expected one of: [1], [P], [T], [T^-1], [1/T], [P/T], [P*T^-1]" id) }
+      | _ ->
+        Parser_errors.push_error ~sp:$startpos ~ep:$endpos
+          ~code:"E103"
+          ~msg:(Printf.sprintf "unknown dimension '[%s]' — expected one of: [1], [P], [T], [T^-1], [1/T], [P/T], [P*T^-1]" id);
+        (0, 0) }
   (* [T^-1] — per-capita rate *)
   | id = IDENT CARET MINUS m = INT
       { match id with
       | "P" -> (- m, 0)
       | "T" -> (0, - m)
-      | _ -> failwith (Printf.sprintf "unknown dimension '[%s^-%d]' — expected one of: [1], [P], [T], [T^-1], [1/T], [P/T], [P*T^-1]" id m) }
+      | _ ->
+        Parser_errors.push_error ~sp:$startpos ~ep:$endpos
+          ~code:"E103"
+          ~msg:(Printf.sprintf "unknown dimension '[%s^-%d]' — expected one of: [1], [P], [T], [T^-1], [1/T], [P/T], [P*T^-1]" id m);
+        (0, 0) }
   (* [P*T^-1] — population-level rate *)
   | id1 = IDENT STAR id2 = IDENT CARET MINUS m = INT
       { match (id1, id2) with
       | ("P", "T") -> (1, - m)
       | ("T", "P") -> (- m, 1)
-      | _ -> failwith (Printf.sprintf "unknown dimension '[%s*%s^-%d]' — expected one of: [1], [P], [T], [T^-1], [1/T], [P/T], [P*T^-1]" id1 id2 m) }
+      | _ ->
+        Parser_errors.push_error ~sp:$startpos ~ep:$endpos
+          ~code:"E103"
+          ~msg:(Printf.sprintf "unknown dimension '[%s*%s^-%d]' — expected one of: [1], [P], [T], [T^-1], [1/T], [P/T], [P*T^-1]" id1 id2 m);
+        (0, 0) }
   (* [P/T] — population-level rate (alternative syntax) *)
   | id1 = IDENT SLASH id2 = IDENT
       { match (id1, id2) with
@@ -208,15 +235,28 @@ dim_literal:
       | ("T", "P") -> (-1, 1)
       | ("P", "P") -> (0, 0)
       | ("T", "T") -> (0, 0)
-      | _ -> failwith (Printf.sprintf "unknown dimension '[%s/%s]' — expected one of: [1], [P], [T], [T^-1], [1/T], [P/T], [P*T^-1]" id1 id2) }
+      | _ ->
+        Parser_errors.push_error ~sp:$startpos ~ep:$endpos
+          ~code:"E103"
+          ~msg:(Printf.sprintf "unknown dimension '[%s/%s]' — expected one of: [1], [P], [T], [T^-1], [1/T], [P/T], [P*T^-1]" id1 id2);
+        (0, 0) }
   (* [1/T] — per-capita rate (alternative syntax) *)
   | n = INT SLASH id = IDENT
       { if n = 1 then
         match id with
         | "P" -> (-1, 0)
         | "T" -> (0, -1)
-        | _ -> failwith (Printf.sprintf "unknown dimension '[1/%s]' — expected one of: [1], [P], [T], [T^-1], [1/T], [P/T], [P*T^-1]" id)
-      else failwith (Printf.sprintf "unknown dimension '[%d/%s]' — expected one of: [1], [P], [T], [T^-1], [1/T], [P/T], [P*T^-1]" n id) }
+        | _ ->
+          Parser_errors.push_error ~sp:$startpos ~ep:$endpos
+            ~code:"E103"
+            ~msg:(Printf.sprintf "unknown dimension '[1/%s]' — expected one of: [1], [P], [T], [T^-1], [1/T], [P/T], [P*T^-1]" id);
+          (0, 0)
+      else begin
+        Parser_errors.push_error ~sp:$startpos ~ep:$endpos
+          ~code:"E103"
+          ~msg:(Printf.sprintf "unknown dimension '[%d/%s]' — expected one of: [1], [P], [T], [T^-1], [1/T], [P/T], [P*T^-1]" n id);
+        (0, 0)
+      end }
 
 param_kind:
   | RATE        { PRate }
@@ -369,8 +409,16 @@ obs_kv:
             | "binomial"      -> LikBinomial     args
             | "beta_binomial" -> LikBetaBinomial args
             | "bernoulli"     -> LikBernoulli    args
-            | s -> failwith (Printf.sprintf "unknown likelihood '%s': expected one of neg_binomial, poisson, normal, binomial, beta_binomial, bernoulli" s))
-        | _ -> failwith "likelihood value must be a function call, e.g. likelihood = neg_binomial(mean = projected, dispersion = k)") }
+            | s ->
+              Parser_errors.push_error ~sp:$startpos ~ep:$endpos
+                ~code:"E104"
+                ~msg:(Printf.sprintf "unknown likelihood '%s': expected one of neg_binomial, poisson, normal, binomial, beta_binomial, bernoulli" s);
+              LikPoisson args)
+        | _ ->
+          Parser_errors.push_error ~sp:$startpos ~ep:$endpos
+            ~code:"E104"
+            ~msg:"likelihood value must be a function call, e.g. likelihood = neg_binomial(mean = projected, dispersion = k)";
+          LikPoisson []) }
 
 obs_projection:
   | e = expr { ProjDerived e }
@@ -418,7 +466,11 @@ recurring_body:
         ) kvs;
         let every_e = match !every with
           | Some e -> e
-          | None   -> failwith "recurring schedule missing required 'every = ...'"
+          | None   ->
+            Parser_errors.push_error ~sp:$startpos ~ep:$endpos
+              ~code:"E105"
+              ~msg:"recurring schedule missing required 'every = ...'";
+            EConst 1.0
         in
         (* from and until default to simulate.from / simulate.to respectively. *)
         SRecurring (every_e, !from_, !until) }
@@ -488,7 +540,11 @@ output_kv:
                        | _ -> "tsv") in
           let rest  = List.filter (fun (k,_) -> k <> "format") kvs in
           `Summ { osquantities = rest; osformat = fmt }
-        | _ -> failwith (Printf.sprintf "unknown output section '%s': expected one of trajectories, flows, summary" $1) }
+        | _ ->
+          Parser_errors.push_error ~sp:$startpos ~ep:$endpos
+            ~code:"E106"
+            ~msg:(Printf.sprintf "unknown output section '%s': expected one of trajectories, flows, summary" $1);
+          `Summ { osquantities = []; osformat = "tsv" } }
 
 (* ── Simulate block ──────────────────────────────────────────────────────── *)
 
@@ -571,10 +627,12 @@ expr:
          20 / 100_000 'per_year — does 'per_year bind to 100_000 or the whole expr?
          The parser binds it to 100_000, which is almost never what the user wants. *)
       (match e2 with
-       | EUnit _ -> failwith
-           "ambiguous unit literal after '/': the unit suffix binds to the adjacent \
-            number, not the whole expression. \
-            Use parentheses: (20 / 100_000) 'per_year, or pre-compute: 0.0002 'per_year"
+       | EUnit _ ->
+         Parser_errors.push_error ~sp:$startpos ~ep:$endpos
+           ~code:"E107"
+           ~msg:"ambiguous unit literal after '/': the unit suffix binds to the \
+                 adjacent number, not the whole expression. Use parentheses: \
+                 (20 / 100_000) 'per_year, or pre-compute: 0.0002 'per_year"
        | _ -> ());
       EBinOp (Div, e1, e2)
     }
@@ -658,7 +716,11 @@ scenario_field:
       { let s = match v with
           | EIdent (s, _)    -> s
           | EFuncCall (s, []) -> s
-          | _ -> failwith "invalid extends clause: expected a scenario name, e.g. extends = baseline" in
+          | _ ->
+            Parser_errors.push_error ~sp:$startpos ~ep:$endpos
+              ~code:"E108"
+              ~msg:"invalid extends clause: expected a scenario name, e.g. extends = baseline";
+            "" in
         Ast.ScExtends s }
   | k = IDENT EQ v = expr
       { match k with
@@ -667,7 +729,11 @@ scenario_field:
             | EIdent (s, _)    -> s   (* quoted string or bare identifier *)
             | EFuncCall (s, []) -> s  (* zero-arg call used as name *)
             | EConst f         -> string_of_float f
-            | _ -> failwith "invalid scenario label: expected a quoted string or identifier, e.g. label = \"baseline\"" in
+            | _ ->
+              Parser_errors.push_error ~sp:$startpos ~ep:$endpos
+                ~code:"E109"
+                ~msg:"invalid scenario label: expected a quoted string or identifier, e.g. label = \"baseline\"";
+              "" in
           Ast.ScLabel s
         | "enable"  -> Ast.ScEnable  (extract_ident_list v)
         | "disable" -> Ast.ScDisable (extract_ident_list v)

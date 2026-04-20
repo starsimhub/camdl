@@ -14,6 +14,7 @@ let compile_detail_result ?(name = "model") ?(filename = "<input>") (src : strin
      same process.  pending_warnings is a mutable global ref; clearing it
      here ensures we never replay warnings from a prior run. *)
   Lexer.pending_warnings := [];
+  Parser_errors.pending_errors := [];
   try
     let lexbuf = Lexing.from_string src in
     Lexing.set_filename lexbuf filename;
@@ -54,6 +55,16 @@ let compile_detail_result ?(name = "model") ?(filename = "<input>") (src : strin
         ()
     ) (List.rev !Lexer.pending_warnings);
     Lexer.pending_warnings := [];
+    (* Drain parser-action errors collected from semantic actions that
+       used to `failwith` (n3 in the 2026-04-19 compiler review). *)
+    List.iter (fun (sp, ep, code, msg) ->
+      Diagnostics.error ctx.diags
+        ~code
+        ~loc:(Diagnostics.loc_of_positions ~file:filename sp ep)
+        ~message:msg
+        ()
+    ) (List.rev !Parser_errors.pending_errors);
+    Parser_errors.pending_errors := [];
     (* Errors: render all diagnostics and exit.
        Warnings are NOT rendered here — callers render once at the end
        of their pipeline so expansion-phase warnings don't get printed
