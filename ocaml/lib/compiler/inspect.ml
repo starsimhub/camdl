@@ -433,7 +433,11 @@ let run_transition_rate ppf (model : Ir.model) ctx name =
   let arrow = "\xe2\x86\x92" in
   match List.find_opt (fun (t : Ir.transition) -> t.name = name) model.transitions with
   | None ->
-    Fmt.epr "error: no transition named '%s'@\n" name
+    (* M30 in 2026-04-19 review: previously this printed an error
+       and exited 0, so `camdl inspect --transition foo` with a
+       bogus name failed silently from a CI's POV. Exit 1. *)
+    Fmt.epr "error: no transition named '%s'@\n" name;
+    exit 1
   | Some t ->
     (* Title *)
     Term_style.bold (Term_style.transition Fmt.string) ppf name;
@@ -549,21 +553,26 @@ let run_transition_count ppf (model : Ir.model) ctx (pattern : string option) ~a
       Term_style.dimension Fmt.string ppf dim;
       Fmt.pf ppf "           %d values@\n" count
     ) orig_tr.trindices;
-    (* Combinatorial counts *)
-    let all_n = List.length all_expanded + (
-      (* count filtered ones too — recompute *)
-      let combos = Expander.cartesian_product orig_tr.trindices ctx in
-      List.length combos - List.length all_expanded
-    ) in
+    (* Combinatorial counts.
+       M25 in the 2026-04-19 review: the prior version computed
+       `all_n = len all_expanded + (len combos - len all_expanded)`
+       which simplifies to `combos_len` — a pointless round-trip.
+       And it labeled filtered combos as "self-loops", but `where`
+       guards can filter on any equality (age == under5, src != dst,
+       …) — only src==dst is a self-loop. Both fixed here. *)
+    let combos = Expander.cartesian_product orig_tr.trindices ctx in
+    let all_n = List.length combos in
+    let kept_n = List.length all_expanded in
     Fmt.pf ppf "  all combos     ";
     Term_style.bold Fmt.string ppf (fmt_number all_n);
     Fmt.pf ppf "@\n";
-    let filtered_n = all_n - List.length all_expanded in
+    let filtered_n = all_n - kept_n in
     Fmt.pf ppf "  after where    ";
-    Term_style.bold Fmt.string ppf (fmt_number (List.length all_expanded));
+    Term_style.bold Fmt.string ppf (fmt_number kept_n);
     if filtered_n > 0 then (
       Fmt.pf ppf "  (";
-      Term_style.dim_style Fmt.string ppf (Printf.sprintf "\xe2\x88\x92%d self-loops" filtered_n);  (* − *)
+      Term_style.dim_style Fmt.string ppf
+        (Printf.sprintf "\xe2\x88\x92%d filtered by where" filtered_n);
       Fmt.pf ppf ")"
     );
     Fmt.pf ppf "@\n";
@@ -647,13 +656,13 @@ let run_let ppf (model : Ir.model) ctx name =
       Term_style.bold Fmt.string ppf (fmt_number n);
       Fmt.pf ppf " entries@\n"
     );
-    (* Referenced by *)
+    (* Referenced by.
+       M24 in the 2026-04-19 review: previously missed references
+       inside EFuncCall / EList / ERange subtrees. A let referenced
+       only inside `incidence(N)` or `prevalence(N)` (both
+       EFuncCall nodes) didn't show as a reference. Also cleans up
+       a dead `rate_str` allocation (n12). *)
     let refs = List.filter_map (fun (orig_tr : transition_decl) ->
-      let rate_str = Format.asprintf "%a" (fun ppf e ->
-        let _ = ppf in ignore e
-      ) orig_tr.trrate in
-      ignore rate_str;
-      (* Check if let binding name appears in the rate expression *)
       let rec expr_refs_name e =
         match e with
         | EIdent (n, _) when n = lb.lname -> true
@@ -661,7 +670,12 @@ let run_let ppf (model : Ir.model) ctx name =
         | EBinOp (_, l, r) -> expr_refs_name l || expr_refs_name r
         | EUnOp (_, e) -> expr_refs_name e
         | ESum (_, _, body) -> expr_refs_name body
-        | ECond (p, t, el) -> expr_refs_name p || expr_refs_name t || expr_refs_name el
+        | ECond (p, t, el) ->
+          expr_refs_name p || expr_refs_name t || expr_refs_name el
+        | EFuncCall (_, args) ->
+          List.exists (fun (_, a) -> expr_refs_name a) args
+        | EList es -> List.exists expr_refs_name es
+        | ERange (a, b) -> expr_refs_name a || expr_refs_name b
         | _ -> false
       in
       if expr_refs_name orig_tr.trrate then Some orig_tr.trname else None
@@ -675,12 +689,6 @@ let run_let ppf (model : Ir.model) ctx name =
       ) refs;
       Fmt.pf ppf "@\n"
     )
-
-(* ── --expansion NAME ────────────────────────────────────────────────────── *)
-
-(** --expansion is no longer supported (coupling sugar removed). *)
-let run_expansion ppf _ctx _name =
-  Fmt.pf ppf "note: coupling sugar has been removed; --expansion is no longer applicable.@\n"
 
 (* ── --dims ─────────────────────────────────────────────────────────────── *)
 
@@ -765,7 +773,6 @@ type inspect_cmd =
   | TransitionRate of string
   | TransitionCount of string option    (* pattern *)
   | LetBinding of string
-  | Expansion of string
   | Dims
 
 type inspect_opts = {
@@ -818,8 +825,6 @@ let run_inspect path opts =
        run_transition_count ppf model ctx pat ~ascii:opts.ascii
      | LetBinding name ->
        run_let ppf model ctx name
-     | Expansion name ->
-       run_expansion ppf ctx name
      | Dims ->
        run_dims ppf model ctx)
 

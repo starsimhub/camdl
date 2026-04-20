@@ -9,9 +9,21 @@ let () =
 
   (* ── camdlc check FILE ────────────────────────────────────────────── *)
   | "check" :: rest ->
-    (match rest with
-     | [] -> print_endline "usage: camdlc check FILE.camdl"; exit 1
-     | path :: _ -> Inspect.run_check path)
+    (* M26 in 2026-04-19 review: --no-dim-check previously only
+       registered on the `compile` subcommand's Arg.Unit handler,
+       so `camdlc check --no-dim-check model.camdl` silently
+       ignored the flag. Parse it here too. *)
+    let path = ref None in
+    List.iter (fun a -> match a with
+      | "--no-dim-check" -> Compiler.no_dim_check := true
+      | s when String.length s > 0 && s.[0] = '-' ->
+        Printf.eprintf "error: unknown flag '%s' for `camdlc check`\n" s;
+        exit 1
+      | s -> path := Some s
+    ) rest;
+    (match !path with
+     | None -> print_endline "usage: camdlc check [--no-dim-check] FILE.camdl"; exit 1
+     | Some p -> Inspect.run_check p)
 
   (* ── camdlc inspect FILE [options] ───────────────────────────────── *)
   | "inspect" :: rest ->
@@ -23,7 +35,6 @@ let () =
     let tr_rate   = ref None in
     let tr_count  = ref false in
     let let_name  = ref None in
-    let expansion = ref None in
     let ir_mode   = ref false in
     let ascii     = ref false in
     let no_color  = ref false in
@@ -45,8 +56,6 @@ let () =
         tr_count := true; parse tl
       | "--let" :: name :: tl ->
         let_name := Some name; parse tl
-      | "--expansion" :: name :: tl ->
-        expansion := Some name; parse tl
       | "--ir"       :: tl -> ir_mode   := true; parse tl
       | "--ascii"    :: tl -> ascii     := true; parse tl
       | "--no-color" :: tl -> no_color  := true; parse tl
@@ -76,9 +85,6 @@ let () =
         | None ->
       match !let_name with
         | Some name -> Inspect.LetBinding name
-        | None ->
-      match !expansion with
-        | Some name -> Inspect.Expansion name
         | None -> Inspect.Summary)
     in
     let opts : Inspect.inspect_opts = {
