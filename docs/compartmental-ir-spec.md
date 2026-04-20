@@ -329,8 +329,10 @@ time_functions: [{
 }]
 
 time_func_kind :=
-  | Sinusoidal(amplitude: float, period: float, phase: float, baseline: float)
+  | Sinusoidal(amplitude: expr, period: expr, phase: expr, baseline: expr)
       -- baseline * (1 + amplitude * cos(2π(t - phase) / period))
+      -- each parameter may reference a Param so forcing amplitudes
+      -- can be inferred; literals are also accepted
   | Piecewise(breakpoints: float list, values: float list)
       -- step function, constant between breakpoints
   | Interpolated(times: float list, values: float list, method: interp)
@@ -353,7 +355,10 @@ dimension.
 tables: [{
   name:          string,
   shape:         int list,        -- e.g. [3, 3] for a 3×3 matrix; [n] for 1D
-  values:        float list,      -- row-major flat storage; length = product(shape)
+  values:        expr list,       -- row-major flat storage; length = product(shape);
+                                  -- each entry is a Const expr (serialized as
+                                  -- {"const": <float>}); future work may permit
+                                  -- Param references here
   out_of_bounds: oob_policy
 }]
 
@@ -942,7 +947,7 @@ and weekly observations.
         "op": "mul",
         "args": [
           { "param": "beta" },
-          { "time_func": "seasonal_forcing" },
+          { "time_func": { "name": "seasonal_forcing" } },
           { "pop": "S_child" },
           {
             "op": "add",
@@ -950,7 +955,7 @@ and weekly observations.
               {
                 "op": "mul",
                 "args": [
-                  { "table": "C_age", "index": { "const": 0 } },
+                  { "table_lookup": { "table": "C_age", "indices": [ { "const": 0.0 } ] } },
                   {
                     "op": "div",
                     "args": [
@@ -965,7 +970,7 @@ and weekly observations.
               {
                 "op": "mul",
                 "args": [
-                  { "table": "C_age", "index": { "const": 1 } },
+                  { "table_lookup": { "table": "C_age", "indices": [ { "const": 1.0 } ] } },
                   {
                     "op": "div",
                     "args": [
@@ -991,7 +996,7 @@ and weekly observations.
         "op": "mul",
         "args": [
           { "param": "beta" },
-          { "time_func": "seasonal_forcing" },
+          { "time_func": { "name": "seasonal_forcing" } },
           { "pop": "S_adult" },
           {
             "op": "add",
@@ -999,7 +1004,7 @@ and weekly observations.
               {
                 "op": "mul",
                 "args": [
-                  { "table": "C_age", "index": { "const": 2 } },
+                  { "table_lookup": { "table": "C_age", "indices": [ { "const": 2.0 } ] } },
                   {
                     "op": "div",
                     "args": [
@@ -1014,7 +1019,7 @@ and weekly observations.
               {
                 "op": "mul",
                 "args": [
-                  { "table": "C_age", "index": { "const": 3 } },
+                  { "table_lookup": { "table": "C_age", "indices": [ { "const": 3.0 } ] } },
                   {
                     "op": "div",
                     "args": [
