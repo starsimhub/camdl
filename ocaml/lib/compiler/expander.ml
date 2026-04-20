@@ -3035,7 +3035,6 @@ let expand_detail ?(source_dir = "") (name : string) (decls : declaration list)
     Ir.parameters         = expand_parameters ctx;
     Ir.parameter_groups   = [];  (* populated when simplex groups are declared *)
     Ir.initial_conditions = expand_init ctx;
-    Ir.data_contract      = None;
     Ir.output             = expand_output ctx;
     Ir.simulation         = expand_simulate ctx;
     Ir.presets            = expand_scenarios ctx;

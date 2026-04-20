@@ -147,7 +147,6 @@ pub struct Model {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub parameter_groups:   Vec<crate::parameter::ParameterGroup>,
     pub initial_conditions: InitialConditions,
-    pub data_contract:      Option<serde_json::Value>,
     pub output:             OutputConfig,
     pub simulation:         SimulationConfig,
     #[serde(default, rename = "scenarios")]

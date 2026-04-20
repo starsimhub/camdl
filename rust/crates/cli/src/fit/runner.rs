@@ -1203,7 +1203,6 @@ mod tests {
                 m.insert("I".into(), 10.0);
                 m
             }),
-            data_contract: None,
             output: OutputConfig { times: OutputSchedule::AtTimes(vec![0.0, 80.0]), format: "tsv".into(), trajectory: true, observations: false },
             simulation: SimulationConfig { t_start: 0.0, t_end: 80.0, time_semantics: "continuous".into(), dt: Some(1.0), rng_seed: Some(42) },
             presets: vec![], model_structure: None, balance: None,
@@ -1289,7 +1288,6 @@ mod tests {
             parameters: vec![beta_with_ir_prior, gamma_no_prior],
             parameter_groups: vec![],
             initial_conditions: ir::model::InitialConditions::Explicit(HashMap::new()),
-            data_contract: None,
             output: ir::model::OutputConfig {
                 times: ir::model::OutputSchedule::AtTimes(vec![]),
                 format: "tsv".into(), trajectory: true, observations: false,

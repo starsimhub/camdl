@@ -403,7 +403,6 @@
       "R_rural": 0.0
     }
   },
-  "data_contract": null,
   "output": {
     "times": { "regular": { "start": 0.0, "step": 1.0, "end": 200.0 } },
     "format": "tsv",

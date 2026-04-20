@@ -66,10 +66,6 @@
 
     "initial_conditions": { "$ref": "#/definitions/initial_conditions" },
 
-    "data_contract": {
-      "oneOf": [{ "type": "null" }, { "type": "object" }]
-    },
-
     "output": { "$ref": "#/definitions/output_config" },
 
     "simulation": { "$ref": "#/definitions/simulation_config" }

@@ -114,7 +114,6 @@ fn sir_model() -> (CompiledModel, Vec<f64>) {
             m.insert("I".into(), 10.0);
             m
         }),
-        data_contract: None,
         output: OutputConfig {
             times: OutputSchedule::AtTimes(vec![0.0, 80.0]),
             format: "tsv".into(),

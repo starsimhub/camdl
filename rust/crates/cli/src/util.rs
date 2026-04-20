@@ -1125,7 +1125,6 @@ mod tests {
             parameters: vec![], parameter_groups: vec![],
             initial_conditions: ir::model::InitialConditions::Explicit(
                 std::collections::HashMap::new()),
-            data_contract: None,
             output: ir::model::OutputConfig {
                 times: ir::model::OutputSchedule::AtTimes(vec![]),
                 format: "tsv".into(), trajectory: true, observations: false,

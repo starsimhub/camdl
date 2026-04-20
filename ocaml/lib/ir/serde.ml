@@ -878,7 +878,6 @@ let model_to_json (m : model) : Yojson.Safe.t =
     ("parameters",         arr (List.map parameter_to_json m.parameters));
     ("parameter_groups",   arr (List.map parameter_group_to_json m.parameter_groups));
     ("initial_conditions", initial_conditions_to_json m.initial_conditions);
-    ("data_contract",      match m.data_contract with None -> null | Some j -> j);
     ("output",             output_config_to_json m.output);
     ("simulation",         simulation_config_to_json m.simulation);
     ("scenarios",          arr (List.map preset_to_json m.presets));
@@ -909,7 +908,6 @@ let model_of_json (j : Yojson.Safe.t) : model =
       | Some `Null | None -> []
       | Some gs -> List.map parameter_group_of_json (as_list gs));
     initial_conditions = initial_conditions_of_json (member "initial_conditions" j);
-    data_contract      = (match member_opt "data_contract" j with Some `Null | None -> None | Some v -> Some v);
     output             = output_config_of_json     (member "output"     j);
     simulation         = simulation_config_of_json (member "simulation" j);
     presets            = (match member_opt "scenarios" j with

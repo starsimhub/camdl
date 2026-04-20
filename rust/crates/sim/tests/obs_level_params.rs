@@ -86,7 +86,6 @@ fn model_with_obs_param() -> (Arc<CompiledModel>, Vec<f64>) {
         initial_conditions: InitialConditions::Explicit({
             let mut m = HashMap::new(); m.insert("N".into(), 100.0); m
         }),
-        data_contract: None,
         output: OutputConfig {
             times: OutputSchedule::AtTimes(vec![0.0, 50.0]),
             format: "tsv".into(),

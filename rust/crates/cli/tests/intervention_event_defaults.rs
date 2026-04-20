@@ -40,7 +40,6 @@ fn mixed_model_ir() -> String {
       "parameters": [],
       "parameter_groups": [],
       "initial_conditions": { "explicit": { "S": 1000.0, "V": 0.0 } },
-      "data_contract": null,
       "output": {
         "times": { "regular": { "start": 0.0, "step": 1.0, "end": 20.0 } },
         "format": "tsv", "trajectory": true, "observations": false

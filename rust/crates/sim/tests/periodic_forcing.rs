@@ -37,7 +37,6 @@ fn model_with_periodic(period: f64, values: Vec<f64>) -> CompiledModel {
         parameters: vec![],
             parameter_groups: vec![],
         initial_conditions: InitialConditions::Parameterized(HashMap::new()),
-        data_contract: None,
         output: OutputConfig {
             times: OutputSchedule::AtTimes(vec![0.0]),
             format: "tsv".into(),

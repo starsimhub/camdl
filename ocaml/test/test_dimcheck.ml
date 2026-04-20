@@ -54,7 +54,6 @@ let empty_model
     parameters;
     parameter_groups = [];
     initial_conditions = Explicit [];
-    data_contract = None;
     output = {
       times = OutRegular { start = 0.0; step = 1.0; end_ = 100.0 };
       format = "tsv";

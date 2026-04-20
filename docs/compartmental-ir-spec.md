@@ -552,24 +552,10 @@ output_schedule :=
 ### 5.2 Input: Data for Inference (v0.2)
 
 When the runtime is in inference mode, it reads observed data from a
-preprocessed TSV/CSV file. The data contract:
-
-```
-data_contract: {
-  path: string | null,               -- runtime argument, not baked in
-  format: "tsv" | "csv",
-  time_column: string,
-  time_unit: "days" | "weeks" | "years",
-  time_origin: string | null,        -- ISO date for t=0 (e.g. "2019-01-01")
-  streams: [data_stream_decl]
-}
-
-data_stream_decl: {
-  name: string,                      -- matches observation_model.data_stream
-  column: string,                    -- column name in the data file
-  dtype: "int" | "float"
-}
-```
+preprocessed TSV/CSV file. Observation-to-column mapping is driven by
+each `observation_model.data_stream` field; no separate top-level
+`data_contract` schema is emitted (the placeholder once planned for it
+has been removed — m20 in the 2026-04-19 compiler review).
 
 **Preprocessing assumptions (v0.2).** The data file is:
 
@@ -697,7 +683,6 @@ model: {
   initial_conditions: initial_conditions,
 
   -- data (v0.2+, null in v0.1)
-  data_contract: data_contract | null,
 
   -- output
   output: output_config,
@@ -1299,7 +1284,6 @@ and weekly observations.
     ]
   },
 
-  "data_contract": null,
 
   "output": {
     "times": { "kind": "regular", "start": 0, "step": 1, "end": 730 },
@@ -1416,7 +1400,6 @@ integer count.
   "tables": [],
   "interventions": [],
   "observations": [],
-  "data_contract": null,
 
   "output": {
     "times": { "kind": "regular", "start": 0, "step": 1, "end": 180 },

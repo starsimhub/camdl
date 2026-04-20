@@ -219,7 +219,6 @@ type model = {
   parameters:         parameter list;
   parameter_groups:   parameter_group list;
   initial_conditions: initial_conditions;
-  data_contract:      Yojson.Safe.t option;
   output:             output_config;
   simulation:         simulation_config;
   presets:            preset list;

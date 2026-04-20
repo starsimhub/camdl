@@ -76,7 +76,6 @@ fn model_with_obs(
         parameters: vec![],
         parameter_groups: vec![],
         initial_conditions: InitialConditions::Explicit(initial),
-        data_contract: None,
         output: OutputConfig {
             times: OutputSchedule::AtTimes(vec![0.0, 5.0]),
             format: "tsv".into(), trajectory: true, observations: false,
@@ -341,7 +340,6 @@ fn snapshot_reads_post_intervention_state() {
         parameters: vec![],
         parameter_groups: vec![],
         initial_conditions: InitialConditions::Explicit(init),
-        data_contract: None,
         output: OutputConfig {
             times: OutputSchedule::AtTimes(vec![5.0]),
             format: "tsv".into(), trajectory: true, observations: false,

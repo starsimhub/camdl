@@ -345,7 +345,6 @@
       "I_east": { "param": "I0" }
     }
   },
-  "data_contract": null,
   "output": {
     "times": { "regular": { "start": 0.0, "step": 1.0, "end": 365.0 } },
     "format": "tsv",

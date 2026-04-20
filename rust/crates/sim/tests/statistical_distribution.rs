@@ -146,7 +146,6 @@ fn birth_death_model(birth_rate: f64, death_rate: f64) -> Model {
         initial_conditions: InitialConditions::Explicit({
             let mut m = HashMap::new(); m.insert("N".into(), 50.0); m
         }),
-        data_contract: None,
         output: OutputConfig {
             times: OutputSchedule::AtTimes(vec![0.0, 200.0]),
             format: "tsv".into(),
@@ -272,7 +271,6 @@ fn test_overdispersion_variance_tau_leap() {
         initial_conditions: InitialConditions::Explicit({
             let mut m = HashMap::new(); m.insert("S".into(), 10000.0); m.insert("I".into(), 0.0); m
         }),
-        data_contract: None,
         output: OutputConfig {
             times: OutputSchedule::AtTimes(vec![0.0, 1.0]),
             format: "tsv".into(),
@@ -366,7 +364,6 @@ fn test_fraction_transfer_edge_cases() {
             parameters: vec![],
             parameter_groups: vec![],
             initial_conditions: InitialConditions::Parameterized(HashMap::new()),
-            data_contract: None,
             output: OutputConfig {
                 times: OutputSchedule::AtTimes(vec![0.0]),
                 format: "tsv".into(), trajectory: true, observations: false,
