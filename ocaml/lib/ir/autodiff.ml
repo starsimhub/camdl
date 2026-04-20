@@ -129,11 +129,23 @@ let rec differentiate (e : expr) (param : string) : expr =
     (* d(-f) = -f' *)
     | Neg -> UnOp { op = Neg; arg = differentiate u.arg param }
 
-    (* d|f| = f' * sign(f) = f' * f / |f| *)
-    | Abs -> BinOp { op = Mul;
-               left  = differentiate u.arg param;
-               right = BinOp { op = Div; left = u.arg;
-                                          right = UnOp { op = Abs; arg = u.arg } } }
+    (* d|f| = f' * sign(f), with sign(0) := 0 so the derivative stays
+       finite at f=0 instead of producing 0/0 = NaN (n1 in the
+       2026-04-19 compiler review).
+
+         sign(f) = if f > 0 then 1 else (if f < 0 then -1 else 0)
+
+       Emitted as nested Cond so the derivative evaluates lazily in
+       the Rust runtime. *)
+    | Abs ->
+      let sign =
+        Cond { pred  = BinOp { op = Gt; left = u.arg; right = Const 0.0 };
+               then_ = Const 1.0;
+               else_ = Cond { pred  = BinOp { op = Lt; left = u.arg; right = Const 0.0 };
+                              then_ = Const (-1.0);
+                              else_ = Const 0.0 } }
+      in
+      BinOp { op = Mul; left = differentiate u.arg param; right = sign }
 
     (* Floor/Ceil: piecewise constant, derivative = 0 *)
     | Floor -> Const 0.0
