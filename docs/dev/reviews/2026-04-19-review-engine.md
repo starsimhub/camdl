@@ -1,9 +1,66 @@
 ---
-status: open
+status: addressed (pending inference sub-review)
 date: 2026-04-19
 scope: rust/ engine subsystem — ir crate, sim crate (foundations + backends + intervention), plus partial inference pass
 reviewer: external (via `scripts/review-zip.sh engine`)
 ---
+
+## Resolution status
+
+**Addressed:**
+- RC1 — `ir::validate::validate` now runs on every model load in
+  `cli/src/util.rs::load_model` and `run_simulation`.
+- RC2 — EKRNG references scrubbed from specs, CLAUDE.md, code
+  comments; dead `event_key` IR field removed cross-language.
+- RC3 — `InitialConditions::FromDistribution` now hard-errors
+  instead of silently zero-initializing.
+- RM1 — `tau_leap` now uses Euler-multinomial for shared-source
+  transitions (mirrors chain_binomial).
+- RM2 — new `eval_stats` module with atomic counters on every
+  silent-fallback site (Div/Pow/UnOp/NegBinomial/Binomial).
+- RM3 — `TableLookup` `OobPolicy::Error` now panics in the hot
+  path instead of log-and-clamp.
+- RM6 — `eval_table_expr` gained the same Pow / UnOp domain
+  guards as `eval_expr` / `eval_resolved`.
+- RM7 — `ode_integrator::rk4_step` caps at `RK4_DT_MAX = 0.5` and
+  sub-steps longer gaps.
+- RM8 — ODE backend uses fractional integer state during RK4
+  substeps via `EvalCtx::int_float_override`. Rounding only at
+  snapshot time.
+- RM10 — gillespie/tau_leap `debug_assert`s now check pre-clamp
+  state via the clamp return value.
+- Rm4 — `apply_interventions_at` rejects non-finite t.
+- Rm5 — unreplaced `TableSource::External` errors at
+  `CompiledModel::new` instead of panicking downstream.
+- Rm8 — `fire_steps` uses `BTreeSet<i64>` for deterministic
+  iteration.
+- Rn2 — `map_or(false, ...)` → `is_ok_and(...)` in trace_enabled.
+
+**Confirmed not a bug after sanity check:**
+- Rm2 — `RATE_EPSILON` already shared via `pub const` imported by
+  `inference/pgas.rs`; no drift risk.
+- Rm3 — `apply_interventions_at` using `model.simulation.dt` is
+  consistent with how `fire_steps` is built; safe.
+
+**Deferred / low priority:**
+- RM4, RM5 — rng fallbacks are IF2-specific defensive code; left
+  alone (now at least observable via `eval_stats`).
+- RE1–RE5 — serde nits around untagged enums, `Option` fields
+  without `#[serde(default)]`, version string. Not bugs; papercuts.
+- Rm1, Rm6, Rm7, Rm9 — trace-loop OnceLock, FlowVec bounds check,
+  balance-negative warn, Gillespie linear event selection. Nits /
+  perf work, not correctness.
+- Rn1, Rn3, Rn4, Rn6, Rn7, Rn8 — documentation, idiomatic-Rust,
+  width, and wrapper-struct nits.
+
+**Still unread (separate review needed):**
+- Inference subdirectory (~3700 lines): `particle_filter.rs`,
+  `if2.rs`, `obs_loglik.rs`, `pgas.rs` (1718 lines),
+  `pgas_grad.rs`, `nuts.rs`, `pmmh.rs`, `correlated_pf.rs`,
+  `multi_stream_obs.rs`, `prior.rs`. Scientific-correctness
+  central. Highest remaining risk surface.
+- CLI (~6600 lines): `main.rs`, `batch.rs`, `util.rs`, `browse.rs`
+  plus hashing / cas / run_meta. Lower scientific risk.
 
 # Engine code review — 2026-04-19
 
