@@ -1293,8 +1293,20 @@ pub fn run_pgas(
         eprintln!("  parallel tempering: {} rungs, β = {:?}", n_rungs, betas);
     }
 
-    // NUTS state — restored from resume or initialized fresh (cold rung only,
-    // heated rungs start fresh per the spec).
+    // NUTS state — restored from resume or initialized fresh.
+    //
+    // Im18 in 2026-04-19 inference review batch 2: only the cold
+    // rung's NUTS state (mass matrix, step size, dual averaging,
+    // acceptance counts) is persisted in ChainResumeState and
+    // restored here. Heated rungs (β < 1) always start with
+    // `MassMatrix::identity`, step_size = 0.1, and fresh dual
+    // averaging — so every resume re-warms the heated rungs, which
+    // wastes sweeps on tempered fits that resume frequently.
+    //
+    // A full fix requires extending ChainResumeState to hold a
+    // Vec<RungNUTSState> and handling back-compat with legacy
+    // single-rung resume files. Not done here; when a tempered fit
+    // hits the pain point the schema upgrade is straightforward.
     let (nuts_mass_init, nuts_step_size_init, log_proposal_sd_restored,
          total_accepted_init, current_ll_restored) = if let Some((mass, ss, lpsd, ta, ll)) = resume_nuts {
         (mass, ss, lpsd, ta, Some(ll))
@@ -1327,6 +1339,17 @@ pub fn run_pgas(
     // Override cold rung LL if we have a resumed value
     if let Some(ll) = current_ll_restored {
         rungs[0].ll = ll;
+    }
+
+    // Im18: make the heated-rung re-warmup visible in logs.
+    // Check the restored NUTS tuple rather than `resume_from` (the
+    // latter is partially moved into earlier bindings).
+    if current_ll_restored.is_some() && n_rungs > 1 {
+        log::info!(
+            "pgas resume: restored cold rung NUTS state; heated rungs \
+             (β<1) re-warm from defaults each resume. Long-running \
+             tempered fits may want to avoid frequent interruption."
+        );
     }
 
     // Swap acceptance tracking (n_rungs - 1 adjacent pairs)
