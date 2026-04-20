@@ -740,6 +740,28 @@ let rec flatten_ast_list = function
     env maps loop variable names to concrete level strings. *)
 let shape_index ctx shape items env =
   let n = List.length shape in
+  (* M20 in 2026-04-19 review: previously this called List.nth items i
+     blindly — when `items` had fewer elements than `shape` (an under-
+     applied shaped let), nth raised Failure("nth") which propagated
+     unhandled through compile_detail_result's generic `exn -> Error`
+     catch, and camdlc printed `Error: Failure("nth")` to the user. A
+     compiler crash masquerading as a mysterious error. Fix: validate
+     lengths up front with a proper diagnostic. *)
+  if List.length items <> n then begin
+    Diagnostics.error ctx.diags
+      ~code:"E273"
+      ~loc:Diagnostics.no_loc
+      ~message:(Printf.sprintf
+        "shaped let index has %d argument%s but the binding expects %d"
+        (List.length items)
+        (if List.length items = 1 then "" else "s")
+        n)
+      ~hint:(Printf.sprintf "shape dims: [%s]" (String.concat ", " shape))
+      ();
+    (* Fall through with 0s so downstream diagnostic-collection
+       continues; the compile aborts at the end of this phase. *)
+    0
+  end else
   let pairs = List.mapi (fun i dim ->
     let item     = List.nth items i in
     let val_name = index_item_to_str env item in
