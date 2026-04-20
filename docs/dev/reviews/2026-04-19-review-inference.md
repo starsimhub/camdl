@@ -344,7 +344,7 @@ fixing the contract.
 Binary search over cumulative weights would be faster for large
 N. Low priority.
 
-## What's left
+## What's left (as of batch 1)
 
 1. `pgas.rs` (1718 lines) — conditional SMC + ancestor sampling.
    Densest scientific code in the repo. Initial concern noted
@@ -356,3 +356,231 @@ N. Low priority.
 5. `correlated_pf.rs` (406).
 6. `diagnostic.rs` (419).
 7. CLI drivers (`cli/src/{if2,pfilter,fit/*}.rs`).
+
+---
+
+# Inference code review — batch 2: NUTS, pgas_grad, correlated PF, PMMH prior path
+
+Covers `nuts.rs` (428 lines, end-to-end), `pgas_grad.rs` (250 of
+344 covering density-gradient core), `correlated_pf.rs` (407
+lines, CPM random-state machinery + filter loop), and the PMMH
+initialization + acceptance code (~360 of 525). Still outstanding
+from this side: `diagnostic.rs` (R-hat/ESS), the last third of
+`pgas_grad.rs` (gamma-density gradient, currently `dead_code`),
+the non-resume PMMH tail, and CLI drivers.
+
+## Findings
+
+### Major
+
+**IM7. `pgas_grad.rs` advances `gamma_idx` once per source group;
+`pgas.rs` and `step_one` advance once per overdispersed
+transition. Silent wrong NUTS gradient for any model with
+multiple overdispersed transitions in one source group.**
+
+Three places agree on the canonical convention:
+- `chain_binomial.rs:280` — `step_one` pushes one gamma per
+  overdispersed transition with `rate > RATE_EPSILON`.
+- `pgas.rs:316` — density increments `gamma_idx` per such transition.
+- `pgas.rs:511` — gamma-density loop increments per such transition.
+
+`pgas_grad.rs:110` breaks the pattern:
+
+```rust
+for &tr_idx in group {
+    // ...
+    let g = if gamma_idx < gammas.len() { gammas[gamma_idx] } else { 1.0 };
+    // uses same gamma_idx for every transition in this group
+}
+if group_has_overdispersion { gamma_idx += 1; }  // advances once per group
+```
+
+For a source group with two overdispersed transitions (spatial
+S→E_local and S→E_import; two-strain S→I₁ and S→I₂; competing
+overdispersed reporting streams): the gradient reads `gammas[k]`
+for both transitions when the density and simulator used
+`gammas[k]` and `gammas[k+1]`, AND every subsequent source
+group's `gamma_idx` is off by one. Log-density computed by the
+gradient machinery disagrees with `log_transition_density_substep`
+and `complete_data_loglik`. NUTS leapfrog takes steps using a
+stale/wrong gradient against the actual target density — MH
+acceptance rate stays OK because the correction is
+self-consistent, but the sampler doesn't explore the correct
+geometry and converges slower / to a biased region.
+
+Not triggered by: He et al. measles SEIR, standard
+SIR/SEIR/SIRS/SIRD with single-outflow overdispersion.
+Triggered by: multi-strain models with per-strain overdispersion;
+spatial models with overdispersed local+import infection (the
+polio cVDPV2 work); competing overdispersed reporting streams
+sharing a source.
+
+Fix: mirror `pgas.rs:311–317` exactly — inside the
+`Overdispersed` arm, increment `gamma_idx += 1` per transition;
+delete the `group_has_overdispersion` bookkeeping. Regression
+test: two-overdispersed-transition model, finite-difference vs
+`complete_data_loglik_grad` at ~1e-6.
+
+**IM8. `correlated_pf.rs` CPM only handles one overdispersed
+transition per substep, and uses the first transition's σ² for
+all subsequent ones.** `correlated_pf.rs:283–289`:
+
+```rust
+let noise_idx = i * steps_per_obs + substep;
+if noise_idx < gamma_row.len() {
+    let z = gamma_row[noise_idx];
+    let g = normal_to_gamma(z, gamma_shape, gamma_scale);
+    scratch.gamma_override = Some(g);
+}
+```
+
+`scratch.gamma_override` is a single `Option<f64>` that
+`step_one` consumes for the first overdispersed transition only
+(`chain_binomial.rs:278` calls `.take()`). Subsequent
+overdispersed transitions in the same substep fall through to
+`rng.gamma_multiplier(...)` — uncorrelated.
+
+Compounding issue: `sigma_sq` at `correlated_pf.rs:248–260`
+picks the **first** overdispersed transition's `sigma_sq` via
+`find_map(...)` and uses it for every gamma draw in the run.
+If different overdispersed transitions have different σ²
+(infection overdispersion ≠ reporting overdispersion, the normal
+case), CPM transforms normals using the wrong shape/scale for
+all but the first.
+
+For single-overdispersion models (common case) both issues are
+moot. For multi-overdispersion models, PMMH with
+`rho = Some(0.99)` produces uncorrelated or mis-transformed
+gamma draws and loses the CPM variance reduction — acceptance
+rate drops to vanilla PMMH levels with no error.
+
+Fix: either promote `gamma_override` to `Vec<f64>` with a
+matching pop/index, or reject multi-overdispersion models at the
+CPM preflight (smaller patch, matches existing pattern at
+`correlated_pf.rs:237–247`).
+
+**IM9. `pgas_grad.rs:79` rate-threshold inconsistency with
+density and simulator.** Line 79:
+
+```rust
+if rate <= 0.0 || matches!(...::Deterministic) { handled[tr_idx] = true; continue; }
+```
+
+Density (`pgas.rs:284`) and simulator (`chain_binomial.rs:270`)
+both use `rate <= RATE_EPSILON`. Density additionally has a
+branch (`pgas.rs:294–301`) for `0 < rate ≤ RATE_EPSILON` with
+nonzero flow — includes the transition in the multinomial with
+its tiny rate rather than skipping. The gradient unconditionally
+skips.
+
+For a near-zero-rate transition with nonzero flow, the density
+is finite and depends on the rate through `total_rate` /
+`p_total`; the gradient computes zero. Hamiltonian is not
+conserved (density shifts without gradient shift), NUTS
+divergences accumulate, step size adapts down. Shows up as
+nonspecific divergences in `pgas.rs:1635–1643`.
+
+Fix: align threshold and "near-zero with flow" handling to match
+`pgas.rs:284–304` exactly. Same regression test as IM7.
+
+### Minor
+
+**Im14. `nuts.rs:281` acceptance detection via byte-equal Vec.**
+`let accepted = z_proposal != current_z;` uses bit-pattern Vec
+equality. A multinomial move that coincidentally returns the
+same float vector is flagged "rejected." Vanishingly unlikely;
+worth a comment.
+
+**Im15. `correlated_pf.rs:346–348` dead allocation.**
+
+```rust
+let _resample_rng = StatefulRng::new(
+    seed.wrapping_add(0xdeadbeef).wrapping_add(obs_idx as u64)
+);
+```
+
+`_`-prefixed, never read; `sorted_systematic_resample` (line 350)
+uses `base_uniform` from correlated noise and no RNG. Delete.
+
+**Im16. `correlated_pf.rs:329–335` sort-by-Σ-flows heuristic is
+fragile with mixed streams.** Deligiannidis-Doucet-Pitt
+sort-by-scalar-projection is a general trick but projection
+choice matters. For incidence-only streams, reasonable; for
+mixed prevalence/incidence with different scales, noisy. Document
+rather than fix.
+
+**Im17. `pgas_grad.rs:117` boundary clamping gives finite-but-huge
+gradient at `p_total ∈ {0, 1}`.** The clamp to `[1e-15, 1-1e-15]`
+at line 115 ensures `dbinom_dp` is never NaN — it's ~±1e15.
+NUTS divergences at the boundary are expected. Worth a comment:
+"clamp ensures finite gradient at the cost of accuracy at
+boundary; divergences here are normal."
+
+**Im18. `pgas.rs:1303–1305` resume state only updates cold rung.**
+Same as the previously-flagged Im13 — heated rungs re-warmup on
+every resume. Either persist all rungs or make cold-rung-only
+opt-in.
+
+### Validated as correct
+
+- **NUTS mass-matrix algebra** (`nuts.rs`). Diagonal stores
+  `Σ_ii` (named `m_inv`, i.e. per-component inverse-mass =
+  variance). Dense stores `Cholesky(Σ)`. Momentum draw
+  `p = L⁻ᵀ z` gives `Cov(p) = M`. Kinetic `0.5 ‖Lᵀp‖²` equals
+  `0.5 pᵀ Σ p`. `m_inv_times` correctly returns `Σp = L Lᵀ p`.
+  The `m_inv` naming is confusing but the algebra is consistent.
+- **NUTS slice sampling.** `log_slice = −h₀ − Exp(1)` is the
+  correct log-uniform (Hoffman & Gelman Algorithm 3). Multinomial
+  `n'/(n_valid + n')` is H&G-original — not Betancourt's improved
+  variant, but mathematically valid.
+- **NUTS dual averaging.** Matches Nesterov:
+  `log_eps = µ − h̄·√m/γ`, polynomially-decaying averaging,
+  `.final_step_size()`. Defaults `γ=0.05, t₀=10, κ=0.75,
+  µ=log(10·initial)` are H&G's.
+- **NUTS U-turn.** `(z⁺ − z⁻) · M⁻¹ p_endpoint < 0` for either
+  endpoint — correct criterion.
+- **PMMH correlated-PF validation.** Preflight rejects
+  state-dependent σ² and non-uniform observation spacing. Both
+  are the right pattern to emulate for IM8's multi-overdispersion
+  case.
+- **PMMH accumulation.** Prior + Jacobian additions in the MH
+  ratio (`pmmh.rs:419–420`) are the standard transform-scale MH
+  form. The only issue is the underlying
+  `Prior::TransformedNormal::log_density` semantics — same double-
+  Jacobian as IC3 from an earlier batch.
+
+### Notes propagating from earlier batches
+
+- The IC3 double-Jacobian on `log_normal` priors also lives in
+  PMMH at `pmmh.rs:419–420`. Verified: `current_log_prior` at
+  334–337 uses `prior.log_density(natural, z)` (z-scale density
+  for `TransformedNormal`, already absorbing the Jacobian);
+  `current_log_jacobian` at 356–359 adds `log_jacobian(z)` on top.
+  Same fix, same three callers.
+- `pmmh.rs:340` tracks `map_log_posterior = current_ll +
+  current_log_prior` without the Jacobian. For Normal/Beta/Gamma
+  priors this correctly tracks `LL + log p(θ)` on the natural
+  scale. For `TransformedNormal`, `current_log_prior` is the
+  z-scale density, so the tracked "MAP posterior" is a different
+  quantity than for the other priors — non-comparable MAPs across
+  parameters using different priors, in the same fit. Fix
+  alongside IC3.
+
+## What's left after batch 2
+
+- `diagnostic.rs` (419 lines) — R-hat, ESS, multi-chain handling.
+- Last 90 lines of `pgas_grad.rs` — `log_gamma_density_grad_substep`
+  is marked `dead_code` (gamma density is routed through
+  `complete_data_loglik` instead). Quick skim for future
+  re-enablement.
+- PMMH lines ~360–525 — adaptive proposal covariance, non-correlated
+  path, MAP updates, resume tail.
+- CLI drivers: `cli/src/if2.rs`, `cli/src/pfilter.rs`,
+  `cli/src/sampling.rs`, `cli/src/fit/{state,refine,mod,status}.rs`.
+  Especially the Prior↔Transform binding (Im1 from batch 1).
+
+**Cross-cutting pattern:** PGAS, PMMH, `pgas_grad`, and
+`correlated_pf` all share conventions with chain-binomial's
+`step_one` that have to be hand-maintained; three of four have
+drifted slightly. A dedicated "audit the gamma_idx convention
+across all four" sweep after IM7 would be worth it.
