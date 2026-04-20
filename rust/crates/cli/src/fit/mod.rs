@@ -637,6 +637,15 @@ pub fn cmd_fit_run_v2(args: &[String]) {
             if total_cells == 1 { "" } else { "s" });
     }
 
+    // Agent-channel Issue 2 (2026-04-19): collect per-sweep-point
+    // gate failures instead of exit(1). A sweep is explicitly a
+    // grid of cells where edge values are expected to fail
+    // convergence — treating the first failure as fatal destroys
+    // the profile-likelihood use case. Collect (cell_i, pt_idx,
+    // stage_name, reason) tuples; when all cells finish, print a
+    // summary of passed/failed cells.
+    let mut sweep_failures: Vec<(usize, usize, String, String)> = Vec::new();
+
     // ── Execute grid: cell × sweep_point × stage ──
     for (cell_i, cell) in cells.iter().enumerate() {
         let mut cell_config = config.clone();
@@ -783,6 +792,18 @@ pub fn cmd_fit_run_v2(args: &[String]) {
                                 if allow_nonconverged_scout {
                                     eprintln!("\x1b[33m  warning:\x1b[0m {}", msg);
                                     eprintln!("\n  --allow-nonconverged-scout: proceeding anyway.");
+                                } else if has_sweep {
+                                    // Issue 2 (agent-channel 2026-04-19): don't
+                                    // kill the whole sweep on one cell's gate
+                                    // failure. Record, skip remaining stages for
+                                    // this sweep point, continue to next point.
+                                    eprintln!("\x1b[33m  sweep-skip:\x1b[0m {}", msg);
+                                    sweep_failures.push((
+                                        cell_i, pt_idx,
+                                        stage_name.to_string(),
+                                        "scout_tail_rhat_gate".to_string(),
+                                    ));
+                                    break; // exit stages loop for this sweep point
                                 } else {
                                     eprintln!("error: {}", msg);
                                     std::process::exit(1);
@@ -842,6 +863,17 @@ pub fn cmd_fit_run_v2(args: &[String]) {
                         scout_best, chain_results.best_loglik,
                         &scout_chain_logliks_for_gate2,
                     ) {
+                        if has_sweep {
+                            // Issue 2 (agent-channel 2026-04-19): same
+                            // non-halting treatment as the scout gate.
+                            eprintln!("\x1b[33m  sweep-skip:\x1b[0m {}", msg);
+                            sweep_failures.push((
+                                cell_i, pt_idx,
+                                stage_name.to_string(),
+                                "regression_gate".to_string(),
+                            ));
+                            break;
+                        }
                         eprintln!("error: {}", msg);
                         std::process::exit(1);
                     }
@@ -1197,6 +1229,41 @@ pub fn cmd_fit_run_v2(args: &[String]) {
     } // end stages
     } // end sweep_points
     } // end cells
+
+    // Issue 2 (agent-channel 2026-04-19): emit a sweep summary when
+    // any cells were skipped due to gate failures. Also write a
+    // machine-readable record to <fit_dir>/sweep_failures.tsv so
+    // downstream tooling (profile-likelihood plots, etc.) can
+    // distinguish "cell didn't converge" from "cell wasn't run."
+    if has_sweep && !sweep_failures.is_empty() {
+        let total_runs = cells.len() * sweep_points.len();
+        let n_failed = sweep_failures.len();
+        eprintln!("\n━━━ sweep summary ━━━");
+        eprintln!("  {} / {} cells skipped gate", n_failed, total_runs);
+        for (cell_i, pt_idx, stage, reason) in &sweep_failures {
+            let slug: String = sweep_points[*pt_idx].iter()
+                .map(|(k, v)| format!("{}={:.3}", k, v))
+                .collect::<Vec<_>>()
+                .join(", ");
+            eprintln!("    cell {:>2} / pt {:>2} ({}) stage={} reason={}",
+                cell_i + 1, pt_idx + 1, slug, stage, reason);
+        }
+        let path = fit_dir.join("sweep_failures.tsv");
+        let mut tsv = String::from("cell\tsweep_point\tsweep_values\tstage\treason\n");
+        for (cell_i, pt_idx, stage, reason) in &sweep_failures {
+            let slug: String = sweep_points[*pt_idx].iter()
+                .map(|(k, v)| format!("{}={:.6}", k, v))
+                .collect::<Vec<_>>()
+                .join(";");
+            tsv.push_str(&format!("{}\t{}\t{}\t{}\t{}\n",
+                cell_i, pt_idx, slug, stage, reason));
+        }
+        if let Err(e) = std::fs::write(&path, tsv) {
+            eprintln!("warning: could not write {}: {}", path.display(), e);
+        } else {
+            eprintln!("  details: {}", path.display());
+        }
+    }
 
     // ── Post-grid aggregation: summary.tsv (+ coverage.tsv for synthetic)
     //
