@@ -80,7 +80,7 @@ pub(crate) fn eval_likelihood_resolved(
     real_s: &RealState,
 ) -> f64 {
     let ctx = |proj: f64| EvalCtx {
-        model: compiled, int_s, real_s, params, t: 0.0, projected: Some(proj),
+        model: compiled, int_s, real_s, params, t: 0.0, projected: Some(proj), int_float_override: None,
     };
 
     match likelihood {
@@ -164,7 +164,7 @@ pub(crate) fn sample_obs_resolved(
     rng: &mut StatefulRng,
 ) -> f64 {
     let ctx = |proj: f64| EvalCtx {
-        model: compiled, int_s, real_s, params, t: 0.0, projected: Some(proj),
+        model: compiled, int_s, real_s, params, t: 0.0, projected: Some(proj), int_float_override: None,
     };
 
     match likelihood {
@@ -210,7 +210,7 @@ pub(crate) fn eval_obs_mean_resolved(
     real_s: &RealState,
 ) -> f64 {
     let ctx = |proj: f64| EvalCtx {
-        model: compiled, int_s, real_s, params, t: 0.0, projected: Some(proj),
+        model: compiled, int_s, real_s, params, t: 0.0, projected: Some(proj), int_float_override: None,
     };
 
     match likelihood {

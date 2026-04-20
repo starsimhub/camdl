@@ -217,16 +217,23 @@ pub fn eval_resolved(expr: &ResolvedExpr, ctx: &EvalCtx<'_>) -> f64 {
 
         ResolvedExpr::Param(idx) => ctx.params[*idx],
 
-        ResolvedExpr::IntPop(local) => ctx.int_s.counts[*local] as f64,
+        ResolvedExpr::IntPop(local) => match ctx.int_float_override {
+            Some(f) => f[*local],
+            None => ctx.int_s.counts[*local] as f64,
+        },
 
         ResolvedExpr::RealPop(local) => ctx.real_s.values[*local],
 
-        ResolvedExpr::IntPopSum(indices) => {
-            indices.iter().map(|&i| ctx.int_s.counts[i] as f64).sum()
-        }
+        ResolvedExpr::IntPopSum(indices) => match ctx.int_float_override {
+            Some(f) => indices.iter().map(|&i| f[i]).sum(),
+            None => indices.iter().map(|&i| ctx.int_s.counts[i] as f64).sum(),
+        },
 
         ResolvedExpr::MixedPopSum { int_indices, real_indices } => {
-            let int_sum: f64 = int_indices.iter().map(|&i| ctx.int_s.counts[i] as f64).sum();
+            let int_sum: f64 = match ctx.int_float_override {
+                Some(f) => int_indices.iter().map(|&i| f[i]).sum(),
+                None => int_indices.iter().map(|&i| ctx.int_s.counts[i] as f64).sum(),
+            };
             let real_sum: f64 = real_indices.iter().map(|&i| ctx.real_s.values[i]).sum();
             int_sum + real_sum
         }

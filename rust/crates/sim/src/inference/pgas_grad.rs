@@ -49,7 +49,7 @@ pub fn log_transition_density_grad(
     eval_propensities(model, &int_s, &real_s, params, t, &mut propensities)?;
 
     let ctx = EvalCtx {
-        model, int_s: &int_s, real_s: &real_s, params, t, projected: None,
+        model, int_s: &int_s, real_s: &real_s, params, t, projected: None, int_float_override: None,
     };
 
     let mut log_p = 0.0;
@@ -213,7 +213,7 @@ fn log_gamma_density_grad_substep(
     int_s.counts.copy_from_slice(counts_before);
     let real_s = RealState::new(model.real_local_to_global.len());
     let ctx = EvalCtx {
-        model, int_s: &int_s, real_s: &real_s, params, t, projected: None,
+        model, int_s: &int_s, real_s: &real_s, params, t, projected: None, int_float_override: None,
     };
 
     let mut log_p = 0.0;

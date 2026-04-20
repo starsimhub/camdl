@@ -238,7 +238,7 @@ impl MultiStreamObsModel {
                     real_s: &self.real_s,
                     params,
                     t: 0.0,
-                    projected: None,
+                    projected: None, int_float_override: None,
                 };
                 eval_resolved(expr, &ctx)
             }

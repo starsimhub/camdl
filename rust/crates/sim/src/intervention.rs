@@ -76,7 +76,7 @@ pub fn inject_event_deltas(
 ) -> Result<(), SimError> {
     let t_end = t + dt;
     let ctx = EvalCtx {
-        model, int_s: snapshot, real_s, params, t: t_end, projected: None,
+        model, int_s: snapshot, real_s, params, t: t_end, projected: None, int_float_override: None,
     };
     let current_step = (t_end / dt).round() as i64;
     for (iv_idx, iv) in model.model.interventions.iter().enumerate() {
@@ -165,7 +165,7 @@ fn apply_intervention(
     for (action_idx, action) in iv.actions.iter().enumerate() {
         let resolved_val = eval_resolved(
             &model.resolved.intervention_exprs[iv_idx][action_idx],
-            &EvalCtx { model, int_s, real_s, params, t, projected: None },
+            &EvalCtx { model, int_s, real_s, params, t, projected: None, int_float_override: None },
         );
         match action {
             Action::FractionTransfer(ft) => {

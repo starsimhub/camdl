@@ -18,6 +18,12 @@ pub struct EvalCtx<'a> {
     /// Projected observation value — only set when evaluating likelihood Exprs.
     /// `Expr::Projected` returns this value; errors if None.
     pub projected: Option<f64>,
+    /// RM8 in 2026-04-19 engine review: the ODE backend uses f64 for
+    /// integer compartment state between snapshots. When Some, `Pop`
+    /// and `PopSum` read from this slice (indexed by local-int index)
+    /// instead of casting int_s.counts[] to f64. Avoids the
+    /// per-substep rounding that quantized RK4 integration.
+    pub int_float_override: Option<&'a [f64]>,
 }
 
 /// Evaluate a single expression. No allocations in steady state.
@@ -37,7 +43,11 @@ pub fn eval_expr(expr: &Expr, ctx: &EvalCtx<'_>) -> Result<f64, SimError> {
                 .copied()
                 .ok_or_else(|| SimError::UnknownCompartment(p.pop.clone()))?;
             if let Some(local) = ctx.model.global_to_int[global] {
-                Ok(ctx.int_s.counts[local] as f64)
+                let v = match ctx.int_float_override {
+                    Some(f) => f[local],
+                    None => ctx.int_s.counts[local] as f64,
+                };
+                Ok(v)
             } else if let Some(local) = ctx.model.global_to_real[global] {
                 Ok(ctx.real_s.values[local])
             } else {
@@ -52,7 +62,11 @@ pub fn eval_expr(expr: &Expr, ctx: &EvalCtx<'_>) -> Result<f64, SimError> {
                     .copied()
                     .ok_or_else(|| SimError::UnknownCompartment(name.clone()))?;
                 if let Some(local) = ctx.model.global_to_int[global] {
-                    sum += ctx.int_s.counts[local] as f64;
+                    let v = match ctx.int_float_override {
+                        Some(f) => f[local],
+                        None => ctx.int_s.counts[local] as f64,
+                    };
+                    sum += v;
                 } else if let Some(local) = ctx.model.global_to_real[global] {
                     sum += ctx.real_s.values[local];
                 }
@@ -310,7 +324,7 @@ pub fn eval_propensities(
     t: f64,
     out: &mut Vec<f64>,
 ) -> Result<(), SimError> {
-    let ctx = EvalCtx { model, int_s, real_s, params, t , projected: None };
+    let ctx = EvalCtx { model, int_s, real_s, params, t , projected: None, int_float_override: None };
     out.clear();
     for (i, tr) in model.model.transitions.iter().enumerate() {
         let p = eval_resolved(&model.resolved.rates[i], &ctx);

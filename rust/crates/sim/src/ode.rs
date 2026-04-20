@@ -39,10 +39,12 @@ impl Simulate for OdeSim {
 
 /// Evaluate ODE derivatives at the current (int_vals, real_vals) state.
 ///
-/// Integer compartments are rounded to i64 when constructing the EvalCtx,
-/// introducing O(1/N) relative error in propensity evaluation. This is
-/// negligible for N > ~100 but can cause premature extinction for very small
-/// compartment values (< ~10). See docs/runtimes.md for full discussion.
+/// RM8 in 2026-04-19 engine review: integer compartments are read at
+/// their full f64 value during substeps via
+/// `EvalCtx::int_float_override`. Previously this rounded to i64 at
+/// every substep, quantizing state and producing O(1/N) relative error
+/// that caused premature extinction at small N. Rounding now happens
+/// only when snapshotting to the output trajectory.
 fn ode_derivs(
     model: &CompiledModel,
     int_vals: &[f64],
@@ -52,14 +54,22 @@ fn ode_derivs(
     d_int: &mut [f64],
     d_real: &mut [f64],
 ) -> Result<(), SimError> {
-    let int_s = IntState::from_vec(
-        int_vals.iter().map(|&x| x.max(0.0).round() as i64).collect()
-    );
+    // Placeholder i64 int_s — never read because int_float_override overrides.
+    let int_s = IntState::from_vec(vec![0_i64; int_vals.len()]);
     let real_s = RealState::from_vec(real_vals.to_vec());
 
+    let ctx = EvalCtx {
+        model, int_s: &int_s, real_s: &real_s, params, t,
+        projected: None,
+        int_float_override: Some(int_vals),
+    };
+
     // Integer compartment derivatives from transition stoichiometry × rate.
-    let mut propensities = Vec::with_capacity(model.model.transitions.len());
-    eval_propensities(model, &int_s, &real_s, params, t, &mut propensities)?;
+    let n_tr = model.model.transitions.len();
+    let mut propensities = Vec::with_capacity(n_tr);
+    for i in 0..n_tr {
+        propensities.push(eval_resolved(&model.resolved.rates[i], &ctx));
+    }
 
     for v in d_int.iter_mut() { *v = 0.0; }
     for (tr_idx, stoich) in model.transition_stoich.iter().enumerate() {
@@ -71,7 +81,6 @@ fn ode_derivs(
 
     // Real compartment derivatives from explicit ODE equations.
     for v in d_real.iter_mut() { *v = 0.0; }
-    let ctx = EvalCtx { model, int_s: &int_s, real_s: &real_s, params, t , projected: None };
     for (eq_idx, _eq) in model.model.ode_equations.iter().enumerate() {
         let local = model.ode_real_indices[eq_idx];
         d_real[local] = eval_resolved(&model.resolved.ode_derivatives[eq_idx], &ctx);

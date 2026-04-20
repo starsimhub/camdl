@@ -90,7 +90,7 @@ fn resolve_ctx_from(model: &CompiledModel) -> ResolveCtx<'_> {
 fn assert_resolved_matches(expr: &Expr, model: &CompiledModel, int_s: &IntState, real_s: &RealState, params: &[f64], t: f64) {
     let rctx = resolve_ctx_from(model);
     let resolved = resolve_expr(expr, &rctx).expect("resolve_expr failed");
-    let ctx = EvalCtx { model, int_s, real_s, params, t, projected: None };
+    let ctx = EvalCtx { model, int_s, real_s, params, t, projected: None, int_float_override: None };
     let expected = eval_expr(expr, &ctx).expect("eval_expr failed");
     let actual = eval_resolved(&resolved, &ctx);
     assert!(
@@ -300,7 +300,7 @@ fn test_derivative_matches() {
 
     let rctx = resolve_ctx_from(&model);
     let resolved = resolve_expr(&expr, &rctx).unwrap();
-    let ctx = EvalCtx { model: &model, int_s: &int_s, real_s: &real_s, params: &params, t: 0.0, projected: None };
+    let ctx = EvalCtx { model: &model, int_s: &int_s, real_s: &real_s, params: &params, t: 0.0, projected: None, int_float_override: None };
 
     // beta is param index 0
     let old_deriv = sim::propensity::eval_expr_deriv(&expr, 0, &ctx);
@@ -329,7 +329,7 @@ fn test_projected() {
     let expr = Expr::Projected(ir::expr::ProjectedExpr { projected: () });
     let resolved = resolve_expr(&expr, &rctx).unwrap();
 
-    let ctx = EvalCtx { model: &model, int_s: &int_s, real_s: &real_s, params: &[], t: 0.0, projected: Some(42.0) };
+    let ctx = EvalCtx { model: &model, int_s: &int_s, real_s: &real_s, params: &[], t: 0.0, projected: Some(42.0), int_float_override: None };
     let val = eval_resolved(&resolved, &ctx);
     assert!((val - 42.0).abs() < 1e-12);
 }

@@ -252,7 +252,7 @@ pub fn bootstrap_filter_correlated(
                 let real_s = crate::state::RealState::new(model.real_local_to_global.len());
                 let ctx = crate::propensity::EvalCtx {
                     model, int_s: &int_s, real_s: &real_s, params,
-                    t: 0.0, projected: None,
+                    t: 0.0, projected: None, int_float_override: None,
                 };
                 crate::resolved_expr::eval_resolved(re, &ctx)
             })

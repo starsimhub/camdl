@@ -9141,3 +9141,111 @@ just a data-file-substitution loop around it? The CAS layer already
 hashes data into fit provenance, so distinct inputs → distinct fit
 dirs automatically. Structurally unblocked.
 
+
+## [downstream] Two upstream issues hit while attempting 2D profile likelihood
+
+Downstream (boarding-school book chapter) wanted a 2D profile on
+(I(0), R(0)) for the SIR + Poisson fit — β, γ estimated at each cell.
+Two workflow options exist on paper; both have upstream problems.
+
+### Issue 1: `camdl profile` subcommand is unreachable
+
+`rust/crates/cli/src/main.rs:24` declares:
+
+```rust
+#[allow(dead_code)] mod profile;
+```
+
+The module `rust/crates/cli/src/profile.rs` exists, has a full
+`cmd_profile` function, and its doc comment advertises both 1D and 2D
+profile likelihoods:
+
+```
+//! `camdl profile` — profile likelihood via parallel IF2 runs.
+//! ...
+//! Usage:
+//!   camdl profile MODEL --params P.toml --data cases.tsv \
+//!       --focal R0 --grid "10,20,30,40,50,60,70,80" \
+//!       --rw-sd "sigma=0.01,gamma=0.01,rho=0.02" \
+//!       --particles 1000 --iterations 50 --starts 3 \
+//!       --parallel 4 --dt 1.0 --seed 1
+//!
+//! Output: profile_{focal}.tsv with columns:
+//!   focal_value  max_loglik  [all estimated param means]
+```
+
+And the usage helper mentions 2D:
+
+```
+//!  1D:  --focal R0 --grid "10,20,30"
+//!  2D:  --focal alpha,gamma --grid-alpha "0.9,0.95,1.0" --grid-gamma "0.06,0.08,0.10"
+```
+
+But no `"profile"` match arm in `main.rs` dispatch. Invoking
+`camdl profile ...` falls through to the simulate case, yielding
+`error: unknown flag: --data  run camdl simulate --help for usage` —
+confusing because the error cites a different subcommand's help.
+
+This is a purpose-built profile-likelihood tool that is silently
+shipped-but-not-wired. Either wire it up, or mark it as
+`#[cfg(feature = "unfinished")]` so a user doesn't discover it in the
+source and try to use it.
+
+The `#[allow(dead_code)]` attribute is the smoking gun that compiler
+warnings were being silenced rather than acted on.
+
+### Issue 2: `camdl fit run --sweep` halts the whole sweep on first scout-Rhat gate failure
+
+Fallback plan was `camdl fit run --sweep "I0=..." --sweep "R_init=..."` to
+get proper IF2-per-cell, which is 2D-capable via repeated `--sweep`
+flags and does a Cartesian product.
+
+What works: the Cartesian sweep dispatch runs correctly.
+What fails: when a single cell's scout tail-Rhat exceeds 1.10, the
+upstream gate fires `std::process::exit(1)` and the remaining cells in
+the Cartesian product never run. No partial output is surfaced. For the
+book's 8×8 (I(0), R(0)) grid we saw the sweep halt at cell 8 of 64
+(corner cell, β Rhat = 1.15, just barely over). The 7 cells that had
+already completed successfully wrote results, but the sweep didn't
+continue to the remaining 56 cells or emit any summary of "N/64
+cells failed the gate."
+
+Expected behavior for a sweep:
+
+1. If a cell's scout doesn't converge, mark it in the output TSV —
+   e.g. `ll = NaN`, `converged = false`, `status = "rhat_gate"` — and
+   continue with subsequent cells.
+2. At end of sweep, print "N_good/N_total cells passed the gate"
+   summary.
+3. Optional: a per-sweep flag `--gate-halt` (default) vs
+   `--gate-continue` so users can choose strict-halt or continue-with-NaN
+   depending on intent.
+
+The current behavior is reasonable for a single-point fit (gate protects
+against laundering). For a sweep it's too strict: edge cells of a wide
+grid are legitimately harder to fit and we expect some to fail the
+gate — that's part of what the profile is *showing us*. A sweep that
+refuses to produce any result because cell (I(0)=1, R(0)=250) didn't
+converge is not a usable profile-likelihood tool.
+
+### What downstream is doing in the meantime
+
+Using a scipy Nelder-Mead loop over (β, γ) at each (I(0), R(0)) cell,
+calling `camdl pfilter` in the objective function with a fixed PF seed
+so the objective is deterministic. 15×15 grid in ~2.5 min. Caveat: NM
+finds a local basin only; IF2-per-cell would be more robust to
+(β, γ) multi-modality at fixed (I(0), R(0)), if we could run it.
+
+### Suggested priority
+
+Issue 1 is simple (a few lines to wire `cmd_profile` into the match in
+`main.rs`), has a fully-built subcommand behind it, and is the right
+long-term tool for this workflow. Please prioritise.
+
+Issue 2 is a design call (strict vs continue-on-failure for sweeps).
+Even a crude first pass — write NaN for failed cells and print a
+summary — would make `--sweep` usable for profiles where some cells
+legitimately fail.
+
+**ACTION FOR upstream:** pick one, ideally Issue 1 first. Will re-run
+the profile against the fixed version when either lands.

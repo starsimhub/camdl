@@ -244,7 +244,7 @@ pub fn log_transition_density_substep(
     eval_propensities(model, &int_s, &real_s, params, t, &mut propensities)?;
 
     let ctx = EvalCtx {
-        model, int_s: &int_s, real_s: &real_s, params, t, projected: None,
+        model, int_s: &int_s, real_s: &real_s, params, t, projected: None, int_float_override: None,
     };
 
     // Per-transition: is it deterministic? What's its sigma_sq?
@@ -475,7 +475,7 @@ pub fn complete_data_loglik(
             let ctx = EvalCtx {
                 model, int_s: &int_s_local, real_s: &real_s_local,
                 params, t: model.model.simulation.t_start + s as f64 * dt,
-                projected: None,
+                projected: None, int_float_override: None,
             };
             let mut gamma_idx_local = 0;
             for &(src_local, ref group) in &model.source_groups {

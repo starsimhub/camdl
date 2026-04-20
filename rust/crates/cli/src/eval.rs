@@ -197,7 +197,7 @@ pub fn cmd_eval(args: &[String]) {
 
     for &t in &times {
         write!(out, "{}", t).unwrap();
-        let ctx = EvalCtx { model: &compiled, int_s: &int_s, real_s: &real_s, params: &params, t , projected: None };
+        let ctx = EvalCtx { model: &compiled, int_s: &int_s, real_s: &real_s, params: &params, t , projected: None, int_float_override: None };
         for (name, expr) in &resolved {
             match eval_expr(expr, &ctx) {
                 Ok(val) => write!(out, "\t{:.6}", val).unwrap(),
