@@ -244,6 +244,73 @@ pub fn bootstrap_filter_correlated(
             }
         }
     }
+
+    // IM8 in 2026-04-19 inference review: the CPM machinery uses a
+    // single `scratch.gamma_override: Option<f64>` that step_one
+    // consumes for the FIRST overdispersed transition in a substep
+    // and then falls through to fresh rng.gamma_multiplier() draws
+    // for any subsequent ones. Plus sigma_sq below is picked from
+    // the first overdispersed transition and reused for every
+    // gamma draw. Neither issue is recoverable without a larger
+    // rewrite (Vec<f64> for gamma_override, per-transition σ²
+    // evaluation), so fail fast at preflight rather than silently
+    // produce uncorrelated / mis-transformed gamma draws. Users hit
+    // by this should drop to vanilla PMMH (rho = None).
+    let n_overdispersed = model.resolved.overdispersion.iter()
+        .filter(|od| od.is_some())
+        .count();
+    // Check per-source-group: if any group has >1 overdispersed
+    // transition, CPM correlation breaks.
+    for (_src, group) in &model.source_groups {
+        let n_od_in_group = group.iter()
+            .filter(|&&tr_idx| model.resolved.overdispersion[tr_idx].is_some())
+            .count();
+        if n_od_in_group > 1 {
+            return Err(SimError::Validation(format!(
+                "Correlated pseudo-marginal (CPM) does not support more than \
+                 one overdispersed transition sharing a source compartment \
+                 (found {} in this model). The CPM gamma_override machinery \
+                 is a single-slot Option<f64> that step_one consumes for the \
+                 first overdispersed transition only. Use vanilla PMMH \
+                 (rho = None), or collapse the multiple overdispersed \
+                 outflows into one.", n_od_in_group
+            )));
+        }
+    }
+    // Also reject if different overdispersed transitions evaluate
+    // to distinct σ² values — the global sigma_sq picked below
+    // would be wrong for all but the first. Since σ² is
+    // state-independent (checked above), evaluation at zero state
+    // is a sound comparison.
+    if n_overdispersed > 1 {
+        let int_s = crate::state::IntState::new(n_int);
+        let real_s = crate::state::RealState::new(model.real_local_to_global.len());
+        let ctx = crate::propensity::EvalCtx {
+            model, int_s: &int_s, real_s: &real_s, params,
+            t: 0.0, projected: None, int_float_override: None,
+        };
+        let mut first_sq: Option<f64> = None;
+        for od in &model.resolved.overdispersion {
+            if let Some(re) = od {
+                let sq = crate::resolved_expr::eval_resolved(re, &ctx);
+                match first_sq {
+                    None => first_sq = Some(sq),
+                    Some(first) if (first - sq).abs() > 1e-12 * first.abs().max(1.0) => {
+                        return Err(SimError::Validation(
+                            "Correlated pseudo-marginal (CPM) does not support \
+                             distinct σ² values across overdispersed \
+                             transitions (it uses the first transition's σ² for \
+                             every gamma draw). Either share one σ² parameter \
+                             across all overdispersed transitions, or drop to \
+                             vanilla PMMH (rho = None).".into()
+                        ));
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+
     let sigma_sq = model.resolved.overdispersion.iter()
         .find_map(|od| {
             od.as_ref().map(|re| {
