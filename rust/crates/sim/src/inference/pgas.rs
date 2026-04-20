@@ -800,6 +800,29 @@ pub fn csmc_as(
         // ã_j = w_{s-1}^j + log f(X_ref_s | x_{s-1}^j, θ, gamma_ref_s)
         // The gamma from the reference is used because we're asking:
         // "given this gamma noise, what's P(reaching ref state from particle j?)"
+        //
+        // IM6 in 2026-04-19 inference review: ancestor sampling runs
+        // POST-resample here, so `prev_counts[j]` is the state at
+        // slot j after resampling (i.e., the pre-resample state of
+        // ancestor `indices[j]`), while `log_weights[j]` is the
+        // pre-resample weight at ORIGINAL slot j (never reshuffled
+        // after resampling at step 1). That pairs a weight from
+        // slot-j pre-resample with a state from slot-indices[j]
+        // pre-resample — a mismatch.
+        //
+        // After resampling, per CSMC theory, all slots carry
+        // uniform weight 1/N. The correct ancestor weight in the
+        // post-resample placement is therefore just the transition
+        // density: ã_j ∝ f(X_ref_s | prev_counts[j]). Adding the
+        // stale log_weights[j] skews the categorical toward slots
+        // whose original weights were high, regardless of whether
+        // the ancestor-source state (at slot indices[j]) happens to
+        // be a good precursor to X_ref.
+        //
+        // Fix: drop log_weights[j] from the sum. The current
+        // log_weights[j] value is discarded at step 5 anyway (either
+        // overwritten by the obs log-likelihood or reset to 0), so
+        // removing it here doesn't affect subsequent steps.
         {
             ancestor_log_w.fill(f64::NEG_INFINITY);
             for j in 0..n_particles {
@@ -812,7 +835,9 @@ pub fn csmc_as(
                     t,
                     dt,
                 )?;
-                ancestor_log_w[j] = log_weights[j] + td;
+                // Post-resample slot j carries uniform weight (1/N);
+                // the categorical is driven by td alone.
+                ancestor_log_w[j] = td;
             }
 
             // Sample ancestor from categorical(softmax(ancestor_log_w)).
