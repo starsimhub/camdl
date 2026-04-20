@@ -811,6 +811,8 @@ let run_inspect path opts =
       Diagnostics.render_all ctx.diags source Fmt.stderr;
       exit 1
     );
+    if ctx.diags.diags <> [] then
+      Diagnostics.render_all ctx.diags source Fmt.stderr;
     let ppf = Fmt.stdout in
     (match opts.cmd with
      | Summary ->

@@ -55,13 +55,12 @@ let compile_detail_result ?(name = "model") ?(filename = "<input>") (src : strin
     ) (List.rev !Lexer.pending_warnings);
     Lexer.pending_warnings := [];
     (* Errors: render all diagnostics and exit.
-       No errors: render any warnings (no-op if none) and continue. *)
+       Warnings are NOT rendered here — callers render once at the end
+       of their pipeline so expansion-phase warnings don't get printed
+       twice when downstream passes (dimcheck) also emit diagnostics
+       (M3 in the 2026-04-19 compiler review). *)
     if Diagnostics.has_errors ctx.diags then
-      Diagnostics.report_and_exit ctx.diags source
-    else begin
-      Fmt.set_style_renderer Fmt.stderr `Ansi_tty;
-      Diagnostics.render_all ctx.diags source Fmt.stderr
-    end;
+      Diagnostics.report_and_exit ctx.diags source;
     Ok { model; ctx; summary; source }
   with
   | Failure msg -> Error msg
@@ -182,11 +181,15 @@ let compile ?(name = "model") ?(filename = "<input>") (src : string) : (Ir.model
       (* Dimension errors block compilation — render and exit *)
       if Diagnostics.has_errors d.ctx.diags then
         Diagnostics.report_and_exit d.ctx.diags d.source
-      else if dc_result.diagnostics <> [] then begin
-        (* Render non-blocking warnings/infos *)
-        Fmt.set_style_renderer Fmt.stderr `Ansi_tty;
-        Diagnostics.render_all d.ctx.diags d.source Fmt.stderr
-      end
+    end;
+    (* Single render of any collected non-blocking diagnostics
+       (expansion warnings + dimcheck infos/warnings). M3 in the
+       2026-04-19 review: previously expansion warnings were rendered
+       once in compile_detail_result and again here after dimcheck,
+       duplicating output. *)
+    if d.ctx.diags.diags <> [] then begin
+      Fmt.set_style_renderer Fmt.stderr `Ansi_tty;
+      Diagnostics.render_all d.ctx.diags d.source Fmt.stderr
     end;
     (* Autodiff pass: differentiate transition rates w.r.t. all parameters *)
     let param_names = List.map (fun (p : Ir.parameter) -> p.name) d.model.Ir.parameters in
