@@ -1848,6 +1848,95 @@ pub fn resolve_prior(
     (Prior::Flat, "flat (default)")
 }
 
+/// IC4 in the 2026-04-19 inference review batch 3: validate that
+/// each estimated parameter's resolved prior is compatible with its
+/// transform. Wrong combinations silently produce a different prior
+/// than the user wrote (log_normal on Transform::None collapses to
+/// Normal-on-natural; log_normal on Transform::Logit becomes
+/// logit-normal; etc.).
+///
+/// Compatibility matrix:
+///   Prior::TransformedNormal (log_normal) — Transform::Log
+///   Prior::Beta                           — Transform::Logit
+///   Prior::HalfNormal, Gamma, Exponential — Transform::Log
+///   Prior::Uniform, Normal, Flat          — any transform
+///
+/// Call from every fit-stage entry point *before* building IF2
+/// params so the user sees a clean error, not a miscalibrated
+/// posterior.
+pub fn validate_prior_transform_compat(
+    fit: &super::config::FitToml,
+    model: &ir::Model,
+) -> Result<(), String> {
+    for (name, _spec) in &fit.estimate {
+        // Build the same Transform the engine will use.
+        let ir_param = match model.parameters.iter().find(|p| p.name == *name) {
+            Some(p) => p,
+            None => continue, // validate_partition catches unknown params.
+        };
+        let transform_override = fit.estimate.get(name)
+            .and_then(|e| e.transform.as_deref());
+        let transform = derive_transform(ir_param, transform_override);
+        let (prior, source) = resolve_prior(name, fit, model);
+
+        let is_log   = matches!(transform, Transform::Log { .. });
+        let is_logit = matches!(transform, Transform::Logit { .. });
+
+        let err = |needs: &str| Err(format!(
+            "parameter '{}': prior {} is incompatible with transform {}; \
+             {} priors require a {} transform. Either fix the param_kind \
+             in the model (or the `transform` override in fit.toml), or \
+             pick a different prior.\n  (prior source: {})",
+            name,
+            match prior {
+                Prior::TransformedNormal { .. } => "log_normal",
+                Prior::Beta { .. }              => "beta",
+                Prior::HalfNormal { .. }        => "half_normal",
+                Prior::Gamma { .. }             => "gamma",
+                Prior::Exponential { .. }       => "exponential",
+                Prior::Normal { .. }            => "normal",
+                Prior::Uniform { .. }           => "uniform",
+                Prior::Flat                     => "flat",
+            },
+            match transform {
+                Transform::Log { .. }   => "Log",
+                Transform::Logit { .. } => "Logit",
+                Transform::None         => "None",
+            },
+            match prior {
+                Prior::TransformedNormal { .. } => "log_normal",
+                Prior::Beta { .. }              => "beta",
+                _                               => "positive-support",
+            },
+            needs, source,
+        ));
+
+        match prior {
+            Prior::TransformedNormal { .. }
+            | Prior::HalfNormal { .. }
+            | Prior::Gamma { .. }
+            | Prior::Exponential { .. } => {
+                if !is_log { return err("Log"); }
+            }
+            Prior::Beta { .. } => {
+                if !is_logit { return err("Logit"); }
+                // Beta is on [0, 1]; require logit bounds span that.
+                if let Transform::Logit { lo, hi } = transform {
+                    if lo != 0.0 || hi != 1.0 {
+                        return Err(format!(
+                            "parameter '{}': beta prior requires bounds [0, 1], \
+                             got [{}, {}].", name, lo, hi));
+                    }
+                }
+            }
+            Prior::Uniform { .. } | Prior::Normal { .. } | Prior::Flat => {
+                // Compatible with any transform.
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Evaluate a prior argument — supports bare numbers and log(x).
 fn eval_prior_arg(s: &str) -> Option<f64> {
     if let Ok(v) = s.parse::<f64>() {
