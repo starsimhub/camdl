@@ -814,33 +814,48 @@ pub fn compute_rhat(
     let n_chains = results.len();
     if n_chains < 2 { return HashMap::new(); }
 
-    let n_tail = (n_iterations / 2).max(1);
+    // Im25 in 2026-04-19 inference review batch 3: use each chain's
+    // own last-half rather than `n_iterations` uniformly. Resumed
+    // chains have `iterations.len() > n_iterations`; the old formula
+    // was `skip(n_iterations − n_tail)` for all chains — so a
+    // resumed chain's "last half" started at an absolute iteration
+    // index that didn't correspond to the physical last half of its
+    // trace. Now each chain defines its own last-half window.
     let mut rhat_map = HashMap::new();
+
+    let chain_tail = |r: &IF2Result, spec: &EstimatedParam| -> Vec<f64> {
+        let len = r.iterations.len().max(n_iterations);
+        let n_tail = (len / 2).max(1);
+        r.iterations.iter()
+            .skip(r.iterations.len().saturating_sub(n_tail))
+            .map(|it| it.param_means[spec.index])
+            .collect()
+    };
 
     for spec in if2_params {
         let chain_means: Vec<f64> = results.iter().map(|(_, r)| {
-            let tail: Vec<f64> = r.iterations.iter()
-                .skip(n_iterations.saturating_sub(n_tail))
-                .map(|it| it.param_means[spec.index])
-                .collect();
+            let tail = chain_tail(r, spec);
             tail.iter().sum::<f64>() / tail.len() as f64
         }).collect();
 
         let chain_vars: Vec<f64> = results.iter().map(|(_, r)| {
-            let tail: Vec<f64> = r.iterations.iter()
-                .skip(n_iterations.saturating_sub(n_tail))
-                .map(|it| it.param_means[spec.index])
-                .collect();
+            let tail = chain_tail(r, spec);
             let m = tail.iter().sum::<f64>() / tail.len() as f64;
             tail.iter().map(|&x| (x - m).powi(2)).sum::<f64>() / (tail.len() - 1).max(1) as f64
         }).collect();
 
+        // For the G-R between/within formula, use the tail length of
+        // the shortest chain — the formula uses a single N per chain
+        // and conservatism argues for the min when lengths differ.
+        let min_tail = results.iter()
+            .map(|(_, r)| chain_tail(r, spec).len())
+            .min().unwrap_or(0).max(1) as f64;
         let grand_mean = chain_means.iter().sum::<f64>() / n_chains as f64;
         let between = chain_means.iter().map(|&m| (m - grand_mean).powi(2)).sum::<f64>()
-            * n_tail as f64 / (n_chains - 1).max(1) as f64;
+            * min_tail / (n_chains - 1).max(1) as f64;
         let within = chain_vars.iter().sum::<f64>() / n_chains as f64;
         let rhat = if within > 0.0 {
-            (((n_tail as f64 - 1.0) / n_tail as f64 * within + between / n_tail as f64) / within).sqrt()
+            (((min_tail - 1.0) / min_tail * within + between / min_tail) / within).sqrt()
         } else { f64::NAN };
 
         rhat_map.insert(spec.name.clone(), rhat);
