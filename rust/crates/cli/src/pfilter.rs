@@ -167,7 +167,13 @@ pub fn cmd_pfilter(args: &[String]) {
     eprintln!("pfilter: {} observations, {} particles, dt={}, seed={}",
         observations.len(), n_particles, dt, seed);
 
-    // Find observation model from the IR
+    // Find observation model from the IR.
+    // Im22 in 2026-04-19 inference review batch 3: pfilter is single-
+    // stream only — the runtime's MultiStreamObsModel supports
+    // joint observation across multiple streams, but this CLI
+    // driver scores exactly one `[observations.NAME]` block per
+    // invocation. Use `camdl fit run` (PGAS/PMMH stages) for
+    // multi-stream joint inference.
     let obs_model_ir = if let Some(ref name) = obs_name {
         model.observations.iter().find(|o| o.name == *name)
             .cloned()

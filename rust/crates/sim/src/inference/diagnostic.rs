@@ -389,8 +389,13 @@ impl DiagnosticCollector {
 }
 
 fn chrono_now() -> String {
-    // ISO 8601 timestamp without chrono dependency.
-    // Computes UTC date/time from epoch seconds via civil-day arithmetic.
+    // ISO 8601 timestamp without a chrono dependency.
+    // Computes UTC date/time from epoch seconds via Howard Hinnant's
+    // civil_from_days algorithm:
+    //   https://howardhinnant.github.io/date_algorithms.html
+    // The 146097-day era (400-year Gregorian cycle) and the
+    // `(5·doy+2)/153` civil-month mapping are standard from that
+    // reference. Im23 in 2026-04-19 inference review batch 3.
     use std::time::SystemTime;
     let secs = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
