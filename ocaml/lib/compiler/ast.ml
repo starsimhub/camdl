@@ -211,7 +211,15 @@ type scenario_decl = {
 (** Source of dimension levels: inline list or read from a file column *)
 type dim_source =
   | DInline of string list
-  | DRead   of string * string    (* path, column_name *)
+  (* fn_name: what the user wrote before `(` (expected "read").
+     col_kw:  keyword for the column arg (expected "column").
+     path:    file path string.
+     col:     column name string.
+     The parser accepts any `ident(STRING, ident = STRING)` and
+     defers the "is it actually `read(…, column = …)`?" check to the
+     expander, where a proper E2xx diagnostic can fire — M11 in the
+     2026-04-19 review. *)
+  | DRead   of { fn_name: string; path: string; col_kw: string; col: string }
 
 type dimensions_entry = {
   dename : string;

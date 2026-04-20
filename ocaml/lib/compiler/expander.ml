@@ -169,30 +169,37 @@ let read_csv_rows ctx path ~on_header ~on_row ~on_done =
         '\t'
     in
     let ic = open_in abs_path in
-    let result = (try
-      let header_line = input_line ic in
-      let header_cols = List.map String.trim (split_by sep header_line) in
-      on_header header_cols;
-      let row_num = ref 1 in
-      (try while true do
-        let raw_line = input_line ic in
-        incr row_num;
-        let line = String.trim raw_line in
-        if line <> "" && not (String.length line > 0 && line.[0] = '#') then begin
-          let cols = split_by sep line in
-          on_row !row_num cols
-        end
-      done with End_of_file -> ());
-      on_done ()
-    with End_of_file ->
-      Diagnostics.error ctx.diags
-        ~code:"E210"
-        ~loc:Diagnostics.no_loc
-        ~message:(Printf.sprintf "%s: file is empty (no header row)" path)
-        ();
-      on_done ()
+    (* M8 in the 2026-04-19 review: previously this sequence was
+       `let result = try ... in close_in ic; Some result` — any
+       non-End_of_file exception (I/O errors, failed assertions
+       inside a callback, etc.) propagated past the try-block and
+       close_in was never reached, leaking the file descriptor.
+       Fun.protect guarantees the close runs on any exit path,
+       normal or exceptional. *)
+    let result = Fun.protect ~finally:(fun () -> close_in_noerr ic) (fun () ->
+      try
+        let header_line = input_line ic in
+        let header_cols = List.map String.trim (split_by sep header_line) in
+        on_header header_cols;
+        let row_num = ref 1 in
+        (try while true do
+          let raw_line = input_line ic in
+          incr row_num;
+          let line = String.trim raw_line in
+          if line <> "" && not (String.length line > 0 && line.[0] = '#') then begin
+            let cols = split_by sep line in
+            on_row !row_num cols
+          end
+        done with End_of_file -> ());
+        on_done ()
+      with End_of_file ->
+        Diagnostics.error ctx.diags
+          ~code:"E210"
+          ~loc:Diagnostics.no_loc
+          ~message:(Printf.sprintf "%s: file is empty (no header row)" path)
+          ();
+        on_done ()
     ) in
-    close_in ic;
     Some result
   end
 
@@ -461,14 +468,37 @@ let resolve_dimensions ctx =
     else begin
       let levels = match de.desrc with
         | DInline vs -> vs
-        | DRead (path, col_name) ->
-          let (vs, n_rows, n_dups) = read_dim_column_from_file ctx path col_name in
+        | DRead { fn_name; path; col_kw; col } ->
+          (* M11 in 2026-04-19 review: parser accepts any
+             `IDENT(STRING, IDENT = STRING)`, so `load("pop.tsv",
+             column = "patch")` parses identically to `read(...,
+             banana = "patch")`. Validate the function name and
+             keyword here with proper diagnostics. *)
+          if fn_name <> "read" then
+            Diagnostics.error ctx.diags
+              ~code:"E275"
+              ~loc:Diagnostics.no_loc
+              ~message:(Printf.sprintf
+                "unknown dimension source function '%s' — use `read(...)`"
+                fn_name)
+              ~hint:"example: patch = read(\"pop.tsv\", column = \"patch\")"
+              ();
+          if col_kw <> "column" then
+            Diagnostics.error ctx.diags
+              ~code:"E276"
+              ~loc:Diagnostics.no_loc
+              ~message:(Printf.sprintf
+                "unknown keyword '%s' for read(...) — use `column = \"...\"`"
+                col_kw)
+              ~hint:"valid keywords: column"
+              ();
+          let (vs, n_rows, n_dups) = read_dim_column_from_file ctx path col in
           let msg = if n_dups = 0 then
             Printf.sprintf "info: dimension '%s': %d levels from %s column \"%s\" (%d rows)"
-              de.dename (List.length vs) path col_name n_rows
+              de.dename (List.length vs) path col n_rows
           else
             Printf.sprintf "info: dimension '%s': %d levels from %s column \"%s\" (%d rows, %d duplicates)"
-              de.dename (List.length vs) path col_name n_rows n_dups
+              de.dename (List.length vs) path col n_rows n_dups
           in
           Printf.eprintf "%s\n%!" msg;
           vs
@@ -1587,13 +1617,26 @@ let expand_parameters ctx =
         }
       ) vals
     | PIndexed { pname; pdims; _ } ->
-      (* The parser only produces single-dim indexed params (pdims = [dim]).
-         Multi-dim (pdims with len != 1) would be an internal parser/AST
-         mismatch, not user-reachable. *)
-      failwith (Printf.sprintf
-        "internal: indexed parameter '%s' has %d dimensions; only single-dim \
-         is supported (compiler bug — parser/expander out of sync)"
-        pname (List.length pdims))
+      (* The parser only produces single-dim indexed params
+         (pdims = [dim]). The single-dim arm above matches that; this
+         fallback is defensive. M10 in the 2026-04-19 review —
+         previously this raised `failwith` which produced a bare
+         stack trace in production via compile_detail_result's
+         generic exn → Error catch. Even though the review's author
+         identified this as "parser only produces single-dim", a
+         future parser extension to multi-dim indexed params would
+         regress this into a crash. Emit a real diagnostic instead. *)
+      Diagnostics.error ctx.diags
+        ~code:"E274"
+        ~loc:Diagnostics.no_loc
+        ~message:(Printf.sprintf
+          "indexed parameter '%s' has %d dimensions; only single-dim \
+           indexed parameters are supported"
+          pname (List.length pdims))
+        ~hint:"declare one parameter per stratified axis, e.g. \
+               `R0[patch] : positive` rather than `R0[patch, age]`"
+        ();
+      []
   ) ctx.param_decls in
   (* Typed const let bindings → fixed-value parameters *)
   let from_lets = List.filter_map (fun (lb : let_binding) ->

@@ -6,8 +6,6 @@ type un_op  = Neg | Exp | Log | Sqrt | Abs | Floor | Ceil
 type bin_op_expr      = { op: bin_op; left: expr; right: expr }
 and  un_op_expr       = { op: un_op;  arg:  expr }
 and  cond_expr        = { pred: expr; then_: expr; else_: expr }
-and  time_func_ref    = { name: string }
-and  table_lookup_expr = { table: string; indices: expr list }
 
 and expr =
   | Const       of float

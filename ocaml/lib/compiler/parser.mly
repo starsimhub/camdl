@@ -536,8 +536,8 @@ dim_entry:
 dim_source_expr:
   | LBRACKET vs = separated_list(COMMA, IDENT) RBRACKET
       { DInline vs }
-  | IDENT LPAREN path = STRING COMMA kwname = IDENT EQ col = STRING RPAREN
-      { ignore kwname; DRead (path, col) }
+  | fn = IDENT LPAREN path = STRING COMMA kwname = IDENT EQ col = STRING RPAREN
+      { DRead { fn_name = fn; path; col_kw = kwname; col } }
 
 (* ── Stratify ────────────────────────────────────────────────────────────── *)
 

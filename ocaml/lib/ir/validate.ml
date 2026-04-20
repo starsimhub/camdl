@@ -62,16 +62,19 @@ let check_expr_refs ~comps ~params ~tables ~tfs errors e =
 let validate (m : model) : (unit, error list) result =
   let errors = ref [] in
 
-  (* unique name checks *)
-  let comp_names  = uniq_check (fun (c: compartment) -> c.name) m.compartments (fun n -> DuplicateCompartment n) errors in
-  let _tr_names   = uniq_check (fun (t: transition)  -> t.name) m.transitions  (fun n -> DuplicateTransition  n) errors in
-  let _param_names = uniq_check (fun (p: parameter)  -> p.name) m.parameters  (fun n -> DuplicateParameter   n) errors in
+  (* Unique-name checks. The returned sets double as the
+     {comps, params, tables, tfs, tr_set} used by check_expr_refs
+     below — m10 in the 2026-04-19 review. Prior version bound two
+     of these to `_tr_names` / `_param_names` and then rebuilt them
+     via `List.map |> SS.of_list`, doing the walk twice for each
+     list. *)
+  let comp_names = uniq_check (fun (c: compartment)     -> c.name) m.compartments (fun n -> DuplicateCompartment n) errors in
+  let tr_set     = uniq_check (fun (t: transition)      -> t.name) m.transitions  (fun n -> DuplicateTransition  n) errors in
+  let params     = uniq_check (fun (p: parameter)       -> p.name) m.parameters   (fun n -> DuplicateParameter   n) errors in
 
   let real_comps = List.filter_map (fun (c: compartment)     -> if c.kind = Real then Some c.name else None) m.compartments |> SS.of_list in
-  let params     = List.map (fun (p: parameter)     -> p.name) m.parameters    |> SS.of_list in
   let tables     = List.map (fun (t: table)         -> t.name) m.tables        |> SS.of_list in
   let tfs        = List.map (fun (f: time_function) -> f.name) m.time_functions |> SS.of_list in
-  let tr_set     = List.map (fun (t: transition)    -> t.name) m.transitions   |> SS.of_list in
 
   let check_expr_r e = check_expr_refs ~comps:comp_names ~params ~tables ~tfs errors e in
 
@@ -105,7 +108,21 @@ let validate (m : model) : (unit, error list) result =
      | CumulativeFlow tn ->
        if not (SS.mem tn tr_set) then errors := UnknownTransition tn :: !errors
      | _ -> ());
-    (* likelihood exprs are allowed to have Projected, skip deep check here *)
+    (* Walk observation-likelihood expressions. The likelihood AST
+       may reference parameters, populations, tables, and the special
+       `Projected` variable; we check every identifier in the
+       distribution's payload so e.g.
+         cases : poisson(rate = bata * Projected)
+       catches the `bata` typo here. m9 in the 2026-04-19 review —
+       previously this branch was commented out, so these checks ran
+       nowhere. *)
+    (match obs.likelihood with
+     | Poisson      { rate }                    -> check_expr_r rate
+     | NegBinomial  { mean; dispersion }        -> check_expr_r mean; check_expr_r dispersion
+     | Normal       { mean; sd }                -> check_expr_r mean; check_expr_r sd
+     | Binomial     { n; p }                    -> check_expr_r n; check_expr_r p
+     | BetaBinomial { n; alpha; beta }          -> check_expr_r n; check_expr_r alpha; check_expr_r beta
+     | Bernoulli    { p }                       -> check_expr_r p)
   ) m.observations;
 
   if !errors = [] then Ok ()
