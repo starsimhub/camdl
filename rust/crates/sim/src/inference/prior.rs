@@ -43,8 +43,26 @@ pub enum Prior {
 }
 
 impl Prior {
-    /// Log-density of the prior at a natural-scale value.
-    /// `transformed` is the value on the unconstrained scale (for TransformedNormal).
+    /// Log-density of the prior on the **natural** scale, `log p(θ)`.
+    /// `transformed` is the unconstrained-scale value z where θ = f(z)
+    /// — used by `TransformedNormal`, which evaluates
+    /// `log N(z; mu, sd)` then subtracts `z` (for the Log transform
+    /// Jacobian) so the return is the natural-scale log-density.
+    ///
+    /// IC3 fix (2026-04-19 inference review batch 2/3): previously
+    /// `TransformedNormal` returned the z-scale density
+    /// `log N(z; μ, σ)` while callers (PMMH `pmmh.rs:419-420`,
+    /// PGAS `pgas.rs:1533-1534`) also added `log_jacobian(z) = z`
+    /// on top, double-counting the Jacobian and producing a +σ²
+    /// systematic bias on log-scale posteriors. The fix returns the
+    /// natural-scale density here; callers continue to add
+    /// `log_jacobian(z)` unconditionally to get the z-scale
+    /// density, now correctly.
+    ///
+    /// Precondition: `TransformedNormal` is only meaningful when the
+    /// parameter uses `Transform::Log`. IC4's validator
+    /// (`fit/config.rs::validate_prior_transform_compat`) enforces
+    /// this at fit-config load time.
     pub fn log_density(&self, natural: f64, transformed: f64) -> f64 {
         match self {
             Prior::Flat => 0.0,
@@ -61,8 +79,17 @@ impl Prior {
                 -HALF_LN_2PI - sd.ln() - 0.5 * z * z
             }
             Prior::TransformedNormal { mean, sd } => {
-                let z = (transformed - mean) / sd;
-                -HALF_LN_2PI - sd.ln() - 0.5 * z * z
+                // Log-normal on natural scale:
+                //   log p(θ) = log N(log θ; μ, σ) − log θ
+                // With z = log θ (Log transform) this is
+                //   log N(z; μ, σ) − z
+                // The −z compensates for the Jacobian that the
+                // caller will add back when evaluating on z-scale
+                // (log_jacobian(z) = z for Log transform), recovering
+                // the correct z-scale density log N(z; μ, σ).
+                if natural <= 0.0 { return f64::NEG_INFINITY; }
+                let z_score = (transformed - mean) / sd;
+                -transformed - HALF_LN_2PI - sd.ln() - 0.5 * z_score * z_score
             }
             Prior::HalfNormal { sigma } => {
                 if natural < 0.0 { return f64::NEG_INFINITY; }
@@ -132,6 +159,47 @@ mod tests {
         // Outside
         assert_eq!(p.log_density(-0.1, 0.0), f64::NEG_INFINITY);
         assert_eq!(p.log_density(1.1, 0.0), f64::NEG_INFINITY);
+    }
+
+    #[test]
+    fn transformed_normal_natural_scale_integrates_to_one() {
+        // IC3 regression: TransformedNormal returns the natural-scale
+        // log-density of a log-normal. Numerically integrate on the
+        // natural axis and check the density integrates to ~1.
+        // log_normal(mu=0, sigma=1) has density
+        //   p(θ) = 1/(θ·√(2π)) · exp(−(log θ)² / 2) for θ > 0.
+        let p = Prior::TransformedNormal { mean: 0.0, sd: 1.0 };
+        let dx = 0.001;
+        let total: f64 = (1..50_000).map(|i| {
+            let theta = i as f64 * dx;
+            let z = theta.ln();
+            p.log_density(theta, z).exp() * dx
+        }).sum();
+        assert!((total - 1.0).abs() < 1e-3,
+            "log-normal density should integrate to ~1, got {}", total);
+    }
+
+    #[test]
+    fn transformed_normal_plus_jacobian_equals_z_scale_normal() {
+        // IC3 regression: for transformed-space MH the density is
+        //   log p̃(z) = log p(θ(z)) + log|dθ/dz|
+        // For a log-normal(μ, σ) with Log transform:
+        //   log|dθ/dz| = z, so log p̃(z) = log N(z; μ, σ).
+        // Verify this identity holds with the fixed log_density.
+        let p = Prior::TransformedNormal { mean: 1.0, sd: 0.5 };
+        for &z in &[-1.0_f64, 0.0, 0.5, 1.0, 2.0] {
+            let theta = z.exp();
+            let log_natural = p.log_density(theta, z);
+            let log_z_scale_expected = {
+                let z_score = (z - 1.0) / 0.5;
+                -HALF_LN_2PI - 0.5_f64.ln() - 0.5 * z_score * z_score
+            };
+            let caller_added_jacobian = z; // log_jacobian for Log transform
+            let log_z_scale_actual = log_natural + caller_added_jacobian;
+            assert!((log_z_scale_actual - log_z_scale_expected).abs() < 1e-10,
+                "at z={}: natural+jacobian={} != z-scale normal={}",
+                z, log_z_scale_actual, log_z_scale_expected);
+        }
     }
 
     #[test]
