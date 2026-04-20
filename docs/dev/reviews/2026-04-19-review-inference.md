@@ -610,3 +610,196 @@ opt-in.
 `step_one` that have to be hand-maintained; three of four have
 drifted slightly. A dedicated "audit the gamma_idx convention
 across all four" sweep after IM7 would be worth it.
+
+---
+
+# Inference code review — batch 3: diagnostics + CLI wiring
+
+Covers `diagnostic.rs` (full), `runner.rs` R-hat/ESS +
+`derive_transform` + `build_if2_params_from_specs` +
+`resolve_prior` + `compute_config_hash`, `pfilter.rs` (full), and
+slices of `fit/mod.rs`, `fit/config.rs`, `fit/pgas.rs`.
+Outstanding after this batch: tail of `fit/pmmh.rs`, `cli/if2.rs`
+specifics (mostly mechanical), `batch.rs` (orchestration, not
+correctness), `util.rs`, tests. Inference-algorithm code is now
+covered end-to-end.
+
+## Findings
+
+### Critical
+
+**IC4. Prior ↔ Transform incompatibility is silently accepted.**
+`derive_transform` (`runner.rs:474–495`) picks the transform from
+the IR's `param_kind` (or bounds fallback) without ever
+consulting the prior. `validate_bounds` (`fit/config.rs:298–315`)
+checks only that fit bounds sit within model bounds — no
+prior/transform compatibility check. Silent failure modes:
+
+1. **`log_normal` prior on `Transform::None` parameter**
+   (`param_kind = "real"`, or negative lower bound):
+   `Prior::TransformedNormal::log_density(natural, z)` is called
+   with `z == natural` (identity transform). The Normal density
+   evaluates at the natural-scale value —
+   `log_normal(mu=0, sigma=1)` silently becomes
+   `Normal(mean=0, sd=1)`. No warning.
+2. **`log_normal` prior on `Transform::Logit` parameter**
+   (probability parameter with mis-specified prior): same silent
+   coercion — `z = logit(natural)`, density evaluated as
+   `log N(logit(θ); mu, sigma)`, i.e. logit-normal not log-normal.
+3. **`half_normal` prior on `Transform::Log`**: correct by
+   construction but nothing validates that HalfNormal's support
+   `[0, ∞)` matches the user's bounds.
+
+Combined with IC3 (double-Jacobian), the subset of prior ×
+transform combinations that actually do what the user intends is
+far smaller than what the CLI accepts. `fit/pgas.rs:96–99`
+reports `LogNormal(mu=X, sigma=Y) → median=exp(X)` — the
+*intended* median — while the sampler targets a different
+quantity after double-Jacobian. CLI reports one prior, sampler
+uses another.
+
+Fix: add `validate_prior_transform_compat` and call from every
+fit-stage entry point. Enforce:
+- `Prior::TransformedNormal` (log_normal) requires `Transform::Log`.
+- `Prior::Beta` requires `Transform::Logit` and bounds `[0, 1]`.
+- `Prior::HalfNormal`/`Gamma`/`Exponential` require `Transform::Log`.
+- `Prior::Uniform`/`Normal` compatible with any transform.
+Reject, don't warn.
+
+### Major
+
+**IM10. `compute_config_hash` omits `starts_from` and the
+data-loading stream-to-file mapping.** `runner.rs:1869–1911`.
+Hash covers: model IR JSON, data file bytes, estimate specs,
+fixed values, n_particles, dt, runtime version. It does NOT
+cover:
+
+- `fit.fit.starts_from` — previous stage's path. Running PGAS
+  with resume after `starts_from = "scout_v1"` vs `"scout_v2"`
+  hashes identically. Resume reuses stale state from a wrong
+  starting point; the `config hash mismatch` check at
+  `fit/pgas.rs:134–135` passes but the chain continues from the
+  wrong initial point.
+- Stream → file mapping. Hash includes file bytes but not the
+  mapping from stream name to file. Renaming a stream in the IR
+  while file contents are identical hashes the same but models a
+  different problem.
+
+Fix: include `fit.fit.starts_from` (as path or transitively via
+its own hash) and normalize the stream→file mapping into the
+hash.
+
+**IM11. ESS estimator uses a simplified Geyer rule that
+overestimates ESS for chains with oscillating autocorrelation.**
+`pmmh.rs:503–525`. The "initial positive sequence" truncation at
+line 520 stops on the first negative *single-lag*
+autocorrelation. Geyer (1992) stops on the first negative *pair
+sum* (ρ_{2k} + ρ_{2k+1}) — strictly more conservative. Stan,
+PyMC, BDA3 all use pair-sum. For chains with non-monotonic
+autocorrelation (NUTS during tuning, PMMH near a mode boundary),
+single-lag overestimates ESS by 2–5×. The user's reported ESS is
+higher than actual effective sample size; posterior-quantile
+uncertainty calibration is off.
+
+Fix: pair-sum truncation (~8 lines), or FFT autocorrelation +
+pair-sum in one function.
+
+**IM12. `compute_rhat_ess` reports total ESS across chains
+regardless of R-hat convergence.** `runner.rs:829–857`. If R-hat
+is 3.0 (chains haven't converged), per-chain ESS estimates are
+meaningful for each chain's own stationary distribution, but the
+sum is meaningless — chains sample different distributions.
+Returned unconditionally; displayed as "total ESS" in reports,
+making a non-converged run look adequately-sampled.
+
+Fix: return `NaN` (or `None`) for `total_ess` when R-hat exceeds
+threshold.
+
+**IM13. `compute_rhat` uses 1992 Gelman-Rubin without
+split-chains or rank-normalization.** `runner.rs:782–823`. For
+IF2 each "chain" is a per-iteration parameter-means trajectory,
+not a posterior sample — classic R-hat is conservatively OK there.
+But the code uses the name `Rhat` without qualification and users
+from Stan/PyMC expect Vehtari et al. 2021. Either rename to
+`gelman_rubin_1992` or implement split-chains + rank-
+normalization.
+
+### Minor
+
+**Im19. Default seed is 20-bit.** `fit/mod.rs:1700`:
+`dur.as_nanos() % 1_000_000`. Birthday bound: ~1000 parallel
+runs → ≈50% collision. Fix: drop the modulo, use full u64.
+
+**Im20. Replicate seeding is additive.** `pfilter.rs:221`:
+`seed + rep as u64`. Same weak-KDF pattern as IM1 from batch 1.
+Fix: multiplicative with golden-ratio constant, or use
+`StatefulRng::new_stream(seed, rep as u64)`.
+
+**Im21. `DiagnosticCollector::push` locks a Mutex per call.**
+`diagnostic.rs:330–341`. Low-frequency so fine; note only.
+
+**Im22. `pfilter` CLI is single-observation-only.**
+`pfilter.rs:149–158`. Runtime supports multi-stream; CLI doesn't.
+Documentation concern.
+
+**Im23. `diagnostic.rs` has a hand-rolled date formatter.**
+Lines 390–419 implement Hinnant's civil_from_days. Correct; add
+a link comment for future readers.
+
+**Im24. `compute_rhat_ess` doesn't check all chains have the
+same length.** `runner.rs:835`. Uses `chains[0].len()` in the
+between-chain variance formula; if chains have different lengths
+(one resumed from longer run), the formula is wrong.
+Fix: assert equal lengths or use per-chain lengths.
+
+**Im25. `compute_rhat` skip amount is identical across chains
+but absolute iteration indices differ for resumed chains.**
+`runner.rs:796`. Same class as Im24.
+
+### Notes on existing good patterns
+
+- `DiagnosticKind` is well-designed: typed variants, stable
+  serialization identifiers, severity-in-type, hints attached to
+  the kind.
+- `CompressedLogitPosition` diagnostic catches real user
+  mistakes.
+- `derive_transform` + `ParamSpec` + `build_if2_params_from_specs`
+  is a clean three-layer decomposition; the comment at
+  `runner.rs:505-509` attributes it to "three bugs in one session"
+  — visibly lessons-learned.
+- `compute_config_hash` including the runtime version is the
+  right call — code changes affecting inference semantics
+  invalidate cached state.
+
+### Cross-cutting consolidated critical bugs list
+
+With inference review now substantively complete:
+
+**OCaml compiler** (addressed in earlier batches):
+- C1, C2, C5, C6, C8 — all fixed.
+
+**Rust runtime** (addressed):
+- RC3 (`ir::validate`) wired.
+- RM1 (tau_leap competing-risks) ported.
+
+**Inference:**
+- IC1 (BetaBinomial -inf) — **addressed batch 1**.
+- IC2 (Normal discretized) — **addressed batch 1** (doc + warn).
+- IC3 (`log_normal` double-Jacobian) — **open**. Cross-cutting
+  across `prior.rs`, `pmmh.rs`, `pgas.rs`, `fit/pgas.rs`.
+- IC4 (prior × transform mismatch) — **open**. New in this
+  batch. Combined with IC3: log_normal priors are the highest-
+  risk Bayesian workflow in the codebase.
+
+Plus majors: IM6 (CSMC-AS — open, pending), IM7/IM8/IM9
+(addressed batch 2), IM10/IM11/IM12/IM13 (this batch — open).
+
+IC3 and IC4 together are the highest-priority unblock: they
+contaminate every Bayesian inference result using a log_normal
+prior. Bayesian modelers reach for log_normal rate priors
+reflexively. Fix IC3 (natural-scale `log_density` for
+TransformedNormal + Jacobian once), add IC4's validator,
+regenerate any PMMH/PGAS posterior that used log_normal priors.
+The He et al. measles benchmark wouldn't have caught IC3 because
+pomp's published MLE is tested against IF2 (no priors), not
+posterior means from PMMH/PGAS.
