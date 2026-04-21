@@ -20,10 +20,20 @@ feature that doesn't shorten or clarify the Garki file isn't worth
 adding; a feature whose absence makes the Garki file contain
 comments explaining "why is it written this way" — is worth adding.
 
-Scope: **items #1–#6 from the Tier S / A / B ranking below.** Tier C
+Scope: **items #1–#5 from the Tier S / A / B ranking below.** Tier C
 items (individual-level heterogeneity, concurrent-infection MOI
 bookkeeping, parasite genotype tracking) are explicitly deferred —
 they belong in an ABM, not a compartmental DSL.
+
+**Not in scope here:** demographic processes — aging, births, age-
+specific mortality. These are not malaria features; they're a
+general compartmental-modelling concern that any stratified model
+needs, and collapsing them into a malaria-specific "aging block" was
+the wrong design. See the companion proposal
+`2026-04-21-vital-dynamics.md` for that work. The post-proposal
+Garki endpoint below compiles without demographic features — the 2-
+age model fits in ≤ 60 lines regardless, and multi-age extensions
+wait on the vital-dynamics proposal landing.
 
 ---
 
@@ -156,14 +166,14 @@ every one corresponds to a numbered feature below:
   with the sens/spec correction manually inlined into the
   `likelihood = binomial(n, p = rho_sens*projected/N_h + (1-rho_spec)*(1-projected/N_h))`
   expression).
-- **#5 no aging**: this example omits demographic aging entirely
-  because adding it would require `|compartments| × (|age|-1)` =
-  8 × 1 = 8 manual transitions. Scaling to 5 age groups means
-  32 aging transitions.
-- **#6 no reactive interventions**: interventions must have static
+- **#5 no reactive interventions**: interventions must have static
   schedules; state-triggered response isn't expressible.
+- **(aging, births, age-specific mortality)**: this fixture omits
+  demographic dynamics entirely. Covered by the separate
+  `2026-04-21-vital-dynamics.md` proposal — orthogonal to malaria
+  and needed equally by any stratified compartmental model.
 
-Proposal target (post-#1, #2, #4, #5): this model compresses to ≈ 55
+Proposal target (post-#1, #2, #4): this model compresses to ≈ 55
 lines and ≈ 10 transitions, with every transition reading like one
 biological event.
 
@@ -433,63 +443,7 @@ without needing algebraic manipulation at the likelihood site.
 
 ---
 
-### #5 — First-class aging transitions
-
-**Status quo.** Aging between age classes is a generic pattern:
-"individuals in class `a_i` progress to `a_{i+1}` at rate
-`1/mean_duration_in_a_i`". Today you write this explicitly, one
-transition per (compartment × age pair):
-
-```camdl
-# for 5 age groups and 4 compartments: 20 hand-written transitions
-age_X_c_t   : X_child --> X_teen      @ X_child / age_dur_child
-age_Y1_c_t  : Y1_child --> Y1_teen    @ Y1_child / age_dur_child
-age_Y2_c_t  : Y2_child --> Y2_teen    @ Y2_child / age_dur_child
-age_Y3_c_t  : Y3_child --> Y3_teen    @ Y3_child / age_dur_child
-# ... × 4 transitions per age-group boundary × 4 boundaries = 16
-```
-
-**Proposed DSL.** A dedicated block that takes the dimension and an
-expression for residence time per class, and emits the full aging
-flow for every compartment stratified by that dimension:
-
-```camdl
-tables {
-  age_dur : age 'years = [5, 10, 35, 15, 20]
-}
-
-aging {
-  age : 1 / age_dur[a]
-}
-```
-
-Expands to `|compartments_with_age| × (|age| - 1)` transitions of
-the form `X[a_i] --> X[a_{i+1}]  @ rate_into_next * X[a_i]`. The
-rate is evaluated per compartment so that if you wanted age-
-compartment-specific rates you'd use a 2D table.
-
-**Boundary semantics.** By default, individuals exiting the last
-class accumulate there (no leaving). A trailing `→ exit` clause
-routes them to a death compartment:
-
-```camdl
-aging {
-  age : 1 / age_dur[a] → death
-}
-```
-
-**IR impact.** Zero. Desugars to transitions the IR already has.
-
-**Effort.** ~3–4 days. Parser addition, expansion logic in the
-expander, unit tests for the 1D, 2D, and compartment-subset cases.
-
-**Unlocks.** Multi-year population dynamics concise. Ross-
-Macdonald doesn't need it (single time-scale); Garki with 5 age
-groups drops from 20 aging transitions to 2 lines of DSL.
-
----
-
-### #6 — Reactive / conditional interventions
+### #5 — Reactive / conditional interventions
 
 **Status quo.** Interventions fire at times specified statically in
 the model (`at [180, 545, 910]`) or on a periodic schedule. Real-
@@ -652,8 +606,10 @@ let I_h       = sum(a in age, Y1[a] + Y2[a])
 let N_h       = sum(a in age, X[a] + Y1[a] + Y2[a] + Y3[a])
 let prev      = I_h / N_h
 
-# --- #5: one block replaces |compartments| × (|age|-1) transitions -
-aging { age : rate = [1 / (15 'years)] }
+# Aging / births / age-specific mortality deliberately omitted —
+# see 2026-04-21-vital-dynamics.md. For a 1-year fit against Garki
+# surveillance data the demographic drift is negligible; multi-decade
+# runs would add a `vital_dynamics {}` block per that proposal.
 
 transitions {
   # --- #1 + #2: vector-host coupling as one atomic event, with a ---
@@ -683,7 +639,7 @@ transitions {
   vec_mort_I : Iv -->     @ mu_v * Iv
 }
 
-# --- #6: reactive outbreak-triggered IRS, not a static schedule ----
+# --- #5: reactive outbreak-triggered IRS, not a static schedule ----
 interventions {
   reactive_irs : transfer(fraction = irs_eff, from = Iv, to = Sv)
                  when prev > outbreak_th
@@ -730,18 +686,21 @@ even if the next never ships; (b) features don't block each other;
    golden fixture.
 2. **#2 probabilistic branching** (~3–4 days) → clean symptomatic
    splits.
-3. **#5 aging transitions** (~3–4 days) → scale-invariant multi-age
-   models.
-4. **#4 diagnostic-test likelihood** (~1 week) → clean surveillance
+3. **#4 diagnostic-test likelihood** (~1 week) → clean surveillance
    observation.
-5. **#6 reactive interventions** (~1 week) → outbreak-response
+4. **#5 reactive interventions** (~1 week) → outbreak-response
    studies.
-6. **#3 hierarchical priors** (~2 weeks) → multi-village partial
+5. **#3 hierarchical priors** (~2 weeks) → multi-village partial
    pooling. Land last; inference surface is the largest.
 
-Total: ~7 weeks of focused language + inference work for a state-
-of-the-art malaria-modelling DSL. First four features (#1, #2, #5,
-#4) get the 55-line Garki model runnable and fittable in ~3 weeks.
+Total: ~6 weeks of focused language + inference work for a state-
+of-the-art malaria-modelling DSL. First three features (#1, #2, #4)
+get the 55-line Garki model runnable and fittable in ~2.5 weeks.
+
+Demographic features (aging, births, age-specific mortality) land in
+parallel on their own track — see `2026-04-21-vital-dynamics.md`
+(~2 weeks). The two proposals compose orthogonally; neither blocks
+the other.
 
 ---
 
