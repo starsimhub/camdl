@@ -17,6 +17,7 @@ mod eval;
 mod pfilter; // used internally by fit runner for data loading
 mod data;
 mod fit;
+mod compare;
 pub mod version;
 
 // Modules kept for internal use but with no direct CLI entry points:
@@ -111,6 +112,9 @@ enum Command {
     /// Emit trajectory or observation output from a cached run
     Cat(args::CatArgs),
 
+    /// Compare fits by prequential scores (elpd, CRPS, PIT)
+    Compare(args::CompareArgs),
+
     /// Compile a .camdl model to IR JSON (delegates to camdlc)
     Compile(Passthrough),
 
@@ -182,6 +186,7 @@ fn main() {
         Command::List(a)                => browse::cmd_list(&a),
         Command::Show(a)                => browse::cmd_show(&a),
         Command::Cat(a)                 => browse::cmd_cat(&a),
+        Command::Compare(a)             => compare::cmd_compare(&a),
         Command::Compile(a) => {
             let refs: Vec<&str> = a.args.iter().map(String::as_str).collect();
             util::delegate_to_camdlc(&refs).unwrap_or_else(|e| {

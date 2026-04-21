@@ -672,6 +672,41 @@ pub struct CatArgs {
     pub stream: Option<String>,
 }
 
+// ─── compare ──────────────────────────────────────────────────────────────────
+
+/// `camdl compare` — multi-model prequential comparison table.
+///
+/// Reads prequential.json from ≥2 fit stage dirs (or a compare.toml)
+/// and renders a baseline-centered comparison.
+/// See docs/dev/proposals/2026-04-20-prequential-evaluation.md §8.
+#[derive(Args)]
+pub struct CompareArgs {
+    /// Stage directories (or .json paths) to compare — need ≥2 when
+    /// --config is not used
+    pub paths: Vec<String>,
+
+    /// compare.toml with [[model]] entries (baseline/metrics/format
+    /// also loadable from the file)
+    #[arg(long)]
+    pub config: Option<String>,
+
+    /// Reference model for Δ columns (default: argmax elpd)
+    #[arg(long)]
+    pub baseline: Option<String>,
+
+    /// Metrics to display (comma-separated: elpd, crps, pit_cov90)
+    #[arg(long = "metric", alias = "metrics")]
+    pub metrics: Option<String>,
+
+    /// Output format: table (default), md, json
+    #[arg(long, default_value = "table")]
+    pub format: String,
+
+    /// Render even if T_score differs across models (Δ columns → '—')
+    #[arg(long)]
+    pub allow_mismatched_horizon: bool,
+}
+
 // ─── Delegated commands (compile / check / inspect → camdlc) ─────────────────
 
 /// All args are passed through verbatim to camdlc.
