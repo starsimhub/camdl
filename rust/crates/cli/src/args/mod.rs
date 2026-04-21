@@ -843,6 +843,36 @@ pub struct CatArgs {
 /// See docs/dev/proposals/2026-04-20-prequential-evaluation.md §8.
 #[derive(Args)]
 #[command(after_help = "\
+Columns:
+  T_score    Number of scored observations (after the t0 burn-in).
+             Differs across fits if they were evaluated on different data
+             horizons — Δ columns are suppressed in that case unless
+             --allow-mismatched-horizon is passed.
+  elpd       Expected log predictive density, summed across scored
+             steps:  Σ_t log p̂(y_t | y_{1:t-1}). Higher = better.
+  Δelpd      elpd(this) − elpd(baseline). Positive = this model beats
+             the baseline. Paired over the same observations.
+  E_T        exp(Δelpd). The terminal e-value / Bayes factor vs baseline
+             (Shafer 2021): a bettor who started with $1 and wagered
+             this model's predictive against baseline's would end with
+             $E_T. Values < 1 favour the baseline; > 1 favour this
+             model. Order-of-magnitude intuition: E_T ≈ 10 is 'strong
+             evidence', ≈ 100 'very strong', ≈ 1000 'decisive'
+             (Jeffreys scale applied to the e-value as a Bayes factor).
+             Valid even at small T where se(Δ) is unreliable.
+  se(Δ)      Paired standard error of Δelpd from pointwise differences:
+             √(T · Var_t(ℓ^A_t − ℓ^B_t))  (Vehtari/Gelman/Gabry).
+             Rule of thumb: |Δelpd| > 2·se → 'the gap is real';
+             smaller → inconclusive on this data alone.
+  crps       Mean Continuous Ranked Probability Score across scored
+             steps. Lower = sharper predictive, correctly calibrated.
+  Δcrps      Mean CRPS difference (this − baseline). Negative = this
+             model's predictive is sharper-at-the-observation.
+  PIT_cov90  Fraction of observations whose probability integral
+             transform fell in the central 90% predictive interval.
+             Nominal 0.90 under correct calibration. < 0.70 triggers
+             an overconfidence warning below the table.
+
 Examples:
   # Compare two fits by prequential scores (table output)
   camdl compare fits/det/pfilter fits/stoch/pfilter --baseline det
@@ -855,6 +885,9 @@ Examples:
 
   # Render despite different T_score across fits (Δ columns → '—')
   camdl compare fits/a/pf fits/b/pf --allow-mismatched-horizon
+
+See docs/dev/proposals/2026-04-20-prequential-evaluation.md §8 for the
+scoring-rule design.
 ")]
 pub struct CompareArgs {
     /// Stage directories (or .json paths) to compare — need ≥2 when
