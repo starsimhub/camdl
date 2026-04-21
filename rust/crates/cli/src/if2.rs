@@ -39,7 +39,7 @@ fn run_one_chain(
     base_seed: u64,
     pb: Option<&ProgressBar>,
 ) -> IF2Result {
-    let chain_seed = base_seed ^ (chain_id as u64).wrapping_mul(0x9e3779b97f4a7c15);
+    let chain_seed = crate::util::derive_chain_seed(base_seed, chain_id);
 
     let progress_cb = |iter: usize, loglik: f64| {
         if let Some(bar) = pb {

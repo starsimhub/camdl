@@ -268,7 +268,7 @@ pub fn run_pmmh_cli(
     let results: Vec<(usize, PMMHResult)> = (0..n_chains)
         .into_par_iter()
         .map(|chain_id| {
-            let chain_seed = seed ^ (chain_id as u64).wrapping_mul(0x9e3779b97f4a7c15);
+            let chain_seed = crate::util::derive_chain_seed(seed, chain_id);
 
             let pmmh_config = PMMHConfig {
                 n_steps,

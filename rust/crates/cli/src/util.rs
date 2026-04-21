@@ -18,6 +18,34 @@ use sim::{
 /// same observation bytes regardless of which path generated them.
 pub const SEED_MIX_OBS: u64 = 0xa5a5a5a5a5a5;
 
+// ─── Small helpers shared across subcommands ────────────────────────────────
+
+/// Create `path` and any missing parents, returning a formatted error
+/// string on failure. Replaces ~10 copies of the same
+/// `create_dir_all(&p).map_err(|e| format!("cannot create {}: {}", p, e))`
+/// across `fit/*.rs`, `pfilter.rs`, etc.
+#[allow(dead_code)] // progressively replacing the inline pattern; not all call sites migrated
+pub fn ensure_dir(path: &str) -> Result<(), String> {
+    std::fs::create_dir_all(path)
+        .map_err(|e| format!("cannot create {}: {}", path, e))
+}
+
+/// Derive an independent RNG seed for chain `id` from a base seed.
+/// XOR with `id * 2^64 * φ` (golden-ratio fractional bits) decorrelates
+/// consecutive-chain streams cheaply. Canonical helper for PGAS/PMMH/IF2;
+/// previously duplicated at 4+ sites.
+pub fn derive_chain_seed(base: u64, id: usize) -> u64 {
+    base ^ (id as u64).wrapping_mul(0x9e3779b97f4a7c15)
+}
+
+/// Error-and-exit shorthand. Replaces ~19 copies of
+/// `eprintln!("error: {}", e); std::process::exit(1);`.
+#[allow(dead_code)] // progressively replacing the inline pattern; not all call sites migrated
+pub fn die<E: std::fmt::Display>(e: E) -> ! {
+    eprintln!("error: {}", e);
+    std::process::exit(1);
+}
+
 // ─── Batch TOML parsing ─────────────────────────────────────────────────────
 
 /// Minimal batch-TOML view needed by `voi` — just the output_dir so

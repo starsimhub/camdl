@@ -637,7 +637,7 @@ fn run_one_chain(
     per_chain_params: Option<&[EstimatedParam]>,
     pb: Option<&ProgressBar>,
 ) -> IF2Result {
-    let chain_seed = config.seed ^ (chain_id as u64).wrapping_mul(0x9e3779b97f4a7c15);
+    let chain_seed = crate::util::derive_chain_seed(config.seed, chain_id);
     let if2_params = per_chain_params.unwrap_or(&config.estimated_params);
 
     let process = config.build_process();
@@ -1109,7 +1109,7 @@ pub fn build_random_chain_starts(
 ) -> Vec<Vec<EstimatedParam>> {
     (0..n_chains).map(|chain_id| {
         let mut rng = StatefulRng::new(
-            seed ^ (chain_id as u64).wrapping_mul(0x9e3779b97f4a7c15));
+            crate::util::derive_chain_seed(seed, chain_id));
         config.estimated_params.iter().map(|spec| {
             let initial = if chain_id == 0 {
                 // Chain 0 keeps the seeded start for reproducibility.
