@@ -46,7 +46,7 @@ the base model with global names and specifies how dimensions interact.
 
 ### 1.1 Syntax Conventions
 
-```
+```camdl
 :    structural definition (what something IS)
 =    value binding (what something EQUALS)
 @    rate expression (how fast, always total propensity)
@@ -56,13 +56,13 @@ the base model with global names and specifies how dimensions interact.
 [ ]  index access and list literals
 ( )  function arguments
 '    unit literal prefix ('days, 'years)
-```
+```camdl
 
 ---
 
 ## 2. Time Unit and Dimensional Types
 
-```
+```camdl
 time_unit = 'days
 ```
 
@@ -72,7 +72,7 @@ All rates and durations are normalized to this unit at compile time.
 
 Unit literals are distinguished from identifiers by the `'` prefix:
 
-```
+```camdl
 # Duration (dimension: time)
 5 'years
 14 'days
@@ -82,7 +82,7 @@ Unit literals are distinguished from identifiers by the `'` prefix:
 # Rate (dimension: 1/time)
 0.1 'per_day
 0.02 'per_year
-```
+```camdl
 
 Supported units: `'days`, `'weeks`, `'months`, `'years`, `'per_day`,
 `'per_week`, `'per_month`, `'per_year`.
@@ -95,23 +95,23 @@ Conversions: 1 'week = 7 'days, 1 'month = 30.4375 'days (365.25/12), 1 'year =
 Durations and rates are **distinct types**. The compiler tracks dimensions
 through expressions and rejects mismatches:
 
-```
+```camdl
 'days     — dimension: time
 'per_day  — dimension: 1/time (rate)
 ```
 
 Valid operations:
 
-```
+```camdl
 5 'days + 3 'days         → 8 'days (time + time = time)
 1 / (14 'days)            → rate (1/time)
 0.1 'per_day * 100        → 10 'per_day (rate × scalar = rate)
 0.1 'per_day * 5 'days    → 0.5 (rate × time = dimensionless) ✓
-```
+```camdl
 
 Invalid operations:
 
-```
+```camdl
 5 'days + 0.1 'per_day    → ERROR: cannot add time and rate
 5 'days * 3 'days         → ERROR: time² has no meaning in this system
 ```
@@ -132,7 +132,7 @@ The checker infers dimensions from:
 - Unit literals: `'days` → **T**, `'per_day` → **T⁻¹**
 - Arithmetic rules: multiplication adds exponents, division subtracts
 
-```
+```camdl
 # ✓ Correct: beta:T⁻¹ * S:P * I:P / N:P = P·T⁻¹
 infection : S --> I @ beta * S * I / N
 
@@ -164,7 +164,7 @@ a bug).
 The `date("YYYY-MM-DD")` expression converts an ISO 8601 date to a float offset
 from the model's declared `origin` date, in the model's `time_unit`:
 
-```
+```camdl
 origin = date("2019-01-01")   # top-level declaration (optional)
 
 simulate {
@@ -179,10 +179,10 @@ factor for other units (e.g., 365.25 for years).
 **E220.** Using `date(...)` without a top-level `origin = date(...)` declaration
 is a compile error:
 
-```
+```camdl
 # ERROR E220: date("2021-06-30") used but no 'origin' declared
 simulate { to = date("2021-06-30") }
-```
+```camdl
 
 The `origin` value is stored in the IR (`"origin": "2019-01-01"`). It does not
 affect simulation dynamics — it is purely a coordinate reference for converting
@@ -192,7 +192,7 @@ calendar dates to simulation time.
 
 Tables carry a single unit for all values:
 
-```
+```camdl
 tables {
   fertility  : age 'per_day   = [0.0, 0.02]
   age_dur    : age 'years     = [5, 60]
@@ -208,13 +208,13 @@ tables {
 
 ## 3. Compartments
 
-```
+```camdl
 compartments { S, E, I, R }
-```
+```camdl
 
 Each is an integer-valued population count. For continuous state:
 
-```
+```camdl
 compartments {
   S, I, R
   W : real       # continuous-valued (environmental reservoir)
@@ -229,7 +229,7 @@ over all strata).
 
 ## 4. Parameters
 
-```
+```camdl
 parameters {
   beta     : rate
   gamma    : rate
@@ -254,7 +254,7 @@ probability : ∈ [0, 1], dimensionless. Default transform: logit.
 positive    : > 0, dimensionless. Default transform: log.
 count       : integer ≥ 0.
 real        : unconstrained (default if omitted).
-```
+```camdl
 
 Types enable: validation of supplied values, default inference transforms,
 and dimensional analysis of rate expressions.
@@ -265,7 +265,7 @@ When a parameter's type doesn't fully determine its dimension (e.g.,
 `positive` could be a rate, a count, or dimensionless), you can add an
 explicit dimension annotation:
 
-```
+```camdl
 parameters {
   beta      : rate                    # dimension T⁻¹ (inferred from type)
   gamma     : rate                    # T⁻¹
@@ -314,16 +314,16 @@ camdl-sim simulate model.ir.json --param gamma=0.1
 
 # Per-stratum override (indexed params)
 camdl-sim simulate model.ir.json --param-vec R0=r0_posterior.tsv
-```
+```camdl
 
-The TOML format supports both flat and sectioned forms (see §22).
+The TOML format supports both flat and sectioned forms (see §21).
 
 ### 4.3 Indexed Parameters
 
 Parameters may be declared with a single dimension index, creating one scalar
 parameter per stratum:
 
-```
+```camdl
 parameters {
   gamma    : rate
   N[patch] : positive   # expands to N_urban, N_rural, ...
@@ -334,7 +334,7 @@ parameters {
 The index must refer to a declared `stratify` dimension. In expressions, indexed
 parameters are accessed with `[index]`:
 
-```
+```camdl
 let beta[p in patch] = R0[p] * gamma   # R0[p] → Param("R0_urban") etc.
 ```
 
@@ -351,26 +351,26 @@ Let bindings and other parameters are never checked in index position.
 **Shadowing warning W103.** The compiler emits W103 when a let binding name
 matches a stratum value in any dimension:
 
-```
+```camdl
 let urban = 1.0   # W103: let binding 'urban' shadows stratum value 'urban'
                   #   in dimension 'patch'. This is allowed but consider renaming.
 ```
 
 **Consistent indexed syntax everywhere.** The `N0[urban]` form works in all
 contexts where a parameter name can appear: expressions (§9.6), init blocks
-(§16.2), and scenario set/scale blocks (§18.1). The compiler always mangles to
+(§15.2), and scenario set/scale blocks (§17.1). The compiler always mangles to
 `N0_urban` in the IR.
 
 **IR representation.** Indexed parameter declarations expand to flat scalar
 parameters:
 
-```
+```camdl
 N[patch] : positive  →  { name: "N_urban",  value: null }
                          { name: "N_rural",  value: null }
 ```
 
 **Runtime override.** Use `--param-vec PREFIX=FILE` to supply per-stratum values
-at runtime (see §22):
+at runtime (see §21):
 
 ```bash
 camdl-sim simulate model.ir.json --param-vec R0=/tmp/r0_posterior.tsv
@@ -380,7 +380,7 @@ camdl-sim simulate model.ir.json --param-vec R0=/tmp/r0_posterior.tsv
 
 An optional `in [lo, hi]` clause constrains the parameter's valid range:
 
-```
+```camdl
 parameters {
   R0       : positive in [1.0, 20.0]    # scalar with bounds
   rho      : probability in [0.0, 1.0]  # redundant but explicit
@@ -411,7 +411,7 @@ with `in [1.0, 20.0]` is implicitly also constrained to `> 0`.
 Dimension levels are declared in a `dimensions {}` block. Levels can be inline
 or read from a data file:
 
-```
+```camdl
 dimensions {
   age   = [child, adult]
   sex   = [female, male]
@@ -420,12 +420,12 @@ dimensions {
 stratify(by = age)
 stratify(by = sex)
 stratify(by = patch)
-```
+```camdl
 
 Each `stratify` declaration applies a dimension to **all** compartments by
 default. Partial stratification restricts to specific compartments:
 
-```
+```camdl
 dimensions { immunity = [natural, vaccine] }
 stratify(by = immunity, only = [R])
 ```
@@ -445,7 +445,7 @@ S[child]                # if S has [age, sex]: sum over sex for age=child
 
 **Named indexing** (explicit dimension labels, any order):
 
-```
+```camdl
 S[age = child]                    # equivalent to S[child]
 S[sex = female, age = child]      # order doesn't matter
 S[patch = p1]                     # sum over age, specific patch
@@ -472,7 +472,7 @@ dimensions of the compartment must be specified.** You cannot write into a
 marginal — the compiler must know exactly which cell gains or loses an
 individual.
 
-```
+```camdl
 # ERROR: R has [age, immunity] but only [age] specified in destination
 recovery[a in age] : I[a] --> R[a]  @ gamma * I[a]
 
@@ -508,7 +508,7 @@ S + E                # both are global sums: PopSum(all S) + PopSum(all E). Vali
 S[a] + E[a]          # S in age=a + E in age=a (summed over latent_stage). Valid.
 S[a] + E[a, e1]      # S in age=a + E in age=a and stage=e1. Valid.
 S[a, e1]             # ERROR: S has no latent_stage dimension.
-```
+```camdl
 
 The omitted-dimension-sums rule applies per-compartment: `E[a]` sums over
 `latent_stage` because `E` has that dimension, while `S[a]` is fully resolved
@@ -519,7 +519,7 @@ independently.
 
 ## 6. Tables
 
-```
+```camdl
 tables {
   C_age      : age × age          = [[12.0, 4.0], [4.0, 8.0]]
   B_sex      : sex × sex          = [[0.0, beta_mf], [beta_fm, 0.0]]
@@ -534,7 +534,7 @@ tables {
   # Patch population (levels were declared in dimensions block)
   pop        : patch              = read("data/lga_pop.tsv")
 }
-```
+```camdl
 
 ### 6.1 Dimension and Unit Annotations
 
@@ -563,9 +563,9 @@ patch           pop
 kano_dala       485000
 borno_maiduguri 345000
 borno_gwoza      78000
-```
+```camdl
 
-```
+```camdl
 tables {
   pop : patch = read("data/lga_pop.tsv")
 }
@@ -582,7 +582,7 @@ signature.
 **Sparse tables** use `default = value` to fill index combinations missing from
 the file:
 
-```
+```camdl
 tables {
   distances : patch × patch = read("data/lga_dist.tsv", default = 0.0)
 }
@@ -594,7 +594,7 @@ src             dst             distance
 kano_dala       borno_maiduguri 245.3
 kano_dala       kano_fagge      18.1
 borno_maiduguri kano_dala       245.3
-```
+```camdl
 
 Index values are the actual level names (not integer positions). The compiler
 validates each value against the known dimension levels and errors on typos.
@@ -606,7 +606,7 @@ For large models (hundreds of patches), listing levels inline is impractical.
 Use `read(...)` in the `dimensions {}` block to derive dimension membership from
 a data file column:
 
-```
+```camdl
 dimensions {
   patch = read("data/lga_pop.tsv", column = "patch")
 }
@@ -637,7 +637,7 @@ All tables referencing `patch` validate against these derived levels.
 When a file has more columns than `n_dims + 1`, list multiple table names on the
 left of `:`:
 
-```
+```camdl
 tables {
   pop, init_sus : patch = read("data/demographics.tsv")
 }
@@ -649,7 +649,7 @@ patch           pop     init_sus
 kano_dala       485000  0.88
 borno_maiduguri 345000  0.91
 borno_gwoza      78000  0.79
-```
+```camdl
 
 Creates two tables with the same index: `pop[kano_dala] = 485000`,
 `init_sus[kano_dala] = 0.88`. Value columns map positionally to the names on the
@@ -666,7 +666,7 @@ entries), binary IR format (msgpack) is recommended over JSON.
 Inline table values can be parameter names or arithmetic expressions, not just
 numeric literals:
 
-```
+```camdl
 tables {
   B_sex : sex × sex = [[0.0,     beta_mf],
                         [beta_fm, 0.0    ]]
@@ -694,7 +694,7 @@ built-in types cover real-world needs:
 - `piecewise` — non-repeating step function (policy changes, campaign windows)
 - `interpolated` — data-driven time series (empirical covariates)
 
-```
+```camdl
 forcing {
   seasonal = sinusoidal(
     amplitude = alpha,        # can reference parameters (for inference)
@@ -708,12 +708,12 @@ forcing {
     values      = [1.0, 0.3, 1.0]
   )
 
-  pop_trend = interpolated(
-    times  = population.time,   # reference to data block
-    values = population.total,
-    method = "cubic_spline",    # "linear" | "cubic_spline" | "pchip"
-    knots  = "natural"          # "natural" | "clamped" | "not_a_knot"
-  )
+  pop_trend : interpolated {
+    data      = "data/nga_pop.csv"
+    time_col  = year        # column holding the time axis
+    value_col = total_pop   # column holding the value axis
+    method    = "cubic_spline"   # "linear" | "cubic_spline" | "pchip"
+  }
 
   reporting_dow = periodic(
     period = 7 'days,
@@ -729,7 +729,7 @@ forcing {
     on     = [7:100, 115:199, 252:300, 308:356]
   }
 }
-```
+```camdl
 
 Forcing functions compile to `TimeFunc` nodes in the IR. Their arguments can
 reference parameters (e.g., `amplitude = alpha`), enabling inference over
@@ -746,12 +746,12 @@ The `periodic` type supports two forms:
 
 Forcing functions are used in rate expressions by name or with explicit `(t)`:
 
-```
+```camdl
 transitions {
   infection : S --> I  @ beta * school(t) * S * I / N
   #                          ^^^^^^^^ forcing function reference
 }
-```
+```camdl
 
 Both `school` and `school(t)` are valid; `school(42)` or other non-`t` arguments
 produce an error.
@@ -797,11 +797,11 @@ correctly.
 a block. They are resolved after the full file is parsed (order does not matter
 between `let` and other declarations).
 
-```
+```camdl
 let N = S + E + I + R
 let N_local[a in age, p in patch] = S[a,p] + E[a,p] + I[a,p] + R[a,p]
 let foi[a in age, p in patch] = sum(b in age, C_age[a,b] * I[b,p] / N_local[b,p])
-```
+```camdl
 
 ### 8.1 Scope Rules
 
@@ -811,7 +811,7 @@ auto-localization, ever.
 
 **Indexed let bindings** define computed quantities over dimensions:
 
-```
+```camdl
 let N_local[a in age] = S[a] + E[a] + I[a] + R[a]   # per-age-group total
 let mig[i in patch, j in patch] = theta * pop[j] / (distance[i,j] ^ 2)
 ```
@@ -837,7 +837,7 @@ and adds the results, producing a scalar.
 
 They compose: `sum(i in age, f[i]) = f[child] + f[adult]`.
 
-```
+```camdl
 # Define per-stratum totals
 let N_local[a in age] = S[a] + E[a] + I[a] + R[a]
 
@@ -852,7 +852,7 @@ let N_local[a in age] = S[a] + E[a] + I[a] + R[a]
 
 The mixing formula in the base model uses global N:
 
-```
+```camdl
 let N = S + I + R
 infection : S --> I  @ beta * S * I / N    # global N, no indices
 ```
@@ -863,7 +863,7 @@ produce the correct indexed formulas in the IR.
 
 For explicit per-stratum FOI, the user writes the indexed form directly:
 
-```
+```camdl
 infection[a in age] : S[a] --> I[a]
   @ beta * S[a] * sum(b in age, C_age[a,b] * I[b] / N_local[b])
 ```
@@ -876,11 +876,11 @@ primitive.
 A `let` binding may carry a type annotation from the same set of kinds used for
 parameters: `rate`, `probability`, `positive`, `count`, `real`.
 
-```
+```camdl
 let iota : count = 1e-6
 let obs_floor : count = 0.01
 let mu_annual : rate = 0.0002 'per_year
-```
+```camdl
 
 When a typed `let` has a constant body (`EConst`, `EUnit`, or their negation),
 the compiler emits it as a fixed-value parameter in the IR with `param_kind` set
@@ -904,7 +904,7 @@ The core dynamics. Every transition has a name, stoichiometry, and rate.
 
 ### 9.1 Syntax
 
-```
+```camdl
 # Transfer: source --> destination
 infection[a in age] : S[a] --> E[a]  @ beta * S[a] * I[a] / N_local[a]
 
@@ -939,7 +939,7 @@ typically at a constant or data-driven rate unrelated to the model's own state.
 Unlike births (which depend on the existing population), importation represents
 exogenous exposure — cases entering the modeled region from elsewhere:
 
-```
+```camdl
 # Constant importation rate (exogenous FOI)
 importation[a in age, p in patch] : --> I[a, p]
   @ import_rate * age_weights[a] * patch_weights[p]
@@ -947,7 +947,7 @@ importation[a in age, p in patch] : --> I[a, p]
 
 ### 9.2 Indexed Transitions
 
-```
+```camdl
 transition_name[i in dim1, j in dim2, ...] : from --> to  @ rate
 ```
 
@@ -959,7 +959,7 @@ at compile time: `|dim1| × |dim2| × ...` transitions.
 
 The `where` clause filters which index combinations generate transitions:
 
-```
+```camdl
 # Migration: exclude self-loops
 migrate[c in compartments, a in age, src in patch, dst in patch]
   : c[a,src] --> c[a,dst]
@@ -999,7 +999,7 @@ and `c in compartments`.
 
 The `consecutive(dim)` binding yields adjacent pairs from an ordered dimension:
 
-```
+```camdl
 aging[c in compartments, (a, a_next) in consecutive(age), p in patch]
   : c[a, p] --> c[a_next, p]
   @ (1 / age_dur[a]) * c[a, p]
@@ -1014,7 +1014,7 @@ This is a general-purpose primitive for any sequential transfer along an ordered
 dimension. It also handles **Erlang sub-staging** for non-exponential waiting
 times:
 
-```
+```camdl
 # Erlang-3 latent period: E passes through 3 sub-stages
 dimensions { erlang_E = [e1, e2, e3] }
 stratify(by = erlang_E, only = [E])
@@ -1036,7 +1036,7 @@ producing a more peaked distribution — closer to real disease progression.
 
 The `c in compartments` binding iterates over compartment names:
 
-```
+```camdl
 # Death for all compartments
 death[c in compartments, a in age, p in patch] : c[a,p] -->
   @ mu * c[a,p]
@@ -1046,7 +1046,7 @@ migrate[c in compartments, a in age, src in patch, dst in patch]
   : c[a,src] --> c[a,dst]
   @ mig[dst,src] * c[a,src]
   where src != dst
-```
+```camdl
 
 **`compartments` means integer compartments only** (the safe default). Real-
 valued compartments (like environmental reservoirs `W : real`) are excluded
@@ -1141,11 +1141,11 @@ function-call syntax and produce IR expression nodes (not forcing functions):
 
 Example:
 
-```
+```camdl
 let day_of_year = mod(t, 365.25)
 let pop_decay = N0 * exp(-mu * t)
 let is_pulse = (day_of_year > 250.0) * (day_of_year < 252.0)
-```
+```camdl
 
 **Rate wrappers.** Two compiler-recognized forms modify how event counts
 are drawn for a transition. They are NOT general-purpose functions — they
@@ -1184,7 +1184,7 @@ evaluation modes depending on context:
 
 Names are resolved in order: **compartments → parameters → let bindings →
 forcing → tables**. The compiler reports an error if a name exists in multiple
-namespaces. User names cannot shadow reserved identifiers (see §15).
+namespaces. User names cannot shadow reserved identifiers (see §14).
 
 ### 9.8 Extra-Demographic Stochasticity (`overdispersed`)
 
@@ -1306,7 +1306,7 @@ All coupling structures are expressed through the same mechanism — a rate matr
 | Identity          | Within-stratum only                     | Same as no coupling |
 | All ones          | Homogeneous mixing                      | No structure        |
 
-```
+```camdl
 tables {
   # Dense: general age mixing
   C_age : age × age = [[12.0, 4.0], [4.0, 8.0]]
@@ -1330,7 +1330,7 @@ shared pool** — a susceptible person isn't "susceptible to wild-type," they're
 just susceptible. The strain dimension belongs on E, I, R (tracking which strain
 you're infected with / recovered from), not on S.
 
-```
+```camdl
 compartments { S, E, I, R }
 
 dimensions {
@@ -1364,7 +1364,7 @@ transitions {
   recovery[a in age, v in strain] : I[a,v] --> R[a,v]
     @ gamma * I[a,v]
 }
-```
+```camdl
 
 The cross-immunity factor `(1 - sum(w in strain, X[w,v] * R[a,w]) / N_local[a])`
 is a population-level mean-field approximation: it reduces the infection rate
@@ -1393,11 +1393,11 @@ safety the rate expression should clamp:
 
 For real-valued compartments:
 
-```
+```camdl
 ode {
   W = xi * I - delta * W      # dW/dt = xi * I - delta * W
 }
-```
+```camdl
 
 Left side = compartment name, right side = time derivative. Creates a
 piecewise-deterministic Markov process (PDMP): stochastic events for integer
@@ -1405,47 +1405,9 @@ compartments, ODE evolution for real compartments between events.
 
 ---
 
-## 12. Data
+## 12. Observations
 
-> **Not yet implemented (v0.2).** The `data { }` block is not yet supported by
-> the parser or expander. External data loading and observation targets backed
-> by data files are planned for v0.2.
-
-External data for features (always loaded) and observation targets.
-
-```
-data {
-  population = read_csv("data/nga_pop.csv") {
-    time      = column("year", unit = 'years, origin = "2000-01-01")
-    total     = column("total_pop")
-    pop_child = column("pop_0_5")
-  }
-
-  cases = read_csv("data/afp_cases.csv") {
-    time   = column("epi_week", unit = 'weeks, origin = "2019-01-01")
-    values = column("afp_cases")
-  }
-
-  # Inline for testing
-  test_cases = inline {
-    time   = [7, 14, 21, 28, 35, 42]
-    values = [0, 3, 12, 45, 102, 89]
-  }
-}
-```
-
-The compiler distinguishes features from observations by usage: if a data column
-appears in a rate expression or function, it's a feature (always loaded). If it
-appears in an `observations` block, it's an observation target.
-
-Feature data is inlined into the IR as `Interpolated` time functions or tables
-at compile time. The IR remains self-contained.
-
----
-
-## 13. Observations
-
-```
+```camdl
 observations {
   weekly_cases : {
     projected  = incidence(infection)
@@ -1467,7 +1429,7 @@ arguments separated by commas).
 
 ### 13.1 Projections
 
-```
+```camdl
 incidence(transition)                    cumulative flow since last observation
 incidence(transition[stratum])           stratum-specific flow (positional)
 incidence(transition[patch = p])         named indexing (sums over other dims)
@@ -1485,7 +1447,7 @@ projection value for that observation.
 
 ### 13.2 Likelihood Families
 
-```
+```camdl
 neg_binomial(mean = EXPR, r = EXPR)            overdispersed counts
 poisson(rate = EXPR)                           Poisson counts
 normal(mean = EXPR, sd = EXPR)                 continuous
@@ -1496,7 +1458,7 @@ bernoulli(p = EXPR)                            binary outcome
 
 ### 13.3 Indexed Observations
 
-```
+```camdl
 observations {
   cases_by_patch[p in patch] : {
     projected  = incidence(infection[patch = p])
@@ -1504,7 +1466,7 @@ observations {
     likelihood = neg_binomial(mean = rho * projected, r = k)
   }
 }
-```
+```camdl
 
 Generates one observation stream per patch.
 
@@ -1524,12 +1486,12 @@ Monthly incidence can be obtained natively by setting `every = 30 'days` (or
 
 ---
 
-## 14. Interventions
+## 13. Interventions
 
 Deterministic state modifications at scheduled times. **Inactive by default.**
 Enabled via scenarios or CLI.
 
-```
+```camdl
 interventions {
   sia_round_1 : transfer(fraction = 0.80, from = S, to = V) at [180, 545]
 
@@ -1545,17 +1507,17 @@ interventions {
 
 ### 14.1 Actions
 
-```
+```camdl
 transfer(fraction = EXPR, from = COMP, to = COMP)   # move fraction
 transfer(count = EXPR, from = COMP, to = COMP)       # move count
 set(COMP, value = EXPR)                               # override value
-```
+```camdl
 
 `transfer` is atomic: `delta = floor(source * fraction)` computed from
 pre-intervention state, then `source -= delta, dest += delta` applied together.
 
 **Stratified compartments in actions.** `transfer(from = S, to = V)` with bare
-compartment names expands over all strata (see §26.10). `set` with a bare
+compartment names expands over all strata (see §25.10). `set` with a bare
 compartment name on a stratified compartment is a **compile error** — the
 compiler cannot guess what value to assign to each stratum. Use explicit
 indexing: `set(I[child, p1], value = ...)`. Named indexing is supported:
@@ -1577,14 +1539,14 @@ NAME : ACTION {
   from  = DURATION             start of recurring (default: t_start)
   until = DURATION             end of recurring (default: t_end)
 }
-```
+```camdl
 
 ### 14.3 Indexed Interventions
 
 An intervention can be declared with an **index binder**, creating a **family**
 of interventions — one per stratum — in a single line:
 
-```
+```camdl
 interventions {
   # Declares sia_north, sia_south, sia_east (one per patch)
   sia[p in patch] : transfer(fraction = vacc_eff * sia_cov, from = S[p], to = V[p]) at [180, 545]
@@ -1597,7 +1559,7 @@ block for recurring schedules)
 The expanded members share a **`base_name`** (the unindexed name, `"sia"`
 above). In scenario `enable`/`disable` lists, passing `"sia"` resolves to all
 members whose `base_name` is `"sia"` — no need to enumerate them individually
-(see §18).
+(see §17).
 
 Individual members can still be addressed by their expanded name (`"sia_north"`)
 when fine-grained control is needed.
@@ -1605,7 +1567,7 @@ when fine-grained control is needed.
 **Per-patch timing from a table.** When SIA rounds happen on different dates per
 patch, store the schedule in a table and reference it in the `at` list:
 
-```
+```camdl
 tables {
   sia_day : patch × round = read("data/sia_schedule.tsv")
 }
@@ -1640,7 +1602,7 @@ Use events for structural demographic processes (cohort entry, seasonal
 migration, importation seeding). Use interventions for policy choices
 (SIA campaigns, school closures).
 
-```
+```camdl
 events {
   cohort_entry : add(S, cohort * birthrate(t) * pop(t))
     every 365.25 'days at_day 251
@@ -1668,9 +1630,9 @@ particle gets a bad trajectory and is resampled away.
 For events and interventions that recur on a specific day within each
 period:
 
-```
+```camdl
 NAME : ACTION every PERIOD at_day DAY
-```
+```camdl
 
 `at_day` is the absolute phase within the period, measured from `t = 0`.
 Fire times are `at_day + k * period` for the smallest `k` where
@@ -1693,7 +1655,7 @@ Forces one compartment to satisfy a population conservation constraint
 at every substep. After all transitions, clamps, events, and
 interventions apply, the target compartment is overwritten:
 
-```
+```camdl
 balance {
   R = pop(t) - S - E - I
 }
@@ -1710,7 +1672,7 @@ decreasing to maintain the constraint.
 
 ---
 
-## 15. Timepoints and Reserved Identifiers
+## 14. Timepoints and Reserved Identifiers
 
 > **Partially implemented.** The `timepoints { }` block is parsed but the
 > declared timepoint values are currently discarded by the expander and not
@@ -1718,7 +1680,7 @@ decreasing to maintain the constraint.
 > built-in reserved identifiers `t_start` and `t_end` are always available
 > regardless.
 
-```
+```camdl
 timepoints {
   midpoint     = 1 'year
   intervention = 180 'days
@@ -1755,18 +1717,18 @@ consecutive      # pair iteration keyword
 
 The compiler errors if a user declaration shadows a reserved name:
 
-```
+```camdl
 ERROR: 't_end' is a reserved identifier and cannot be used as a
   parameter name.
-```
+```camdl
 
 ---
 
-## 16. Initial Conditions
+## 15. Initial Conditions
 
 ### 16.1 Un-Stratified Models
 
-```
+```camdl
 init {
   S = N0 - I0
   I = I0
@@ -1780,7 +1742,7 @@ Unlisted compartments default to 0. Expressions can reference parameters.
 When compartments have index dimensions, **bare names are a compile error.** The
 compiler cannot guess how to distribute a total across strata.
 
-```
+```camdl
 # ERROR: S has dimensions [age, patch], must specify strata
 init {
   S = N0 - I0
@@ -1792,12 +1754,12 @@ init {
   S[adult, p1] = 200000
   I[child, p1] = I0
 }
-```
+```camdl
 
 **Indexed parameter references** work in init RHS expressions. If `N0[patch]`
 is an indexed parameter, both the mangled form and the indexed form are accepted:
 
-```
+```camdl
 init {
   S[urban] = N0[urban] - I0   # indexed syntax — preferred
   S[rural] = N0_rural         # mangled form — still accepted
@@ -1806,11 +1768,11 @@ init {
 
 Named indexing works in init:
 
-```
+```camdl
 init {
   S[age = child, patch = p1] = 100000
 }
-```
+```camdl
 
 Unlisted stratum combinations default to 0. For a 774-patch model, only the
 patches mentioned in init are nonzero — the rest start empty. This is common for
@@ -1821,7 +1783,7 @@ initialization from a single-patch seeding event.
 For large spatial models where per-stratum populations come from a CSV, declare
 a table (§6) and reference it directly in init expressions:
 
-```
+```camdl
 tables {
   N0 : patch = read("data/population.tsv")
 }
@@ -1846,12 +1808,12 @@ aggregate helper for proportional allocation is future sugar (v0.2).
 
 ---
 
-## 17. Output
+## 16. Output
 
 Each sub-block produces a **separate file** with its own schema. Different
 output types have different shapes — they are never kludged into one TSV.
 
-```
+```camdl
 output {
   trajectories {
     every = 1 'day
@@ -1891,7 +1853,7 @@ trajectories.parquet  # time × named quantities (one row per output time)
 flows.parquet         # time × named flow quantities
 summary.tsv           # one row per run, scalar columns
 synthetic.tsv         # time × stream × projected × observed
-metadata.json         # run provenance (see §20)
+metadata.json         # run provenance (see §19)
 ```
 
 ### 17.2 IR Mapping
@@ -1920,16 +1882,16 @@ min(expr)                  minimum value
 cumulative(transition)     total firings over entire simulation
 at(expr, timepoint)        value of expr at specific time
 time_when(pred)            first time predicate becomes true
-```
+```camdl
 
 ---
 
-## 18. Scenarios
+## 17. Scenarios
 
 Patch-based modifications to the baseline. Baseline is the identity patch — the
 model as defined, no modifications.
 
-```
+```camdl
 scenarios {
   baseline {
     label = "no SIA (baseline)"
@@ -1998,7 +1960,7 @@ A scenario can inherit from another via `extends = <parent_name>`, which is
 fields layered on top. The IR keeps its flat preset shape — downstream
 consumers see no trace of inheritance.
 
-```
+```camdl
 scenarios {
   baseline {
     label = "No intervention"
@@ -2063,7 +2025,7 @@ operations.
 
 For multi-model analysis, a separate experiment file:
 
-```
+```camdl
 experiment("Nigeria SIA evaluation") {
   model  = "models/seir_nigeria.camdl"
   params = "params/fitted_2024.toml"
@@ -2119,9 +2081,9 @@ match a name declared in the model's `output { summary { ... } }` block (e.g.,
 
 ---
 
-## 19. Simulation Configuration
+## 18. Simulation Configuration
 
-```
+```camdl
 simulate {
   from = 0 'days
   to   = 2 'years
@@ -2132,7 +2094,7 @@ Seed is always external (CLI `--seed`), never in the model file.
 
 ---
 
-## 20. Content-Addressable Output
+## 19. Content-Addressable Output
 
 Outputs are stored in a two-level content-addressable hierarchy inside an
 `output_dir` you choose:
@@ -2251,7 +2213,7 @@ Same inputs → same hashes → run directory already exists → skip simulation
 
 ---
 
-## 21. Parameter Files
+## 20. Parameter Files
 
 ### 21.1 Values (v0.1)
 
@@ -2265,14 +2227,14 @@ rho = 0.4
 k = 5.0
 N0 = 1000000
 I0 = 10
-```
+```camdl
 
 ### 21.2 Priors
 
 Priors are declared with `~` syntax directly on parameters in the `.camdl`
 file — they are beliefs about parameters and belong with the declaration:
 
-```
+```camdl
 parameters {
     beta  : rate in [0.01, 2.0] ~ log_normal(mu = -1.0, sigma = 0.5)
     gamma : rate in [0.05, 1.0] ~ half_normal(sigma = 0.3)
@@ -2366,7 +2328,7 @@ structural skeleton; the parameter grammar fills in the rest.
 
 ---
 
-## 22. CLI
+## 21. CLI
 
 The unified `camdl` command routes to two backends: **`camdlc`** (OCaml
 compiler) for compilation/inspection and **`camdl-sim`** (Rust) for simulation,
@@ -2549,20 +2511,20 @@ camdl voi run voi.toml
 
 ```bash
 camdl serve [--port 8080] [DIR]
-```
+```camdl
 
 Serves experiment output directories over HTTP for the web editor.
 
 ---
 
-## 23. Worked Examples
+## 22. Worked Examples
 
 These examples progress from trivial to complex, showing how primitives compose.
 Each shows the DSL source and key points about what the compiler generates.
 
 ### 23.1 Bare SIR (Simplest Possible Model)
 
-```
+```camdl
 time_unit = 'days
 
 compartments { S, I, R }
@@ -2597,7 +2559,7 @@ minimal golden test model.
 
 ### 23.2 SIR with Demography (Explicit Transitions)
 
-```
+```camdl
 time_unit = 'days
 
 compartments { S, I, R }
@@ -2631,7 +2593,7 @@ simulate {
   from = 0 'days
   to   = 5 'years
 }
-```
+```camdl
 
 6 transitions total. Every rate is a total propensity — `death_S` rate is
 `mu * S` (per-capita rate times population count, explicit). Birth is an inflow
@@ -2644,7 +2606,7 @@ the **coupling sugar** form. Both produce identical IR.
 
 **Primitive form:**
 
-```
+```camdl
 time_unit = 'days
 
 compartments { S, E, I, R }
@@ -2675,7 +2637,7 @@ transitions {
 
 **Coupling sugar form** (not yet implemented — identical IR output when available):
 
-```
+```camdl
 time_unit = 'days
 
 compartments { S, E, I, R }
@@ -2701,7 +2663,7 @@ transitions {
   progression : E --> I  @ sigma * E
   recovery    : I --> R  @ gamma * I
 }
-```
+```camdl
 
 The sugar version has no index variables, no `sum`, no `N_local`. The
 `coupling[age = C_age]` declaration tells the compiler to transform `S * I / N`
@@ -2711,7 +2673,7 @@ when no coupling is declared).
 
 ### 23.4 STI with Directed Transmission (Off-Diagonal Matrix)
 
-```
+```camdl
 time_unit = 'days
 
 compartments { S, I, R }
@@ -2749,7 +2711,7 @@ needed — the matrix structure does all the work.
 
 ### 23.5 Cholera with Environmental Reservoir (Real Compartment + ODE) _(planned v0.2)_
 
-```
+```camdl
 time_unit = 'days
 
 compartments {
@@ -2778,7 +2740,7 @@ transitions {
 ode {
   W = xi * I - delta * W
 }
-```
+```camdl
 
 `W : real` is continuous-valued — not a population count. The `ode` block gives
 `dW/dt`. Between stochastic events (infections, recoveries), W evolves
@@ -2791,7 +2753,7 @@ by default).
 
 ### 23.6 Five-Age-Group Model with Consecutive Aging
 
-```
+```camdl
 time_unit = 'days
 
 compartments { S, I, R }
@@ -2833,7 +2795,7 @@ transitions {
   birth : --> S[age_0_5]
     @ mu * sum(a in age, N_local[a])
 }
-```
+```camdl
 
 `consecutive(age)` generates pairs: `(age_0_5, age_5_15)`,
 `(age_5_15, age_15_50)`, `(age_15_50, age_50_65)`, `(age_50_65, age_65p)`. With
@@ -2845,7 +2807,7 @@ Total transitions: 5 infections + 5 recoveries + 12 aging + 15 deaths + 1 birth
 
 ### 23.7 Erlang Sub-Staging (Non-Exponential Waiting Times)
 
-```
+```camdl
 time_unit = 'days
 
 compartments { S, E, I, R }
@@ -2883,9 +2845,9 @@ R don't have the `latent_stage` dimension.
 
 ---
 
-## 24. Full Example: Spatial Age-Structured SEIR
+## 23. Full Example: Spatial Age-Structured SEIR
 
-```
+```camdl
 time_unit = 'days
 
 compartments { S, E, I, R, V }
@@ -2994,15 +2956,6 @@ interventions {
   sia_round_1 : transfer(fraction = vacc_frac, from = S, to = V) at [180, 545]
 }
 
-## ── Data ───────────────────────────────────────────────
-
-data {
-  cases = read_csv("data/nigeria_afp.csv") {
-    time   = column("epi_week", unit = 'weeks, origin = "2019-01-01")
-    values = column("afp_cases")
-  }
-}
-
 ## ── Observations ───────────────────────────────────────
 
 observations {
@@ -3076,7 +3029,7 @@ scenarios {
 
 ---
 
-## 25. Compilation Pipeline
+## 24. Compilation Pipeline
 
 ```
 .camdl file  →  [Parser]     →  AST
@@ -3099,7 +3052,7 @@ data files   →  [Loader]     ─┤
 A `.camdl` file is a sequence of declarations. Order does not matter — all
 declarations are collected first, then resolved (forward references are valid).
 
-```
+```camdl
 file := declaration*
 
 declaration :=
@@ -3113,7 +3066,6 @@ declaration :=
   | transitions_block                 # transitions { ... }
   | observations_block                # observations { ... }
   | interventions_block               # interventions { ... }
-  | data_block                        # data { ... }
   | ode_block                         # ode { ... }
   | output_block                      # output { ... }
   | timepoints_block                  # timepoints { ... }
@@ -3146,7 +3098,7 @@ and expression ASTs.
 
 ---
 
-## 26. Expansion Rules (DSL → IR Mapping)
+## 25. Expansion Rules (DSL → IR Mapping)
 
 Every DSL construct compiles to specific IR structures. This section documents
 the mapping for each construct — the contract between the OCaml frontend and the
@@ -3154,7 +3106,7 @@ Rust backend.
 
 ### 26.1 Let Bindings
 
-```
+```camdl
 # DSL:
 let N = S + E + I + R
 
@@ -3167,7 +3119,7 @@ After stratification, bare `S` in the let body becomes
 
 ### 26.2 Indexed Transitions
 
-```
+```camdl
 # DSL:
 recovery[a in age] : I[a] --> R[a]  @ gamma * I[a]
 # with age = [child, adult]
@@ -3186,7 +3138,7 @@ recovery[a in age] : I[a] --> R[a]  @ gamma * I[a]
 
 ### 26.3 Inflows
 
-```
+```camdl
 # DSL:
 birth[p in patch] : --> S[child, p]
   @ mu * sum(a in age, N_local[a, p])
@@ -3205,7 +3157,7 @@ compartment list and index bindings.
 
 ### 26.4 Projections
 
-```
+```camdl
 # DSL:
 incidence(infection)           # un-indexed: sum of all expanded flows
 
@@ -3229,7 +3181,7 @@ PopSum(["R_child", "R_adult"])
 
 ### 26.5 Interventions
 
-```
+```camdl
 # DSL:
 sia_round_1 : transfer(fraction = 0.80, from = S, to = V) at [180]
 
@@ -3250,7 +3202,7 @@ sia_round_1 : transfer(fraction = 0.80, from = S, to = V) at [180]
 
 ### 26.6 Coupling Sugar
 
-```
+```camdl
 # DSL:
 infection : S --> E @ beta * S * I / N {
   coupling[age = C_age]
@@ -3281,7 +3233,7 @@ of all compartments in stratum `b`.
 
 ### 26.7 Consecutive Pairs
 
-```
+```camdl
 # DSL:
 aging[c in compartments, (a, a_next) in consecutive(age)]
   : c[a] --> c[a_next]
@@ -3318,7 +3270,7 @@ Guards are evaluated at compile time. The compiler instantiates all index
 combinations, evaluates the guard, and **omits** transitions where the guard is
 false. The IR has no concept of guards.
 
-```
+```camdl
 # DSL:
 migrate[src in patch, dst in patch] : S[src] --> S[dst]
   @ mig[dst,src] * S[src]
@@ -3342,7 +3294,7 @@ compartment name. When a compartment has more dimensions than the index
 signature provides, the compiler **iterates over the omitted dimensions** to
 satisfy the stoichiometry rule (§5.1).
 
-```
+```camdl
 # DSL:
 death[c in compartments, a in age] : c[a] -->  @ mu * c[a]
 # with compartments = [S, I, R] (R has extra immunity dimension)
@@ -3366,7 +3318,7 @@ death[c in compartments, a in age] : c[a] -->  @ mu * c[a]
 
 Interventions on stratified compartments expand over **all** dimensions:
 
-```
+```camdl
 # DSL:
 sia_round_1 : transfer(fraction = 0.80, from = S, to = V) at [180]
 # S and V have dimensions [age, patch] (2 × 774)
@@ -3386,7 +3338,7 @@ pre-intervention state, then `source -= delta, dest += delta`.
 
 ---
 
-## 27. Errors and Validation
+## 26. Errors and Validation
 
 The compiler produces clear, domain-specific error messages. Errors are caught
 at compile time, not simulation time.
@@ -3416,7 +3368,7 @@ camdlc check model.camdl --json-errors 2>errors.json
 
 ### 27.1 Dimension Errors
 
-```
+```camdl
 # Wrong number of indices
 recovery[a in age] : I[a, s] --> R[a]  @ gamma * I[a, s]
 # ERROR at line 42: I has dimensions [age] but was indexed with
@@ -3429,11 +3381,11 @@ infection[a in age] : S[a] --> E[a]
 # ERROR at line 45: C_age is declared as age × age, but index 2
 #   ('j') is bound to 'sex' (via 'j in sex'). Did you mean
 #   'j in age'?
-```
+```camdl
 
 ### 27.2 Unbound Variables
 
-```
+```camdl
 infection[a in age] : S[a] --> E[a]
   @ beta * S[a] * I[a, s] / N
 # ERROR at line 45: 's' is used in I[a, s] but is not bound.
@@ -3443,7 +3395,7 @@ infection[a in age] : S[a] --> E[a]
 
 ### 27.3 Partial Stratification Stoichiometry
 
-```
+```camdl
 dimensions { immunity = [natural, vaccine] }
 stratify(by = immunity, only = [R])
 
@@ -3452,11 +3404,11 @@ recovery[a in age] : I[a] --> R[a]  @ gamma * I[a]
 #   R[a] only specifies [age]. All dimensions of a destination
 #   compartment must be specified in stoichiometry.
 #   Did you mean: R[a, natural] or R[a, vaccine]?
-```
+```camdl
 
 ### 27.4 Dimension Does Not Exist
 
-```
+```camdl
 recovery[a in age, r in habitat] : I[a, r] --> R[a, r]  @ gamma * I[a, r]
 # ERROR at line 50: 'habitat' is not a declared dimension.
 #   Declared dimensions: age, sex, patch.
@@ -3464,7 +3416,7 @@ recovery[a in age, r in habitat] : I[a, r] --> R[a, r]  @ gamma * I[a, r]
 
 ### 27.5 Compartment Doesn't Have Dimension
 
-```
+```camdl
 dimensions { immunity = [natural, vaccine] }
 stratify(by = immunity, only = [R])
 
@@ -3472,11 +3424,11 @@ waning[a in age] : I[a, natural] --> S[a]  @ wane * I[a, natural]
 # ERROR at line 55: I does not have dimension 'immunity'.
 #   I has dimensions: [age]. Only R has dimension 'immunity'.
 #   Did you mean R[a, natural]?
-```
+```camdl
 
 ### 27.6 Unit Errors
 
-```
+```camdl
 transitions {
   recovery : I --> R  @ gamma + I
   # where gamma : rate ('per_day) and I : count
@@ -3497,7 +3449,7 @@ Checked when parameter values are supplied (not at model compile time):
 
 ### 27.8 Scenario Validation
 
-```
+```camdl
 scenarios {
   high_coverage {
     scale = { beta = 1.5, beta = 2.0 }
@@ -3513,11 +3465,11 @@ scenarios {
 # WARNING: scenarios 'variant' and 'closure' both modify parameter
 #   'beta'. Composition is non-commutative; the result depends on
 #   order. 'variant' is applied first, then 'closure'.
-```
+```camdl
 
 ### 27.9 Self-Loop Detection
 
-```
+```camdl
 migrate[c in compartments, src in patch, dst in patch]
   : c[src] --> c[dst]  @ mig[dst, src] * c[src]
 # WARNING: transition 'migrate' generates self-loops where
@@ -3557,11 +3509,11 @@ This gives the user a quick sanity check on model size before simulation.
 
 ---
 
-## 28. Primitive Summary
+## 27. Primitive Summary
 
 The language is built on these composable primitives:
 
-```
+```camdl
 # State
 compartments { NAME, ... }           integer-valued populations
 compartments { NAME : real }         continuous-valued state

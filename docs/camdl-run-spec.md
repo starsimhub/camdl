@@ -839,7 +839,7 @@ camdl simulate model.camdl \
 
 # ── From a batch file ────────────────────────────────────
 camdl simulate batch batches/ppc.toml
-```
+```camdl
 
 **CLI `--sweep` accepts comma-separated lists only.** Generators (`linspace`,
 `logspace`, `range`) are available only in batch TOML `[sweep]` sections.
@@ -1168,7 +1168,7 @@ pub struct SyntheticSpec {
     /// Scenario applied during data generation (not during fitting).
     pub scenario: Option<String>,
 }
-```
+```camdl
 
 ### 6.3 EstimateSpec — free parameters
 
@@ -1402,7 +1402,7 @@ fn sweep_point_slug(point: &SweepPoint) -> String {
         .collect::<Vec<_>>()
         .join("__")
 }
-```
+```camdl
 
 ### 6.9 Completeness Validation
 
@@ -2054,7 +2054,7 @@ orchestration layer that connects them is not yet built.
 
 Priors are declared in the model file with `~` syntax on the parameter:
 
-```
+```camdl
 parameters {
     beta  : rate in [0.01, 2.0] ~ log_normal(mu = -1.0, sigma = 0.5)
     gamma : rate in [0.05, 1.0] ~ half_normal(sigma = 0.3)

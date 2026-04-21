@@ -48,7 +48,7 @@ kano_dala	540	0.71
 borno_maiduguri	182	0.68
 borno_maiduguri	370	0.55
 borno_gwoza	190	0.45
-```
+```camdl
 
 Two index columns (`patch`, `day`), one value column (`coverage`). Kano has 3
 rows (3 campaigns), Gwoza has 1. Patches with no campaigns have no rows —
@@ -64,9 +64,9 @@ and which are values (everything remaining).
 
 A table declaration maps CSV structure to DSL objects:
 
-```
+```camdl
 name : dim₁ × dim₂ × ... = read("file.tsv")
-```
+```camdl
 
 The dimensions map **positionally** to index columns in the CSV. The remaining
 column(s) are the value(s). A CSV with `n_dims + 1` columns has exactly one
@@ -98,13 +98,13 @@ tables {
 
 The type says 2 dimensions. The CSV has 3 columns:
 
-```
+```camdl
 Column 1 (src)    → first patch dimension
 Column 2 (dst)    → second patch dimension
 Column 3 (weight) → table value
 
 kano_dala   borno_maiduguri   0.10  → adj[kano_dala, borno_maiduguri] = 0.10
-```
+```camdl
 
 Column names in the CSV are for human readability. The compiler uses positional
 mapping from the type signature only. (It does require a header row and skips
@@ -135,7 +135,7 @@ dimensions {
 dimensions {
   patch = read("data/pop.tsv", column = "patch")
 }
-```
+```camdl
 
 The `read(file, column = "col")` form reads the named column, collects unique
 values in first-occurrence order, and those become the levels of the dimension.
@@ -156,7 +156,7 @@ tables {
   pop : patch = read("data/pop.tsv")
   adj : patch × patch = read("data/adj.tsv", default = 0.0)
 }
-```
+```camdl
 
 ### Rules
 
@@ -175,7 +175,7 @@ dimensions {
   patch = read("data/pop.tsv", column = "patch")
   patch = read("data/pop2.tsv", column = "patch")
 }
-```
+```camdl
 
 **2. Validation is exhaustive and strict.**
 
@@ -336,7 +336,7 @@ interventions {
     at = t
   ) where sia_cov[p, t] > 0
 }
-```
+```camdl
 
 **What the compiler does:**
 
@@ -397,7 +397,7 @@ scenarios {
   routine_only  { enable = [sia_routine] }
   full_response { enable = [sia_routine, sia_outbreak] }
 }
-```
+```camdl
 
 Two dimensions, two tables, two intervention families. No union, no
 intersection, no ambiguity. The scenario system composes them.
@@ -456,7 +456,7 @@ transitions {
   infection[p in patch] : S[p] --> I[p]
     @ beta * (1 + alpha * temperature[p]) * S[p] * I[p] / N[p]
 }
-```
+```camdl
 
 At runtime, `temperature[kano_dala]` evaluates by interpolating the Kano
 temperature series at the current time `t`. This extends the existing time
