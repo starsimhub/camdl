@@ -135,19 +135,22 @@ applied at specified times, interrupting the stochastic simulation.
 ```
 intervention: {
   name: string,
+  base_name: string | null,          -- pre-expansion name (e.g. "vaccination" for "vaccination_child")
   schedule: intervention_schedule,
-  actions: [action]
+  actions: [action],
+  always_active: bool                -- if true, fires regardless of scenario enable/disable
 }
 
 intervention_schedule :=
   | AtTimes(float list)                          -- explicit times
-  | Recurring(start: float, period: float, end: float)
+  | Recurring(start: float, period: float, end: float, at_day: float | null)
   | External(string)                             -- times from external data
 
 action :=
   | FractionTransfer(src, dst, fraction: expr)   -- move fraction of src to dst
   | AbsoluteTransfer(src, dst, count: expr)      -- move fixed count
   | Set(compartment, value: expr)                -- override compartment value
+  | AddAction(compartment, count: expr)          -- add count unconditionally (importation, birth)
 ```
 
 The `expr` in interventions can reference parameters and current state, but not
@@ -274,9 +277,10 @@ expr :=
   | Cond(expr, expr, expr)          -- if pred > 0 then second else third
                                    --   pred is any expr; truthy iff > 0, falsy iff ≤ 0
   | TimeFunc(string)                -- named time-varying function (see 3.3)
-  | TableLookup(string, expr list)  -- named table, multi-index (see 3.4); len must equal len(shape)
+  | TableLookup(string, expr list)  -- named table, multi-index (see 3.4)
 
-op  := Add | Sub | Mul | Div | Pow | Min | Max
+op  := Add | Sub | Mul | Div | Pow | Mod | Min | Max
+     | Eq | Neq | Lt | Gt | Le | Ge          -- comparison; result used as Cond predicate
 uop := Neg | Exp | Log | Sqrt | Abs | Floor | Ceil
 ```
 
@@ -329,13 +333,12 @@ time_functions: [{
 time_func_kind :=
   | Sinusoidal(amplitude: expr, period: expr, phase: expr, baseline: expr)
       -- baseline * (1 + amplitude * cos(2π(t - phase) / period))
-      -- each parameter may reference a Param so forcing amplitudes
-      -- can be inferred; literals are also accepted
-  | Piecewise(breakpoints: float list, values: float list)
+      -- each field is an expr, so forcing amplitudes can be Param refs
+  | Piecewise(breakpoints: expr list, values: expr list)
       -- step function, constant between breakpoints
-  | Interpolated(times: float list, values: float list, method: interp)
-      -- linear or spline interpolation through data points
-  | Periodic(period: float, values: float list)
+  | Interpolated(times: expr list, values: expr list, method: string)
+      -- linear or spline interpolation; method is e.g. "linear"
+  | Periodic(period: expr, values: expr list)
       -- repeating step function within a period
 ```
 
@@ -352,13 +355,16 @@ dimension.
 ```
 tables: [{
   name:          string,
-  shape:         int list,        -- e.g. [3, 3] for a 3×3 matrix; [n] for 1D
-  values:        expr list,       -- row-major flat storage; length = product(shape);
-                                  -- each entry is a Const expr (serialized as
-                                  -- {"const": <float>}); future work may permit
-                                  -- Param references here
+  values:        expr list,       -- row-major flat storage (Inline source); or
+  external:      string,          -- logical name (External source, resolved at compile time)
   out_of_bounds: oob_policy
 }]
+
+-- Note: there is no explicit shape field. Dimensionality is implicit: the
+-- number of index expressions in each TableLookup node at the call site
+-- determines how the flat array is indexed. For a 2D n×m table, the
+-- OCaml expander lays values out in row-major order and emits two-index
+-- TableLookup calls; the Rust backend uses the same row-major stride.
 
 oob_policy := Clamp | Wrap | Error
 ```
@@ -368,12 +374,9 @@ is computed using row-major (C-order) strides: for shape `[d0, d1, ..., dn]`,
 strides are `[d1*d2*...*dn, d2*...*dn, ..., 1]`. Strides are precomputed at
 model load time and must not be recomputed in the hot loop.
 
-Validation requires `len(indices) == len(shape)`. A mismatch is a model error,
-not a warning.
-
-For 1D tables, `shape = [n]` and `indices = [expr]`. Contact matrices are 2D:
-`shape = [n_age, n_age]`, `indices = [i_expr, j_expr]`. The OCaml expander
-produces the index expressions directly — no manual stride arithmetic needed.
+For 1D tables `indices = [expr]`; for contact matrices `indices = [i_expr, j_expr]`.
+The OCaml expander produces the index expressions directly — no manual stride
+arithmetic needed.
 
 **Why tables are essential.** Without them, the OCaml expander must inline every
 age-specific rate as a literal `Const`, producing enormous IR files for
@@ -451,6 +454,7 @@ likelihood :=
   | Normal(mean: expr, sd: expr)              -- discretized-Normal count likelihood
   | Binomial(n: expr, p: expr)
   | BetaBinomial(n: expr, alpha: expr, beta: expr)
+  | Bernoulli(p: expr)                        -- binary (0/1) observation streams
 
 -- within likelihood exprs, `Projected` refers to the projection output
 ```
@@ -481,9 +485,9 @@ observation_model: {
 }
 
 observation_schedule :=
-  | AtTimes(float list)
-  | Regular(start: float, step: float, end: float)
-  | FromData                     -- v0.2+: observation times from data file
+  | ObsAtTimes(float list)
+  | ObsRegular(start: float, step: float, end: float)
+  | ObsFromData                  -- v0.2+: observation times from data file
 ```
 
 ### 4.4 Reporting Pipelines `[v0.2+, essential]`
@@ -594,10 +598,13 @@ Every named value in rate expressions is a declared parameter:
 ```
 parameter: {
   name: string,
-  value: float,                       -- v0.1: this is the value used for simulation
+  value: float | null,                -- null = must be supplied at runtime via --param/--params
+  bounds: [float, float] | null,      -- optional [lo, hi] constraint for inference/validation
   prior: prior_dist | null,           -- v0.2+: prior for inference (null in v0.1)
   transform: transform | null,        -- v0.2+: for unconstrained MCMC proposals
-  initial_value: float | null         -- v0.2+: hint for optimization
+  initial_value: float | null,        -- v0.2+: hint for optimization
+  param_kind: string | null,          -- DSL type: "rate", "probability", "positive", "count", "real"
+  param_dim: [int, int] | null        -- explicit dimension as [P_exponent, T_exponent]
 }
 
 prior_dist :=
@@ -669,7 +676,9 @@ model: {
   -- metadata
   name: string,
   version: string,                     -- IR schema version ("0.3")
+  time_unit: string,                   -- declared time unit, e.g. "days"
   description: string | null,
+  origin: string | null,               -- ISO date string for calendar offsets, e.g. "2020-01-01"
 
   -- state space
   compartments: compartment list,       -- {name, kind} (§2.1)
@@ -702,7 +711,21 @@ model: {
     time_semantics: "continuous" | "discrete",
     dt: float | null,                  -- required if discrete
     rng_seed: int | null               -- null = random
-  }
+  },
+
+  -- advisory / tooling
+  scenarios: preset list,              -- named parameter sets for CLI/web UI (may be empty)
+  model_structure: {                   -- stratification metadata for tooling; null if none
+    dimensions: [{name, values}] list,
+    compartment_dims: {comp_name: dim_name list} map,
+    base_compartments: string list,
+    transmission_transitions: string list,
+    infectious_compartments: string list
+  } | null,
+  balance: {                           -- population conservation constraint; null if none
+    balance_target: string,
+    balance_expr: expr
+  } | null
 }
 
 transition: {
@@ -714,7 +737,15 @@ transition: {
     origin_kind: string | null,
     source_compartment: string | null,
     dest_compartment: string | null
-  } | null
+  } | null,
+
+  draw_method: DrawPoisson             -- omitted in JSON when Poisson (default)
+             | DrawDeterministic       -- string "deterministic"
+             | DrawOverdispersed(expr) -- {"overdispersed": expr} — requires tau-leap or chain-binomial
+
+  rate_grad: { param_name: expr, ... } -- ∂rate/∂param for each estimated param (autodiff output).
+                                       -- omitted when empty (forward-simulation-only models).
+                                       -- absent entries = zero gradient (Rust backend contract).
 }
 ```
 
@@ -834,392 +865,101 @@ paired-seed approximations, not as exact couplings.
 
 ---
 
-## 11. Full Example: Age-Stratified SEIR with Seasonal Forcing `[v0.1]`
+## 11. Example IR Documents `[v0.1]`
 
-What the OCaml compiler produces from a DSL specification of an SEIR model
-stratified by two age groups with seasonal transmission, demographic turnover,
-and weekly observations.
+**Note:** The authoritative source of truth for the wire format is
+`ir/golden/*.ir.json` — these are generated by the OCaml compiler and parsed
+by the Rust backend on every CI run. The examples below are taken directly
+from those golden files.
+
+### 11.1 Minimal SIR
+
+Taken from `ir/golden/sir_basic.ir.json`. Shows the core structure:
+compartment objects, `bin_op` expression nodes, parameterized initial
+conditions, `scenarios` (presets), and `model_structure`.
 
 ```json
 {
-  "name": "seir_age_seasonal",
+  "name": "sir_basic",
   "version": "0.3",
-  "description": "Age-stratified SEIR with seasonal forcing and demographic turnover",
+  "time_unit": "days",
+  "description": null,
 
   "compartments": [
-    "S_child",
-    "E_child",
-    "I_child",
-    "R_child",
-    "S_adult",
-    "E_adult",
-    "I_adult",
-    "R_adult"
-  ],
-
-  "time_functions": [
-    {
-      "name": "seasonal_forcing",
-      "kind": "sinusoidal",
-      "amplitude": 0.2,
-      "period": 365.25,
-      "phase": 0.0,
-      "baseline": 1.0
-    }
-  ],
-
-  "tables": [
-    {
-      "name": "C_age",
-      "values": [12.0, 4.0, 4.0, 8.0],
-      "out_of_bounds": "error"
-    }
+    { "name": "S", "kind": "integer" },
+    { "name": "I", "kind": "integer" },
+    { "name": "R", "kind": "integer" }
   ],
 
   "transitions": [
     {
-      "name": "infection_child",
-      "stoichiometry": [["S_child", -1], ["E_child", 1]],
+      "name": "infection",
+      "stoichiometry": [["S", -1], ["I", 1]],
       "rate": {
-        "op": "mul",
-        "args": [
-          { "param": "beta" },
-          { "time_func": { "name": "seasonal_forcing" } },
-          { "pop": "S_child" },
-          {
-            "op": "add",
-            "args": [
-              {
-                "op": "mul",
-                "args": [
-                  { "table_lookup": { "table": "C_age", "indices": [ { "const": 0.0 } ] } },
-                  {
-                    "op": "div",
-                    "args": [
-                      { "pop": "I_child" },
-                      {
-                        "pop_sum": ["S_child", "E_child", "I_child", "R_child"]
-                      }
-                    ]
-                  }
-                ]
-              },
-              {
-                "op": "mul",
-                "args": [
-                  { "table_lookup": { "table": "C_age", "indices": [ { "const": 1.0 } ] } },
-                  {
-                    "op": "div",
-                    "args": [
-                      { "pop": "I_adult" },
-                      {
-                        "pop_sum": ["S_adult", "E_adult", "I_adult", "R_adult"]
-                      }
-                    ]
-                  }
-                ]
-              }
-            ]
-          }
-        ]
-      },
-      "metadata": { "origin_kind": "transmission" }
-    },
-    {
-      "name": "infection_adult",
-      "stoichiometry": [["S_adult", -1], ["E_adult", 1]],
-      "rate": {
-        "op": "mul",
-        "args": [
-          { "param": "beta" },
-          { "time_func": { "name": "seasonal_forcing" } },
-          { "pop": "S_adult" },
-          {
-            "op": "add",
-            "args": [
-              {
-                "op": "mul",
-                "args": [
-                  { "table_lookup": { "table": "C_age", "indices": [ { "const": 2.0 } ] } },
-                  {
-                    "op": "div",
-                    "args": [
-                      { "pop": "I_child" },
-                      {
-                        "pop_sum": ["S_child", "E_child", "I_child", "R_child"]
-                      }
-                    ]
-                  }
-                ]
-              },
-              {
-                "op": "mul",
-                "args": [
-                  { "table_lookup": { "table": "C_age", "indices": [ { "const": 3.0 } ] } },
-                  {
-                    "op": "div",
-                    "args": [
-                      { "pop": "I_adult" },
-                      {
-                        "pop_sum": ["S_adult", "E_adult", "I_adult", "R_adult"]
-                      }
-                    ]
-                  }
-                ]
-              }
-            ]
-          }
-        ]
-      },
-      "metadata": { "origin_kind": "transmission" }
-    },
-
-    {
-      "name": "progression_child",
-      "stoichiometry": [["E_child", -1], ["I_child", 1]],
-      "rate": {
-        "op": "mul",
-        "args": [{ "param": "sigma" }, { "pop": "E_child" }]
-      },
-      "metadata": { "origin_kind": "intrinsic" }
-    },
-    {
-      "name": "progression_adult",
-      "stoichiometry": [["E_adult", -1], ["I_adult", 1]],
-      "rate": {
-        "op": "mul",
-        "args": [{ "param": "sigma" }, { "pop": "E_adult" }]
-      },
-      "metadata": { "origin_kind": "intrinsic" }
-    },
-    {
-      "name": "recovery_child",
-      "stoichiometry": [["I_child", -1], ["R_child", 1]],
-      "rate": {
-        "op": "mul",
-        "args": [{ "param": "gamma" }, { "pop": "I_child" }]
-      },
-      "metadata": { "origin_kind": "intrinsic" }
-    },
-    {
-      "name": "recovery_adult",
-      "stoichiometry": [["I_adult", -1], ["R_adult", 1]],
-      "rate": {
-        "op": "mul",
-        "args": [{ "param": "gamma" }, { "pop": "I_adult" }]
-      },
-      "metadata": { "origin_kind": "intrinsic" }
-    },
-
-    {
-      "name": "birth",
-      "stoichiometry": [["S_child", 1]],
-      "rate": {
-        "op": "mul",
-        "args": [
-          { "param": "mu" },
-          {
-            "pop_sum": [
-              "S_child",
-              "E_child",
-              "I_child",
-              "R_child",
-              "S_adult",
-              "E_adult",
-              "I_adult",
-              "R_adult"
-            ]
-          }
-        ]
-      },
-      "metadata": { "origin_kind": "inflow" }
-    },
-
-    {
-      "name": "death_S_child",
-      "stoichiometry": [["S_child", -1]],
-      "rate": {
-        "op": "mul",
-        "args": [{ "param": "mu_child" }, { "pop": "S_child" }]
-      },
-      "metadata": { "origin_kind": "outflow" }
-    },
-    {
-      "name": "death_E_child",
-      "stoichiometry": [["E_child", -1]],
-      "rate": {
-        "op": "mul",
-        "args": [{ "param": "mu_child" }, { "pop": "E_child" }]
-      },
-      "metadata": { "origin_kind": "outflow" }
-    },
-    {
-      "name": "death_I_child",
-      "stoichiometry": [["I_child", -1]],
-      "rate": {
-        "op": "mul",
-        "args": [{ "param": "mu_child" }, { "pop": "I_child" }]
-      },
-      "metadata": { "origin_kind": "outflow" }
-    },
-    {
-      "name": "death_R_child",
-      "stoichiometry": [["R_child", -1]],
-      "rate": {
-        "op": "mul",
-        "args": [{ "param": "mu_child" }, { "pop": "R_child" }]
-      },
-      "metadata": { "origin_kind": "outflow" }
-    },
-    {
-      "name": "death_S_adult",
-      "stoichiometry": [["S_adult", -1]],
-      "rate": {
-        "op": "mul",
-        "args": [{ "param": "mu_adult" }, { "pop": "S_adult" }]
-      },
-      "metadata": { "origin_kind": "outflow" }
-    },
-    {
-      "name": "death_E_adult",
-      "stoichiometry": [["E_adult", -1]],
-      "rate": {
-        "op": "mul",
-        "args": [{ "param": "mu_adult" }, { "pop": "E_adult" }]
-      },
-      "metadata": { "origin_kind": "outflow" }
-    },
-    {
-      "name": "death_I_adult",
-      "stoichiometry": [["I_adult", -1]],
-      "rate": {
-        "op": "mul",
-        "args": [{ "param": "mu_adult" }, { "pop": "I_adult" }]
-      },
-      "metadata": { "origin_kind": "outflow" }
-    },
-    {
-      "name": "death_R_adult",
-      "stoichiometry": [["R_adult", -1]],
-      "rate": {
-        "op": "mul",
-        "args": [{ "param": "mu_adult" }, { "pop": "R_adult" }]
-      },
-      "metadata": { "origin_kind": "outflow" }
-    },
-
-    {
-      "name": "aging_S",
-      "stoichiometry": [["S_child", -1], ["S_adult", 1]],
-      "rate": {
-        "op": "mul",
-        "args": [{ "param": "aging_rate" }, { "pop": "S_child" }]
-      },
-      "metadata": { "origin_kind": "transfer" }
-    },
-    {
-      "name": "aging_E",
-      "stoichiometry": [["E_child", -1], ["E_adult", 1]],
-      "rate": {
-        "op": "mul",
-        "args": [{ "param": "aging_rate" }, { "pop": "E_child" }]
-      },
-      "metadata": { "origin_kind": "transfer" }
-    },
-    {
-      "name": "aging_I",
-      "stoichiometry": [["I_child", -1], ["I_adult", 1]],
-      "rate": {
-        "op": "mul",
-        "args": [{ "param": "aging_rate" }, { "pop": "I_child" }]
-      },
-      "metadata": { "origin_kind": "transfer" }
-    },
-    {
-      "name": "aging_R",
-      "stoichiometry": [["R_child", -1], ["R_adult", 1]],
-      "rate": {
-        "op": "mul",
-        "args": [{ "param": "aging_rate" }, { "pop": "R_child" }]
-      },
-      "metadata": { "origin_kind": "transfer" }
-    }
-  ],
-
-  "interventions": [],
-
-  "observations": [
-    {
-      "name": "weekly_cases",
-      "data_stream": "reported_cases",
-      "schedule": { "kind": "regular", "start": 0, "step": 7, "end": 730 },
-      "projection": {
-        "kind": "cumulative_flow",
-        "transition": "infection_child"
-      },
-      "likelihood": {
-        "family": "neg_binomial",
-        "mean": {
+        "bin_op": {
           "op": "mul",
-          "args": [{ "param": "rho" }, { "projected": true }]
-        },
-        "dispersion": { "param": "inv_phi" }
+          "left": {
+            "bin_op": {
+              "op": "mul",
+              "left":  { "param": "beta" },
+              "right": { "pop": "S" }
+            }
+          },
+          "right": {
+            "bin_op": {
+              "op": "div",
+              "left":  { "pop": "I" },
+              "right": { "pop_sum": ["S", "I", "R"] }
+            }
+          }
+        }
+      },
+      "metadata": {
+        "origin_kind": "transmission",
+        "source_compartment": "S",
+        "dest_compartment": "I"
+      }
+    },
+    {
+      "name": "recovery",
+      "stoichiometry": [["I", -1], ["R", 1]],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left":  { "param": "gamma" },
+          "right": { "pop": "I" }
+        }
+      },
+      "metadata": {
+        "origin_kind": "intrinsic",
+        "source_compartment": "I",
+        "dest_compartment": "R"
       }
     }
   ],
 
+  "ode_equations": [],
+  "time_functions": [],
+  "tables": [],
+  "interventions": [],
+  "observations": [],
+
   "parameters": [
-    { "name": "beta", "value": 0.3, "prior": null, "transform": null },
-    { "name": "sigma", "value": 0.2, "prior": null, "transform": null },
-    { "name": "gamma", "value": 0.1, "prior": null, "transform": null },
-    { "name": "mu", "value": 0.0000548, "prior": null, "transform": null },
-    {
-      "name": "mu_child",
-      "value": 0.0000685,
-      "prior": null,
-      "transform": null
-    },
-    {
-      "name": "mu_adult",
-      "value": 0.0000411,
-      "prior": null,
-      "transform": null
-    },
-    {
-      "name": "aging_rate",
-      "value": 0.000183,
-      "prior": null,
-      "transform": null
-    },
-    { "name": "rho", "value": 0.4, "prior": null, "transform": null },
-    { "name": "inv_phi", "value": 5.0, "prior": null, "transform": null },
-    { "name": "I0_child", "value": 10, "prior": null, "transform": null },
-    { "name": "I0_adult", "value": 5, "prior": null, "transform": null }
+    { "name": "beta",  "value": null, "bounds": [0.001, 2.0],    "prior": null, "transform": null, "initial_value": null },
+    { "name": "gamma", "value": null, "bounds": [0.001, 1.0],    "prior": null, "transform": null, "initial_value": null },
+    { "name": "N0",    "value": null, "bounds": [100.0, 100000.0],"prior": null, "transform": null, "initial_value": null },
+    { "name": "I0",    "value": null, "bounds": [1.0, 1000.0],   "prior": null, "transform": null, "initial_value": null }
   ],
 
   "initial_conditions": {
-    "kind": "parameterized",
-    "values": [
-      [
-        "S_child",
-        { "op": "sub", "args": [{ "const": 500000 }, { "param": "I0_child" }] }
-      ],
-      ["E_child", { "const": 0 }],
-      ["I_child", { "param": "I0_child" }],
-      ["R_child", { "const": 0 }],
-      [
-        "S_adult",
-        { "op": "sub", "args": [{ "const": 500000 }, { "param": "I0_adult" }] }
-      ],
-      ["E_adult", { "const": 0 }],
-      ["I_adult", { "param": "I0_adult" }],
-      ["R_adult", { "const": 0 }]
-    ]
+    "parameterized": {
+      "S": { "bin_op": { "op": "sub", "left": { "param": "N0" }, "right": { "param": "I0" } } },
+      "I": { "param": "I0" }
+    }
   },
 
-
   "output": {
-    "times": { "kind": "regular", "start": 0, "step": 1, "end": 730 },
+    "times": { "regular": { "start": 0.0, "step": 1.0, "end": 80.0 } },
     "format": "tsv",
     "trajectory": true,
     "observations": true
@@ -1227,25 +967,184 @@ and weekly observations.
 
   "simulation": {
     "t_start": 0.0,
-    "t_end": 730.0,
+    "t_end": 80.0,
     "time_semantics": "continuous",
     "dt": null,
-    "rng_seed": 42
+    "rng_seed": null
+  },
+
+  "scenarios": [
+    {
+      "name": "baseline",
+      "label": "default  (R0 ≈ 3)",
+      "params": { "beta": 0.3, "gamma": 0.1, "N0": 1000.0, "I0": 10.0 },
+      "enable": [],
+      "disable": [],
+      "t_end": 80.0
+    }
+  ],
+
+  "model_structure": {
+    "dimensions": [],
+    "compartment_dims": { "S": [], "I": [], "R": [] },
+    "base_compartments": ["S", "I", "R"],
+    "transmission_transitions": ["infection"],
+    "infectious_compartments": ["I"]
   }
 }
 ```
 
-### 11.2 Minimal Example: Cholera SIWR with Environmental Reservoir
+### 11.2 Age-Stratified SEIR with Contact Matrix
 
-This example shows the real-valued compartment feature (§2.1, §2.4). `W` is
-bacteria concentration in the water supply — a continuous ODE quantity, not an
-integer count.
+Taken from `ir/golden/seir_age.ir.json`. Shows stratified compartments,
+`table_lookup` expression nodes, and a `tables` entry with `expr` values.
+Only one transition shown for brevity — the full file has eight.
+
+```json
+{
+  "name": "seir_age",
+  "version": "0.3",
+  "time_unit": "days",
+  "description": null,
+
+  "compartments": [
+    { "name": "S_child", "kind": "integer" },
+    { "name": "S_adult", "kind": "integer" },
+    { "name": "E_child", "kind": "integer" },
+    { "name": "E_adult", "kind": "integer" },
+    { "name": "I_child", "kind": "integer" },
+    { "name": "I_adult", "kind": "integer" },
+    { "name": "R_child", "kind": "integer" },
+    { "name": "R_adult", "kind": "integer" }
+  ],
+
+  "transitions": [
+    {
+      "name": "infection_child",
+      "stoichiometry": [["S_child", -1], ["E_child", 1]],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": {
+            "bin_op": {
+              "op": "mul",
+              "left":  { "param": "beta" },
+              "right": { "pop": "S_child" }
+            }
+          },
+          "right": {
+            "bin_op": {
+              "op": "add",
+              "left": {
+                "bin_op": {
+                  "op": "div",
+                  "left": {
+                    "bin_op": {
+                      "op": "mul",
+                      "left":  { "table_lookup": { "table": "C_age", "indices": [{ "const": 0.0 }] } },
+                      "right": { "pop": "I_child" }
+                    }
+                  },
+                  "right": { "pop_sum": ["S_child", "E_child", "I_child", "R_child"] }
+                }
+              },
+              "right": {
+                "bin_op": {
+                  "op": "div",
+                  "left": {
+                    "bin_op": {
+                      "op": "mul",
+                      "left":  { "table_lookup": { "table": "C_age", "indices": [{ "const": 1.0 }] } },
+                      "right": { "pop": "I_adult" }
+                    }
+                  },
+                  "right": { "pop_sum": ["S_adult", "E_adult", "I_adult", "R_adult"] }
+                }
+              }
+            }
+          }
+        }
+      },
+      "metadata": { "origin_kind": "transmission", "source_compartment": "S_child", "dest_compartment": "E_child" }
+    }
+    /* ... recovery_child, progression_child, and adult variants omitted */
+  ],
+
+  "tables": [
+    {
+      "name": "C_age",
+      "values": [
+        { "const": 12.0 }, { "const": 4.0 },
+        { "const": 4.0 },  { "const": 8.0 }
+      ],
+      "out_of_bounds": "error"
+    }
+  ],
+
+  "ode_equations": [],
+  "time_functions": [],
+  "interventions": [],
+  "observations": [],
+
+  "parameters": [
+    { "name": "beta",  "value": null, "bounds": [0.001, 0.5], "prior": null, "transform": null, "initial_value": null },
+    { "name": "sigma", "value": null, "bounds": [0.01,  1.0], "prior": null, "transform": null, "initial_value": null },
+    { "name": "gamma", "value": null, "bounds": [0.01,  1.0], "prior": null, "transform": null, "initial_value": null }
+  ],
+
+  "initial_conditions": {
+    "explicit": { "S_child": 4990.0, "S_adult": 5000.0, "I_child": 10.0 }
+  },
+
+  "output": {
+    "times": { "regular": { "start": 0.0, "step": 1.0, "end": 100.0 } },
+    "format": "tsv",
+    "trajectory": true,
+    "observations": true
+  },
+
+  "simulation": {
+    "t_start": 0.0,
+    "t_end": 100.0,
+    "time_semantics": "continuous",
+    "dt": null,
+    "rng_seed": null
+  },
+
+  "scenarios": [
+    {
+      "name": "baseline",
+      "label": "default",
+      "params": { "beta": 0.05, "sigma": 0.2, "gamma": 0.1 },
+      "enable": [],
+      "disable": [],
+      "t_end": 100.0
+    }
+  ],
+
+  "model_structure": {
+    "dimensions": [{ "name": "age", "values": ["child", "adult"] }],
+    "compartment_dims": { "S": ["age"], "E": ["age"], "I": ["age"], "R": ["age"] },
+    "base_compartments": ["S", "E", "I", "R"],
+    "transmission_transitions": ["infection_child", "infection_adult"],
+    "infectious_compartments": ["I"]
+  }
+}
+```
+
+### 11.3 Real-Valued Compartment: Cholera SIWR
+
+Taken from `ir/golden/cholera_siwr.ir.json`. Shows `kind: "real"` for the
+water reservoir `W`, `ode_equations`, and an `observations` block with
+`neg_binomial` likelihood. The `"projected": null` node inside the likelihood
+refers to the projection output (§4.2).
 
 ```json
 {
   "name": "cholera_siwr",
   "version": "0.3",
-  "description": "SIWR cholera model with environmental transmission route",
+  "time_unit": "days",
+  "description": "SIWR cholera model: integer S/I/R + real-valued water reservoir W. PDMP coupling.",
 
   "compartments": [
     { "name": "S", "kind": "integer" },
@@ -1254,93 +1153,125 @@ integer count.
     { "name": "W", "kind": "real" }
   ],
 
-  "ode_equations": [
-    {
-      "compartment": "W",
-      "derivative": {
-        "op": "sub",
-        "args": [
-          { "op": "mul", "args": [{ "param": "xi" }, { "pop": "I" }] },
-          { "op": "mul", "args": [{ "param": "delta" }, { "pop": "W" }] }
-        ]
-      }
-    }
-  ],
-
   "transitions": [
     {
-      "name": "infection_water",
+      "name": "infection",
       "stoichiometry": [["S", -1], ["I", 1]],
       "rate": {
-        "op": "mul",
-        "args": [
-          { "pop": "S" },
-          {
-            "op": "div",
-            "args": [
-              { "op": "mul", "args": [{ "param": "beta_W" }, { "pop": "W" }] },
-              { "op": "add", "args": [{ "param": "K" }, { "pop": "W" }] }
-            ]
+        "bin_op": {
+          "op": "mul",
+          "left": { "pop": "S" },
+          "right": {
+            "bin_op": {
+              "op": "add",
+              "left": {
+                "bin_op": {
+                  "op": "mul",
+                  "left":  { "param": "beta_I" },
+                  "right": {
+                    "bin_op": {
+                      "op": "div",
+                      "left":  { "pop": "I" },
+                      "right": { "pop_sum": ["S", "I", "R"] }
+                    }
+                  }
+                }
+              },
+              "right": {
+                "bin_op": {
+                  "op": "div",
+                  "left": {
+                    "bin_op": {
+                      "op": "mul",
+                      "left":  { "param": "beta_W" },
+                      "right": { "pop": "W" }
+                    }
+                  },
+                  "right": {
+                    "bin_op": {
+                      "op": "add",
+                      "left":  { "pop": "W" },
+                      "right": { "param": "kappa" }
+                    }
+                  }
+                }
+              }
+            }
           }
-        ]
+        }
       },
-    },
-    {
-      "name": "infection_person",
-      "stoichiometry": [["S", -1], ["I", 1]],
-      "rate": {
-        "op": "mul",
-        "args": [
-          { "param": "beta_P" },
-          { "pop": "S" },
-          {
-            "op": "div",
-            "args": [{ "pop": "I" }, { "pop_sum": ["S", "I", "R"] }]
-          }
-        ]
-      },
+      "metadata": { "origin_kind": "transmission", "source_compartment": "S", "dest_compartment": "I" }
     },
     {
       "name": "recovery",
       "stoichiometry": [["I", -1], ["R", 1]],
-      "rate": { "op": "mul", "args": [{ "param": "gamma" }, { "pop": "I" }] },
+      "rate": {
+        "bin_op": { "op": "mul", "left": { "param": "gamma" }, "right": { "pop": "I" } }
+      },
+      "metadata": { "origin_kind": "intrinsic", "source_compartment": "I", "dest_compartment": "R" }
     }
   ],
 
-  "parameters": [
-    { "name": "beta_W", "value": 0.5, "prior": null, "transform": null },
-    { "name": "beta_P", "value": 0.1, "prior": null, "transform": null },
-    { "name": "K", "value": 1000000, "prior": null, "transform": null },
-    { "name": "xi", "value": 10.0, "prior": null, "transform": null },
-    { "name": "delta", "value": 0.2, "prior": null, "transform": null },
-    { "name": "gamma", "value": 0.25, "prior": null, "transform": null }
+  "ode_equations": [
+    {
+      "compartment": "W",
+      "derivative": {
+        "bin_op": {
+          "op": "sub",
+          "left": {
+            "bin_op": { "op": "mul", "left": { "param": "xi" },     "right": { "pop": "I" } }
+          },
+          "right": {
+            "bin_op": { "op": "mul", "left": { "param": "omega_W" }, "right": { "pop": "W" } }
+          }
+        }
+      }
+    }
   ],
-
-  "initial_conditions": {
-    "kind": "parameterized",
-    "values": [
-      ["S", { "op": "sub", "args": [{ "const": 100000 }, { "param": "I0" }] }],
-      ["I", { "param": "I0" }],
-      ["R", { "const": 0 }],
-      ["W", { "const": 0.0 }]
-    ]
-  },
 
   "time_functions": [],
   "tables": [],
   "interventions": [],
-  "observations": [],
+
+  "observations": [
+    {
+      "name": "reported_cases",
+      "data_stream": "cases",
+      "schedule": { "obs_regular": { "start": 7.0, "step": 7.0, "end": 365.0 } },
+      "projection": { "cumulative_flow": "infection" },
+      "likelihood": {
+        "neg_binomial": {
+          "mean":       { "projected": null },
+          "dispersion": { "param": "rho" }
+        }
+      }
+    }
+  ],
+
+  "parameters": [
+    { "name": "beta_I",  "value": 0.5,    "prior": null, "transform": null, "initial_value": null },
+    { "name": "beta_W",  "value": 0.3,    "prior": null, "transform": null, "initial_value": null },
+    { "name": "kappa",   "value": 0.0001, "prior": null, "transform": null, "initial_value": null },
+    { "name": "gamma",   "value": 0.25,   "prior": null, "transform": null, "initial_value": null },
+    { "name": "xi",      "value": 1.0,    "prior": null, "transform": null, "initial_value": null },
+    { "name": "omega_W", "value": 0.5,    "prior": null, "transform": null, "initial_value": null },
+    { "name": "rho",     "value": 5.0,    "prior": null, "transform": null, "initial_value": null }
+  ],
+
+  "initial_conditions": {
+    "explicit": { "S": 990, "I": 10, "R": 0, "W": 0.0 }
+  },
 
   "output": {
-    "times": { "kind": "regular", "start": 0, "step": 1, "end": 180 },
+    "times": { "regular": { "start": 0.0, "step": 7.0, "end": 365.0 } },
     "format": "tsv",
     "trajectory": true,
-    "observations": false
+    "observations": true
   },
 
   "simulation": {
     "t_start": 0.0,
-    "t_end": 180.0,
+    "t_end": 365.0,
     "time_semantics": "continuous",
     "dt": null,
     "rng_seed": 42
@@ -1348,10 +1279,10 @@ integer count.
 }
 ```
 
-Note: `W` does not appear in any stoichiometry list. Its dynamics come entirely
-from `ode_equations`. Both transmission routes (`infection_water` via `W` and
-`infection_person` via person-to-person contact) are present; setting
-`beta_P = 0` gives a pure waterborne model.
+Note: `W` does not appear in any stoichiometry list — its dynamics are governed
+entirely by `ode_equations`. The `"projected": null` node in the likelihood
+refers to the evaluated `projection` value (§4.1–4.2) rather than a named
+parameter.
 
 ---
 
