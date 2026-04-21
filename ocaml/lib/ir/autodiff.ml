@@ -234,11 +234,13 @@ let simplify_fixpoint (e : expr) : expr =
 
 (** Differentiate a rate expression w.r.t. each estimated parameter.
     Returns an association list [(param_name, derivative_expr)].
-    Zero derivatives (Const 0.0) are included for completeness. *)
+    Parameters absent from the rate (derivative simplifies to Const 0.0)
+    are omitted — the Rust backend treats missing entries as zero gradient. *)
 let differentiate_rate (rate : expr) (param_names : string list) :
     (string * expr) list =
-  List.map (fun p ->
-    let d = differentiate rate p in
-    let d = simplify_fixpoint d in
-    (p, d)
+  List.filter_map (fun p ->
+    let d = simplify_fixpoint (differentiate rate p) in
+    match d with
+    | Const 0.0 -> None
+    | _ -> Some (p, d)
   ) param_names

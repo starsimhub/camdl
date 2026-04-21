@@ -205,16 +205,40 @@ let compile ?(name = "model") ?(filename = "<input>") (src : string) : (Ir.model
        2026-04-19 review: previously expansion warnings were rendered
        once in compile_detail_result and again here after dimcheck,
        duplicating output. *)
-    if d.ctx.diags.diags <> [] then begin
+    if Diagnostics.has_any d.ctx.diags then begin
       Fmt.set_style_renderer Fmt.stderr `Ansi_tty;
       Diagnostics.render_all d.ctx.diags d.source Fmt.stderr
     end;
-    (* Autodiff pass: differentiate transition rates w.r.t. all parameters *)
+    (* Autodiff pass: differentiate transition rates w.r.t. all parameters.
+       If a rate contains `mod` over a parameter, differentiation raises
+       Failure — catch per-transition and emit E600 with source location. *)
     let param_names = List.map (fun (p : Ir.parameter) -> p.name) d.model.Ir.parameters in
-    let m = { d.model with Ir.transitions =
-      List.map (fun (t : Ir.transition) ->
-        { t with Ir.rate_grad = Autodiff.differentiate_rate t.rate param_names }
-      ) d.model.Ir.transitions }
+    let tr_loc name =
+      (* Find the original (pre-expansion) transition declaration by prefix
+         match: expanded name "infection_child" → base "infection". *)
+      match List.find_opt (fun (td : Ast.transition_decl) ->
+        let b = td.trname and bl = String.length td.trname in
+        let el = String.length name in
+        name = b || (el > bl && String.sub name 0 bl = b && name.[bl] = '_')
+      ) d.ctx.orig_transitions with
+      | Some td -> Expander.diag_loc_of_ast_ctx d.ctx td.trloc
+      | None -> Diagnostics.no_loc
     in
+    let transitions = List.map (fun (t : Ir.transition) ->
+      match (try Ok (Autodiff.differentiate_rate t.rate param_names)
+             with Failure msg -> Error msg) with
+      | Ok rate_grad -> { t with Ir.rate_grad }
+      | Error msg ->
+        Diagnostics.error d.ctx.diags
+          ~code:"E600"
+          ~loc:(tr_loc t.name)
+          ~message:(Printf.sprintf "transition '%s': %s" t.name msg)
+          ~hint:"mod is not differentiable; replace with a conditional guard"
+          ();
+        { t with Ir.rate_grad = [] }
+    ) d.model.Ir.transitions in
+    if Diagnostics.has_errors d.ctx.diags then
+      Diagnostics.report_and_exit d.ctx.diags d.source;
+    let m = { d.model with Ir.transitions = transitions } in
     Ok m
   | Error e -> Error e

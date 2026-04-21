@@ -40,6 +40,8 @@ let emit t d  = t.diags <- d :: t.diags
 let has_errors t =
   List.exists (fun d -> d.severity = Error) t.diags
 
+let has_any t = t.diags <> []
+
 (* ── Locations ───────────────────────────────────────────────────────────── *)
 
 let no_loc = { file = ""; line = 0; col = 0; end_line = 0; end_col = 0 }

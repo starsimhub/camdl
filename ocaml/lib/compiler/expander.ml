@@ -69,12 +69,12 @@ let empty_context ?(source_dir = "") ?(filename = "<input>") () = {
   dim_decls            = [];
   dim_registry         = [];
   origin               = None;
-  let_tbl              = Hashtbl.create 0;
-  comp_tbl             = Hashtbl.create 0;
-  scalar_param_tbl     = Hashtbl.create 0;
-  expanded_param_tbl   = Hashtbl.create 0;
-  func_tbl             = Hashtbl.create 0;
-  expanded_comp_tbl    = Hashtbl.create 0;
+  let_tbl              = Hashtbl.create 16;
+  comp_tbl             = Hashtbl.create 16;
+  scalar_param_tbl     = Hashtbl.create 16;
+  expanded_param_tbl   = Hashtbl.create 16;
+  func_tbl             = Hashtbl.create 16;
+  expanded_comp_tbl    = Hashtbl.create 16;
 }
 
 (* ── Model summary ────────────────────────────────────────────────────────── *)

@@ -1,5 +1,5 @@
 (* IR type definitions — mirror of rust/crates/ir/src/ *)
-[@@@warning "-30-50"]  (* allow duplicate record field names; suppress docstring warning (matches ir.mli) *)
+[@@@warning "-30-50"]  (* allow duplicate record field names; suppress docstring warning *)
 
 (* ── Expression ─────────────────────────────────────────────────────────────── *)
 
