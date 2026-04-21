@@ -509,7 +509,7 @@ fn show_resolves_fit_by_hash_prefix() {
     }"#;
     std::fs::write(fit_dir.join("run.json"), run_json).unwrap();
     let out = Command::new(&bin)
-        .args(["show", "deadbee", &output.to_string_lossy()])
+        .args(["show", "deadbee", "--root", &output.to_string_lossy()])
         .output().expect("spawn");
     assert!(out.status.success(), "show by short-hash should resolve: stderr={}",
         String::from_utf8_lossy(&out.stderr));
@@ -585,7 +585,7 @@ fn cat_emits_cached_trajectory() {
 
     // `camdl cat <short>` uniquely resolves and emits the TSV
     let out = Command::new(&bin)
-        .args(["cat", short, &output.to_string_lossy()])
+        .args(["cat", short, "--root", &output.to_string_lossy()])
         .output().expect("spawn");
     assert!(out.status.success(), "cat short-hash should resolve uniquely");
     let stdout = String::from_utf8_lossy(&out.stdout);
@@ -636,7 +636,7 @@ beta = [0.2, 0.3, 0.4]
     )).unwrap();
 
     let st = Command::new(&bin)
-        .args(["simulate", "batch", &batch_path.to_string_lossy()])
+        .args(["batch", "run", &batch_path.to_string_lossy()])
         .status().expect("spawn");
     assert!(st.success(), "batch sweep should succeed");
 
@@ -714,7 +714,7 @@ beta = [0.2, 0.3, 0.4]
     )).unwrap();
 
     let out = Command::new(&bin)
-        .args(["simulate", "batch", &batch_path.to_string_lossy(), "--dry-run"])
+        .args(["batch", "run", &batch_path.to_string_lossy(), "--dry-run"])
         .output().expect("spawn");
     assert!(out.status.success(), "dry-run should exit 0");
     let stderr = String::from_utf8_lossy(&out.stderr);
@@ -752,8 +752,8 @@ fn simulate_batch_flag_rejected_cleanly() {
         .output().expect("spawn");
     assert!(!out.status.success(), "`--batch` flag should fail cleanly, not run");
     let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(stderr.contains("unknown flag") && stderr.contains("--batch"),
-        "stderr should report unknown flag, not panic: {}", stderr);
+    assert!(stderr.contains("unexpected argument") && stderr.contains("--batch"),
+        "stderr should report unexpected argument, not panic: {}", stderr);
 }
 
 #[test]
@@ -779,7 +779,7 @@ fn show_prints_metadata() {
     let short = &meta["kind"]["sim_hash"].as_str().unwrap()[..8];
 
     let out = Command::new(&bin)
-        .args(["show", short, &output.to_string_lossy()])
+        .args(["show", short, "--root", &output.to_string_lossy()])
         .output().expect("spawn");
     assert!(out.status.success(), "show should succeed");
     let stdout = String::from_utf8_lossy(&out.stdout);

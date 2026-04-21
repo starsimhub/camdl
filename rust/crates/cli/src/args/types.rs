@@ -45,11 +45,21 @@ impl FromStr for TableSpec {
 // ─── Backend ──────────────────────────────────────────────────────────────────
 
 /// Simulation backend.  Used as a clap `ValueEnum` so `--help` lists variants.
+///
+/// Canonical names use snake_case on the CLI (`--backend chain_binomial`)
+/// to match the IR JSON and run.json `backend` field. Clap 4's default
+/// ValueEnum rendering is kebab-case, which would diverge from
+/// everywhere else in the tool — hence the explicit `#[value(name=...)]`.
+/// The kebab form is kept as an alias so old scripts don't break.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, clap::ValueEnum)]
 pub enum Backend {
+    #[value(name = "gillespie")]
     Gillespie,
+    #[value(name = "tau_leap", alias = "tau-leap")]
     TauLeap,
+    #[value(name = "chain_binomial", alias = "chain-binomial")]
     ChainBinomial,
+    #[value(name = "ode")]
     Ode,
 }
 

@@ -51,7 +51,7 @@ fn save_paths_writes_n_times_t_rows() {
                "--params", &params.to_string_lossy(),
                "--data",   &data.to_string_lossy(),
                "--particles", "500", "--seed", "1",
-               "--save-paths", "10", &paths.to_string_lossy()])
+               "--n-paths", "10", "--save-paths", &paths.to_string_lossy()])
         .status().expect("spawn");
     assert!(status.success(), "pfilter should succeed");
 
@@ -141,7 +141,7 @@ fn save_paths_does_not_emit_filtering_caveat() {
                "--params", &params.to_string_lossy(),
                "--data",   &data.to_string_lossy(),
                "--particles", "100", "--seed", "1",
-               "--save-paths", "5", &paths.to_string_lossy()])
+               "--n-paths", "5", "--save-paths", &paths.to_string_lossy()])
         .output().expect("spawn");
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(!stderr.contains("filtering marginals"),
@@ -163,7 +163,7 @@ fn save_paths_values_are_monotone_nonincreasing_for_pure_death() {
                "--params", &params.to_string_lossy(),
                "--data",   &data.to_string_lossy(),
                "--particles", "500", "--seed", "1",
-               "--save-paths", "20", &paths.to_string_lossy()])
+               "--n-paths", "20", "--save-paths", &paths.to_string_lossy()])
         .status().expect("spawn");
 
     let contents = std::fs::read_to_string(&paths).unwrap();
