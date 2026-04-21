@@ -1,0 +1,65 @@
+time_unit = 'days
+
+dimensions { age = [child, adult] }
+# Explicit symp / asym compartments — no branching sugar today,
+# so each destination of "infection" must be its own named state.
+compartments { X, Y1_symp, Y1_asym, Y2, Y3, Sv, Ev, Iv }
+stratify(by = age, only = [X, Y1_symp, Y1_asym, Y2, Y3])
+
+parameters {
+  a         : rate in [0.1, 1.0]
+  b_h       : probability
+  b_v       : probability
+  r1_c      : rate in [0.01, 0.5]
+  r1_a      : rate in [0.01, 0.5]
+  alpha_c   : rate
+  alpha_a   : rate
+  r2        : rate
+  delta     : rate
+  sigma_v   : rate
+  mu_v      : rate
+  rho_sens  : probability
+  rho_spec  : probability
+  p_symp_c  : probability
+  p_symp_a  : probability
+}
+
+let I_h_c = Y1_symp_child + Y1_asym_child + Y2_child
+let I_h_a = Y1_symp_adult + Y1_asym_adult + Y2_adult
+let I_h_total = I_h_c + I_h_a
+let N_h = X_child + X_adult
+        + Y1_symp_child + Y1_symp_adult + Y1_asym_child + Y1_asym_adult
+        + Y2_child + Y2_adult + Y3_child + Y3_adult
+let h_eff = a * b_h * Iv / N_h
+
+transitions {
+  infect_symp_c : X_child --> Y1_symp_child  @ p_symp_c * h_eff * X_child
+  infect_asym_c : X_child --> Y1_asym_child  @ (1 - p_symp_c) * h_eff * X_child
+  infect_symp_a : X_adult --> Y1_symp_adult  @ p_symp_a * h_eff * X_adult
+  infect_asym_a : X_adult --> Y1_asym_adult  @ (1 - p_symp_a) * h_eff * X_adult
+
+  recover_symp_c  : Y1_symp_child --> X_child  @ r1_c * Y1_symp_child
+  recover_asym_c  : Y1_asym_child --> X_child  @ r1_c * Y1_asym_child
+  recover_symp_a  : Y1_symp_adult --> X_adult  @ r1_a * Y1_symp_adult
+  recover_asym_a  : Y1_asym_adult --> X_adult  @ r1_a * Y1_asym_adult
+
+  acquire_symp_c  : Y1_symp_child --> Y2_child @ alpha_c * Y1_symp_child
+  acquire_asym_c  : Y1_asym_child --> Y2_child @ alpha_c * Y1_asym_child
+  acquire_symp_a  : Y1_symp_adult --> Y2_adult @ alpha_a * Y1_symp_adult
+  acquire_asym_a  : Y1_asym_adult --> Y2_adult @ alpha_a * Y1_asym_adult
+
+  clear_c : Y2_child --> Y3_child @ r2 * Y2_child
+  clear_a : Y2_adult --> Y3_adult @ r2 * Y2_adult
+  wane_c  : Y3_child --> X_child  @ delta * Y3_child
+  wane_a  : Y3_adult --> X_adult  @ delta * Y3_adult
+
+  mosq_infect   : Sv --> Ev  @ a * b_v * Sv * I_h_total / N_h
+  mosq_eip      : Ev --> Iv  @ sigma_v * Ev
+  mosq_death_S  : Sv -->     @ mu_v * Sv
+  mosq_death_E  : Ev -->     @ mu_v * Ev
+  mosq_death_I  : Iv -->     @ mu_v * Iv
+}
+
+init { X_child = 400  X_adult = 600  Sv = 5000 }
+
+simulate { from = 0 'days  to = 365 'days }

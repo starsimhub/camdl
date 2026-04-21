@@ -32,18 +32,28 @@ they belong in an ABM, not a compartmental DSL.
 A minimal two-age Garki-style model exercises most of camdl's current
 features. Annotated with the pain points each section hits:
 
+This minimal 2-age Garki-like model **compiles cleanly against the
+current DSL** (verified against camdlc at commit 213aba8), and is
+the baseline the proposal measures progress against. Without
+branching sugar (#2), the symptomatic / asymptomatic split requires
+declaring `Y1_symp` and `Y1_asym` as separate compartments, doubling
+the Y1 state count and the number of transitions out of Y1:
+
 ```camdl
 time_unit = 'days
 
 dimensions { age = [child, adult] }
-compartments { X, Y1, Y2, Y3, Sv, Ev, Iv }
-stratify(by = age, only = [X, Y1, Y2, Y3])
+# Explicit symp/asym compartments — no branching sugar today, so each
+# destination of "infection" is its own named state. #2 would collapse
+# this back to a single Y1 with a multinomial branch at firing.
+compartments { X, Y1_symp, Y1_asym, Y2, Y3, Sv, Ev, Iv }
+stratify(by = age, only = [X, Y1_symp, Y1_asym, Y2, Y3])
 
 parameters {
-  a         : rate in [0.1, 1.0]       # biting rate (1/day)
-  b_h       : probability              # host susceptibility per bite
-  b_v       : probability              # vector susceptibility per bite
-  r1_c      : rate in [0.01, 0.5]      # #1: per-age recovery, separate params
+  a         : rate in [0.1, 1.0]
+  b_h       : probability
+  b_v       : probability
+  r1_c      : rate in [0.01, 0.5]      # #3: per-age recovery, separate params
   r1_a      : rate in [0.01, 0.5]
   alpha_c   : rate                     #     immunity acquisition
   alpha_a   : rate
@@ -57,66 +67,105 @@ parameters {
   p_symp_a  : probability
 }
 
-let I_h_c = Y1_child + Y2_child
-let I_h_a = Y1_adult + Y2_adult
+let I_h_c = Y1_symp_child + Y1_asym_child + Y2_child
+let I_h_a = Y1_symp_adult + Y1_asym_adult + Y2_adult
 let I_h_total = I_h_c + I_h_a
-let N_h = X_child + X_adult + Y1_child + Y1_adult
+let N_h = X_child + X_adult
+        + Y1_symp_child + Y1_symp_adult + Y1_asym_child + Y1_asym_adult
         + Y2_child + Y2_adult + Y3_child + Y3_adult
-
 let h_eff = a * b_h * Iv / N_h                # per-host force of infection
 
 transitions {
-  # #1 / #2: one transition per age × per branch. 2 ages × 2 branches = 4
-  # transitions to express "infection split by symptomaticity."
-  infect_symp_c : X_child --> Y1_symp_child    @ p_symp_c * h_eff * X_child
-  infect_asym_c : X_child --> Y1_asym_child    @ (1 - p_symp_c) * h_eff * X_child
-  infect_symp_a : X_adult --> Y1_symp_adult    @ p_symp_a * h_eff * X_adult
-  infect_asym_a : X_adult --> Y1_asym_adult    @ (1 - p_symp_a) * h_eff * X_adult
+  # #2: 4 infection transitions where biology is 2 events × 1 branch.
+  infect_symp_c : X_child --> Y1_symp_child  @ p_symp_c * h_eff * X_child
+  infect_asym_c : X_child --> Y1_asym_child  @ (1 - p_symp_c) * h_eff * X_child
+  infect_symp_a : X_adult --> Y1_symp_adult  @ p_symp_a * h_eff * X_adult
+  infect_asym_a : X_adult --> Y1_asym_adult  @ (1 - p_symp_a) * h_eff * X_adult
 
-  # #1: age-specific recovery rates via flat params (no per-age indexing on params).
-  recover_c     : Y1_child --> X_child         @ r1_c * Y1_child
-  recover_a     : Y1_adult --> X_adult         @ r1_a * Y1_adult
-  acquire_c     : Y1_child --> Y2_child        @ alpha_c * Y1_child
-  acquire_a     : Y1_adult --> Y2_adult        @ alpha_a * Y1_adult
+  # #2: 4 recovery transitions (one per {symp,asym} × {child,adult}) where
+  #     biology is 2 per-age events.
+  recover_symp_c  : Y1_symp_child --> X_child  @ r1_c * Y1_symp_child
+  recover_asym_c  : Y1_asym_child --> X_child  @ r1_c * Y1_asym_child
+  recover_symp_a  : Y1_symp_adult --> X_adult  @ r1_a * Y1_symp_adult
+  recover_asym_a  : Y1_asym_adult --> X_adult  @ r1_a * Y1_asym_adult
 
-  # #1: vector-host coupling — two separate transitions keep the rates in sync.
-  #     If we edit the coupling expression on one side and forget the other,
-  #     we've silently broken the model.
+  # Same duplication for immunity acquisition.
+  acquire_symp_c  : Y1_symp_child --> Y2_child @ alpha_c * Y1_symp_child
+  acquire_asym_c  : Y1_asym_child --> Y2_child @ alpha_c * Y1_asym_child
+  acquire_symp_a  : Y1_symp_adult --> Y2_adult @ alpha_a * Y1_symp_adult
+  acquire_asym_a  : Y1_asym_adult --> Y2_adult @ alpha_a * Y1_asym_adult
+
+  clear_c : Y2_child --> Y3_child @ r2 * Y2_child
+  clear_a : Y2_adult --> Y3_adult @ r2 * Y2_adult
+  wane_c  : Y3_child --> X_child  @ delta * Y3_child
+  wane_a  : Y3_adult --> X_adult  @ delta * Y3_adult
+
+  # #1: vector-host coupling — one biological event, but `mosq_infect`
+  #     and the `h_eff` term inside all `infect_*` transitions have to
+  #     be kept in sync by hand. Edit one without the other and the
+  #     model silently breaks.
   mosq_infect   : Sv --> Ev  @ a * b_v * Sv * I_h_total / N_h
-  # The corresponding "host sees infectious mosquito" side is already in
-  # `infect_*_*` above as part of h_eff — but the two shouldn't be
-  # represented by independent rates. They should be one coupled event.
-
   mosq_eip      : Ev --> Iv  @ sigma_v * Ev
   mosq_death_S  : Sv -->     @ mu_v * Sv
   mosq_death_E  : Ev -->     @ mu_v * Ev
   mosq_death_I  : Iv -->     @ mu_v * Iv
 }
 
-observations {
-  slide_positivity : {
-    projected  = prevalence(Y1_symp_child + Y1_symp_adult + Y1_asym_child + Y1_asym_adult
-                          + Y2_child + Y2_adult)
-    every      = 1 'weeks
-    # #4: test-characteristic correction expressed as a derived expression
-    #     that has to be inlined at the likelihood call site.
-    likelihood = binomial(n = N_tested,
-                          p = rho_sens * projected / N_h + (1 - rho_spec) * (1 - projected / N_h))
-  }
-}
+init { X_child = 400  X_adult = 600  Sv = 5000 }
 
 simulate { from = 0 'days  to = 365 'days }
 ```
 
-Count the friction points:
-- **Parameter explosion**: `r1_c, r1_a, alpha_c, alpha_a, p_symp_c, p_symp_a` — flat names that duplicate dimensional structure.
-- **Transition duplication**: 4 infection transitions where biologically there are 2 events (infect-child, infect-adult) × 1 stochastic branching.
-- **Hidden coupling**: `mosq_infect` and `h_eff` both depend on `a, b_h/b_v, N_h`. Keeping them in sync is manual.
-- **Inlined test correction**: the sensitivity/specificity correction sits inside the `likelihood = ` expression and re-computes `projected / N_h` — the reader has to know the formula to parse intent.
-- **Age aging absent**: this model assumes no ageing. A multi-year Garki fit with 5 age groups needs explicit aging transitions — 5 compartments × 4 transitions = 20 lines of `Y2_child --> Y2_teen @ Y2_child / age_dur_child`.
+Verified compile (`camdlc inspect`):
 
-Total: ~50 lines of DSL for a 2-age model, most of which is incidental
-structure rather than biology.
+```text
+garki_pre_proposal
+  compartments   8 base × 2 age = 13 expanded
+  transitions    21 base → 21 expanded (+ 0 filtered by where)
+  parameters     15 declared (a: rate, b_h: probability, b_v: probability,
+                 r1_c: rate, r1_a: rate, alpha_c: rate, alpha_a: rate,
+                 r2: rate, delta: rate, sigma_v: rate, mu_v: rate,
+                 rho_sens: probability, rho_spec: probability,
+                 p_symp_c: probability, p_symp_a: probability)
+  tables         0
+  let bindings   5 (I_h_c, I_h_a, I_h_total, N_h, h_eff)
+  dimensions     age = [child, adult]
+  observations   0 streams
+  interventions  0 (0 active by default)
+```
+
+The fixture lives at `docs/dev/proposals/fixtures/garki_pre_proposal.camdl`.
+
+**65 content lines, 21 transitions.** Count the friction points —
+every one corresponds to a numbered feature below:
+
+- **#1 vector-host coupling duplication**: `mosq_infect` and the
+  `a * b_h * Iv / N_h` inside `h_eff` both encode the same
+  biological event. No atomic coupling; hand-maintained parallel
+  rates.
+- **#2 branching explosion**: `Y1_symp` and `Y1_asym` have to be
+  distinct compartments, doubling the state count out of `Y1`.
+  Four infection transitions × four recovery × four acquisition =
+  12 transitions that in the biology are one event per age.
+- **#3 parameter explosion**: `r1_c`, `r1_a`, `alpha_c`, `alpha_a`,
+  `p_symp_c`, `p_symp_a` — flat names duplicate the dimensional
+  structure that `age` already has. Indexed priors with partial
+  pooling across age groups aren't expressible.
+- **#4 inlined test-characteristic correction** (not shown in the
+  model above — would be another 3-line `observations { }` block
+  with the sens/spec correction manually inlined into the
+  `likelihood = binomial(n, p = rho_sens*projected/N_h + (1-rho_spec)*(1-projected/N_h))`
+  expression).
+- **#5 no aging**: this example omits demographic aging entirely
+  because adding it would require `|compartments| × (|age|-1)` =
+  8 × 1 = 8 manual transitions. Scaling to 5 age groups means
+  32 aging transitions.
+- **#6 no reactive interventions**: interventions must have static
+  schedules; state-triggered response isn't expressible.
+
+Proposal target (post-#1, #2, #4, #5): this model compresses to ≈ 55
+lines and ≈ 10 transitions, with every transition reading like one
+biological event.
 
 ---
 
@@ -567,92 +616,98 @@ host and an infectious vector meet; the host becomes infectious."
 
 ## Endpoint: Garki in camdl, post-proposal
 
-Using #1, #2, #4, #5, #6 (deferring #3 until a multi-village fit
-demands it):
+Same biology as the 65-line pre-proposal fixture above, rewritten
+against the proposed DSL with all six features applied. Each
+annotated block calls out which feature it uses.
 
 ```camdl
 time_unit = 'days
 
-dimensions { age = [c, t, a1, a2, s] }   # child / teen / adult1 / adult2 / senior
-compartments { X, Y_symp, Y_asym, Y_imm_pos, Y_imm_neg, S_v, E_v, I_v }
-stratify(by = age, only = [X, Y_symp, Y_asym, Y_imm_pos, Y_imm_neg])
+dimensions { age = [child, adult] }
+compartments { X, Y1, Y2, Y3, Sv, Ev, Iv }
+stratify(by = age, only = [X, Y1, Y2, Y3])
+# #2 collapses Y1_symp / Y1_asym back to a single Y1. The symp/asym
+# split becomes a multinomial branch at infection firing, not a
+# state duplication.
 
-tables {
-  age_dur  : age 'years = [5, 10, 20, 20, 20]
-  r1       : age 'per_day       # recovery from primary infection
-  alpha    : age 'per_day       # immunity-acquisition rate
-  p_symp   : age                # symptomatic fraction at infection
-}
-
+# --- #3: age-indexed parameters, one declaration each --------------
 parameters {
-  a, b_h, b_v    : rate, probability, probability
-  r2, delta      : rate, rate        # immune-clearance, immunity-waning
-  sigma_v, mu_v  : rate, rate
-  rho_sens, rho_spec : probability, probability
-  outbreak_th    : probability in [0.02, 0.15]
-  irs_eff        : probability in [0.5, 0.95]
+  a        : rate
+  b_h      : probability
+  b_v      : probability
+  r1[age]  : rate         ~ HalfNormal(0.1) | age      # partial pooling
+  alpha[age]: rate        ~ HalfNormal(0.05) | age
+  p_symp[age]: probability ~ Beta(2, 2) | age
+  r2       : rate
+  delta    : rate
+  sigma_v  : rate
+  mu_v     : rate
+  rho_sens : probability
+  rho_spec : probability
+  outbreak_th : probability in [0.02, 0.15]
+  irs_eff  : probability  in [0.5, 0.95]
 }
 
-forcing {
-  m_density : interpolated { data = "rainfall.tsv"  time_col = t  value_col = mosq
-                              method = "linear" }
-}
+let I_h       = sum(a in age, Y1[a] + Y2[a])
+let N_h       = sum(a in age, X[a] + Y1[a] + Y2[a] + Y3[a])
+let prev      = I_h / N_h
 
-let I_h[a] = Y_symp[a] + Y_asym[a] + Y_imm_pos[a]
-let N_h    = sum(a in age, X[a] + Y_symp[a] + Y_asym[a] + Y_imm_pos[a] + Y_imm_neg[a])
-let prev   = sum(a in age, I_h[a]) / N_h
-
-aging {
-  age : 1 / age_dur[a]
-}
+# --- #5: one block replaces |compartments| × (|age|-1) transitions -
+aging { age : rate = [1 / (15 'years)] }
 
 transitions {
-  # Vector-host coupling: one event each, bidirectional reference compartment.
-  host_infect[a in age] :
-    X[a] + I_v --> {Y_symp[a] : p_symp[a], Y_asym[a] : 1 - p_symp[a]} + I_v
-    @ a * b_h * X[a] * I_v / N_h
+  # --- #1 + #2: vector-host coupling as one atomic event, with a ---
+  # --- multinomial branch on the infection outcome per age ---------
+  bite[a in age] :
+    X[a] + Iv --> {Y1[a] : p_symp[a], Y1[a] : 1 - p_symp[a]} + Iv
+    @ a * b_h * X[a] * Iv / N_h
+  # (Both branches currently land in Y1; when we split Y1 into symp/
+  # asym Y1 flags later the branch targets diverge. The DSL tolerates
+  # identical targets — the branch becomes a no-op but documents the
+  # biology.)
 
-  vec_infect  : S_v + sum_over_age(I_h[a]) --> E_v + sum_over_age(I_h[a])
-    @ a * b_v * S_v * sum(a in age, I_h[a]) / N_h
+  # #1: mosquito-side coupling, reciprocal of `bite`.
+  infect_v : Sv + I_h_ref --> Ev + I_h_ref
+    @ a * b_v * Sv * I_h / N_h
 
-  # Single-source progression
-  prim_to_imm_pos[a in age] : Y_symp[a]   --> Y_imm_pos[a]  @ alpha[a] * Y_symp[a]
-  asym_to_imm_pos[a in age] : Y_asym[a]   --> Y_imm_pos[a]  @ alpha[a] * Y_asym[a]
-  recover_prim[a in age]    : Y_symp[a]   --> X[a]          @ r1[a] * Y_symp[a]
-  recover_asym[a in age]    : Y_asym[a]   --> X[a]          @ r1[a] * Y_asym[a]
-  clear_imm[a in age]       : Y_imm_pos[a] --> Y_imm_neg[a] @ r2 * Y_imm_pos[a]
-  reinfect_imm[a in age]    : Y_imm_neg[a] + I_v --> Y_imm_pos[a] + I_v
-                                                     @ a * b_h * Y_imm_neg[a] * I_v / N_h
-  wane_imm[a in age]        : Y_imm_neg[a] --> X[a]          @ delta * Y_imm_neg[a]
+  # Per-age progression — indexed transitions keyed by [a in age]
+  # eliminate the per-age duplication.
+  recover[a in age]  : Y1[a] --> X[a]  @ r1[a] * Y1[a]
+  acquire[a in age]  : Y1[a] --> Y2[a] @ alpha[a] * Y1[a]
+  clear[a in age]    : Y2[a] --> Y3[a] @ r2 * Y2[a]
+  wane[a in age]     : Y3[a] --> X[a]  @ delta * Y3[a]
 
-  # Vector EIP chain (using existing Erlang-consecutive sugar)
-  vec_eip                   : E_v --> I_v  @ sigma_v * E_v
-  vec_mort_S                : S_v -->      @ mu_v * S_v
-  vec_mort_E                : E_v -->      @ mu_v * E_v
-  vec_mort_I                : I_v -->      @ mu_v * I_v
+  vec_eip    : Ev --> Iv  @ sigma_v * Ev
+  vec_mort_S : Sv -->     @ mu_v * Sv
+  vec_mort_E : Ev -->     @ mu_v * Ev
+  vec_mort_I : Iv -->     @ mu_v * Iv
 }
 
+# --- #6: reactive outbreak-triggered IRS, not a static schedule ----
 interventions {
-  reactive_irs : transfer(fraction = irs_eff, from = I_v, to = S_v)
+  reactive_irs : transfer(fraction = irs_eff, from = Iv, to = Sv)
                  when prev > outbreak_th
                  cooldown = 60 'days
 }
 
+# --- #4: diagnostic_test likelihood absorbs sens/spec correction ---
 observations {
   slide_positivity[a in age] : {
-    projected  = prevalence(Y_symp[a] + Y_asym[a] + Y_imm_pos[a])
+    projected  = prevalence(Y1[a] + Y2[a])
     every      = 1 'weeks
     likelihood = diagnostic_test(
-      base = binomial(n = N_tested[a], p = projected / N_h_age[a]),
+      base = binomial(n = N_tested[a], p = projected / N_h),
       sens = rho_sens, spec = rho_spec
     )
   }
 }
 
+init { X[child] = 400  X[adult] = 600  Sv = 5000 }
 simulate { from = 0 'days  to = 2 'years }
 ```
 
-**≈ 55 content lines** for a 5-age Garki with vector dynamics,
+**≈ 55 content lines** for a 2-age Garki (extends to any age
+partition by rewriting one `dimensions` line) with vector dynamics,
 bite-mediated transmission, symptomatic/asymptomatic branching,
 immune-waning dynamics, reactive IRS, and slide-characteristic-
 adjusted observations per age. Every non-boilerplate line reads
