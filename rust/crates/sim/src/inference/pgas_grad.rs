@@ -268,7 +268,7 @@ fn log_gamma_density_grad_substep(
     let mut grad = vec![0.0; d];
     let mut gamma_idx = 0;
 
-    for &(_, ref group) in &model.source_groups {
+    for (_, group) in &model.source_groups {
         let mut resolved_od: Option<&crate::resolved_expr::ResolvedExpr> = None;
         let mut sigma_sq = 1.0;
 
@@ -383,7 +383,7 @@ pub fn complete_data_loglik_grad(
         if let Some(&obs_idx) = obs_at_substep.get(&s) {
             log_p += obs_model.log_likelihood_from_flows_and_counts(
                 &cum_flows, &rec.counts_after, obs_idx, params);
-            for f in &mut cum_flows { *f = 0; }
+            cum_flows.fill(0);
         }
     }
 

@@ -100,7 +100,7 @@ pub fn inject_event_deltas(
                     {
                         use std::sync::OnceLock;
                         static TRACE: OnceLock<bool> = OnceLock::new();
-                        if *TRACE.get_or_init(|| std::env::var("CAMDL_TRACE_STEPS").map_or(false, |v| v == "1")) {
+                        if *TRACE.get_or_init(|| std::env::var("CAMDL_TRACE_STEPS").is_ok_and(|v| v == "1")) {
                             eprintln!("EVENT '{}' at t={:.1}: add {} += {} (raw={:.2})",
                                 iv.name, t_end, aa.compartment, n, raw);
                         }

@@ -490,7 +490,7 @@ pub fn cmd_fit_run_v2(a: &crate::args::FitRunArgs) {
                 .collect::<Vec<_>>()
                 .join("__");
             if pt_idx == 0 {
-                eprintln!("");
+                eprintln!();
             }
             eprintln!("═══ sweep point {}/{}: {} ═══", pt_idx + 1, sweep_points.len(), slug);
             fit_dir.join(&per_fit_prefix).join(slug)
@@ -890,7 +890,7 @@ pub fn cmd_fit_run_v2(a: &crate::args::FitRunArgs) {
                 let prior_state = effective_starts.as_ref().and_then(|dir| {
                     state::FitState::load(dir).ok()
                 });
-                if prior_state.is_none() && !effective_starts.as_ref().map_or(true, |s| s.is_empty()) {
+                if prior_state.is_none() && !effective_starts.as_ref().is_none_or(|s| s.is_empty()) {
                     eprintln!("warning: could not load fit_state from starts_from");
                 }
 

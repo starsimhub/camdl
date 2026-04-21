@@ -1493,7 +1493,7 @@ fn print_dry_run(
     if scenarios.len() > 1 || scenarios[0] != "(baseline)" {
         eprintln!("  {} {}", d("scenarios:"), scenarios.join(", "));
     } else {
-        eprintln!("  {} {}", d("scenario:"), "(baseline)");
+        eprintln!("  {} (baseline)", d("scenario:"));
     }
 
     // Obs output
@@ -1788,7 +1788,7 @@ mod tests {
         assert_eq!(draws.len(), 100);
         for row in &draws {
             let v = row["beta"];
-            assert!(v >= 0.01 && v <= 2.0, "{} out of bounds", v);
+            assert!((0.01..=2.0).contains(&v), "{} out of bounds", v);
         }
     }
 
@@ -1819,7 +1819,7 @@ mod tests {
         let draws = generate_prior_draws_from_ir(&path, 50, 42, &[]).unwrap();
         for row in &draws {
             let v = row["beta"];
-            assert!(v >= 0.0 && v <= 1.0,
+            assert!((0.0..=1.0).contains(&v),
                 "truncation must keep all draws in bounds, got {}", v);
         }
     }
@@ -1869,7 +1869,7 @@ mod tests {
         for row in &draws {
             assert_eq!(row["N0"], 1000.0, "scenario should pin N0");
             let b = row["beta"];
-            assert!(b >= 0.01 && b <= 2.0, "beta out of bounds: {}", b);
+            assert!((0.01..=2.0).contains(&b), "beta out of bounds: {}", b);
         }
     }
 

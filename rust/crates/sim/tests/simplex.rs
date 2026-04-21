@@ -275,7 +275,7 @@ fn perturb_different_rw_sds() {
     let start = vec![1.0/3.0, 1.0/3.0, 1.0/3.0];
     let mut rng = rng();
 
-    let mut total_movement = vec![0.0; 3];
+    let mut total_movement = [0.0; 3];
     let n_reps = 100;
     for _ in 0..n_reps {
         let mut params = start.clone();
@@ -350,7 +350,7 @@ fn perturb_with_extra_params() {
     assert_eq!(params[4], 999.0, "non-group param 4 should be untouched");
 
     // Group params should sum to 1
-    let group_sum: f64 = vec![params[1], params[2], params[3]].iter().sum();
+    let group_sum: f64 = [params[1], params[2], params[3]].iter().sum();
     assert!((group_sum - 1.0).abs() < 1e-10,
         "group sum should be 1.0, got {}", group_sum);
 }

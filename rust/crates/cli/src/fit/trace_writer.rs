@@ -83,7 +83,7 @@ impl TraceWriter {
             writeln!(f).unwrap();
 
             let n = self.row_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            if (n + 1) % self.flush_interval == 0 {
+            if (n + 1).is_multiple_of(self.flush_interval) {
                 f.flush().ok();
             }
         }

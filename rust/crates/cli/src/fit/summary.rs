@@ -73,10 +73,7 @@ pub fn write_summary(
             }
         }
         out.push('\t');
-        match r.loglik {
-            Some(ll) => out.push_str(&format!("{:.4}", ll)),
-            None     => {}
-        }
+        if let Some(ll) = r.loglik { out.push_str(&format!("{:.4}", ll)) }
         out.push('\t');
         out.push_str(&r.content_hash);
         out.push('\n');

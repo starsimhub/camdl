@@ -289,8 +289,7 @@ pub fn resolve_flow_indices(model: &ir::Model, flow_name: Option<&str>) -> Resul
     } else {
         let indices: Vec<usize> = model.transitions.iter().enumerate()
             .filter(|(_, tr)| tr.metadata.as_ref()
-                .and_then(|m| m.origin_kind.as_deref())
-                .map_or(false, |k| k == "transmission"))
+                .and_then(|m| m.origin_kind.as_deref()) == Some("transmission"))
             .map(|(i, _)| i)
             .collect();
         if indices.is_empty() {

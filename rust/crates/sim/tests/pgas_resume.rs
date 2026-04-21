@@ -344,7 +344,7 @@ fn test_resume_reorder_z_by_name() {
         .collect();
 
     // Current run's parameter order: [amplitude, R0, s0] (different!)
-    let current_order = vec!["amplitude", "R0", "s0"];
+    let current_order = ["amplitude", "R0", "s0"];
     let reordered: Vec<f64> = current_order.iter()
         .map(|name| *saved_z.get(name).unwrap())
         .collect();
@@ -379,7 +379,7 @@ fn test_resume_param_names_mismatch_detected() {
         .collect();
 
     // Missing param in saved state should be detected
-    let current_names = vec!["R0", "s0", "amplitude", "new_param"];
+    let current_names = ["R0", "s0", "amplitude", "new_param"];
     let missing: Vec<&&str> = current_names.iter()
         .filter(|name| !saved_z.contains_key(**name))
         .collect();

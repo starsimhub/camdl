@@ -762,7 +762,7 @@ fn run_design_experiment(
         // Annotate each point with its index for run.json
         let sweep_points = &design_result.points;
         let design_stem = crate::hashing::path_stem_slug(ir_path);
-        let plans = plan_runs(&scenarios, sweep_points, &seeds, shash,
+        let plans = plan_runs(&scenarios, sweep_points, seeds, shash,
             design_stem.as_deref(), &runs_dir, force);
         let total = plans.len();
         let counter = Arc::new(AtomicUsize::new(0));
@@ -819,7 +819,7 @@ fn run_design_experiment(
                             serde_json::to_string(&plan.scenario).unwrap_or_default(),
                             plan.seed,
                         );
-                        let _ = std::fs::write(&format!("{}/run.json", plan.run_dir), run_json);
+                        let _ = std::fs::write(format!("{}/run.json", plan.run_dir), run_json);
                         let n = counter.fetch_add(1, Ordering::Relaxed) + 1;
                         eprintln!("[{}/{}] design={} scenario={} seed={}", n, total, design_name, plan.scenario, plan.seed);
                     }
@@ -1217,8 +1217,8 @@ mod tests {
         let p1 = plan_runs(&[sc_enable("old_name", &["sia"])], &no_sweep(), &[1], "aaaa1111bbbb2222", None, runs_dir, false);
         let p2 = plan_runs(&[sc_enable("new_name", &["sia"])], &no_sweep(), &[1], "aaaa1111bbbb2222", None, runs_dir, false);
         // Slugs differ but scen_hash_8 (embedded in dir name) is identical
-        let hash1: &str = p1[0].run_path.splitn(3, '/').nth(1).unwrap().splitn(2, '-').nth(1).unwrap();
-        let hash2: &str = p2[0].run_path.splitn(3, '/').nth(1).unwrap().splitn(2, '-').nth(1).unwrap();
+        let hash1: &str = p1[0].run_path.split('/').nth(1).unwrap().split_once('-').unwrap().1;
+        let hash2: &str = p2[0].run_path.split('/').nth(1).unwrap().split_once('-').unwrap().1;
         assert_eq!(hash1, hash2, "same enables/params → same scen_hash_8");
     }
 

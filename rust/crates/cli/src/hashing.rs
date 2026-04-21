@@ -202,7 +202,7 @@ pub fn fit_content_hash(
         h.update(b"\x00");
     }
     h.update(b"fit\x00");
-    h.update(&canonicalise_toml(fit_toml_bytes));
+    h.update(canonicalise_toml(fit_toml_bytes));
     h.update(b"\x00version\x00");
     h.update(version::VERSION_SHORT.as_bytes());
     // Full 64-char hex. Directory-name truncation happens at the
@@ -245,7 +245,7 @@ pub fn fit_input_hash(
         h.update(b"\x00");
     }
     h.update(b"fit\x00");
-    h.update(&canonicalise_toml(fit_toml_bytes));
+    h.update(canonicalise_toml(fit_toml_bytes));
     h.update(b"\x00seed\x00");
     h.update(seed.to_le_bytes());
     h.update(b"\x00version\x00");
@@ -607,7 +607,7 @@ mod tests {
         let base = fit_input_hash(model, &mut data.clone(), fit, 1);
         // Change each input independently; hash must differ every time.
         let diff_model = fit_input_hash(b"ir:{changed}", &mut data.clone(), fit, 1);
-        let diff_data  = fit_input_hash(model, &mut vec![("cases".into(), b"b".to_vec())], fit, 1);
+        let diff_data  = fit_input_hash(model, &mut [("cases".into(), b"b".to_vec())], fit, 1);
         let diff_fit   = fit_input_hash(model, &mut data.clone(), b"[fit]\nseed=1", 1);
         let diff_seed  = fit_input_hash(model, &mut data.clone(), fit, 2);
         assert_ne!(base, diff_model, "model change must invalidate");

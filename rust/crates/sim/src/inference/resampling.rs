@@ -92,7 +92,7 @@ mod tests {
         assert_eq!(indices.len(), 4);
         let count_0 = indices.iter().filter(|&&i| i == 0).count();
         // Particle 0 should get ~2 copies (3/6 * 4 = 2)
-        assert!(count_0 >= 1 && count_0 <= 3,
+        assert!((1..=3).contains(&count_0),
             "particle 0 (weight 3/6) got {} copies out of 4", count_0);
     }
 }

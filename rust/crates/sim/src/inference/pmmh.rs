@@ -173,7 +173,7 @@ impl AdaptiveProposal {
         }
 
         self.steps_since_chol += 1;
-        if self.steps_since_chol >= self.chol_interval && self.n >= self.d + 1 {
+        if self.steps_since_chol >= self.chol_interval && self.n > self.d {
             self.update_cholesky();
         }
     }
@@ -456,7 +456,7 @@ pub fn run_pmmh(
         }
 
         // Record step (respecting burn-in and thinning)
-        if step >= config.burn_in && (step - config.burn_in) % config.thin == 0 {
+        if step >= config.burn_in && (step - config.burn_in).is_multiple_of(config.thin) {
             steps.push(PMMHStep {
                 step,
                 params: current_params.clone(),

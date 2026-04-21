@@ -331,7 +331,7 @@ pub fn run_pmmh_cli(
                 let acc = accepted_count.load(Ordering::Relaxed) as f64 / (step + 1) as f64;
 
                 // Stream trace row to disk (respecting burn-in/thin)
-                if step >= burn_in && (step - burn_in) % thin == 0 {
+                if step >= burn_in && (step - burn_in).is_multiple_of(thin) {
                     let log_prior: f64 = config.estimated_params.iter().zip(priors.iter())
                         .map(|(spec, prior)| {
                             let theta = params[spec.index];
@@ -350,7 +350,7 @@ pub fn run_pmmh_cli(
                 }
 
                 // Progress display (always, regardless of burn-in/thin)
-                if step % 100 == 0 || step == n_steps - 1 {
+                if step.is_multiple_of(100) || step == n_steps - 1 {
                     if is_tty {
                         bar.set_position(step as u64 + 1);
                         if loglik.is_finite() {

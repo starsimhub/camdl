@@ -276,8 +276,10 @@ fn parse_seed_range(s: &str) -> Option<Vec<u64>> {
 /// How initial parameter points are chosen for each fit-seed replicate.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
+#[derive(Default)]
 pub enum FitStarts {
     /// Start from the model's declared parameter values (default).
+    #[default]
     ModelDefault,
     /// Draw starts from declared priors. Errors if any estimated
     /// parameter lacks a prior.
@@ -285,9 +287,6 @@ pub enum FitStarts {
     // LatinHypercube is reserved; not implemented in the initial landing.
 }
 
-impl Default for FitStarts {
-    fn default() -> Self { FitStarts::ModelDefault }
-}
 
 // ─── Estimate ───────────────────────────────────────────────────────────────
 
@@ -481,18 +480,17 @@ impl Stage {
 /// directory path; if it equals "random", it's random starts; otherwise
 /// it's a stage name reference.
 #[derive(Debug, Clone, Serialize)]
+#[derive(Default)]
 pub enum StartsFrom {
     /// Name of a previous stage in this fit.toml (e.g., "mle").
     Stage(String),
     /// Path to an external results directory.
     Directory(PathBuf),
     /// Random starts from parameter bounds.
+    #[default]
     Random,
 }
 
-impl Default for StartsFrom {
-    fn default() -> Self { StartsFrom::Random }
-}
 
 impl StartsFrom {
     pub fn is_random(&self) -> bool { matches!(self, StartsFrom::Random) }
@@ -971,6 +969,13 @@ impl FitConfigV2 {
         }
         Ok(())
     }
+}
+
+/// Format a dataset index as `ds_01`, `ds_02`, … zero-padded to the
+/// minimum width for a 2-digit grid. Grids beyond 99 datasets just
+/// stop padding and render as `ds_100`, `ds_101`, etc.
+pub(crate) fn format_dataset_dir(idx: usize) -> String {
+    format!("ds_{:02}", idx)
 }
 
 // ─── Tests ──────────────────────────────────────────────────────────────────
@@ -2026,11 +2031,4 @@ cooling = 0.7
         assert_eq!(format_dataset_dir(10),  "ds_10");
         assert_eq!(format_dataset_dir(100), "ds_100");
     }
-}
-
-/// Format a dataset index as `ds_01`, `ds_02`, … zero-padded to the
-/// minimum width for a 2-digit grid. Grids beyond 99 datasets just
-/// stop padding and render as `ds_100`, `ds_101`, etc.
-pub(crate) fn format_dataset_dir(idx: usize) -> String {
-    format!("ds_{:02}", idx)
 }

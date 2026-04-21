@@ -233,15 +233,13 @@ pub fn bootstrap_filter_correlated(
     //
     // Check: if σ² depends on compartment counts, CPM can't handle it correctly
     // (would need per-particle per-substep evaluation). Emit an error.
-    for od in &model.resolved.overdispersion {
-        if let Some(re) = od {
-            if crate::resolved_expr::references_state(re) {
-                return Err(SimError::Validation(
-                    "Correlated pseudo-marginal (CPM) does not support state-dependent \
-                     overdispersion (σ² references compartment counts). Use vanilla PMMH \
-                     (rho = None) or make σ² a parameter instead.".into()
-                ));
-            }
+    for re in model.resolved.overdispersion.iter().flatten() {
+        if crate::resolved_expr::references_state(re) {
+            return Err(SimError::Validation(
+                "Correlated pseudo-marginal (CPM) does not support state-dependent \
+                 overdispersion (σ² references compartment counts). Use vanilla PMMH \
+                 (rho = None) or make σ² a parameter instead.".into()
+            ));
         }
     }
 
@@ -290,23 +288,21 @@ pub fn bootstrap_filter_correlated(
             t: 0.0, projected: None, int_float_override: None,
         };
         let mut first_sq: Option<f64> = None;
-        for od in &model.resolved.overdispersion {
-            if let Some(re) = od {
-                let sq = crate::resolved_expr::eval_resolved(re, &ctx);
-                match first_sq {
-                    None => first_sq = Some(sq),
-                    Some(first) if (first - sq).abs() > 1e-12 * first.abs().max(1.0) => {
-                        return Err(SimError::Validation(
-                            "Correlated pseudo-marginal (CPM) does not support \
-                             distinct σ² values across overdispersed \
-                             transitions (it uses the first transition's σ² for \
-                             every gamma draw). Either share one σ² parameter \
-                             across all overdispersed transitions, or drop to \
-                             vanilla PMMH (rho = None).".into()
-                        ));
-                    }
-                    _ => {}
+        for re in model.resolved.overdispersion.iter().flatten() {
+            let sq = crate::resolved_expr::eval_resolved(re, &ctx);
+            match first_sq {
+                None => first_sq = Some(sq),
+                Some(first) if (first - sq).abs() > 1e-12 * first.abs().max(1.0) => {
+                    return Err(SimError::Validation(
+                        "Correlated pseudo-marginal (CPM) does not support \
+                         distinct σ² values across overdispersed \
+                         transitions (it uses the first transition's σ² for \
+                         every gamma draw). Either share one σ² parameter \
+                         across all overdispersed transitions, or drop to \
+                         vanilla PMMH (rho = None).".into()
+                    ));
                 }
+                _ => {}
             }
         }
     }

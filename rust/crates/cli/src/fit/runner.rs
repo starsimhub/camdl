@@ -358,7 +358,7 @@ fn build_if2_params(
             } else {
                 p.initial *= 1.0 + 0.2 * (rng.uniform() - 0.5);
             }
-        } else if let Some(ref state) = prior_state {
+        } else if let Some(state) = prior_state {
             if let Some(&v) = state.start_values.get(&p.name) {
                 p.initial = v;
             }
@@ -1023,7 +1023,7 @@ fn median(v: &mut [f64]) -> f64 {
     v.sort_by(|a, b| a.total_cmp(b));
     let n = v.len();
     if n == 0 { return 0.0; }
-    if n % 2 == 0 {
+    if n.is_multiple_of(2) {
         (v[n / 2 - 1] + v[n / 2]) / 2.0
     } else {
         v[n / 2]
@@ -1197,6 +1197,297 @@ pub fn write_diagnostics(dir: &str, results: &[(usize, IF2Result)]) -> Result<()
         }
     }
     Ok(())
+}
+
+/// Compute input hash for provenance (shared by refine and validate).
+pub fn compute_fit_input_hash(fit: &FitToml, config: &FitRunConfig, seed: u64) -> String {
+    let fit_toml_bytes = toml::to_string(fit).unwrap_or_default().into_bytes();
+    let mut data_files: Vec<(String, Vec<u8>)> = fit.data.iter().map(|(name, path)| {
+        (name.clone(), std::fs::read(path).unwrap_or_default())
+    }).collect();
+    crate::hashing::fit_input_hash(
+        config.model_ir_json.as_bytes(),
+        &mut data_files,
+        &fit_toml_bytes,
+        seed,
+    )
+}
+
+/// Collect ALL parameter values (estimated + fixed) for MLE output.
+pub fn collect_all_params(
+    mle: &[f64],
+    if2_params: &[EstimatedParam],
+    model: &ir::Model,
+    base_params: &[f64],
+    compiled: &CompiledModel,
+) -> HashMap<String, f64> {
+    let mut params = HashMap::new();
+    for p in &model.parameters {
+        let idx = compiled.param_index.get(p.name.as_str()).copied().unwrap();
+        let value = if let Some(spec) = if2_params.iter().find(|s| s.name == p.name) {
+            mle[spec.index]
+        } else {
+            base_params[idx]
+        };
+        params.insert(p.name.clone(), value);
+    }
+    params
+}
+
+/// Parse a prior specification string from fit.toml.
+///
+/// Mirrors the seven distributions supported in DSL `~` syntax. Args are
+/// positional here (fit.toml strings) but named in the DSL. Both the DSL
+/// name (`log_normal`, `half_normal`) and the legacy compact form
+/// (`lognormal`, `halfnormal`) are accepted.
+///
+/// | fit.toml string                  | Prior variant                            |
+/// |----------------------------------|------------------------------------------|
+/// | `flat`                           | `Flat`                                   |
+/// | `uniform(lower, upper)`          | `Uniform { lower, upper }`               |
+/// | `normal(mu, sigma)`              | `Normal { mean: mu, sd: sigma }`         |
+/// | `log_normal(mu, sigma)`          | `TransformedNormal { mean: mu, sd: sigma }` |
+/// | `half_normal(sigma)`             | `HalfNormal { sigma }`                   |
+/// | `beta(alpha, beta)`              | `Beta { alpha, beta }`                   |
+/// | `gamma(shape, rate)`             | `Gamma { shape, rate }`                  |
+/// | `exponential(rate)`              | `Exponential { rate }`                   |
+///
+/// Examples:
+///   "log_normal(log(50), 0.4)"   → LogNormal with median 50
+///   "log_normal(3.912, 0.4)"     → same (log(50) ≈ 3.912)
+///   "normal(0.08, 0.02)"         → Normal(0.08, 0.02) on natural scale
+pub fn parse_prior(s: &str) -> Option<Prior> {
+    let s = s.trim();
+    if s == "flat" { return Some(Prior::Flat); }
+
+    // Match "name(arg1, arg2, ...)"
+    let open = s.find('(')?;
+    let close = s.rfind(')')?;
+    let name = s[..open].trim();
+    let args_str = &s[open + 1..close];
+    let args: Vec<f64> = args_str.split(',')
+        .map(|a| eval_prior_arg(a.trim()))
+        .collect::<Option<Vec<_>>>()?;
+
+    // Accept both DSL names (log_normal, half_normal) and legacy compact
+    // names (lognormal) for fit.toml backward compatibility.
+    match (name, args.len()) {
+        ("lognormal", 2) | ("log_normal", 2) =>
+            Some(Prior::TransformedNormal { mean: args[0], sd: args[1] }),
+        ("normal", 2) =>
+            Some(Prior::Normal { mean: args[0], sd: args[1] }),
+        ("beta", 2) =>
+            Some(Prior::Beta { alpha: args[0], beta: args[1] }),
+        ("half_normal", 1) | ("halfnormal", 1) =>
+            Some(Prior::HalfNormal { sigma: args[0] }),
+        ("gamma", 2) =>
+            Some(Prior::Gamma { shape: args[0], rate: args[1] }),
+        ("exponential", 1) =>
+            Some(Prior::Exponential { rate: args[0] }),
+        ("uniform", 2) =>
+            Some(Prior::Uniform { lower: args[0], upper: args[1] }),
+        _ => None,
+    }
+}
+
+/// Resolve the prior for a parameter using the precedence chain:
+///
+///   1. fit.toml [estimate] prior string (override, for sensitivity analysis)
+///   2. model IR parameter.prior (from `~` syntax in .camdl)
+///   3. Prior::Flat (improper uniform, default for inference)
+///
+/// Returns the prior and a string describing the source (for logging).
+pub fn resolve_prior(
+    name: &str,
+    fit: &super::config::FitToml,
+    model: &ir::Model,
+) -> (Prior, &'static str) {
+    // 1. fit.toml override
+    if let Some(est) = fit.estimate.get(name) {
+        if let Some(ref s) = est.prior {
+            if let Some(p) = parse_prior(s) {
+                return (p, "fit.toml");
+            } else {
+                eprintln!("warning: cannot parse prior '{}' for {} in fit.toml, falling through", s, name);
+            }
+        }
+    }
+    // 2. model IR
+    if let Some(ir_param) = model.parameters.iter().find(|p| p.name == name) {
+        if let Some(ref pd) = ir_param.prior {
+            return (Prior::from_ir(pd), "model");
+        }
+    }
+    // 3. fallback
+    (Prior::Flat, "flat (default)")
+}
+
+/// IC4 in the 2026-04-19 inference review batch 3: validate that
+/// each estimated parameter's resolved prior is compatible with its
+/// transform. Wrong combinations silently produce a different prior
+/// than the user wrote (log_normal on Transform::None collapses to
+/// Normal-on-natural; log_normal on Transform::Logit becomes
+/// logit-normal; etc.).
+///
+/// Compatibility matrix:
+///   Prior::TransformedNormal (log_normal) — Transform::Log
+///   Prior::Beta                           — Transform::Logit
+///   Prior::HalfNormal, Gamma, Exponential — Transform::Log
+///   Prior::Uniform, Normal, Flat          — any transform
+///
+/// Call from every fit-stage entry point *before* building IF2
+/// params so the user sees a clean error, not a miscalibrated
+/// posterior.
+pub fn validate_prior_transform_compat(
+    fit: &super::config::FitToml,
+    model: &ir::Model,
+) -> Result<(), String> {
+    for name in fit.estimate.keys() {
+        // Build the same Transform the engine will use.
+        let ir_param = match model.parameters.iter().find(|p| p.name == *name) {
+            Some(p) => p,
+            None => continue, // validate_partition catches unknown params.
+        };
+        let transform_override = fit.estimate.get(name)
+            .and_then(|e| e.transform.as_deref());
+        let transform = derive_transform(ir_param, transform_override);
+        let (prior, source) = resolve_prior(name, fit, model);
+
+        let is_log   = matches!(transform, Transform::Log { .. });
+        let is_logit = matches!(transform, Transform::Logit { .. });
+
+        let err = |needs: &str| Err(format!(
+            "parameter '{}': prior {} is incompatible with transform {}; \
+             {} priors require a {} transform. Either fix the param_kind \
+             in the model (or the `transform` override in fit.toml), or \
+             pick a different prior.\n  (prior source: {})",
+            name,
+            match prior {
+                Prior::TransformedNormal { .. } => "log_normal",
+                Prior::Beta { .. }              => "beta",
+                Prior::HalfNormal { .. }        => "half_normal",
+                Prior::Gamma { .. }             => "gamma",
+                Prior::Exponential { .. }       => "exponential",
+                Prior::Normal { .. }            => "normal",
+                Prior::Uniform { .. }           => "uniform",
+                Prior::Flat                     => "flat",
+            },
+            match transform {
+                Transform::Log { .. }   => "Log",
+                Transform::Logit { .. } => "Logit",
+                Transform::None         => "None",
+            },
+            match prior {
+                Prior::TransformedNormal { .. } => "log_normal",
+                Prior::Beta { .. }              => "beta",
+                _                               => "positive-support",
+            },
+            needs, source,
+        ));
+
+        match prior {
+            Prior::TransformedNormal { .. }
+            | Prior::HalfNormal { .. }
+            | Prior::Gamma { .. }
+            | Prior::Exponential { .. } => {
+                if !is_log { return err("Log"); }
+            }
+            Prior::Beta { .. } => {
+                if !is_logit { return err("Logit"); }
+                // Beta is on [0, 1]; require logit bounds span that.
+                if let Transform::Logit { lo, hi } = transform {
+                    if lo != 0.0 || hi != 1.0 {
+                        return Err(format!(
+                            "parameter '{}': beta prior requires bounds [0, 1], \
+                             got [{}, {}].", name, lo, hi));
+                    }
+                }
+            }
+            Prior::Uniform { .. } | Prior::Normal { .. } | Prior::Flat => {
+                // Compatible with any transform.
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Evaluate a prior argument — supports bare numbers and log(x).
+fn eval_prior_arg(s: &str) -> Option<f64> {
+    if let Ok(v) = s.parse::<f64>() {
+        return Some(v);
+    }
+    // Handle log(x)
+    if s.starts_with("log(") && s.ends_with(')') {
+        let inner = &s[4..s.len() - 1];
+        let v: f64 = inner.parse().ok()?;
+        return Some(v.ln());
+    }
+    None
+}
+
+/// Compute a config hash identifying the statistical problem.
+/// Changes to model/data/priors/bounds/particles/dt invalidate resume state.
+/// Fields NOT included (safe to change on resume): sweeps/steps, burn_in,
+/// thin, n_trajectories, use_nuts, dense_mass.
+pub fn compute_config_hash(fit: &super::config::FitToml, config: &FitRunConfig) -> String {
+    use sha2::{Sha256, Digest};
+
+    let mut h = Sha256::new();
+    h.update(config.model_ir_json.as_bytes());
+
+    let mut data_entries: Vec<_> = fit.data.iter().collect();
+    data_entries.sort_by_key(|(k, _)| k.as_str());
+    for (name, path) in &data_entries {
+        h.update(name.as_bytes());
+        h.update(b"\x00");
+        if let Ok(contents) = std::fs::read(path) {
+            h.update(&contents);
+        }
+        h.update(b"\x00");
+    }
+
+    let mut est_entries: Vec<_> = fit.estimate.iter().collect();
+    est_entries.sort_by_key(|(k, _)| k.as_str());
+    for (name, spec) in &est_entries {
+        h.update(name.as_bytes());
+        h.update(format!("{:?}{:?}{:?}{:?}",
+            spec.bounds, spec.prior, spec.transform, spec.ivp).as_bytes());
+    }
+
+    let mut fixed_entries: Vec<_> = fit.fixed.iter().collect();
+    fixed_entries.sort_by_key(|(k, _)| k.as_str());
+    for (name, val) in &fixed_entries {
+        h.update(format!("{}={}", name, val).as_bytes());
+    }
+
+    h.update(config.if2_config.n_particles.to_le_bytes());
+    h.update(config.if2_config.dt.to_bits().to_le_bytes());
+
+    // IM10 in 2026-04-19 inference review batch 3: hash
+    // `starts_from` across every stage config. Without this, a
+    // resumed fit pointed at a different prior stage's output
+    // hashes the same — the `config hash mismatch` check in PGAS
+    // / PMMH passes, and the chain silently continues from a wrong
+    // initial point. starts_from is effectively part of the
+    // statistical problem definition.
+    h.update(b"\x00starts_from\x00");
+    if let Some(s) = fit.pgas.as_ref().and_then(|p| p.starts_from.as_ref()) {
+        h.update(b"pgas=");
+        h.update(s.as_bytes());
+    }
+    if let Some(s) = fit.pmmh.as_ref().and_then(|p| p.proposal_from.as_ref()) {
+        h.update(b"\x00pmmh_proposal_from=");
+        h.update(s.as_bytes());
+    }
+
+    // Pin the runtime version. Without this, a code change that alters
+    // inference semantics but leaves the config bytes identical would
+    // silently reuse stale cached state. Matches compute_config_hash_v2
+    // and compute_input_hash, which were already version-aware.
+    h.update(b"\x00");
+    h.update(crate::version::VERSION_SHORT.as_bytes());
+
+    hex::encode(h.finalize())
 }
 
 #[cfg(test)]
@@ -1783,295 +2074,4 @@ cooling = 0.5
         assert!(parse_prior("normal 0.3, 0.1").is_none(), "missing parens");
         assert!(parse_prior("normal(abc, 0.1)").is_none(), "non-numeric arg");
     }
-}
-
-/// Compute input hash for provenance (shared by refine and validate).
-pub fn compute_fit_input_hash(fit: &FitToml, config: &FitRunConfig, seed: u64) -> String {
-    let fit_toml_bytes = toml::to_string(fit).unwrap_or_default().into_bytes();
-    let mut data_files: Vec<(String, Vec<u8>)> = fit.data.iter().map(|(name, path)| {
-        (name.clone(), std::fs::read(path).unwrap_or_default())
-    }).collect();
-    crate::hashing::fit_input_hash(
-        config.model_ir_json.as_bytes(),
-        &mut data_files,
-        &fit_toml_bytes,
-        seed,
-    )
-}
-
-/// Collect ALL parameter values (estimated + fixed) for MLE output.
-pub fn collect_all_params(
-    mle: &[f64],
-    if2_params: &[EstimatedParam],
-    model: &ir::Model,
-    base_params: &[f64],
-    compiled: &CompiledModel,
-) -> HashMap<String, f64> {
-    let mut params = HashMap::new();
-    for p in &model.parameters {
-        let idx = compiled.param_index.get(p.name.as_str()).copied().unwrap();
-        let value = if let Some(spec) = if2_params.iter().find(|s| s.name == p.name) {
-            mle[spec.index]
-        } else {
-            base_params[idx]
-        };
-        params.insert(p.name.clone(), value);
-    }
-    params
-}
-
-/// Parse a prior specification string from fit.toml.
-///
-/// Mirrors the seven distributions supported in DSL `~` syntax. Args are
-/// positional here (fit.toml strings) but named in the DSL. Both the DSL
-/// name (`log_normal`, `half_normal`) and the legacy compact form
-/// (`lognormal`, `halfnormal`) are accepted.
-///
-/// | fit.toml string                  | Prior variant                            |
-/// |----------------------------------|------------------------------------------|
-/// | `flat`                           | `Flat`                                   |
-/// | `uniform(lower, upper)`          | `Uniform { lower, upper }`               |
-/// | `normal(mu, sigma)`              | `Normal { mean: mu, sd: sigma }`         |
-/// | `log_normal(mu, sigma)`          | `TransformedNormal { mean: mu, sd: sigma }` |
-/// | `half_normal(sigma)`             | `HalfNormal { sigma }`                   |
-/// | `beta(alpha, beta)`              | `Beta { alpha, beta }`                   |
-/// | `gamma(shape, rate)`             | `Gamma { shape, rate }`                  |
-/// | `exponential(rate)`              | `Exponential { rate }`                   |
-///
-/// Examples:
-///   "log_normal(log(50), 0.4)"   → LogNormal with median 50
-///   "log_normal(3.912, 0.4)"     → same (log(50) ≈ 3.912)
-///   "normal(0.08, 0.02)"         → Normal(0.08, 0.02) on natural scale
-pub fn parse_prior(s: &str) -> Option<Prior> {
-    let s = s.trim();
-    if s == "flat" { return Some(Prior::Flat); }
-
-    // Match "name(arg1, arg2, ...)"
-    let open = s.find('(')?;
-    let close = s.rfind(')')?;
-    let name = s[..open].trim();
-    let args_str = &s[open + 1..close];
-    let args: Vec<f64> = args_str.split(',')
-        .map(|a| eval_prior_arg(a.trim()))
-        .collect::<Option<Vec<_>>>()?;
-
-    // Accept both DSL names (log_normal, half_normal) and legacy compact
-    // names (lognormal) for fit.toml backward compatibility.
-    match (name, args.len()) {
-        ("lognormal", 2) | ("log_normal", 2) =>
-            Some(Prior::TransformedNormal { mean: args[0], sd: args[1] }),
-        ("normal", 2) =>
-            Some(Prior::Normal { mean: args[0], sd: args[1] }),
-        ("beta", 2) =>
-            Some(Prior::Beta { alpha: args[0], beta: args[1] }),
-        ("half_normal", 1) | ("halfnormal", 1) =>
-            Some(Prior::HalfNormal { sigma: args[0] }),
-        ("gamma", 2) =>
-            Some(Prior::Gamma { shape: args[0], rate: args[1] }),
-        ("exponential", 1) =>
-            Some(Prior::Exponential { rate: args[0] }),
-        ("uniform", 2) =>
-            Some(Prior::Uniform { lower: args[0], upper: args[1] }),
-        _ => None,
-    }
-}
-
-/// Resolve the prior for a parameter using the precedence chain:
-///
-///   1. fit.toml [estimate] prior string (override, for sensitivity analysis)
-///   2. model IR parameter.prior (from `~` syntax in .camdl)
-///   3. Prior::Flat (improper uniform, default for inference)
-///
-/// Returns the prior and a string describing the source (for logging).
-pub fn resolve_prior(
-    name: &str,
-    fit: &super::config::FitToml,
-    model: &ir::Model,
-) -> (Prior, &'static str) {
-    // 1. fit.toml override
-    if let Some(est) = fit.estimate.get(name) {
-        if let Some(ref s) = est.prior {
-            if let Some(p) = parse_prior(s) {
-                return (p, "fit.toml");
-            } else {
-                eprintln!("warning: cannot parse prior '{}' for {} in fit.toml, falling through", s, name);
-            }
-        }
-    }
-    // 2. model IR
-    if let Some(ir_param) = model.parameters.iter().find(|p| p.name == name) {
-        if let Some(ref pd) = ir_param.prior {
-            return (Prior::from_ir(pd), "model");
-        }
-    }
-    // 3. fallback
-    (Prior::Flat, "flat (default)")
-}
-
-/// IC4 in the 2026-04-19 inference review batch 3: validate that
-/// each estimated parameter's resolved prior is compatible with its
-/// transform. Wrong combinations silently produce a different prior
-/// than the user wrote (log_normal on Transform::None collapses to
-/// Normal-on-natural; log_normal on Transform::Logit becomes
-/// logit-normal; etc.).
-///
-/// Compatibility matrix:
-///   Prior::TransformedNormal (log_normal) — Transform::Log
-///   Prior::Beta                           — Transform::Logit
-///   Prior::HalfNormal, Gamma, Exponential — Transform::Log
-///   Prior::Uniform, Normal, Flat          — any transform
-///
-/// Call from every fit-stage entry point *before* building IF2
-/// params so the user sees a clean error, not a miscalibrated
-/// posterior.
-pub fn validate_prior_transform_compat(
-    fit: &super::config::FitToml,
-    model: &ir::Model,
-) -> Result<(), String> {
-    for (name, _spec) in &fit.estimate {
-        // Build the same Transform the engine will use.
-        let ir_param = match model.parameters.iter().find(|p| p.name == *name) {
-            Some(p) => p,
-            None => continue, // validate_partition catches unknown params.
-        };
-        let transform_override = fit.estimate.get(name)
-            .and_then(|e| e.transform.as_deref());
-        let transform = derive_transform(ir_param, transform_override);
-        let (prior, source) = resolve_prior(name, fit, model);
-
-        let is_log   = matches!(transform, Transform::Log { .. });
-        let is_logit = matches!(transform, Transform::Logit { .. });
-
-        let err = |needs: &str| Err(format!(
-            "parameter '{}': prior {} is incompatible with transform {}; \
-             {} priors require a {} transform. Either fix the param_kind \
-             in the model (or the `transform` override in fit.toml), or \
-             pick a different prior.\n  (prior source: {})",
-            name,
-            match prior {
-                Prior::TransformedNormal { .. } => "log_normal",
-                Prior::Beta { .. }              => "beta",
-                Prior::HalfNormal { .. }        => "half_normal",
-                Prior::Gamma { .. }             => "gamma",
-                Prior::Exponential { .. }       => "exponential",
-                Prior::Normal { .. }            => "normal",
-                Prior::Uniform { .. }           => "uniform",
-                Prior::Flat                     => "flat",
-            },
-            match transform {
-                Transform::Log { .. }   => "Log",
-                Transform::Logit { .. } => "Logit",
-                Transform::None         => "None",
-            },
-            match prior {
-                Prior::TransformedNormal { .. } => "log_normal",
-                Prior::Beta { .. }              => "beta",
-                _                               => "positive-support",
-            },
-            needs, source,
-        ));
-
-        match prior {
-            Prior::TransformedNormal { .. }
-            | Prior::HalfNormal { .. }
-            | Prior::Gamma { .. }
-            | Prior::Exponential { .. } => {
-                if !is_log { return err("Log"); }
-            }
-            Prior::Beta { .. } => {
-                if !is_logit { return err("Logit"); }
-                // Beta is on [0, 1]; require logit bounds span that.
-                if let Transform::Logit { lo, hi } = transform {
-                    if lo != 0.0 || hi != 1.0 {
-                        return Err(format!(
-                            "parameter '{}': beta prior requires bounds [0, 1], \
-                             got [{}, {}].", name, lo, hi));
-                    }
-                }
-            }
-            Prior::Uniform { .. } | Prior::Normal { .. } | Prior::Flat => {
-                // Compatible with any transform.
-            }
-        }
-    }
-    Ok(())
-}
-
-/// Evaluate a prior argument — supports bare numbers and log(x).
-fn eval_prior_arg(s: &str) -> Option<f64> {
-    if let Ok(v) = s.parse::<f64>() {
-        return Some(v);
-    }
-    // Handle log(x)
-    if s.starts_with("log(") && s.ends_with(')') {
-        let inner = &s[4..s.len() - 1];
-        let v: f64 = inner.parse().ok()?;
-        return Some(v.ln());
-    }
-    None
-}
-
-/// Compute a config hash identifying the statistical problem.
-/// Changes to model/data/priors/bounds/particles/dt invalidate resume state.
-/// Fields NOT included (safe to change on resume): sweeps/steps, burn_in,
-/// thin, n_trajectories, use_nuts, dense_mass.
-pub fn compute_config_hash(fit: &super::config::FitToml, config: &FitRunConfig) -> String {
-    use sha2::{Sha256, Digest};
-
-    let mut h = Sha256::new();
-    h.update(config.model_ir_json.as_bytes());
-
-    let mut data_entries: Vec<_> = fit.data.iter().collect();
-    data_entries.sort_by_key(|(k, _)| k.as_str());
-    for (name, path) in &data_entries {
-        h.update(name.as_bytes());
-        h.update(b"\x00");
-        if let Ok(contents) = std::fs::read(path) {
-            h.update(&contents);
-        }
-        h.update(b"\x00");
-    }
-
-    let mut est_entries: Vec<_> = fit.estimate.iter().collect();
-    est_entries.sort_by_key(|(k, _)| k.as_str());
-    for (name, spec) in &est_entries {
-        h.update(name.as_bytes());
-        h.update(format!("{:?}{:?}{:?}{:?}",
-            spec.bounds, spec.prior, spec.transform, spec.ivp).as_bytes());
-    }
-
-    let mut fixed_entries: Vec<_> = fit.fixed.iter().collect();
-    fixed_entries.sort_by_key(|(k, _)| k.as_str());
-    for (name, val) in &fixed_entries {
-        h.update(format!("{}={}", name, val).as_bytes());
-    }
-
-    h.update(config.if2_config.n_particles.to_le_bytes());
-    h.update(config.if2_config.dt.to_bits().to_le_bytes());
-
-    // IM10 in 2026-04-19 inference review batch 3: hash
-    // `starts_from` across every stage config. Without this, a
-    // resumed fit pointed at a different prior stage's output
-    // hashes the same — the `config hash mismatch` check in PGAS
-    // / PMMH passes, and the chain silently continues from a wrong
-    // initial point. starts_from is effectively part of the
-    // statistical problem definition.
-    h.update(b"\x00starts_from\x00");
-    if let Some(ref s) = fit.pgas.as_ref().and_then(|p| p.starts_from.as_ref()) {
-        h.update(b"pgas=");
-        h.update(s.as_bytes());
-    }
-    if let Some(ref s) = fit.pmmh.as_ref().and_then(|p| p.proposal_from.as_ref()) {
-        h.update(b"\x00pmmh_proposal_from=");
-        h.update(s.as_bytes());
-    }
-
-    // Pin the runtime version. Without this, a code change that alters
-    // inference semantics but leaves the config bytes identical would
-    // silently reuse stale cached state. Matches compute_config_hash_v2
-    // and compute_input_hash, which were already version-aware.
-    h.update(b"\x00");
-    h.update(crate::version::VERSION_SHORT.as_bytes());
-
-    hex::encode(h.finalize())
 }

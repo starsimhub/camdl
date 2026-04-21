@@ -300,7 +300,7 @@ mod tests {
         let mat = saltelli_matrices(32, 4);
         for row in &mat {
             for &v in row {
-                assert!(v >= 0.0 && v <= 1.0, "value {} out of [0,1]", v);
+                assert!((0.0..=1.0).contains(&v), "value {} out of [0,1]", v);
             }
         }
     }
@@ -346,7 +346,7 @@ mod tests {
         let pts = lhs_matrix(50, 4);
         for row in &pts {
             for &v in row {
-                assert!(v >= 0.0 && v < 1.0, "value {} out of [0,1)", v);
+                assert!((0.0..1.0).contains(&v), "value {} out of [0,1)", v);
             }
         }
     }
@@ -398,8 +398,8 @@ mod tests {
         for pt in &design.points {
             let x = pt["x"];
             let y = pt["y"];
-            assert!(x >= 5.0 && x <= 10.0, "x={} out of range", x);
-            assert!(y >= 0.001 && y <= 1.0, "y={} out of range", y);
+            assert!((5.0..=10.0).contains(&x), "x={} out of range", x);
+            assert!((0.001..=1.0).contains(&y), "y={} out of range", y);
         }
     }
 }

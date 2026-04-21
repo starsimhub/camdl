@@ -159,7 +159,7 @@ pub fn run_scout(fit: &FitToml, seed: u64, force: bool) -> Result<(), String> {
         best_loglik: chain_results.best_loglik,
         initial_loglik,
         best_chain: chain_results.best_chain,
-        n_chains: n_chains,
+        n_chains,
         n_good_chains: None,
         start_values,
         rw_sd: HashMap::new(),

@@ -730,7 +730,7 @@ beta = [0.2, 0.3, 0.4]
     // Must not have written any run files.
     let runs_dir = output.join("sims");
     assert!(!runs_dir.exists() ||
-            walkdir(&runs_dir).into_iter().filter(|p| p.join("run.json").exists()).next().is_none(),
+            walkdir(&runs_dir).into_iter().find(|p| p.join("run.json").exists()).is_none(),
         "dry-run must not write any run.json files");
 }
 

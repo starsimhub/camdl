@@ -382,7 +382,7 @@ pub fn load_data_tsv_column(path: &str, column: &str) -> Result<Vec<Observation>
 
     // Find the column index for the requested stream name
     let col_idx = cols.iter().position(|&c| c == column)
-        .or_else(|| {
+        .or({
             // Fallback: if only 2 columns (time + value), use column 1
             if cols.len() == 2 { Some(1) } else { None }
         })
@@ -475,7 +475,7 @@ fn write_prequential_outputs(
     }
     drop(tsv);
     let json = serde_json::to_string_pretty(trace)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+        .map_err(std::io::Error::other)?;
     std::fs::write(&json_path, json)?;
     Ok(())
 }

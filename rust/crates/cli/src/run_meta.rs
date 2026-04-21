@@ -222,7 +222,7 @@ impl Run {
     pub fn write(&self, dir: &std::path::Path) -> std::io::Result<()> {
         std::fs::create_dir_all(dir)?;
         let json = serde_json::to_string_pretty(self)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+            .map_err(std::io::Error::other)?;
         let tmp = dir.join("run.json.tmp");
         let final_path = dir.join("run.json");
         // Write tmp + rename. If anything fails mid-write, tmp may be

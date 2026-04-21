@@ -469,7 +469,7 @@ pub fn run_if2_with_progress<P: ProcessModel<State = ParticleState>>(
 
             // Reset
             for s in &mut states { s.reset_flows(); }
-            for lw in &mut log_weights { *lw = 0.0; }
+            log_weights.fill(0.0);
         }
 
         // Compute parameter means across particles → next iteration's starting point

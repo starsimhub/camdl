@@ -308,7 +308,7 @@ pub fn run_pgas_cli(
                 );
 
                 // Save posterior trajectory sample
-                if sweep >= burn_in && (sweep - burn_in) % traj_stride == 0 {
+                if sweep >= burn_in && (sweep - burn_in).is_multiple_of(traj_stride) {
                     use std::io::Write;
                     let path = format!("{}/trajectory_{:06}.tsv", traj_dir, sweep);
                     if let Ok(mut f) = std::fs::File::create(&path) {
@@ -329,7 +329,7 @@ pub fn run_pgas_cli(
                 }
 
                 // Progress (non-TTY only for parallel — TTY would interleave)
-                if sweep % 500 == 0 || sweep == n_sweeps - 1 {
+                if sweep.is_multiple_of(500) || sweep == n_sweeps - 1 {
                     let elapsed = chain_start.elapsed().as_secs();
                     let n_acc: usize = result.accepted.iter().filter(|&&a| a).count();
                     eprintln!("[pgas] chain {}: {}/{} ({:.0}%) ll={:.1} acc={}/{} renewal={:.0}% elapsed={}s",
@@ -391,7 +391,7 @@ pub fn run_pgas_cli(
                 let status = if r < 0.10 { "\x1b[31m" }
                     else if r > 0.50 { "\x1b[33m" }
                     else { "\x1b[32m" };
-                if r < 0.10 || r > 0.50 {
+                if !(0.10..=0.50).contains(&r) {
                     collector.push(DiagnosticKind::AcceptanceRateUnhealthy {
                         rate: r, param: Some(p.name.clone()),
                     });
@@ -506,7 +506,7 @@ pub fn run_pgas_cli(
         for (_, sweeps, _) in &all_results {
             for (i, sweep) in sweeps.iter().enumerate() {
                 if i < burn_in { continue; }
-                if (i - burn_in) % thin != 0 { continue; }
+                if !(i - burn_in).is_multiple_of(thin) { continue; }
                 let mut vals: Vec<String> = config.estimated_params.iter()
                     .map(|spec| format!("{:.17e}", sweep.params[spec.index]))
                     .collect();

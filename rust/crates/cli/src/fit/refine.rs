@@ -176,7 +176,7 @@ pub fn run_refine(
         best_loglik: chain_results.best_loglik,
         initial_loglik: prior_state.best_loglik,
         best_chain: chain_results.best_chain,
-        n_chains: n_chains,
+        n_chains,
         n_good_chains: None,
         start_values,
         rw_sd,
@@ -223,7 +223,7 @@ pub fn run_refine(
         dt: fit.config.dt,
         loglik: chain_results.best_loglik,
         loglik_sd: 0.0, // Not computed in refine
-        n_particles: n_particles,
+        n_particles,
         ess_at_mle: None,
         timestamp: state.timestamp.clone(),
     };

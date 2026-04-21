@@ -600,7 +600,7 @@ pub fn complete_data_loglik(
                     ivp: ivp_ll,
                 });
             }
-            for f in &mut cum_flows { *f = 0; }
+            cum_flows.fill(0);
         }
     }
 
@@ -752,9 +752,7 @@ pub fn csmc_as(
     // Store initial counts per particle BEFORE propagation (for traceback).
     // Needed because free particles have stochastic initial states (Binom draw)
     // that differ from the deterministic initial_state(params).
-    let initial_counts_per_particle: Vec<Vec<i64>> = counts.iter()
-        .map(|c| c.clone())
-        .collect();
+    let initial_counts_per_particle: Vec<Vec<i64>> = counts.to_vec();
 
     // History for traceback
     let mut history_counts_before: Vec<Vec<Vec<i64>>> = Vec::with_capacity(n_substeps);
@@ -927,14 +925,14 @@ pub fn csmc_as(
             }
         } else {
             // Non-observation substep: uniform weights
-            for w in &mut log_weights { *w = 0.0; }
+            log_weights.fill(0.0);
         }
 
         // ── 6. Store history ──
-        history_counts_before.push(prev_counts.iter().map(|c| c.clone()).collect());
-        history_counts_after.push(counts.iter().map(|c| c.clone()).collect());
-        history_flows.push(substep_flows.iter().map(|f| f.clone()).collect());
-        history_gammas.push(substep_gammas.iter().map(|g| g.clone()).collect());
+        history_counts_before.push(prev_counts.to_vec());
+        history_counts_after.push(counts.to_vec());
+        history_flows.push(substep_flows.to_vec());
+        history_gammas.push(substep_gammas.to_vec());
     }
 
     // Diagnostic: warn if many substeps had degenerate ancestor sampling
@@ -1192,7 +1190,7 @@ pub fn run_pgas(
         )?;
         eprintln!("  reference: {} substeps, initial S={}",
             trajectory.substeps.len(),
-            trajectory.initial_counts.get(0).copied().unwrap_or(0));
+            trajectory.initial_counts.first().copied().unwrap_or(0));
         current_transformed = if2_params.iter()
             .map(|p| p.to_transformed(current_params[p.index]))
             .collect();
@@ -1261,7 +1259,7 @@ pub fn run_pgas(
                 .zip(init_pert.counts.iter()).enumerate()
             {
                 // Skip balance compartment (it changes as a consequence)
-                if model.balance.as_ref().map_or(false, |b| b.local_int_idx == c) {
+                if model.balance.as_ref().is_some_and(|b| b.local_int_idx == c) {
                     continue;
                 }
                 if base_c != pert_c {
@@ -1766,7 +1764,7 @@ pub fn run_pgas(
         }
 
         // Record (respecting burn-in and thinning)
-        if sweep >= config.burn_in && (sweep - config.burn_in) % config.thin == 0 {
+        if sweep >= config.burn_in && (sweep - config.burn_in).is_multiple_of(config.thin) {
             sweeps.push(sweep_result);
         }
     }

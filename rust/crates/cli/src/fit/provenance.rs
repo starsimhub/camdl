@@ -407,7 +407,7 @@ pub fn fit_stage_hash(
     for (name, spec) in &est_entries {
         h.update(name.as_bytes());
         h.update(b"\x00");
-        h.update(&serde_json::to_vec(spec).unwrap_or_default());
+        h.update(serde_json::to_vec(spec).unwrap_or_default());
         h.update(b"\x00");
     }
 
@@ -426,7 +426,7 @@ pub fn fit_stage_hash(
     h.update(b"\x00stage\x00");
     h.update(stage_name.as_bytes());
     h.update(b"\x00");
-    h.update(&serde_json::to_vec(stage).unwrap_or_default());
+    h.update(serde_json::to_vec(stage).unwrap_or_default());
 
     // Seed
     h.update(b"\x00seed\x00");

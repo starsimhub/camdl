@@ -118,9 +118,8 @@ fn generate_one_dataset(
     let (traj, model) = run_simulation(&run)?;
 
     if model.observations.is_empty() {
-        return Err(format!(
-            "model has no `observations {{ }}` block — synthetic-data fits \
-             require at least one observation stream in the .camdl file"));
+        return Err("model has no `observations { }` block — synthetic-data fits \
+             require at least one observation stream in the .camdl file".to_string());
     }
 
     // Compile observation samplers once per dataset. The RNG stream

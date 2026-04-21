@@ -248,6 +248,6 @@ fn test_four_rungs_runs() {
 
     assert!(!result.sweeps.is_empty(), "should produce posterior samples with 4 rungs");
     for &rate in &result.acceptance_rates {
-        assert!(rate >= 0.0 && rate <= 1.0, "acceptance rate {} out of [0,1]", rate);
+        assert!((0.0..=1.0).contains(&rate), "acceptance rate {} out of [0,1]", rate);
     }
 }

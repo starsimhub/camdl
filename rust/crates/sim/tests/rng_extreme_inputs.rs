@@ -176,5 +176,5 @@ fn normal_produces_finite() {
 #[test]
 fn uniform_in_range() {
     let v = rng().uniform();
-    assert!(v >= 0.0 && v < 1.0);
+    assert!((0.0..1.0).contains(&v));
 }

@@ -156,7 +156,7 @@ pub fn run_status(fit: &FitToml) -> Result<(), String> {
 
             if let Some(&r) = rhat.as_ref() {
                 if r < 1.1 {
-                    line.push_str(&format!(" \x1b[32m✓\x1b[0m identified"));
+                    line.push_str(" \x1b[32m✓\x1b[0m identified");
                 } else {
                     line.push_str(&format!(" \x1b[33m~ Rhat={:.2}\x1b[0m", r));
                 }

@@ -129,7 +129,7 @@ pub fn run_validate(fit: &FitToml, starts_from: &str, seed: u64, force: bool) ->
         let n_train = config.observations.len();
         let mut full_obs: Vec<sim::inference::if2::Observation> = config.observations.iter()
             .map(|o| sim::inference::if2::Observation { time: o.time, value: o.value })
-            .chain(holdout_obs.into_iter())
+            .chain(holdout_obs)
             .collect();
         full_obs.sort_by(|a, b| a.time.total_cmp(&b.time));
         let n_holdout = full_obs.len() - n_train;
@@ -209,7 +209,7 @@ pub fn run_validate(fit: &FitToml, starts_from: &str, seed: u64, force: bool) ->
         best_loglik: loglik,
         initial_loglik: prior_state.best_loglik,
         best_chain: chain_results.best_chain,
-        n_chains: n_chains,
+        n_chains,
         n_good_chains: None,
         start_values,
         rw_sd,

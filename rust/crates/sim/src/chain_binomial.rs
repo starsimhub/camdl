@@ -147,7 +147,7 @@ fn run_chain_binomial(
         // which caused interventions to fire TWICE per scheduled time
         // (once at t_end inside step_one, once at the new t here).
         // See docs/dev/incidents/2026-04-17-chain-binomial-double-fire.md.
-        for f in &mut flows { *f = 0; }
+        flows.fill(0);
         scratch.gamma_used.clear();
         step_one(model, &mut int_s.counts, &mut flows, params, t, dt, &mut rng, &mut scratch)?;
 
@@ -269,10 +269,7 @@ pub fn step_one(
             let rate = scratch.propensities[tr_idx];
             if rate <= RATE_EPSILON { scratch.handled[tr_idx] = true; continue; }
             let per_capita = rate / n_src as f64;
-            match &scratch.draws[tr_idx] {
-                ResolvedDraw::Deterministic => { scratch.handled[tr_idx] = true; continue; }
-                _ => {}
-            }
+            if let ResolvedDraw::Deterministic = &scratch.draws[tr_idx] { scratch.handled[tr_idx] = true; continue; }
             let effective = match &scratch.draws[tr_idx] {
                 ResolvedDraw::Overdispersed(sigma_sq) => {
                     let g = scratch.gamma_override.take()
@@ -371,17 +368,17 @@ pub fn step_one(
         // Header on first call
         use std::sync::OnceLock;
         static HEADER: OnceLock<bool> = OnceLock::new();
-        if *HEADER.get_or_init(|| {
+        HEADER.get_or_init(|| {
             eprint!("t");
             for c in &model.model.compartments { eprint!("\t{}", c.name); }
             for tr in &model.model.transitions { eprint!("\tflow_{}", tr.name); }
             eprint!("\ttotal_pop");
-            for (_i, tr) in model.model.transitions.iter().enumerate() {
+            for tr in model.model.transitions.iter() {
                 eprint!("\trate_{}", tr.name);
             }
             eprintln!();
             true
-        }) {}
+        });
         eprint!("{:.1}", t + dt);
         for &c in counts.iter() { eprint!("\t{}", c); }
         for &f in flows.iter() { eprint!("\t{}", f); }

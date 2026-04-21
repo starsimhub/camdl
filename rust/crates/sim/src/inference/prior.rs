@@ -18,7 +18,7 @@
 use crate::inference::obs_loglik::lgamma;
 
 /// 0.5 · ln(2π), used in Gaussian log-densities.
-const HALF_LN_2PI: f64 = 0.918_938_533_204_672_74;
+const HALF_LN_2PI: f64 = 0.918_938_533_204_672_8;
 
 /// Prior distribution for one estimated parameter.
 #[derive(Clone, Debug)]

@@ -277,9 +277,9 @@ fn test_if2_respects_bounds() {
     for it in &result.iterations {
         let beta = it.param_means[0];
         let gamma = it.param_means[1];
-        assert!(beta >= 0.1 && beta <= 0.5,
+        assert!((0.1..=0.5).contains(&beta),
             "beta={:.4} outside bounds [0.1, 0.5] at iter {}", beta, it.iteration);
-        assert!(gamma >= 0.05 && gamma <= 0.2,
+        assert!((0.05..=0.2).contains(&gamma),
             "gamma={:.4} outside bounds [0.05, 0.2] at iter {}", gamma, it.iteration);
     }
 }
@@ -359,8 +359,8 @@ fn logit_transform_enforces_bounds() {
     let v1 = param.from_transformed(100.0);
     let v2 = param.from_transformed(-100.0);
     let v3 = param.from_transformed(0.0);
-    assert!(v1 >= 0.0 && v1 <= 1.0, "logit(100) = {} not in [0,1]", v1);
-    assert!(v2 >= 0.0 && v2 <= 1.0, "logit(-100) = {} not in [0,1]", v2);
+    assert!((0.0..=1.0).contains(&v1), "logit(100) = {} not in [0,1]", v1);
+    assert!((0.0..=1.0).contains(&v2), "logit(-100) = {} not in [0,1]", v2);
     assert!((v3 - 0.5).abs() < 1e-10, "logit(0) should be 0.5, got {}", v3);
     // Moderate z → strictly interior
     let v4 = param.from_transformed(2.0);

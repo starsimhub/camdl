@@ -99,20 +99,20 @@ pub fn cmd_list(a: &crate::args::ListArgs) {
 
     let now = SystemTime::now();
     let mut filtered_runs: Vec<RunEntry> = runs.into_iter()
-        .filter(|r| a.model.as_deref().map_or(true, |m| r.meta.model.contains(m)))
-        .filter(|r| a.scenario.as_deref().map_or(true, |s| r.meta.scenario == s))
+        .filter(|r| a.model.as_deref().is_none_or(|m| r.meta.model.contains(m)))
+        .filter(|r| a.scenario.as_deref().is_none_or(|s| r.meta.scenario == s))
         .filter(|r| match filter_since {
-            Some(dur) => now.duration_since(r.created).map_or(false, |d| d <= dur),
+            Some(dur) => now.duration_since(r.created).is_ok_and(|d| d <= dur),
             None => true,
         })
         .collect();
     filtered_runs.sort_by(|x, y| y.created.cmp(&x.created));
 
     let mut filtered_fits: Vec<FitEntry> = fits.into_iter()
-        .filter(|f| a.model.as_deref().map_or(true, |m| f.meta.model.contains(m)))
+        .filter(|f| a.model.as_deref().is_none_or(|m| f.meta.model.contains(m)))
         .filter(|_| a.scenario.is_none())
         .filter(|f| match filter_since {
-            Some(dur) => now.duration_since(f.created).map_or(false, |d| d <= dur),
+            Some(dur) => now.duration_since(f.created).is_ok_and(|d| d <= dur),
             None => true,
         })
         .collect();
@@ -360,8 +360,8 @@ fn resolve_any(root: &str, key: &str) -> Result<Resolved, String> {
         .and_then(|s| s.parse().ok());
     let sim_matches: Vec<RunEntry> = discover_runs(root)?.into_iter()
         .filter(|r| r.meta.sim_hash.starts_with(hash_prefix))
-        .filter(|r| scen_filter.map_or(true, |s| r.meta.scenario == s))
-        .filter(|r| seed_filter.map_or(true, |s| r.meta.seed == s))
+        .filter(|r| scen_filter.is_none_or(|s| r.meta.scenario == s))
+        .filter(|r| seed_filter.is_none_or(|s| r.meta.seed == s))
         .collect();
 
     let total = fit_matches.len() + sim_matches.len();
@@ -475,8 +475,8 @@ fn resolve_run(root: &str, key: &str) -> Result<RunEntry, String> {
 
     let matches: Vec<RunEntry> = all.into_iter()
         .filter(|r| r.meta.sim_hash.starts_with(hash_prefix))
-        .filter(|r| scen_filter.map_or(true, |s| r.meta.scenario == s))
-        .filter(|r| seed_filter.map_or(true, |s| r.meta.seed == s))
+        .filter(|r| scen_filter.is_none_or(|s| r.meta.scenario == s))
+        .filter(|r| seed_filter.is_none_or(|s| r.meta.seed == s))
         .collect();
 
     match matches.len() {
@@ -544,7 +544,7 @@ fn print_table(runs: &[RunEntry], now: SystemTime) {
 /// extensions — a reader recognizes the model by its basename.
 fn model_display_name(path: &str) -> String {
     // Take the last path component after either separator.
-    let base = path.rsplit(|c| c == '/' || c == '\\').next().unwrap_or(path);
+    let base = path.rsplit(['/', '\\']).next().unwrap_or(path);
     // Strip `.ir.json` first (longer suffix), then fall back to `.camdl`.
     if let Some(stem) = base.strip_suffix(".ir.json") { return stem.to_string(); }
     if let Some(stem) = base.strip_suffix(".camdl")   { return stem.to_string(); }
