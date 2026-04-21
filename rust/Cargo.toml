@@ -10,7 +10,6 @@ members = [
   "crates/cli",
   "crates/io",
   "crates/ir",
-  "crates/observe",
   "crates/sim",
   "crates/wasm",
 ]

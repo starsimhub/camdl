@@ -79,10 +79,6 @@ Three schedule types (`ir::observation::ObservationSchedule`):
 | Data-TSV loader (inference)    | `rust/crates/cli/src/pfilter.rs` (`load_data_tsv`, `load_data_tsv_column`) |
 | Synthetic-obs emitter (simulate) | `rust/crates/cli/src/main.rs` (the `--obs` / `--obs-dir` / `--obs-only` branch in `run_simulate`) |
 
-The `rust/crates/observe/` crate is a one-line stub left over from
-the original design plan — no code, nothing references it.
-Candidate for removal pre-1.0.
-
 ## 4. Flow through the system
 
 ```

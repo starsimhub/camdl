@@ -16,7 +16,6 @@ indexmap = { version = "2", features = ["serde"] }
 indicatif = "0.17"
 io = { path = "../io" }
 ir = { path = "../ir" }
-observe = { path = "../observe" }
 rand = "0.8"
 rand_distr = "0.4"
 rayon = "1"
