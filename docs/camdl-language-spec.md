@@ -364,7 +364,7 @@ contexts where a parameter name can appear: expressions (§9.6), init blocks
 **IR representation.** Indexed parameter declarations expand to flat scalar
 parameters:
 
-```camdl
+```
 N[patch] : positive  →  { name: "N_urban",  value: null }
                          { name: "N_rural",  value: null }
 ```
@@ -436,7 +436,7 @@ After this, S/E/I have dimensions `[age, sex]` but R has `[age, sex, immunity]`.
 
 **Positional indexing** (declaration order of stratify blocks):
 
-```
+```camdl
 S[child]                # first dimension = age
 S[child, female]        # age, then sex
 S                       # bare = sum over ALL strata (always global)
@@ -503,7 +503,7 @@ per-compartment based on each compartment's actual arity.
 
 Example: `E` has `[age, latent_stage]`, `S` has `[age]`.
 
-```
+```camdl
 S + E                # both are global sums: PopSum(all S) + PopSum(all E). Valid.
 S[a] + E[a]          # S in age=a + E in age=a (summed over latent_stage). Valid.
 S[a] + E[a, e1]      # S in age=a + E in age=a and stage=e1. Valid.
@@ -1242,7 +1242,7 @@ Writing the full indexed transmission formula is the primitive — it's always
 correct and always available. But for models with multiple stratification
 dimensions, the formula gets long:
 
-```
+```camdl
 # Primitive: fully explicit age × sex structured transmission
 infection[a in age, s in sex] : S[a,s] --> E[a,s]
   @ beta * S[a,s] * sum(b in age, sum(t in sex,
@@ -1254,7 +1254,7 @@ infection[a in age, s in sex] : S[a,s] --> E[a,s]
 The coupling sugar lets the user write the base (un-stratified) model and
 declare how each dimension interacts:
 
-```
+```camdl
 # Sugar: base model + coupling declarations
 infection : S --> E @ beta * S * I / N {
   coupling[age = C_age]
@@ -1280,7 +1280,7 @@ follows. Starting from `@ beta * S * I / N`:
 
 Multiple `coupling` lines nest the sums:
 
-```
+```camdl
 # coupling[age = C_age], coupling[sex = B_sex] expands to:
 infection[a in age, s in sex] : S[a,s] --> E[a,s]
   @ beta * S[a,s] * sum(b in age, sum(t in sex,
@@ -1431,16 +1431,30 @@ arguments separated by commas).
 
 ```camdl
 incidence(transition)                    cumulative flow since last observation
-incidence(transition[stratum])           stratum-specific flow (positional)
-incidence(transition[patch = p])         named indexing (sums over other dims)
+incidence(transition[stratum])           positional index: pins first declared
+                                         dimension, sums over the rest
+incidence(transition[patch = p])         named index: pins `patch = p`, sums
+                                         over the rest (order-independent)
 prevalence(compartment)                  current population
 prevalence(compartment[age = child])     named index on compartment
 ```
 
-Named indexing (§5.1) is particularly useful here because transitions and
-compartments may have multiple dimensions. `incidence(infection[patch = p])`
-sums over age for a specific patch — without named indexing, positional
-`infection[p]` would incorrectly index the first dimension (age).
+**Both indexed forms sum over unspecified dimensions.** The only difference
+is how the index is matched:
+
+- **Positional** (`infection[north]`) binds to dimensions in declaration
+  order. In a model with `dimensions { patch, age }` and
+  `stratify(by = patch); stratify(by = age)`, `infection[north]` pins the
+  `patch` dimension to `north` and sums over `age`. If you later reorder
+  declarations to `{ age, patch }`, the same expression would try to match
+  `north` as an `age` stratum — a silent re-interpretation.
+- **Named** (`infection[patch = north]`) binds the `patch` dimension to
+  `north` regardless of declaration order, and sums over every other
+  dimension (§5.1). Order-independent and robust to dimension-reordering
+  edits.
+
+Use named indexing in any model with more than one dimension — it prevents
+the positional-binding failure mode above.
 
 Inside a likelihood expression, the keyword `projected` refers to the evaluated
 projection value for that observation.
