@@ -1752,7 +1752,7 @@ assert_approx_eq!(eval(TimeFunc("seasonal"), ..., t=91.3125), 1.0, 1e-10);
 table["C"] = [12.0, 4.0, 4.0, 8.0];
 assert_eq!(eval(TableLookup("C", Const(2.0)), ...), 4.0);
 assert_panics!(eval(TableLookup("C", Const(5.0)), ...));  // oob_policy: Error
-```camdl
+```
 
 #### A.4.2 Full Propensity Expression Tests
 

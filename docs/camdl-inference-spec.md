@@ -113,7 +113,7 @@ mu     = true
 k      = true
 psi    = true
 cohort = true
-```camdl
+```
 
 ### 3.2 Search Bounds
 
