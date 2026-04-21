@@ -83,13 +83,13 @@ jobs:
         include:
           - os: ubuntu-latest
             suffix: linux-x64
-            exe: camdl-sim
+            exe: camdl
           - os: macos-latest
             suffix: macos-arm64
-            exe: camdl-sim
+            exe: camdl
           - os: windows-latest
             suffix: windows-x64
-            exe: camdl-sim.exe
+            exe: camdl.exe
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -101,7 +101,7 @@ jobs:
         shell: bash
         run: |
           mkdir -p dist
-          ls -la rust/target/release/camdl-sim* || true
+          ls -la rust/target/release/camdl* || true
           if [ "${{ runner.os }}" = "Windows" ]; then
             cp "rust/target/release/${{ matrix.exe }}" dist/camdl.exe
           else

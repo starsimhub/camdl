@@ -79,7 +79,7 @@ run_batch_test() {
     trap "rm -rf '$outdir'" RETURN
 
     # run
-    if ! "$CAMDL" simulate batch "$fixture" --output-dir "$outdir" --parallel 2 > /dev/null; then
+    if ! "$CAMDL" batch run "$fixture" --output-dir "$outdir" --parallel 2 > /dev/null; then
         echo "FAIL [simulate batch] $name"; FAIL=$((FAIL+1)); return
     fi
 
@@ -92,7 +92,7 @@ run_batch_test() {
     fi
 
     # resume is a no-op (re-run without --force, check it succeeds)
-    if ! "$CAMDL" simulate batch "$fixture" --output-dir "$outdir" --parallel 2 > /dev/null; then
+    if ! "$CAMDL" batch run "$fixture" --output-dir "$outdir" --parallel 2 > /dev/null; then
         echo "FAIL [resume] $name"; FAIL=$((FAIL+1)); return
     fi
 
