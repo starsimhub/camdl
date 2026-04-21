@@ -18,34 +18,33 @@ use sim::{
 /// same observation bytes regardless of which path generated them.
 pub const SEED_MIX_OBS: u64 = 0xa5a5a5a5a5a5;
 
-// ─── Experiment TOML parsing ─────────────────────────────────────────────────
+// ─── Batch TOML parsing ─────────────────────────────────────────────────────
 
-/// Minimal batch-TOML view needed by `voi` (the only remaining consumer
-/// now that analyze/summarize are gone). Just the output_dir — design
-/// and analyze sections aren't read anywhere.
+/// Minimal batch-TOML view needed by `voi` — just the output_dir so
+/// voi can locate the previously-generated designs/*/outputs.tsv.
 #[allow(dead_code)] // used by voi (gated — not in alpha)
-pub struct ExperimentInfo {
+pub struct BatchInfo {
     pub output_dir: String,
 }
 
 /// Parse a batch TOML source string for `voi`. Returns an error string
 /// on parse failure.
 #[allow(dead_code)] // used by voi (gated — not in alpha)
-pub fn parse_experiment_toml(src: &str) -> Result<ExperimentInfo, String> {
+pub fn parse_batch_toml(src: &str) -> Result<BatchInfo, String> {
     #[derive(Deserialize, Default)]
     struct ConfigSection {
         output_dir: Option<String>,
     }
     #[derive(Deserialize)]
-    struct ExperimentDoc {
+    struct BatchDoc {
         #[serde(default)]
         config: ConfigSection,
     }
 
-    let doc: ExperimentDoc = toml::from_str(src)
+    let doc: BatchDoc = toml::from_str(src)
         .map_err(|e| format!("batch TOML parse error: {}", e))?;
 
-    Ok(ExperimentInfo {
+    Ok(BatchInfo {
         output_dir: doc.config.output_dir.unwrap_or_else(
             || crate::run_paths::DEFAULT_OUTPUT_ROOT.to_string()),
     })

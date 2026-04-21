@@ -674,7 +674,7 @@ pub fn cmd_batch_run(a: &crate::args::BatchArgs) {
 ///   1. Generate parameter points via the specified method (sobol/lhs/random)
 ///   2. Write `{output_dir}/designs/{design}/parameter_points.tsv`
 ///   3. Run all (point, scenario, seed) combinations
-///   4. Collect summary outputs → `outputs.tsv` (prepared for `camdl experiment analyze`)
+///   4. Collect summary outputs → `outputs.tsv` (consumed downstream by `camdl voi`)
 #[allow(clippy::too_many_arguments)]
 fn run_design_experiment(
     scenarios: Vec<ScenarioEntry>,
@@ -916,7 +916,7 @@ pub fn cmd_batch_status(a: &crate::args::BatchStatusArgs) {
 
     println!("Experiment status for: {}", toml_path);
     println!("  No manifest.json found at {}", manifest_path);
-    println!("  Run 'camdl experiment run {}' to start.", toml_path);
+    println!("  Run 'camdl batch run {}' to start.", toml_path);
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
