@@ -691,9 +691,16 @@ pub fn run_simulation(run: &SimRun) -> Result<(Trajectory, ir::Model), String> {
         msg
     })?;
 
-    // Apply scenario patch
-    {
-        let (raw_enable, raw_disable, scenario_params, scenario_scale, scenario_compose):
+    // Resolve scenario patch up-front (interventions are applied here;
+    // parameter set/scale are deferred until AFTER --params + --param-vec,
+    // per the spec-documented precedence
+    //   params.toml  →  overridden by scenario  →  overridden by --param
+    // (see docs/camdl-run-spec.md §1.3). The old code applied scenario
+    // params first and let --params silently overwrite them — a
+    // silent-wrong-answer bug caught by
+    // `rust/crates/cli/tests/scenario_runtime_application.rs`.
+    let (scenario_params, scenario_scale): (Vec<(String, f64)>, Vec<(String, f64)>) = {
+        let (raw_enable, raw_disable, scenario_params, scenario_scale, _scenario_compose):
             (Vec<String>, Vec<String>, Vec<(String, f64)>, Vec<(String, f64)>, Vec<String>) =
             if let Some(ref name) = run.scenario_name {
                 let preset = model.presets.iter().find(|p| p.name == *name)
@@ -740,28 +747,12 @@ pub fn run_simulation(run: &SimRun) -> Result<(Trajectory, ir::Model), String> {
         // Apply the shared scenario filter. Preserves always_active events
         // unless they're explicitly disabled; drops toggleable interventions
         // unless they're explicitly enabled or named by the scenario.
-        // See apply_scenario_filter for the full semantics.
+        // See apply_scenario_filter for the full semantics. Safe to apply
+        // here — intervention filtering is independent of parameter values.
         apply_scenario_filter(&mut model, &raw_enable, &raw_disable)?;
 
-        for (k, v) in scenario_params {
-            for p in &mut model.parameters {
-                if p.name == k { p.value = Some(v); }
-            }
-        }
-
-        // Apply scale: multiply existing param values
-        for (k, factor) in &scenario_scale {
-            for p in &mut model.parameters {
-                if p.name == *k {
-                    if let Some(v) = p.value {
-                        p.value = Some(v * factor);
-                    }
-                }
-            }
-        }
-
-        let _ = scenario_compose; // compose is consumed above; suppress unused warning
-    }
+        (scenario_params, scenario_scale)
+    };
 
     // Apply --params TOML files (layered, later overrides earlier)
     let model_param_set: std::collections::HashSet<String> = model.parameters.iter()
@@ -809,6 +800,26 @@ pub fn run_simulation(run: &SimRun) -> Result<(Trajectory, ir::Model), String> {
         for (full_name, val) in resolved {
             for p in &mut model.parameters {
                 if p.name == full_name { p.value = Some(val); }
+            }
+        }
+    }
+
+    // Apply scenario param set / scale — MUST happen after --params +
+    // --param-vec so scenarios override the file-loaded base values (as
+    // documented in docs/camdl-run-spec.md §1.3). --param CLI overrides
+    // below still win against scenarios — spec:
+    //   params.toml → scenario params → --param CLI flags.
+    for (k, v) in &scenario_params {
+        for p in &mut model.parameters {
+            if p.name == *k { p.value = Some(*v); }
+        }
+    }
+    for (k, factor) in &scenario_scale {
+        for p in &mut model.parameters {
+            if p.name == *k {
+                if let Some(v) = p.value {
+                    p.value = Some(v * factor);
+                }
             }
         }
     }
