@@ -44,6 +44,8 @@ let () =
     let ascii     = ref false in
     let no_color  = ref false in
     let dims      = ref false in
+    let do_tables = ref false in
+    let tables_pat = ref None in
     let rec parse = function
       | [] -> ()
       | "--summary"      :: tl -> summary := true;         parse tl
@@ -61,6 +63,12 @@ let () =
         tr_count := true; parse tl
       | "--let" :: name :: tl ->
         let_name := Some name; parse tl
+      | "--tables" :: tl ->
+        do_tables := true;
+        (match tl with
+         | s :: tl2 when not (String.length s > 0 && s.[0] = '-') ->
+           tables_pat := Some s; parse tl2
+         | _ -> parse tl)
       | "--ir"       :: tl -> ir_mode   := true; parse tl
       | "--ascii"    :: tl -> ascii     := true; parse tl
       | "--no-color" :: tl -> no_color  := true; parse tl
@@ -82,6 +90,7 @@ let () =
     in
     let cmd =
       if !dims              then Inspect.Dims
+      else if !do_tables    then Inspect.Tables !tables_pat
       else if !comps             then Inspect.Compartments
       else if !do_transitions then Inspect.Transitions !transitions_pat
       else if !tr_count then Inspect.TransitionCount !transitions_pat

@@ -756,6 +756,149 @@ let run_dims ppf (model : Ir.model) ctx =
     Fmt.pf ppf "@\n"
   ) model.parameters
 
+(* ── Tables ──────────────────────────────────────────────────────────────── *)
+
+let dim_of_entry = function
+  | TDim d | TDimUnit (d, _) -> d
+
+(** Recover source annotation from the AST table declaration. *)
+let table_source_label (td : table_decl) =
+  let find_path args =
+    List.find_map (fun (kw, e) ->
+      if kw = "" then match e with EIdent (s, _) -> Some s | _ -> None
+      else None
+    ) args
+  in
+  match td.tvalue with
+  | EFuncCall ("read", args)     ->
+    (match find_path args with Some p -> `FromFile p | None -> `Inline)
+  | EFuncCall ("external", args) ->
+    (match find_path args with Some n -> `External n | None -> `External "?")
+  | _ -> `Inline
+
+(** Format a compiled table value (always Const f after expansion). *)
+let pp_val ppf = function
+  | Ir.Const f ->
+    let s = if Float.is_integer f && Float.abs f < 1e15
+            then Printf.sprintf "%g" f
+            else Printf.sprintf "%g" f in
+    Fmt.string ppf s
+  | other ->
+    Pp_expr.pp ~mode:Pp_expr.Dsl ~split:Pp_expr.no_split ~ascii:true ppf other
+
+(** Build multi-index label for n-dimensional flat position. *)
+let multi_index_label level_lists flat_i =
+  let n = List.length level_lists in
+  let sizes = List.map List.length level_lists in
+  let indices = Array.make n 0 in
+  let rem = ref flat_i in
+  let strides = Array.make n 1 in
+  for k = n - 2 downto 0 do
+    strides.(k) <- strides.(k + 1) * List.nth sizes (k + 1)
+  done;
+  for k = 0 to n - 1 do
+    indices.(k) <- !rem / strides.(k);
+    rem := !rem mod strides.(k)
+  done;
+  List.mapi (fun k levels -> List.nth levels indices.(k)) level_lists
+  |> String.concat ","
+
+let run_tables ppf (model : Ir.model) ctx (pattern : string option) =
+  let faint s  = Term_style.dim_style Fmt.string ppf s in
+  let bar ()   = faint "\xe2\x94\x82" in  (* │ *)
+  let tables = match pattern with
+    | None     -> model.tables
+    | Some pat -> List.filter (fun (t : Ir.table) -> glob_match pat t.name) model.tables
+  in
+  if tables = [] then (
+    (match pattern with
+     | None     -> Fmt.pf ppf "  (no tables defined)@\n"
+     | Some p   -> Fmt.pf ppf "  no tables matching '%s'@\n" p);
+    ()
+  ) else
+  List.iter (fun (t : Ir.table) ->
+    let decl_opt = List.find_opt (fun td -> List.mem t.name td.tnames)
+                     ctx.Expander.table_decls in
+    let tdim_names = match decl_opt with
+      | Some td -> List.map dim_of_entry td.tdims
+      | None    -> []
+    in
+    let dim_levels = List.map (fun d ->
+      match List.assoc_opt d ctx.Expander.dim_registry with
+      | Some vs -> vs | None -> []
+    ) tdim_names in
+    (* ── Header ── *)
+    Term_style.bold (Term_style.table Fmt.string) ppf t.name;
+    (if tdim_names <> [] then (
+      Fmt.pf ppf "  [";
+      List.iteri (fun i d ->
+        if i > 0 then faint " \xc3\x97 ";   (* × *)
+        Term_style.dimension Fmt.string ppf d
+      ) tdim_names;
+      Fmt.pf ppf "]"
+    ));
+    (match decl_opt with
+     | None    -> ()
+     | Some td ->
+       match table_source_label td with
+       | `Inline     -> faint "  inline"
+       | `FromFile p -> faint (Printf.sprintf "  loaded: %s" p)
+       | `External _ -> Term_style.warning_style Fmt.string ppf "  runtime: external()");
+    Fmt.pf ppf "@\n";
+    (* ── Values ── *)
+    (match t.source with
+     | Ir.External name ->
+       Fmt.pf ppf "  (values for '%s' supplied via --table at simulate time)@\n" name
+     | Ir.Inline vals ->
+       match dim_levels with
+       | [] ->
+         (match vals with
+          | [v] -> Fmt.pf ppf "  "; pp_val ppf v; Fmt.pf ppf "@\n"
+          | _   ->
+            List.iteri (fun i v ->
+              Fmt.pf ppf "  "; bar (); Fmt.pf ppf " [%d]  " i; pp_val ppf v; Fmt.pf ppf "@\n"
+            ) vals)
+       | [levels] ->
+         let w = List.fold_left (fun a s -> max a (String.length s)) 0 levels in
+         List.iter2 (fun lv v ->
+           let pad = String.make (w - String.length lv) ' ' in
+           Fmt.pf ppf "  "; bar (); Fmt.pf ppf " ";
+           Term_style.dim_style Fmt.string ppf lv; Fmt.pf ppf "%s  " pad;
+           pp_val ppf v; Fmt.pf ppf "@\n"
+         ) levels vals
+       | [row_lvs; col_lvs] ->
+         let rw = List.fold_left (fun a s -> max a (String.length s)) 0 row_lvs in
+         let cw = List.fold_left (fun a s -> max a (String.length s)) 5 col_lvs in
+         let nc = List.length col_lvs in
+         (* column header row *)
+         Fmt.pf ppf "  "; bar (); Fmt.pf ppf "  %s" (String.make rw ' ');
+         List.iter (fun c ->
+           let pad = String.make (cw - String.length c) ' ' in
+           Fmt.pf ppf "  %s" pad;
+           Term_style.dim_style Fmt.string ppf c
+         ) col_lvs;
+         Fmt.pf ppf "@\n";
+         List.iteri (fun ri row ->
+           let rpad = String.make (rw - String.length row) ' ' in
+           Fmt.pf ppf "  "; bar (); Fmt.pf ppf "  ";
+           Term_style.dim_style Fmt.string ppf row; Fmt.pf ppf "%s" rpad;
+           List.iteri (fun ci _ ->
+             let v = List.nth vals (ri * nc + ci) in
+             let vs = Format.asprintf "%a" pp_val v in
+             let pad = String.make (cw - String.length vs) ' ' in
+             Fmt.pf ppf "  %s%s" pad vs
+           ) col_lvs;
+           Fmt.pf ppf "@\n"
+         ) row_lvs
+       | level_lists ->
+         List.iteri (fun i v ->
+           let lbl = multi_index_label level_lists i in
+           Fmt.pf ppf "  "; bar (); Fmt.pf ppf " [%s]  " lbl;
+           pp_val ppf v; Fmt.pf ppf "@\n"
+         ) vals);
+    Fmt.pf ppf "@\n"
+  ) tables
+
 (* ── Main entry point ────────────────────────────────────────────────────── *)
 
 type inspect_cmd =
@@ -766,6 +909,7 @@ type inspect_cmd =
   | TransitionCount of string option    (* pattern *)
   | LetBinding of string
   | Dims
+  | Tables of string option             (* pattern *)
 
 type inspect_opts = {
   cmd      : inspect_cmd;
@@ -822,7 +966,9 @@ let run_inspect path opts =
      | LetBinding name ->
        run_let ppf ctx name
      | Dims ->
-       run_dims ppf model ctx)
+       run_dims ppf model ctx
+     | Tables pat ->
+       run_tables ppf model ctx pat)
 
 (** Run 'camdl check': validate + show summary. *)
 let run_check path =
