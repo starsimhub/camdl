@@ -2466,6 +2466,85 @@ let test_likelihood_unknown_kwarg_errors () =
   |} in
   compile_expect_error_code ~code:"E251" ~contains:"lambda" src
 
+(* ── Multi-source transitions (Wave 1 / #1) ──────────────────────────────── *)
+
+(** Parser accepts `S + I --> I + I` on the source side. *)
+let test_multi_source_parses () =
+  let src = {|
+    time_unit = 'days
+    compartments { S, I }
+    parameters { beta : rate in [0.0001, 1.0] }
+    transitions {
+      infect : S + I --> I + I  @ beta * S * I
+    }
+    init { S = 999  I = 1 }
+    simulate { from = 0 'days  to = 30 'days }
+  |} in
+  let _m = compile_expect_ok src in
+  ()
+
+(** Catalyst collapse: `S + I --> I + I` produces the same stoichiometry
+    as the plain `S --> I` single-source form. The I on both sides
+    should sum to zero and be dropped; the rate expression retains its
+    reference to I. *)
+let test_multi_source_catalyst_collapses () =
+  let multi = {|
+    time_unit = 'days
+    compartments { S, I }
+    parameters { beta : rate in [0.0001, 1.0] }
+    transitions {
+      infect : S + I --> I + I  @ beta * S * I
+    }
+    init { S = 999  I = 1 }
+    simulate { from = 0 'days  to = 30 'days }
+  |} in
+  let single = {|
+    time_unit = 'days
+    compartments { S, I }
+    parameters { beta : rate in [0.0001, 1.0] }
+    transitions {
+      infect : S --> I  @ beta * S * I
+    }
+    init { S = 999  I = 1 }
+    simulate { from = 0 'days  to = 30 'days }
+  |} in
+  let m_multi  = compile_expect_ok multi  in
+  let m_single = compile_expect_ok single in
+  let stoich_of m =
+    match m.Ir.transitions with
+    | [t] -> List.sort compare t.Ir.stoichiometry
+    | _   -> Alcotest.fail "expected exactly one transition"
+  in
+  let s_multi  = stoich_of m_multi  in
+  let s_single = stoich_of m_single in
+  Alcotest.(check (list (pair string int)))
+    "catalyst-collapsed multi-source stoich == single-source stoich"
+    s_single s_multi
+
+(** True bimolecular (non-catalyst) source: `A + B --> C`. Stoichiometry
+    must be {A: -1, B: -1, C: +1}. *)
+let test_multi_source_bimolecular_stoich () =
+  let src = {|
+    time_unit = 'days
+    compartments { A, B, C }
+    parameters { k : rate in [0.0001, 1.0] }
+    transitions {
+      react : A + B --> C  @ k * A * B
+    }
+    init { A = 100  B = 100  C = 0 }
+    simulate { from = 0 'days  to = 10 'days }
+  |} in
+  let m = compile_expect_ok src in
+  let t = match m.Ir.transitions with
+    | [t] -> t
+    | _   -> Alcotest.fail "expected exactly one transition"
+  in
+  let got = List.sort compare t.Ir.stoichiometry in
+  let expected = List.sort compare [("A", -1); ("B", -1); ("C", 1)] in
+  Alcotest.(check (list (pair string int)))
+    "A + B --> C produces {A:-1, B:-1, C:+1}"
+    expected got
+
 let () =
   Alcotest.run "compiler" [
     "golden", [
@@ -2653,5 +2732,10 @@ let () =
       Alcotest.test_case "poisson(rate = projected) parses"              `Quick test_poisson_rate_kwarg_parses;
       Alcotest.test_case "E250 positional arg in likelihood"             `Quick test_poisson_positional_errors;
       Alcotest.test_case "E251 unknown kwarg in likelihood"              `Quick test_likelihood_unknown_kwarg_errors;
+    ];
+    "multi_source_transitions", [
+      Alcotest.test_case "parser accepts `S + I --> I + I`"              `Quick test_multi_source_parses;
+      Alcotest.test_case "catalyst collapse preserves single-source IR"  `Quick test_multi_source_catalyst_collapses;
+      Alcotest.test_case "bimolecular A + B --> C → {A:-1, B:-1, C:+1}"  `Quick test_multi_source_bimolecular_stoich;
     ];
   ]
