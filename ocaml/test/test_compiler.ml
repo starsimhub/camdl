@@ -316,6 +316,91 @@ let test_parameterised_table () =
             (Serde.model_to_string
                { m with Ir.tables = [{tbl with Ir.source = Ir.Inline [other]}] })))
 
+(* ── Table unit conversion (spec §6.1) ───────────────────────────────────────
+   `tables { x : dim 'unit = [...] }` annotations must scale inline values
+   from the declared unit to the model's `time_unit`. Pre-fix, the unit was
+   parsed (TDimUnit) but dropped in the expander (`expander.ml:218,664`),
+   so `age_dur : group 'years = [5, 60]` with `time_unit = 'days` compiled
+   to verbatim [5, 60] instead of [1826.25, 21915.0]. See incident
+   `docs/dev/incidents/2026-04-21-table-unit-annotations-ignored.md`. *)
+
+let assert_inline_const ~epsilon tbl idx expected =
+  let values = match tbl.Ir.source with
+    | Ir.Inline vs -> vs
+    | Ir.External _ -> Alcotest.fail "expected Inline, got External"
+  in
+  match List.nth values idx with
+  | Ir.Const f when Float.abs (f -. expected) < epsilon -> ()
+  | Ir.Const f ->
+    Alcotest.failf "entry %d: expected %f (±%f), got %f" idx expected epsilon f
+  | _ -> Alcotest.failf "entry %d: expected Ir.Const, got non-const" idx
+
+let test_table_years_annotation_scales_to_days () =
+  (* With time_unit = 'days, `[5, 60] 'years` must materialise as days. *)
+  let src = {|
+    time_unit = 'days
+    dimensions { group = [young, old] }
+    compartments { S, I }
+    stratify(by = group)
+    parameters { beta : rate }
+    tables { age_dur : group 'years = [5, 60] }
+    let N = S_young + I_young + S_old + I_old
+    transitions {
+      recovery[g in group] : I[g] --> S[g]
+        @ (1.0 / age_dur[g]) * I[g]
+    }
+    init { S_young = 500 I_young = 10 S_old = 500 I_old = 10 }
+    simulate { from = 0 'days  to = 10 'days }
+  |} in
+  let m = compile_expect_ok src in
+  let tbl = List.find (fun (t : Ir.table) -> t.Ir.name = "age_dur") m.Ir.tables in
+  (* days_per Years = 365.2425 (Gregorian, not Julian 365.25) *)
+  assert_inline_const ~epsilon:1e-6 tbl 0 (5.0 *. 365.2425);
+  assert_inline_const ~epsilon:1e-6 tbl 1 (60.0 *. 365.2425)
+
+let test_table_per_day_annotation_with_weeks_unit () =
+  (* With time_unit = 'weeks, `[0.1] 'per_day` means 0.1 /day = 0.7 /week. *)
+  let src = {|
+    time_unit = 'weeks
+    dimensions { group = [adult] }
+    compartments { S, I }
+    stratify(by = group)
+    parameters { beta : rate }
+    tables { mort : group 'per_day = [0.1] }
+    let N = S_adult + I_adult
+    transitions {
+      death[g in group] : I[g] -->   @ mort[g] * I[g]
+    }
+    init { S_adult = 90 I_adult = 10 }
+    simulate { from = 0 'weeks  to = 10 'weeks }
+  |} in
+  let m = compile_expect_ok src in
+  let tbl = List.find (fun (t : Ir.table) -> t.Ir.name = "mort") m.Ir.tables in
+  assert_inline_const ~epsilon:1e-6 tbl 0 0.7
+
+let test_table_no_unit_annotation_leaves_values_alone () =
+  (* No unit literal on the table = no scaling; dimcheck infers dim from use. *)
+  let src = {|
+    time_unit = 'days
+    dimensions { group = [a, b] }
+    compartments { S }
+    stratify(by = group)
+    parameters { beta : rate }
+    tables { C : group × group = [[1.0, 0.5], [0.5, 1.0]] }
+    let N = S_a + S_b
+    transitions {
+      dummy[g in group] : S[g] -->   @ beta * C[g, g] * S[g]
+    }
+    init { S_a = 1 S_b = 1 }
+    simulate { from = 0 'days  to = 1 'days }
+  |} in
+  let m = compile_expect_ok src in
+  let tbl = List.find (fun (t : Ir.table) -> t.Ir.name = "C") m.Ir.tables in
+  assert_inline_const ~epsilon:1e-12 tbl 0 1.0;
+  assert_inline_const ~epsilon:1e-12 tbl 1 0.5;
+  assert_inline_const ~epsilon:1e-12 tbl 2 0.5;
+  assert_inline_const ~epsilon:1e-12 tbl 3 1.0
+
 (* ── DESIGN-2: Intervention expansion ───────────────────────────────────────
    Compile a model with an intervention. Assert it appears in model.interventions. *)
 
@@ -2225,6 +2310,14 @@ let () =
     ];
     "parameterised_tables", [
       Alcotest.test_case "param survives as Ir.Param" `Quick test_parameterised_table;
+    ];
+    "table_unit_conversion", [
+      Alcotest.test_case "'years table scales to days"
+        `Quick test_table_years_annotation_scales_to_days;
+      Alcotest.test_case "'per_day table scales to model 'weeks unit"
+        `Quick test_table_per_day_annotation_with_weeks_unit;
+      Alcotest.test_case "no unit annotation leaves values untouched"
+        `Quick test_table_no_unit_annotation_leaves_values_alone;
     ];
     "interventions", [
       Alcotest.test_case "intervention expansion" `Quick test_intervention_expansion;

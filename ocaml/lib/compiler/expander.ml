@@ -663,6 +663,54 @@ let build_lookup_tables ctx =
 let dim_name_of_entry = function
   | TDim d | TDimUnit (d, _) -> d
 
+(** Extract the unit literal from a table's dim list, if any.
+    Spec §6.1 permits at most one unit annotation per table (the annotation
+    is logically on the value, not on a particular dim); parser grammar
+    allows multiple, so we enforce the invariant here. *)
+let extract_table_unit ctx ~table_name (dims : table_dim_entry list) =
+  let units = List.filter_map (function
+    | TDim _ -> None
+    | TDimUnit (_, u) -> Some u
+  ) dims in
+  match units with
+  | [] -> None
+  | [u] -> Some u
+  | _ ->
+    Diagnostics.error ctx.diags
+      ~code:"E216"
+      ~loc:Diagnostics.no_loc
+      ~message:(Printf.sprintf
+        "table '%s' has unit annotations on more than one dimension; \
+         declare the unit on exactly one dimension (it applies to all values)"
+        table_name)
+      ();
+    Some (List.hd units)
+
+(** Scale a list of Ir.Const values from `unit` to the model's time unit.
+    Non-Const entries (e.g. Param, BinOp) are passed through unchanged and
+    a diagnostic is emitted — unit conversion of symbolic table values
+    isn't implemented (would require re-materialising as BinOp { Mul, ... }
+    which has knock-on dimcheck consequences). *)
+let scale_table_values ctx ~table_name ~unit values =
+  let scale = unit_to_model_time ctx 1.0 unit in
+  if scale = 1.0 then values
+  else List.map (fun v ->
+    match v with
+    | Ir.Const f -> Ir.Const (f *. scale)
+    | other ->
+      Diagnostics.error ctx.diags
+        ~code:"E217"
+        ~loc:Diagnostics.no_loc
+        ~message:(Printf.sprintf
+          "table '%s' has a '%s annotation but non-constant entries; \
+           unit conversion of symbolic (parameter/expression) table \
+           values isn't yet supported — declare values as plain \
+           numbers or drop the unit annotation"
+          table_name (unit_lit_to_string unit))
+        ();
+      other
+  ) values
+
 let table_dims ctx tname =
   match List.find_opt (fun td -> List.mem tname td.tnames) ctx.table_decls with
   | Some td -> List.map dim_name_of_entry td.tdims
@@ -1762,6 +1810,8 @@ let table_source_of_expr ctx (dim_entries : table_dim_entry list) e =
 let expand_tables ctx =
   List.concat_map (fun td ->
     let dim_entries = td.tdims in
+    let primary_name = List.hd td.tnames in
+    let table_unit = extract_table_unit ctx ~table_name:primary_name dim_entries in
     match td.tvalue with
     | EFuncCall ("read", args) ->
       (* Multi-value loader: produces one Ir.table per name in td.tnames *)
@@ -1779,6 +1829,10 @@ let expand_tables ctx =
          List.mapi (fun col_idx name ->
            let arr = List.nth arrays col_idx in
            let vals = Array.to_list (Array.map (fun f -> Ir.Const f) arr) in
+           let vals = match table_unit with
+             | Some u -> scale_table_values ctx ~table_name:name ~unit:u vals
+             | None   -> vals
+           in
            { Ir.name          = name;
              Ir.source        = Ir.Inline vals;
              Ir.out_of_bounds = Ir.Error;
@@ -1792,6 +1846,11 @@ let expand_tables ctx =
         List.hd td.tnames
       in
       let source = table_source_of_expr ctx dim_entries td.tvalue in
+      let source = match source, table_unit with
+        | Ir.Inline vs, Some u ->
+          Ir.Inline (scale_table_values ctx ~table_name:name ~unit:u vs)
+        | _ -> source
+      in
       (match source with
        | Ir.Inline [] -> []   (* empty inline = compile error upstream, skip *)
        | _ -> [{ Ir.name; Ir.source; Ir.out_of_bounds = Ir.Error }])

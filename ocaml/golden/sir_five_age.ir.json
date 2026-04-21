@@ -1600,11 +1600,11 @@
     {
       "name": "age_dur",
       "values": [
-        { "const": 5.0 },
-        { "const": 10.0 },
-        { "const": 35.0 },
-        { "const": 15.0 },
-        { "const": 20.0 }
+        { "const": 1826.2125 },
+        { "const": 3652.425 },
+        { "const": 12783.487500000001 },
+        { "const": 5478.6375 },
+        { "const": 7304.85 }
       ],
       "out_of_bounds": "error"
     }
