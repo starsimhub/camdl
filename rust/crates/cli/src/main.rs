@@ -223,7 +223,9 @@ fn run_simulate(a: &args::SimulateArgs) {
     // Option<_> fields mean None ↔ not explicitly passed.
     let backend_explicit = a.backend.backend.is_some();
     let dt_explicit      = a.backend.dt.is_some();
-    let mut backend      = a.backend.backend.map(|b| b.to_string()).unwrap_or_else(|| "gillespie".to_string());
+    // Default is chain_binomial so `simulate` and `fit` agree at the
+    // same MLE params (see docs/dev/incidents/2026-04-19-backend-default-mismatch.md).
+    let mut backend      = a.backend.backend.map(|b| b.to_string()).unwrap_or_else(|| "chain_binomial".to_string());
     let mut dt           = a.backend.dt.unwrap_or(1.0_f64);
     let seed             = a.seed;
     let overrides: HashMap<String, f64> = a.model_overrides.param.iter()
