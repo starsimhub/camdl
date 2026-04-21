@@ -572,6 +572,43 @@ let test_incidence_positional_and_named_produce_equal_projections () =
     "positional and named projections produce identical IR"
     pos_proj nam_proj
 
+(* ── P3.4 — consecutive() pair count (spec §14) ──────────────────────────────
+   Spec: `consecutive((s, s_next) in consecutive(dim))` pairs adjacent levels
+   only — k levels → k-1 transitions. Common pitfall: an off-by-one where k
+   transitions get emitted, or a cross-product k² (every (s, t) pair). *)
+
+let test_consecutive_pair_count () =
+  (* 3 erlang sub-stages → 2 progression transitions (e1→e2, e2→e3).
+     Final exit (e3 → I) is a separate transition. *)
+  let src = {|
+    compartments { S, E, I, R }
+    dimensions { erlang_E = [e1, e2, e3] }
+    stratify(by = erlang_E, only = [E])
+    parameters { beta : rate  sigma : rate  gamma : rate }
+    let N = S + E_e1 + E_e2 + E_e3 + I + R
+    transitions {
+      infection : S --> E_e1  @ beta * S * I / N
+      progression[(s, s_next) in consecutive(erlang_E)]
+        : E[s] --> E[s_next]
+        @ 3.0 * sigma * E[s]
+      exit : E_e3 --> I  @ 3.0 * sigma * E_e3
+      recovery : I --> R  @ gamma * I
+    }
+    init { S = 999  I = 1 }
+    simulate { from = 0 'days  to = 30 'days }
+  |} in
+  let m = compile_expect_ok src in
+  (* Count transitions whose name starts with "progression" — the
+     consecutive expansion should produce exactly k-1 = 2 (for k=3). *)
+  let progression_count = List.length
+    (List.filter (fun (t : Ir.transition) ->
+      String.length t.name >= 11 && String.sub t.name 0 11 = "progression"
+    ) m.transitions) in
+  Alcotest.(check int) "consecutive(k=3) → k-1 = 2 progression transitions"
+    2 progression_count;
+  (* Total: 1 infection + 2 progression + 1 exit + 1 recovery = 5 *)
+  Alcotest.(check int) "total transition count" 5 (List.length m.transitions)
+
 (* ── DESIGN-2: Intervention expansion ───────────────────────────────────────
    Compile a model with an intervention. Assert it appears in model.interventions. *)
 
@@ -2499,6 +2536,8 @@ let () =
         `Quick test_stratification_compartment_count;
       Alcotest.test_case "§13.1 incidence positional ≡ named projection (P3.5)"
         `Quick test_incidence_positional_and_named_produce_equal_projections;
+      Alcotest.test_case "§14 consecutive(k) → k-1 adjacent pairs (P3.4)"
+        `Quick test_consecutive_pair_count;
     ];
     "interventions", [
       Alcotest.test_case "intervention expansion" `Quick test_intervention_expansion;
