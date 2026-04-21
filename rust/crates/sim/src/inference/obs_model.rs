@@ -10,6 +10,7 @@ use crate::propensity::EvalCtx;
 use crate::resolved_expr::{ResolvedLikelihood, ResolveCtx, resolve_likelihood, eval_resolved};
 use crate::state::{IntState, RealState};
 use crate::inference::obs_loglik::{negbin_logpmf, discretized_normal_logpmf_tol, poisson_logpmf, DEFAULT_TOL};
+use crate::inference::types::LOG_PROB_FLOOR;
 use ir::observation::ObservationModel;
 use rand::prelude::Distribution;
 use rand_distr::{Gamma, Normal};
@@ -141,7 +142,7 @@ pub(crate) fn eval_likelihood_resolved(
         }
         ResolvedLikelihood::Bernoulli { p } => {
             let p_val = eval_resolved(p, &ctx(projected));
-            if observed > 0.5 { p_val.max(1e-300).ln() } else { (1.0 - p_val).max(1e-300).ln() }
+            if observed > 0.5 { p_val.max(LOG_PROB_FLOOR).ln() } else { (1.0 - p_val).max(LOG_PROB_FLOOR).ln() }
         }
     }
 }
@@ -227,8 +228,8 @@ pub(crate) fn sample_obs_resolved(
             // then k ~ Binomial(n, p). Uses the inner RNG directly for
             // the Beta draw (Gamma(a,1)/(Gamma(a,1)+Gamma(b,1))).
             let n_val = eval_resolved(n, &ctx(projected));
-            let alpha_val = eval_resolved(alpha, &ctx(projected)).max(1e-300);
-            let beta_val  = eval_resolved(beta,  &ctx(projected)).max(1e-300);
+            let alpha_val = eval_resolved(alpha, &ctx(projected)).max(LOG_PROB_FLOOR);
+            let beta_val  = eval_resolved(beta,  &ctx(projected)).max(LOG_PROB_FLOOR);
             let n_int = n_val.round().max(0.0) as u64;
             use rand_distr::{Gamma, Distribution};
             let inner = rng.inner_mut();
@@ -277,7 +278,7 @@ pub(crate) fn eval_obs_mean_resolved(
             let n_val = eval_resolved(n, &ctx(projected));
             let alpha_val = eval_resolved(alpha, &ctx(projected));
             let beta_val  = eval_resolved(beta,  &ctx(projected));
-            let denom = (alpha_val + beta_val).max(1e-300);
+            let denom = (alpha_val + beta_val).max(LOG_PROB_FLOOR);
             n_val * (alpha_val / denom)
         }
         ResolvedLikelihood::Bernoulli { p } => {

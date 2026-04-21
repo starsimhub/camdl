@@ -281,13 +281,6 @@ pub fn run_pmmh_cli(
                 burn_in,
                 rho: sc.and_then(|c| c.rho),
                 n_source_groups: config.compiled.source_groups.len(),
-                n_obs: config.observations.len(),
-                steps_per_obs: {
-                    let obs_spacing = if config.observations.len() >= 2 {
-                        config.observations[1].time - config.observations[0].time
-                    } else { 7.0 };
-                    (obs_spacing / dt).round() as usize
-                },
             };
 
             // Build the loglik evaluator closure for this chain
@@ -377,8 +370,8 @@ pub fn run_pmmh_cli(
 
             let result = run_pmmh(
                 &config.estimated_params, &priors, &config.base_params,
-                &pmmh_config, &eval_loglik, eval_corr_ref, chain_seed, Some(&progress_cb),
-                resume_states[chain_id].clone(), config_hash.clone(),
+                &pmmh_config, &config.observations, &eval_loglik, eval_corr_ref, chain_seed,
+                Some(&progress_cb), resume_states[chain_id].clone(), config_hash.clone(),
             );
 
             bar.finish_with_message(format!(

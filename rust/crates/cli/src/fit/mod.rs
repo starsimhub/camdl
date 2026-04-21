@@ -30,52 +30,54 @@ pub mod gating;
 
 use config::FitToml;
 
-pub fn cmd_fit_status(args: &[String]) {
-    if let Some(path) = args.first() {
-        if !path.starts_with("--") {
-            let p = std::path::Path::new(path);
-            // Directory → walk it directly
-            if p.is_dir() {
-                run_status_v2_dir(path);
-                return;
-            }
-            // Try v2 config format
-            match config_v2::FitConfigV2::load(path) {
-                Ok(config) => {
-                    match config.fit_dir(path) {
-                        Ok(fit_dir) if fit_dir.exists() => {
-                            run_status_v2_dir(&fit_dir.to_string_lossy());
-                        }
-                        Ok(fit_dir) => {
-                            eprintln!("no results found at {}", fit_dir.display());
-                        }
-                        Err(e) => {
-                            eprintln!("error computing fit directory: {}", e);
-                            std::process::exit(1);
-                        }
-                    }
-                    return;
+pub fn cmd_fit_status(a: &crate::args::FitStatusArgs) {
+    let path_str = match &a.path {
+        Some(p) => p.to_string_lossy().into_owned(),
+        None => {
+            eprintln!("usage: camdl fit status [FILE_OR_DIR]");
+            std::process::exit(1);
+        }
+    };
+    let p = std::path::Path::new(&path_str);
+    // Directory → walk it directly
+    if p.is_dir() {
+        run_status_v2_dir(&path_str);
+        return;
+    }
+    // Try v2 config format
+    match config_v2::FitConfigV2::load(&path_str) {
+        Ok(config) => {
+            match config.fit_dir(&path_str) {
+                Ok(fit_dir) if fit_dir.exists() => {
+                    run_status_v2_dir(&fit_dir.to_string_lossy());
+                }
+                Ok(fit_dir) => {
+                    eprintln!("no results found at {}", fit_dir.display());
                 }
                 Err(e) => {
-                    // Check if it has [stages] (v2 marker) — if so, the error is real
-                    if let Ok(contents) = std::fs::read_to_string(path) {
-                        if contents.contains("[stages.") || contents.contains("[stages]") {
-                            eprintln!("error parsing v2 fit.toml: {}", e);
-                            std::process::exit(1);
-                        }
-                    }
-                    // Otherwise fall through to v1
+                    eprintln!("error computing fit directory: {}", e);
+                    std::process::exit(1);
                 }
             }
+            return;
+        }
+        Err(e) => {
+            // Check if it has [stages] (v2 marker) — if so, the error is real
+            if let Ok(contents) = std::fs::read_to_string(&path_str) {
+                if contents.contains("[stages.") || contents.contains("[stages]") {
+                    eprintln!("error parsing v2 fit.toml: {}", e);
+                    std::process::exit(1);
+                }
+            }
+            // Otherwise fall through to v1
         }
     }
-    // Fall back to v1: treat the fit.toml as a v1 FitToml and walk the
-    // computed cell dir (same shape as v2). Legacy v1 status expected
-    // `fit.fit.output_dir` to be the stage-container dir directly; now
-    // it's a root, so we route through `cell_dir` to land at
-    // `<root>/fits/<stem>-<hash>/real/fit_<seed>/`.
-    let (fit, fit_path, seed, _) = parse_fit_args(args, false);
-    let cell = fit.cell_dir(&fit_path, seed).unwrap_or_else(|e| {
+    // Fall back to v1 (legacy): use fit.toml's own seed field if present.
+    let fit = FitToml::load(&path_str).unwrap_or_else(|e| {
+        eprintln!("error: {}", e); std::process::exit(1);
+    });
+    let seed = fit.fit.seed.unwrap_or(1);
+    let cell = fit.cell_dir(&path_str, seed).unwrap_or_else(|e| {
         eprintln!("error: {}", e); std::process::exit(1);
     });
     if !cell.exists() {
@@ -172,49 +174,18 @@ fn print_stage_status(name: &str, stage_dir: &str) {
 
 // ─── New `camdl fit run` entry point (config_v2) ────────────────────────────
 
-pub fn cmd_fit_run_v2(args: &[String]) {
+pub fn cmd_fit_run_v2(a: &crate::args::FitRunArgs) {
     use config_v2::{FitConfigV2, Stage, StartsFrom};
 
-    let mut fit_path: Option<String> = None;
-    let mut seed = 1_u64;
-    let mut force = false;
-    let mut stage_filter: Option<String> = None;
-    let mut starts_from_override: Option<String> = None;
-    let mut has_seed_flag = false;
-    let mut sweep_args: Vec<String> = Vec::new();
-    let mut allow_nonconverged_scout = false;
-
-    let mut i = 0;
-    while i < args.len() {
-        match args[i].as_str() {
-            "--seed" => { i += 1; seed = args[i].parse().expect("--seed needs integer"); has_seed_flag = true; }
-            "--force" => { force = true; }
-            "--stage" => { i += 1; stage_filter = Some(args[i].clone()); }
-            "--starts-from" => {
-                i += 1;
-                starts_from_override = Some(resolve_starts_from_arg(&args[i]));
-            }
-            "--sweep" => { i += 1; sweep_args.push(args[i].clone()); }
-            "--allow-nonconverged-scout" => { allow_nonconverged_scout = true; }
-            "--resume" => {
-                eprintln!("error: --resume is not yet implemented for `camdl fit run`.");
-                eprintln!("  Use the legacy `camdl fit pgas` or `camdl fit pmmh` with --resume.");
-                std::process::exit(1);
-            }
-            s if s.starts_with("--") => {
-                eprintln!("unknown flag: {}", s);
-                eprintln!("usage: camdl fit run FIT.toml [--stage NAME] [--seed N] [--force] [--sweep \"NAME=V1,V2,...\"]");
-                std::process::exit(1);
-            }
-            path => { fit_path = Some(path.to_string()); }
-        }
-        i += 1;
-    }
-
-    let fit_path = fit_path.unwrap_or_else(|| {
-        eprintln!("usage: camdl fit run FIT.toml [--stage NAME] [--seed N] [--force]");
-        std::process::exit(1);
-    });
+    let fit_path              = a.config.to_string_lossy().into_owned();
+    let base_seed             = a.seed.unwrap_or(1);
+    let force                 = a.force;
+    let stage_filter          = a.stage.clone();
+    let starts_from_override  = a.starts_from.as_ref().map(|s| resolve_starts_from_arg(s));
+    let allow_nonconverged_scout = a.allow_nonconverged_scout;
+    let sweep_specs: Vec<(String, Vec<f64>)> = a.sweep.iter()
+        .map(|s| (s.name.clone(), s.values.clone()))
+        .collect();
 
     // Load v2 config
     let config = FitConfigV2::load(&fit_path).unwrap_or_else(|e| {
@@ -240,23 +211,7 @@ pub fn cmd_fit_run_v2(args: &[String]) {
         eprintln!("\x1b[33mwarning:\x1b[0m {}", msg);
     }
 
-    // ── Parse and validate sweeps ─────────────────────────────────────────
-    let sweep_specs: Vec<(String, Vec<f64>)> = sweep_args.iter().map(|arg| {
-        let mut parts = arg.splitn(2, '=');
-        let name = parts.next().unwrap().trim().to_string();
-        let values_str = parts.next().unwrap_or_else(|| {
-            eprintln!("error: --sweep requires NAME=V1,V2,...");
-            std::process::exit(1);
-        });
-        let values: Vec<f64> = values_str.split(',')
-            .map(|s| s.trim().parse().unwrap_or_else(|_| {
-                eprintln!("error: cannot parse sweep value '{}' for '{}'", s.trim(), name);
-                std::process::exit(1);
-            }))
-            .collect();
-        (name, values)
-    }).collect();
-
+    // ── Validate sweeps ───────────────────────────────────────────────────
     // Validate: swept params must be in [fixed], not [estimate]
     let fixed_resolved = config.fixed.resolve().unwrap_or_default();
     for (name, _) in &sweep_specs {
@@ -369,9 +324,6 @@ pub fn cmd_fit_run_v2(args: &[String]) {
         eprintln!("    - initial state spread from ivp params: [{}]", ivp_params.join(", "));
         eprintln!("    - log-likelihood accumulation from t = 2 (y₁ reweights and resamples only)");
     }
-
-    // Seed: CLI --seed > default (1). Deterministic by default for reproducibility.
-    let base_seed = if has_seed_flag { seed } else { 1 };
 
     // ── Build the replicate grid: (dataset_idx, fit_seed) cells ──────────
     //
@@ -1427,39 +1379,9 @@ fn format_prior(p: &Option<config_v2::PriorSpec>) -> String {
 /// on the stem prefix.
 ///
 /// Hardening proposal ship-now #8.
-pub fn cmd_fit_where(args: &[String]) {
-    let mut fit_path: Option<String> = None;
-    let mut seed: Option<u64> = None;
-    let mut i = 0;
-    while i < args.len() {
-        match args[i].as_str() {
-            "--seed" => {
-                i += 1;
-                seed = Some(args.get(i).and_then(|s| s.parse().ok()).unwrap_or_else(|| {
-                    eprintln!("error: --seed needs an integer");
-                    std::process::exit(1);
-                }));
-            }
-            "--help" | "-h" => {
-                eprintln!("usage: camdl fit where FIT.toml [--seed N]");
-                eprintln!();
-                eprintln!("Prints the fit directory for FIT.toml on stdout.");
-                eprintln!("Without --seed: the fit root.");
-                eprintln!("With --seed N: the per-seed cell (real/fit_N/).");
-                std::process::exit(0);
-            }
-            s if s.starts_with("--") => {
-                eprintln!("unknown flag: {}", s);
-                std::process::exit(1);
-            }
-            path => { fit_path = Some(path.to_string()); }
-        }
-        i += 1;
-    }
-    let fit_path = fit_path.unwrap_or_else(|| {
-        eprintln!("usage: camdl fit where FIT.toml [--seed N]");
-        std::process::exit(1);
-    });
+pub fn cmd_fit_where(a: &crate::args::FitWhereArgs) {
+    let fit_path = a.config.to_string_lossy().into_owned();
+    let seed     = a.seed;
 
     // Try v2 first (the common path); fall through to v1 on parse
     // failure. Mirrors the detection logic in cmd_fit_status.
@@ -1494,23 +1416,21 @@ pub fn cmd_fit_where(args: &[String]) {
     println!("{}", dir.display());
 }
 
-pub fn cmd_fit_diff(args: &[String]) {
+pub fn cmd_fit_diff(args: &crate::args::FitDiffArgs) {
     use config_v2::FitConfigV2;
 
-    if args.len() < 2 {
-        eprintln!("usage: camdl fit diff A.toml B.toml");
-        std::process::exit(1);
-    }
-    let a = FitConfigV2::load(&args[0]).unwrap_or_else(|e| {
-        eprintln!("error loading {}: {}", args[0], e);
+    let a_path = args.a.to_string_lossy().into_owned();
+    let b_path = args.b.to_string_lossy().into_owned();
+    let a = FitConfigV2::load(&a_path).unwrap_or_else(|e| {
+        eprintln!("error loading {}: {}", a_path, e);
         std::process::exit(1);
     });
-    let b = FitConfigV2::load(&args[1]).unwrap_or_else(|e| {
-        eprintln!("error loading {}: {}", args[1], e);
+    let b = FitConfigV2::load(&b_path).unwrap_or_else(|e| {
+        eprintln!("error loading {}: {}", b_path, e);
         std::process::exit(1);
     });
 
-    println!("diff: {} → {}", args[0], args[1]);
+    println!("diff: {} → {}", a_path, b_path);
     println!();
 
     // Parameter changes
@@ -1613,33 +1533,9 @@ pub fn cmd_fit_diff(args: &[String]) {
 
 // ─── camdl fit new ──────────────────────────────────────────────────────────
 
-pub fn cmd_fit_new(args: &[String]) {
-    let mut from_path: Option<String> = None;
-    let mut to_path: Option<String> = None;
-    let mut i = 0;
-    while i < args.len() {
-        match args[i].as_str() {
-            "--from" => { i += 1; from_path = Some(args[i].clone()); }
-            s if !s.starts_with("--") => {
-                if from_path.is_none() {
-                    from_path = Some(s.to_string());
-                } else {
-                    to_path = Some(s.to_string());
-                }
-            }
-            _ => {}
-        }
-        i += 1;
-    }
-
-    let from = from_path.unwrap_or_else(|| {
-        eprintln!("usage: camdl fit new --from SOURCE.toml DEST.toml");
-        std::process::exit(1);
-    });
-    let to = to_path.unwrap_or_else(|| {
-        eprintln!("usage: camdl fit new --from SOURCE.toml DEST.toml");
-        std::process::exit(1);
-    });
+pub fn cmd_fit_new(a: &crate::args::FitNewArgs) {
+    let from = a.from.to_string_lossy().into_owned();
+    let to   = a.dest.to_string_lossy().into_owned();
 
     if std::path::Path::new(&to).exists() {
         eprintln!("error: {} already exists. Choose a different name.", to);
@@ -1699,6 +1595,7 @@ pub fn cmd_fit_new(args: &[String]) {
     eprintln!("created {}", to);
 }
 
+#[allow(dead_code)]
 fn parse_fit_args(args: &[String], _needs_starts_from: bool) -> (FitToml, String, u64, bool) {
     let mut fit_path: Option<String> = None;
     let mut seed = 1_u64;

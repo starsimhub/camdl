@@ -76,84 +76,51 @@ fn load_sim_entry(dir: &Path, cwd: &Path) -> Option<RunEntry> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum KindFilter { Sim, Fit, Both }
 
-pub fn cmd_list(args: &[String]) {
-    let mut root = format!("./{}", crate::run_paths::DEFAULT_OUTPUT_ROOT);
-    let mut filter_model: Option<String> = None;
-    let mut filter_scenario: Option<String> = None;
-    let mut filter_since: Option<std::time::Duration> = None;
-    let mut filter_kind: KindFilter = KindFilter::Both;
-    let mut limit: usize = 50;
-    let mut format_json = false;
-    let mut show_all = false;
-
-    let mut i = 0;
-    while i < args.len() {
-        match args[i].as_str() {
-            "--model"    => { i += 1; filter_model    = Some(args[i].clone()); }
-            "--scenario" => { i += 1; filter_scenario = Some(args[i].clone()); }
-            "--since"    => { i += 1; filter_since    = Some(parse_duration(&args[i]).unwrap_or_else(|e| {
-                                 eprintln!("error: --since: {}", e); std::process::exit(1); })); }
-            "--kind"     => { i += 1; filter_kind = match args[i].as_str() {
-                                 "sim" | "simulate"  => KindFilter::Sim,
-                                 "fit"               => KindFilter::Fit,
-                                 "both" | "all"      => KindFilter::Both,
-                                 other => {
-                                     eprintln!("error: --kind expects sim|fit|both, got '{}'", other);
-                                     std::process::exit(1);
-                                 }
-                              }; }
-            "--limit"    => { i += 1; limit = args[i].parse().unwrap_or_else(|_| {
-                                 eprintln!("error: --limit needs an integer"); std::process::exit(1); }); }
-            "--format"   => { i += 1; if args[i] == "json" { format_json = true; } else {
-                                 eprintln!("error: --format only supports 'json'"); std::process::exit(1); } }
-            "--all"      => { show_all = true; }
-            "--help" | "-h" => { list_help(); }
-            s if s.starts_with("--") => { eprintln!("unknown flag: {}", s); list_help(); }
-            path => { root = path.to_string(); }
-        }
-        i += 1;
-    }
+pub fn cmd_list(a: &crate::args::ListArgs) {
+    let root = a.root.to_string_lossy();
+    let filter_since: Option<std::time::Duration> = a.since.as_ref().map(|d| d.0);
+    let filter_kind = match a.kind.as_str() {
+        "sim" | "simulate" => KindFilter::Sim,
+        "fit"              => KindFilter::Fit,
+        _                  => KindFilter::Both,
+    };
+    let format_json = a.format.as_deref() == Some("json");
 
     let runs = if filter_kind == KindFilter::Fit {
         Vec::new()
     } else {
-        discover_runs(&root).unwrap_or_else(|e| {
-            eprintln!("error: {}", e); std::process::exit(1);
-        })
+        discover_runs(&root).unwrap_or_else(|e| { eprintln!("error: {}", e); std::process::exit(1); })
     };
     let fits = if filter_kind == KindFilter::Sim {
         Vec::new()
     } else {
-        discover_fits(&root).unwrap_or_else(|e| {
-            eprintln!("error: {}", e); std::process::exit(1);
-        })
+        discover_fits(&root).unwrap_or_else(|e| { eprintln!("error: {}", e); std::process::exit(1); })
     };
 
     let now = SystemTime::now();
     let mut filtered_runs: Vec<RunEntry> = runs.into_iter()
-        .filter(|r| filter_model.as_deref().map_or(true, |m| r.meta.model.contains(m)))
-        .filter(|r| filter_scenario.as_deref().map_or(true, |s| r.meta.scenario == s))
+        .filter(|r| a.model.as_deref().map_or(true, |m| r.meta.model.contains(m)))
+        .filter(|r| a.scenario.as_deref().map_or(true, |s| r.meta.scenario == s))
         .filter(|r| match filter_since {
             Some(dur) => now.duration_since(r.created).map_or(false, |d| d <= dur),
             None => true,
         })
         .collect();
-    filtered_runs.sort_by(|a, b| b.created.cmp(&a.created));
+    filtered_runs.sort_by(|x, y| y.created.cmp(&x.created));
 
-    // Fits aren't scenario-qualified; skip scenario filter for them.
     let mut filtered_fits: Vec<FitEntry> = fits.into_iter()
-        .filter(|f| filter_model.as_deref().map_or(true, |m| f.meta.model.contains(m)))
-        .filter(|_| filter_scenario.is_none())
+        .filter(|f| a.model.as_deref().map_or(true, |m| f.meta.model.contains(m)))
+        .filter(|_| a.scenario.is_none())
         .filter(|f| match filter_since {
             Some(dur) => now.duration_since(f.created).map_or(false, |d| d <= dur),
             None => true,
         })
         .collect();
-    filtered_fits.sort_by(|a, b| b.created.cmp(&a.created));
+    filtered_fits.sort_by(|x, y| y.created.cmp(&x.created));
 
-    if !show_all {
-        filtered_runs.truncate(limit);
-        filtered_fits.truncate(limit);
+    if !a.all {
+        filtered_runs.truncate(a.limit);
+        filtered_fits.truncate(a.limit);
     }
 
     if format_json {
@@ -166,55 +133,17 @@ pub fn cmd_list(args: &[String]) {
             eprintln!();
         }
         if !filtered_runs.is_empty() || filtered_fits.is_empty() {
-            if !filtered_fits.is_empty() {
-                eprintln!("{}", "sims".bold());
-            }
+            if !filtered_fits.is_empty() { eprintln!("{}", "sims".bold()); }
             print_table(&filtered_runs, now);
         }
     }
 }
 
-fn list_help() -> ! {
-    eprintln!("{}", "camdl list — browse cached runs".bold());
-    eprintln!();
-    eprintln!("Usage:  camdl list [OUTPUT-DIR] [OPTIONS]");
-    eprintln!();
-    eprintln!("OUTPUT-DIR defaults to ./results");
-    eprintln!();
-    eprintln!("Options:");
-    eprintln!("  --model NAME          Filter to runs whose model name contains NAME");
-    eprintln!("  --scenario NAME       Filter to sim runs with exact scenario name");
-    eprintln!("  --kind KIND           Filter by kind: sim | fit | both (default: both)");
-    eprintln!("  --since DURATION      Show only runs newer than DURATION (e.g. 1h, 1d, 1w)");
-    eprintln!("  --limit N             Limit rows shown per section (default: 50)");
-    eprintln!("  --all                 Don't truncate; show every matching run");
-    eprintln!("  --format json         Machine-readable output, one run.json per line");
-    eprintln!();
-    eprintln!("Examples:");
-    eprintln!("  camdl list                    # most recent runs, both sections");
-    eprintln!("  camdl list --kind fit         # only fits");
-    eprintln!("  camdl list --since 1h         # runs from the last hour");
-    eprintln!("  camdl list --scenario baseline --all");
-    std::process::exit(0);
-}
-
 // ── cmd_show ─────────────────────────────────────────────────────────────────
 
-pub fn cmd_show(args: &[String]) {
-    if args.is_empty() || args[0] == "--help" || args[0] == "-h" {
-        eprintln!("usage: camdl show <PATH | short-hash> [OUTPUT-DIR]");
-        eprintln!();
-        eprintln!("Prints the run.json for a cached sim run or a fit. Accepts a");
-        eprintln!("full path, or a git-style short-hash prefix that matches");
-        eprintln!("either sim.sim_hash or fit.hash. Ambiguous prefixes error with");
-        eprintln!("a candidate list.");
-        std::process::exit(if args.is_empty() { 1 } else { 0 });
-    }
-    let key = &args[0];
-    let root = args.get(1).cloned()
-        .unwrap_or_else(|| format!("./{}", crate::run_paths::DEFAULT_OUTPUT_ROOT));
-
-    let entry = match resolve_any(&root, key) {
+pub fn cmd_show(a: &crate::args::ShowArgs) {
+    let root = a.root.to_string_lossy();
+    let entry = match resolve_any(&root, &a.target) {
         Ok(Resolved::Fit(f)) => { show_fit(&f); return; }
         Ok(Resolved::Sim(s)) => s,
         Err(e) => { eprintln!("error: {}", e); std::process::exit(1); }
@@ -268,38 +197,9 @@ fn show_fit(entry: &FitEntry) {
 
 // ── cmd_cat ──────────────────────────────────────────────────────────────────
 
-pub fn cmd_cat(args: &[String]) {
-    if args.is_empty() || args[0] == "--help" || args[0] == "-h" {
-        eprintln!("usage: camdl cat <PATH | short-hash> [--obs STREAM] [OUTPUT-DIR]");
-        eprintln!();
-        eprintln!("Emits the cached trajectory TSV to stdout. With --obs STREAM,");
-        eprintln!("emits a named observation stream instead.");
-        std::process::exit(if args.is_empty() { 1 } else { 0 });
-    }
-    let mut key: Option<String> = None;
-    let mut obs_stream: Option<String> = None;
-    let mut root = format!("./{}", crate::run_paths::DEFAULT_OUTPUT_ROOT);
-    let mut i = 0;
-    while i < args.len() {
-        match args[i].as_str() {
-            "--obs" => { i += 1; obs_stream = Some(args[i].clone()); }
-            s if s.starts_with("--") => { eprintln!("unknown flag: {}", s); std::process::exit(1); }
-            other => {
-                if key.is_none() { key = Some(other.to_string()); }
-                else { root = other.to_string(); }
-            }
-        }
-        i += 1;
-    }
-    let key = key.unwrap_or_else(|| {
-        eprintln!("error: camdl cat requires <PATH | short-hash>");
-        std::process::exit(1);
-    });
-
-    // If the key happens to point at a fit (by path or unique hash
-    // prefix), give a clear error instead of a confusing "no
-    // traj.tsv" message from the sim path.
-    match resolve_any(&root, &key) {
+pub fn cmd_cat(a: &crate::args::CatArgs) {
+    let root = a.root.to_string_lossy();
+    match resolve_any(&root, &a.target) {
         Ok(Resolved::Fit(f)) => {
             eprintln!("error: 'camdl cat' on a fit has no single-file target.\n  \
                        {} is a fit directory. For stage output, pass the stage\n  \
@@ -309,12 +209,12 @@ pub fn cmd_cat(args: &[String]) {
         }
         Ok(Resolved::Sim(_)) | Err(_) => {}
     }
-    let entry = resolve_run(&root, &key).unwrap_or_else(|e| {
+    let entry = resolve_run(&root, &a.target).unwrap_or_else(|e| {
         eprintln!("error: {}", e); std::process::exit(1);
     });
 
     use std::io::Write as _;
-    if let Some(stream) = obs_stream {
+    if let Some(ref stream) = a.stream {
         // Look under obs/*/{stream}.tsv — takes the first match.
         let obs_root = entry.abs_path.join("obs");
         let mut found = None;
@@ -747,6 +647,7 @@ fn shorten(s: &str, max: usize) -> String {
 
 /// Parse a duration like "1h", "30m", "2d", "1w". Returns Err on unknown
 /// suffix or parse failure.
+#[cfg(test)]
 fn parse_duration(s: &str) -> Result<std::time::Duration, String> {
     let s = s.trim();
     if s.is_empty() { return Err("empty duration".into()); }

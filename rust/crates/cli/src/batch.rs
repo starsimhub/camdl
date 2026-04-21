@@ -363,48 +363,8 @@ struct Manifest {
 
 // ─── cmd_batch_run ──────────────────────────────────────────────────────
 
-pub fn cmd_batch_run(args: &[String]) {
-    let mut toml_path: Option<String> = None;
-    let mut output_dir_override: Option<String> = None;
-    let mut parallel_override: Option<usize> = None;
-    let mut force = false;
-    let mut dry_run = false;
-
-    // Bounds-checked value-grabbing closure. Errors cleanly instead of
-    // panicking when a flag is the last argv entry.
-    let need = |i: &mut usize, flag: &str| -> String {
-        *i += 1;
-        if *i >= args.len() {
-            eprintln!("error: {} requires a value", flag);
-            std::process::exit(1);
-        }
-        args[*i].clone()
-    };
-
-    let mut i = 0;
-    while i < args.len() {
-        match args[i].as_str() {
-            "--output-dir" => { output_dir_override = Some(need(&mut i, "--output-dir")); }
-            "--parallel"   => {
-                parallel_override = Some(need(&mut i, "--parallel").parse().unwrap_or_else(|_| {
-                    eprintln!("error: --parallel requires an integer");
-                    std::process::exit(1);
-                }));
-            }
-            "--force"    => { force = true; }
-            "--resume"   => { /* default, no-op */ }
-            "--dry-run"  => { dry_run = true; }
-            "--help" | "-h" => { batch_usage(); }
-            s if s.starts_with("--") => { eprintln!("unknown flag: {}", s); batch_usage(); }
-            path => { toml_path = Some(path.to_string()); }
-        }
-        i += 1;
-    }
-
-    let toml_path = toml_path.unwrap_or_else(|| {
-        eprintln!("error: simulate batch requires a TOML file path");
-        batch_usage();
-    });
+pub fn cmd_batch_run(a: &crate::args::BatchArgs) {
+    let toml_path = a.file.to_string_lossy().into_owned();
 
     let toml_src = std::fs::read_to_string(&toml_path).unwrap_or_else(|e| {
         eprintln!("error: cannot read {}: {}", toml_path, e);
@@ -415,8 +375,10 @@ pub fn cmd_batch_run(args: &[String]) {
         std::process::exit(1);
     });
 
-    let output_dir = output_dir_override.unwrap_or(exp.config.output_dir.clone());
-    let parallel   = parallel_override.unwrap_or(exp.config.parallel);
+    let output_dir = a.output_dir.as_ref()
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_else(|| exp.config.output_dir.clone());
+    let parallel = a.parallel.unwrap_or(exp.config.parallel);
     let backend    = exp.config.backend.clone();
     let dt         = exp.config.dt;
     let model_path = exp.config.model.clone();
@@ -505,7 +467,7 @@ pub fn cmd_batch_run(args: &[String]) {
             exp.scenario.clone()
         };
         run_design_experiment(scenarios, exp.design, &ir_path_resolved, &output_dir, &shash,
-                              &backend, dt, force, parallel, &params_file_opt, &seeds);
+                              &backend, dt, a.force, parallel, &params_file_opt, &seeds);
         return;
     }
 
@@ -521,16 +483,12 @@ pub fn cmd_batch_run(args: &[String]) {
 
     let runs_dir = format!("{}/sims", output_dir);
 
-    // Classify every (sweep_point, scenario, seed) triple before any
-    // fs writes. plan_runs only probes file existence — it's safe to
-    // run before we create the output dir, which matters for --dry-run:
-    // a dry run must not touch the filesystem.
     let model_stem = crate::hashing::path_stem_slug(&ir_path_resolved);
     let plans = plan_runs(&scenarios, &sweep_points, &seeds, &shash,
-        model_stem.as_deref(), &runs_dir, force);
+        model_stem.as_deref(), &runs_dir, a.force);
     let total = plans.len();
 
-    if dry_run {
+    if a.dry_run {
         print_batch_dry_run(
             &model_path, &backend, dt, &output_dir, parallel,
             &scenarios, &sweep_points, &seeds, &base_params,
@@ -905,21 +863,8 @@ fn build_priors_txt(params: &[(String, DesignParam)]) -> Option<String> {
 
 // ─── cmd_batch_status ───────────────────────────────────────────────────
 
-pub fn cmd_batch_status(args: &[String]) {
-    let mut toml_path: Option<String> = None;
-    let mut i = 0;
-    while i < args.len() {
-        match args[i].as_str() {
-            s if s.starts_with("--") => { eprintln!("unknown flag: {}", s); batch_usage(); }
-            path => { toml_path = Some(path.to_string()); }
-        }
-        i += 1;
-    }
-
-    let toml_path = toml_path.unwrap_or_else(|| {
-        eprintln!("error: experiment status requires a TOML file path");
-        batch_usage();
-    });
+pub fn cmd_batch_status(a: &crate::args::BatchStatusArgs) {
+    let toml_path = a.file.to_string_lossy().into_owned();
 
     let toml_src = std::fs::read_to_string(&toml_path).unwrap_or_else(|e| {
         eprintln!("error: cannot read {}: {}", toml_path, e);
@@ -1106,18 +1051,6 @@ fn print_batch_dry_run(
     eprintln!("(dry run — no simulation, no files written.)");
 }
 
-fn batch_usage() -> ! {
-    eprintln!("usage: camdl simulate batch FILE [OPTIONS]");
-    eprintln!("       camdl simulate status FILE");
-    eprintln!();
-    eprintln!("  batch OPTIONS:");
-    eprintln!("    --output-dir DIR   override output_dir from TOML");
-    eprintln!("    --parallel N       override parallel from TOML");
-    eprintln!("    --dry-run          print the resolved sweep grid and exit (no simulation)");
-    eprintln!("    --resume           skip runs where output already exists (default)");
-    eprintln!("    --force            re-run even if output exists");
-    std::process::exit(1);
-}
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
 

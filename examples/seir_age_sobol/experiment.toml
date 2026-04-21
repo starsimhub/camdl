@@ -18,8 +18,8 @@
 # design × 3 seeds = 15,360 runs per design × 3 designs = 46,080 total runs.
 #
 # Run from repo root:
-#   camdl-sim experiment run examples/seir_age_sobol/experiment.toml --parallel 8
-#   camdl-sim experiment analyze examples/seir_age_sobol/experiment.toml
+#   camdl batch examples/seir_age_sobol/experiment.toml --parallel 8
+#   # camdl (removed: experiment analyze) examples/seir_age_sobol/experiment.toml
 
 [config]
 model = "ocaml/golden/seir_age.ir.json"

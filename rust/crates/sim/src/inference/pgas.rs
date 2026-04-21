@@ -21,7 +21,7 @@ use crate::inference::obs_loglik::{poisson_logpmf, binom_logpmf};
 use crate::inference::particle_filter::Observation;
 use crate::inference::resampling::systematic_resample;
 use crate::inference::pmmh::Prior;
-use crate::inference::if2::EstimatedParam;
+use crate::inference::types::{EstimatedParam, LOG_PROB_FLOOR, RESAMPLE_RNG_STREAM, init_particle_rngs, restore_z_values};
 use crate::propensity::{eval_propensities, EvalCtx};
 use crate::resolved_expr::eval_resolved;
 use crate::state::{IntState, RealState};
@@ -65,6 +65,11 @@ pub struct PGASConfig {
     /// sampling is the bottleneck. Each extra CSMC sweep renovates
     /// more of the trajectory before the next NUTS step.
     pub csmc_sweeps_per_nuts: usize,
+}
+
+impl super::traits::InferenceConfig for PGASConfig {
+    fn n_particles(&self) -> usize { self.n_particles }
+    fn dt(&self) -> f64 { self.dt }
 }
 
 /// Per-substep record: minimal information for transition density
@@ -214,6 +219,115 @@ pub fn build_obs_at_substep(
 // Transition density
 // ═══════════════════════════════════════════════════════════════════
 
+/// Build the effective-rate list for one source group, advancing `gamma_idx`.
+///
+/// Returns `(probs, total_rate)` where `probs[k] = (tr_idx, effective_rate)`.
+/// The `effective_rate` for an overdispersed transition is `per_capita * g`
+/// where `g = gammas[gamma_idx]`; `gamma_idx` is advanced once per
+/// overdispersed transition with rate above RATE_EPSILON, in the same order
+/// that `step_one` pushes to `gamma_used`.
+///
+/// Returns `Err(f64::NEG_INFINITY)` when a transition has rate=0 but nonzero
+/// flow, which is an impossible state — the density is zero and the caller
+/// should propagate NEG_INFINITY immediately.
+fn compute_source_group_probs(
+    group: &[usize],
+    flows: &[u64],
+    propensities: &[f64],
+    is_determ: &[bool],
+    sigma_sq_by_tr: &[Option<f64>],
+    gammas: &[f64],
+    gamma_idx: &mut usize,
+    n_src: i64,
+) -> Result<(Vec<(usize, f64)>, f64), f64> {
+    let mut probs: Vec<(usize, f64)> = Vec::new();
+    let mut total_rate = 0.0_f64;
+
+    for &tr_idx in group {
+        let rate = propensities[tr_idx];
+        if rate <= RATE_EPSILON {
+            if flows[tr_idx] > 0 && rate <= 0.0 {
+                log::warn!(
+                    "transition index {} has rate=0 but flow={}. \
+                     Add a seeding term (iota) to avoid this impossible state.",
+                    tr_idx, flows[tr_idx],
+                );
+                return Err(f64::NEG_INFINITY);
+            } else if flows[tr_idx] > 0 {
+                // Near-zero rate with nonzero flow: include with tiny rate.
+                let per_capita = rate / n_src as f64;
+                total_rate += per_capita;
+                probs.push((tr_idx, per_capita));
+                continue;
+            }
+            continue;
+        }
+        if is_determ[tr_idx] { continue; }
+
+        let per_capita = rate / n_src as f64;
+        let effective = if sigma_sq_by_tr[tr_idx].is_some() {
+            // Consume one gamma per overdispersed transition — same order as step_one.
+            let g = if *gamma_idx < gammas.len() { gammas[*gamma_idx] } else { 1.0 };
+            *gamma_idx += 1;
+            per_capita * g
+        } else {
+            per_capita
+        };
+        total_rate += effective;
+        probs.push((tr_idx, effective));
+    }
+
+    Ok((probs, total_rate))
+}
+
+/// Log-density for the total-exits Binomial and the multinomial split.
+///
+/// Evaluates:
+///   log Binom(n_exit; n_src, p_total)
+///   + Σ_{k=0}^{K-2} log Binom(flow_k; remaining_k, p_split_k)
+///
+/// where `p_total = 1 - exp(-total_rate * dt)` and
+/// `p_split_k = eff_rate_k / rate_remaining_k`. Returns NEG_INFINITY if
+/// the observed counts are incompatible with `probs` (impossible partition).
+fn exit_and_split_log_density(
+    n_src: i64,
+    n_exit: u64,
+    total_rate: f64,
+    dt: f64,
+    probs: &[(usize, f64)],
+    flows: &[u64],
+    src_local: usize,
+) -> f64 {
+    let p_total = (1.0 - (-total_rate * dt).exp()).clamp(1e-15, 1.0 - 1e-15);
+    let binom_total = binom_logpmf(n_exit, n_src as u64, p_total);
+
+    if !binom_total.is_finite() {
+        log::debug!("density: total exits -inf: Binom({}, {}, {:.6e}), src_comp_idx={}",
+            n_exit, n_src, p_total, src_local);
+        return f64::NEG_INFINITY;
+    }
+
+    let mut log_p = binom_total;
+    let n_competing = probs.len();
+    let mut remaining = n_exit;
+    let mut rate_remaining = total_rate;
+
+    for (k, &(tr_idx, eff_rate)) in probs.iter().enumerate() {
+        if k == n_competing - 1 {
+            if flows[tr_idx] != remaining { return f64::NEG_INFINITY; }
+        } else if remaining > 0 && rate_remaining > 0.0 {
+            let p_split = (eff_rate / rate_remaining).clamp(1e-15, 1.0 - 1e-15);
+            log_p += binom_logpmf(flows[tr_idx], remaining, p_split);
+            remaining -= flows[tr_idx];
+            rate_remaining -= eff_rate;
+        } else if flows[tr_idx] > 0 {
+            return f64::NEG_INFINITY;
+        }
+    }
+
+    log_p
+}
+
 /// Log transition density for ONE substep, mirroring step_one's
 /// Euler-multinomial decomposition exactly.
 ///
@@ -264,7 +378,9 @@ pub fn log_transition_density_substep(
     let mut handled = vec![false; n_tr];
     let mut gamma_idx = 0;
 
-    // Source-grouped transitions (mirrors step_one's Euler-multinomial)
+    // Source-grouped transitions (mirrors step_one's Euler-multinomial).
+    // Stage 1: compute effective rates (gamma_idx advances here, same order as step_one).
+    // Stage 2: Binomial total-exits + multinomial split densities.
     for &(src_local, ref group) in &model.source_groups {
         let n_src = counts_before[src_local].max(0);
         if n_src == 0 {
@@ -275,90 +391,29 @@ pub fn log_transition_density_substep(
             continue;
         }
 
-        // Step 1: compute effective per-capita rates (same as step_one)
-        let mut probs: Vec<(usize, f64)> = Vec::new();
-        let mut total_rate = 0.0_f64;
-        for &tr_idx in group {
-            let rate = propensities[tr_idx];
-            // Mirror step_one's logic exactly: check rate first, then deterministic.
-            if rate <= RATE_EPSILON {
-                if flows[tr_idx] > 0 && rate <= 0.0 {
-                    // Truly zero rate with nonzero flow — model needs iota.
-                    log::warn!(
-                        "transition '{}' has rate=0 but flow={}. \
-                         Add a seeding term (iota) to the rate expression: \
-                         e.g., beta * (I + iota) / N * S.",
-                        model.model.transitions[tr_idx].name, flows[tr_idx],
-                    );
-                    return Ok(f64::NEG_INFINITY);
-                } else if flows[tr_idx] > 0 {
-                    // Near-zero rate (0 < rate ≤ RATE_EPSILON) with nonzero flow.
-                    // Include in multinomial with its tiny rate rather than -inf.
-                    let per_capita = rate / n_src as f64;
-                    total_rate += per_capita;
-                    probs.push((tr_idx, per_capita));
-                    continue;
-                }
-                handled[tr_idx] = true;
-                continue;
-            }
-            if is_determ[tr_idx] {
-                // Deterministic transitions are not part of the multinomial.
-                // step_one handles them separately (exact count = rate * dt).
-                handled[tr_idx] = true;
-                continue;
-            }
-            let per_capita = rate / n_src as f64;
-            let effective = if let Some(_sigma_sq) = sigma_sq_by_tr[tr_idx] {
-                // Advance gamma_idx per overdispersed transition with rate > 0.
-                // Matches step_one which pushes one gamma per such transition.
-                let g = if gamma_idx < gammas.len() { gammas[gamma_idx] } else { 1.0 };
-                gamma_idx += 1;
-                per_capita * g
-            } else {
-                per_capita
-            };
-            total_rate += effective;
-            probs.push((tr_idx, effective));
-        }
+        let (probs, total_rate) = match compute_source_group_probs(
+            group, flows, &propensities, &is_determ, &sigma_sq_by_tr,
+            gammas, &mut gamma_idx, n_src,
+        ) {
+            Ok(r) => r,
+            Err(neg_inf) => return Ok(neg_inf),
+        };
 
         if total_rate <= RATE_EPSILON || probs.is_empty() { continue; }
 
-        // Step 2: evaluate total exits density
-        let p_total = (1.0 - (-total_rate * dt).exp()).clamp(1e-15, 1.0 - 1e-15);
         let n_exit: u64 = probs.iter().map(|&(tr_idx, _)| flows[tr_idx]).sum();
-        let binom_total = binom_logpmf(n_exit, n_src as u64, p_total);
+        let density = exit_and_split_log_density(
+            n_src, n_exit, total_rate, dt, &probs, flows, src_local,
+        );
+        if density == f64::NEG_INFINITY { return Ok(f64::NEG_INFINITY); }
+        log_p += density;
 
-        if !binom_total.is_finite() {
-            log::debug!("density: total exits -inf: Binom({}, {}, {:.6e}), src_comp_idx={}",
-                n_exit, n_src, p_total, src_local);
-            return Ok(f64::NEG_INFINITY);
-        }
-
-        log_p += binom_total;
-
-        // Step 3: evaluate split density (mirrors step_one's proportional split)
-        let n_competing = probs.len();
-        let mut remaining = n_exit;
-        let mut rate_remaining = total_rate;
-        for (k, &(tr_idx, eff_rate)) in probs.iter().enumerate() {
-            handled[tr_idx] = true;
-            if k == n_competing - 1 {
-                if flows[tr_idx] != remaining {
-                    return Ok(f64::NEG_INFINITY);
-                }
-            } else if remaining > 0 && rate_remaining > 0.0 {
-                let p_split = (eff_rate / rate_remaining).clamp(1e-15, 1.0 - 1e-15);
-                log_p += binom_logpmf(flows[tr_idx], remaining, p_split);
-                remaining -= flows[tr_idx];
-                rate_remaining -= eff_rate;
-            } else if flows[tr_idx] > 0 {
-                return Ok(f64::NEG_INFINITY);
-            }
-        }
+        for &(tr_idx, _) in &probs { handled[tr_idx] = true; }
+        // Also mark any low-rate/deterministic transitions in the group as handled.
+        for &tr_idx in group { handled[tr_idx] = true; }
     }
 
-    // Ungrouped / inflow transitions
+    // Ungrouped / inflow transitions: Poisson density (or deterministic exact-count check).
     for (i, &rate) in propensities.iter().enumerate() {
         if handled[i] || rate <= RATE_EPSILON { continue; }
         let mean = rate * dt;
@@ -502,7 +557,7 @@ pub fn complete_data_loglik(
                             let scale = sigma_sq / dt;
                             // log Gamma(g; shape, scale) = (shape-1)*ln(g) - g/scale
                             //   - shape*ln(scale) - ln(Gamma(shape))
-                            let log_gamma_density = (shape - 1.0) * g.max(1e-300).ln()
+                            let log_gamma_density = (shape - 1.0) * g.max(LOG_PROB_FLOOR).ln()
                                 - g / scale
                                 - shape * scale.ln()
                                 - crate::inference::obs_loglik::lgamma(shape);
@@ -654,9 +709,7 @@ pub fn csmc_as(
         .collect();
 
     // Per-particle RNGs via ChaCha8 stream counter (IM1 fix 2026-04-19).
-    let mut rngs: Vec<StatefulRng> = (0..n_particles)
-        .map(|i| StatefulRng::new_stream(seed, i as u64))
-        .collect();
+    let mut rngs = init_particle_rngs(seed, n_particles, 0);
 
     let mut counts: Vec<Vec<i64>> = (0..n_particles)
         .map(|j| {
@@ -713,8 +766,9 @@ pub fn csmc_as(
     // Weights (log-space)
     let mut log_weights = vec![0.0f64; n_particles];
 
-    // Resampling RNG (particle RNGs already created above for stochastic init)
-    let mut resample_rng = StatefulRng::new(seed.wrapping_add(0xdeadbeef));
+    // Resampling RNG — uses a reserved high stream index so it never
+    // collides with per-particle streams (which use [0, n_particles)).
+    let mut resample_rng = StatefulRng::new_stream(seed, RESAMPLE_RNG_STREAM);
 
     // Per-particle scratch buffers
     let mut scratches: Vec<StepScratch> = (0..n_particles)
@@ -945,41 +999,6 @@ pub fn csmc_as(
         initial_counts,
         substeps: trajectory_substeps,
     }, diag))
-}
-
-/// Restore transformed z-values from a resume state, matching by parameter name.
-///
-/// The resume state stores `param_names` alongside `transformed` z-values. Because
-/// HashMap iteration order is non-deterministic, the current run's `if2_params` may
-/// be in a different order than when the state was saved. This function reorders
-/// z-values to match the current parameter ordering. Parameters missing from the
-/// saved state are recomputed from `current_params` with a warning.
-pub fn restore_z_values(
-    saved_names: &[String],
-    saved_z: &[f64],
-    if2_params: &[EstimatedParam],
-    current_params: &[f64],
-) -> Vec<f64> {
-    if saved_names.is_empty() || saved_names.len() != saved_z.len() {
-        eprintln!("  warning: resume state lacks param_names — recomputing z from params.");
-        return if2_params.iter()
-            .map(|spec| spec.to_transformed(current_params[spec.index]))
-            .collect();
-    }
-
-    let saved: std::collections::HashMap<&str, f64> = saved_names.iter()
-        .zip(saved_z.iter())
-        .map(|(name, &z)| (name.as_str(), z))
-        .collect();
-
-    if2_params.iter().map(|spec| {
-        if let Some(&z) = saved.get(spec.name.as_str()) {
-            z
-        } else {
-            eprintln!("  warning: param '{}' not found in resume state, computing from theta", spec.name);
-            spec.to_transformed(current_params[spec.index])
-        }
-    }).collect()
 }
 
 /// Sample from a categorical distribution parameterized by unnormalized log-weights.
@@ -1363,6 +1382,21 @@ pub fn run_pgas(
                    Increase sweeps in fit.toml to continue.", start_sweep, config.n_sweeps);
     }
 
+    // Pre-resolve rate_grad indices once for the entire run (avoids O(n_params)
+    // string scans per gradient term per substep in the NUTS hot path).
+    // model_to_estimated[model_param_idx] = estimated_param_idx, or None if fixed.
+    let rate_grads_for_run: Vec<Vec<(usize, crate::resolved_expr::ResolvedExpr)>> = {
+        let n_model_params = model.model.parameters.len();
+        let mut model_to_estimated: Vec<Option<usize>> = vec![None; n_model_params];
+        for (est_idx, spec) in if2_params.iter().enumerate() {
+            model_to_estimated[spec.index] = Some(est_idx);
+        }
+        super::pgas_grad::resolve_rate_grad_for_run(
+            &model.resolved.rate_grads_indexed,
+            &model_to_estimated,
+        )
+    };
+
     // ── Trajectory warm-up: CSMC-only sweeps before parameter updates ──
     if config.trajectory_warmup > 0 && start_sweep == 0 {
         eprintln!("  trajectory warm-up: {} CSMC-only sweeps", config.trajectory_warmup);
@@ -1410,8 +1444,6 @@ pub fn run_pgas(
             // For heated rungs (β < 1), scale LL and its gradient by β.
             // Prior and Jacobian are untempered.
             if has_gradients {
-                let param_names: Vec<String> = if2_params.iter().map(|p| p.name.clone()).collect();
-                let param_model_indices: Vec<usize> = if2_params.iter().map(|p| p.index).collect();
                 let rung_traj = &rungs[rung].trajectory;
 
                 let log_prob_and_grad = |z: &[f64]| -> (f64, Vec<f64>) {
@@ -1423,7 +1455,7 @@ pub fn run_pgas(
                     let (ll, ll_grad_theta) = match super::pgas_grad::complete_data_loglik_grad(
                         model, rung_traj, &params, observations,
                         config.dt, obs_model, &ivp_mappings,
-                        &param_names, &param_model_indices, &obs_at_substep,
+                        d, &rate_grads_for_run, &obs_at_substep,
                     ) {
                         Ok(r) => r,
                         Err(_) => return (f64::NEG_INFINITY, vec![0.0; d]),

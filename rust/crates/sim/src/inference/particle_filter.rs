@@ -10,7 +10,7 @@ use rayon::prelude::*;
 use crate::rng::StatefulRng;
 use crate::error::SimError;
 use super::traits::{ProcessModel, ObservationModel, SMCConfig};
-use super::types::{ParticleState, ParticleSwarm, log_sum_exp};
+use super::types::{ParticleState, ParticleSwarm, log_sum_exp, RESAMPLE_RNG_STREAM, init_particle_rngs};
 use super::resampling::systematic_resample;
 /// Observation: one data point at a specific time.
 #[derive(Clone)]
@@ -83,19 +83,15 @@ pub fn bootstrap_filter<P: ProcessModel<State = ParticleState>>(
         p.counts.copy_from_slice(&init.counts);
     }
 
-    // Per-particle RNG streams (deterministic, derived from seed)
-    let mut rngs: Vec<StatefulRng> = (0..n_particles)
-        .map(|i| StatefulRng::new_stream(seed, i as u64))
-        .collect();
+    // Per-particle RNG streams (deterministic, derived from seed).
+    // stream_offset = 0: particles use stream indices [0, n_particles).
+    let mut rngs = init_particle_rngs(seed, n_particles, 0);
 
     // Separate RNG streams for diagnostic draws (rmeasure).
     // Process RNG streams must be identical whether or not predictions are computed.
-    let mut diag_rngs: Vec<StatefulRng> = (0..n_particles)
-        // Diagnostic RNG stream — offset by 2^62 so process-RNG and
-        // diag-RNG streams never overlap (u64 stream id is 64 bits;
-        // 2^62 is a comfortable gap from the low-indexed process streams).
-        .map(|i| StatefulRng::new_stream(seed, (i as u64) | (1u64 << 62)))
-        .collect();
+    // Offset by 2^62 so process-RNG and diag-RNG streams never overlap
+    // (u64 stream id is 64 bits; 2^62 is a comfortable gap from low-indexed streams).
+    let mut diag_rngs = init_particle_rngs(seed, n_particles, 1u64 << 62);
 
     // Double-buffer for resampling (avoids clone allocation)
     let mut states_buf: Vec<ParticleState> = (0..n_particles)
@@ -119,8 +115,8 @@ pub fn bootstrap_filter<P: ProcessModel<State = ParticleState>>(
 
     let mut t = config.t_start;
 
-    // Resampling RNG (separate from particle RNGs)
-    let mut resample_rng = StatefulRng::new(seed.wrapping_add(0xdeadbeef));
+    // Resampling RNG — reserved stream index, never collides with particle streams.
+    let mut resample_rng = StatefulRng::new_stream(seed, RESAMPLE_RNG_STREAM);
 
     // Ancestry recording (allocated only if requested).
     let mut history_states: Vec<Vec<Vec<f64>>> = if config.record_ancestry {

@@ -7,6 +7,11 @@ let () =
     print_endline "camdlc check FILE.camdl                   -- validate model";
     exit 1
 
+  (* ── camdlc --camdl-version ──────────────────────────────────────── *)
+  | ["--camdl-version"] | "--camdl-version" :: _ ->
+    print_endline Version.git_hash;
+    exit 0
+
   (* ── camdlc check FILE ────────────────────────────────────────────── *)
   | "check" :: rest ->
     (* M26 in 2026-04-19 review: --no-dim-check previously only

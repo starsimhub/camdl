@@ -21,10 +21,10 @@
 # At high beta:   sia_all wins (widespread transmission; broad coverage needed)
 #
 # Run from repo root:
-#   camdl-sim experiment run      examples/polio_es/experiment.toml --parallel 8
-#   camdl-sim experiment summarize examples/polio_es/experiment.toml
+#   camdl batch      examples/polio_es/experiment.toml --parallel 8
+#   # camdl (removed: experiment summarize) examples/polio_es/experiment.toml
 #   python3 examples/polio_es/postprocess.py
-#   camdl-sim voi run             examples/polio_es/voi.toml
+#   camdl voi run             examples/polio_es/voi.toml
 
 [voi]
 experiment = "examples/polio_es/experiment.toml"

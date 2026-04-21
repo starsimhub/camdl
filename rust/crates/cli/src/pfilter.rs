@@ -20,113 +20,34 @@ use sim::{
 };
 use std::collections::HashMap;
 
-pub fn cmd_pfilter(args: &[String]) {
-    let mut ir_path: Option<String> = None;
-    let mut params_files: Vec<String> = Vec::new();
-    let mut data_path: Option<String> = None;
-    let mut n_particles = 1000_usize;
-    let mut dt = 1.0_f64;
-    let mut seed = 1_u64;
-    let mut trace_path: Option<String> = None;
-    let mut output_path: Option<String> = None;
-    let mut overrides: HashMap<String, f64> = HashMap::new();
-    let mut scenario_name: Option<String> = None;
-    let mut adhoc_enable: Vec<String> = Vec::new();
-    let mut adhoc_disable: Vec<String> = Vec::new();
-    let mut flow_name: Option<String> = None; // --flow recovery → project that transition
-    let mut obs_name: Option<String> = None; // --obs NAME → select observation block
-    let mut save_final_state: Option<String> = None;
-    let mut n_replicates = 1_usize;
-    let mut save_paths: Option<(usize, String)> = None;
-    let mut save_filtering: Option<String> = None;
-
-    let mut i = 0;
-    while i < args.len() {
-        match args[i].as_str() {
-            "--params"    => { i += 1; params_files.push(args[i].clone()); }
-            "--data"      => { i += 1; data_path = Some(args[i].clone()); }
-            "--replicates" => { i += 1; n_replicates = args[i].parse().unwrap_or_else(|_| { eprintln!("error: --replicates needs integer"); std::process::exit(1); }); }
-            "--particles" => { i += 1; n_particles = args[i].parse().unwrap_or_else(|_| { eprintln!("error: --particles needs an integer"); std::process::exit(1); }); }
-            "--dt"        => { i += 1; dt = args[i].parse().unwrap_or_else(|_| { eprintln!("error: --dt needs a number"); std::process::exit(1); }); }
-            "--seed"      => { i += 1; seed = args[i].parse().unwrap_or_else(|_| { eprintln!("error: --seed needs an integer"); std::process::exit(1); }); }
-            "--trace"     => {
-                // Accept both: --trace FILE and bare --trace (stdout)
-                if i + 1 < args.len() && !args[i + 1].starts_with("--") {
-                    i += 1;
-                    trace_path = Some(args[i].clone());
-                } else {
-                    trace_path = Some("-".to_string()); // sentinel for stdout
-                }
-            }
-            "--output" | "-o" => { i += 1; output_path = Some(args[i].clone()); }
-            "--scenario"  => { i += 1; scenario_name = Some(args[i].clone()); }
-            "--enable"    => { i += 1; adhoc_enable.push(args[i].clone()); }
-            "--disable"   => { i += 1; adhoc_disable.push(args[i].clone()); }
-            "--obs"       => { i += 1; obs_name = Some(args[i].clone()); }
-            "--flow"      => { i += 1; flow_name = Some(args[i].clone()); }
-            "--save-final-state" => { i += 1; save_final_state = Some(args[i].clone()); }
-            "--save-paths" => {
-                // Two-argument form: --save-paths N PATH.TSV. N is
-                // the number of trajectory samples from the smoothing
-                // distribution; PATH is where to write them.
-                i += 1;
-                let n: usize = args[i].parse().unwrap_or_else(|_| {
-                    eprintln!("error: --save-paths needs an integer count (got '{}')", args[i]);
-                    std::process::exit(1);
-                });
-                i += 1;
-                let path = args.get(i).cloned().unwrap_or_else(|| {
-                    eprintln!("error: --save-paths needs both N and a PATH");
-                    std::process::exit(1);
-                });
-                save_paths = Some((n, path));
-            }
-            "--save-filtering" => { i += 1; save_filtering = Some(args[i].clone()); }
-            "--param"     => {
-                i += 1;
-                let kv = &args[i];
-                let mut parts = kv.splitn(2, '=');
-                let k = parts.next().unwrap().to_string();
-                let v: f64 = parts.next().and_then(|s| s.parse().ok()).unwrap_or_else(|| { eprintln!("error: --param needs NAME=VALUE"); std::process::exit(1); });
-                overrides.insert(k, v);
-            }
-            s if s.starts_with("--") => {
-                eprintln!("unknown flag: {}", s);
-                eprintln!();
-                eprintln!("usage: camdl pfilter MODEL --params P.toml --data cases.tsv \\");
-                eprintln!("         --particles 5000 --dt 1.0 --seed 1");
-                eprintln!();
-                eprintln!("Latent-trajectory outputs (see docs/dev/proposals/2026-04-19-pf-latent-trajectories.md):");
-                eprintln!("  --save-paths N PATH      Draw N trajectory samples from the smoothing");
-                eprintln!("                           distribution (ancestor tracing). For model-vs-data");
-                eprintln!("                           plots, this is what you want.");
-                eprintln!("  --save-filtering PATH    Dump per-step particle states + weights. For PF");
-                eprintln!("                           diagnostics (particle degeneracy, obs sanity,");
-                eprintln!("                           implementation debugging). NOT a substitute for");
-                eprintln!("                           --save-paths when plotting against data.");
-                std::process::exit(1);
-            }
-            path => { ir_path = Some(path.to_string()); }
-        }
-        i += 1;
-    }
-
-    let ir_path = ir_path.unwrap_or_else(|| {
-        eprintln!("usage: camdl pfilter MODEL --params P.toml --data cases.tsv --particles 5000");
-        std::process::exit(1);
-    });
-    let data_path = data_path.unwrap_or_else(|| {
-        eprintln!("error: --data required");
-        std::process::exit(1);
-    });
+pub fn cmd_pfilter(a: &crate::args::PfilterArgs) {
+    let ir_path = a.model.to_string_lossy().into_owned();
+    let data_path = a.data.to_string_lossy().into_owned();
+    let n_particles = a.inference.particles;
+    let dt = a.inference.dt;
+    let seed = a.inference.seed;
+    let n_replicates = a.replicates;
+    let trace_path: Option<String> = a.trace.clone();
+    let output_path: Option<String> = a.output.as_ref().map(|p| p.to_string_lossy().into_owned());
+    let save_final_state: Option<String> = a.save_final_state.as_ref().map(|p| p.to_string_lossy().into_owned());
+    let save_filtering: Option<String> = a.save_filtering.as_ref().map(|p| p.to_string_lossy().into_owned());
+    let save_paths: Option<(usize, String)> = a.save_paths.as_ref()
+        .map(|p| (a.n_paths, p.to_string_lossy().into_owned()));
+    let scenario_name = a.scenario.scenario.clone();
+    let adhoc_enable = a.scenario.enable.clone();
+    let adhoc_disable = a.scenario.disable.clone();
+    let obs_name = a.flow.obs.clone();
+    let flow_name = a.flow.flow.clone();
+    let overrides: HashMap<String, f64> = a.model_overrides.param.iter()
+        .map(|p| (p.name.clone(), p.value))
+        .collect();
 
     // Load model (supports .camdl via camdlc)
     let (mut model, _model_json) = crate::util::load_model(&ir_path)
         .unwrap_or_else(|e| { eprintln!("error: {}", e); std::process::exit(1); });
 
-    // Apply params
-    for pf in &params_files {
-        crate::util::apply_params_file(&mut model, pf)
+    for pf in &a.model_overrides.params {
+        crate::util::apply_params_file(&mut model, &pf.to_string_lossy())
             .unwrap_or_else(|e| { eprintln!("error: {}", e); std::process::exit(1); });
     }
 

@@ -34,7 +34,7 @@ pub mod diagnostic;
 pub use types::{ParticleState, ParticleSwarm};
 pub use obs_loglik::{negbin_logpmf, normal_logpdf, discretized_normal_logpmf, normal_cdf};
 pub use particle_filter::bootstrap_filter;
-pub use traits::{ProcessModel, DensityProcess, ObservationModel, Resettable, SMCConfig};
+pub use traits::{ProcessModel, DensityProcess, ObservationModel, Resettable, SMCConfig, InferenceConfig};
 pub use chain_binomial_process::ChainBinomialProcess;
 pub use multi_stream_obs::{MultiStreamObsModel, NullObsModel};
 pub use prior::Prior;

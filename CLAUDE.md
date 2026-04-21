@@ -3,6 +3,27 @@
 This file provides guidance to Claude Code (claude.ai/code) when working with
 code in this repository.
 
+## Implementation standard
+
+This software is used to inform major public health decisions. Errors
+in inference, simulation, or data handling are not just bugs — they can
+mislead policy. Every implementation must be:
+
+- **Correct before clean**: verify logic against the mathematical
+  derivation or spec before refactoring for style.
+- **Tested at every step**: run `cargo test` before and after each
+  change; do not batch multiple semantic changes into one commit without
+  an intermediate green test run.
+- **Reviewed against the proposal**: when implementing from a proposal
+  in `docs/dev/proposals/`, follow it exactly unless a concrete reason
+  to deviate is documented inline. Do not improvise design changes
+  mid-implementation.
+- **Conservatively scoped**: if a change touches inference math
+  (`pgas.rs`, `pgas_grad.rs`, `obs_loglik.rs`, `obs_model.rs`,
+  `if2.rs`, `particle_filter.rs`), treat it as high-risk regardless of
+  how mechanical it looks. Read the full function before editing any
+  part of it.
+
 ## Project Overview
 
 `compartmental` is a monorepo for stochastic compartmental epidemic modelling.

@@ -344,6 +344,11 @@ pub struct ResolvedModel {
     pub overdispersion: Vec<Option<ResolvedExpr>>,
     /// Per-transition resolved rate gradients: Vec of (param_name, resolved_expr).
     pub rate_grads: Vec<Vec<(String, ResolvedExpr)>>,
+    /// Like rate_grads but with param names replaced by model param indices
+    /// (indices into the `params` slice). Populated at construction time via
+    /// `param_index`. Gradient terms whose name is not found in `param_index`
+    /// are silently dropped — this only happens if the IR is malformed.
+    pub rate_grads_indexed: Vec<Vec<(usize, ResolvedExpr)>>,
     /// Per-ODE-equation resolved derivative expression.
     pub ode_derivatives: Vec<ResolvedExpr>,
     /// Per-intervention, per-action resolved expression (count/fraction/value).
@@ -615,6 +620,19 @@ impl CompiledModel {
             })
             .collect::<Result<_, _>>()?;
 
+        // Index-keyed form: resolve String keys to model param indices once at
+        // construction time. Gradient terms with unknown names are dropped (they
+        // indicate a malformed IR — all known names are in param_index).
+        let rate_grads_indexed: Vec<Vec<(usize, ResolvedExpr)>> = rate_grads.iter()
+            .map(|tr_grads| {
+                tr_grads.iter()
+                    .filter_map(|(name, expr)| {
+                        param_index.get(name.as_str()).map(|&idx| (idx, expr.clone()))
+                    })
+                    .collect()
+            })
+            .collect();
+
         // Resolve ODE derivatives
         let ode_derivatives: Vec<ResolvedExpr> = model.ode_equations.iter()
             .map(|eq| resolve_expr(&eq.derivative, &resolve_ctx))
@@ -639,6 +657,7 @@ impl CompiledModel {
             rates,
             overdispersion,
             rate_grads,
+            rate_grads_indexed,
             ode_derivatives,
             intervention_exprs,
         };

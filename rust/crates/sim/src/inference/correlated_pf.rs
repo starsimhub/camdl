@@ -12,7 +12,7 @@ use serde::{Serialize, Deserialize};
 use crate::chain_binomial::StepScratch;
 use crate::rng::StatefulRng;
 use crate::error::SimError;
-use super::types::{ParticleState, ParticleSwarm, log_sum_exp};
+use super::types::{ParticleState, ParticleSwarm, log_sum_exp, LOG_PROB_FLOOR};
 use super::particle_filter::PFilterResult;
 use super::chain_binomial_process::ChainBinomialProcess;
 use super::traits::{ObservationModel, SMCConfig};
@@ -129,7 +129,7 @@ pub fn binomial_quantile(n: u64, p: f64, u: f64) -> u64 {
         if cdf >= u { return k; }
         // P(X=k+1) = P(X=k) * (n-k)/(k+1) * p/(1-p)
         binom_prob *= (n - k) as f64 / (k + 1) as f64 * p / q;
-        if binom_prob < 1e-300 { break; } // underflow guard
+        if binom_prob < LOG_PROB_FLOOR { break; } // underflow guard
     }
     n // fallback
 }

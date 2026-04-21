@@ -5,10 +5,10 @@
 # Decision: how many patches to target for SIA, before vs after ES.
 #
 # Run from repo root:
-#   camdl-sim experiment run      examples/polio_es/experiment.toml --parallel 8
-#   camdl-sim experiment summarize examples/polio_es/experiment.toml
+#   camdl batch      examples/polio_es/experiment.toml --parallel 8
+#   # camdl (removed: experiment summarize) examples/polio_es/experiment.toml
 #   python3 examples/polio_es/add_p_positive.py
-#   camdl-sim voi run             examples/polio_es/voi.toml
+#   camdl voi run             examples/polio_es/voi.toml
 
 [config]
 model = "examples/polio_es/polio_es_50.ir.json"

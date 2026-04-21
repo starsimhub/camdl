@@ -18,7 +18,8 @@
 
 use serde::{Serialize, Deserialize};
 use crate::rng::StatefulRng;
-use super::if2::EstimatedParam;
+use super::types::{EstimatedParam, restore_z_values};
+use super::if2::Observation;
 pub use super::prior::Prior;
 
 // ── Configuration ──────────────────────────────────────────────────
@@ -45,11 +46,11 @@ pub struct PMMHConfig {
     /// Number of source groups in the model (for sizing binomial noise).
     /// Set by the CLI from model.source_groups.len().
     pub n_source_groups: usize,
-    /// Number of observations (for sizing PFRandomState).
-    pub n_obs: usize,
-    /// Substeps per observation interval (= obs_spacing / dt).
-    /// Used to size the CPM random state. Computed from actual observation times.
-    pub steps_per_obs: usize,
+}
+
+impl super::traits::InferenceConfig for PMMHConfig {
+    fn n_particles(&self) -> usize { self.n_particles }
+    fn dt(&self) -> f64 { self.dt }
 }
 
 // ── Output types ───────────────────────────────────────────────────
@@ -253,6 +254,7 @@ pub fn run_pmmh(
     priors: &[Prior],
     base_params: &[f64],
     config: &PMMHConfig,
+    observations: &[Observation],
     eval_loglik: &dyn Fn(&[f64], u64) -> f64,
     eval_loglik_correlated: Option<&CorrelatedEvalFn>,
     seed: u64,
@@ -265,6 +267,14 @@ pub fn run_pmmh(
     assert_eq!(d, config.proposal_sd.len(), "proposal_sd must match if2_params length");
 
     use super::correlated_pf::PFRandomState;
+
+    // CPM sizing: derived from observation times and dt rather than config fields.
+    let n_obs = observations.len();
+    let steps_per_obs = if observations.len() >= 2 {
+        ((observations[1].time - observations[0].time) / config.dt).round() as usize
+    } else {
+        1
+    };
 
     let start_step;
     let mut current_params: Vec<f64>;
@@ -292,7 +302,7 @@ pub fn run_pmmh(
         map_loglik = state.map_loglik;
         map_log_posterior = state.map_log_posterior;
 
-        current_transformed = super::pgas::restore_z_values(
+        current_transformed = restore_z_values(
             &state.param_names, &state.transformed, if2_params, &current_params,
         );
 
@@ -315,10 +325,9 @@ pub fn run_pmmh(
             .collect();
 
         // CPM random state (if correlated mode)
-        let steps_per_obs = config.steps_per_obs;
         current_randoms = config.rho.map(|_| {
             PFRandomState::draw_fresh(
-                config.n_particles, config.n_obs, steps_per_obs,
+                config.n_particles, n_obs, steps_per_obs,
                 config.n_source_groups, &mut rng,
             )
         });

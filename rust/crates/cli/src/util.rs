@@ -23,12 +23,14 @@ pub const SEED_MIX_OBS: u64 = 0xa5a5a5a5a5a5;
 /// Minimal batch-TOML view needed by `voi` (the only remaining consumer
 /// now that analyze/summarize are gone). Just the output_dir — design
 /// and analyze sections aren't read anywhere.
+#[allow(dead_code)] // used by voi (gated — not in alpha)
 pub struct ExperimentInfo {
     pub output_dir: String,
 }
 
 /// Parse a batch TOML source string for `voi`. Returns an error string
 /// on parse failure.
+#[allow(dead_code)] // used by voi (gated — not in alpha)
 pub fn parse_experiment_toml(src: &str) -> Result<ExperimentInfo, String> {
     #[derive(Deserialize, Default)]
     struct ConfigSection {
@@ -55,18 +57,101 @@ fn camdlc_name() -> &'static str {
     if cfg!(windows) { "camdlc.exe" } else { "camdlc" }
 }
 
+/// Versioned camdlc name, e.g. `camdlc-abc1234` (or `.exe` on Windows).
+/// Installing camdlc under this name lets `find_camdlc` confirm an exact
+/// hash match without any subprocess — pure filesystem stat.
+fn camdlc_versioned_name() -> String {
+    format!("camdlc-{}{}",
+        crate::version::GIT_HASH,
+        if cfg!(windows) { ".exe" } else { "" })
+}
+
+/// Pure helper: given raw camdlc subprocess output, return `Ok(())` if the
+/// reported hash matches `our_hash`, or `Err(message)` otherwise.
+/// `location` is a human-readable path string used in the error text.
+fn eval_version_output(
+    stdout: &[u8],
+    exit_success: bool,
+    our_hash: &str,
+    location: &str,
+) -> Result<(), String> {
+    if exit_success {
+        let reported = String::from_utf8_lossy(stdout).trim().to_string();
+        if reported == our_hash {
+            Ok(())
+        } else {
+            Err(format!(
+                "error: camdlc version mismatch\n  \
+                 camdl:  {our_hash}\n  \
+                 camdlc: {reported} ({location})\n  \
+                 Run `make build-ocaml && make install` to sync.\n  \
+                 Set CAMDL_SKIP_VERSION_CHECK=1 to bypass (unsupported)."
+            ))
+        }
+    } else {
+        Err(format!(
+            "error: camdlc ({location}) does not report a version (old build).\n  \
+             Run `make build-ocaml && make install` to rebuild.\n  \
+             Set CAMDL_SKIP_VERSION_CHECK=1 to bypass (unsupported)."
+        ))
+    }
+}
+
+/// Run `camdlc --camdl-version` exactly once per process lifetime.
+/// Errors to stderr and exits if the hash differs from this camdl binary's hash.
+/// Subsequent calls are instant (OnceLock).
+static CAMDLC_CHECKED: std::sync::OnceLock<()> = std::sync::OnceLock::new();
+
+fn check_camdlc_version_once(camdlc: &std::path::Path) {
+    CAMDLC_CHECKED.get_or_init(|| {
+        if std::env::var("CAMDL_SKIP_VERSION_CHECK").is_ok() {
+            return;
+        }
+        match std::process::Command::new(camdlc)
+            .arg("--camdl-version")
+            .output()
+        {
+            Ok(out) => {
+                if let Err(msg) = eval_version_output(
+                    &out.stdout,
+                    out.status.success(),
+                    crate::version::GIT_HASH,
+                    &camdlc.display().to_string(),
+                ) {
+                    eprintln!("{msg}");
+                    std::process::exit(1);
+                }
+            }
+            Err(_) => {} // spawn failed; nothing useful to report
+        }
+    });
+}
+
 /// Find the camdlc compiler binary via a priority chain:
-/// 1. Same directory as the running binary (release zip layout)
-/// 2. CAMDLC_PATH or CAMDLC environment variable
-/// 3. On system PATH
+///
+/// 1a. `camdlc-<GIT_HASH>` in same directory as running binary — exact match,
+///     zero subprocess overhead (binary name IS the version check).
+/// 1b. Plain `camdlc` in same directory — runs `--camdl-version` once
+///     (OnceLock) to confirm it matches; warns if stale.
+/// 2.  `CAMDLC_PATH` or `CAMDLC` environment variable — same version check.
+/// 3.  System PATH — probes with `--camdl-version` (combines existence +
+///     version check in one spawn; also serves as the PATH existence test).
 fn find_camdlc() -> Result<std::path::PathBuf, String> {
     use std::path::PathBuf;
 
-    // 1. Same directory as the running binary
+    // 1. Same directory as running binary
     if let Ok(exe) = std::env::current_exe() {
         if let Some(dir) = exe.parent() {
-            let candidate = dir.join(camdlc_name());
-            if candidate.exists() { return Ok(candidate); }
+            // 1a. Versioned name: exact hash match, no subprocess at all
+            let versioned = dir.join(camdlc_versioned_name());
+            if versioned.exists() { return Ok(versioned); }
+
+            // 1b. Plain camdlc: version-check once via subprocess
+            let plain = dir.join(camdlc_name());
+            if plain.exists() {
+                check_camdlc_version_once(&plain);
+                return Ok(plain);
+            }
         }
     }
 
@@ -74,20 +159,35 @@ fn find_camdlc() -> Result<std::path::PathBuf, String> {
     for var in &["CAMDLC_PATH", "CAMDLC"] {
         if let Ok(path) = std::env::var(var) {
             let p = PathBuf::from(&path);
-            if p.exists() { return Ok(p); }
+            if p.exists() {
+                check_camdlc_version_once(&p);
+                return Ok(p);
+            }
         }
     }
 
-    // 3. System PATH
-    // Try running it to see if it exists
-    if std::process::Command::new(camdlc_name())
-        .arg("--version")
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .is_ok()
+    // 3. System PATH: --camdl-version probe doubles as existence check
+    match std::process::Command::new(camdlc_name())
+        .arg("--camdl-version")
+        .output()
     {
-        return Ok(PathBuf::from(camdlc_name()));
+        Ok(out) => {
+            let p = PathBuf::from(camdlc_name());
+            CAMDLC_CHECKED.get_or_init(|| {
+                if std::env::var("CAMDL_SKIP_VERSION_CHECK").is_ok() { return; }
+                if let Err(msg) = eval_version_output(
+                    &out.stdout,
+                    out.status.success(),
+                    crate::version::GIT_HASH,
+                    "on PATH",
+                ) {
+                    eprintln!("{msg}");
+                    std::process::exit(1);
+                }
+            });
+            return Ok(p);
+        }
+        Err(_) => {} // binary not found on PATH
     }
 
     Err(format!(
@@ -96,6 +196,11 @@ fn find_camdlc() -> Result<std::path::PathBuf, String> {
          Set CAMDLC_PATH to override.",
         if cfg!(windows) { ".exe" } else { "" }
     ))
+}
+
+#[cfg(test)]
+pub(crate) fn camdlc_checked_flag() -> &'static std::sync::OnceLock<()> {
+    &CAMDLC_CHECKED
 }
 
 /// Run camdlc on a .camdl file and return the IR JSON as a string.
@@ -853,6 +958,40 @@ pub fn fmt_relative_time(from: std::time::SystemTime, now: std::time::SystemTime
 mod tests {
     use super::*;
 
+    // ── camdlc version check ─────────────────────────────────────────────────
+
+    #[test]
+    fn version_output_match() {
+        assert!(eval_version_output(b"abc1234\n", true, "abc1234", "test").is_ok());
+        // trim whitespace variants
+        assert!(eval_version_output(b"abc1234", true, "abc1234", "test").is_ok());
+    }
+
+    #[test]
+    fn version_output_mismatch() {
+        let err = eval_version_output(b"old0000\n", true, "abc1234", "/usr/bin/camdlc")
+            .unwrap_err();
+        assert!(err.contains("version mismatch"), "unexpected message: {err}");
+        assert!(err.contains("abc1234"), "our hash missing: {err}");
+        assert!(err.contains("old0000"), "reported hash missing: {err}");
+        assert!(err.contains("/usr/bin/camdlc"), "location missing: {err}");
+    }
+
+    #[test]
+    fn version_output_old_build() {
+        let err = eval_version_output(b"", false, "abc1234", "on PATH")
+            .unwrap_err();
+        assert!(err.contains("old build"), "unexpected message: {err}");
+        assert!(err.contains("on PATH"), "location missing: {err}");
+    }
+
+    #[test]
+    fn camdlc_versioned_name_format() {
+        let name = camdlc_versioned_name();
+        assert!(name.starts_with("camdlc-"), "unexpected prefix: {name}");
+        assert!(name.contains(crate::version::GIT_HASH), "hash missing: {name}");
+    }
+
     /// Helper: path to the sir_vaccination golden IR (has 4 params:
     /// beta=0.3, gamma=0.1, vaccine_coverage=0.5, rho=10.0).
     /// Resolves relative to the repo root (tests run from rust/).
@@ -1269,5 +1408,52 @@ mod tests {
         assert!(names.contains("sia_north"));
         assert!(names.contains("sia_south"));
         assert!(!names.contains("lockdown_2022"));
+    }
+
+    /// Measure `camdlc --camdl-version` subprocess latency and OnceLock
+    /// short-circuit overhead.
+    ///
+    /// Run with `cargo test bench_camdlc_version -- --nocapture` to see timing.
+    /// If the subprocess is consistently >50ms, prefer the versioned-binary
+    /// fast path (`make install` installs `camdlc-<hash>` alongside `camdlc`).
+    #[test]
+    fn bench_camdlc_version() {
+        // Cold subprocess: first call hits the OS
+        let t0 = std::time::Instant::now();
+        let result = std::process::Command::new("camdlc")
+            .arg("--camdl-version")
+            .output();
+        let cold = t0.elapsed();
+
+        match &result {
+            Ok(out) => eprintln!(
+                "camdlc --camdl-version (cold):  {:>6.1?}  status={}  hash={:?}",
+                cold, out.status,
+                String::from_utf8_lossy(&out.stdout).trim()
+            ),
+            Err(e) => eprintln!(
+                "camdlc --camdl-version (cold):  {:>6.1?}  error: {}", cold, e
+            ),
+        }
+
+        // Warm OnceLock: initialise the lock, then measure a subsequent call
+        let flag = crate::util::camdlc_checked_flag();
+        flag.get_or_init(|| ());  // ensure it's set
+        let t1 = std::time::Instant::now();
+        flag.get_or_init(|| ());
+        let warm = t1.elapsed();
+        eprintln!("OnceLock short-circuit (warm): {:>6.1?}", warm);
+
+        // Verdict
+        eprintln!();
+        if cold.as_millis() < 20 {
+            eprintln!("verdict: subprocess is fast (<20ms) — OnceLock path is fine");
+        } else {
+            eprintln!(
+                "verdict: subprocess is slow ({}ms) — prefer `make install` so \
+                 `camdlc-<hash>` is present next to camdl for zero-overhead path",
+                cold.as_millis()
+            );
+        }
     }
 }

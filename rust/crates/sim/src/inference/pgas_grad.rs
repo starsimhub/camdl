@@ -13,19 +13,47 @@
 use crate::compiled_model::CompiledModel;
 use crate::error::SimError;
 use crate::propensity::{eval_propensities, EvalCtx};
-use crate::resolved_expr::{eval_resolved, eval_resolved_deriv};
+use crate::resolved_expr::{eval_resolved, eval_resolved_deriv, ResolvedExpr};
 use crate::state::{IntState, RealState};
 use crate::inference::obs_loglik::binom_logpmf;
 use crate::inference::pgas::{PGASTrajectory, IVPMapping};
 use crate::inference::particle_filter::Observation;
 
+/// Build a run-specific rate_grads table with estimated-param indices.
+///
+/// `rate_grads_indexed[tr_idx]` contains `(model_param_idx, expr)` pairs.
+/// `model_to_estimated[model_idx]` maps a model param index to its position
+/// in the estimated-param vector, or `None` if that param is not being
+/// estimated in this run.
+///
+/// The returned table has estimated-param indices: `(est_idx, expr)`. Only
+/// entries where `model_to_estimated[model_idx]` is `Some` are kept — fixed
+/// parameters (not in the estimated set) are intentionally dropped.
+pub fn resolve_rate_grad_for_run(
+    rate_grads_indexed: &[Vec<(usize, ResolvedExpr)>],
+    model_to_estimated: &[Option<usize>],
+) -> Vec<Vec<(usize, ResolvedExpr)>> {
+    rate_grads_indexed.iter()
+        .map(|tr_grads| {
+            tr_grads.iter()
+                .filter_map(|&(model_idx, ref expr)| {
+                    model_to_estimated.get(model_idx)
+                        .and_then(|opt| *opt)
+                        .map(|est_idx| (est_idx, expr.clone()))
+                })
+                .collect()
+        })
+        .collect()
+}
+
 /// Evaluate log transition density AND its gradient w.r.t. estimated parameters
 /// for a single substep.
 ///
-/// Returns (log_p, grad) where grad[i] = ∂log_p/∂θ_i.
+/// Returns (log_p, grad) where grad[i] = ∂log_p/∂θ_i for i in 0..d.
 ///
-/// `param_names` are the names of estimated parameters (matching keys in rate_grad).
-/// `param_indices` are their indices into the params array.
+/// `rate_grads_for_run` is pre-resolved via `resolve_rate_grad_for_run`:
+/// each entry is `(estimated_param_idx, gradient_expr)`. No string lookup
+/// happens in this function — the hot path is index-only.
 pub fn log_transition_density_grad(
     model: &CompiledModel,
     counts_before: &[i64],
@@ -34,10 +62,9 @@ pub fn log_transition_density_grad(
     params: &[f64],
     t: f64,
     dt: f64,
-    param_names: &[String],
-    _param_indices: &[usize],
+    d: usize,
+    rate_grads_for_run: &[Vec<(usize, ResolvedExpr)>],
 ) -> Result<(f64, Vec<f64>), SimError> {
-    let d = param_names.len();
     let n_int = model.int_local_to_global.len();
     let n_tr = model.model.transitions.len();
 
@@ -96,12 +123,10 @@ pub fn log_transition_density_grad(
             }
             let per_capita = rate / n_src as f64;
 
-            // Compute d(rate)/dθ for each estimated parameter
+            // Compute d(rate)/dθ for each estimated parameter (index-keyed, no string lookup)
             let mut d_rate = vec![0.0; d];
-            for (name, resolved_grad) in &model.resolved.rate_grads[tr_idx] {
-                if let Some(i) = param_names.iter().position(|pn| pn == name) {
-                    d_rate[i] = eval_resolved(resolved_grad, &ctx) / n_src as f64;
-                }
+            for &(est_idx, ref resolved_grad) in &rate_grads_for_run[tr_idx] {
+                d_rate[est_idx] = eval_resolved(resolved_grad, &ctx) / n_src as f64;
             }
 
             let (effective, d_effective) = if let ir::transition::DrawMethod::Overdispersed(_) =
@@ -202,13 +227,11 @@ pub fn log_transition_density_grad(
         // dλ/dθ = d(rate)/dθ * dt
         log_p += crate::inference::obs_loglik::poisson_logpmf(flow, mean);
 
-        for (name, resolved_grad) in &model.resolved.rate_grads[tr_idx] {
-            if let Some(i) = param_names.iter().position(|pn| pn == name) {
-                let d_rate = eval_resolved(resolved_grad, &ctx);
-                let d_mean = d_rate * dt;
-                if mean > 0.0 {
-                    grad[i] += (flow / mean - 1.0) * d_mean;
-                }
+        for &(est_idx, ref resolved_grad) in &rate_grads_for_run[tr_idx] {
+            let d_rate = eval_resolved(resolved_grad, &ctx);
+            let d_mean = d_rate * dt;
+            if mean > 0.0 {
+                grad[est_idx] += (flow / mean - 1.0) * d_mean;
             }
         }
     }
@@ -298,14 +321,13 @@ pub fn complete_data_loglik_grad(
     dt: f64,
     obs_model: &super::multi_stream_obs::MultiStreamObsModel,
     ivp_mappings: &[IVPMapping],
-    param_names: &[String],
-    param_indices: &[usize],
+    d: usize,
+    rate_grads_for_run: &[Vec<(usize, ResolvedExpr)>],
     obs_at_substep: &super::pgas::ObsAtSubstep,
 ) -> Result<(f64, Vec<f64>), SimError> {
     let t_start = model.model.simulation.t_start;
     let n_substeps = trajectory.substeps.len();
     let n_tr = model.model.transitions.len();
-    let d = param_names.len();
     let mut log_p = 0.0;
     let mut grad = vec![0.0; d];
 
@@ -334,7 +356,7 @@ pub fn complete_data_loglik_grad(
 
         let (td, td_grad) = log_transition_density_grad(
             model, counts_before, &rec.flows, &rec.gammas,
-            params, t, dt, param_names, param_indices,
+            params, t, dt, d, rate_grads_for_run,
         )?;
 
         if !td.is_finite() {

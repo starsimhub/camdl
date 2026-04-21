@@ -33,113 +33,45 @@ use std::io::Write;
 use std::sync::Arc;
 
 
-pub fn cmd_profile(args: &[String]) {
-    let mut ir_path: Option<String> = None;
-    let mut params_files: Vec<String> = Vec::new();
-    let mut data_path: Option<String> = None;
-    let mut focal_str: Option<String> = None;
-    let mut grid_str: Option<String> = None;
-    let mut named_grids: HashMap<String, String> = HashMap::new();
-    let mut n_particles = 1000_usize;
-    let mut n_iterations = 50_usize;
-    let mut n_starts = 3_usize;
-    let mut cooling = 0.95_f64;
-    let mut dt = 1.0_f64;
-    let mut seed = 1_u64;
-    let mut parallel = 0_usize; // 0 = rayon default (num_cpus)
-    let mut overrides: HashMap<String, f64> = HashMap::new();
-    let mut scenario_name: Option<String> = None;
-    let mut _obs_model = "negbin".to_string();
-    let mut _tol = 0.0_f64;
-    let mut flow_name: Option<String> = None;
-    let mut rw_sd_str: Option<String> = None;
-    let mut fixed_str: Option<String> = None;
-    let mut output_path: Option<String> = None;
+pub fn cmd_profile(a: &crate::args::ProfileArgs) {
+    let ir_path = a.model.to_string_lossy().into_owned();
+    let data_path = a.data.to_string_lossy().into_owned();
+    let n_particles = a.inference.particles;
+    let n_iterations = a.iterations;
+    let n_starts = a.starts;
+    let cooling = a.cooling;
+    let dt = a.inference.dt;
+    let seed = a.inference.seed;
+    let parallel = a.inference.parallel;
+    let output_path: Option<String> = a.output.as_ref().map(|p| p.to_string_lossy().into_owned());
+    let scenario_name = a.scenario.scenario.clone();
+    let flow_name = a.flow.flow.clone();
+    let overrides: HashMap<String, f64> = a.model_overrides.param.iter()
+        .map(|p| (p.name.clone(), p.value))
+        .collect();
 
-    let mut i = 0;
-    while i < args.len() {
-        match args[i].as_str() {
-            "--params"     => { i += 1; params_files.push(args[i].clone()); }
-            "--data"       => { i += 1; data_path = Some(args[i].clone()); }
-            "--focal"      => { i += 1; focal_str = Some(args[i].clone()); }
-            "--grid"       => { i += 1; grid_str = Some(args[i].clone()); }
-            s if s.starts_with("--grid-") => {
-                let name = s.strip_prefix("--grid-").unwrap().to_string();
-                i += 1;
-                named_grids.insert(name, args[i].clone());
-            }
-            "--particles"  => { i += 1; n_particles = args[i].parse().unwrap_or_else(|_| { eprintln!("error: needs integer"); std::process::exit(1); }); }
-            "--iterations" => { i += 1; n_iterations = args[i].parse().unwrap_or_else(|_| { eprintln!("error: needs integer"); std::process::exit(1); }); }
-            "--starts"     => { i += 1; n_starts = args[i].parse().unwrap_or_else(|_| { eprintln!("error: needs integer"); std::process::exit(1); }); }
-            "--cooling"    => { i += 1; cooling = args[i].parse().unwrap_or_else(|_| { eprintln!("error: needs number"); std::process::exit(1); }); }
-            "--dt"         => { i += 1; dt = args[i].parse().unwrap_or_else(|_| { eprintln!("error: needs number"); std::process::exit(1); }); }
-            "--seed"       => { i += 1; seed = args[i].parse().unwrap_or_else(|_| { eprintln!("error: needs integer"); std::process::exit(1); }); }
-            "--parallel"   => { i += 1; parallel = args[i].parse().unwrap_or_else(|_| { eprintln!("error: needs integer"); std::process::exit(1); }); }
-            "--scenario"   => { i += 1; scenario_name = Some(args[i].clone()); }
-            "--obs-model"  => { i += 1; _obs_model = args[i].clone(); }
-            "--tol"        => { i += 1; _tol = args[i].parse().unwrap_or_else(|_| { eprintln!("error: needs number"); std::process::exit(1); }); }
-            "--flow"       => { i += 1; flow_name = Some(args[i].clone()); }
-            "--rw-sd"      => { i += 1; rw_sd_str = Some(args[i].clone()); }
-            "--fixed"      => { i += 1; fixed_str = Some(args[i].clone()); }
-            "--output" | "-o" => { i += 1; output_path = Some(args[i].clone()); }
-            "--param"      => {
-                i += 1;
-                let kv = &args[i];
-                let mut parts = kv.splitn(2, '=');
-                let k = parts.next().unwrap().to_string();
-                let v: f64 = parts.next().and_then(|s| s.parse().ok()).unwrap_or_else(|| { eprintln!("error: --param needs NAME=VALUE"); std::process::exit(1); });
-                overrides.insert(k, v);
-            }
-            s if s.starts_with("--") => {
-                eprintln!("unknown flag: {}", s); std::process::exit(1);
-            }
-            path => { ir_path = Some(path.to_string()); }
-        }
-        i += 1;
-    }
+    // focal names come from the sweep specs; grid values inline
+    let focal_names: Vec<String> = a.sweep.iter().map(|s| s.name.clone()).collect();
 
-    let ir_path = ir_path.unwrap_or_else(|| {
-        eprintln!("usage: camdl profile MODEL --focal R0 --grid \"10,20,30\" --rw-sd \"sigma=0.01\" ...");
-        eprintln!("  2D:  --focal alpha,gamma --grid-alpha \"0.9,0.95,1.0\" --grid-gamma \"0.06,0.08,0.10\"");
-        std::process::exit(1);
-    });
-    let data_path = data_path.unwrap_or_else(|| { eprintln!("--data required"); std::process::exit(1); });
-    let focal_str = focal_str.unwrap_or_else(|| { eprintln!("--focal required"); std::process::exit(1); });
-    let rw_sd_str = rw_sd_str.unwrap_or_else(|| { eprintln!("--rw-sd required"); std::process::exit(1); });
-
-    // Parse focal parameter(s) and their grids
-    let focal_names: Vec<String> = focal_str.split(',').map(|s| s.trim().to_string()).collect();
-
-    // Build per-focal grids. For 1D: --grid "values". For 2D+: --grid-NAME "values".
     struct FocalGrid { name: String, values: Vec<f64>, param_idx: usize }
     let mut focal_grids: Vec<FocalGrid> = Vec::new();
 
-    // Parse rw_sd — supports "auto" and "name=value,name=auto" forms
-    let rw_sd_auto = rw_sd_str.trim() == "auto";
-    let rw_sd_map_raw: HashMap<String, Option<f64>> = if rw_sd_auto {
-        HashMap::new()
-    } else {
-        rw_sd_str.split(',')
-            .map(|kv| {
-                let mut parts = kv.trim().splitn(2, '=');
-                let k = parts.next().unwrap().to_string();
-                let v_str = parts.next().unwrap_or("auto");
-                let v: Option<f64> = if v_str == "auto" { None } else {
-                    Some(v_str.parse().unwrap_or_else(|_| {
-                        eprintln!("bad --rw-sd entry: {}", kv); std::process::exit(1);
-                    }))
-                };
-                (k, v)
-            })
-            .collect()
+    let rw_sd = a.rw_sd.as_ref().unwrap_or_else(|| {
+        eprintln!("error: --rw-sd required (e.g., --rw-sd \"sigma=0.01\" or --rw-sd auto)");
+        std::process::exit(1);
+    });
+    let rw_sd_auto = matches!(rw_sd, crate::args::types::RwSd::Auto);
+    let rw_sd_map_raw: HashMap<String, Option<f64>> = match rw_sd {
+        crate::args::types::RwSd::Auto => HashMap::new(),
+        crate::args::types::RwSd::Map(m) => m.clone(),
     };
 
     // Load model
     let (mut model, _model_json) = crate::util::load_model(&ir_path)
         .unwrap_or_else(|e| { eprintln!("error: {}", e); std::process::exit(1); });
 
-    for pf in &params_files {
-        crate::util::apply_params_file(&mut model, pf).unwrap_or_else(|e| { eprintln!("{}", e); std::process::exit(1); });
+    for pf in &a.model_overrides.params {
+        crate::util::apply_params_file(&mut model, &pf.to_string_lossy()).unwrap_or_else(|e| { eprintln!("{}", e); std::process::exit(1); });
     }
     if let Some(ref name) = scenario_name {
         if let Some(preset) = model.presets.iter().find(|p| p.name == *name) {
@@ -161,28 +93,13 @@ pub fn cmd_profile(args: &[String]) {
         .unwrap_or_else(|e| { eprintln!("error: {}", e); std::process::exit(1); });
     let flow_indices = Arc::new(flow_indices);
 
-    // Build focal grids with param indices
-    for name in &focal_names {
-        let idx = compiled.param_index.get(name.as_str()).copied()
-            .unwrap_or_else(|| { eprintln!("focal parameter '{}' not found", name); std::process::exit(1); });
-        let grid_values = if focal_names.len() == 1 {
-            // 1D: use --grid
-            let gs = grid_str.as_ref().unwrap_or_else(|| { eprintln!("--grid required for 1D profile"); std::process::exit(1); });
-            gs.split(',').map(|s| s.trim().parse().unwrap_or_else(|_| { eprintln!("error: grid values must be numbers"); std::process::exit(1); })).collect()
-        } else {
-            // 2D+: use --grid-NAME
-            let gs = named_grids.get(name).unwrap_or_else(|| {
-                eprintln!("--grid-{} required for multi-focal profile", name); std::process::exit(1);
-            });
-            gs.split(',').map(|s| s.trim().parse().unwrap_or_else(|_| { eprintln!("error: grid values must be numbers"); std::process::exit(1); })).collect()
-        };
-        focal_grids.push(FocalGrid { name: name.clone(), values: grid_values, param_idx: idx });
+    for sw in &a.sweep {
+        let idx = compiled.param_index.get(sw.name.as_str()).copied()
+            .unwrap_or_else(|| { eprintln!("focal parameter '{}' not found", sw.name); std::process::exit(1); });
+        focal_grids.push(FocalGrid { name: sw.name.clone(), values: sw.values.clone(), param_idx: idx });
     }
 
-    // Parse --fixed "N0,mu,rho,..."
-    let fixed_names: std::collections::HashSet<String> = fixed_str
-        .map(|s| s.split(',').map(|n| n.trim().to_string()).collect())
-        .unwrap_or_default();
+    let fixed_names: std::collections::HashSet<String> = a.fixed.iter().cloned().collect();
 
     // Build IF2 param specs (excluding focal + fixed params)
     // Focal params are fixed at grid values by the profile loop.

@@ -74,68 +74,22 @@ fn references_compartments(expr: &Expr) -> Option<String> {
     }
 }
 
-pub fn cmd_eval(args: &[String]) {
-    let mut ir_path: Option<String> = None;
-    let mut params_files: Vec<String> = Vec::new();
-    let mut expr_names: Vec<String> = Vec::new();
-    let mut t_from = 0.0_f64;
-    let mut t_to = 100.0_f64;
-    let mut t_every = 1.0_f64;
-    let mut at_points: Option<Vec<f64>> = None;
-    let mut overrides = std::collections::HashMap::new();
-    let mut output_path: Option<String> = None;
+pub fn cmd_eval(a: &crate::args::EvalArgs) {
+    let ir_path = a.model.to_string_lossy();
+    let overrides: std::collections::HashMap<String, f64> = a.model_overrides.param
+        .iter()
+        .map(|p| (p.name.clone(), p.value))
+        .collect();
+    let at_points: Option<Vec<f64>> = if a.at.is_empty() { None } else { Some(a.at.clone()) };
 
-    let mut i = 0;
-    while i < args.len() {
-        match args[i].as_str() {
-            "--params" => { i += 1; params_files.push(args[i].clone()); }
-            "--expr"   => { i += 1; expr_names = args[i].split(',').map(|s| s.trim().to_string()).collect(); }
-            "--from"   => { i += 1; t_from = args[i].parse().unwrap_or_else(|_| { eprintln!("error: --from needs a number"); std::process::exit(1); }); }
-            "--to"     => { i += 1; t_to = args[i].parse().unwrap_or_else(|_| { eprintln!("error: --to needs a number"); std::process::exit(1); }); }
-            "--every"  => { i += 1; t_every = args[i].parse().unwrap_or_else(|_| { eprintln!("error: --every needs a number"); std::process::exit(1); }); }
-            "--at"     => { i += 1; at_points = Some(args[i].split(',').map(|s| s.trim().parse().unwrap_or_else(|_| { eprintln!("error: --at values must be numbers"); std::process::exit(1); })).collect()); }
-            "--output" | "-o" => { i += 1; output_path = Some(args[i].clone()); }
-            "--param"  => {
-                i += 1;
-                let kv = &args[i];
-                let mut parts = kv.splitn(2, '=');
-                let k = parts.next().unwrap().to_string();
-                let v: f64 = parts.next().and_then(|s| s.parse().ok()).unwrap_or_else(|| {
-                    eprintln!("error: --param needs NAME=VALUE"); std::process::exit(1);
-                });
-                overrides.insert(k, v);
-            }
-            s if s.starts_with("--") => {
-                eprintln!("unknown flag: {}", s);
-                eprintln!("usage: camdl eval MODEL --params P.toml --expr \"name1,name2\" --from 0 --to 730 --every 1");
-                std::process::exit(1);
-            }
-            path => { ir_path = Some(path.to_string()); }
-        }
-        i += 1;
-    }
-
-    let ir_path = ir_path.unwrap_or_else(|| {
-        eprintln!("usage: camdl eval MODEL --params P.toml --expr \"name1,name2\" --from 0 --to 730 --every 1");
-        std::process::exit(1);
-    });
-
-    if expr_names.is_empty() {
-        eprintln!("error: --expr required. Specify one or more comma-separated expression names.");
-        std::process::exit(1);
-    }
-
-    // Load model: if .camdl, compile via camdlc; if .ir.json, load directly
     let (mut model, _model_json) = crate::util::load_model(&ir_path)
         .unwrap_or_else(|e| { eprintln!("error: {}", e); std::process::exit(1); });
 
-    // Apply params files
-    for pf in &params_files {
-        crate::util::apply_params_file(&mut model, pf)
+    for pf in &a.model_overrides.params {
+        crate::util::apply_params_file(&mut model, &pf.to_string_lossy())
             .unwrap_or_else(|e| { eprintln!("error loading params: {}", e); std::process::exit(1); });
     }
 
-    // Apply overrides
     for p in &mut model.parameters {
         if let Some(&v) = overrides.get(&p.name) { p.value = Some(v); }
     }
@@ -144,9 +98,8 @@ pub fn cmd_eval(args: &[String]) {
         .unwrap_or_else(|e| { eprintln!("compile error: {:?}", e); std::process::exit(1); });
     let params = compiled.default_params.clone();
 
-    // Resolve expressions
     let mut resolved: Vec<(String, Expr)> = Vec::new();
-    for name in &expr_names {
+    for name in &a.expr {
         match resolve_named_expr(&model, &compiled, name) {
             Ok(expr) => {
                 if let Some(comp) = references_compartments(&expr) {
@@ -161,29 +114,26 @@ pub fn cmd_eval(args: &[String]) {
         }
     }
 
-    // Build time grid
     let times: Vec<f64> = if let Some(pts) = at_points {
         pts
     } else {
         let mut ts = Vec::new();
-        let mut t = t_from;
-        while t <= t_to + 1e-9 {
+        let mut t = a.from;
+        while t <= a.to + 1e-9 {
             ts.push(t);
-            t += t_every;
+            t += a.every;
         }
         ts
     };
 
-    // Empty state for eval (no compartments needed)
     let int_s = IntState::new(compiled.int_local_to_global.len());
     let real_s = RealState::new(compiled.real_local_to_global.len());
 
-    // Output
     use std::io::Write;
-    let mut out: Box<dyn Write> = match &output_path {
+    let mut out: Box<dyn Write> = match &a.output {
         Some(path) => {
             let f = std::fs::File::create(path)
-                .unwrap_or_else(|e| { eprintln!("cannot create {}: {}", path, e); std::process::exit(1); });
+                .unwrap_or_else(|e| { eprintln!("cannot create {}: {}", path.display(), e); std::process::exit(1); });
             Box::new(std::io::BufWriter::new(f))
         }
         None => Box::new(std::io::BufWriter::new(std::io::stdout().lock())),
@@ -197,7 +147,7 @@ pub fn cmd_eval(args: &[String]) {
 
     for &t in &times {
         write!(out, "{}", t).unwrap();
-        let ctx = EvalCtx { model: &compiled, int_s: &int_s, real_s: &real_s, params: &params, t , projected: None, int_float_override: None };
+        let ctx = EvalCtx { model: &compiled, int_s: &int_s, real_s: &real_s, params: &params, t, projected: None, int_float_override: None };
         for (name, expr) in &resolved {
             match eval_expr(expr, &ctx) {
                 Ok(val) => write!(out, "\t{:.6}", val).unwrap(),
@@ -211,7 +161,7 @@ pub fn cmd_eval(args: &[String]) {
     }
     drop(out);
 
-    if let Some(ref path) = output_path {
-        eprintln!("eval written to {}", path);
+    if let Some(ref path) = a.output {
+        eprintln!("eval written to {}", path.display());
     }
 }

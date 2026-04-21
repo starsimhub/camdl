@@ -42,6 +42,7 @@ fn test_gradient_vs_finite_differences_sir() {
     }
     let compiled = Arc::new(CompiledModel::new(model).unwrap());
 
+    let n_params = compiled.model.parameters.len();
     let param_names: Vec<String> = compiled.model.parameters.iter()
         .map(|p| p.name.clone()).collect();
     let param_indices: Vec<usize> = param_names.iter()
@@ -54,6 +55,13 @@ fn test_gradient_vs_finite_differences_sir() {
             params[compiled.param_index[p.name.as_str()]] = v;
         }
     }
+
+    // Build rate_grads_for_run: all model params are "estimated" (est_idx == model_idx)
+    let model_to_estimated: Vec<Option<usize>> = (0..n_params).map(Some).collect();
+    let rate_grads_for_run = sim::inference::pgas_grad::resolve_rate_grad_for_run(
+        &compiled.resolved.rate_grads_indexed,
+        &model_to_estimated,
+    );
 
     // Simulate a trajectory
     let mut rng = StatefulRng::new(42);
@@ -72,7 +80,7 @@ fn test_gradient_vs_finite_differences_sir() {
     let (ll, grad) = complete_data_loglik_grad(
         &compiled, &trajectory, &params, &observations, dt,
         &obs_model, &ivp_mappings,
-        &param_names, &param_indices, &oas,
+        n_params, &rate_grads_for_run, &oas,
     ).unwrap();
 
     eprintln!("  log-likelihood: {:.4}", ll);
@@ -170,7 +178,18 @@ fn test_nuts_target_gradient_on_z_scale() {
     let priors: Vec<Prior> = if2_params.iter().map(|_| Prior::Flat).collect();
     let base_params = vec![0.4, 0.1, 1000.0, 10.0];
     let param_names: Vec<String> = if2_params.iter().map(|p| p.name.clone()).collect();
-    let param_indices: Vec<usize> = if2_params.iter().map(|p| p.index).collect();
+    let d_nuts = if2_params.len();
+
+    // Build rate_grads_for_run: map model param indices → estimated param indices
+    let n_model_params = compiled.model.parameters.len();
+    let mut model_to_estimated_nuts: Vec<Option<usize>> = vec![None; n_model_params];
+    for (est_idx, spec) in if2_params.iter().enumerate() {
+        model_to_estimated_nuts[spec.index] = Some(est_idx);
+    }
+    let rate_grads_for_run_nuts = sim::inference::pgas_grad::resolve_rate_grad_for_run(
+        &compiled.resolved.rate_grads_indexed,
+        &model_to_estimated_nuts,
+    );
 
     // Current z values (transformed scale)
     let z: Vec<f64> = if2_params.iter()
@@ -179,7 +198,6 @@ fn test_nuts_target_gradient_on_z_scale() {
 
     // Build the FULL NUTS target closure (same structure as run_pgas)
     let log_prob_and_grad = |z_val: &[f64]| -> (f64, Vec<f64>) {
-        let d = z_val.len();
         let mut params = base_params.clone();
         for (i, spec) in if2_params.iter().enumerate() {
             params[spec.index] = spec.from_transformed(z_val[i]);
@@ -188,13 +206,13 @@ fn test_nuts_target_gradient_on_z_scale() {
         let (ll, ll_grad_theta) = sim::inference::pgas_grad::complete_data_loglik_grad(
             &compiled, &trajectory, &params, &observations, dt,
             &obs_model, &ivp_mappings,
-            &param_names, &param_indices, &oas,
-        ).unwrap_or((f64::NEG_INFINITY, vec![0.0; d]));
+            d_nuts, &rate_grads_for_run_nuts, &oas,
+        ).unwrap_or((f64::NEG_INFINITY, vec![0.0; d_nuts]));
 
         let mut log_p = ll;
-        let mut grad_z = vec![0.0; d];
+        let mut grad_z = vec![0.0; d_nuts];
 
-        for i in 0..d {
+        for i in 0..d_nuts {
             let theta = params[if2_params[i].index];
             let dtheta_dz = match &if2_params[i].transform {
                 Transform::Log { .. } => z_val[i].exp(),

@@ -18,35 +18,13 @@ use rayon::prelude::*;
 use crate::rng::StatefulRng;
 use crate::error::SimError;
 use super::traits::{ProcessModel, ObservationModel};
-use super::types::{ParticleState, log_sum_exp};
+use super::types::{ParticleState, log_sum_exp, LOG_PROB_FLOOR, init_particle_rngs};
 use super::resampling::systematic_resample;
 
-/// One parameter's transform and perturbation spec.
-#[derive(Clone, Debug)]
-pub struct EstimatedParam {
-    /// Parameter name (for reporting).
-    pub name: String,
-    /// Index into the params array.
-    pub index: usize,
-    /// Initial value (starting point for IF2).
-    pub initial: f64,
-    /// Random walk standard deviation on the TRANSFORMED scale.
-    /// Shrinks by `cooling_fraction` each iteration.
-    pub rw_sd: f64,
-    /// Transform: "log" for positive parameters, "logit" for [0,1],
-    /// "none" for unconstrained.
-    pub transform: Transform,
-    /// Bounds for logit transform.
-    pub lower: f64,
-    pub upper: f64,
-    /// Whether rw_sd was auto-computed (for preflight reporting).
-    #[allow(dead_code)]
-    pub rw_sd_auto: bool,
-    /// If true, this parameter is only perturbed at t=0 (initial value
-    /// parameter). Used for S₀, E₀, I₀ etc. that set the initial state
-    /// but don't change during simulation. Matches pomp's ivp() in rw.sd.
-    pub ivp: bool,
-}
+// `Transform` and `EstimatedParam` are defined in `types.rs` (shared by all
+// inference algorithms). Re-exported here so existing import paths via
+// `inference::if2::EstimatedParam` continue to work.
+pub use super::types::{Transform, EstimatedParam};
 
 /// A group of parameters with a joint simplex constraint (sum to 1).
 /// Uses barycentric (log-ratio + softmax) transform, matching pomp's
@@ -65,10 +43,10 @@ impl SimplexGroup {
     /// z_i = log(x_i / sum(x)), matching pomp's to_log_barycentric.
     pub fn to_log_barycentric(&self, params: &[f64]) -> Vec<f64> {
         let fracs: Vec<f64> = self.indices.iter()
-            .map(|&i| params[i].max(1e-300))
+            .map(|&i| params[i].max(LOG_PROB_FLOOR))
             .collect();
         let sum: f64 = fracs.iter().sum();
-        fracs.iter().map(|&f| (f / sum).max(1e-300).ln()).collect()
+        fracs.iter().map(|&f| (f / sum).max(LOG_PROB_FLOOR).ln()).collect()
     }
 
     /// Inverse transform: log-ratios → fractions via softmax.
@@ -96,115 +74,6 @@ impl SimplexGroup {
         let fracs = Self::from_log_barycentric(&perturbed);
         for (j, &idx) in self.indices.iter().enumerate() {
             particle_params[idx] = fracs[j];
-        }
-    }
-}
-
-#[derive(Clone, Debug)]
-pub enum Transform {
-    /// Log transform with bounds clamping on inverse.
-    /// Correct for rates, positive quantities, counts.
-    /// from_transformed clamps z.exp() to [lo, hi] — out-of-bounds
-    /// particles get bad loglik and are resampled away. No NaN, no panic.
-    /// This is what Stan does for lower-bounded parameters.
-    Log { lo: f64, hi: f64 },
-    /// Scaled logit mapping [lo, hi] to (-inf, inf).
-    /// Correct for probabilities. Bounds enforced by construction
-    /// (logistic function output is always in (0, 1)).
-    /// Note: for narrow bounds like [0.01, 0.10], the logit-scaled
-    /// position can be extreme (|z| > 2), compressing the effective
-    /// perturbation range. The preflight diagnostic warns about this.
-    Logit { lo: f64, hi: f64 },
-    /// No transform. For "real" parameters or unknown types.
-    None,
-}
-
-impl EstimatedParam {
-    pub fn to_transformed(&self, x: f64) -> f64 {
-        match &self.transform {
-            Transform::Log { lo, hi } => x.clamp(*lo, *hi).max(1e-300).ln(),
-            Transform::Logit { lo, hi } => {
-                let p = ((x - lo) / (hi - lo)).clamp(1e-10, 1.0 - 1e-10);
-                (p / (1.0 - p)).ln()
-            }
-            Transform::None => x,
-        }
-    }
-
-    pub fn from_transformed(&self, z: f64) -> f64 {
-        match &self.transform {
-            Transform::Log { lo, hi } => {
-                // Clamp to declared bounds — prevents NaN/panic downstream.
-                // Out-of-bounds particles get bad loglik and are resampled away.
-                z.exp().clamp(*lo, *hi)
-            }
-            Transform::Logit { lo, hi } => {
-                let p = 1.0 / (1.0 + (-z).exp());
-                lo + p * (hi - lo)
-                // Bounds enforced by construction — no clamp needed.
-            }
-            Transform::None => z,
-        }
-    }
-
-    /// Log |dθ/dz| for the transform θ = f(z).
-    /// Needed for the MH ratio when proposing on the transformed scale.
-    ///
-    /// For log-transform: θ = exp(z), so |dθ/dz| = exp(z) = θ → log-Jacobian = z.
-    /// For logit-transform: θ = lo + (hi-lo)/(1+exp(-z)), Jacobian = (hi-lo) × p × (1-p).
-    /// For no transform: Jacobian = 1 → log-Jacobian = 0.
-    pub fn log_jacobian(&self, z: f64) -> f64 {
-        match &self.transform {
-            Transform::Log { .. } => z, // log(exp(z)) = z
-            Transform::Logit { lo, hi } => {
-                let p = 1.0 / (1.0 + (-z).exp());
-                ((hi - lo) * p * (1.0 - p)).ln()
-            }
-            Transform::None => 0.0,
-        }
-    }
-
-    /// Derivative of log|Jacobian| w.r.t. z.
-    /// d/dz log|dθ/dz|.
-    pub fn jacobian_grad(&self, z: f64) -> f64 {
-        match &self.transform {
-            Transform::Log { .. } => 1.0, // d/dz z = 1
-            Transform::Logit { .. } => {
-                let p = 1.0 / (1.0 + (-z).exp());
-                1.0 - 2.0 * p // d/dz log(p*(1-p)) = (1 - 2p)
-            }
-            Transform::None => 0.0,
-        }
-    }
-
-    /// Derivative of the transform θ(z) w.r.t. z: dθ/dz.
-    ///
-    /// Used in the chain rule to convert natural-scale gradients to the
-    /// unconstrained scale: d(f(θ))/dz = d(f)/dθ × dθ/dz.
-    pub fn transform_deriv(&self, z: f64) -> f64 {
-        match &self.transform {
-            Transform::Log { .. } => z.exp(), // θ = exp(z), dθ/dz = exp(z)
-            Transform::Logit { lo, hi } => {
-                let p = 1.0 / (1.0 + (-z).exp());
-                (hi - lo) * p * (1.0 - p) // θ = lo + (hi-lo)*σ(z), dθ/dz = (hi-lo)*σ(z)*(1-σ(z))
-            }
-            Transform::None => 1.0,
-        }
-    }
-
-    /// Delta method: convert natural-scale rw_sd to transformed-scale.
-    /// Matches pomp's convention: user specifies rw.sd on natural scale.
-    pub fn transformed_sd(&self, natural_sd: f64, current_value: f64) -> f64 {
-        match &self.transform {
-            Transform::Log { .. } => {
-                natural_sd / current_value.max(1e-300)
-            }
-            Transform::Logit { lo, hi } => {
-                let range = hi - lo;
-                let p = ((current_value - lo) / range).clamp(1e-10, 1.0 - 1e-10);
-                natural_sd / (range * p * (1.0 - p))
-            }
-            Transform::None => natural_sd,
         }
     }
 }
@@ -238,6 +107,11 @@ pub struct IF2Config {
     /// per-particle spread at t=0, typically from an `ivp` estimated
     /// parameter. See docs/dev/proposals/2026-04-18-ic-free-inference.md.
     pub skip_first_obs_from_loglik: bool,
+}
+
+impl super::traits::InferenceConfig for IF2Config {
+    fn n_particles(&self) -> usize { self.n_particles }
+    fn dt(&self) -> f64 { self.dt }
 }
 
 /// Result of one IF2 iteration.
@@ -411,15 +285,12 @@ pub fn run_if2_with_progress<P: ProcessModel<State = ParticleState>>(
         // IM1 fix (2026-04-19 inference review): per-particle RNG
         // streams via ChaCha8's stream counter. iter in the top
         // 32 bits, particle i in the bottom 32 — fits 2^32
-        // iterations × 2^32 particles with room to spare. The
-        // resample RNG uses a non-overlapping high bit.
+        // iterations × 2^32 particles with room to spare.
         let stream_base = (iter as u64) << 32;
-        let mut rngs: Vec<StatefulRng> = (0..n)
-            .map(|i| StatefulRng::new_stream(seed, stream_base | (i as u64)))
-            .collect();
+        let mut rngs = init_particle_rngs(seed, n, stream_base);
         let mut resample_rng = StatefulRng::new_stream(
             seed,
-            stream_base | (1u64 << 63),
+            stream_base | super::types::RESAMPLE_RNG_STREAM,
         );
 
         // Diagnostic accumulators (averaged across observation times)

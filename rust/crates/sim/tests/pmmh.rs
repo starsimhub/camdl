@@ -178,10 +178,10 @@ fn test_pmmh_posterior_covers_truth() {
         adapt: true,
         adapt_start: 200,
         thin: 1,
-        burn_in: 500, rho: None, n_source_groups: 0, n_obs: 0, steps_per_obs: 7,
+        burn_in: 500, rho: None, n_source_groups: 0,
     };
 
-    let result = run_pmmh(&if2_params, &priors, &base_params, &config, &eval_loglik, None, 42, None, None, String::new());
+    let result = run_pmmh(&if2_params, &priors, &base_params, &config, &[], &eval_loglik, None, 42, None, None, String::new());
 
     // Extract μ samples (index 0 in param vector)
     let mu_samples: Vec<f64> = result.steps.iter().map(|s| s.params[0]).collect();
@@ -222,11 +222,11 @@ fn test_pmmh_determinism() {
         adapt: false,
         adapt_start: 50,
         thin: 1,
-        burn_in: 0, rho: None, n_source_groups: 0, n_obs: 0, steps_per_obs: 7,
+        burn_in: 0, rho: None, n_source_groups: 0,
     };
 
-    let r1 = run_pmmh(&if2_params, &priors, &base_params, &config, &eval_loglik, None, 42, None, None, String::new());
-    let r2 = run_pmmh(&if2_params, &priors, &base_params, &config, &eval_loglik, None, 42, None, None, String::new());
+    let r1 = run_pmmh(&if2_params, &priors, &base_params, &config, &[], &eval_loglik, None, 42, None, None, String::new());
+    let r2 = run_pmmh(&if2_params, &priors, &base_params, &config, &[], &eval_loglik, None, 42, None, None, String::new());
 
     assert_eq!(r1.steps.len(), r2.steps.len());
     for (s1, s2) in r1.steps.iter().zip(r2.steps.iter()) {
@@ -255,10 +255,10 @@ fn test_pmmh_acceptance_rate() {
         adapt: true,
         adapt_start: 200,
         thin: 1,
-        burn_in: 0, rho: None, n_source_groups: 0, n_obs: 0, steps_per_obs: 7,
+        burn_in: 0, rho: None, n_source_groups: 0,
     };
 
-    let result = run_pmmh(&if2_params, &priors, &base_params, &config, &eval_loglik, None, 42, None, None, String::new());
+    let result = run_pmmh(&if2_params, &priors, &base_params, &config, &[], &eval_loglik, None, 42, None, None, String::new());
 
     assert!(result.acceptance_rate > 0.05,
         "acceptance rate {:.3} too low (chain stuck)", result.acceptance_rate);
@@ -285,10 +285,10 @@ fn test_pmmh_flat_prior_finds_near_mle() {
         adapt: true,
         adapt_start: 200,
         thin: 1,
-        burn_in: 500, rho: None, n_source_groups: 0, n_obs: 0, steps_per_obs: 7,
+        burn_in: 500, rho: None, n_source_groups: 0,
     };
 
-    let result = run_pmmh(&if2_params, &priors, &base_params, &config, &eval_loglik, None, 42, None, None, String::new());
+    let result = run_pmmh(&if2_params, &priors, &base_params, &config, &[], &eval_loglik, None, 42, None, None, String::new());
 
     // MAP should be close to true μ=0.01
     let map_mu = result.map_params[0];
@@ -316,10 +316,10 @@ fn test_pmmh_adaptive_improves_acceptance() {
         adapt: true,
         adapt_start: 200,
         thin: 1,
-        burn_in: 0, rho: None, n_source_groups: 0, n_obs: 0, steps_per_obs: 7,
+        burn_in: 0, rho: None, n_source_groups: 0,
     };
 
-    let result = run_pmmh(&if2_params, &priors, &base_params, &config, &eval_loglik, None, 42, None, None, String::new());
+    let result = run_pmmh(&if2_params, &priors, &base_params, &config, &[], &eval_loglik, None, 42, None, None, String::new());
 
     // Compute acceptance rate in the second half (after adaptation kicks in)
     let half = result.steps.len() / 2;
@@ -375,11 +375,11 @@ fn test_pmmh_different_seeds_differ() {
         adapt: false,
         adapt_start: 50,
         thin: 1,
-        burn_in: 0, rho: None, n_source_groups: 0, n_obs: 0, steps_per_obs: 7,
+        burn_in: 0, rho: None, n_source_groups: 0,
     };
 
-    let r1 = run_pmmh(&if2_params, &priors, &base_params, &config, &eval_loglik, None, 1, None, None, String::new());
-    let r2 = run_pmmh(&if2_params, &priors, &base_params, &config, &eval_loglik, None, 2, None, None, String::new());
+    let r1 = run_pmmh(&if2_params, &priors, &base_params, &config, &[], &eval_loglik, None, 1, None, None, String::new());
+    let r2 = run_pmmh(&if2_params, &priors, &base_params, &config, &[], &eval_loglik, None, 2, None, None, String::new());
 
     // At least some steps should differ
     let any_differ = r1.steps.iter().zip(r2.steps.iter())

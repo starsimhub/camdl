@@ -1,3 +1,4 @@
+mod args;
 mod util;
 mod hashing;
 #[allow(dead_code)] // write sites wire up in commit 4/6 of the unified-output-tree rollout
@@ -9,8 +10,8 @@ mod cas;
 mod browse;
 mod sampling;
 #[allow(dead_code)]
-mod batch;  // `simulate batch FILE` subcommand (formerly `experiment`)
-mod serve;
+mod batch;
+// mod serve; // not mature enough for alpha
 mod eval;
 #[allow(dead_code)]
 mod pfilter; // used internally by fit runner for data loading
@@ -19,7 +20,7 @@ mod fit;
 pub mod version;
 
 // Modules kept for internal use but with no direct CLI entry points:
-#[allow(dead_code)] mod voi;
+// mod voi; // not mature enough for alpha
 #[allow(dead_code)] mod if2;
 mod profile;
 
@@ -43,351 +44,163 @@ mod term {
     pub fn cyan(s: &str) -> String { wrap("36", s) }
 }
 
+use clap::{Parser, Subcommand};
 use sim::{write_diagnostics_tsv, warn_zero_firings};
 use std::collections::HashMap;
 
-fn print_main_help() -> ! {
-    let d = term::dim;
-    let b = term::bold;
-    eprintln!("{}", b("camdl — compartmental model simulation and inference"));
-    eprintln!();
-    eprintln!("Commands:");
-    eprintln!("  {}    Run forward simulations (single or batch)", b("simulate"));
-    eprintln!("  {}         Inference pipeline (MLE, posterior sampling, evaluation)", b("fit"));
-    eprintln!("  {}     Standalone particle filter at fixed parameters", b("pfilter"));
-    eprintln!("  {}         Standalone iterated filtering (IF2)", b("if2"));
-    eprintln!("  {}     Profile likelihood via parallel IF2 over a grid", b("profile"));
-    eprintln!("  {}     Compile .camdl → IR JSON", b("compile"));
-    eprintln!("  {}       Type-check a .camdl model", b("check"));
-    eprintln!("  {}     Print model structure", b("inspect"));
-    eprintln!("  {}        Evaluate expressions against a model", b("eval"));
-    eprintln!("  {}        Data utilities (split train/holdout)", b("data"));
-    eprintln!("  {}       Launch web visualization server", b("serve"));
-    eprintln!();
-    eprintln!("Cache browsing (runs written by {}):", d("simulate --cas / simulate batch"));
-    eprintln!("  {}        Browse cached runs as a table", b("list"));
-    eprintln!("  {}        Show full metadata for one run", b("show"));
-    eprintln!("  {}         Emit a cached trajectory or obs stream", b("cat"));
-    eprintln!();
-    eprintln!("Run {} for details on any command.", d("camdl <command> --help"));
-    std::process::exit(0);
+// ─── CLI ──────────────────────────────────────────────────────────────────────
+//
+// Compile/Check/Inspect delegate to camdlc via Passthrough (raw argv forwarding).
+// All other commands use fully typed Args structs from args/mod.rs.
+
+#[derive(Parser)]
+#[command(
+    name = "camdl",
+    version = version::VERSION,
+    about = "Stochastic compartmental model simulation and inference",
+    disable_help_subcommand = true,
+    arg_required_else_help = true,
+)]
+struct Cli {
+    #[command(subcommand)]
+    command: Command,
+
+    /// Log verbosity; overrides RUST_LOG (error/warn/info/debug/trace)
+    #[arg(long, global = true, default_value = "warn", value_name = "LEVEL",
+          help_heading = "Global options")]
+    verbosity: log::LevelFilter,
 }
 
-fn simulate_help() -> ! {
-    let d = term::dim;
-    let b = term::bold;
-    eprintln!("{}", b("camdl simulate — forward simulation"));
-    eprintln!();
-    eprintln!("Usage:  camdl simulate MODEL [OPTIONS]");
-    eprintln!();
-    eprintln!("Examples:");
-    eprintln!();
-    eprintln!("  {}", d("# Basic simulation, output to stdout"));
-    eprintln!("  camdl simulate sir.camdl --params p.toml --seed 42");
-    eprintln!();
-    eprintln!("  {}", d("# With a named scenario"));
-    eprintln!("  camdl simulate sir.camdl --params p.toml --scenario with_sia --seed 42");
-    eprintln!();
-    eprintln!("  {}", d("# Generate synthetic observations"));
-    eprintln!("  camdl simulate sir.camdl --params p.toml --obs cases.tsv --seed 42");
-    eprintln!();
-    eprintln!("  {}", d("# Posterior predictive check"));
-    eprintln!("  camdl simulate sir.camdl --draws posterior.tsv --replicates 10 --obs ppc.tsv");
-    eprintln!();
-    eprintln!("  {}", d("# Prior predictive check (priors declared with ~ in the model)"));
-    eprintln!("  camdl simulate sir.camdl --draws prior -n 500 --obs prior_pred.tsv");
-    eprintln!();
-    eprintln!("  {}", d("# Space-filling exploration from parameter bounds"));
-    eprintln!("  camdl simulate sir.camdl --draws uniform -n 500 --obs explore.tsv");
-    eprintln!();
-    eprintln!("  {}", d("# Batch: multiple scenarios × seeds"));
-    eprintln!("  camdl simulate sir.camdl --params p.toml --seeds 1:100 --scenario baseline,with_sia");
-    eprintln!();
-    eprintln!("  {}", d("# Batch sweep (multiple scenarios × seeds × sweep points)"));
-    eprintln!("  camdl simulate batch batches/sweep.toml --parallel 8");
-    eprintln!();
-    eprintln!("  {}", d("# Verify a batch config before running"));
-    eprintln!("  camdl simulate batch batches/sweep.toml --dry-run");
-    eprintln!();
-    eprintln!("  {}", d("# Cache output in content-addressable storage — repeat runs are instant"));
-    eprintln!("  camdl simulate sir.camdl --params p.toml --seed 42 --cas");
-    eprintln!("  camdl list        # browse cached runs");
-    eprintln!();
-    eprintln!("Options:");
-    eprintln!("  --params FILE             Load parameter values (repeatable)");
-    eprintln!("  --param NAME=VALUE        Override single parameter (repeatable)");
-    eprintln!("  --param-vec PREFIX=FILE   Override indexed params from keyed TSV");
-    eprintln!("  --table NAME=FILE         Supply external() table data");
-    eprintln!("  --backend BACKEND         gillespie|tau_leap|chain_binomial|ode (default: gillespie)");
-    eprintln!("  --dt DT                   Step size for discrete-time backends (default: 1.0)");
-    eprintln!("  --seed N                  RNG seed (default: 1)");
-    eprintln!("  --seeds SPEC              Multiple seeds: 1:100 or 1,2,42");
-    eprintln!("  --scenario NAME[,NAME]    Named scenarios (comma-separated)");
-    eprintln!("  --enable NAME             Enable intervention (mutually exclusive with --scenario)");
-    eprintln!("  --disable NAME            Disable intervention");
-    eprintln!("  --draws SOURCE            Parameter draws: path.tsv, uniform, or prior");
-    eprintln!("  --fit FILE                fit.toml to override model IR priors for --draws prior");
-    eprintln!("  -n N                      Number of draws (for --draws uniform/prior)");
-    eprintln!("  --replicates N            Stochastic replicates per parameter point");
-    eprintln!("  --obs FILE                Write synthetic observations (wide-format TSV)");
-    eprintln!("  --obs-dir DIR             Write one TSV per observation stream");
-    eprintln!("  --obs-only FILE           Like --obs but suppress trajectory output");
-    eprintln!("  -o, --output FILE         Write trajectory to file (default: stdout)");
-    eprintln!("  --parallel N              Concurrent runs (single-run + --cas)");
-    eprintln!("  --dry-run                 Show resolved parameters and run plan, don't simulate");
-    eprintln!("  --cas                     Cache output under {}/sims/.../seed_<n>/ (single-run only)", d("./results"));
-    eprintln!("  --output-dir DIR          Root for --cas output (default: ./results)");
-    eprintln!("  --force                   Re-run cached results");
-    std::process::exit(0);
+#[derive(Subcommand)]
+enum Command {
+    /// Run a forward simulation
+    #[command(alias = "sim")]
+    Simulate(args::SimulateArgs),
+
+    /// Run a batch sweep or check its status
+    #[command(subcommand)]
+    Batch(BatchCmd),
+
+    /// Inference pipeline (MLE, posterior sampling, evaluation)
+    #[command(subcommand)]
+    Fit(FitCmd),
+
+    /// Standalone bootstrap particle filter at fixed parameters
+    Pfilter(args::PfilterArgs),
+
+    /// Standalone iterated filtering (IF2 / MIF2)
+    #[command(alias = "mif2")]
+    If2(args::If2Args),
+
+    /// Profile likelihood via parallel IF2 over a parameter grid
+    Profile(args::ProfileArgs),
+
+    /// Evaluate time-dependent expressions against a model
+    Eval(args::EvalArgs),
+
+    /// Data utilities
+    #[command(subcommand)]
+    Data(DataCmd),
+
+    /// Browse cached runs as a table
+    List(args::ListArgs),
+
+    /// Show full metadata for a cached run
+    Show(args::ShowArgs),
+
+    /// Emit trajectory or observation output from a cached run
+    Cat(args::CatArgs),
+
+    /// Compile a .camdl model to IR JSON (delegates to camdlc)
+    Compile(Passthrough),
+
+    /// Parse and type-check a .camdl model (delegates to camdlc)
+    Check(Passthrough),
+
+    /// Print model structure (delegates to camdlc)
+    Inspect(Passthrough),
 }
 
-fn fit_help() -> ! {
-    let d = term::dim;
-    let b = term::bold;
-    eprintln!("{}", b("camdl fit — inference pipeline"));
-    eprintln!();
-    eprintln!("Usage:  camdl fit <run|status|diff|new> [OPTIONS]");
-    eprintln!();
-    eprintln!("Commands:");
-    eprintln!("  {}       Execute inference stages from a fit.toml", b("run"));
-    eprintln!("  {}    Show completion status for a fit directory", b("status"));
-    eprintln!("  {}      Compare two fit.toml configs", b("diff"));
-    eprintln!("  {}       Create a derived fit.toml with provenance", b("new"));
-    eprintln!();
-    eprintln!("Examples:");
-    eprintln!();
-    eprintln!("  {}", d("# Run all stages in a fit config"));
-    eprintln!("  camdl fit run fits/01_all_free.toml");
-    eprintln!();
-    eprintln!("  {}", d("# Run a single stage with a specific seed"));
-    eprintln!("  camdl fit run fits/01.toml --stage mle --seed 42");
-    eprintln!();
-    eprintln!("  {}", d("# Profile likelihood: sweep a fixed parameter"));
-    eprintln!("  camdl fit run fits/01.toml --sweep \"rho=0.5,0.1,0.02\"");
-    eprintln!();
-    eprintln!("  {}", d("# Seed from a previous fit's results"));
-    eprintln!("  camdl fit run fits/02.toml --starts-from results/fits/01-<hash>/real/fit_1/mle");
-    eprintln!();
-    eprintln!("  {}", d("# Check what's done"));
-    eprintln!("  camdl fit status results/fits/01-<hash>");
-    eprintln!();
-    eprintln!("  {}", d("# See what changed between two configs"));
-    eprintln!("  camdl fit diff fits/01.toml fits/02.toml");
-    eprintln!();
-    eprintln!("  {}", d("# Create a new config derived from an existing one"));
-    eprintln!("  camdl fit new --from fits/01.toml fits/02_fix_beta.toml");
-    eprintln!();
-    eprintln!("Options (camdl fit run):");
-    eprintln!("  --stage NAME            Run specific stage only");
-    eprintln!("  --starts-from DIR       Override starts_from for target stage");
-    eprintln!("  --seed N                RNG seed (default: random)");
-    eprintln!("  --sweep \"NAME=V1,V2\"    Sweep over fixed param (repeatable; Cartesian product)");
-    eprintln!("  --skip-chains N[,N]     Skip specific chain indices");
-    eprintln!("  --resume                Resume partially completed sampling stage");
-    eprintln!("  --parallel N            Concurrent sweep points");
-    eprintln!("  --force                 Re-run (overwrite stale results)");
-    std::process::exit(0);
+#[derive(Subcommand)]
+enum BatchCmd {
+    /// Run a batch sweep from a TOML manifest
+    Run(args::BatchArgs),
+    /// Show status of a batch sweep
+    Status(args::BatchStatusArgs),
 }
 
-fn pfilter_help() -> ! {
-    let d = term::dim;
-    let b = term::bold;
-    eprintln!("{}", b("camdl pfilter — bootstrap particle filter at fixed parameters"));
-    eprintln!();
-    eprintln!("Usage:  camdl pfilter MODEL --params P.toml --data cases.tsv [OPTIONS]");
-    eprintln!();
-    eprintln!("Examples:");
-    eprintln!();
-    eprintln!("  {}", d("# Evaluate loglik at MLE with 5000 particles"));
-    eprintln!("  camdl pfilter sir.camdl --params mle.toml --data cases.tsv --particles 5000");
-    eprintln!();
-    eprintln!("  {}", d("# With per-observation diagnostics"));
-    eprintln!("  camdl pfilter sir.camdl --params mle.toml --data cases.tsv --particles 10000 --trace");
-    eprintln!();
-    eprintln!("Options:");
-    eprintln!("  --params FILE           Parameter values");
-    eprintln!("  --data FILE             Observation data (TSV)");
-    eprintln!("  --particles N           Number of particles");
-    eprintln!("  --dt DT                 Step size (default: 1.0)");
-    eprintln!("  --seed N                RNG seed");
-    eprintln!("  --trace                 Write per-observation diagnostics");
-    eprintln!("  --flow NAME             Flow projection name");
-    std::process::exit(0);
+#[derive(Subcommand)]
+enum FitCmd {
+    /// Run inference stages defined in a fit.toml
+    Run(args::FitRunArgs),
+    /// Show completion status for a fit
+    Status(args::FitStatusArgs),
+    /// Compare two fit.toml configs
+    Diff(args::FitDiffArgs),
+    /// Derive a new fit.toml from an existing one
+    New(args::FitNewArgs),
+    /// Print the output directory path for a fit.toml
+    Where(args::FitWhereArgs),
 }
 
-fn if2_help() -> ! {
-    let d = term::dim;
-    let b = term::bold;
-    eprintln!("{}", b("camdl if2 — standalone iterated filtering"));
-    eprintln!();
-    eprintln!("Usage:  camdl if2 MODEL --params P.toml --data cases.tsv [OPTIONS]");
-    eprintln!();
-    eprintln!("Examples:");
-    eprintln!();
-    eprintln!("  {}", d("# Quick 8-chain scout with auto rw_sd"));
-    eprintln!("  camdl if2 sir.camdl --params p.toml --data cases.tsv \\");
-    eprintln!("      --rw-sd auto --chains 8 --particles 1000 --iterations 80");
-    eprintln!();
-    eprintln!("  {}", d("# With explicit rw_sd and fixed parameters"));
-    eprintln!("  camdl if2 sir.camdl --params p.toml --data cases.tsv \\");
-    eprintln!("      --rw-sd \"beta=0.01,gamma=0.005\" --fixed \"N0,mu\"");
-    eprintln!();
-    eprintln!("{}", d("Note: for structured pipelines, use `camdl fit run` with a fit.toml."));
-    eprintln!("{}", d("      Standalone if2 is for quick ad-hoc runs and scripted workflows."));
-    std::process::exit(0);
+#[derive(Subcommand)]
+enum DataCmd {
+    /// Split a data TSV into train and holdout sets
+    Split(args::DataSplitArgs),
+}
+
+/// Captures all remaining argv tokens verbatim. Used only by Compile/Check/Inspect
+/// which forward raw argv to camdlc and don't benefit from typed parsing.
+#[derive(clap::Args)]
+struct Passthrough {
+    #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+    args: Vec<String>,
 }
 
 fn main() {
-    let all_args: Vec<String> = std::env::args().skip(1).collect();
-    if all_args.is_empty() { print_main_help(); }
-    if all_args[0] == "--help" || all_args[0] == "-h" || all_args[0] == "help" {
-        print_main_help();
-    }
+    let cli = Cli::parse();
 
-    // --version / -V anywhere in args
-    if all_args.iter().any(|a| a == "--version" || a == "-V") {
-        println!("{}", version::VERSION);
-        return;
-    }
+    // Logger: CLI flag > RUST_LOG > default warn
+    env_logger::Builder::from_env(
+        env_logger::Env::default().default_filter_or(cli.verbosity.as_str())
+    ).init();
 
-    // --verbosity LEVEL: set log level (default: warn)
-    // Levels: error, warn, info, debug, trace
-    let verbosity = all_args.iter()
-        .position(|a| a == "--verbosity")
-        .and_then(|i| all_args.get(i + 1))
-        .map(|s| s.as_str())
-        .unwrap_or("warn");
-    let log_level = match verbosity {
-        "trace" => log::LevelFilter::Trace,
-        "debug" => log::LevelFilter::Debug,
-        "info" => log::LevelFilter::Info,
-        "warn" => log::LevelFilter::Warn,
-        "error" => log::LevelFilter::Error,
-        other => {
-            eprintln!("invalid verbosity level: '{}'. Use: error, warn, info, debug, trace", other);
-            std::process::exit(1);
-        }
-    };
-    env_logger::builder().filter_level(log_level).init();
-
-    // Strip --verbosity LEVEL from args before dispatch
-    let all_args: Vec<String> = {
-        let mut filtered = Vec::new();
-        let mut skip_next = false;
-        for arg in &all_args {
-            if skip_next { skip_next = false; continue; }
-            if arg == "--verbosity" { skip_next = true; continue; }
-            filtered.push(arg.clone());
-        }
-        filtered
-    };
-
-    // Dispatch on first argument
-    match all_args[0].as_str() {
-        // ── Compiler delegation (transparent camdlc invocation) ──
-        "compile" => {
-            let args: Vec<&str> = all_args[1..].iter().map(|s| s.as_str()).collect();
-            util::delegate_to_camdlc(&args).unwrap_or_else(|e| {
+    match cli.command {
+        Command::Simulate(a)            => run_simulate(&a),
+        Command::Batch(BatchCmd::Run(a))    => batch::cmd_batch_run(&a),
+        Command::Batch(BatchCmd::Status(a)) => batch::cmd_batch_status(&a),
+        Command::Fit(FitCmd::Run(a))    => fit::cmd_fit_run_v2(&a),
+        Command::Fit(FitCmd::Status(a)) => fit::cmd_fit_status(&a),
+        Command::Fit(FitCmd::Diff(a))   => fit::cmd_fit_diff(&a),
+        Command::Fit(FitCmd::New(a))    => fit::cmd_fit_new(&a),
+        Command::Fit(FitCmd::Where(a))  => fit::cmd_fit_where(&a),
+        Command::Pfilter(a)             => pfilter::cmd_pfilter(&a),
+        Command::If2(a)                 => if2::cmd_if2(&a),
+        Command::Profile(a)             => profile::cmd_profile(&a),
+        Command::Eval(a)                => eval::cmd_eval(&a),
+        Command::Data(DataCmd::Split(a))=> data::cmd_data_split(&a),
+        Command::List(a)                => browse::cmd_list(&a),
+        Command::Show(a)                => browse::cmd_show(&a),
+        Command::Cat(a)                 => browse::cmd_cat(&a),
+        Command::Compile(a) => {
+            let refs: Vec<&str> = a.args.iter().map(String::as_str).collect();
+            util::delegate_to_camdlc(&refs).unwrap_or_else(|e| {
                 eprintln!("error: {}", e); std::process::exit(1);
             });
         }
-        "check" => {
-            let mut args = vec!["check"];
-            args.extend(all_args[1..].iter().map(|s| s.as_str()));
-            util::delegate_to_camdlc(&args).unwrap_or_else(|e| {
+        Command::Check(a) => {
+            let mut refs = vec!["check"];
+            refs.extend(a.args.iter().map(String::as_str));
+            util::delegate_to_camdlc(&refs).unwrap_or_else(|e| {
                 eprintln!("error: {}", e); std::process::exit(1);
             });
         }
-        "inspect" => {
-            let mut args = vec!["inspect"];
-            args.extend(all_args[1..].iter().map(|s| s.as_str()));
-            util::delegate_to_camdlc(&args).unwrap_or_else(|e| {
+        Command::Inspect(a) => {
+            let mut refs = vec!["inspect"];
+            refs.extend(a.args.iter().map(String::as_str));
+            util::delegate_to_camdlc(&refs).unwrap_or_else(|e| {
                 eprintln!("error: {}", e); std::process::exit(1);
             });
-        }
-        // ── Simulation ──
-        "simulate" | "sim" => {
-            let args = &all_args[1..];
-            if args.is_empty() || args.iter().any(|a| a == "--help" || a == "-h") { simulate_help(); }
-            // `simulate batch FILE` and `simulate status FILE` are
-            // sub-subcommands. Everything else is a single-run simulate.
-            match args.first().map(String::as_str) {
-                Some("batch")  => batch::cmd_batch_run(&args[1..]),
-                Some("status") => batch::cmd_batch_status(&args[1..]),
-                _              => run_simulate(args),
-            }
-        }
-        // ── Inference ──
-        "fit" => {
-            match all_args.get(1).map(|s| s.as_str()) {
-                Some("run")    => fit::cmd_fit_run_v2(&all_args[2..]),
-                Some("status") => fit::cmd_fit_status(&all_args[2..]),
-                Some("diff")   => fit::cmd_fit_diff(&all_args[2..]),
-                Some("new")    => fit::cmd_fit_new(&all_args[2..]),
-                Some("where")  => fit::cmd_fit_where(&all_args[2..]),
-                _ => fit_help(),
-            }
-        }
-        // ── Standalone inference tools ──
-        "pfilter" => {
-            if all_args[1..].is_empty() || all_args.iter().any(|a| a == "--help" || a == "-h") {
-                pfilter_help();
-            }
-            pfilter::cmd_pfilter(&all_args[1..]);
-        }
-        "if2" | "mif2" => {
-            if all_args[1..].is_empty() || all_args.iter().any(|a| a == "--help" || a == "-h") {
-                if2_help();
-            }
-            if2::cmd_if2(&all_args[1..]);
-        }
-        "profile" => {
-            // Rewired 2026-04-19 after a camdl-book profile-likelihood
-            // chapter hit the gap: cmd_profile was fully built but
-            // lost dispatch in d609654's CLI cleanup when
-            // `fit run --sweep` was promoted as the replacement. The
-            // replacement halts on the first scout-gate failure,
-            // which defeats the primary profile-likelihood use case
-            // (edge cells of a grid are expected to fail the gate).
-            profile::cmd_profile(&all_args[1..]);
-        }
-        "voi" => {
-            match all_args.get(1).map(|s| s.as_str()) {
-                Some("run") => voi::cmd_voi_run(&all_args[2..]),
-                _ => {
-                    eprintln!("usage: camdl voi run VOI.toml");
-                    std::process::exit(1);
-                }
-            }
-        }
-        // ── Utilities ──
-        "eval" => {
-            eval::cmd_eval(&all_args[1..]);
-        }
-        "data" => {
-            match all_args.get(1).map(|s| s.as_str()) {
-                Some("split") => data::cmd_data_split(&all_args[2..]),
-                _ => {
-                    eprintln!("usage: camdl data split FILE --at-time T [--train OUT] [--holdout OUT]");
-                    std::process::exit(1);
-                }
-            }
-        }
-        "serve" => {
-            serve::cmd_serve(&all_args[1..]);
-        }
-        "list" => {
-            browse::cmd_list(&all_args[1..]);
-        }
-        "show" => {
-            browse::cmd_show(&all_args[1..]);
-        }
-        "cat" => {
-            browse::cmd_cat(&all_args[1..]);
-        }
-        _ => {
-            // Accept bare "camdl FILE ..." for simulation
-            run_simulate(&all_args);
         }
     }
 }
@@ -403,111 +216,45 @@ use util::SEED_MIX_OBS;     // canonical home: util.rs
 const SEED_MIX_UNIFORM: u64 = 0xd4a5_b1ce;      // uniform draws RNG
 const SEED_MIX_PRIOR: u64  = 0x0014_b1ce;      // prior draws RNG
 
-fn run_simulate(args: &[String]) {
-    let mut ir_path:     Option<String> = None;
-    let mut backend    = "gillespie".to_string();
-    let mut dt         = 1.0_f64;
-    // Track explicit vs default flags. The backend-provenance
-    // guardrail (docs/dev/proposals/2026-04-19-backend-provenance-guardrail.md)
-    // only auto-matches the fit's backend when --backend was NOT
-    // passed; when it was passed AND differs from the fit's backend,
-    // we warn instead of silently overriding.
-    let mut backend_explicit = false;
-    let mut dt_explicit      = false;
-    let mut seed       = 1_u64;
-    let mut overrides: HashMap<String, f64> = HashMap::new();
-    let mut table_files: HashMap<String, String> = HashMap::new();
-    let mut params_files: Vec<String> = Vec::new();
-    let mut scenario_names: Vec<String> = Vec::new();
-    let mut adhoc_enable: Vec<String> = Vec::new();
-    let mut adhoc_disable: Vec<String> = Vec::new();
-    let mut seeds_spec: Option<String> = None;
-    let mut output_path: Option<String> = None;
-    let mut obs_path: Option<String> = None;
-    let mut obs_dir: Option<String> = None;
-    let mut obs_only: Option<String> = None;
-    let mut replicates: usize = 1;
-    let mut draws_path: Option<String> = None;
-    let mut n_draws_arg: Option<usize> = None;
-    let mut fit_path_for_draws: Option<String> = None;
-    let mut dry_run = false;
-    let mut cas_enabled = false;
-    let mut output_dir_arg: Option<String> = None;
-
-    // Collect --param-vec PREFIX=FILE entries for deferred validation after model load
-    let mut set_vec_entries: Vec<(String, String)> = Vec::new();
-
-    // Advance i and return the next argument as a slice. Exits with a
-    // clean error (not a panic) when the flag is the final arg.
-    let need = |i: &mut usize, flag: &str| -> String {
-        *i += 1;
-        if *i >= args.len() {
-            eprintln!("error: {} requires a value", flag);
-            std::process::exit(1);
-        }
-        args[*i].clone()
+fn run_simulate(a: &args::SimulateArgs) {
+    // ── Extract typed args into locals that match the rest of the function ─
+    let ir_path          = a.model.to_string_lossy().into_owned();
+    // Track explicit vs default flags for the backend-provenance guardrail.
+    // Option<_> fields mean None ↔ not explicitly passed.
+    let backend_explicit = a.backend.backend.is_some();
+    let dt_explicit      = a.backend.dt.is_some();
+    let mut backend      = a.backend.backend.map(|b| b.to_string()).unwrap_or_else(|| "gillespie".to_string());
+    let mut dt           = a.backend.dt.unwrap_or(1.0_f64);
+    let seed             = a.seed;
+    let overrides: HashMap<String, f64> = a.model_overrides.param.iter()
+        .map(|p| (p.name.clone(), p.value)).collect();
+    let table_files: HashMap<String, String> = a.model_overrides.table.iter()
+        .map(|t| (t.name.clone(), t.path.to_string_lossy().into_owned())).collect();
+    let params_files: Vec<String> = a.model_overrides.params.iter()
+        .map(|p| p.to_string_lossy().into_owned()).collect();
+    let set_vec_entries: Vec<(String, String)> = a.param_vec.iter()
+        .map(|pv| (pv.prefix.clone(), pv.file.clone())).collect();
+    let scenario_names: Vec<String> = a.scenarios.iter()
+        .flat_map(|s| s.split(',').map(|t| t.trim().to_string()))
+        .collect();
+    let adhoc_enable: Vec<String>  = a.enable.clone();
+    let adhoc_disable: Vec<String> = a.disable.clone();
+    let seeds: Vec<u64> = match &a.seeds {
+        Some(spec) => spec.expand(),
+        None       => vec![a.seed],
     };
-
-    let mut i = 0;
-    while i < args.len() {
-        match args[i].as_str() {
-            "--backend"  => { backend = need(&mut i, "--backend"); backend_explicit = true; }
-            "--dt"       => {
-                dt = need(&mut i, "--dt").parse().unwrap_or_else(|_| {
-                    eprintln!("error: --dt needs a number"); std::process::exit(1);
-                });
-                dt_explicit = true;
-            }
-            "--seed"     => { seed    = need(&mut i, "--seed").parse().unwrap_or_else(|_| { eprintln!("error: --seed needs an integer"); std::process::exit(1); }); }
-            "--params"   => { params_files.push(need(&mut i, "--params")); }
-            "--scenario" => { scenario_names.extend(need(&mut i, "--scenario").split(',').map(|s| s.trim().to_string())); }
-            "--seeds"    => { seeds_spec = Some(need(&mut i, "--seeds")); }
-            "--enable"   => { adhoc_enable.push(need(&mut i, "--enable")); }
-            "--disable"  => { adhoc_disable.push(need(&mut i, "--disable")); }
-            "--param"     => {
-                let kv = need(&mut i, "--param");
-                let mut parts = kv.splitn(2, '=');
-                let k = parts.next().unwrap_or_else(|| { eprintln!("error: --param needs NAME=VALUE"); std::process::exit(1); }).to_string();
-                let v: f64 = parts.next().and_then(|s| s.parse().ok())
-                    .unwrap_or_else(|| { eprintln!("error: --param value must be a number"); std::process::exit(1); });
-                overrides.insert(k, v);
-            }
-            "--param-vec" => {
-                let kv = need(&mut i, "--param-vec");
-                let mut parts = kv.splitn(2, '=');
-                let prefix = parts.next().unwrap_or_else(|| { eprintln!("error: --param-vec needs PREFIX=FILE"); std::process::exit(1); }).to_string();
-                let file   = parts.next().unwrap_or_else(|| { eprintln!("error: --param-vec needs PREFIX=FILE"); std::process::exit(1); }).to_string();
-                set_vec_entries.push((prefix, file));
-            }
-            "--table"   => {
-                let kv = need(&mut i, "--table");
-                let mut parts = kv.splitn(2, '=');
-                let k = parts.next().unwrap_or_else(|| { eprintln!("error: --table needs NAME=FILE"); std::process::exit(1); }).to_string();
-                let v = parts.next().unwrap_or_else(|| { eprintln!("error: --table needs NAME=FILE"); std::process::exit(1); }).to_string();
-                table_files.insert(k, v);
-            }
-            "--output" | "-o" => { output_path = Some(need(&mut i, "--output")); }
-            "--obs"      => { obs_path = Some(need(&mut i, "--obs")); }
-            "--obs-dir"  => { obs_dir = Some(need(&mut i, "--obs-dir")); }
-            "--obs-only" => { obs_only = Some(need(&mut i, "--obs-only")); }
-            "--replicates" => { replicates = need(&mut i, "--replicates").parse().unwrap_or_else(|_| { eprintln!("error: --replicates needs a positive integer"); std::process::exit(1); }); }
-            "--draws" => { draws_path = Some(need(&mut i, "--draws")); }
-            "-n" | "--n-draws" => { n_draws_arg = Some(need(&mut i, "-n").parse().unwrap_or_else(|_| { eprintln!("error: -n needs a positive integer"); std::process::exit(1); })); }
-            "--fit" => { fit_path_for_draws = Some(need(&mut i, "--fit")); }
-            "--dry-run" => { dry_run = true; }
-            "--cas"        => { cas_enabled = true; }
-            "--output-dir" => { output_dir_arg = Some(need(&mut i, "--output-dir")); }
-            s if s.starts_with("--") => {
-                eprintln!("error: unknown flag: {}", s);
-                eprintln!("  run `camdl simulate --help` for usage");
-                std::process::exit(1);
-            }
-            path => { ir_path = Some(path.to_string()); }
-        }
-        i += 1;
-    }
-
-    let ir_path = ir_path.unwrap_or_else(|| { eprintln!("missing IR file argument"); simulate_help(); });
+    let seeds_spec_given = a.seeds.is_some();
+    let output_path: Option<String>  = a.output.as_ref().map(|p| p.to_string_lossy().into_owned());
+    let mut obs_path: Option<String> = a.obs.as_ref().map(|p| p.to_string_lossy().into_owned());
+    let mut obs_dir: Option<String>  = a.obs_dir.as_ref().map(|p| p.to_string_lossy().into_owned());
+    let obs_only: Option<String>     = a.obs_only.as_ref().map(|p| p.to_string_lossy().into_owned());
+    let replicates: usize            = a.replicates.unwrap_or(1);
+    let draws_path: Option<String>   = a.draws.clone();
+    let n_draws_arg: Option<usize>   = a.n_draws;
+    let fit_path_for_draws: Option<String> = a.fit.as_ref().map(|p| p.to_string_lossy().into_owned());
+    let dry_run     = a.dry_run;
+    let cas_enabled = a.cas;
+    let output_dir_arg: Option<String> = Some(a.output_dir.to_string_lossy().into_owned());
 
     // --obs-only implies --obs or --obs-dir (infer from path: trailing / or existing dir → obs-dir)
     if let Some(ref path) = obs_only {
@@ -530,23 +277,14 @@ fn run_simulate(args: &[String]) {
 
     let want_obs = obs_path.is_some() || obs_dir.is_some();
 
-    // Parse --seeds spec
-    let seeds: Vec<u64> = if let Some(ref spec) = seeds_spec {
-        parse_seeds_spec(spec).unwrap_or_else(|e| {
-            eprintln!("error: --seeds: {}", e);
-            std::process::exit(1);
-        })
-    } else {
-        vec![seed]
-    };
-    if seeds_spec.is_some() && replicates > 1 {
+    if seeds_spec_given && replicates > 1 {
         eprintln!("error: --seeds and --replicates are mutually exclusive.\n  \
                    --seeds provides explicit seed values.\n  \
                    --replicates generates N deterministic seeds from --seed.");
         std::process::exit(1);
     }
     // If using --seeds, replicates tracks seed count
-    let replicates = if seeds_spec.is_some() { seeds.len() } else { replicates };
+    let replicates = if seeds_spec_given { seeds.len() } else { replicates };
 
     // Validate mutually exclusive σ flags
     if !scenario_names.is_empty() && (!adhoc_enable.is_empty() || !adhoc_disable.is_empty()) {
@@ -845,7 +583,7 @@ fn run_simulate(args: &[String]) {
     for scenario in &scenario_list {
     for (draw_idx, draw_overrides) in draws.iter().enumerate() {
         for rep in 0..replicates {
-            let process_seed = if seeds_spec.is_some() {
+            let process_seed = if seeds_spec_given {
                 seeds[rep] // explicit seeds
             } else if total_runs == 1 {
                 seed
@@ -1618,6 +1356,7 @@ fn sample_from_prior_raw(
 }
 
 /// Parse a seeds spec: "1:100" (range), "42" (single), "1,2,3,42" (list).
+#[cfg(test)]
 fn parse_seeds_spec(spec: &str) -> Result<Vec<u64>, String> {
     // Range: "1:100"
     if spec.contains(':') {

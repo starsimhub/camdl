@@ -4,8 +4,8 @@ SHELL := bash
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
 
-CAMDLC     := ocaml/_build/default/bin/camdlc.exe
-CAMDL_SIM  := rust/target/release/camdl-sim
+CAMDLC  := ocaml/_build/default/bin/camdlc.exe
+CAMDL   := rust/target/release/camdl
 INSTALL_DIR := $(HOME)/.local/bin
 
 OCAML_GOLDENS := $(wildcard ocaml/golden/*.camdl)
@@ -68,17 +68,23 @@ web-build: build-ocaml build-wasm \
 
 .PHONY: install uninstall
 
+# Git hash embedded in both binaries for version-skew detection.
+GIT_HASH := $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
+
 install: build
 	@mkdir -p $(INSTALL_DIR)
-	@# camdlc: dune uses .exe on all platforms; install without the suffix
+	@# camdlc: dune uses .exe on all platforms; install without the suffix.
+	@# Also install as camdlc-<hash> so camdl can confirm an exact version
+	@# match via a filesystem stat (no subprocess needed).
 	install -m 755 $(CAMDLC) $(INSTALL_DIR)/camdlc
-	install -m 755 $(CAMDL_SIM) $(INSTALL_DIR)/camdl-sim
-	install -m 755 bin/camdl $(INSTALL_DIR)/camdl
-	@echo "Installed to $(INSTALL_DIR)"
+	install -m 755 $(CAMDLC) $(INSTALL_DIR)/camdlc-$(GIT_HASH)
+	install -m 755 $(CAMDL)  $(INSTALL_DIR)/camdl
+	@echo "Installed to $(INSTALL_DIR)  [camdlc-$(GIT_HASH)]"
 	@echo "Make sure $(INSTALL_DIR) is on your PATH."
 
 uninstall:
-	rm -f $(INSTALL_DIR)/camdlc $(INSTALL_DIR)/camdl-sim $(INSTALL_DIR)/camdl
+	rm -f $(INSTALL_DIR)/camdlc $(INSTALL_DIR)/camdl
+	rm -f $(INSTALL_DIR)/camdlc-$(GIT_HASH)
 	@echo "Removed from $(INSTALL_DIR)"
 
 # ── Test ──────────────────────────────────────────────────────────────────────
@@ -94,7 +100,7 @@ test-rust:
 	cd rust && cargo test --workspace
 
 test-integration: build
-	CAMDLC="$(CAMDLC)" CAMDL="$(CAMDL_SIM)" bash tests/test_ocaml_to_rust.sh
+	CAMDLC="$(CAMDLC)" CAMDL="$(CAMDL)" bash tests/test_ocaml_to_rust.sh
 
 # ── Golden file management ────────────────────────────────────────────────────
 
@@ -117,7 +123,7 @@ update-golden: update-ocaml-golden
 
 # Usage: make sim MODEL=ir/golden/sir_basic.ir.json ARGS="--set beta=0.3 ..."
 sim: build-rust
-	$(CAMDL_SIM) simulate $(MODEL) $(ARGS)
+	$(CAMDL) simulate $(MODEL) $(ARGS)
 
 # ── Tree-sitter / Neovim ──────────────────────────────────────────────────────
 

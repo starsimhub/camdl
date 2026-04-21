@@ -67,94 +67,47 @@ fn run_one_chain(
     result
 }
 
-pub fn cmd_if2(args: &[String]) {
-    let mut ir_path: Option<String> = None;
-    let mut params_files: Vec<String> = Vec::new();
-    let mut data_path: Option<String> = None;
-    let mut n_particles: Option<usize> = None;
-    let mut n_iterations: Option<usize> = None;
-    let mut cooling: Option<f64> = None;
-    let mut dt = 1.0_f64;
-    let mut seed = 1_u64;
-    let mut overrides: HashMap<String, f64> = HashMap::new();
-    let mut scenario_name: Option<String> = None;
-    let mut adhoc_enable: Vec<String> = Vec::new();
-    let mut _obs_model = "negbin".to_string();
-    let mut _tol = 0.0_f64;
-    let mut flow_name: Option<String> = None;
-    let mut rw_sd_str: Option<String> = None;
-    let mut fixed_str: Option<String> = None;
-    let mut ivp_str: Option<String> = None;
-    let mut n_chains = 1_usize;
-    let mut regime: Option<String> = None;
-    let mut parallel = 0_usize; // 0 = rayon default (num_cpus)
-    let mut output_dir: Option<String> = None;
-    let mut output_path: Option<String> = None;
-    let mut trace_path: Option<String> = None;
+pub fn cmd_if2(a: &crate::args::If2Args) {
+    let ir_path = a.model.to_string_lossy().into_owned();
+    let data_path = a.data.to_string_lossy().into_owned();
+    let dt = a.inference.dt;
+    let seed = a.inference.seed;
+    let parallel = a.inference.parallel;
+    let output_path: Option<String> = a.output.as_ref().map(|p| p.to_string_lossy().into_owned());
+    let output_dir: Option<String> = a.output_dir.as_ref().map(|p| p.to_string_lossy().into_owned());
+    let trace_path: Option<String> = a.trace.as_ref().map(|p| p.to_string_lossy().into_owned());
+    let scenario_name = a.scenario.scenario.clone();
+    let _adhoc_enable = a.scenario.enable.clone();
+    let flow_name = a.flow.flow.clone();
+    let overrides: HashMap<String, f64> = a.model_overrides.param.iter()
+        .map(|p| (p.name.clone(), p.value))
+        .collect();
 
-    let mut i = 0;
-    while i < args.len() {
-        match args[i].as_str() {
-            "--params"     => { i += 1; params_files.push(args[i].clone()); }
-            "--data"       => { i += 1; data_path = Some(args[i].clone()); }
-            "--particles"  => { i += 1; n_particles = Some(args[i].parse().unwrap_or_else(|_| { eprintln!("error: --particles needs integer"); std::process::exit(1); })); }
-            "--iterations" => { i += 1; n_iterations = Some(args[i].parse().unwrap_or_else(|_| { eprintln!("error: --iterations needs integer"); std::process::exit(1); })); }
-            "--cooling"    => { i += 1; cooling = Some(args[i].parse().unwrap_or_else(|_| { eprintln!("error: --cooling needs number"); std::process::exit(1); })); }
-            "--dt"         => { i += 1; dt = args[i].parse().unwrap_or_else(|_| { eprintln!("error: --dt needs number"); std::process::exit(1); }); }
-            "--seed"       => { i += 1; seed = args[i].parse().unwrap_or_else(|_| { eprintln!("error: --seed needs integer"); std::process::exit(1); }); }
-            "--scenario"   => { i += 1; scenario_name = Some(args[i].clone()); }
-            "--enable"     => { i += 1; adhoc_enable.push(args[i].clone()); }
-            "--obs-model"  => { i += 1; _obs_model = args[i].clone(); }
-            "--tol"        => { i += 1; _tol = args[i].parse().unwrap_or_else(|_| { eprintln!("error: --tol needs number"); std::process::exit(1); }); }
-            "--flow"       => { i += 1; flow_name = Some(args[i].clone()); }
-            "--rw-sd"      => { i += 1; rw_sd_str = Some(args[i].clone()); }
-            "--fixed"      => { i += 1; fixed_str = Some(args[i].clone()); }
-            "--ivp"        => { i += 1; ivp_str = Some(args[i].clone()); }
-            "--chains"     => { i += 1; n_chains = args[i].parse().unwrap_or_else(|_| { eprintln!("error: --chains needs integer"); std::process::exit(1); }); }
-            "--regime"     => { i += 1; regime = Some(args[i].clone()); }
-            "--parallel"   => { i += 1; parallel = args[i].parse().unwrap_or_else(|_| { eprintln!("error: --parallel needs integer"); std::process::exit(1); }); }
-            "--output-dir" => { i += 1; output_dir = Some(args[i].clone()); }
-            "--output" | "-o" => { i += 1; output_path = Some(args[i].clone()); }
-            "--trace" => { i += 1; trace_path = Some(args[i].clone()); }
-            "--param"      => {
-                i += 1;
-                let kv = &args[i];
-                let mut parts = kv.splitn(2, '=');
-                let k = parts.next().unwrap().to_string();
-                let v: f64 = parts.next().and_then(|s| s.parse().ok()).unwrap_or_else(|| { eprintln!("error: --param needs NAME=VALUE"); std::process::exit(1); });
-                overrides.insert(k, v);
-            }
-            s if s.starts_with("--") => {
-                eprintln!("unknown flag: {}", s);
-                std::process::exit(1);
-            }
-            path => { ir_path = Some(path.to_string()); }
-        }
-        i += 1;
-    }
+    // Apply regime defaults, then fill in from explicit flags
+    let mut n_chains = a.chains.unwrap_or(1);
+    let mut n_particles = a.inference.particles;
+    let mut n_iterations = a.iterations;
+    let mut cooling = a.cooling;
 
-    // Apply regime defaults — only for values the user didn't explicitly set
-    if let Some(ref r) = regime {
+    if let Some(ref r) = a.regime {
         match r.as_str() {
             "scout" => {
                 if n_chains == 1 { n_chains = 8; }
-                n_particles = n_particles.or(Some(500));
+                n_particles = if a.inference.particles == 0 { 500 } else { n_particles };
                 n_iterations = n_iterations.or(Some(30));
-                cooling = cooling.or(Some(0.70)); // cf50: 70% at halfway — find basins
+                cooling = cooling.or(Some(0.70));
             }
             "refine" => {
                 if n_chains == 1 { n_chains = 4; }
-                n_particles = n_particles.or(Some(1000));
+                n_particles = if a.inference.particles == 0 { 1000 } else { n_particles };
                 n_iterations = n_iterations.or(Some(50));
                 cooling = cooling.or(Some(0.05));
-                // parallel stays 0 (num_cpus default) unless user sets --parallel
             }
             "validate" => {
                 if n_chains == 1 { n_chains = 4; }
-                n_particles = n_particles.or(Some(5000));
+                n_particles = if a.inference.particles == 0 { 5000 } else { n_particles };
                 n_iterations = n_iterations.or(Some(100));
                 cooling = cooling.or(Some(0.05));
-                // parallel stays 0 (num_cpus default) unless user sets --parallel
             }
             other => {
                 eprintln!("unknown regime '{}'. Use scout, refine, or validate.", other);
@@ -163,61 +116,33 @@ pub fn cmd_if2(args: &[String]) {
         }
     }
 
-    // Resolve Options to concrete values with defaults
-    let n_particles = n_particles.unwrap_or(2000);
+    let n_particles = if n_particles == 0 { 2000 } else { n_particles };
     let n_iterations = n_iterations.unwrap_or(100);
     let cooling = cooling.unwrap_or(0.95);
 
-    let ir_path = ir_path.unwrap_or_else(|| {
-        eprintln!("usage: camdl if2 MODEL --params P.toml --data cases.tsv --rw-sd \"R0=5\" [--regime scout]");
+    let rw_sd = a.rw_sd.as_ref().unwrap_or_else(|| {
+        eprintln!("error: --rw-sd required (e.g., --rw-sd \"R0=5,sigma=0.01\" or --rw-sd auto)");
         std::process::exit(1);
     });
-    let data_path = data_path.unwrap_or_else(|| {
-        eprintln!("error: --data required"); std::process::exit(1);
-    });
-    let rw_sd_str = rw_sd_str.unwrap_or_else(|| {
-        eprintln!("error: --rw-sd required (e.g., --rw-sd \"R0=5,sigma=0.01\" or --rw-sd auto)"); std::process::exit(1);
-    });
 
-    // Parse --rw-sd: "auto" | "R0=5,sigma=auto,gamma=0.01"
-    let rw_sd_auto = rw_sd_str.trim() == "auto";
-    let rw_sd_map: HashMap<String, Option<f64>> = if rw_sd_auto {
-        HashMap::new() // all auto — will be filled after model load
-    } else {
-        rw_sd_str.split(',')
-            .map(|kv| {
-                let mut parts = kv.trim().splitn(2, '=');
-                let k = parts.next().unwrap().to_string();
-                let v_str = parts.next().unwrap_or("auto");
-                let v: Option<f64> = if v_str == "auto" { None } else {
-                    Some(v_str.parse().unwrap_or_else(|_| {
-                        eprintln!("bad --rw-sd entry: {}", kv); std::process::exit(1);
-                    }))
-                };
-                (k, v)
-            })
-            .collect()
+    let rw_sd_auto = matches!(rw_sd, crate::args::types::RwSd::Auto);
+    let rw_sd_map: HashMap<String, Option<f64>> = match rw_sd {
+        crate::args::types::RwSd::Auto => HashMap::new(),
+        crate::args::types::RwSd::Map(m) => m.clone(),
     };
 
-    // Parse --fixed "N0,mu,k"
-    let ivp_set: std::collections::HashSet<String> = ivp_str
-        .map(|s| s.split(',').map(|n| n.trim().to_string()).collect())
-        .unwrap_or_default();
-    let fixed_set: std::collections::HashSet<String> = fixed_str
-        .map(|s| s.split(',').map(|n| n.trim().to_string()).collect())
-        .unwrap_or_default();
+    let ivp_set: std::collections::HashSet<String> = a.ivp.iter().cloned().collect();
+    let fixed_set: std::collections::HashSet<String> = a.fixed.iter().cloned().collect();
 
     // Load model
     let (mut model, _model_json) = crate::util::load_model(&ir_path)
         .unwrap_or_else(|e| { eprintln!("error: {}", e); std::process::exit(1); });
 
-    // Apply params files
-    for pf in &params_files {
-        crate::util::apply_params_file(&mut model, pf)
+    for pf in &a.model_overrides.params {
+        crate::util::apply_params_file(&mut model, &pf.to_string_lossy())
             .unwrap_or_else(|e| { eprintln!("error: {}", e); std::process::exit(1); });
     }
 
-    // Apply scenario
     if let Some(ref name) = scenario_name {
         if let Some(preset) = model.presets.iter().find(|p| p.name == *name) {
             for p in &mut model.parameters {
@@ -226,7 +151,6 @@ pub fn cmd_if2(args: &[String]) {
         }
     }
 
-    // Apply overrides
     for p in &mut model.parameters {
         if let Some(&v) = overrides.get(&p.name) { p.value = Some(v); }
     }
@@ -323,7 +247,7 @@ pub fn cmd_if2(args: &[String]) {
     let psi_idx = compiled.param_index.get("psi").copied();
 
     let n_fixed = model.parameters.len() - if2_params.len();
-    let regime_name = regime.as_deref().unwrap_or("manual");
+    let regime_name = a.regime.as_deref().unwrap_or("manual");
     eprintln!("if2: {} observations, {} chains × {} particles × {} iterations, cooling={}, dt={}, seed={}",
         observations.len(), n_chains, n_particles, n_iterations, cooling, dt, seed);
     let effective_threads = if parallel > 0 { parallel } else { rayon::current_num_threads() };

@@ -182,3 +182,13 @@ pub struct SMCConfig {
     #[doc(alias = "save_trajectories")]
     pub record_ancestry: bool,
 }
+
+/// Shared interface for algorithm config structs that drive a particle filter.
+///
+/// All three inference algorithms — IF2, PGAS, PMMH — carry `n_particles` and
+/// `dt` with identical types and semantics. This trait makes that surface
+/// explicit, enabling generic progress logging and sizing code.
+pub trait InferenceConfig {
+    fn n_particles(&self) -> usize;
+    fn dt(&self) -> f64;
+}
