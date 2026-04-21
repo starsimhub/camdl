@@ -414,6 +414,18 @@ pub struct PfilterArgs {
     /// Write per-step particle states and log-weights to this TSV
     #[arg(long)]
     pub save_filtering: Option<PathBuf>,
+
+    /// Write {STEM}.tsv (per-step log score, CRPS, PIT, ESS) + {STEM}.json
+    /// (full typed PrequentialTrace) for the plug-in one-step-ahead
+    /// predictive at the fixed parameters. See
+    /// docs/dev/proposals/2026-04-20-prequential-evaluation.md.
+    #[arg(long)]
+    pub save_prequential: Option<String>,
+
+    /// With --save-prequential, drop per-particle predictive samples
+    /// from {STEM}.json. Keeps scalar scores, shrinks the file.
+    #[arg(long)]
+    pub no_save_samples: bool,
 }
 
 // ─── if2 ──────────────────────────────────────────────────────────────────────
