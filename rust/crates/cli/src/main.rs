@@ -116,12 +116,36 @@ enum Command {
     Compare(args::CompareArgs),
 
     /// Compile a .camdl model to IR JSON (delegates to camdlc)
+    #[command(after_help = "\
+Examples:
+  # Compile a .camdl source to IR JSON on stdout
+  camdl compile sir.camdl > sir.ir.json
+
+  # Write to a specific file
+  camdl compile sir.camdl --output sir.ir.json
+")]
     Compile(Passthrough),
 
     /// Parse and type-check a .camdl model (delegates to camdlc)
+    #[command(after_help = "\
+Examples:
+  # Type-check a model, report errors/warnings
+  camdl check sir.camdl
+
+  # Check with full dimension analysis output
+  camdl check sir.camdl --verbose
+")]
     Check(Passthrough),
 
     /// Print model structure (delegates to camdlc)
+    #[command(after_help = "\
+Examples:
+  # Summary: compartments, transitions, parameters, dimensions
+  camdl inspect sir.camdl
+
+  # Show loaded table values as well
+  camdl inspect sir.camdl --tables
+")]
     Inspect(Passthrough),
 }
 
