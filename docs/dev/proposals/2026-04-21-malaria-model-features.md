@@ -434,17 +434,21 @@ This says "`alpha_child ~ N(0.05, 0.02)` independently,
 For multi-village Garki fits where per-village parameters should
 share strength, this is the feature pomp users most ask about.
 
-**Proposed DSL.** A `hyper { }` block for hyper-parameters, plus
-hyper-parametrised priors in `parameters { }`:
+**Proposed DSL.** Everything stays in `parameters { }`. A
+hyperparameter is nothing but a parameter that another parameter's
+prior references — there's no language-level distinction, only a
+reference-graph property the compiler can infer. A trailing
+`| <dim>` clause on an indexed parameter's prior marks which
+dimension is partially pooled.
 
 ```camdl
-hyper {
-  mu_alpha    ~ normal(0, 1)
-  sigma_alpha ~ half_normal(0.5)
-}
-
 parameters {
-  alpha[a in age] : rate ~ normal(mu_alpha, sigma_alpha)
+  # Hyperparameters: ordinary scalars with ordinary priors.
+  mu_alpha    : rate     ~ normal(mu = 0, sigma = 1)
+  sigma_alpha : positive ~ half_normal(sigma = 0.5)
+
+  # Leaf: prior references the hyperparameters above, one draw per age.
+  alpha[age]  : rate ~ normal(mu = mu_alpha, sigma = sigma_alpha) | age
 }
 ```
 
@@ -453,10 +457,36 @@ parameters (estimated from data) that govern a group-level
 distribution from which each `alpha[a]` is drawn. During inference,
 both levels are updated.
 
-**IR impact.** Parameters gain an optional `hyper_parent` field that
-references the hyper-parameter names. Hyper-parameters are regular
-parameters with a flag distinguishing them. No structural change
-to the expression grammar.
+**Why one block, not a `hyper { }` block.** Hyperparameters and
+leaves are semantically identical — both get priors, both are
+sampled, both support `--params` / `fit.toml [fixed]` overrides.
+Splitting them into two blocks (a) forces every downstream consumer
+(transform defaults, scenario machinery, `run.json` provenance,
+`camdl inspect` output) to handle two cases instead of one, (b)
+introduces a language-level distinction that dissolves under the
+slightest reparameterisation, and (c) diverges from the one-block
+convention in Stan, PyMC, brms, rstanarm. The engineering upside of
+a separate block — knowing which parameters need non-centered
+reparameterisation in NUTS — is already derivable from the prior
+reference graph; no grammar change required.
+
+`camdl inspect --hierarchy` renders the graph explicitly for users
+who want to see hyper vs leaf structure:
+
+```
+parameters:
+  mu_alpha    scalar    hyper (referenced by alpha)
+  sigma_alpha scalar    hyper (referenced by alpha)
+  alpha       [age]     leaf, pools over age, parent = (mu_alpha, sigma_alpha)
+```
+
+**IR impact.** No new block, no new top-level variant. The existing
+`Prior` node gains an optional `pool_over: Option<DimName>` field
+(from the `| age` clause) and the existing prior-argument slot
+already supports parameter references via `Expr::Param`. The
+compiler derives the hyper/leaf partition from the reference graph
+during a single post-parse walk, storing it in the IR
+`Parameter::role: enum { Hyper, Leaf { parent: Vec<Name> }, Plain }`.
 
 **Inference impact.** Substantial. IF2 needs to sample both levels
 jointly; PGAS/NUTS needs gradients of the hierarchical log-prior
@@ -772,22 +802,36 @@ stratify(by = age, only = [X, Y1, Y2, Y3])
 # split becomes a multinomial branch at infection firing, not a
 # state duplication.
 
-# --- #3: age-indexed parameters, one declaration each --------------
+# --- #3: age-indexed leaves + hyperparameters, all in one block.
+# The `| age` clause marks the pooling dimension; the compiler detects
+# that r1, alpha, p_symp are leaves (their priors reference other
+# parameters) and applies non-centered reparameterization in NUTS.
 parameters {
-  a        : rate
-  b_h      : probability
-  b_v      : probability
-  r1[age]  : rate         ~ HalfNormal(0.1) | age      # partial pooling
-  alpha[age]: rate        ~ HalfNormal(0.05) | age
-  p_symp[age]: probability ~ Beta(2, 2) | age
-  r2       : rate
-  delta    : rate
-  sigma_v  : rate
-  mu_v     : rate
-  rho_sens : probability
-  rho_spec : probability
+  a         : rate
+  b_h       : probability
+  b_v       : probability
+
+  # Hyperparameters for the per-age-group partially-pooled rates.
+  mu_r1     : rate     ~ half_normal(sigma = 0.1)
+  sigma_r1  : positive ~ half_normal(sigma = 0.05)
+  mu_alpha  : rate     ~ half_normal(sigma = 0.05)
+  sigma_alpha : positive ~ half_normal(sigma = 0.02)
+  alpha_psymp : positive ~ gamma(shape = 2, rate = 1)
+  beta_psymp  : positive ~ gamma(shape = 2, rate = 1)
+
+  # Leaves: priors reference hyperparameters above.
+  r1[age]     : rate        ~ log_normal(mu = mu_r1, sigma = sigma_r1) | age
+  alpha[age]  : rate        ~ log_normal(mu = mu_alpha, sigma = sigma_alpha) | age
+  p_symp[age] : probability ~ beta(alpha = alpha_psymp, beta = beta_psymp) | age
+
+  r2          : rate
+  delta       : rate
+  sigma_v     : rate
+  mu_v        : rate
+  rho_sens    : probability
+  rho_spec    : probability
   outbreak_th : probability in [0.02, 0.15]
-  irs_eff  : probability  in [0.5, 0.95]
+  irs_eff     : probability in [0.5, 0.95]
 }
 
 let I_h       = sum(a in age, Y1[a] + Y2[a])
@@ -866,29 +910,95 @@ surface area and a ~20× reduction in incidental-complexity lines.
 
 ## Implementation sequencing
 
-Landing order optimises: (a) each feature is independently useful
-even if the next never ships; (b) features don't block each other;
-(c) the Ross-Macdonald test model works as soon as possible.
+Three waves, each ending with a runnable and fittable malaria model
+so that every wave has an independent demo. Checkboxes track
+landed work; update in place as each item ships.
 
-1. **#1 multi-source transitions** (~1 week) → unlocks Ross-Macdonald
-   golden fixture.
-2. **#2 probabilistic branching** (~3–4 days) → clean symptomatic
-   splits.
-3. **#4 diagnostic-test likelihood** (~1 week) → clean surveillance
-   observation.
-4. **#5 reactive interventions** (~1 week) → outbreak-response
-   studies.
-5. **#3 hierarchical priors** (~2 weeks) → multi-village partial
-   pooling. Land last; inference surface is the largest.
+### Wave 1 — "Ross-Macdonald fittable" (~2 weeks)
 
-Total: ~6 weeks of focused language + inference work for a state-
-of-the-art malaria-modelling DSL. First three features (#1, #2, #4)
-get the 55-line Garki model runnable and fittable in ~2.5 weeks.
+Goal: a 15-line Ross-Macdonald model that simulates correctly under
+Gillespie/tau-leap and fits real slide-positivity data.
 
-Demographic features (aging, births, age-specific mortality) land in
-parallel on their own track — see `2026-04-21-vital-dynamics.md`
-(~2 weeks). The two proposals compose orthogonally; neither blocks
-the other.
+- [ ] **#1 multi-source transitions** (~1 week)
+  - [ ] Parser: `+` separator on source side of `-->`
+  - [ ] Expander: stoichiometry generation for bimolecular sources
+  - [ ] Propensity: multi-source rate evaluation + conservation check
+  - [ ] Error codes: source-dim mismatch, non-positive stoichiometry
+  - [ ] Tests: conservation under Gillespie, paired-seed regression
+  - [ ] Spec §N updated before implementation merges
+  - [ ] Golden: `ocaml/golden/ross_macdonald.camdl`
+- [ ] **#4 diagnostic-test likelihood** (~1 week)
+  - [ ] Parser: `diagnostic_test(base = …, sens = …, spec = …)`
+  - [ ] IR: new `Likelihood::DiagnosticTest` variant
+  - [ ] Scoring + sampling paths (log-pmf, gradients, draws)
+  - [ ] Error codes: invalid base likelihood, sens/spec out of [0,1]
+  - [ ] Tests: equivalence to hand-inlined correction (byte-identical)
+  - [ ] Spec §12 updated
+- [ ] **Wave 1 demo**: `docs/vignettes/ross_macdonald_fit.qmd`
+  PMMH recovers `a, b_h, b_v` within 2σ on synthetic data.
+
+### Wave 2 — "Garki fittable" (~3 weeks)
+
+Goal: the 55-line post-proposal Garki from §"Endpoint" above
+compiles and fits age-specific partial-pooling parameters.
+
+- [ ] **#2 probabilistic branching** (~3–4 days)
+  - [ ] Parser: `{ dest : weight, ... }` on transition destination
+  - [ ] IR: branch weights + normalisation check
+  - [ ] Propensity: multinomial draw at firing (Gillespie + tau-leap)
+  - [ ] Error codes: non-summing-to-one weights, empty branches
+  - [ ] 3σ statistical test for draw proportions
+- [ ] **#3 hierarchical priors (single-level)** (~2 weeks)
+  - [ ] Parser: `| <dim>` pooling clause; `~` with parameter refs
+  - [ ] Semantic: reference-graph walk → hyper/leaf classification
+  - [ ] IR: `Parameter::role` enum; `Prior::pool_over` field
+  - [ ] Inference: non-centered reparameterization in NUTS; joint
+        updates in PGAS + IF2 + PMMH
+  - [ ] `camdl inspect --hierarchy` visualiser
+  - [ ] Shrinkage regression test: fitted leaves between per-group
+        MLE and grand mean
+  - [ ] Posterior-coverage test on synthetic two-level data (≥ 90%)
+- [ ] **Wave 2 demo**: `docs/vignettes/garki_2age_fit.qmd`
+  Recovers age-specific `p_symp` with pooled-sigma shrinkage.
+
+### Wave 3 — "Policy-grade interventions" (~2 weeks)
+
+Goal: reactive, decay-aware interventions; counterfactual policy
+simulation with proper uncertainty.
+
+- [ ] **#5 reactive interventions** (~1 week)
+  - [ ] Parser: `when <predicate>` + `cooldown = <duration>`
+  - [ ] IR: `Intervention::trigger: Conditional { predicate, cooldown }`
+  - [ ] Runtime: substep predicate eval + cooldown tracking +
+        last-fired bookkeeping (state survives inference restarts)
+  - [ ] Decide eval cadence default (observation cadence vs substep)
+  - [ ] Reproducibility: identical seed → identical firing times
+- [ ] **#5b intervention state-read** (~3 days)
+  - [ ] Parser: `<iv>.t_last_fired`, `<iv>.times_fired`
+  - [ ] IR: `Expr::InterventionState { iv, field }`
+  - [ ] Propensity: read from intervention registry
+  - [ ] Sentinel semantics at t=0 before any firing
+  - [ ] Decay test: single firing, efficacy half at t = halflife
+- [ ] **Wave 3 demo**: `docs/vignettes/reactive_irs.qmd`
+  Scheduled vs reactive vs no-IRS trajectories with CIs.
+
+### Parallel track — Vital dynamics (~2 weeks)
+
+See `2026-04-21-vital-dynamics.md`. Independent of the waves above;
+ship anytime. No inter-track dependencies in either direction.
+
+### Cross-cutting hygiene
+
+Every wave follows the discipline in `docs/dev/testing.md`:
+
+- Failing TDD test asserting the documented claim **before** code.
+- Error-code fixture in `ocaml/test/errors/` for every new diagnostic.
+- Spec update merges **before** implementation.
+- Each wave ends with a book chapter, not just code — the vignettes
+  are the reality check on DSL ergonomics.
+
+**Total**: ~7 weeks end-to-end for a fittable, documented, state-of-
+the-art malaria DSL. First Ross-Macdonald demo at ~2 weeks.
 
 ---
 
