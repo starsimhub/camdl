@@ -378,6 +378,39 @@ let test_table_per_day_annotation_with_weeks_unit () =
   let tbl = List.find (fun (t : Ir.table) -> t.Ir.name = "mort") m.Ir.tables in
   assert_inline_const ~epsilon:1e-6 tbl 0 0.7
 
+let test_table_read_path_scales_unit () =
+  (* The `read("file.tsv")` loader had the same pattern-matching bug as the
+     inline path; covered in the same fix but not separately tested. This
+     test addresses P1.5 of the 2026-04-21 spec-claims audit: exercise a
+     unit-annotated table loaded from a TSV file, assert the values are
+     scaled. *)
+  let tmp = Filename.temp_file "camdl_read_unit" ".tsv" in
+  (* TSV: one row per stratum, columns are `group` + `x`. *)
+  let oc = open_out tmp in
+  output_string oc "group\tx\n";
+  output_string oc "a\t5\n";
+  output_string oc "b\t60\n";
+  close_out oc;
+  let src = Printf.sprintf {|
+    time_unit = 'days
+    dimensions { group = [a, b] }
+    compartments { S, I }
+    stratify(by = group)
+    parameters { beta : rate }
+    tables { age_dur : group 'years = read("%s") }
+    let N = S_a + I_a + S_b + I_b
+    transitions {
+      recovery[g in group] : I[g] --> S[g]  @ (1.0 / age_dur[g]) * I[g]
+    }
+    init { S_a = 500 I_a = 10 S_b = 500 I_b = 10 }
+    simulate { from = 0 'days  to = 10 'days }
+  |} tmp in
+  let m = compile_expect_ok src in
+  let tbl = List.find (fun (t : Ir.table) -> t.Ir.name = "age_dur") m.Ir.tables in
+  assert_inline_const ~epsilon:1e-6 tbl 0 (5.0 *. 365.2425);
+  assert_inline_const ~epsilon:1e-6 tbl 1 (60.0 *. 365.2425);
+  Sys.remove tmp
+
 let test_table_no_unit_annotation_leaves_values_alone () =
   (* No unit literal on the table = no scaling; dimcheck infers dim from use. *)
   let src = {|
@@ -400,6 +433,144 @@ let test_table_no_unit_annotation_leaves_values_alone () =
   assert_inline_const ~epsilon:1e-12 tbl 1 0.5;
   assert_inline_const ~epsilon:1e-12 tbl 2 0.5;
   assert_inline_const ~epsilon:1e-12 tbl 3 1.0
+
+(* ── P3.1 — let-binding inlining (spec §9) ──────────────────────────────────
+   Spec claim: `let N = S + I + R` is inlined at every use site.
+   Direct assertion: the compiled transition rate must contain Pop "S" +
+   Pop "I" + Pop "R", NOT a Let/Ref node. See audit
+   docs/dev/reviews/2026-04-21-spec-claims-vs-tests.md P3.1. *)
+
+(** Walk an Ir.expr and collect all Pop compartment names. *)
+let rec collect_pops = function
+  | Ir.Const _ | Ir.Param _ | Ir.Time | Ir.Projected -> []
+  | Ir.Pop name -> [name]
+  | Ir.PopSum names -> names
+  | Ir.BinOp b -> collect_pops b.left @ collect_pops b.right
+  | Ir.UnOp u  -> collect_pops u.arg
+  | Ir.Cond c  -> collect_pops c.pred @ collect_pops c.then_ @ collect_pops c.else_
+  | Ir.TimeFunc _ -> []
+  | Ir.TableLookup (_, idx) -> List.concat_map collect_pops idx
+
+let test_let_binding_is_inlined () =
+  let src = {|
+    compartments { S, I, R }
+    let N = S + I + R
+    parameters { beta : rate  gamma : rate }
+    transitions {
+      infection : S --> I  @ beta * S * I / N
+      recovery  : I --> R  @ gamma * I
+    }
+    init { S = 999  I = 1 }
+    simulate { from = 0 'days  to = 30 'days }
+  |} in
+  let m = compile_expect_ok src in
+  let infection = List.find (fun (t : Ir.transition) -> t.name = "infection") m.transitions in
+  let pops = collect_pops infection.rate in
+  (* If let bindings were NOT inlined, we'd see something like Ir.Ref "N"
+     or an IR variant for bindings. Instead, `N` must expand to {S, I, R}. *)
+  let has s = List.mem s pops in
+  Alcotest.(check bool) "S inlined into N" true (has "S");
+  Alcotest.(check bool) "I inlined into N" true (has "I");
+  Alcotest.(check bool) "R inlined into N" true (has "R");
+  (* And we MUST see the rate referring to S+I for the infection term
+     (beta * S * I / (S+I+R)), not just N's PopSum substitution. *)
+  let count_s = List.length (List.filter (fun p -> p = "S") pops) in
+  let count_i = List.length (List.filter (fun p -> p = "I") pops) in
+  Alcotest.(check bool) "S used ≥2× (numerator + denominator)" true (count_s >= 2);
+  Alcotest.(check bool) "I used ≥2× (numerator + denominator)" true (count_i >= 2)
+
+(* ── P3.2 — stratification count invariant (spec §5) ─────────────────────────
+   Spec: `stratify(by = dim)` with N compartments and |dim|=K levels expands
+   to N×K compartments. Direct count assertion. *)
+
+let test_stratification_compartment_count () =
+  let src = {|
+    compartments { S, I, R }
+    dimensions { age = [child, adult, elder] }
+    stratify(by = age)
+    parameters { beta : rate  gamma : rate }
+    let N = S + I + R
+    transitions {
+      infection[a in age] : S[a] --> I[a]  @ beta * S[a] * I[a] / N
+      recovery[a in age]  : I[a] --> R[a]  @ gamma * I[a]
+    }
+    init { S_child = 100  I_child = 1 }
+    simulate { from = 0 'days  to = 30 'days }
+  |} in
+  let m = compile_expect_ok src in
+  (* 3 compartments × 3 age levels = 9 *)
+  Alcotest.(check int) "3 compartments × 3 strata = 9" 9 (List.length m.compartments);
+  (* 2 transitions × 3 age levels = 6 *)
+  Alcotest.(check int) "2 transitions × 3 strata = 6" 6 (List.length m.transitions);
+  (* All expected names present *)
+  let names = List.map (fun (c : Ir.compartment) -> c.name) m.compartments in
+  List.iter (fun n ->
+    Alcotest.(check bool) (Printf.sprintf "compartment %s exists" n) true (List.mem n names)
+  ) ["S_child"; "S_adult"; "S_elder"; "I_child"; "I_adult"; "I_elder";
+     "R_child"; "R_adult"; "R_elder"]
+
+(* ── P3.5 — incidence positional vs named indexing (spec §13.1) ──────────────
+   Spec: both `incidence(transition[stratum])` and `incidence(transition[dim = v])`
+   sum over unspecified dimensions. The positional form binds by declaration
+   order; named by dim name. Both must produce the same IR shape when the
+   positional index targets the same dimension. See clarification in commit
+   3960453 + audit P3.5. *)
+
+let test_incidence_positional_and_named_produce_equal_projections () =
+  (* Same observation written both ways; assert the IR projection
+     structures are identical. *)
+  let src_positional = {|
+    compartments { S, I, R }
+    dimensions { patch = [north, south] }
+    stratify(by = patch)
+    parameters { beta : rate  gamma : rate  rho : probability }
+    let N_north = S_north + I_north + R_north
+    let N_south = S_south + I_south + R_south
+    transitions {
+      infection[p in patch] : S[p] --> I[p]  @ beta * S[p] * I[p]
+      recovery[p in patch]  : I[p] --> R[p]  @ gamma * I[p]
+    }
+    init { S_north = 100  I_north = 1 }
+    simulate { from = 0 'days  to = 10 'days }
+    observations {
+      north_cases : {
+        projected  = incidence(recovery[north])
+        every      = 1 'days
+        likelihood = poisson(rate = rho * projected)
+      }
+    }
+  |} in
+  let src_named = {|
+    compartments { S, I, R }
+    dimensions { patch = [north, south] }
+    stratify(by = patch)
+    parameters { beta : rate  gamma : rate  rho : probability }
+    let N_north = S_north + I_north + R_north
+    let N_south = S_south + I_south + R_south
+    transitions {
+      infection[p in patch] : S[p] --> I[p]  @ beta * S[p] * I[p]
+      recovery[p in patch]  : I[p] --> R[p]  @ gamma * I[p]
+    }
+    init { S_north = 100  I_north = 1 }
+    simulate { from = 0 'days  to = 10 'days }
+    observations {
+      north_cases : {
+        projected  = incidence(recovery[patch = north])
+        every      = 1 'days
+        likelihood = poisson(rate = rho * projected)
+      }
+    }
+  |} in
+  let m_pos = compile_expect_ok src_positional in
+  let m_nam = compile_expect_ok src_named in
+  let obs_pos = List.hd m_pos.observations in
+  let obs_nam = List.hd m_nam.observations in
+  (* Serialize both projections and compare — easier than deep-matching. *)
+  let pos_proj = Yojson.Safe.to_string (Serde.projection_to_json obs_pos.projection) in
+  let nam_proj = Yojson.Safe.to_string (Serde.projection_to_json obs_nam.projection) in
+  Alcotest.(check string)
+    "positional and named projections produce identical IR"
+    pos_proj nam_proj
 
 (* ── DESIGN-2: Intervention expansion ───────────────────────────────────────
    Compile a model with an intervention. Assert it appears in model.interventions. *)
@@ -2316,8 +2487,18 @@ let () =
         `Quick test_table_years_annotation_scales_to_days;
       Alcotest.test_case "'per_day table scales to model 'weeks unit"
         `Quick test_table_per_day_annotation_with_weeks_unit;
+      Alcotest.test_case "read() path also scales unit-annotated values"
+        `Quick test_table_read_path_scales_unit;
       Alcotest.test_case "no unit annotation leaves values untouched"
         `Quick test_table_no_unit_annotation_leaves_values_alone;
+    ];
+    "spec_claims_v1", [
+      Alcotest.test_case "§9 let binding is inlined at use sites (P3.1)"
+        `Quick test_let_binding_is_inlined;
+      Alcotest.test_case "§5 stratify expands N × |dim| compartments (P3.2)"
+        `Quick test_stratification_compartment_count;
+      Alcotest.test_case "§13.1 incidence positional ≡ named projection (P3.5)"
+        `Quick test_incidence_positional_and_named_produce_equal_projections;
     ];
     "interventions", [
       Alcotest.test_case "intervention expansion" `Quick test_intervention_expansion;
