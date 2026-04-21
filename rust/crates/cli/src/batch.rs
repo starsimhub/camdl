@@ -186,7 +186,7 @@ struct ConfigSection {
 
 fn default_backend() -> String { "chain_binomial".to_string() }
 fn default_dt() -> f64 { 1.0 }
-fn default_output_dir() -> String { "output".to_string() }
+fn default_output_dir() -> String { crate::run_paths::DEFAULT_OUTPUT_ROOT.to_string() }
 fn default_parallel() -> usize { 1 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -1057,6 +1057,16 @@ fn print_batch_dry_run(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Regression guard: batch's default output dir must equal the
+    /// canonical root used by simulate / fit / voi. Before 2026-04-21
+    /// these diverged — batch wrote to `./output/` while everything
+    /// else wrote to `./results/` — so `camdl list` silently skipped
+    /// batch output. See commit fixing `default_output_dir`.
+    #[test]
+    fn batch_default_output_dir_matches_canonical_root() {
+        assert_eq!(default_output_dir(), crate::run_paths::DEFAULT_OUTPUT_ROOT);
+    }
 
     fn sc(name: &str) -> ScenarioEntry {
         ScenarioEntry { name: name.to_string(), params: HashMap::new(), enable: vec![], disable: vec![] }
