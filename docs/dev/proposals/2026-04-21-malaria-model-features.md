@@ -37,6 +37,107 @@ wait on the vital-dynamics proposal landing.
 
 ---
 
+## What's already in camdl (and therefore not in this proposal)
+
+Three features that come up repeatedly in malaria-modelling wishlists
+are already shipped. This section documents them explicitly so
+reviewers don't double-count them as gaps.
+
+### Environmental forcing / climate-driven rates — already works
+
+Language spec §12 ships a `forcing {}` block with four primitive
+forms: `sinusoidal`, `periodic`, `piecewise`, and `interpolated`. The
+last reads a TSV with `time_col` / `value_col` and supports linear,
+cubic-spline, or PCHIP interpolation. Forcing values are first-class
+references in rate expressions. Climate-driven malaria transmission
+(rainfall → vector breeding, temperature → EIP) composes from these
+primitives plus `let` bindings:
+
+```camdl
+forcing {
+  rainfall    = interpolated { data = "rain.tsv"  time_col = t  value_col = mm
+                               method = "cubic_spline" }
+  temperature = interpolated { data = "temp.tsv"  time_col = t  value_col = C
+                               method = "cubic_spline" }
+}
+parameters {
+  beta_base, rain_alpha, temp_opt, temp_width : rate, positive, positive, positive
+}
+
+let thermal = exp(-((temperature - temp_opt) / temp_width)^2)
+let beta_t  = beta_base * (rainfall / 100)^rain_alpha * thermal
+
+transitions {
+  bite[a in age] : X[a] + Iv --> Y1[a] + Iv  @ beta_t * X[a] * Iv / N_h
+}
+```
+
+No new language feature required. The one small sugar that would
+help repeated temperature-dependent rates across multiple transitions
+(e.g., `sigma_v(T)` appearing at both EIP and mortality sites) is a
+named `functions {}` block — ~2 days of work, generic DSL, not
+malaria-specific, not blocking. Tracked separately if it becomes a
+friction point.
+
+### Spatial / indexed parameters — already works at one level
+
+The `dimensions {}` mechanism is dimension-agnostic; `age`, `patch`,
+`village`, and `district` are all the same primitive. Any parameter
+can be indexed by any dimension, and any indexed parameter can carry
+a prior. #3 below adds shared-hyperprior syntax (`| patch` for
+partial pooling over a single dimension) — that works identically
+for spatial and demographic indices.
+
+```camdl
+dimensions { patch = read("lga_pop.tsv", column = "patch") }  # 36 LGAs from data
+parameters {
+  beta[patch] : rate ~ log_normal(mu = -1.0, sigma = 0.5) | patch  # per-patch
+}
+```
+
+What's **not** in scope for this proposal: multi-level nested
+hierarchies (region ⊃ district ⊃ village with pooling at each
+level). That needs nested-prior surface area like
+`beta[village] ~ LogNormal(mu[district(v)], sigma_v) | village`, with
+a `district(v)` lookup function. Non-trivial design; deferred to a
+dedicated proposal once single-level spatial pooling has been used
+against real data long enough to know what the nested surface should
+look like.
+
+### Multi-stage infection dynamics — already expressible
+
+Multi-stage within-host progression (e.g., `I_liver → I_early → I_mid
+→ I_late → I_gam` with stage-specific rates and detection) does not
+need a new feature. It's a `stage` dimension:
+
+```camdl
+dimensions { stage = [liver, blood_early, blood_mid, blood_late, gam] }
+compartments { X, I, R }
+stratify(by = stage, only = [I])
+
+parameters {
+  progression[stage] : rate
+  gamma_clear[stage] : rate
+  p_gam[stage]       : probability
+}
+
+transitions {
+  # Sequential progression through stages — one indexed transition,
+  # the `where` clause keeps it from generating a past-the-end move.
+  progress[s in stage, where s < last(stage)] :
+    I[s] --> I[next(stage, s)]  @ progression[s] * I[s]
+
+  # Stage-specific clearance with gametocyte branching (uses #2 below).
+  clear[s in stage] :
+    I[s] --> {R : 1 - p_gam[s], G : p_gam[s]}  @ gamma_clear[s] * I[s]
+}
+```
+
+The stage dimension plus #2 (branching) covers the 4-6 stage
+structure without new language surface.
+
+---
+
 ## Current state — what a Garki-like model looks like today
 
 A minimal two-age Garki-style model exercises most of camdl's current
@@ -488,6 +589,81 @@ evaluation logic, cooldown tracking.
 triggered vaccination campaigns. The Garki model for intervention-
 evaluation studies.
 
+#### #5b — Intervention state-read (decay dynamics)
+
+**Motivation.** Real ITN / IRS / drug interventions don't just turn
+on or off — efficacy decays after deployment. ITN efficacy falls
+with net ageing; IRS efficacy decays with residual insecticide life;
+repeated drug deployment raises resistance. Today the only way to
+express "ITN efficacy is 95% on the day of distribution and decays
+exponentially with 2-year half-life" is to write a `piecewise`
+forcing with hand-set deploy times, which breaks the moment
+distribution becomes `when`-triggered rather than scheduled.
+
+**Proposed DSL.** Expose the intervention's firing history as
+readable scalars inside rate expressions (and inside `when`
+predicates):
+
+```camdl
+parameters {
+  itn_eff_init  : probability in [0.5, 0.95]
+  itn_halflife  : time        in [180 'days, 1000 'days]
+  outbreak_th   : probability in [0.02, 0.15]
+}
+
+interventions {
+  itn_distribution :
+    transfer(fraction = 0.8, from = Sv, to = Sv_protected)
+    when   prevalence > outbreak_th
+    cooldown = 2 'years
+}
+
+# `itn_distribution.t_last_fired` and `itn_distribution.times_fired`
+# are readable anywhere in the rate DSL.
+let itn_age = t - itn_distribution.t_last_fired
+let itn_eff = if itn_distribution.times_fired > 0
+              then itn_eff_init * exp(- log(2) * itn_age / itn_halflife)
+              else 0.0
+
+transitions {
+  bite[a in age] : X[a] + Iv --> Y1[a] + Iv
+    @ (1 - itn_eff) * a * b_h * X[a] * Iv / N_h
+}
+```
+
+**Surface area.** Two new scalar expressions per intervention:
+
+- `<iv>.t_last_fired` — model time of last firing; `-∞` before first
+  firing. Dimension `T`.
+- `<iv>.times_fired` — integer count; dimension `[1]`.
+
+No new blocks, no new distributions, no new backends. Trigger
+bookkeeping is already required by the cooldown machinery in #5
+above; this just exposes it to the expression language.
+
+**IR impact.** One new IR expression node variant:
+`InterventionState { intervention: String, field: TLastFired | TimesFired }`.
+Propensity evaluator reads from the intervention registry.
+
+**Test plan.** One-intervention model where efficacy decays
+predictably: schedule a single firing at t=0, integrate with a
+known decay half-life, assert the intervention effect at
+t = halflife is exactly half of the initial effect.
+
+**Effort.** ~3 days on top of #5's cooldown bookkeeping. Parser
+addition for the `<iv>.field` syntax, IR + propensity additions,
+one test.
+
+**Unlocks.** ITN decay, IRS residual efficacy, post-campaign
+case-management reactivation windows, resistance build-up models
+(`resistance_frac = 1 - exp(-k * drug.times_fired)`).
+
+**What this deliberately does not cover.** Multi-state intervention
+*efficacy* tracked as its own compartment (e.g., "netted vs
+un-netted households" as populations that migrate between each
+other). That's just compartments and transitions — no new feature
+needed, write it directly.
+
 ---
 
 ## What we're not proposing, and why
@@ -509,8 +685,20 @@ right tool.
 **DDE backend for fixed delays.** Erlang-staging with k ≥ 10 is the
 standard compartmental workaround and works fine.
 
+**Multi-level nested hierarchical priors** (region ⊃ district ⊃
+village partial pooling at each level). #3 gives single-level
+pooling within one dimension — enough for "villages within a
+region," "age effects within a population," or "strains within a
+serotype." Nested surface (`beta[village] ~ LogNormal(mu[district(v)],
+...)` with a `district(v)` parent-lookup) is a real gap for
+multi-country DHS-scale fits but is a dedicated design problem: it
+wants lookup functions into the dimension hierarchy, a multi-level
+prior distribution in the IR, and careful NUTS reparameterization.
+Worth its own proposal once single-level spatial pooling has been
+exercised against real data.
+
 **Module system / model composition.** Big DX win but architecturally
-heavy. Revisit after the above six features shipped; users will have
+heavy. Revisit after the above features shipped; users will have
 built real malaria models and we'll know what module boundaries want
 to be.
 
