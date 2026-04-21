@@ -867,9 +867,13 @@ let run_tables ppf (model : Ir.model) ctx (pattern : string option) =
            pp_val ppf v; Fmt.pf ppf "@\n"
          ) levels vals
        | [row_lvs; col_lvs] ->
-         let rw = List.fold_left (fun a s -> max a (String.length s)) 0 row_lvs in
-         let cw = List.fold_left (fun a s -> max a (String.length s)) 5 col_lvs in
          let nc = List.length col_lvs in
+         let nr = List.length row_lvs in
+         let val_strs = Array.init (nr * nc) (fun i ->
+           Format.asprintf "%a" pp_val (List.nth vals i)) in
+         let rw = List.fold_left (fun a s -> max a (String.length s)) 0 row_lvs in
+         let cw = List.fold_left (fun a s -> max a (String.length s)) 0 col_lvs in
+         let cw = Array.fold_left (fun a s -> max a (String.length s)) cw val_strs in
          (* column header row *)
          Fmt.pf ppf "  "; bar (); Fmt.pf ppf "  %s" (String.make rw ' ');
          List.iter (fun c ->
@@ -883,8 +887,7 @@ let run_tables ppf (model : Ir.model) ctx (pattern : string option) =
            Fmt.pf ppf "  "; bar (); Fmt.pf ppf "  ";
            Term_style.dim_style Fmt.string ppf row; Fmt.pf ppf "%s" rpad;
            List.iteri (fun ci _ ->
-             let v = List.nth vals (ri * nc + ci) in
-             let vs = Format.asprintf "%a" pp_val v in
+             let vs = val_strs.(ri * nc + ci) in
              let pad = String.make (cw - String.length vs) ' ' in
              Fmt.pf ppf "  %s%s" pad vs
            ) col_lvs;
