@@ -1,0 +1,71 @@
+name: Release
+
+# Cross-platform Rust tests + binary artifact builds for macOS and
+# Windows. Gated behind version tags + manual trigger because these
+# runners are billed at 10× (macOS) and 2× (Windows) the Linux rate;
+# running them on every push burned ~90% of the monthly CI budget at
+# the current commit cadence.
+#
+# Trigger on a version tag (`git tag v0.2.0 && git push --tags`) or
+# via the "Run workflow" button on the Actions page for ad-hoc
+# cross-platform verification.
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  # ── Cross-platform Rust test pass ─────────────────────────────────
+  test-cross-platform:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Rust tests
+        run: cargo test --release
+        working-directory: rust
+
+  # ── Build release artifacts (all platforms) ───────────────────────
+  build-artifacts:
+    needs: [test-cross-platform]
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            suffix: linux-x64
+            exe: camdl
+          - os: macos-latest
+            suffix: macos-arm64
+            exe: camdl
+          - os: windows-latest
+            suffix: windows-x64
+            exe: camdl.exe
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo build --release -p cli
+        working-directory: rust
+
+      - name: Package
+        shell: bash
+        run: |
+          mkdir -p dist
+          ls -la rust/target/release/camdl* || true
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            cp "rust/target/release/${{ matrix.exe }}" dist/camdl.exe
+          else
+            cp "rust/target/release/${{ matrix.exe }}" dist/camdl
+            chmod +x dist/camdl
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: camdl-${{ matrix.suffix }}
+          path: dist/

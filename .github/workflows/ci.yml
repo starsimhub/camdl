@@ -1,13 +1,33 @@
 name: CI
 
+# Runs on every push / PR to main. Linux-only — cross-platform builds
+# are gated behind tags (see release.yml) because macOS runners are
+# billed 10× and Windows 2× the Linux rate, and the Rust code is
+# platform-invariant (no OS-conditional cfgs).
+#
+# Doc-only and fixture-only changes skip this workflow.
+
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - 'docs/**'
+      - 'examples/**'
+      - 'README.md'
+      - '**/*.md'
+      - '.gitignore'
+      - 'LICENSE'
   pull_request:
     branches: [main]
+    paths-ignore:
+      - 'docs/**'
+      - 'examples/**'
+      - 'README.md'
+      - '**/*.md'
+      - '.gitignore'
+      - 'LICENSE'
 
 jobs:
-  # ── Full build + test (Linux, existing pipeline) ──────────────────
   test:
     runs-on: ubuntu-latest
     steps:
@@ -41,7 +61,19 @@ jobs:
       - name: Clippy
         run: cd rust && cargo clippy --all-targets -- -D warnings
 
-      - name: Rust unit tests
+      # ── Install camdlc to ~/.local/bin + put on PATH ───
+      # Several Rust integration tests (`scenario_runtime_application`,
+      # `synthetic_fit_grid`, …) shell out to the built `camdl` binary,
+      # which in turn needs to locate `camdlc` to compile inline .camdl
+      # sources. `make install` puts camdlc at ~/.local/bin/camdlc; we
+      # export that directory so the spawned binary's PATH search finds
+      # it.
+      - name: Install camdlc on PATH
+        run: |
+          opam exec -- make install
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: Rust tests
         run: cd rust && cargo test
 
       # ── Integration ────────────────────────────────────
@@ -52,64 +84,4 @@ jobs:
         run: git diff --exit-code ir/golden/ ocaml/golden/
 
       - name: Integration tests
-        run: opam exec -- make test
-
-  # ── Rust tests on Windows ─────────────────────────────────────────
-  test-rust-windows:
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - name: Rust tests
-        run: cargo test --release
-        working-directory: rust
-
-  # ── Rust tests on macOS ───────────────────────────────────────────
-  test-rust-macos:
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - name: Rust tests
-        run: cargo test --release
-        working-directory: rust
-
-  # ── Build release artifacts (all platforms) ───────────────────────
-  build-artifacts:
-    needs: [test-rust-windows, test-rust-macos]
-    if: github.ref == 'refs/heads/main'
-    strategy:
-      matrix:
-        include:
-          - os: ubuntu-latest
-            suffix: linux-x64
-            exe: camdl
-          - os: macos-latest
-            suffix: macos-arm64
-            exe: camdl
-          - os: windows-latest
-            suffix: windows-x64
-            exe: camdl.exe
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - run: cargo build --release -p cli
-        working-directory: rust
-
-      - name: Package
-        shell: bash
-        run: |
-          mkdir -p dist
-          ls -la rust/target/release/camdl* || true
-          if [ "${{ runner.os }}" = "Windows" ]; then
-            cp "rust/target/release/${{ matrix.exe }}" dist/camdl.exe
-          else
-            cp "rust/target/release/${{ matrix.exe }}" dist/camdl
-            chmod +x dist/camdl
-          fi
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: camdl-${{ matrix.suffix }}
-          path: dist/
+        run: opam exec -- make test-integration
