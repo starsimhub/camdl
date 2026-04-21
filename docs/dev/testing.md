@@ -157,16 +157,10 @@ Options:
 2. `CAMDL_SKIP_VERSION_CHECK=1 cargo test …` to bypass for this
    invocation.
 
-**Gotcha: `camdl-sim` vs `camdl`.** The binary was renamed from
-`camdl-sim` → `camdl` in the clap 4 migration (2026-04-20). Several
-integration tests still reference `target/release/camdl-sim`. A
-symlink keeps them working:
-
-```bash
-ln -sf camdl rust/target/release/camdl-sim
-```
-
-Created once after a fresh `cargo clean` or clone.
+**Note on the binary name.** The binary is `target/release/camdl`.
+It was called `camdl-sim` before the 2026-04-20 clap 4 migration;
+if you have a `camdl-sim` symlink in `target/release/` from an older
+checkout, it's harmless but no longer referenced by any test.
 
 ### L6 — Statistical / distribution tests
 

@@ -5,7 +5,7 @@
 //!     - events (`always_active = true`)  → on by default
 //!     - interventions (`always_active = false`) → off by default
 //!
-//! All tests shell out to the built `camdl-sim` binary and observe
+//! All tests shell out to the built `camdl` binary and observe
 //! behaviour via trajectory output / cached run files.
 
 use std::path::{Path, PathBuf};
@@ -13,7 +13,7 @@ use std::process::Command;
 
 fn binary() -> PathBuf {
     let manifest = std::env::var("CARGO_MANIFEST_DIR").unwrap();
-    Path::new(&manifest).join("../../target/release/camdl-sim")
+    Path::new(&manifest).join("../../target/release/camdl")
 }
 
 fn skip_if_missing_binary() -> Option<PathBuf> {

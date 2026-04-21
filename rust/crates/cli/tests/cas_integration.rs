@@ -1,6 +1,6 @@
 //! End-to-end tests for `camdl simulate --cas` and `camdl list/show/cat`.
 //!
-//! These shell out to the built `camdl-sim` binary in `target/release/`
+//! These shell out to the built `camdl` binary in `target/release/`
 //! and exercise the full pipeline: real hash computation, real cache
 //! lookups, real directory writes.
 
@@ -13,7 +13,7 @@ use std::process::Command;
 fn binary() -> PathBuf {
     let manifest = std::env::var("CARGO_MANIFEST_DIR").unwrap();
     let bin = Path::new(&manifest)
-        .join("../../target/release/camdl-sim");
+        .join("../../target/release/camdl");
     bin
 }
 
@@ -27,7 +27,7 @@ fn golden_sir_basic() -> PathBuf {
 fn skip_if_missing_binary() -> Option<PathBuf> {
     let bin = binary();
     if !bin.exists() {
-        eprintln!("skipping: camdl-sim binary not built at {}", bin.display());
+        eprintln!("skipping: camdl binary not built at {}", bin.display());
         return None;
     }
     Some(bin)
@@ -167,8 +167,8 @@ fn cas_rejects_multi_seeds() {
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(stderr.contains("--cas supports single runs only"),
         "error should name the limitation: {}", stderr);
-    assert!(stderr.contains("simulate batch"),
-        "error should hint at `simulate batch`: {}", stderr);
+    assert!(stderr.contains("batch run"),
+        "error should hint at `batch run`: {}", stderr);
 }
 
 #[test]
@@ -686,7 +686,7 @@ beta = [0.2, 0.3, 0.4]
 
 #[test]
 fn simulate_batch_dry_run_prints_grid_no_output() {
-    // --dry-run on `simulate batch` must print the resolved sweep grid
+    // --dry-run on `batch run` must print the resolved sweep grid
     // on stderr, exit 0, and touch zero files under output/runs/.
     let Some(bin) = skip_if_missing_binary() else { return; };
     let tmp = tempfile::tempdir().unwrap();
@@ -718,7 +718,7 @@ beta = [0.2, 0.3, 0.4]
         .output().expect("spawn");
     assert!(out.status.success(), "dry-run should exit 0");
     let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(stderr.contains("camdl simulate batch (dry run)"),
+    assert!(stderr.contains("camdl batch run (dry run)"),
         "stderr should mark the dry run: {}", stderr);
     assert!(stderr.contains("Sweep grid"), "stderr should include sweep grid: {}", stderr);
     for beta in ["0.2", "0.3", "0.4"] {

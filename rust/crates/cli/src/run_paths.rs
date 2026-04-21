@@ -33,7 +33,7 @@ pub fn output_root(cli: Option<&str>, config: Option<&str>) -> PathBuf {
 }
 
 /// Directory for one simulate run. Matches the layout established
-/// for `--cas` and `simulate batch`:
+/// for `--cas` and `batch run`:
 ///
 /// ```text
 /// <root>/sims/<sim_hash[:8]>/<scenario-slug>-<scen_hash[:8]>/seed_<N>/

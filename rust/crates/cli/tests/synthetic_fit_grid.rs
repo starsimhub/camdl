@@ -2,7 +2,7 @@
 //! `camdl fit run`. Encodes the canonical modes from
 //! docs/dev/proposals/2026-04-17-synthetic-fit-replicates.md.
 //!
-//! Shells out to the built `camdl-sim` binary; skipped silently when
+//! Shells out to the built `camdl` binary; skipped silently when
 //! the release binary or `camdlc.exe` isn't present so the suite
 //! stays runnable in rust-only CI and when tests run before a build.
 
@@ -11,7 +11,7 @@ use std::process::Command;
 
 fn camdl_sim() -> Option<PathBuf> {
     let manifest = std::env::var("CARGO_MANIFEST_DIR").ok()?;
-    let p = Path::new(&manifest).join("../../target/release/camdl-sim");
+    let p = Path::new(&manifest).join("../../target/release/camdl");
     if p.exists() { Some(p) } else { None }
 }
 
@@ -116,7 +116,7 @@ fn run_fit(bin: &Path, fit_toml: &Path) {
         .arg("fit").arg("run")
         .arg(fit_toml)
         .status()
-        .expect("camdl-sim fit run must invoke");
+        .expect("camdl fit run must invoke");
     assert!(status.success(), "fit run failed for {}", fit_toml.display());
 }
 

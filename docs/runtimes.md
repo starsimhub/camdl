@@ -427,7 +427,7 @@ Mismatch produces a hard error before simulation starts — no silent wrong
 answers.
 
 ```
-$ camdl-sim model.ir.json --backend gillespie --seed 42
+$ camdl model.ir.json --backend gillespie --seed 42
 error: model requires capabilities not supported by backend 'gillespie':
   - OVERDISPERSION: transitions with overdispersion require --backend tau_leap or chain_binomial
 ```

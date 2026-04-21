@@ -53,7 +53,7 @@ the inference algorithm explores and which it treats as known constants.
 model.camdl      → what the model IS (structure, scenarios)
 params.toml      → a point m ∈ M (concrete parameter values)
 fit.toml         → how inference RUNS (what to estimate, algorithm, data)
-batch file       → how a batch RUNS (sweep/scenarios/seeds, via `camdl simulate batch`)
+batch file       → how a batch RUNS (sweep/scenarios/seeds, via `camdl batch run`)
 ```
 
 Each file owns its domain exclusively. The fit file cannot define model
@@ -114,7 +114,7 @@ the algorithm explores.
 ### 1.4 Core Design Rules
 
 **CLI and file are the same type.** Every batch TOML file deserializes into the
-same Rust struct that CLI argument parsing produces. `camdl simulate batch
+same Rust struct that CLI argument parsing produces. `camdl batch run
 file.toml` and a long command line are interchangeable representations of the
 same job. This is enforced by deriving both `clap::Parser` and
 `serde::Deserialize` from shared types.
@@ -728,7 +728,7 @@ camdl cat <short-hash>
 
 **Scope.** `--cas` currently supports single-run invocations only — one
 seed, one scenario, no `--draws` / `--replicates`. For sweeps use
-`camdl simulate batch` (§5), which has had content-addressable output
+`camdl batch run` (§5), which has had content-addressable output
 since v0.2.
 
 **Layout.** Same as batch — `results/sims/{sim_hash[:8]}/{scenario_slug}-{scen_hash[:8]}/seed_{n}/traj.tsv`.
@@ -745,7 +745,7 @@ inputs — no silent stale results.
 are logged to stderr; trajectory bytes go to stdout (or `-o FILE`).
 Pipelines like `camdl simulate ... --cas > out.tsv` work as expected.
 
-**Output location.** Defaults to `./output` (matches `simulate batch`).
+**Output location.** Defaults to `./output` (matches `batch run`).
 Override with `--output-dir DIR`.
 
 ### 4.5 `camdl list` / `camdl show` / `camdl cat` — browse cached runs
@@ -838,7 +838,7 @@ camdl simulate model.camdl \
     --scenario baseline,with_sia --replicates 10 --obs-dir obs/
 
 # ── From a batch file ────────────────────────────────────
-camdl simulate batch batches/ppc.toml
+camdl batch run batches/ppc.toml
 ```
 
 **CLI `--sweep` accepts comma-separated lists only.** Generators (`linspace`,
@@ -2293,7 +2293,7 @@ camdl simulate MODEL [OPTIONS]
   --output-dir DIR          Output root (default: results/)
   --force                   Re-run cached results
 
-camdl simulate batch FILE [OPTIONS]
+camdl batch run FILE [OPTIONS]
   --output-dir DIR          Override output_dir from the TOML
   --parallel N              Override parallel from the TOML
   --dry-run                 Print the resolved sweep grid + cache summary; exit
@@ -2329,7 +2329,7 @@ names survive unchanged.** Open an issue if you're writing such tooling
 and need a migration window.
 
 Sensitivity analysis (Sobol indices and similar) is not a camdl
-concern. Run `camdl simulate batch` to produce the output tree, then
+concern. Run `camdl batch run` to produce the output tree, then
 compute indices with R's `sensitivity` package or Python's `SALib`.
 
 ---

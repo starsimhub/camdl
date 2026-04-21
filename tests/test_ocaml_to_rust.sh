@@ -63,7 +63,7 @@ done
 # ── Batch pipeline tests ─────────────────────────────────────────────────────
 #
 # Previously named `experiment` — the subcommand was renamed to
-# `simulate batch` on 2026-04-17 (commit 4d1291b). The `summarize`
+# `batch run` on 2026-04-17 (commit 4d1291b). The `summarize`
 # sub-subcommand was removed at the same time (see
 # docs/dev/proposals/2026-04-16-cas-simulate.md); trajectory aggregation
 # now lives in `camdl list` / `camdl cat`.
@@ -80,7 +80,7 @@ run_batch_test() {
 
     # run
     if ! "$CAMDL" batch run "$fixture" --output-dir "$outdir" --parallel 2 > /dev/null; then
-        echo "FAIL [simulate batch] $name"; FAIL=$((FAIL+1)); return
+        echo "FAIL [batch run] $name"; FAIL=$((FAIL+1)); return
     fi
 
     # check manifest completed count

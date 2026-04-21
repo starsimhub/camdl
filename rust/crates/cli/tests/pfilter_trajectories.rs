@@ -11,7 +11,7 @@ use std::process::Command;
 
 fn binary() -> PathBuf {
     let manifest = std::env::var("CARGO_MANIFEST_DIR").unwrap();
-    Path::new(&manifest).join("../../target/release/camdl-sim")
+    Path::new(&manifest).join("../../target/release/camdl")
 }
 
 fn skip_if_missing() -> Option<PathBuf> {

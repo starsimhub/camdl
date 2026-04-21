@@ -11,13 +11,13 @@ intermediate representation. A Rust backend simulates, fits, and analyzes them.
 ```
 model.camdl ──→ camdlc ──→ model.ir.json
                                 │
-                    ┌───────────┼───────────┐
-                    ▼           ▼           ▼
-              camdl simulate  camdl fit  camdl experiment
-                    │           │           │
-                    ▼           ▼           ▼
-              trajectory    mle_params   sobol_indices
-                            profiles     evsi
+          ┌──────────┬──────────┼──────────┐
+          ▼          ▼          ▼          ▼
+    camdl simulate  camdl fit  camdl batch  camdl compare
+          │          │          │           │
+          ▼          ▼          ▼           ▼
+    trajectory  mle_params   sweep/CAS   elpd table
+                profiles     manifest
 ```
 
 ## Capabilities
@@ -29,7 +29,7 @@ model.camdl ──→ camdlc ──→ model.ir.json
 | **Inference**         | IF2 (MLE), PGAS with NUTS (Bayesian posterior), bootstrap particle filter, 1D/2D profiles. Source-to-source autodiff: compiler emits gradient expressions, enabling HMC. |
 | **Fitting workflow**  | `camdl fit scout → refine → validate → pgas` pipeline driven by `fit.toml`. IF2 finds the MLE, PGAS characterizes the posterior with exact complete-data likelihood + NUTS gradient proposals. Parallel chains, random starts, R-hat/ESS diagnostics, posterior trajectory output. |
 | **Experiments**       | Multi-scenario seed ensembles, Sobol sensitivity analysis, parameter sweeps. Content-addressable output with caching.                                                     |
-| **Decision analysis** | Value of Information (EVSI) via `camdl voi run`.                                                                                                                          |
+| **Model comparison**  | Prequential scoring (elpd, CRPS, PIT) + paired Δ table via `camdl compare`. |
 
 ---
 
@@ -55,9 +55,9 @@ camdl fit refine fit.toml --starts-from fit/output/scout/
 camdl fit validate fit.toml --starts-from fit/output/refine/
 camdl fit status fit.toml
 
-# Run an experiment
-camdl experiment run experiment.toml
-camdl experiment analyze experiment.toml
+# Run a parameter sweep / scenario batch
+camdl batch run sweep.toml
+camdl batch status sweep.toml
 ```
 
 ---
@@ -277,31 +277,32 @@ Specification: [`docs/camdl-inference-spec.md`](docs/camdl-inference-spec.md)
 
 ---
 
-## Experiments
+## Batch sweeps
 
 ```bash
-camdl experiment run experiment.toml       # parallel seed ensembles
-camdl experiment status experiment.toml    # check progress
-camdl experiment summarize experiment.toml # aggregate trajectories
-camdl experiment analyze experiment.toml   # Sobol sensitivity indices
+camdl batch run sweep.toml        # multi-scenario × multi-seed sweep
+camdl batch run sweep.toml --dry-run   # preview resolved sweep grid
+camdl batch status sweep.toml     # completion / live file count
 ```
 
-Multi-scenario parameter sweeps with content-addressable output and caching.
-Sobol first-order and total-effect sensitivity indices for any output metric.
+Scenario × sweep-point × seed cartesian products with content-addressable
+output in `./results/sims/`. Re-runs skip cached results automatically;
+`--force` re-runs anyway. `[design]` blocks in `sweep.toml` generate
+Sobol, LHS, or random samples for sensitivity analysis — downstream
+analysis (Sobol indices, etc.) reads the resulting `outputs.tsv` from
+any tool you prefer.
 
-Specification: [`docs/camdl-experiment-spec.md`](docs/camdl-experiment-spec.md)
+Specification: [`docs/camdl-run-spec.md`](docs/camdl-run-spec.md)
 
-### Value of Information
+## Model comparison
 
 ```bash
-camdl voi run voi.toml
+camdl compare fits/a/pfilter fits/b/pfilter --baseline a
 ```
 
-Expected Value of Sample Information (EVSI) for study design decisions. Combines
-experiment outputs with decision problems, prior distributions, and utility
-functions.
-
-Specification: [`docs/camdl-voi-spec.md`](docs/camdl-voi-spec.md)
+Prequential out-of-sample scoring (elpd, CRPS, PIT coverage, paired
+Δelpd + se, E_T = exp(Δelpd) Bayes factor). Consumes `prequential.json`
+written by `fit run` pfilter stages or `camdl pfilter --save-prequential`.
 
 ---
 
@@ -365,8 +366,7 @@ errors), golden file regeneration + diff check, and the full integration suite.
 | [`docs/camdl-language-spec.md`](docs/camdl-language-spec.md)     | Full DSL reference                   |
 | [`docs/camdl-data-spec.md`](docs/camdl-data-spec.md)             | IR schema and data model             |
 | [`docs/camdl-inference-spec.md`](docs/camdl-inference-spec.md)   | Fitting workflow specification       |
-| [`docs/camdl-experiment-spec.md`](docs/camdl-experiment-spec.md) | Experiment system specification      |
-| [`docs/camdl-voi-spec.md`](docs/camdl-voi-spec.md)               | Value of Information specification   |
+| [`docs/camdl-run-spec.md`](docs/camdl-run-spec.md)               | Run-system / batch / CAS specification |
 | [`docs/inference.md`](docs/inference.md)                         | Inference guide (PF, IF2, PGAS, NUTS)|
 | [`docs/runtimes.md`](docs/runtimes.md)                           | Simulation backend details           |
 | [`docs/user-features.md`](docs/user-features.md)                 | Feature catalog with pomp comparison |
@@ -378,7 +378,6 @@ errors), golden file regeneration + diff check, and the full integration suite.
 ## Repository layout
 
 ```
-bin/camdl              Wrapper script (routes to camdlc or camdl-sim)
 ocaml/
   lib/compiler/        Lexer, parser, expander (AST → flat IR)
   lib/ir/              OCaml IR types + serialization

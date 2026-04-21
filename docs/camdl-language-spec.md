@@ -304,16 +304,16 @@ declares names and types only; concrete values are supplied at runtime:
 
 ```bash
 # Single flat TOML file
-camdl-sim simulate model.ir.json --params base.toml
+camdl simulate model.ir.json --params base.toml
 
 # Layered overrides (later files win)
-camdl-sim simulate model.ir.json --params base.toml --params patch.toml
+camdl simulate model.ir.json --params base.toml --params patch.toml
 
 # Single value override
-camdl-sim simulate model.ir.json --param gamma=0.1
+camdl simulate model.ir.json --param gamma=0.1
 
 # Per-stratum override (indexed params)
-camdl-sim simulate model.ir.json --param-vec R0=r0_posterior.tsv
+camdl simulate model.ir.json --param-vec R0=r0_posterior.tsv
 ```
 
 The TOML format supports both flat and sectioned forms (see §21).
@@ -373,7 +373,7 @@ N[patch] : positive  →  { name: "N_urban",  value: null }
 at runtime (see §21):
 
 ```bash
-camdl-sim simulate model.ir.json --param-vec R0=/tmp/r0_posterior.tsv
+camdl simulate model.ir.json --param-vec R0=/tmp/r0_posterior.tsv
 ```
 
 ### 4.4 Parameter Bounds
@@ -2345,7 +2345,7 @@ structural skeleton; the parameter grammar fills in the rest.
 ## 21. CLI
 
 The unified `camdl` command routes to two backends: **`camdlc`** (OCaml
-compiler) for compilation/inspection and **`camdl-sim`** (Rust) for simulation,
+compiler) for compilation/inspection and **`camdl`** (Rust) for simulation,
 experiments, and inference. All commands accept `.camdl` files directly
 (auto-compiled via `camdlc`).
 
@@ -3370,7 +3370,7 @@ Diagnostics carry a numeric code for programmatic consumption (e.g.,
 | E202 | Error   | Wrong number of indices for compartment                                                         |
 | E203 | Error   | Index belongs to wrong dimension (e.g., `C_age[i, s]` where `s : sex`)                          |
 | E204 | Error   | Partial-stratification stoichiometry: destination compartment dimensions incompletely specified |
-| W002 | Warning | Zero-firing transition (emitted at simulation time by `camdl-sim`)                              |
+| W002 | Warning | Zero-firing transition (emitted at simulation time by `camdl`)                              |
 | W103 | Warning | Let binding name shadows a stratum value in some dimension                                      |
 
 Diagnostics can be emitted as structured JSON by passing `--json-errors` to

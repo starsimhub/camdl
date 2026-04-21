@@ -1,5 +1,12 @@
 # polio_es — EVSI of Environmental Surveillance for SIA Targeting
 
+> **Status: not runnable on alpha.** This example depends on `camdl voi`
+> (EVSI engine) and the legacy `experiment run / summarize` pipeline,
+> both of which are gated for alpha. The model + sweep `.toml` files
+> are preserved here so the example can be resurrected when voi ships.
+> For sweep-only usage (no EVSI), run the model via
+> `camdl batch run examples/polio_es/experiment.toml`.
+
 50-patch SIRV model demonstrating EVSI analysis for poliovirus environmental
 surveillance (ES). Answers: **how many ES sites should we fund before deciding
 on SIA scope?**

@@ -361,7 +361,7 @@ fn run_simulate(a: &args::SimulateArgs) {
     };
 
     // --cas currently supports single-run invocations. For sweeps or
-    // replicates, redirect users to `simulate batch` which has robust CAS.
+    // replicates, redirect users to `batch run` which has robust CAS.
     if cas_enabled {
         let multi_seeds = seeds.len() > 1;
         let multi_scenarios = scenario_list.len() > 1;
@@ -369,7 +369,7 @@ fn run_simulate(a: &args::SimulateArgs) {
         if multi_seeds || multi_scenarios || replicates > 1 || has_draws {
             eprintln!("error: --cas supports single runs only.");
             eprintln!("  For sweeps (multiple seeds/scenarios/draws/replicates), use");
-            eprintln!("  `camdl simulate batch FILE` with a TOML config.");
+            eprintln!("  `camdl batch run FILE` with a TOML config.");
             std::process::exit(1);
         }
     }

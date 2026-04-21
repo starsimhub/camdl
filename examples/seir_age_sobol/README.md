@@ -1,5 +1,12 @@
 # Outbreak Triage: Which Uncertainty to Resolve First?
 
+> **Status: not runnable on alpha.** This example depends on `camdl voi`
+> (EVSI) and the legacy `experiment run / analyze` pipeline, both of
+> which are gated for alpha. The model + sweep `.toml` files are
+> preserved for resurrection post-voi. Sobol sample *generation* still
+> works via `camdl batch run examples/seir_age_sobol/experiment.toml`;
+> Sobol *index computation* (the analyze step) is out-of-tree.
+
 A novel respiratory pathogen is detected in a town of ~10,000 residents. Two age
 groups are at risk: children (school-age) and adults (working-age). Before
 recommending targeted interventions, the team wants to know:

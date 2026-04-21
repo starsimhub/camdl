@@ -1,6 +1,6 @@
-//! `simulate batch FILE` subcommand — the multi-scenario / sweep runner
-//! behind `camdl simulate batch`. Writes content-addressed output to
-//! `<output_dir>/runs/{sim_hash}/{scen_slug}-{scen_hash}/seed_{n}/` in the
+//! `batch run FILE` subcommand — the multi-scenario / sweep runner
+//! behind `camdl batch run`. Writes content-addressed output to
+//! `<output_dir>/sims/{sim_hash}/{scen_slug}-{scen_hash}/seed_{n}/` in the
 //! same layout `--cas` uses for single runs, so `camdl list/show/cat`
 //! browse both uniformly.
 //!
@@ -921,7 +921,7 @@ pub fn cmd_batch_status(a: &crate::args::BatchStatusArgs) {
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-/// Print the resolved sweep grid + cache summary for `simulate batch --dry-run`.
+/// Print the resolved sweep grid + cache summary for `batch run --dry-run`.
 /// Does not simulate. Format mirrors the single-run `--dry-run` idiom in
 /// main.rs: header block, per-item tables, totals.
 #[allow(clippy::too_many_arguments)]
@@ -938,7 +938,7 @@ fn print_batch_dry_run(
     params_file: Option<&str>,
     plans: &[RunPlan],
 ) {
-    eprintln!("camdl simulate batch (dry run)");
+    eprintln!("camdl batch run (dry run)");
     eprintln!();
     eprintln!("  model:       {}", model_path);
     eprintln!("  backend:     {}", backend);

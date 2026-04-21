@@ -15,7 +15,7 @@ to its inputs.
 
 **params.toml is the universal interface.** The inference pipeline's
 final output is a params.toml. It feeds directly into `camdl simulate`,
-`camdl simulate batch`, `camdl voi run`. No format conversion. One
+`camdl batch run`, `camdl voi run`. No format conversion. One
 chain from raw data to decision.
 
 **The fixed/free partition is explicit and exhaustive.** Every model
@@ -780,7 +780,7 @@ fit/he2010/ — He et al. 2010 London measles
     mle_params.toml: ✓ content hash matches (a3c1e890)
     fit_record.json: ✓ input hash 7f2c1d3a
 
-  Next: camdl simulate batch experiment.toml \
+  Next: camdl batch run experiment.toml \
           --params fit/he2010/validate/mle_params.toml
 ```
 
