@@ -142,14 +142,7 @@
               }
             }
           }
-        },
-        "sigma": { "const": 0.0 },
-        "gamma": { "const": 0.0 },
-        "omega": { "const": 0.0 },
-        "vacc_frac": { "const": 0.0 },
-        "N0_under5": { "const": 0.0 },
-        "N0_over5": { "const": 0.0 },
-        "I0": { "const": 0.0 }
+        }
       }
     },
     {
@@ -278,14 +271,7 @@
               }
             }
           }
-        },
-        "sigma": { "const": 0.0 },
-        "gamma": { "const": 0.0 },
-        "omega": { "const": 0.0 },
-        "vacc_frac": { "const": 0.0 },
-        "N0_under5": { "const": 0.0 },
-        "N0_over5": { "const": 0.0 },
-        "I0": { "const": 0.0 }
+        }
       }
     },
     {
@@ -303,16 +289,7 @@
         "source_compartment": "E_under5",
         "dest_compartment": "I_under5"
       },
-      "rate_grad": {
-        "beta": { "const": 0.0 },
-        "sigma": { "pop": "E_under5" },
-        "gamma": { "const": 0.0 },
-        "omega": { "const": 0.0 },
-        "vacc_frac": { "const": 0.0 },
-        "N0_under5": { "const": 0.0 },
-        "N0_over5": { "const": 0.0 },
-        "I0": { "const": 0.0 }
-      }
+      "rate_grad": { "sigma": { "pop": "E_under5" } }
     },
     {
       "name": "progression_over5",
@@ -329,16 +306,7 @@
         "source_compartment": "E_over5",
         "dest_compartment": "I_over5"
       },
-      "rate_grad": {
-        "beta": { "const": 0.0 },
-        "sigma": { "pop": "E_over5" },
-        "gamma": { "const": 0.0 },
-        "omega": { "const": 0.0 },
-        "vacc_frac": { "const": 0.0 },
-        "N0_under5": { "const": 0.0 },
-        "N0_over5": { "const": 0.0 },
-        "I0": { "const": 0.0 }
-      }
+      "rate_grad": { "sigma": { "pop": "E_over5" } }
     },
     {
       "name": "recovery_under5",
@@ -355,16 +323,7 @@
         "source_compartment": "I_under5",
         "dest_compartment": "R_under5"
       },
-      "rate_grad": {
-        "beta": { "const": 0.0 },
-        "sigma": { "const": 0.0 },
-        "gamma": { "pop": "I_under5" },
-        "omega": { "const": 0.0 },
-        "vacc_frac": { "const": 0.0 },
-        "N0_under5": { "const": 0.0 },
-        "N0_over5": { "const": 0.0 },
-        "I0": { "const": 0.0 }
-      }
+      "rate_grad": { "gamma": { "pop": "I_under5" } }
     },
     {
       "name": "recovery_over5",
@@ -381,16 +340,7 @@
         "source_compartment": "I_over5",
         "dest_compartment": "R_over5"
       },
-      "rate_grad": {
-        "beta": { "const": 0.0 },
-        "sigma": { "const": 0.0 },
-        "gamma": { "pop": "I_over5" },
-        "omega": { "const": 0.0 },
-        "vacc_frac": { "const": 0.0 },
-        "N0_under5": { "const": 0.0 },
-        "N0_over5": { "const": 0.0 },
-        "I0": { "const": 0.0 }
-      }
+      "rate_grad": { "gamma": { "pop": "I_over5" } }
     },
     {
       "name": "waning_under5",
@@ -407,16 +357,7 @@
         "source_compartment": "V_under5",
         "dest_compartment": "S_under5"
       },
-      "rate_grad": {
-        "beta": { "const": 0.0 },
-        "sigma": { "const": 0.0 },
-        "gamma": { "const": 0.0 },
-        "omega": { "pop": "V_under5" },
-        "vacc_frac": { "const": 0.0 },
-        "N0_under5": { "const": 0.0 },
-        "N0_over5": { "const": 0.0 },
-        "I0": { "const": 0.0 }
-      }
+      "rate_grad": { "omega": { "pop": "V_under5" } }
     },
     {
       "name": "waning_over5",
@@ -433,16 +374,7 @@
         "source_compartment": "V_over5",
         "dest_compartment": "S_over5"
       },
-      "rate_grad": {
-        "beta": { "const": 0.0 },
-        "sigma": { "const": 0.0 },
-        "gamma": { "const": 0.0 },
-        "omega": { "pop": "V_over5" },
-        "vacc_frac": { "const": 0.0 },
-        "N0_under5": { "const": 0.0 },
-        "N0_over5": { "const": 0.0 },
-        "I0": { "const": 0.0 }
-      }
+      "rate_grad": { "omega": { "pop": "V_over5" } }
     }
   ],
   "ode_equations": [],

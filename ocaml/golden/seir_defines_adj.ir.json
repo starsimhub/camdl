@@ -78,11 +78,7 @@
               }
             }
           }
-        },
-        "sigma": { "const": 0.0 },
-        "gamma": { "const": 0.0 },
-        "kappa": { "const": 0.0 },
-        "I0": { "const": 0.0 }
+        }
       }
     },
     {
@@ -145,11 +141,7 @@
               }
             }
           }
-        },
-        "sigma": { "const": 0.0 },
-        "gamma": { "const": 0.0 },
-        "kappa": { "const": 0.0 },
-        "I0": { "const": 0.0 }
+        }
       }
     },
     {
@@ -210,11 +202,7 @@
               }
             }
           }
-        },
-        "sigma": { "const": 0.0 },
-        "gamma": { "const": 0.0 },
-        "kappa": { "const": 0.0 },
-        "I0": { "const": 0.0 }
+        }
       }
     },
     {
@@ -258,9 +246,6 @@
         "dest_compartment": "E_north"
       },
       "rate_grad": {
-        "beta": { "const": 0.0 },
-        "sigma": { "const": 0.0 },
-        "gamma": { "const": 0.0 },
         "kappa": {
           "bin_op": {
             "op": "div",
@@ -302,8 +287,7 @@
               }
             }
           }
-        },
-        "I0": { "const": 0.0 }
+        }
       }
     },
     {
@@ -345,9 +329,6 @@
         "dest_compartment": "E_north"
       },
       "rate_grad": {
-        "beta": { "const": 0.0 },
-        "sigma": { "const": 0.0 },
-        "gamma": { "const": 0.0 },
         "kappa": {
           "bin_op": {
             "op": "div",
@@ -389,8 +370,7 @@
               }
             }
           }
-        },
-        "I0": { "const": 0.0 }
+        }
       }
     },
     {
@@ -434,9 +414,6 @@
         "dest_compartment": "E_south"
       },
       "rate_grad": {
-        "beta": { "const": 0.0 },
-        "sigma": { "const": 0.0 },
-        "gamma": { "const": 0.0 },
         "kappa": {
           "bin_op": {
             "op": "div",
@@ -478,8 +455,7 @@
               }
             }
           }
-        },
-        "I0": { "const": 0.0 }
+        }
       }
     },
     {
@@ -521,9 +497,6 @@
         "dest_compartment": "E_south"
       },
       "rate_grad": {
-        "beta": { "const": 0.0 },
-        "sigma": { "const": 0.0 },
-        "gamma": { "const": 0.0 },
         "kappa": {
           "bin_op": {
             "op": "div",
@@ -565,8 +538,7 @@
               }
             }
           }
-        },
-        "I0": { "const": 0.0 }
+        }
       }
     },
     {
@@ -610,9 +582,6 @@
         "dest_compartment": "E_east"
       },
       "rate_grad": {
-        "beta": { "const": 0.0 },
-        "sigma": { "const": 0.0 },
-        "gamma": { "const": 0.0 },
         "kappa": {
           "bin_op": {
             "op": "div",
@@ -654,8 +623,7 @@
               }
             }
           }
-        },
-        "I0": { "const": 0.0 }
+        }
       }
     },
     {
@@ -699,9 +667,6 @@
         "dest_compartment": "E_east"
       },
       "rate_grad": {
-        "beta": { "const": 0.0 },
-        "sigma": { "const": 0.0 },
-        "gamma": { "const": 0.0 },
         "kappa": {
           "bin_op": {
             "op": "div",
@@ -743,8 +708,7 @@
               }
             }
           }
-        },
-        "I0": { "const": 0.0 }
+        }
       }
     },
     {
@@ -762,13 +726,7 @@
         "source_compartment": "E_north",
         "dest_compartment": "I_north"
       },
-      "rate_grad": {
-        "beta": { "const": 0.0 },
-        "sigma": { "pop": "E_north" },
-        "gamma": { "const": 0.0 },
-        "kappa": { "const": 0.0 },
-        "I0": { "const": 0.0 }
-      }
+      "rate_grad": { "sigma": { "pop": "E_north" } }
     },
     {
       "name": "progression_south",
@@ -785,13 +743,7 @@
         "source_compartment": "E_south",
         "dest_compartment": "I_south"
       },
-      "rate_grad": {
-        "beta": { "const": 0.0 },
-        "sigma": { "pop": "E_south" },
-        "gamma": { "const": 0.0 },
-        "kappa": { "const": 0.0 },
-        "I0": { "const": 0.0 }
-      }
+      "rate_grad": { "sigma": { "pop": "E_south" } }
     },
     {
       "name": "progression_east",
@@ -808,13 +760,7 @@
         "source_compartment": "E_east",
         "dest_compartment": "I_east"
       },
-      "rate_grad": {
-        "beta": { "const": 0.0 },
-        "sigma": { "pop": "E_east" },
-        "gamma": { "const": 0.0 },
-        "kappa": { "const": 0.0 },
-        "I0": { "const": 0.0 }
-      }
+      "rate_grad": { "sigma": { "pop": "E_east" } }
     },
     {
       "name": "recovery_north",
@@ -831,13 +777,7 @@
         "source_compartment": "I_north",
         "dest_compartment": "R_north"
       },
-      "rate_grad": {
-        "beta": { "const": 0.0 },
-        "sigma": { "const": 0.0 },
-        "gamma": { "pop": "I_north" },
-        "kappa": { "const": 0.0 },
-        "I0": { "const": 0.0 }
-      }
+      "rate_grad": { "gamma": { "pop": "I_north" } }
     },
     {
       "name": "recovery_south",
@@ -854,13 +794,7 @@
         "source_compartment": "I_south",
         "dest_compartment": "R_south"
       },
-      "rate_grad": {
-        "beta": { "const": 0.0 },
-        "sigma": { "const": 0.0 },
-        "gamma": { "pop": "I_south" },
-        "kappa": { "const": 0.0 },
-        "I0": { "const": 0.0 }
-      }
+      "rate_grad": { "gamma": { "pop": "I_south" } }
     },
     {
       "name": "recovery_east",
@@ -877,13 +811,7 @@
         "source_compartment": "I_east",
         "dest_compartment": "R_east"
       },
-      "rate_grad": {
-        "beta": { "const": 0.0 },
-        "sigma": { "const": 0.0 },
-        "gamma": { "pop": "I_east" },
-        "kappa": { "const": 0.0 },
-        "I0": { "const": 0.0 }
-      }
+      "rate_grad": { "gamma": { "pop": "I_east" } }
     }
   ],
   "ode_equations": [],

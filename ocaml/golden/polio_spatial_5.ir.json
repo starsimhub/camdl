@@ -69,7 +69,6 @@
         "dest_compartment": "E_north"
       },
       "rate_grad": {
-        "sigma": { "const": 0.0 },
         "gamma": {
           "bin_op": {
             "op": "div",
@@ -113,9 +112,6 @@
             }
           }
         },
-        "omega": { "const": 0.0 },
-        "kappa": { "const": 0.0 },
-        "vacc_frac": { "const": 0.0 },
         "R0_north": {
           "bin_op": {
             "op": "div",
@@ -158,17 +154,7 @@
               }
             }
           }
-        },
-        "R0_south": { "const": 0.0 },
-        "R0_east": { "const": 0.0 },
-        "R0_west": { "const": 0.0 },
-        "R0_center": { "const": 0.0 },
-        "N0_north": { "const": 0.0 },
-        "N0_south": { "const": 0.0 },
-        "N0_east": { "const": 0.0 },
-        "N0_west": { "const": 0.0 },
-        "N0_center": { "const": 0.0 },
-        "I0": { "const": 0.0 }
+        }
       }
     },
     {
@@ -209,7 +195,6 @@
         "dest_compartment": "E_south"
       },
       "rate_grad": {
-        "sigma": { "const": 0.0 },
         "gamma": {
           "bin_op": {
             "op": "div",
@@ -253,10 +238,6 @@
             }
           }
         },
-        "omega": { "const": 0.0 },
-        "kappa": { "const": 0.0 },
-        "vacc_frac": { "const": 0.0 },
-        "R0_north": { "const": 0.0 },
         "R0_south": {
           "bin_op": {
             "op": "div",
@@ -299,16 +280,7 @@
               }
             }
           }
-        },
-        "R0_east": { "const": 0.0 },
-        "R0_west": { "const": 0.0 },
-        "R0_center": { "const": 0.0 },
-        "N0_north": { "const": 0.0 },
-        "N0_south": { "const": 0.0 },
-        "N0_east": { "const": 0.0 },
-        "N0_west": { "const": 0.0 },
-        "N0_center": { "const": 0.0 },
-        "I0": { "const": 0.0 }
+        }
       }
     },
     {
@@ -347,7 +319,6 @@
         "dest_compartment": "E_east"
       },
       "rate_grad": {
-        "sigma": { "const": 0.0 },
         "gamma": {
           "bin_op": {
             "op": "div",
@@ -391,11 +362,6 @@
             }
           }
         },
-        "omega": { "const": 0.0 },
-        "kappa": { "const": 0.0 },
-        "vacc_frac": { "const": 0.0 },
-        "R0_north": { "const": 0.0 },
-        "R0_south": { "const": 0.0 },
         "R0_east": {
           "bin_op": {
             "op": "div",
@@ -438,15 +404,7 @@
               }
             }
           }
-        },
-        "R0_west": { "const": 0.0 },
-        "R0_center": { "const": 0.0 },
-        "N0_north": { "const": 0.0 },
-        "N0_south": { "const": 0.0 },
-        "N0_east": { "const": 0.0 },
-        "N0_west": { "const": 0.0 },
-        "N0_center": { "const": 0.0 },
-        "I0": { "const": 0.0 }
+        }
       }
     },
     {
@@ -485,7 +443,6 @@
         "dest_compartment": "E_west"
       },
       "rate_grad": {
-        "sigma": { "const": 0.0 },
         "gamma": {
           "bin_op": {
             "op": "div",
@@ -529,12 +486,6 @@
             }
           }
         },
-        "omega": { "const": 0.0 },
-        "kappa": { "const": 0.0 },
-        "vacc_frac": { "const": 0.0 },
-        "R0_north": { "const": 0.0 },
-        "R0_south": { "const": 0.0 },
-        "R0_east": { "const": 0.0 },
         "R0_west": {
           "bin_op": {
             "op": "div",
@@ -577,14 +528,7 @@
               }
             }
           }
-        },
-        "R0_center": { "const": 0.0 },
-        "N0_north": { "const": 0.0 },
-        "N0_south": { "const": 0.0 },
-        "N0_east": { "const": 0.0 },
-        "N0_west": { "const": 0.0 },
-        "N0_center": { "const": 0.0 },
-        "I0": { "const": 0.0 }
+        }
       }
     },
     {
@@ -625,7 +569,6 @@
         "dest_compartment": "E_center"
       },
       "rate_grad": {
-        "sigma": { "const": 0.0 },
         "gamma": {
           "bin_op": {
             "op": "div",
@@ -672,13 +615,6 @@
             }
           }
         },
-        "omega": { "const": 0.0 },
-        "kappa": { "const": 0.0 },
-        "vacc_frac": { "const": 0.0 },
-        "R0_north": { "const": 0.0 },
-        "R0_south": { "const": 0.0 },
-        "R0_east": { "const": 0.0 },
-        "R0_west": { "const": 0.0 },
         "R0_center": {
           "bin_op": {
             "op": "div",
@@ -724,13 +660,7 @@
               }
             }
           }
-        },
-        "N0_north": { "const": 0.0 },
-        "N0_south": { "const": 0.0 },
-        "N0_east": { "const": 0.0 },
-        "N0_west": { "const": 0.0 },
-        "N0_center": { "const": 0.0 },
-        "I0": { "const": 0.0 }
+        }
       }
     },
     {
@@ -776,9 +706,6 @@
         "dest_compartment": "E_north"
       },
       "rate_grad": {
-        "sigma": { "const": 0.0 },
-        "gamma": { "const": 0.0 },
-        "omega": { "const": 0.0 },
         "kappa": {
           "bin_op": {
             "op": "div",
@@ -826,19 +753,7 @@
               }
             }
           }
-        },
-        "vacc_frac": { "const": 0.0 },
-        "R0_north": { "const": 0.0 },
-        "R0_south": { "const": 0.0 },
-        "R0_east": { "const": 0.0 },
-        "R0_west": { "const": 0.0 },
-        "R0_center": { "const": 0.0 },
-        "N0_north": { "const": 0.0 },
-        "N0_south": { "const": 0.0 },
-        "N0_east": { "const": 0.0 },
-        "N0_west": { "const": 0.0 },
-        "N0_center": { "const": 0.0 },
-        "I0": { "const": 0.0 }
+        }
       }
     },
     {
@@ -882,9 +797,6 @@
         "dest_compartment": "E_north"
       },
       "rate_grad": {
-        "sigma": { "const": 0.0 },
-        "gamma": { "const": 0.0 },
-        "omega": { "const": 0.0 },
         "kappa": {
           "bin_op": {
             "op": "div",
@@ -932,19 +844,7 @@
               }
             }
           }
-        },
-        "vacc_frac": { "const": 0.0 },
-        "R0_north": { "const": 0.0 },
-        "R0_south": { "const": 0.0 },
-        "R0_east": { "const": 0.0 },
-        "R0_west": { "const": 0.0 },
-        "R0_center": { "const": 0.0 },
-        "N0_north": { "const": 0.0 },
-        "N0_south": { "const": 0.0 },
-        "N0_east": { "const": 0.0 },
-        "N0_west": { "const": 0.0 },
-        "N0_center": { "const": 0.0 },
-        "I0": { "const": 0.0 }
+        }
       }
     },
     {
@@ -988,9 +888,6 @@
         "dest_compartment": "E_north"
       },
       "rate_grad": {
-        "sigma": { "const": 0.0 },
-        "gamma": { "const": 0.0 },
-        "omega": { "const": 0.0 },
         "kappa": {
           "bin_op": {
             "op": "div",
@@ -1038,19 +935,7 @@
               }
             }
           }
-        },
-        "vacc_frac": { "const": 0.0 },
-        "R0_north": { "const": 0.0 },
-        "R0_south": { "const": 0.0 },
-        "R0_east": { "const": 0.0 },
-        "R0_west": { "const": 0.0 },
-        "R0_center": { "const": 0.0 },
-        "N0_north": { "const": 0.0 },
-        "N0_south": { "const": 0.0 },
-        "N0_east": { "const": 0.0 },
-        "N0_west": { "const": 0.0 },
-        "N0_center": { "const": 0.0 },
-        "I0": { "const": 0.0 }
+        }
       }
     },
     {
@@ -1096,9 +981,6 @@
         "dest_compartment": "E_north"
       },
       "rate_grad": {
-        "sigma": { "const": 0.0 },
-        "gamma": { "const": 0.0 },
-        "omega": { "const": 0.0 },
         "kappa": {
           "bin_op": {
             "op": "div",
@@ -1149,19 +1031,7 @@
               }
             }
           }
-        },
-        "vacc_frac": { "const": 0.0 },
-        "R0_north": { "const": 0.0 },
-        "R0_south": { "const": 0.0 },
-        "R0_east": { "const": 0.0 },
-        "R0_west": { "const": 0.0 },
-        "R0_center": { "const": 0.0 },
-        "N0_north": { "const": 0.0 },
-        "N0_south": { "const": 0.0 },
-        "N0_east": { "const": 0.0 },
-        "N0_west": { "const": 0.0 },
-        "N0_center": { "const": 0.0 },
-        "I0": { "const": 0.0 }
+        }
       }
     },
     {
@@ -1207,9 +1077,6 @@
         "dest_compartment": "E_south"
       },
       "rate_grad": {
-        "sigma": { "const": 0.0 },
-        "gamma": { "const": 0.0 },
-        "omega": { "const": 0.0 },
         "kappa": {
           "bin_op": {
             "op": "div",
@@ -1257,19 +1124,7 @@
               }
             }
           }
-        },
-        "vacc_frac": { "const": 0.0 },
-        "R0_north": { "const": 0.0 },
-        "R0_south": { "const": 0.0 },
-        "R0_east": { "const": 0.0 },
-        "R0_west": { "const": 0.0 },
-        "R0_center": { "const": 0.0 },
-        "N0_north": { "const": 0.0 },
-        "N0_south": { "const": 0.0 },
-        "N0_east": { "const": 0.0 },
-        "N0_west": { "const": 0.0 },
-        "N0_center": { "const": 0.0 },
-        "I0": { "const": 0.0 }
+        }
       }
     },
     {
@@ -1313,9 +1168,6 @@
         "dest_compartment": "E_south"
       },
       "rate_grad": {
-        "sigma": { "const": 0.0 },
-        "gamma": { "const": 0.0 },
-        "omega": { "const": 0.0 },
         "kappa": {
           "bin_op": {
             "op": "div",
@@ -1363,19 +1215,7 @@
               }
             }
           }
-        },
-        "vacc_frac": { "const": 0.0 },
-        "R0_north": { "const": 0.0 },
-        "R0_south": { "const": 0.0 },
-        "R0_east": { "const": 0.0 },
-        "R0_west": { "const": 0.0 },
-        "R0_center": { "const": 0.0 },
-        "N0_north": { "const": 0.0 },
-        "N0_south": { "const": 0.0 },
-        "N0_east": { "const": 0.0 },
-        "N0_west": { "const": 0.0 },
-        "N0_center": { "const": 0.0 },
-        "I0": { "const": 0.0 }
+        }
       }
     },
     {
@@ -1419,9 +1259,6 @@
         "dest_compartment": "E_south"
       },
       "rate_grad": {
-        "sigma": { "const": 0.0 },
-        "gamma": { "const": 0.0 },
-        "omega": { "const": 0.0 },
         "kappa": {
           "bin_op": {
             "op": "div",
@@ -1469,19 +1306,7 @@
               }
             }
           }
-        },
-        "vacc_frac": { "const": 0.0 },
-        "R0_north": { "const": 0.0 },
-        "R0_south": { "const": 0.0 },
-        "R0_east": { "const": 0.0 },
-        "R0_west": { "const": 0.0 },
-        "R0_center": { "const": 0.0 },
-        "N0_north": { "const": 0.0 },
-        "N0_south": { "const": 0.0 },
-        "N0_east": { "const": 0.0 },
-        "N0_west": { "const": 0.0 },
-        "N0_center": { "const": 0.0 },
-        "I0": { "const": 0.0 }
+        }
       }
     },
     {
@@ -1527,9 +1352,6 @@
         "dest_compartment": "E_south"
       },
       "rate_grad": {
-        "sigma": { "const": 0.0 },
-        "gamma": { "const": 0.0 },
-        "omega": { "const": 0.0 },
         "kappa": {
           "bin_op": {
             "op": "div",
@@ -1580,19 +1402,7 @@
               }
             }
           }
-        },
-        "vacc_frac": { "const": 0.0 },
-        "R0_north": { "const": 0.0 },
-        "R0_south": { "const": 0.0 },
-        "R0_east": { "const": 0.0 },
-        "R0_west": { "const": 0.0 },
-        "R0_center": { "const": 0.0 },
-        "N0_north": { "const": 0.0 },
-        "N0_south": { "const": 0.0 },
-        "N0_east": { "const": 0.0 },
-        "N0_west": { "const": 0.0 },
-        "N0_center": { "const": 0.0 },
-        "I0": { "const": 0.0 }
+        }
       }
     },
     {
@@ -1638,9 +1448,6 @@
         "dest_compartment": "E_east"
       },
       "rate_grad": {
-        "sigma": { "const": 0.0 },
-        "gamma": { "const": 0.0 },
-        "omega": { "const": 0.0 },
         "kappa": {
           "bin_op": {
             "op": "div",
@@ -1688,19 +1495,7 @@
               }
             }
           }
-        },
-        "vacc_frac": { "const": 0.0 },
-        "R0_north": { "const": 0.0 },
-        "R0_south": { "const": 0.0 },
-        "R0_east": { "const": 0.0 },
-        "R0_west": { "const": 0.0 },
-        "R0_center": { "const": 0.0 },
-        "N0_north": { "const": 0.0 },
-        "N0_south": { "const": 0.0 },
-        "N0_east": { "const": 0.0 },
-        "N0_west": { "const": 0.0 },
-        "N0_center": { "const": 0.0 },
-        "I0": { "const": 0.0 }
+        }
       }
     },
     {
@@ -1746,9 +1541,6 @@
         "dest_compartment": "E_east"
       },
       "rate_grad": {
-        "sigma": { "const": 0.0 },
-        "gamma": { "const": 0.0 },
-        "omega": { "const": 0.0 },
         "kappa": {
           "bin_op": {
             "op": "div",
@@ -1796,19 +1588,7 @@
               }
             }
           }
-        },
-        "vacc_frac": { "const": 0.0 },
-        "R0_north": { "const": 0.0 },
-        "R0_south": { "const": 0.0 },
-        "R0_east": { "const": 0.0 },
-        "R0_west": { "const": 0.0 },
-        "R0_center": { "const": 0.0 },
-        "N0_north": { "const": 0.0 },
-        "N0_south": { "const": 0.0 },
-        "N0_east": { "const": 0.0 },
-        "N0_west": { "const": 0.0 },
-        "N0_center": { "const": 0.0 },
-        "I0": { "const": 0.0 }
+        }
       }
     },
     {
@@ -1852,9 +1632,6 @@
         "dest_compartment": "E_east"
       },
       "rate_grad": {
-        "sigma": { "const": 0.0 },
-        "gamma": { "const": 0.0 },
-        "omega": { "const": 0.0 },
         "kappa": {
           "bin_op": {
             "op": "div",
@@ -1902,19 +1679,7 @@
               }
             }
           }
-        },
-        "vacc_frac": { "const": 0.0 },
-        "R0_north": { "const": 0.0 },
-        "R0_south": { "const": 0.0 },
-        "R0_east": { "const": 0.0 },
-        "R0_west": { "const": 0.0 },
-        "R0_center": { "const": 0.0 },
-        "N0_north": { "const": 0.0 },
-        "N0_south": { "const": 0.0 },
-        "N0_east": { "const": 0.0 },
-        "N0_west": { "const": 0.0 },
-        "N0_center": { "const": 0.0 },
-        "I0": { "const": 0.0 }
+        }
       }
     },
     {
@@ -1960,9 +1725,6 @@
         "dest_compartment": "E_east"
       },
       "rate_grad": {
-        "sigma": { "const": 0.0 },
-        "gamma": { "const": 0.0 },
-        "omega": { "const": 0.0 },
         "kappa": {
           "bin_op": {
             "op": "div",
@@ -2013,19 +1775,7 @@
               }
             }
           }
-        },
-        "vacc_frac": { "const": 0.0 },
-        "R0_north": { "const": 0.0 },
-        "R0_south": { "const": 0.0 },
-        "R0_east": { "const": 0.0 },
-        "R0_west": { "const": 0.0 },
-        "R0_center": { "const": 0.0 },
-        "N0_north": { "const": 0.0 },
-        "N0_south": { "const": 0.0 },
-        "N0_east": { "const": 0.0 },
-        "N0_west": { "const": 0.0 },
-        "N0_center": { "const": 0.0 },
-        "I0": { "const": 0.0 }
+        }
       }
     },
     {
@@ -2071,9 +1821,6 @@
         "dest_compartment": "E_west"
       },
       "rate_grad": {
-        "sigma": { "const": 0.0 },
-        "gamma": { "const": 0.0 },
-        "omega": { "const": 0.0 },
         "kappa": {
           "bin_op": {
             "op": "div",
@@ -2121,19 +1868,7 @@
               }
             }
           }
-        },
-        "vacc_frac": { "const": 0.0 },
-        "R0_north": { "const": 0.0 },
-        "R0_south": { "const": 0.0 },
-        "R0_east": { "const": 0.0 },
-        "R0_west": { "const": 0.0 },
-        "R0_center": { "const": 0.0 },
-        "N0_north": { "const": 0.0 },
-        "N0_south": { "const": 0.0 },
-        "N0_east": { "const": 0.0 },
-        "N0_west": { "const": 0.0 },
-        "N0_center": { "const": 0.0 },
-        "I0": { "const": 0.0 }
+        }
       }
     },
     {
@@ -2179,9 +1914,6 @@
         "dest_compartment": "E_west"
       },
       "rate_grad": {
-        "sigma": { "const": 0.0 },
-        "gamma": { "const": 0.0 },
-        "omega": { "const": 0.0 },
         "kappa": {
           "bin_op": {
             "op": "div",
@@ -2229,19 +1961,7 @@
               }
             }
           }
-        },
-        "vacc_frac": { "const": 0.0 },
-        "R0_north": { "const": 0.0 },
-        "R0_south": { "const": 0.0 },
-        "R0_east": { "const": 0.0 },
-        "R0_west": { "const": 0.0 },
-        "R0_center": { "const": 0.0 },
-        "N0_north": { "const": 0.0 },
-        "N0_south": { "const": 0.0 },
-        "N0_east": { "const": 0.0 },
-        "N0_west": { "const": 0.0 },
-        "N0_center": { "const": 0.0 },
-        "I0": { "const": 0.0 }
+        }
       }
     },
     {
@@ -2285,9 +2005,6 @@
         "dest_compartment": "E_west"
       },
       "rate_grad": {
-        "sigma": { "const": 0.0 },
-        "gamma": { "const": 0.0 },
-        "omega": { "const": 0.0 },
         "kappa": {
           "bin_op": {
             "op": "div",
@@ -2335,19 +2052,7 @@
               }
             }
           }
-        },
-        "vacc_frac": { "const": 0.0 },
-        "R0_north": { "const": 0.0 },
-        "R0_south": { "const": 0.0 },
-        "R0_east": { "const": 0.0 },
-        "R0_west": { "const": 0.0 },
-        "R0_center": { "const": 0.0 },
-        "N0_north": { "const": 0.0 },
-        "N0_south": { "const": 0.0 },
-        "N0_east": { "const": 0.0 },
-        "N0_west": { "const": 0.0 },
-        "N0_center": { "const": 0.0 },
-        "I0": { "const": 0.0 }
+        }
       }
     },
     {
@@ -2393,9 +2098,6 @@
         "dest_compartment": "E_west"
       },
       "rate_grad": {
-        "sigma": { "const": 0.0 },
-        "gamma": { "const": 0.0 },
-        "omega": { "const": 0.0 },
         "kappa": {
           "bin_op": {
             "op": "div",
@@ -2446,19 +2148,7 @@
               }
             }
           }
-        },
-        "vacc_frac": { "const": 0.0 },
-        "R0_north": { "const": 0.0 },
-        "R0_south": { "const": 0.0 },
-        "R0_east": { "const": 0.0 },
-        "R0_west": { "const": 0.0 },
-        "R0_center": { "const": 0.0 },
-        "N0_north": { "const": 0.0 },
-        "N0_south": { "const": 0.0 },
-        "N0_east": { "const": 0.0 },
-        "N0_west": { "const": 0.0 },
-        "N0_center": { "const": 0.0 },
-        "I0": { "const": 0.0 }
+        }
       }
     },
     {
@@ -2504,9 +2194,6 @@
         "dest_compartment": "E_center"
       },
       "rate_grad": {
-        "sigma": { "const": 0.0 },
-        "gamma": { "const": 0.0 },
-        "omega": { "const": 0.0 },
         "kappa": {
           "bin_op": {
             "op": "div",
@@ -2554,19 +2241,7 @@
               }
             }
           }
-        },
-        "vacc_frac": { "const": 0.0 },
-        "R0_north": { "const": 0.0 },
-        "R0_south": { "const": 0.0 },
-        "R0_east": { "const": 0.0 },
-        "R0_west": { "const": 0.0 },
-        "R0_center": { "const": 0.0 },
-        "N0_north": { "const": 0.0 },
-        "N0_south": { "const": 0.0 },
-        "N0_east": { "const": 0.0 },
-        "N0_west": { "const": 0.0 },
-        "N0_center": { "const": 0.0 },
-        "I0": { "const": 0.0 }
+        }
       }
     },
     {
@@ -2612,9 +2287,6 @@
         "dest_compartment": "E_center"
       },
       "rate_grad": {
-        "sigma": { "const": 0.0 },
-        "gamma": { "const": 0.0 },
-        "omega": { "const": 0.0 },
         "kappa": {
           "bin_op": {
             "op": "div",
@@ -2662,19 +2334,7 @@
               }
             }
           }
-        },
-        "vacc_frac": { "const": 0.0 },
-        "R0_north": { "const": 0.0 },
-        "R0_south": { "const": 0.0 },
-        "R0_east": { "const": 0.0 },
-        "R0_west": { "const": 0.0 },
-        "R0_center": { "const": 0.0 },
-        "N0_north": { "const": 0.0 },
-        "N0_south": { "const": 0.0 },
-        "N0_east": { "const": 0.0 },
-        "N0_west": { "const": 0.0 },
-        "N0_center": { "const": 0.0 },
-        "I0": { "const": 0.0 }
+        }
       }
     },
     {
@@ -2718,9 +2378,6 @@
         "dest_compartment": "E_center"
       },
       "rate_grad": {
-        "sigma": { "const": 0.0 },
-        "gamma": { "const": 0.0 },
-        "omega": { "const": 0.0 },
         "kappa": {
           "bin_op": {
             "op": "div",
@@ -2768,19 +2425,7 @@
               }
             }
           }
-        },
-        "vacc_frac": { "const": 0.0 },
-        "R0_north": { "const": 0.0 },
-        "R0_south": { "const": 0.0 },
-        "R0_east": { "const": 0.0 },
-        "R0_west": { "const": 0.0 },
-        "R0_center": { "const": 0.0 },
-        "N0_north": { "const": 0.0 },
-        "N0_south": { "const": 0.0 },
-        "N0_east": { "const": 0.0 },
-        "N0_west": { "const": 0.0 },
-        "N0_center": { "const": 0.0 },
-        "I0": { "const": 0.0 }
+        }
       }
     },
     {
@@ -2824,9 +2469,6 @@
         "dest_compartment": "E_center"
       },
       "rate_grad": {
-        "sigma": { "const": 0.0 },
-        "gamma": { "const": 0.0 },
-        "omega": { "const": 0.0 },
         "kappa": {
           "bin_op": {
             "op": "div",
@@ -2874,19 +2516,7 @@
               }
             }
           }
-        },
-        "vacc_frac": { "const": 0.0 },
-        "R0_north": { "const": 0.0 },
-        "R0_south": { "const": 0.0 },
-        "R0_east": { "const": 0.0 },
-        "R0_west": { "const": 0.0 },
-        "R0_center": { "const": 0.0 },
-        "N0_north": { "const": 0.0 },
-        "N0_south": { "const": 0.0 },
-        "N0_east": { "const": 0.0 },
-        "N0_west": { "const": 0.0 },
-        "N0_center": { "const": 0.0 },
-        "I0": { "const": 0.0 }
+        }
       }
     },
     {
@@ -2904,24 +2534,7 @@
         "source_compartment": "E_north",
         "dest_compartment": "I_north"
       },
-      "rate_grad": {
-        "sigma": { "pop": "E_north" },
-        "gamma": { "const": 0.0 },
-        "omega": { "const": 0.0 },
-        "kappa": { "const": 0.0 },
-        "vacc_frac": { "const": 0.0 },
-        "R0_north": { "const": 0.0 },
-        "R0_south": { "const": 0.0 },
-        "R0_east": { "const": 0.0 },
-        "R0_west": { "const": 0.0 },
-        "R0_center": { "const": 0.0 },
-        "N0_north": { "const": 0.0 },
-        "N0_south": { "const": 0.0 },
-        "N0_east": { "const": 0.0 },
-        "N0_west": { "const": 0.0 },
-        "N0_center": { "const": 0.0 },
-        "I0": { "const": 0.0 }
-      }
+      "rate_grad": { "sigma": { "pop": "E_north" } }
     },
     {
       "name": "progression_south",
@@ -2938,24 +2551,7 @@
         "source_compartment": "E_south",
         "dest_compartment": "I_south"
       },
-      "rate_grad": {
-        "sigma": { "pop": "E_south" },
-        "gamma": { "const": 0.0 },
-        "omega": { "const": 0.0 },
-        "kappa": { "const": 0.0 },
-        "vacc_frac": { "const": 0.0 },
-        "R0_north": { "const": 0.0 },
-        "R0_south": { "const": 0.0 },
-        "R0_east": { "const": 0.0 },
-        "R0_west": { "const": 0.0 },
-        "R0_center": { "const": 0.0 },
-        "N0_north": { "const": 0.0 },
-        "N0_south": { "const": 0.0 },
-        "N0_east": { "const": 0.0 },
-        "N0_west": { "const": 0.0 },
-        "N0_center": { "const": 0.0 },
-        "I0": { "const": 0.0 }
-      }
+      "rate_grad": { "sigma": { "pop": "E_south" } }
     },
     {
       "name": "progression_east",
@@ -2972,24 +2568,7 @@
         "source_compartment": "E_east",
         "dest_compartment": "I_east"
       },
-      "rate_grad": {
-        "sigma": { "pop": "E_east" },
-        "gamma": { "const": 0.0 },
-        "omega": { "const": 0.0 },
-        "kappa": { "const": 0.0 },
-        "vacc_frac": { "const": 0.0 },
-        "R0_north": { "const": 0.0 },
-        "R0_south": { "const": 0.0 },
-        "R0_east": { "const": 0.0 },
-        "R0_west": { "const": 0.0 },
-        "R0_center": { "const": 0.0 },
-        "N0_north": { "const": 0.0 },
-        "N0_south": { "const": 0.0 },
-        "N0_east": { "const": 0.0 },
-        "N0_west": { "const": 0.0 },
-        "N0_center": { "const": 0.0 },
-        "I0": { "const": 0.0 }
-      }
+      "rate_grad": { "sigma": { "pop": "E_east" } }
     },
     {
       "name": "progression_west",
@@ -3006,24 +2585,7 @@
         "source_compartment": "E_west",
         "dest_compartment": "I_west"
       },
-      "rate_grad": {
-        "sigma": { "pop": "E_west" },
-        "gamma": { "const": 0.0 },
-        "omega": { "const": 0.0 },
-        "kappa": { "const": 0.0 },
-        "vacc_frac": { "const": 0.0 },
-        "R0_north": { "const": 0.0 },
-        "R0_south": { "const": 0.0 },
-        "R0_east": { "const": 0.0 },
-        "R0_west": { "const": 0.0 },
-        "R0_center": { "const": 0.0 },
-        "N0_north": { "const": 0.0 },
-        "N0_south": { "const": 0.0 },
-        "N0_east": { "const": 0.0 },
-        "N0_west": { "const": 0.0 },
-        "N0_center": { "const": 0.0 },
-        "I0": { "const": 0.0 }
-      }
+      "rate_grad": { "sigma": { "pop": "E_west" } }
     },
     {
       "name": "progression_center",
@@ -3040,24 +2602,7 @@
         "source_compartment": "E_center",
         "dest_compartment": "I_center"
       },
-      "rate_grad": {
-        "sigma": { "pop": "E_center" },
-        "gamma": { "const": 0.0 },
-        "omega": { "const": 0.0 },
-        "kappa": { "const": 0.0 },
-        "vacc_frac": { "const": 0.0 },
-        "R0_north": { "const": 0.0 },
-        "R0_south": { "const": 0.0 },
-        "R0_east": { "const": 0.0 },
-        "R0_west": { "const": 0.0 },
-        "R0_center": { "const": 0.0 },
-        "N0_north": { "const": 0.0 },
-        "N0_south": { "const": 0.0 },
-        "N0_east": { "const": 0.0 },
-        "N0_west": { "const": 0.0 },
-        "N0_center": { "const": 0.0 },
-        "I0": { "const": 0.0 }
-      }
+      "rate_grad": { "sigma": { "pop": "E_center" } }
     },
     {
       "name": "recovery_north",
@@ -3074,24 +2619,7 @@
         "source_compartment": "I_north",
         "dest_compartment": "R_north"
       },
-      "rate_grad": {
-        "sigma": { "const": 0.0 },
-        "gamma": { "pop": "I_north" },
-        "omega": { "const": 0.0 },
-        "kappa": { "const": 0.0 },
-        "vacc_frac": { "const": 0.0 },
-        "R0_north": { "const": 0.0 },
-        "R0_south": { "const": 0.0 },
-        "R0_east": { "const": 0.0 },
-        "R0_west": { "const": 0.0 },
-        "R0_center": { "const": 0.0 },
-        "N0_north": { "const": 0.0 },
-        "N0_south": { "const": 0.0 },
-        "N0_east": { "const": 0.0 },
-        "N0_west": { "const": 0.0 },
-        "N0_center": { "const": 0.0 },
-        "I0": { "const": 0.0 }
-      }
+      "rate_grad": { "gamma": { "pop": "I_north" } }
     },
     {
       "name": "recovery_south",
@@ -3108,24 +2636,7 @@
         "source_compartment": "I_south",
         "dest_compartment": "R_south"
       },
-      "rate_grad": {
-        "sigma": { "const": 0.0 },
-        "gamma": { "pop": "I_south" },
-        "omega": { "const": 0.0 },
-        "kappa": { "const": 0.0 },
-        "vacc_frac": { "const": 0.0 },
-        "R0_north": { "const": 0.0 },
-        "R0_south": { "const": 0.0 },
-        "R0_east": { "const": 0.0 },
-        "R0_west": { "const": 0.0 },
-        "R0_center": { "const": 0.0 },
-        "N0_north": { "const": 0.0 },
-        "N0_south": { "const": 0.0 },
-        "N0_east": { "const": 0.0 },
-        "N0_west": { "const": 0.0 },
-        "N0_center": { "const": 0.0 },
-        "I0": { "const": 0.0 }
-      }
+      "rate_grad": { "gamma": { "pop": "I_south" } }
     },
     {
       "name": "recovery_east",
@@ -3142,24 +2653,7 @@
         "source_compartment": "I_east",
         "dest_compartment": "R_east"
       },
-      "rate_grad": {
-        "sigma": { "const": 0.0 },
-        "gamma": { "pop": "I_east" },
-        "omega": { "const": 0.0 },
-        "kappa": { "const": 0.0 },
-        "vacc_frac": { "const": 0.0 },
-        "R0_north": { "const": 0.0 },
-        "R0_south": { "const": 0.0 },
-        "R0_east": { "const": 0.0 },
-        "R0_west": { "const": 0.0 },
-        "R0_center": { "const": 0.0 },
-        "N0_north": { "const": 0.0 },
-        "N0_south": { "const": 0.0 },
-        "N0_east": { "const": 0.0 },
-        "N0_west": { "const": 0.0 },
-        "N0_center": { "const": 0.0 },
-        "I0": { "const": 0.0 }
-      }
+      "rate_grad": { "gamma": { "pop": "I_east" } }
     },
     {
       "name": "recovery_west",
@@ -3176,24 +2670,7 @@
         "source_compartment": "I_west",
         "dest_compartment": "R_west"
       },
-      "rate_grad": {
-        "sigma": { "const": 0.0 },
-        "gamma": { "pop": "I_west" },
-        "omega": { "const": 0.0 },
-        "kappa": { "const": 0.0 },
-        "vacc_frac": { "const": 0.0 },
-        "R0_north": { "const": 0.0 },
-        "R0_south": { "const": 0.0 },
-        "R0_east": { "const": 0.0 },
-        "R0_west": { "const": 0.0 },
-        "R0_center": { "const": 0.0 },
-        "N0_north": { "const": 0.0 },
-        "N0_south": { "const": 0.0 },
-        "N0_east": { "const": 0.0 },
-        "N0_west": { "const": 0.0 },
-        "N0_center": { "const": 0.0 },
-        "I0": { "const": 0.0 }
-      }
+      "rate_grad": { "gamma": { "pop": "I_west" } }
     },
     {
       "name": "recovery_center",
@@ -3210,24 +2687,7 @@
         "source_compartment": "I_center",
         "dest_compartment": "R_center"
       },
-      "rate_grad": {
-        "sigma": { "const": 0.0 },
-        "gamma": { "pop": "I_center" },
-        "omega": { "const": 0.0 },
-        "kappa": { "const": 0.0 },
-        "vacc_frac": { "const": 0.0 },
-        "R0_north": { "const": 0.0 },
-        "R0_south": { "const": 0.0 },
-        "R0_east": { "const": 0.0 },
-        "R0_west": { "const": 0.0 },
-        "R0_center": { "const": 0.0 },
-        "N0_north": { "const": 0.0 },
-        "N0_south": { "const": 0.0 },
-        "N0_east": { "const": 0.0 },
-        "N0_west": { "const": 0.0 },
-        "N0_center": { "const": 0.0 },
-        "I0": { "const": 0.0 }
-      }
+      "rate_grad": { "gamma": { "pop": "I_center" } }
     },
     {
       "name": "waning_north",
@@ -3244,24 +2704,7 @@
         "source_compartment": "V_north",
         "dest_compartment": "S_north"
       },
-      "rate_grad": {
-        "sigma": { "const": 0.0 },
-        "gamma": { "const": 0.0 },
-        "omega": { "pop": "V_north" },
-        "kappa": { "const": 0.0 },
-        "vacc_frac": { "const": 0.0 },
-        "R0_north": { "const": 0.0 },
-        "R0_south": { "const": 0.0 },
-        "R0_east": { "const": 0.0 },
-        "R0_west": { "const": 0.0 },
-        "R0_center": { "const": 0.0 },
-        "N0_north": { "const": 0.0 },
-        "N0_south": { "const": 0.0 },
-        "N0_east": { "const": 0.0 },
-        "N0_west": { "const": 0.0 },
-        "N0_center": { "const": 0.0 },
-        "I0": { "const": 0.0 }
-      }
+      "rate_grad": { "omega": { "pop": "V_north" } }
     },
     {
       "name": "waning_south",
@@ -3278,24 +2721,7 @@
         "source_compartment": "V_south",
         "dest_compartment": "S_south"
       },
-      "rate_grad": {
-        "sigma": { "const": 0.0 },
-        "gamma": { "const": 0.0 },
-        "omega": { "pop": "V_south" },
-        "kappa": { "const": 0.0 },
-        "vacc_frac": { "const": 0.0 },
-        "R0_north": { "const": 0.0 },
-        "R0_south": { "const": 0.0 },
-        "R0_east": { "const": 0.0 },
-        "R0_west": { "const": 0.0 },
-        "R0_center": { "const": 0.0 },
-        "N0_north": { "const": 0.0 },
-        "N0_south": { "const": 0.0 },
-        "N0_east": { "const": 0.0 },
-        "N0_west": { "const": 0.0 },
-        "N0_center": { "const": 0.0 },
-        "I0": { "const": 0.0 }
-      }
+      "rate_grad": { "omega": { "pop": "V_south" } }
     },
     {
       "name": "waning_east",
@@ -3312,24 +2738,7 @@
         "source_compartment": "V_east",
         "dest_compartment": "S_east"
       },
-      "rate_grad": {
-        "sigma": { "const": 0.0 },
-        "gamma": { "const": 0.0 },
-        "omega": { "pop": "V_east" },
-        "kappa": { "const": 0.0 },
-        "vacc_frac": { "const": 0.0 },
-        "R0_north": { "const": 0.0 },
-        "R0_south": { "const": 0.0 },
-        "R0_east": { "const": 0.0 },
-        "R0_west": { "const": 0.0 },
-        "R0_center": { "const": 0.0 },
-        "N0_north": { "const": 0.0 },
-        "N0_south": { "const": 0.0 },
-        "N0_east": { "const": 0.0 },
-        "N0_west": { "const": 0.0 },
-        "N0_center": { "const": 0.0 },
-        "I0": { "const": 0.0 }
-      }
+      "rate_grad": { "omega": { "pop": "V_east" } }
     },
     {
       "name": "waning_west",
@@ -3346,24 +2755,7 @@
         "source_compartment": "V_west",
         "dest_compartment": "S_west"
       },
-      "rate_grad": {
-        "sigma": { "const": 0.0 },
-        "gamma": { "const": 0.0 },
-        "omega": { "pop": "V_west" },
-        "kappa": { "const": 0.0 },
-        "vacc_frac": { "const": 0.0 },
-        "R0_north": { "const": 0.0 },
-        "R0_south": { "const": 0.0 },
-        "R0_east": { "const": 0.0 },
-        "R0_west": { "const": 0.0 },
-        "R0_center": { "const": 0.0 },
-        "N0_north": { "const": 0.0 },
-        "N0_south": { "const": 0.0 },
-        "N0_east": { "const": 0.0 },
-        "N0_west": { "const": 0.0 },
-        "N0_center": { "const": 0.0 },
-        "I0": { "const": 0.0 }
-      }
+      "rate_grad": { "omega": { "pop": "V_west" } }
     },
     {
       "name": "waning_center",
@@ -3380,24 +2772,7 @@
         "source_compartment": "V_center",
         "dest_compartment": "S_center"
       },
-      "rate_grad": {
-        "sigma": { "const": 0.0 },
-        "gamma": { "const": 0.0 },
-        "omega": { "pop": "V_center" },
-        "kappa": { "const": 0.0 },
-        "vacc_frac": { "const": 0.0 },
-        "R0_north": { "const": 0.0 },
-        "R0_south": { "const": 0.0 },
-        "R0_east": { "const": 0.0 },
-        "R0_west": { "const": 0.0 },
-        "R0_center": { "const": 0.0 },
-        "N0_north": { "const": 0.0 },
-        "N0_south": { "const": 0.0 },
-        "N0_east": { "const": 0.0 },
-        "N0_west": { "const": 0.0 },
-        "N0_center": { "const": 0.0 },
-        "I0": { "const": 0.0 }
-      }
+      "rate_grad": { "omega": { "pop": "V_center" } }
     }
   ],
   "ode_equations": [],

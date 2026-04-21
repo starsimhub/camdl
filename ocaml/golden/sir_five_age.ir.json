@@ -193,9 +193,7 @@
               }
             }
           }
-        },
-        "gamma": { "const": 0.0 },
-        "mu": { "const": 0.0 }
+        }
       }
     },
     {
@@ -370,9 +368,7 @@
               }
             }
           }
-        },
-        "gamma": { "const": 0.0 },
-        "mu": { "const": 0.0 }
+        }
       }
     },
     {
@@ -547,9 +543,7 @@
               }
             }
           }
-        },
-        "gamma": { "const": 0.0 },
-        "mu": { "const": 0.0 }
+        }
       }
     },
     {
@@ -724,9 +718,7 @@
               }
             }
           }
-        },
-        "gamma": { "const": 0.0 },
-        "mu": { "const": 0.0 }
+        }
       }
     },
     {
@@ -901,9 +893,7 @@
               }
             }
           }
-        },
-        "gamma": { "const": 0.0 },
-        "mu": { "const": 0.0 }
+        }
       }
     },
     {
@@ -921,11 +911,7 @@
         "source_compartment": "I_age_0_5",
         "dest_compartment": "R_age_0_5"
       },
-      "rate_grad": {
-        "beta": { "const": 0.0 },
-        "gamma": { "pop": "I_age_0_5" },
-        "mu": { "const": 0.0 }
-      }
+      "rate_grad": { "gamma": { "pop": "I_age_0_5" } }
     },
     {
       "name": "recovery_age_5_15",
@@ -942,11 +928,7 @@
         "source_compartment": "I_age_5_15",
         "dest_compartment": "R_age_5_15"
       },
-      "rate_grad": {
-        "beta": { "const": 0.0 },
-        "gamma": { "pop": "I_age_5_15" },
-        "mu": { "const": 0.0 }
-      }
+      "rate_grad": { "gamma": { "pop": "I_age_5_15" } }
     },
     {
       "name": "recovery_age_15_50",
@@ -963,11 +945,7 @@
         "source_compartment": "I_age_15_50",
         "dest_compartment": "R_age_15_50"
       },
-      "rate_grad": {
-        "beta": { "const": 0.0 },
-        "gamma": { "pop": "I_age_15_50" },
-        "mu": { "const": 0.0 }
-      }
+      "rate_grad": { "gamma": { "pop": "I_age_15_50" } }
     },
     {
       "name": "recovery_age_50_65",
@@ -984,11 +962,7 @@
         "source_compartment": "I_age_50_65",
         "dest_compartment": "R_age_50_65"
       },
-      "rate_grad": {
-        "beta": { "const": 0.0 },
-        "gamma": { "pop": "I_age_50_65" },
-        "mu": { "const": 0.0 }
-      }
+      "rate_grad": { "gamma": { "pop": "I_age_50_65" } }
     },
     {
       "name": "recovery_age_65p",
@@ -1005,11 +979,7 @@
         "source_compartment": "I_age_65p",
         "dest_compartment": "R_age_65p"
       },
-      "rate_grad": {
-        "beta": { "const": 0.0 },
-        "gamma": { "pop": "I_age_65p" },
-        "mu": { "const": 0.0 }
-      }
+      "rate_grad": { "gamma": { "pop": "I_age_65p" } }
     },
     {
       "name": "aging_S_age_0_5",
@@ -1036,11 +1006,6 @@
         "origin_kind": "intrinsic",
         "source_compartment": "S_age_0_5",
         "dest_compartment": "S_age_5_15"
-      },
-      "rate_grad": {
-        "beta": { "const": 0.0 },
-        "gamma": { "const": 0.0 },
-        "mu": { "const": 0.0 }
       }
     },
     {
@@ -1068,11 +1033,6 @@
         "origin_kind": "intrinsic",
         "source_compartment": "S_age_5_15",
         "dest_compartment": "S_age_15_50"
-      },
-      "rate_grad": {
-        "beta": { "const": 0.0 },
-        "gamma": { "const": 0.0 },
-        "mu": { "const": 0.0 }
       }
     },
     {
@@ -1100,11 +1060,6 @@
         "origin_kind": "intrinsic",
         "source_compartment": "S_age_15_50",
         "dest_compartment": "S_age_50_65"
-      },
-      "rate_grad": {
-        "beta": { "const": 0.0 },
-        "gamma": { "const": 0.0 },
-        "mu": { "const": 0.0 }
       }
     },
     {
@@ -1132,11 +1087,6 @@
         "origin_kind": "intrinsic",
         "source_compartment": "S_age_50_65",
         "dest_compartment": "S_age_65p"
-      },
-      "rate_grad": {
-        "beta": { "const": 0.0 },
-        "gamma": { "const": 0.0 },
-        "mu": { "const": 0.0 }
       }
     },
     {
@@ -1164,11 +1114,6 @@
         "origin_kind": "intrinsic",
         "source_compartment": "I_age_0_5",
         "dest_compartment": "I_age_5_15"
-      },
-      "rate_grad": {
-        "beta": { "const": 0.0 },
-        "gamma": { "const": 0.0 },
-        "mu": { "const": 0.0 }
       }
     },
     {
@@ -1196,11 +1141,6 @@
         "origin_kind": "intrinsic",
         "source_compartment": "I_age_5_15",
         "dest_compartment": "I_age_15_50"
-      },
-      "rate_grad": {
-        "beta": { "const": 0.0 },
-        "gamma": { "const": 0.0 },
-        "mu": { "const": 0.0 }
       }
     },
     {
@@ -1228,11 +1168,6 @@
         "origin_kind": "intrinsic",
         "source_compartment": "I_age_15_50",
         "dest_compartment": "I_age_50_65"
-      },
-      "rate_grad": {
-        "beta": { "const": 0.0 },
-        "gamma": { "const": 0.0 },
-        "mu": { "const": 0.0 }
       }
     },
     {
@@ -1260,11 +1195,6 @@
         "origin_kind": "intrinsic",
         "source_compartment": "I_age_50_65",
         "dest_compartment": "I_age_65p"
-      },
-      "rate_grad": {
-        "beta": { "const": 0.0 },
-        "gamma": { "const": 0.0 },
-        "mu": { "const": 0.0 }
       }
     },
     {
@@ -1292,11 +1222,6 @@
         "origin_kind": "intrinsic",
         "source_compartment": "R_age_0_5",
         "dest_compartment": "R_age_5_15"
-      },
-      "rate_grad": {
-        "beta": { "const": 0.0 },
-        "gamma": { "const": 0.0 },
-        "mu": { "const": 0.0 }
       }
     },
     {
@@ -1324,11 +1249,6 @@
         "origin_kind": "intrinsic",
         "source_compartment": "R_age_5_15",
         "dest_compartment": "R_age_15_50"
-      },
-      "rate_grad": {
-        "beta": { "const": 0.0 },
-        "gamma": { "const": 0.0 },
-        "mu": { "const": 0.0 }
       }
     },
     {
@@ -1356,11 +1276,6 @@
         "origin_kind": "intrinsic",
         "source_compartment": "R_age_15_50",
         "dest_compartment": "R_age_50_65"
-      },
-      "rate_grad": {
-        "beta": { "const": 0.0 },
-        "gamma": { "const": 0.0 },
-        "mu": { "const": 0.0 }
       }
     },
     {
@@ -1388,11 +1303,6 @@
         "origin_kind": "intrinsic",
         "source_compartment": "R_age_50_65",
         "dest_compartment": "R_age_65p"
-      },
-      "rate_grad": {
-        "beta": { "const": 0.0 },
-        "gamma": { "const": 0.0 },
-        "mu": { "const": 0.0 }
       }
     },
     {
@@ -1410,11 +1320,7 @@
         "source_compartment": "S_age_0_5",
         "dest_compartment": null
       },
-      "rate_grad": {
-        "beta": { "const": 0.0 },
-        "gamma": { "const": 0.0 },
-        "mu": { "pop": "S_age_0_5" }
-      }
+      "rate_grad": { "mu": { "pop": "S_age_0_5" } }
     },
     {
       "name": "death_S_age_5_15",
@@ -1431,11 +1337,7 @@
         "source_compartment": "S_age_5_15",
         "dest_compartment": null
       },
-      "rate_grad": {
-        "beta": { "const": 0.0 },
-        "gamma": { "const": 0.0 },
-        "mu": { "pop": "S_age_5_15" }
-      }
+      "rate_grad": { "mu": { "pop": "S_age_5_15" } }
     },
     {
       "name": "death_S_age_15_50",
@@ -1452,11 +1354,7 @@
         "source_compartment": "S_age_15_50",
         "dest_compartment": null
       },
-      "rate_grad": {
-        "beta": { "const": 0.0 },
-        "gamma": { "const": 0.0 },
-        "mu": { "pop": "S_age_15_50" }
-      }
+      "rate_grad": { "mu": { "pop": "S_age_15_50" } }
     },
     {
       "name": "death_S_age_50_65",
@@ -1473,11 +1371,7 @@
         "source_compartment": "S_age_50_65",
         "dest_compartment": null
       },
-      "rate_grad": {
-        "beta": { "const": 0.0 },
-        "gamma": { "const": 0.0 },
-        "mu": { "pop": "S_age_50_65" }
-      }
+      "rate_grad": { "mu": { "pop": "S_age_50_65" } }
     },
     {
       "name": "death_S_age_65p",
@@ -1494,11 +1388,7 @@
         "source_compartment": "S_age_65p",
         "dest_compartment": null
       },
-      "rate_grad": {
-        "beta": { "const": 0.0 },
-        "gamma": { "const": 0.0 },
-        "mu": { "pop": "S_age_65p" }
-      }
+      "rate_grad": { "mu": { "pop": "S_age_65p" } }
     },
     {
       "name": "death_I_age_0_5",
@@ -1515,11 +1405,7 @@
         "source_compartment": "I_age_0_5",
         "dest_compartment": null
       },
-      "rate_grad": {
-        "beta": { "const": 0.0 },
-        "gamma": { "const": 0.0 },
-        "mu": { "pop": "I_age_0_5" }
-      }
+      "rate_grad": { "mu": { "pop": "I_age_0_5" } }
     },
     {
       "name": "death_I_age_5_15",
@@ -1536,11 +1422,7 @@
         "source_compartment": "I_age_5_15",
         "dest_compartment": null
       },
-      "rate_grad": {
-        "beta": { "const": 0.0 },
-        "gamma": { "const": 0.0 },
-        "mu": { "pop": "I_age_5_15" }
-      }
+      "rate_grad": { "mu": { "pop": "I_age_5_15" } }
     },
     {
       "name": "death_I_age_15_50",
@@ -1557,11 +1439,7 @@
         "source_compartment": "I_age_15_50",
         "dest_compartment": null
       },
-      "rate_grad": {
-        "beta": { "const": 0.0 },
-        "gamma": { "const": 0.0 },
-        "mu": { "pop": "I_age_15_50" }
-      }
+      "rate_grad": { "mu": { "pop": "I_age_15_50" } }
     },
     {
       "name": "death_I_age_50_65",
@@ -1578,11 +1456,7 @@
         "source_compartment": "I_age_50_65",
         "dest_compartment": null
       },
-      "rate_grad": {
-        "beta": { "const": 0.0 },
-        "gamma": { "const": 0.0 },
-        "mu": { "pop": "I_age_50_65" }
-      }
+      "rate_grad": { "mu": { "pop": "I_age_50_65" } }
     },
     {
       "name": "death_I_age_65p",
@@ -1599,11 +1473,7 @@
         "source_compartment": "I_age_65p",
         "dest_compartment": null
       },
-      "rate_grad": {
-        "beta": { "const": 0.0 },
-        "gamma": { "const": 0.0 },
-        "mu": { "pop": "I_age_65p" }
-      }
+      "rate_grad": { "mu": { "pop": "I_age_65p" } }
     },
     {
       "name": "death_R_age_0_5",
@@ -1620,11 +1490,7 @@
         "source_compartment": "R_age_0_5",
         "dest_compartment": null
       },
-      "rate_grad": {
-        "beta": { "const": 0.0 },
-        "gamma": { "const": 0.0 },
-        "mu": { "pop": "R_age_0_5" }
-      }
+      "rate_grad": { "mu": { "pop": "R_age_0_5" } }
     },
     {
       "name": "death_R_age_5_15",
@@ -1641,11 +1507,7 @@
         "source_compartment": "R_age_5_15",
         "dest_compartment": null
       },
-      "rate_grad": {
-        "beta": { "const": 0.0 },
-        "gamma": { "const": 0.0 },
-        "mu": { "pop": "R_age_5_15" }
-      }
+      "rate_grad": { "mu": { "pop": "R_age_5_15" } }
     },
     {
       "name": "death_R_age_15_50",
@@ -1662,11 +1524,7 @@
         "source_compartment": "R_age_15_50",
         "dest_compartment": null
       },
-      "rate_grad": {
-        "beta": { "const": 0.0 },
-        "gamma": { "const": 0.0 },
-        "mu": { "pop": "R_age_15_50" }
-      }
+      "rate_grad": { "mu": { "pop": "R_age_15_50" } }
     },
     {
       "name": "death_R_age_50_65",
@@ -1683,11 +1541,7 @@
         "source_compartment": "R_age_50_65",
         "dest_compartment": null
       },
-      "rate_grad": {
-        "beta": { "const": 0.0 },
-        "gamma": { "const": 0.0 },
-        "mu": { "pop": "R_age_50_65" }
-      }
+      "rate_grad": { "mu": { "pop": "R_age_50_65" } }
     },
     {
       "name": "death_R_age_65p",
@@ -1704,11 +1558,7 @@
         "source_compartment": "R_age_65p",
         "dest_compartment": null
       },
-      "rate_grad": {
-        "beta": { "const": 0.0 },
-        "gamma": { "const": 0.0 },
-        "mu": { "pop": "R_age_65p" }
-      }
+      "rate_grad": { "mu": { "pop": "R_age_65p" } }
     },
     {
       "name": "birth",
@@ -1733,8 +1583,6 @@
         "dest_compartment": "S_age_0_5"
       },
       "rate_grad": {
-        "beta": { "const": 0.0 },
-        "gamma": { "const": 0.0 },
         "mu": {
           "pop_sum": [
             "S_age_0_5", "I_age_0_5", "R_age_0_5", "S_age_5_15",

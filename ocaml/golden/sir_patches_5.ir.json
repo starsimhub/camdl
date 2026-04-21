@@ -86,11 +86,6 @@
             }
           }
         },
-        "N0_p0": { "const": 0.0 },
-        "N0_p1": { "const": 0.0 },
-        "N0_p2": { "const": 0.0 },
-        "N0_p3": { "const": 0.0 },
-        "N0_p4": { "const": 0.0 },
         "R0_p0": {
           "bin_op": {
             "op": "div",
@@ -121,12 +116,7 @@
               }
             }
           }
-        },
-        "R0_p1": { "const": 0.0 },
-        "R0_p2": { "const": 0.0 },
-        "R0_p3": { "const": 0.0 },
-        "R0_p4": { "const": 0.0 },
-        "I0": { "const": 0.0 }
+        }
       }
     },
     {
@@ -194,12 +184,6 @@
             }
           }
         },
-        "N0_p0": { "const": 0.0 },
-        "N0_p1": { "const": 0.0 },
-        "N0_p2": { "const": 0.0 },
-        "N0_p3": { "const": 0.0 },
-        "N0_p4": { "const": 0.0 },
-        "R0_p0": { "const": 0.0 },
         "R0_p1": {
           "bin_op": {
             "op": "div",
@@ -230,11 +214,7 @@
               }
             }
           }
-        },
-        "R0_p2": { "const": 0.0 },
-        "R0_p3": { "const": 0.0 },
-        "R0_p4": { "const": 0.0 },
-        "I0": { "const": 0.0 }
+        }
       }
     },
     {
@@ -302,13 +282,6 @@
             }
           }
         },
-        "N0_p0": { "const": 0.0 },
-        "N0_p1": { "const": 0.0 },
-        "N0_p2": { "const": 0.0 },
-        "N0_p3": { "const": 0.0 },
-        "N0_p4": { "const": 0.0 },
-        "R0_p0": { "const": 0.0 },
-        "R0_p1": { "const": 0.0 },
         "R0_p2": {
           "bin_op": {
             "op": "div",
@@ -339,10 +312,7 @@
               }
             }
           }
-        },
-        "R0_p3": { "const": 0.0 },
-        "R0_p4": { "const": 0.0 },
-        "I0": { "const": 0.0 }
+        }
       }
     },
     {
@@ -410,14 +380,6 @@
             }
           }
         },
-        "N0_p0": { "const": 0.0 },
-        "N0_p1": { "const": 0.0 },
-        "N0_p2": { "const": 0.0 },
-        "N0_p3": { "const": 0.0 },
-        "N0_p4": { "const": 0.0 },
-        "R0_p0": { "const": 0.0 },
-        "R0_p1": { "const": 0.0 },
-        "R0_p2": { "const": 0.0 },
         "R0_p3": {
           "bin_op": {
             "op": "div",
@@ -448,9 +410,7 @@
               }
             }
           }
-        },
-        "R0_p4": { "const": 0.0 },
-        "I0": { "const": 0.0 }
+        }
       }
     },
     {
@@ -518,15 +478,6 @@
             }
           }
         },
-        "N0_p0": { "const": 0.0 },
-        "N0_p1": { "const": 0.0 },
-        "N0_p2": { "const": 0.0 },
-        "N0_p3": { "const": 0.0 },
-        "N0_p4": { "const": 0.0 },
-        "R0_p0": { "const": 0.0 },
-        "R0_p1": { "const": 0.0 },
-        "R0_p2": { "const": 0.0 },
-        "R0_p3": { "const": 0.0 },
         "R0_p4": {
           "bin_op": {
             "op": "div",
@@ -557,8 +508,7 @@
               }
             }
           }
-        },
-        "I0": { "const": 0.0 }
+        }
       }
     },
     {
@@ -576,20 +526,7 @@
         "source_compartment": "I_p0",
         "dest_compartment": "R_p0"
       },
-      "rate_grad": {
-        "gamma": { "pop": "I_p0" },
-        "N0_p0": { "const": 0.0 },
-        "N0_p1": { "const": 0.0 },
-        "N0_p2": { "const": 0.0 },
-        "N0_p3": { "const": 0.0 },
-        "N0_p4": { "const": 0.0 },
-        "R0_p0": { "const": 0.0 },
-        "R0_p1": { "const": 0.0 },
-        "R0_p2": { "const": 0.0 },
-        "R0_p3": { "const": 0.0 },
-        "R0_p4": { "const": 0.0 },
-        "I0": { "const": 0.0 }
-      }
+      "rate_grad": { "gamma": { "pop": "I_p0" } }
     },
     {
       "name": "recovery_p1",
@@ -606,20 +543,7 @@
         "source_compartment": "I_p1",
         "dest_compartment": "R_p1"
       },
-      "rate_grad": {
-        "gamma": { "pop": "I_p1" },
-        "N0_p0": { "const": 0.0 },
-        "N0_p1": { "const": 0.0 },
-        "N0_p2": { "const": 0.0 },
-        "N0_p3": { "const": 0.0 },
-        "N0_p4": { "const": 0.0 },
-        "R0_p0": { "const": 0.0 },
-        "R0_p1": { "const": 0.0 },
-        "R0_p2": { "const": 0.0 },
-        "R0_p3": { "const": 0.0 },
-        "R0_p4": { "const": 0.0 },
-        "I0": { "const": 0.0 }
-      }
+      "rate_grad": { "gamma": { "pop": "I_p1" } }
     },
     {
       "name": "recovery_p2",
@@ -636,20 +560,7 @@
         "source_compartment": "I_p2",
         "dest_compartment": "R_p2"
       },
-      "rate_grad": {
-        "gamma": { "pop": "I_p2" },
-        "N0_p0": { "const": 0.0 },
-        "N0_p1": { "const": 0.0 },
-        "N0_p2": { "const": 0.0 },
-        "N0_p3": { "const": 0.0 },
-        "N0_p4": { "const": 0.0 },
-        "R0_p0": { "const": 0.0 },
-        "R0_p1": { "const": 0.0 },
-        "R0_p2": { "const": 0.0 },
-        "R0_p3": { "const": 0.0 },
-        "R0_p4": { "const": 0.0 },
-        "I0": { "const": 0.0 }
-      }
+      "rate_grad": { "gamma": { "pop": "I_p2" } }
     },
     {
       "name": "recovery_p3",
@@ -666,20 +577,7 @@
         "source_compartment": "I_p3",
         "dest_compartment": "R_p3"
       },
-      "rate_grad": {
-        "gamma": { "pop": "I_p3" },
-        "N0_p0": { "const": 0.0 },
-        "N0_p1": { "const": 0.0 },
-        "N0_p2": { "const": 0.0 },
-        "N0_p3": { "const": 0.0 },
-        "N0_p4": { "const": 0.0 },
-        "R0_p0": { "const": 0.0 },
-        "R0_p1": { "const": 0.0 },
-        "R0_p2": { "const": 0.0 },
-        "R0_p3": { "const": 0.0 },
-        "R0_p4": { "const": 0.0 },
-        "I0": { "const": 0.0 }
-      }
+      "rate_grad": { "gamma": { "pop": "I_p3" } }
     },
     {
       "name": "recovery_p4",
@@ -696,20 +594,7 @@
         "source_compartment": "I_p4",
         "dest_compartment": "R_p4"
       },
-      "rate_grad": {
-        "gamma": { "pop": "I_p4" },
-        "N0_p0": { "const": 0.0 },
-        "N0_p1": { "const": 0.0 },
-        "N0_p2": { "const": 0.0 },
-        "N0_p3": { "const": 0.0 },
-        "N0_p4": { "const": 0.0 },
-        "R0_p0": { "const": 0.0 },
-        "R0_p1": { "const": 0.0 },
-        "R0_p2": { "const": 0.0 },
-        "R0_p3": { "const": 0.0 },
-        "R0_p4": { "const": 0.0 },
-        "I0": { "const": 0.0 }
-      }
+      "rate_grad": { "gamma": { "pop": "I_p4" } }
     }
   ],
   "ode_equations": [],

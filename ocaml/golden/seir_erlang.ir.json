@@ -70,9 +70,7 @@
               }
             }
           }
-        },
-        "sigma": { "const": 0.0 },
-        "gamma": { "const": 0.0 }
+        }
       }
     },
     {
@@ -97,15 +95,13 @@
         "dest_compartment": "E_e2"
       },
       "rate_grad": {
-        "beta": { "const": 0.0 },
         "sigma": {
           "bin_op": {
             "op": "mul",
             "left": { "const": 3.0 },
             "right": { "pop": "E_e1" }
           }
-        },
-        "gamma": { "const": 0.0 }
+        }
       }
     },
     {
@@ -130,15 +126,13 @@
         "dest_compartment": "E_e3"
       },
       "rate_grad": {
-        "beta": { "const": 0.0 },
         "sigma": {
           "bin_op": {
             "op": "mul",
             "left": { "const": 3.0 },
             "right": { "pop": "E_e2" }
           }
-        },
-        "gamma": { "const": 0.0 }
+        }
       }
     },
     {
@@ -163,15 +157,13 @@
         "dest_compartment": "I"
       },
       "rate_grad": {
-        "beta": { "const": 0.0 },
         "sigma": {
           "bin_op": {
             "op": "mul",
             "left": { "const": 3.0 },
             "right": { "pop": "E_e3" }
           }
-        },
-        "gamma": { "const": 0.0 }
+        }
       }
     },
     {
@@ -189,11 +181,7 @@
         "source_compartment": "I",
         "dest_compartment": "R"
       },
-      "rate_grad": {
-        "beta": { "const": 0.0 },
-        "sigma": { "const": 0.0 },
-        "gamma": { "pop": "I" }
-      }
+      "rate_grad": { "gamma": { "pop": "I" } }
     }
   ],
   "ode_equations": [],

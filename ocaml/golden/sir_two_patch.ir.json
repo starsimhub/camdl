@@ -113,7 +113,6 @@
             }
           }
         },
-        "N_rural": { "const": 0.0 },
         "R0_urban": {
           "bin_op": {
             "op": "div",
@@ -144,8 +143,7 @@
               }
             }
           }
-        },
-        "R0_rural": { "const": 0.0 }
+        }
       }
     },
     {
@@ -213,7 +211,6 @@
             }
           }
         },
-        "N_urban": { "const": 0.0 },
         "N_rural": {
           "bin_op": {
             "op": "div",
@@ -250,7 +247,6 @@
             }
           }
         },
-        "R0_urban": { "const": 0.0 },
         "R0_rural": {
           "bin_op": {
             "op": "div",
@@ -299,13 +295,7 @@
         "source_compartment": "I_urban",
         "dest_compartment": "R_urban"
       },
-      "rate_grad": {
-        "gamma": { "pop": "I_urban" },
-        "N_urban": { "const": 0.0 },
-        "N_rural": { "const": 0.0 },
-        "R0_urban": { "const": 0.0 },
-        "R0_rural": { "const": 0.0 }
-      }
+      "rate_grad": { "gamma": { "pop": "I_urban" } }
     },
     {
       "name": "recovery_rural",
@@ -322,13 +312,7 @@
         "source_compartment": "I_rural",
         "dest_compartment": "R_rural"
       },
-      "rate_grad": {
-        "gamma": { "pop": "I_rural" },
-        "N_urban": { "const": 0.0 },
-        "N_rural": { "const": 0.0 },
-        "R0_urban": { "const": 0.0 },
-        "R0_rural": { "const": 0.0 }
-      }
+      "rate_grad": { "gamma": { "pop": "I_rural" } }
     }
   ],
   "ode_equations": [],

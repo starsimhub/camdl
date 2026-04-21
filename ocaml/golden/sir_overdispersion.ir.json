@@ -62,11 +62,7 @@
               }
             }
           }
-        },
-        "gamma": { "const": 0.0 },
-        "sigma_se": { "const": 0.0 },
-        "N0": { "const": 0.0 },
-        "I0": { "const": 0.0 }
+        }
       }
     },
     {
@@ -84,13 +80,7 @@
         "source_compartment": "I",
         "dest_compartment": "R"
       },
-      "rate_grad": {
-        "beta": { "const": 0.0 },
-        "gamma": { "pop": "I" },
-        "sigma_se": { "const": 0.0 },
-        "N0": { "const": 0.0 },
-        "I0": { "const": 0.0 }
-      }
+      "rate_grad": { "gamma": { "pop": "I" } }
     }
   ],
   "ode_equations": [],

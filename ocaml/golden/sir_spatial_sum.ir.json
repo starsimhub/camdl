@@ -269,7 +269,6 @@
             }
           }
         },
-        "gamma": { "const": 0.0 },
         "rho": {
           "bin_op": {
             "op": "mul",
@@ -626,7 +625,6 @@
             }
           }
         },
-        "gamma": { "const": 0.0 },
         "rho": {
           "bin_op": {
             "op": "mul",
@@ -983,7 +981,6 @@
             }
           }
         },
-        "gamma": { "const": 0.0 },
         "rho": {
           "bin_op": {
             "op": "mul",
@@ -1340,7 +1337,6 @@
             }
           }
         },
-        "gamma": { "const": 0.0 },
         "rho": {
           "bin_op": {
             "op": "mul",
@@ -1461,11 +1457,7 @@
         "source_compartment": "I_p0",
         "dest_compartment": "R_p0"
       },
-      "rate_grad": {
-        "beta": { "const": 0.0 },
-        "gamma": { "pop": "I_p0" },
-        "rho": { "const": 0.0 }
-      }
+      "rate_grad": { "gamma": { "pop": "I_p0" } }
     },
     {
       "name": "recovery_p1",
@@ -1482,11 +1474,7 @@
         "source_compartment": "I_p1",
         "dest_compartment": "R_p1"
       },
-      "rate_grad": {
-        "beta": { "const": 0.0 },
-        "gamma": { "pop": "I_p1" },
-        "rho": { "const": 0.0 }
-      }
+      "rate_grad": { "gamma": { "pop": "I_p1" } }
     },
     {
       "name": "recovery_p2",
@@ -1503,11 +1491,7 @@
         "source_compartment": "I_p2",
         "dest_compartment": "R_p2"
       },
-      "rate_grad": {
-        "beta": { "const": 0.0 },
-        "gamma": { "pop": "I_p2" },
-        "rho": { "const": 0.0 }
-      }
+      "rate_grad": { "gamma": { "pop": "I_p2" } }
     },
     {
       "name": "recovery_p3",
@@ -1524,11 +1508,7 @@
         "source_compartment": "I_p3",
         "dest_compartment": "R_p3"
       },
-      "rate_grad": {
-        "beta": { "const": 0.0 },
-        "gamma": { "pop": "I_p3" },
-        "rho": { "const": 0.0 }
-      }
+      "rate_grad": { "gamma": { "pop": "I_p3" } }
     }
   ],
   "ode_equations": [],

@@ -33,36 +33,7 @@
         "source_compartment": null,
         "dest_compartment": "S_H"
       },
-      "rate_grad": {
-        "Pi_H": { "const": 1.0 },
-        "mu_H": { "const": 0.0 },
-        "tau": { "const": 0.0 },
-        "eps_H": { "const": 0.0 },
-        "gamma": { "const": 0.0 },
-        "omega": { "const": 0.0 },
-        "beta_BH": { "const": 0.0 },
-        "beta_AH": { "const": 0.0 },
-        "beta_HB": { "const": 0.0 },
-        "beta_HA": { "const": 0.0 },
-        "mu_L": { "const": 0.0 },
-        "tau_L": { "const": 0.0 },
-        "pi_B": { "const": 0.0 },
-        "phi_B": { "const": 0.0 },
-        "mu_B": { "const": 0.0 },
-        "mu_R": { "const": 0.0 },
-        "eps_B": { "const": 0.0 },
-        "eps_R": { "const": 0.0 },
-        "sigma_B": { "const": 0.0 },
-        "sigma_R": { "const": 0.0 },
-        "pi_A": { "const": 0.0 },
-        "phi_A": { "const": 0.0 },
-        "mu_A": { "const": 0.0 },
-        "mu_r": { "const": 0.0 },
-        "eps_A": { "const": 0.0 },
-        "eps_r": { "const": 0.0 },
-        "sigma_A": { "const": 0.0 },
-        "sigma_r": { "const": 0.0 }
-      }
+      "rate_grad": { "Pi_H": { "const": 1.0 } }
     },
     {
       "name": "death_S_H",
@@ -79,36 +50,7 @@
         "source_compartment": "S_H",
         "dest_compartment": null
       },
-      "rate_grad": {
-        "Pi_H": { "const": 0.0 },
-        "mu_H": { "pop": "S_H" },
-        "tau": { "const": 0.0 },
-        "eps_H": { "const": 0.0 },
-        "gamma": { "const": 0.0 },
-        "omega": { "const": 0.0 },
-        "beta_BH": { "const": 0.0 },
-        "beta_AH": { "const": 0.0 },
-        "beta_HB": { "const": 0.0 },
-        "beta_HA": { "const": 0.0 },
-        "mu_L": { "const": 0.0 },
-        "tau_L": { "const": 0.0 },
-        "pi_B": { "const": 0.0 },
-        "phi_B": { "const": 0.0 },
-        "mu_B": { "const": 0.0 },
-        "mu_R": { "const": 0.0 },
-        "eps_B": { "const": 0.0 },
-        "eps_R": { "const": 0.0 },
-        "sigma_B": { "const": 0.0 },
-        "sigma_R": { "const": 0.0 },
-        "pi_A": { "const": 0.0 },
-        "phi_A": { "const": 0.0 },
-        "mu_A": { "const": 0.0 },
-        "mu_r": { "const": 0.0 },
-        "eps_A": { "const": 0.0 },
-        "eps_r": { "const": 0.0 },
-        "sigma_A": { "const": 0.0 },
-        "sigma_r": { "const": 0.0 }
-      }
+      "rate_grad": { "mu_H": { "pop": "S_H" } }
     },
     {
       "name": "death_E_H",
@@ -125,36 +67,7 @@
         "source_compartment": "E_H",
         "dest_compartment": null
       },
-      "rate_grad": {
-        "Pi_H": { "const": 0.0 },
-        "mu_H": { "pop": "E_H" },
-        "tau": { "const": 0.0 },
-        "eps_H": { "const": 0.0 },
-        "gamma": { "const": 0.0 },
-        "omega": { "const": 0.0 },
-        "beta_BH": { "const": 0.0 },
-        "beta_AH": { "const": 0.0 },
-        "beta_HB": { "const": 0.0 },
-        "beta_HA": { "const": 0.0 },
-        "mu_L": { "const": 0.0 },
-        "tau_L": { "const": 0.0 },
-        "pi_B": { "const": 0.0 },
-        "phi_B": { "const": 0.0 },
-        "mu_B": { "const": 0.0 },
-        "mu_R": { "const": 0.0 },
-        "eps_B": { "const": 0.0 },
-        "eps_R": { "const": 0.0 },
-        "sigma_B": { "const": 0.0 },
-        "sigma_R": { "const": 0.0 },
-        "pi_A": { "const": 0.0 },
-        "phi_A": { "const": 0.0 },
-        "mu_A": { "const": 0.0 },
-        "mu_r": { "const": 0.0 },
-        "eps_A": { "const": 0.0 },
-        "eps_r": { "const": 0.0 },
-        "sigma_A": { "const": 0.0 },
-        "sigma_r": { "const": 0.0 }
-      }
+      "rate_grad": { "mu_H": { "pop": "E_H" } }
     },
     {
       "name": "death_I_H",
@@ -177,36 +90,7 @@
         "source_compartment": "I_H",
         "dest_compartment": null
       },
-      "rate_grad": {
-        "Pi_H": { "const": 0.0 },
-        "mu_H": { "pop": "I_H" },
-        "tau": { "pop": "I_H" },
-        "eps_H": { "const": 0.0 },
-        "gamma": { "const": 0.0 },
-        "omega": { "const": 0.0 },
-        "beta_BH": { "const": 0.0 },
-        "beta_AH": { "const": 0.0 },
-        "beta_HB": { "const": 0.0 },
-        "beta_HA": { "const": 0.0 },
-        "mu_L": { "const": 0.0 },
-        "tau_L": { "const": 0.0 },
-        "pi_B": { "const": 0.0 },
-        "phi_B": { "const": 0.0 },
-        "mu_B": { "const": 0.0 },
-        "mu_R": { "const": 0.0 },
-        "eps_B": { "const": 0.0 },
-        "eps_R": { "const": 0.0 },
-        "sigma_B": { "const": 0.0 },
-        "sigma_R": { "const": 0.0 },
-        "pi_A": { "const": 0.0 },
-        "phi_A": { "const": 0.0 },
-        "mu_A": { "const": 0.0 },
-        "mu_r": { "const": 0.0 },
-        "eps_A": { "const": 0.0 },
-        "eps_r": { "const": 0.0 },
-        "sigma_A": { "const": 0.0 },
-        "sigma_r": { "const": 0.0 }
-      }
+      "rate_grad": { "mu_H": { "pop": "I_H" }, "tau": { "pop": "I_H" } }
     },
     {
       "name": "death_R_H",
@@ -223,36 +107,7 @@
         "source_compartment": "R_H",
         "dest_compartment": null
       },
-      "rate_grad": {
-        "Pi_H": { "const": 0.0 },
-        "mu_H": { "pop": "R_H" },
-        "tau": { "const": 0.0 },
-        "eps_H": { "const": 0.0 },
-        "gamma": { "const": 0.0 },
-        "omega": { "const": 0.0 },
-        "beta_BH": { "const": 0.0 },
-        "beta_AH": { "const": 0.0 },
-        "beta_HB": { "const": 0.0 },
-        "beta_HA": { "const": 0.0 },
-        "mu_L": { "const": 0.0 },
-        "tau_L": { "const": 0.0 },
-        "pi_B": { "const": 0.0 },
-        "phi_B": { "const": 0.0 },
-        "mu_B": { "const": 0.0 },
-        "mu_R": { "const": 0.0 },
-        "eps_B": { "const": 0.0 },
-        "eps_R": { "const": 0.0 },
-        "sigma_B": { "const": 0.0 },
-        "sigma_R": { "const": 0.0 },
-        "pi_A": { "const": 0.0 },
-        "phi_A": { "const": 0.0 },
-        "mu_A": { "const": 0.0 },
-        "mu_r": { "const": 0.0 },
-        "eps_A": { "const": 0.0 },
-        "eps_r": { "const": 0.0 },
-        "sigma_A": { "const": 0.0 },
-        "sigma_r": { "const": 0.0 }
-      }
+      "rate_grad": { "mu_H": { "pop": "R_H" } }
     },
     {
       "name": "infection_H",
@@ -294,12 +149,6 @@
         "dest_compartment": "E_H"
       },
       "rate_grad": {
-        "Pi_H": { "const": 0.0 },
-        "mu_H": { "const": 0.0 },
-        "tau": { "const": 0.0 },
-        "eps_H": { "const": 0.0 },
-        "gamma": { "const": 0.0 },
-        "omega": { "const": 0.0 },
         "beta_BH": {
           "bin_op": {
             "op": "mul",
@@ -349,27 +198,7 @@
             },
             "right": { "pop": "S_H" }
           }
-        },
-        "beta_HB": { "const": 0.0 },
-        "beta_HA": { "const": 0.0 },
-        "mu_L": { "const": 0.0 },
-        "tau_L": { "const": 0.0 },
-        "pi_B": { "const": 0.0 },
-        "phi_B": { "const": 0.0 },
-        "mu_B": { "const": 0.0 },
-        "mu_R": { "const": 0.0 },
-        "eps_B": { "const": 0.0 },
-        "eps_R": { "const": 0.0 },
-        "sigma_B": { "const": 0.0 },
-        "sigma_R": { "const": 0.0 },
-        "pi_A": { "const": 0.0 },
-        "phi_A": { "const": 0.0 },
-        "mu_A": { "const": 0.0 },
-        "mu_r": { "const": 0.0 },
-        "eps_A": { "const": 0.0 },
-        "eps_r": { "const": 0.0 },
-        "sigma_A": { "const": 0.0 },
-        "sigma_r": { "const": 0.0 }
+        }
       }
     },
     {
@@ -387,36 +216,7 @@
         "source_compartment": "E_H",
         "dest_compartment": "I_H"
       },
-      "rate_grad": {
-        "Pi_H": { "const": 0.0 },
-        "mu_H": { "const": 0.0 },
-        "tau": { "const": 0.0 },
-        "eps_H": { "pop": "E_H" },
-        "gamma": { "const": 0.0 },
-        "omega": { "const": 0.0 },
-        "beta_BH": { "const": 0.0 },
-        "beta_AH": { "const": 0.0 },
-        "beta_HB": { "const": 0.0 },
-        "beta_HA": { "const": 0.0 },
-        "mu_L": { "const": 0.0 },
-        "tau_L": { "const": 0.0 },
-        "pi_B": { "const": 0.0 },
-        "phi_B": { "const": 0.0 },
-        "mu_B": { "const": 0.0 },
-        "mu_R": { "const": 0.0 },
-        "eps_B": { "const": 0.0 },
-        "eps_R": { "const": 0.0 },
-        "sigma_B": { "const": 0.0 },
-        "sigma_R": { "const": 0.0 },
-        "pi_A": { "const": 0.0 },
-        "phi_A": { "const": 0.0 },
-        "mu_A": { "const": 0.0 },
-        "mu_r": { "const": 0.0 },
-        "eps_A": { "const": 0.0 },
-        "eps_r": { "const": 0.0 },
-        "sigma_A": { "const": 0.0 },
-        "sigma_r": { "const": 0.0 }
-      }
+      "rate_grad": { "eps_H": { "pop": "E_H" } }
     },
     {
       "name": "recovery_H",
@@ -433,36 +233,7 @@
         "source_compartment": "I_H",
         "dest_compartment": "R_H"
       },
-      "rate_grad": {
-        "Pi_H": { "const": 0.0 },
-        "mu_H": { "const": 0.0 },
-        "tau": { "const": 0.0 },
-        "eps_H": { "const": 0.0 },
-        "gamma": { "pop": "I_H" },
-        "omega": { "const": 0.0 },
-        "beta_BH": { "const": 0.0 },
-        "beta_AH": { "const": 0.0 },
-        "beta_HB": { "const": 0.0 },
-        "beta_HA": { "const": 0.0 },
-        "mu_L": { "const": 0.0 },
-        "tau_L": { "const": 0.0 },
-        "pi_B": { "const": 0.0 },
-        "phi_B": { "const": 0.0 },
-        "mu_B": { "const": 0.0 },
-        "mu_R": { "const": 0.0 },
-        "eps_B": { "const": 0.0 },
-        "eps_R": { "const": 0.0 },
-        "sigma_B": { "const": 0.0 },
-        "sigma_R": { "const": 0.0 },
-        "pi_A": { "const": 0.0 },
-        "phi_A": { "const": 0.0 },
-        "mu_A": { "const": 0.0 },
-        "mu_r": { "const": 0.0 },
-        "eps_A": { "const": 0.0 },
-        "eps_r": { "const": 0.0 },
-        "sigma_A": { "const": 0.0 },
-        "sigma_r": { "const": 0.0 }
-      }
+      "rate_grad": { "gamma": { "pop": "I_H" } }
     },
     {
       "name": "waning_H",
@@ -479,36 +250,7 @@
         "source_compartment": "R_H",
         "dest_compartment": "S_H"
       },
-      "rate_grad": {
-        "Pi_H": { "const": 0.0 },
-        "mu_H": { "const": 0.0 },
-        "tau": { "const": 0.0 },
-        "eps_H": { "const": 0.0 },
-        "gamma": { "const": 0.0 },
-        "omega": { "pop": "R_H" },
-        "beta_BH": { "const": 0.0 },
-        "beta_AH": { "const": 0.0 },
-        "beta_HB": { "const": 0.0 },
-        "beta_HA": { "const": 0.0 },
-        "mu_L": { "const": 0.0 },
-        "tau_L": { "const": 0.0 },
-        "pi_B": { "const": 0.0 },
-        "phi_B": { "const": 0.0 },
-        "mu_B": { "const": 0.0 },
-        "mu_R": { "const": 0.0 },
-        "eps_B": { "const": 0.0 },
-        "eps_R": { "const": 0.0 },
-        "sigma_B": { "const": 0.0 },
-        "sigma_R": { "const": 0.0 },
-        "pi_A": { "const": 0.0 },
-        "phi_A": { "const": 0.0 },
-        "mu_A": { "const": 0.0 },
-        "mu_r": { "const": 0.0 },
-        "eps_A": { "const": 0.0 },
-        "eps_r": { "const": 0.0 },
-        "sigma_A": { "const": 0.0 },
-        "sigma_r": { "const": 0.0 }
-      }
+      "rate_grad": { "omega": { "pop": "R_H" } }
     },
     {
       "name": "birth_L_B",
@@ -519,36 +261,7 @@
         "source_compartment": null,
         "dest_compartment": "L_B"
       },
-      "rate_grad": {
-        "Pi_H": { "const": 0.0 },
-        "mu_H": { "const": 0.0 },
-        "tau": { "const": 0.0 },
-        "eps_H": { "const": 0.0 },
-        "gamma": { "const": 0.0 },
-        "omega": { "const": 0.0 },
-        "beta_BH": { "const": 0.0 },
-        "beta_AH": { "const": 0.0 },
-        "beta_HB": { "const": 0.0 },
-        "beta_HA": { "const": 0.0 },
-        "mu_L": { "const": 0.0 },
-        "tau_L": { "const": 0.0 },
-        "pi_B": { "const": 1.0 },
-        "phi_B": { "const": 0.0 },
-        "mu_B": { "const": 0.0 },
-        "mu_R": { "const": 0.0 },
-        "eps_B": { "const": 0.0 },
-        "eps_R": { "const": 0.0 },
-        "sigma_B": { "const": 0.0 },
-        "sigma_R": { "const": 0.0 },
-        "pi_A": { "const": 0.0 },
-        "phi_A": { "const": 0.0 },
-        "mu_A": { "const": 0.0 },
-        "mu_r": { "const": 0.0 },
-        "eps_A": { "const": 0.0 },
-        "eps_r": { "const": 0.0 },
-        "sigma_A": { "const": 0.0 },
-        "sigma_r": { "const": 0.0 }
-      }
+      "rate_grad": { "pi_B": { "const": 1.0 } }
     },
     {
       "name": "death_L_B",
@@ -565,36 +278,7 @@
         "source_compartment": "L_B",
         "dest_compartment": null
       },
-      "rate_grad": {
-        "Pi_H": { "const": 0.0 },
-        "mu_H": { "const": 0.0 },
-        "tau": { "const": 0.0 },
-        "eps_H": { "const": 0.0 },
-        "gamma": { "const": 0.0 },
-        "omega": { "const": 0.0 },
-        "beta_BH": { "const": 0.0 },
-        "beta_AH": { "const": 0.0 },
-        "beta_HB": { "const": 0.0 },
-        "beta_HA": { "const": 0.0 },
-        "mu_L": { "pop": "L_B" },
-        "tau_L": { "const": 0.0 },
-        "pi_B": { "const": 0.0 },
-        "phi_B": { "const": 0.0 },
-        "mu_B": { "const": 0.0 },
-        "mu_R": { "const": 0.0 },
-        "eps_B": { "const": 0.0 },
-        "eps_R": { "const": 0.0 },
-        "sigma_B": { "const": 0.0 },
-        "sigma_R": { "const": 0.0 },
-        "pi_A": { "const": 0.0 },
-        "phi_A": { "const": 0.0 },
-        "mu_A": { "const": 0.0 },
-        "mu_r": { "const": 0.0 },
-        "eps_A": { "const": 0.0 },
-        "eps_r": { "const": 0.0 },
-        "sigma_A": { "const": 0.0 },
-        "sigma_r": { "const": 0.0 }
-      }
+      "rate_grad": { "mu_L": { "pop": "L_B" } }
     },
     {
       "name": "emerge_S_B",
@@ -624,17 +308,6 @@
         "dest_compartment": "S_B"
       },
       "rate_grad": {
-        "Pi_H": { "const": 0.0 },
-        "mu_H": { "const": 0.0 },
-        "tau": { "const": 0.0 },
-        "eps_H": { "const": 0.0 },
-        "gamma": { "const": 0.0 },
-        "omega": { "const": 0.0 },
-        "beta_BH": { "const": 0.0 },
-        "beta_AH": { "const": 0.0 },
-        "beta_HB": { "const": 0.0 },
-        "beta_HA": { "const": 0.0 },
-        "mu_L": { "const": 0.0 },
         "tau_L": {
           "bin_op": {
             "op": "mul",
@@ -648,7 +321,6 @@
             "right": { "pop": "L_B" }
           }
         },
-        "pi_B": { "const": 0.0 },
         "phi_B": {
           "bin_op": {
             "op": "mul",
@@ -661,21 +333,7 @@
             },
             "right": { "pop": "L_B" }
           }
-        },
-        "mu_B": { "const": 0.0 },
-        "mu_R": { "const": 0.0 },
-        "eps_B": { "const": 0.0 },
-        "eps_R": { "const": 0.0 },
-        "sigma_B": { "const": 0.0 },
-        "sigma_R": { "const": 0.0 },
-        "pi_A": { "const": 0.0 },
-        "phi_A": { "const": 0.0 },
-        "mu_A": { "const": 0.0 },
-        "mu_r": { "const": 0.0 },
-        "eps_A": { "const": 0.0 },
-        "eps_r": { "const": 0.0 },
-        "sigma_A": { "const": 0.0 },
-        "sigma_r": { "const": 0.0 }
+        }
       }
     },
     {
@@ -700,17 +358,6 @@
         "dest_compartment": "S_R"
       },
       "rate_grad": {
-        "Pi_H": { "const": 0.0 },
-        "mu_H": { "const": 0.0 },
-        "tau": { "const": 0.0 },
-        "eps_H": { "const": 0.0 },
-        "gamma": { "const": 0.0 },
-        "omega": { "const": 0.0 },
-        "beta_BH": { "const": 0.0 },
-        "beta_AH": { "const": 0.0 },
-        "beta_HB": { "const": 0.0 },
-        "beta_HA": { "const": 0.0 },
-        "mu_L": { "const": 0.0 },
         "tau_L": {
           "bin_op": {
             "op": "mul",
@@ -718,28 +365,13 @@
             "right": { "pop": "L_B" }
           }
         },
-        "pi_B": { "const": 0.0 },
         "phi_B": {
           "bin_op": {
             "op": "mul",
             "left": { "param": "tau_L" },
             "right": { "pop": "L_B" }
           }
-        },
-        "mu_B": { "const": 0.0 },
-        "mu_R": { "const": 0.0 },
-        "eps_B": { "const": 0.0 },
-        "eps_R": { "const": 0.0 },
-        "sigma_B": { "const": 0.0 },
-        "sigma_R": { "const": 0.0 },
-        "pi_A": { "const": 0.0 },
-        "phi_A": { "const": 0.0 },
-        "mu_A": { "const": 0.0 },
-        "mu_r": { "const": 0.0 },
-        "eps_A": { "const": 0.0 },
-        "eps_r": { "const": 0.0 },
-        "sigma_A": { "const": 0.0 },
-        "sigma_r": { "const": 0.0 }
+        }
       }
     },
     {
@@ -757,36 +389,7 @@
         "source_compartment": "S_B",
         "dest_compartment": null
       },
-      "rate_grad": {
-        "Pi_H": { "const": 0.0 },
-        "mu_H": { "const": 0.0 },
-        "tau": { "const": 0.0 },
-        "eps_H": { "const": 0.0 },
-        "gamma": { "const": 0.0 },
-        "omega": { "const": 0.0 },
-        "beta_BH": { "const": 0.0 },
-        "beta_AH": { "const": 0.0 },
-        "beta_HB": { "const": 0.0 },
-        "beta_HA": { "const": 0.0 },
-        "mu_L": { "const": 0.0 },
-        "tau_L": { "const": 0.0 },
-        "pi_B": { "const": 0.0 },
-        "phi_B": { "const": 0.0 },
-        "mu_B": { "pop": "S_B" },
-        "mu_R": { "const": 0.0 },
-        "eps_B": { "const": 0.0 },
-        "eps_R": { "const": 0.0 },
-        "sigma_B": { "const": 0.0 },
-        "sigma_R": { "const": 0.0 },
-        "pi_A": { "const": 0.0 },
-        "phi_A": { "const": 0.0 },
-        "mu_A": { "const": 0.0 },
-        "mu_r": { "const": 0.0 },
-        "eps_A": { "const": 0.0 },
-        "eps_r": { "const": 0.0 },
-        "sigma_A": { "const": 0.0 },
-        "sigma_r": { "const": 0.0 }
-      }
+      "rate_grad": { "mu_B": { "pop": "S_B" } }
     },
     {
       "name": "infection_B",
@@ -816,14 +419,6 @@
         "dest_compartment": "E_B"
       },
       "rate_grad": {
-        "Pi_H": { "const": 0.0 },
-        "mu_H": { "const": 0.0 },
-        "tau": { "const": 0.0 },
-        "eps_H": { "const": 0.0 },
-        "gamma": { "const": 0.0 },
-        "omega": { "const": 0.0 },
-        "beta_BH": { "const": 0.0 },
-        "beta_AH": { "const": 0.0 },
         "beta_HB": {
           "bin_op": {
             "op": "mul",
@@ -848,26 +443,7 @@
             },
             "right": { "pop": "S_B" }
           }
-        },
-        "beta_HA": { "const": 0.0 },
-        "mu_L": { "const": 0.0 },
-        "tau_L": { "const": 0.0 },
-        "pi_B": { "const": 0.0 },
-        "phi_B": { "const": 0.0 },
-        "mu_B": { "const": 0.0 },
-        "mu_R": { "const": 0.0 },
-        "eps_B": { "const": 0.0 },
-        "eps_R": { "const": 0.0 },
-        "sigma_B": { "const": 0.0 },
-        "sigma_R": { "const": 0.0 },
-        "pi_A": { "const": 0.0 },
-        "phi_A": { "const": 0.0 },
-        "mu_A": { "const": 0.0 },
-        "mu_r": { "const": 0.0 },
-        "eps_A": { "const": 0.0 },
-        "eps_r": { "const": 0.0 },
-        "sigma_A": { "const": 0.0 },
-        "sigma_r": { "const": 0.0 }
+        }
       }
     },
     {
@@ -885,36 +461,7 @@
         "source_compartment": "E_B",
         "dest_compartment": null
       },
-      "rate_grad": {
-        "Pi_H": { "const": 0.0 },
-        "mu_H": { "const": 0.0 },
-        "tau": { "const": 0.0 },
-        "eps_H": { "const": 0.0 },
-        "gamma": { "const": 0.0 },
-        "omega": { "const": 0.0 },
-        "beta_BH": { "const": 0.0 },
-        "beta_AH": { "const": 0.0 },
-        "beta_HB": { "const": 0.0 },
-        "beta_HA": { "const": 0.0 },
-        "mu_L": { "const": 0.0 },
-        "tau_L": { "const": 0.0 },
-        "pi_B": { "const": 0.0 },
-        "phi_B": { "const": 0.0 },
-        "mu_B": { "pop": "E_B" },
-        "mu_R": { "const": 0.0 },
-        "eps_B": { "const": 0.0 },
-        "eps_R": { "const": 0.0 },
-        "sigma_B": { "const": 0.0 },
-        "sigma_R": { "const": 0.0 },
-        "pi_A": { "const": 0.0 },
-        "phi_A": { "const": 0.0 },
-        "mu_A": { "const": 0.0 },
-        "mu_r": { "const": 0.0 },
-        "eps_A": { "const": 0.0 },
-        "eps_r": { "const": 0.0 },
-        "sigma_A": { "const": 0.0 },
-        "sigma_r": { "const": 0.0 }
-      }
+      "rate_grad": { "mu_B": { "pop": "E_B" } }
     },
     {
       "name": "incubation_B",
@@ -931,36 +478,7 @@
         "source_compartment": "E_B",
         "dest_compartment": "I_B"
       },
-      "rate_grad": {
-        "Pi_H": { "const": 0.0 },
-        "mu_H": { "const": 0.0 },
-        "tau": { "const": 0.0 },
-        "eps_H": { "const": 0.0 },
-        "gamma": { "const": 0.0 },
-        "omega": { "const": 0.0 },
-        "beta_BH": { "const": 0.0 },
-        "beta_AH": { "const": 0.0 },
-        "beta_HB": { "const": 0.0 },
-        "beta_HA": { "const": 0.0 },
-        "mu_L": { "const": 0.0 },
-        "tau_L": { "const": 0.0 },
-        "pi_B": { "const": 0.0 },
-        "phi_B": { "const": 0.0 },
-        "mu_B": { "const": 0.0 },
-        "mu_R": { "const": 0.0 },
-        "eps_B": { "pop": "E_B" },
-        "eps_R": { "const": 0.0 },
-        "sigma_B": { "const": 0.0 },
-        "sigma_R": { "const": 0.0 },
-        "pi_A": { "const": 0.0 },
-        "phi_A": { "const": 0.0 },
-        "mu_A": { "const": 0.0 },
-        "mu_r": { "const": 0.0 },
-        "eps_A": { "const": 0.0 },
-        "eps_r": { "const": 0.0 },
-        "sigma_A": { "const": 0.0 },
-        "sigma_r": { "const": 0.0 }
-      }
+      "rate_grad": { "eps_B": { "pop": "E_B" } }
     },
     {
       "name": "death_I_B",
@@ -977,36 +495,7 @@
         "source_compartment": "I_B",
         "dest_compartment": null
       },
-      "rate_grad": {
-        "Pi_H": { "const": 0.0 },
-        "mu_H": { "const": 0.0 },
-        "tau": { "const": 0.0 },
-        "eps_H": { "const": 0.0 },
-        "gamma": { "const": 0.0 },
-        "omega": { "const": 0.0 },
-        "beta_BH": { "const": 0.0 },
-        "beta_AH": { "const": 0.0 },
-        "beta_HB": { "const": 0.0 },
-        "beta_HA": { "const": 0.0 },
-        "mu_L": { "const": 0.0 },
-        "tau_L": { "const": 0.0 },
-        "pi_B": { "const": 0.0 },
-        "phi_B": { "const": 0.0 },
-        "mu_B": { "pop": "I_B" },
-        "mu_R": { "const": 0.0 },
-        "eps_B": { "const": 0.0 },
-        "eps_R": { "const": 0.0 },
-        "sigma_B": { "const": 0.0 },
-        "sigma_R": { "const": 0.0 },
-        "pi_A": { "const": 0.0 },
-        "phi_A": { "const": 0.0 },
-        "mu_A": { "const": 0.0 },
-        "mu_r": { "const": 0.0 },
-        "eps_A": { "const": 0.0 },
-        "eps_r": { "const": 0.0 },
-        "sigma_A": { "const": 0.0 },
-        "sigma_r": { "const": 0.0 }
-      }
+      "rate_grad": { "mu_B": { "pop": "I_B" } }
     },
     {
       "name": "biting_rest_B",
@@ -1023,36 +512,7 @@
         "source_compartment": "I_B",
         "dest_compartment": "I_R"
       },
-      "rate_grad": {
-        "Pi_H": { "const": 0.0 },
-        "mu_H": { "const": 0.0 },
-        "tau": { "const": 0.0 },
-        "eps_H": { "const": 0.0 },
-        "gamma": { "const": 0.0 },
-        "omega": { "const": 0.0 },
-        "beta_BH": { "const": 0.0 },
-        "beta_AH": { "const": 0.0 },
-        "beta_HB": { "const": 0.0 },
-        "beta_HA": { "const": 0.0 },
-        "mu_L": { "const": 0.0 },
-        "tau_L": { "const": 0.0 },
-        "pi_B": { "const": 0.0 },
-        "phi_B": { "const": 0.0 },
-        "mu_B": { "const": 0.0 },
-        "mu_R": { "const": 0.0 },
-        "eps_B": { "const": 0.0 },
-        "eps_R": { "const": 0.0 },
-        "sigma_B": { "pop": "I_B" },
-        "sigma_R": { "const": 0.0 },
-        "pi_A": { "const": 0.0 },
-        "phi_A": { "const": 0.0 },
-        "mu_A": { "const": 0.0 },
-        "mu_r": { "const": 0.0 },
-        "eps_A": { "const": 0.0 },
-        "eps_r": { "const": 0.0 },
-        "sigma_A": { "const": 0.0 },
-        "sigma_r": { "const": 0.0 }
-      }
+      "rate_grad": { "sigma_B": { "pop": "I_B" } }
     },
     {
       "name": "death_S_R",
@@ -1069,36 +529,7 @@
         "source_compartment": "S_R",
         "dest_compartment": null
       },
-      "rate_grad": {
-        "Pi_H": { "const": 0.0 },
-        "mu_H": { "const": 0.0 },
-        "tau": { "const": 0.0 },
-        "eps_H": { "const": 0.0 },
-        "gamma": { "const": 0.0 },
-        "omega": { "const": 0.0 },
-        "beta_BH": { "const": 0.0 },
-        "beta_AH": { "const": 0.0 },
-        "beta_HB": { "const": 0.0 },
-        "beta_HA": { "const": 0.0 },
-        "mu_L": { "const": 0.0 },
-        "tau_L": { "const": 0.0 },
-        "pi_B": { "const": 0.0 },
-        "phi_B": { "const": 0.0 },
-        "mu_B": { "const": 0.0 },
-        "mu_R": { "pop": "S_R" },
-        "eps_B": { "const": 0.0 },
-        "eps_R": { "const": 0.0 },
-        "sigma_B": { "const": 0.0 },
-        "sigma_R": { "const": 0.0 },
-        "pi_A": { "const": 0.0 },
-        "phi_A": { "const": 0.0 },
-        "mu_A": { "const": 0.0 },
-        "mu_r": { "const": 0.0 },
-        "eps_A": { "const": 0.0 },
-        "eps_r": { "const": 0.0 },
-        "sigma_A": { "const": 0.0 },
-        "sigma_r": { "const": 0.0 }
-      }
+      "rate_grad": { "mu_R": { "pop": "S_R" } }
     },
     {
       "name": "infection_R",
@@ -1128,14 +559,6 @@
         "dest_compartment": "E_R"
       },
       "rate_grad": {
-        "Pi_H": { "const": 0.0 },
-        "mu_H": { "const": 0.0 },
-        "tau": { "const": 0.0 },
-        "eps_H": { "const": 0.0 },
-        "gamma": { "const": 0.0 },
-        "omega": { "const": 0.0 },
-        "beta_BH": { "const": 0.0 },
-        "beta_AH": { "const": 0.0 },
         "beta_HB": {
           "bin_op": {
             "op": "mul",
@@ -1160,26 +583,7 @@
             },
             "right": { "pop": "S_R" }
           }
-        },
-        "beta_HA": { "const": 0.0 },
-        "mu_L": { "const": 0.0 },
-        "tau_L": { "const": 0.0 },
-        "pi_B": { "const": 0.0 },
-        "phi_B": { "const": 0.0 },
-        "mu_B": { "const": 0.0 },
-        "mu_R": { "const": 0.0 },
-        "eps_B": { "const": 0.0 },
-        "eps_R": { "const": 0.0 },
-        "sigma_B": { "const": 0.0 },
-        "sigma_R": { "const": 0.0 },
-        "pi_A": { "const": 0.0 },
-        "phi_A": { "const": 0.0 },
-        "mu_A": { "const": 0.0 },
-        "mu_r": { "const": 0.0 },
-        "eps_A": { "const": 0.0 },
-        "eps_r": { "const": 0.0 },
-        "sigma_A": { "const": 0.0 },
-        "sigma_r": { "const": 0.0 }
+        }
       }
     },
     {
@@ -1197,36 +601,7 @@
         "source_compartment": "E_R",
         "dest_compartment": null
       },
-      "rate_grad": {
-        "Pi_H": { "const": 0.0 },
-        "mu_H": { "const": 0.0 },
-        "tau": { "const": 0.0 },
-        "eps_H": { "const": 0.0 },
-        "gamma": { "const": 0.0 },
-        "omega": { "const": 0.0 },
-        "beta_BH": { "const": 0.0 },
-        "beta_AH": { "const": 0.0 },
-        "beta_HB": { "const": 0.0 },
-        "beta_HA": { "const": 0.0 },
-        "mu_L": { "const": 0.0 },
-        "tau_L": { "const": 0.0 },
-        "pi_B": { "const": 0.0 },
-        "phi_B": { "const": 0.0 },
-        "mu_B": { "const": 0.0 },
-        "mu_R": { "pop": "E_R" },
-        "eps_B": { "const": 0.0 },
-        "eps_R": { "const": 0.0 },
-        "sigma_B": { "const": 0.0 },
-        "sigma_R": { "const": 0.0 },
-        "pi_A": { "const": 0.0 },
-        "phi_A": { "const": 0.0 },
-        "mu_A": { "const": 0.0 },
-        "mu_r": { "const": 0.0 },
-        "eps_A": { "const": 0.0 },
-        "eps_r": { "const": 0.0 },
-        "sigma_A": { "const": 0.0 },
-        "sigma_r": { "const": 0.0 }
-      }
+      "rate_grad": { "mu_R": { "pop": "E_R" } }
     },
     {
       "name": "incubation_R",
@@ -1243,36 +618,7 @@
         "source_compartment": "E_R",
         "dest_compartment": "I_R"
       },
-      "rate_grad": {
-        "Pi_H": { "const": 0.0 },
-        "mu_H": { "const": 0.0 },
-        "tau": { "const": 0.0 },
-        "eps_H": { "const": 0.0 },
-        "gamma": { "const": 0.0 },
-        "omega": { "const": 0.0 },
-        "beta_BH": { "const": 0.0 },
-        "beta_AH": { "const": 0.0 },
-        "beta_HB": { "const": 0.0 },
-        "beta_HA": { "const": 0.0 },
-        "mu_L": { "const": 0.0 },
-        "tau_L": { "const": 0.0 },
-        "pi_B": { "const": 0.0 },
-        "phi_B": { "const": 0.0 },
-        "mu_B": { "const": 0.0 },
-        "mu_R": { "const": 0.0 },
-        "eps_B": { "const": 0.0 },
-        "eps_R": { "pop": "E_R" },
-        "sigma_B": { "const": 0.0 },
-        "sigma_R": { "const": 0.0 },
-        "pi_A": { "const": 0.0 },
-        "phi_A": { "const": 0.0 },
-        "mu_A": { "const": 0.0 },
-        "mu_r": { "const": 0.0 },
-        "eps_A": { "const": 0.0 },
-        "eps_r": { "const": 0.0 },
-        "sigma_A": { "const": 0.0 },
-        "sigma_r": { "const": 0.0 }
-      }
+      "rate_grad": { "eps_R": { "pop": "E_R" } }
     },
     {
       "name": "death_I_R",
@@ -1289,36 +635,7 @@
         "source_compartment": "I_R",
         "dest_compartment": null
       },
-      "rate_grad": {
-        "Pi_H": { "const": 0.0 },
-        "mu_H": { "const": 0.0 },
-        "tau": { "const": 0.0 },
-        "eps_H": { "const": 0.0 },
-        "gamma": { "const": 0.0 },
-        "omega": { "const": 0.0 },
-        "beta_BH": { "const": 0.0 },
-        "beta_AH": { "const": 0.0 },
-        "beta_HB": { "const": 0.0 },
-        "beta_HA": { "const": 0.0 },
-        "mu_L": { "const": 0.0 },
-        "tau_L": { "const": 0.0 },
-        "pi_B": { "const": 0.0 },
-        "phi_B": { "const": 0.0 },
-        "mu_B": { "const": 0.0 },
-        "mu_R": { "pop": "I_R" },
-        "eps_B": { "const": 0.0 },
-        "eps_R": { "const": 0.0 },
-        "sigma_B": { "const": 0.0 },
-        "sigma_R": { "const": 0.0 },
-        "pi_A": { "const": 0.0 },
-        "phi_A": { "const": 0.0 },
-        "mu_A": { "const": 0.0 },
-        "mu_r": { "const": 0.0 },
-        "eps_A": { "const": 0.0 },
-        "eps_r": { "const": 0.0 },
-        "sigma_A": { "const": 0.0 },
-        "sigma_r": { "const": 0.0 }
-      }
+      "rate_grad": { "mu_R": { "pop": "I_R" } }
     },
     {
       "name": "rest_biting_B",
@@ -1335,36 +652,7 @@
         "source_compartment": "I_R",
         "dest_compartment": "I_B"
       },
-      "rate_grad": {
-        "Pi_H": { "const": 0.0 },
-        "mu_H": { "const": 0.0 },
-        "tau": { "const": 0.0 },
-        "eps_H": { "const": 0.0 },
-        "gamma": { "const": 0.0 },
-        "omega": { "const": 0.0 },
-        "beta_BH": { "const": 0.0 },
-        "beta_AH": { "const": 0.0 },
-        "beta_HB": { "const": 0.0 },
-        "beta_HA": { "const": 0.0 },
-        "mu_L": { "const": 0.0 },
-        "tau_L": { "const": 0.0 },
-        "pi_B": { "const": 0.0 },
-        "phi_B": { "const": 0.0 },
-        "mu_B": { "const": 0.0 },
-        "mu_R": { "const": 0.0 },
-        "eps_B": { "const": 0.0 },
-        "eps_R": { "const": 0.0 },
-        "sigma_B": { "const": 0.0 },
-        "sigma_R": { "pop": "I_R" },
-        "pi_A": { "const": 0.0 },
-        "phi_A": { "const": 0.0 },
-        "mu_A": { "const": 0.0 },
-        "mu_r": { "const": 0.0 },
-        "eps_A": { "const": 0.0 },
-        "eps_r": { "const": 0.0 },
-        "sigma_A": { "const": 0.0 },
-        "sigma_r": { "const": 0.0 }
-      }
+      "rate_grad": { "sigma_R": { "pop": "I_R" } }
     },
     {
       "name": "birth_L_A",
@@ -1375,36 +663,7 @@
         "source_compartment": null,
         "dest_compartment": "L_A"
       },
-      "rate_grad": {
-        "Pi_H": { "const": 0.0 },
-        "mu_H": { "const": 0.0 },
-        "tau": { "const": 0.0 },
-        "eps_H": { "const": 0.0 },
-        "gamma": { "const": 0.0 },
-        "omega": { "const": 0.0 },
-        "beta_BH": { "const": 0.0 },
-        "beta_AH": { "const": 0.0 },
-        "beta_HB": { "const": 0.0 },
-        "beta_HA": { "const": 0.0 },
-        "mu_L": { "const": 0.0 },
-        "tau_L": { "const": 0.0 },
-        "pi_B": { "const": 0.0 },
-        "phi_B": { "const": 0.0 },
-        "mu_B": { "const": 0.0 },
-        "mu_R": { "const": 0.0 },
-        "eps_B": { "const": 0.0 },
-        "eps_R": { "const": 0.0 },
-        "sigma_B": { "const": 0.0 },
-        "sigma_R": { "const": 0.0 },
-        "pi_A": { "const": 1.0 },
-        "phi_A": { "const": 0.0 },
-        "mu_A": { "const": 0.0 },
-        "mu_r": { "const": 0.0 },
-        "eps_A": { "const": 0.0 },
-        "eps_r": { "const": 0.0 },
-        "sigma_A": { "const": 0.0 },
-        "sigma_r": { "const": 0.0 }
-      }
+      "rate_grad": { "pi_A": { "const": 1.0 } }
     },
     {
       "name": "death_L_A",
@@ -1421,36 +680,7 @@
         "source_compartment": "L_A",
         "dest_compartment": null
       },
-      "rate_grad": {
-        "Pi_H": { "const": 0.0 },
-        "mu_H": { "const": 0.0 },
-        "tau": { "const": 0.0 },
-        "eps_H": { "const": 0.0 },
-        "gamma": { "const": 0.0 },
-        "omega": { "const": 0.0 },
-        "beta_BH": { "const": 0.0 },
-        "beta_AH": { "const": 0.0 },
-        "beta_HB": { "const": 0.0 },
-        "beta_HA": { "const": 0.0 },
-        "mu_L": { "pop": "L_A" },
-        "tau_L": { "const": 0.0 },
-        "pi_B": { "const": 0.0 },
-        "phi_B": { "const": 0.0 },
-        "mu_B": { "const": 0.0 },
-        "mu_R": { "const": 0.0 },
-        "eps_B": { "const": 0.0 },
-        "eps_R": { "const": 0.0 },
-        "sigma_B": { "const": 0.0 },
-        "sigma_R": { "const": 0.0 },
-        "pi_A": { "const": 0.0 },
-        "phi_A": { "const": 0.0 },
-        "mu_A": { "const": 0.0 },
-        "mu_r": { "const": 0.0 },
-        "eps_A": { "const": 0.0 },
-        "eps_r": { "const": 0.0 },
-        "sigma_A": { "const": 0.0 },
-        "sigma_r": { "const": 0.0 }
-      }
+      "rate_grad": { "mu_L": { "pop": "L_A" } }
     },
     {
       "name": "emerge_S_A",
@@ -1480,17 +710,6 @@
         "dest_compartment": "S_A"
       },
       "rate_grad": {
-        "Pi_H": { "const": 0.0 },
-        "mu_H": { "const": 0.0 },
-        "tau": { "const": 0.0 },
-        "eps_H": { "const": 0.0 },
-        "gamma": { "const": 0.0 },
-        "omega": { "const": 0.0 },
-        "beta_BH": { "const": 0.0 },
-        "beta_AH": { "const": 0.0 },
-        "beta_HB": { "const": 0.0 },
-        "beta_HA": { "const": 0.0 },
-        "mu_L": { "const": 0.0 },
         "tau_L": {
           "bin_op": {
             "op": "mul",
@@ -1504,15 +723,6 @@
             "right": { "pop": "L_A" }
           }
         },
-        "pi_B": { "const": 0.0 },
-        "phi_B": { "const": 0.0 },
-        "mu_B": { "const": 0.0 },
-        "mu_R": { "const": 0.0 },
-        "eps_B": { "const": 0.0 },
-        "eps_R": { "const": 0.0 },
-        "sigma_B": { "const": 0.0 },
-        "sigma_R": { "const": 0.0 },
-        "pi_A": { "const": 0.0 },
         "phi_A": {
           "bin_op": {
             "op": "mul",
@@ -1525,13 +735,7 @@
             },
             "right": { "pop": "L_A" }
           }
-        },
-        "mu_A": { "const": 0.0 },
-        "mu_r": { "const": 0.0 },
-        "eps_A": { "const": 0.0 },
-        "eps_r": { "const": 0.0 },
-        "sigma_A": { "const": 0.0 },
-        "sigma_r": { "const": 0.0 }
+        }
       }
     },
     {
@@ -1556,17 +760,6 @@
         "dest_compartment": "S_r"
       },
       "rate_grad": {
-        "Pi_H": { "const": 0.0 },
-        "mu_H": { "const": 0.0 },
-        "tau": { "const": 0.0 },
-        "eps_H": { "const": 0.0 },
-        "gamma": { "const": 0.0 },
-        "omega": { "const": 0.0 },
-        "beta_BH": { "const": 0.0 },
-        "beta_AH": { "const": 0.0 },
-        "beta_HB": { "const": 0.0 },
-        "beta_HA": { "const": 0.0 },
-        "mu_L": { "const": 0.0 },
         "tau_L": {
           "bin_op": {
             "op": "mul",
@@ -1574,28 +767,13 @@
             "right": { "pop": "L_A" }
           }
         },
-        "pi_B": { "const": 0.0 },
-        "phi_B": { "const": 0.0 },
-        "mu_B": { "const": 0.0 },
-        "mu_R": { "const": 0.0 },
-        "eps_B": { "const": 0.0 },
-        "eps_R": { "const": 0.0 },
-        "sigma_B": { "const": 0.0 },
-        "sigma_R": { "const": 0.0 },
-        "pi_A": { "const": 0.0 },
         "phi_A": {
           "bin_op": {
             "op": "mul",
             "left": { "param": "tau_L" },
             "right": { "pop": "L_A" }
           }
-        },
-        "mu_A": { "const": 0.0 },
-        "mu_r": { "const": 0.0 },
-        "eps_A": { "const": 0.0 },
-        "eps_r": { "const": 0.0 },
-        "sigma_A": { "const": 0.0 },
-        "sigma_r": { "const": 0.0 }
+        }
       }
     },
     {
@@ -1613,36 +791,7 @@
         "source_compartment": "S_A",
         "dest_compartment": null
       },
-      "rate_grad": {
-        "Pi_H": { "const": 0.0 },
-        "mu_H": { "const": 0.0 },
-        "tau": { "const": 0.0 },
-        "eps_H": { "const": 0.0 },
-        "gamma": { "const": 0.0 },
-        "omega": { "const": 0.0 },
-        "beta_BH": { "const": 0.0 },
-        "beta_AH": { "const": 0.0 },
-        "beta_HB": { "const": 0.0 },
-        "beta_HA": { "const": 0.0 },
-        "mu_L": { "const": 0.0 },
-        "tau_L": { "const": 0.0 },
-        "pi_B": { "const": 0.0 },
-        "phi_B": { "const": 0.0 },
-        "mu_B": { "const": 0.0 },
-        "mu_R": { "const": 0.0 },
-        "eps_B": { "const": 0.0 },
-        "eps_R": { "const": 0.0 },
-        "sigma_B": { "const": 0.0 },
-        "sigma_R": { "const": 0.0 },
-        "pi_A": { "const": 0.0 },
-        "phi_A": { "const": 0.0 },
-        "mu_A": { "pop": "S_A" },
-        "mu_r": { "const": 0.0 },
-        "eps_A": { "const": 0.0 },
-        "eps_r": { "const": 0.0 },
-        "sigma_A": { "const": 0.0 },
-        "sigma_r": { "const": 0.0 }
-      }
+      "rate_grad": { "mu_A": { "pop": "S_A" } }
     },
     {
       "name": "infection_A",
@@ -1672,15 +821,6 @@
         "dest_compartment": "E_A"
       },
       "rate_grad": {
-        "Pi_H": { "const": 0.0 },
-        "mu_H": { "const": 0.0 },
-        "tau": { "const": 0.0 },
-        "eps_H": { "const": 0.0 },
-        "gamma": { "const": 0.0 },
-        "omega": { "const": 0.0 },
-        "beta_BH": { "const": 0.0 },
-        "beta_AH": { "const": 0.0 },
-        "beta_HB": { "const": 0.0 },
         "beta_HA": {
           "bin_op": {
             "op": "mul",
@@ -1705,25 +845,7 @@
             },
             "right": { "pop": "S_A" }
           }
-        },
-        "mu_L": { "const": 0.0 },
-        "tau_L": { "const": 0.0 },
-        "pi_B": { "const": 0.0 },
-        "phi_B": { "const": 0.0 },
-        "mu_B": { "const": 0.0 },
-        "mu_R": { "const": 0.0 },
-        "eps_B": { "const": 0.0 },
-        "eps_R": { "const": 0.0 },
-        "sigma_B": { "const": 0.0 },
-        "sigma_R": { "const": 0.0 },
-        "pi_A": { "const": 0.0 },
-        "phi_A": { "const": 0.0 },
-        "mu_A": { "const": 0.0 },
-        "mu_r": { "const": 0.0 },
-        "eps_A": { "const": 0.0 },
-        "eps_r": { "const": 0.0 },
-        "sigma_A": { "const": 0.0 },
-        "sigma_r": { "const": 0.0 }
+        }
       }
     },
     {
@@ -1741,36 +863,7 @@
         "source_compartment": "E_A",
         "dest_compartment": null
       },
-      "rate_grad": {
-        "Pi_H": { "const": 0.0 },
-        "mu_H": { "const": 0.0 },
-        "tau": { "const": 0.0 },
-        "eps_H": { "const": 0.0 },
-        "gamma": { "const": 0.0 },
-        "omega": { "const": 0.0 },
-        "beta_BH": { "const": 0.0 },
-        "beta_AH": { "const": 0.0 },
-        "beta_HB": { "const": 0.0 },
-        "beta_HA": { "const": 0.0 },
-        "mu_L": { "const": 0.0 },
-        "tau_L": { "const": 0.0 },
-        "pi_B": { "const": 0.0 },
-        "phi_B": { "const": 0.0 },
-        "mu_B": { "const": 0.0 },
-        "mu_R": { "const": 0.0 },
-        "eps_B": { "const": 0.0 },
-        "eps_R": { "const": 0.0 },
-        "sigma_B": { "const": 0.0 },
-        "sigma_R": { "const": 0.0 },
-        "pi_A": { "const": 0.0 },
-        "phi_A": { "const": 0.0 },
-        "mu_A": { "pop": "E_A" },
-        "mu_r": { "const": 0.0 },
-        "eps_A": { "const": 0.0 },
-        "eps_r": { "const": 0.0 },
-        "sigma_A": { "const": 0.0 },
-        "sigma_r": { "const": 0.0 }
-      }
+      "rate_grad": { "mu_A": { "pop": "E_A" } }
     },
     {
       "name": "incubation_A",
@@ -1787,36 +880,7 @@
         "source_compartment": "E_A",
         "dest_compartment": "I_A"
       },
-      "rate_grad": {
-        "Pi_H": { "const": 0.0 },
-        "mu_H": { "const": 0.0 },
-        "tau": { "const": 0.0 },
-        "eps_H": { "const": 0.0 },
-        "gamma": { "const": 0.0 },
-        "omega": { "const": 0.0 },
-        "beta_BH": { "const": 0.0 },
-        "beta_AH": { "const": 0.0 },
-        "beta_HB": { "const": 0.0 },
-        "beta_HA": { "const": 0.0 },
-        "mu_L": { "const": 0.0 },
-        "tau_L": { "const": 0.0 },
-        "pi_B": { "const": 0.0 },
-        "phi_B": { "const": 0.0 },
-        "mu_B": { "const": 0.0 },
-        "mu_R": { "const": 0.0 },
-        "eps_B": { "const": 0.0 },
-        "eps_R": { "const": 0.0 },
-        "sigma_B": { "const": 0.0 },
-        "sigma_R": { "const": 0.0 },
-        "pi_A": { "const": 0.0 },
-        "phi_A": { "const": 0.0 },
-        "mu_A": { "const": 0.0 },
-        "mu_r": { "const": 0.0 },
-        "eps_A": { "pop": "E_A" },
-        "eps_r": { "const": 0.0 },
-        "sigma_A": { "const": 0.0 },
-        "sigma_r": { "const": 0.0 }
-      }
+      "rate_grad": { "eps_A": { "pop": "E_A" } }
     },
     {
       "name": "death_I_A",
@@ -1833,36 +897,7 @@
         "source_compartment": "I_A",
         "dest_compartment": null
       },
-      "rate_grad": {
-        "Pi_H": { "const": 0.0 },
-        "mu_H": { "const": 0.0 },
-        "tau": { "const": 0.0 },
-        "eps_H": { "const": 0.0 },
-        "gamma": { "const": 0.0 },
-        "omega": { "const": 0.0 },
-        "beta_BH": { "const": 0.0 },
-        "beta_AH": { "const": 0.0 },
-        "beta_HB": { "const": 0.0 },
-        "beta_HA": { "const": 0.0 },
-        "mu_L": { "const": 0.0 },
-        "tau_L": { "const": 0.0 },
-        "pi_B": { "const": 0.0 },
-        "phi_B": { "const": 0.0 },
-        "mu_B": { "const": 0.0 },
-        "mu_R": { "const": 0.0 },
-        "eps_B": { "const": 0.0 },
-        "eps_R": { "const": 0.0 },
-        "sigma_B": { "const": 0.0 },
-        "sigma_R": { "const": 0.0 },
-        "pi_A": { "const": 0.0 },
-        "phi_A": { "const": 0.0 },
-        "mu_A": { "pop": "I_A" },
-        "mu_r": { "const": 0.0 },
-        "eps_A": { "const": 0.0 },
-        "eps_r": { "const": 0.0 },
-        "sigma_A": { "const": 0.0 },
-        "sigma_r": { "const": 0.0 }
-      }
+      "rate_grad": { "mu_A": { "pop": "I_A" } }
     },
     {
       "name": "biting_rest_A",
@@ -1879,36 +914,7 @@
         "source_compartment": "I_A",
         "dest_compartment": "I_r"
       },
-      "rate_grad": {
-        "Pi_H": { "const": 0.0 },
-        "mu_H": { "const": 0.0 },
-        "tau": { "const": 0.0 },
-        "eps_H": { "const": 0.0 },
-        "gamma": { "const": 0.0 },
-        "omega": { "const": 0.0 },
-        "beta_BH": { "const": 0.0 },
-        "beta_AH": { "const": 0.0 },
-        "beta_HB": { "const": 0.0 },
-        "beta_HA": { "const": 0.0 },
-        "mu_L": { "const": 0.0 },
-        "tau_L": { "const": 0.0 },
-        "pi_B": { "const": 0.0 },
-        "phi_B": { "const": 0.0 },
-        "mu_B": { "const": 0.0 },
-        "mu_R": { "const": 0.0 },
-        "eps_B": { "const": 0.0 },
-        "eps_R": { "const": 0.0 },
-        "sigma_B": { "const": 0.0 },
-        "sigma_R": { "const": 0.0 },
-        "pi_A": { "const": 0.0 },
-        "phi_A": { "const": 0.0 },
-        "mu_A": { "const": 0.0 },
-        "mu_r": { "const": 0.0 },
-        "eps_A": { "const": 0.0 },
-        "eps_r": { "const": 0.0 },
-        "sigma_A": { "pop": "I_A" },
-        "sigma_r": { "const": 0.0 }
-      }
+      "rate_grad": { "sigma_A": { "pop": "I_A" } }
     },
     {
       "name": "death_S_r",
@@ -1925,36 +931,7 @@
         "source_compartment": "S_r",
         "dest_compartment": null
       },
-      "rate_grad": {
-        "Pi_H": { "const": 0.0 },
-        "mu_H": { "const": 0.0 },
-        "tau": { "const": 0.0 },
-        "eps_H": { "const": 0.0 },
-        "gamma": { "const": 0.0 },
-        "omega": { "const": 0.0 },
-        "beta_BH": { "const": 0.0 },
-        "beta_AH": { "const": 0.0 },
-        "beta_HB": { "const": 0.0 },
-        "beta_HA": { "const": 0.0 },
-        "mu_L": { "const": 0.0 },
-        "tau_L": { "const": 0.0 },
-        "pi_B": { "const": 0.0 },
-        "phi_B": { "const": 0.0 },
-        "mu_B": { "const": 0.0 },
-        "mu_R": { "const": 0.0 },
-        "eps_B": { "const": 0.0 },
-        "eps_R": { "const": 0.0 },
-        "sigma_B": { "const": 0.0 },
-        "sigma_R": { "const": 0.0 },
-        "pi_A": { "const": 0.0 },
-        "phi_A": { "const": 0.0 },
-        "mu_A": { "const": 0.0 },
-        "mu_r": { "pop": "S_r" },
-        "eps_A": { "const": 0.0 },
-        "eps_r": { "const": 0.0 },
-        "sigma_A": { "const": 0.0 },
-        "sigma_r": { "const": 0.0 }
-      }
+      "rate_grad": { "mu_r": { "pop": "S_r" } }
     },
     {
       "name": "infection_r",
@@ -1984,15 +961,6 @@
         "dest_compartment": "E_r"
       },
       "rate_grad": {
-        "Pi_H": { "const": 0.0 },
-        "mu_H": { "const": 0.0 },
-        "tau": { "const": 0.0 },
-        "eps_H": { "const": 0.0 },
-        "gamma": { "const": 0.0 },
-        "omega": { "const": 0.0 },
-        "beta_BH": { "const": 0.0 },
-        "beta_AH": { "const": 0.0 },
-        "beta_HB": { "const": 0.0 },
         "beta_HA": {
           "bin_op": {
             "op": "mul",
@@ -2017,25 +985,7 @@
             },
             "right": { "pop": "S_r" }
           }
-        },
-        "mu_L": { "const": 0.0 },
-        "tau_L": { "const": 0.0 },
-        "pi_B": { "const": 0.0 },
-        "phi_B": { "const": 0.0 },
-        "mu_B": { "const": 0.0 },
-        "mu_R": { "const": 0.0 },
-        "eps_B": { "const": 0.0 },
-        "eps_R": { "const": 0.0 },
-        "sigma_B": { "const": 0.0 },
-        "sigma_R": { "const": 0.0 },
-        "pi_A": { "const": 0.0 },
-        "phi_A": { "const": 0.0 },
-        "mu_A": { "const": 0.0 },
-        "mu_r": { "const": 0.0 },
-        "eps_A": { "const": 0.0 },
-        "eps_r": { "const": 0.0 },
-        "sigma_A": { "const": 0.0 },
-        "sigma_r": { "const": 0.0 }
+        }
       }
     },
     {
@@ -2053,36 +1003,7 @@
         "source_compartment": "E_r",
         "dest_compartment": null
       },
-      "rate_grad": {
-        "Pi_H": { "const": 0.0 },
-        "mu_H": { "const": 0.0 },
-        "tau": { "const": 0.0 },
-        "eps_H": { "const": 0.0 },
-        "gamma": { "const": 0.0 },
-        "omega": { "const": 0.0 },
-        "beta_BH": { "const": 0.0 },
-        "beta_AH": { "const": 0.0 },
-        "beta_HB": { "const": 0.0 },
-        "beta_HA": { "const": 0.0 },
-        "mu_L": { "const": 0.0 },
-        "tau_L": { "const": 0.0 },
-        "pi_B": { "const": 0.0 },
-        "phi_B": { "const": 0.0 },
-        "mu_B": { "const": 0.0 },
-        "mu_R": { "const": 0.0 },
-        "eps_B": { "const": 0.0 },
-        "eps_R": { "const": 0.0 },
-        "sigma_B": { "const": 0.0 },
-        "sigma_R": { "const": 0.0 },
-        "pi_A": { "const": 0.0 },
-        "phi_A": { "const": 0.0 },
-        "mu_A": { "const": 0.0 },
-        "mu_r": { "pop": "E_r" },
-        "eps_A": { "const": 0.0 },
-        "eps_r": { "const": 0.0 },
-        "sigma_A": { "const": 0.0 },
-        "sigma_r": { "const": 0.0 }
-      }
+      "rate_grad": { "mu_r": { "pop": "E_r" } }
     },
     {
       "name": "incubation_r",
@@ -2099,36 +1020,7 @@
         "source_compartment": "E_r",
         "dest_compartment": "I_r"
       },
-      "rate_grad": {
-        "Pi_H": { "const": 0.0 },
-        "mu_H": { "const": 0.0 },
-        "tau": { "const": 0.0 },
-        "eps_H": { "const": 0.0 },
-        "gamma": { "const": 0.0 },
-        "omega": { "const": 0.0 },
-        "beta_BH": { "const": 0.0 },
-        "beta_AH": { "const": 0.0 },
-        "beta_HB": { "const": 0.0 },
-        "beta_HA": { "const": 0.0 },
-        "mu_L": { "const": 0.0 },
-        "tau_L": { "const": 0.0 },
-        "pi_B": { "const": 0.0 },
-        "phi_B": { "const": 0.0 },
-        "mu_B": { "const": 0.0 },
-        "mu_R": { "const": 0.0 },
-        "eps_B": { "const": 0.0 },
-        "eps_R": { "const": 0.0 },
-        "sigma_B": { "const": 0.0 },
-        "sigma_R": { "const": 0.0 },
-        "pi_A": { "const": 0.0 },
-        "phi_A": { "const": 0.0 },
-        "mu_A": { "const": 0.0 },
-        "mu_r": { "const": 0.0 },
-        "eps_A": { "const": 0.0 },
-        "eps_r": { "pop": "E_r" },
-        "sigma_A": { "const": 0.0 },
-        "sigma_r": { "const": 0.0 }
-      }
+      "rate_grad": { "eps_r": { "pop": "E_r" } }
     },
     {
       "name": "death_I_r",
@@ -2145,36 +1037,7 @@
         "source_compartment": "I_r",
         "dest_compartment": null
       },
-      "rate_grad": {
-        "Pi_H": { "const": 0.0 },
-        "mu_H": { "const": 0.0 },
-        "tau": { "const": 0.0 },
-        "eps_H": { "const": 0.0 },
-        "gamma": { "const": 0.0 },
-        "omega": { "const": 0.0 },
-        "beta_BH": { "const": 0.0 },
-        "beta_AH": { "const": 0.0 },
-        "beta_HB": { "const": 0.0 },
-        "beta_HA": { "const": 0.0 },
-        "mu_L": { "const": 0.0 },
-        "tau_L": { "const": 0.0 },
-        "pi_B": { "const": 0.0 },
-        "phi_B": { "const": 0.0 },
-        "mu_B": { "const": 0.0 },
-        "mu_R": { "const": 0.0 },
-        "eps_B": { "const": 0.0 },
-        "eps_R": { "const": 0.0 },
-        "sigma_B": { "const": 0.0 },
-        "sigma_R": { "const": 0.0 },
-        "pi_A": { "const": 0.0 },
-        "phi_A": { "const": 0.0 },
-        "mu_A": { "const": 0.0 },
-        "mu_r": { "pop": "I_r" },
-        "eps_A": { "const": 0.0 },
-        "eps_r": { "const": 0.0 },
-        "sigma_A": { "const": 0.0 },
-        "sigma_r": { "const": 0.0 }
-      }
+      "rate_grad": { "mu_r": { "pop": "I_r" } }
     },
     {
       "name": "rest_biting_A",
@@ -2191,36 +1054,7 @@
         "source_compartment": "I_r",
         "dest_compartment": "I_A"
       },
-      "rate_grad": {
-        "Pi_H": { "const": 0.0 },
-        "mu_H": { "const": 0.0 },
-        "tau": { "const": 0.0 },
-        "eps_H": { "const": 0.0 },
-        "gamma": { "const": 0.0 },
-        "omega": { "const": 0.0 },
-        "beta_BH": { "const": 0.0 },
-        "beta_AH": { "const": 0.0 },
-        "beta_HB": { "const": 0.0 },
-        "beta_HA": { "const": 0.0 },
-        "mu_L": { "const": 0.0 },
-        "tau_L": { "const": 0.0 },
-        "pi_B": { "const": 0.0 },
-        "phi_B": { "const": 0.0 },
-        "mu_B": { "const": 0.0 },
-        "mu_R": { "const": 0.0 },
-        "eps_B": { "const": 0.0 },
-        "eps_R": { "const": 0.0 },
-        "sigma_B": { "const": 0.0 },
-        "sigma_R": { "const": 0.0 },
-        "pi_A": { "const": 0.0 },
-        "phi_A": { "const": 0.0 },
-        "mu_A": { "const": 0.0 },
-        "mu_r": { "const": 0.0 },
-        "eps_A": { "const": 0.0 },
-        "eps_r": { "const": 0.0 },
-        "sigma_A": { "const": 0.0 },
-        "sigma_r": { "pop": "I_r" }
-      }
+      "rate_grad": { "sigma_r": { "pop": "I_r" } }
     }
   ],
   "ode_equations": [],

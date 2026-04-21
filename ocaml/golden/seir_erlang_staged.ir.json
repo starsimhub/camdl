@@ -70,11 +70,7 @@
               }
             }
           }
-        },
-        "gamma": { "const": 0.0 },
-        "sigma_e1": { "const": 0.0 },
-        "sigma_e2": { "const": 0.0 },
-        "sigma_e3": { "const": 0.0 }
+        }
       }
     },
     {
@@ -96,13 +92,6 @@
         "origin_kind": "intrinsic",
         "source_compartment": "E_e1",
         "dest_compartment": "E_e2"
-      },
-      "rate_grad": {
-        "beta": { "const": 0.0 },
-        "gamma": { "const": 0.0 },
-        "sigma_e1": { "const": 0.0 },
-        "sigma_e2": { "const": 0.0 },
-        "sigma_e3": { "const": 0.0 }
       }
     },
     {
@@ -124,13 +113,6 @@
         "origin_kind": "intrinsic",
         "source_compartment": "E_e2",
         "dest_compartment": "E_e3"
-      },
-      "rate_grad": {
-        "beta": { "const": 0.0 },
-        "gamma": { "const": 0.0 },
-        "sigma_e1": { "const": 0.0 },
-        "sigma_e2": { "const": 0.0 },
-        "sigma_e3": { "const": 0.0 }
       }
     },
     {
@@ -152,13 +134,6 @@
         "origin_kind": "intrinsic",
         "source_compartment": "E_e3",
         "dest_compartment": "I"
-      },
-      "rate_grad": {
-        "beta": { "const": 0.0 },
-        "gamma": { "const": 0.0 },
-        "sigma_e1": { "const": 0.0 },
-        "sigma_e2": { "const": 0.0 },
-        "sigma_e3": { "const": 0.0 }
       }
     },
     {
@@ -176,13 +151,7 @@
         "source_compartment": "I",
         "dest_compartment": "R"
       },
-      "rate_grad": {
-        "beta": { "const": 0.0 },
-        "gamma": { "pop": "I" },
-        "sigma_e1": { "const": 0.0 },
-        "sigma_e2": { "const": 0.0 },
-        "sigma_e3": { "const": 0.0 }
-      }
+      "rate_grad": { "gamma": { "pop": "I" } }
     }
   ],
   "ode_equations": [],

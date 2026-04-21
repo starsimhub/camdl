@@ -122,10 +122,7 @@
               }
             }
           }
-        },
-        "gamma": { "const": 0.0 },
-        "N0": { "const": 0.0 },
-        "I0": { "const": 0.0 }
+        }
       }
     },
     {
@@ -238,10 +235,7 @@
               }
             }
           }
-        },
-        "gamma": { "const": 0.0 },
-        "N0": { "const": 0.0 },
-        "I0": { "const": 0.0 }
+        }
       }
     },
     {
@@ -259,12 +253,7 @@
         "source_compartment": "I_young",
         "dest_compartment": "R_young"
       },
-      "rate_grad": {
-        "beta": { "const": 0.0 },
-        "gamma": { "pop": "I_young" },
-        "N0": { "const": 0.0 },
-        "I0": { "const": 0.0 }
-      }
+      "rate_grad": { "gamma": { "pop": "I_young" } }
     },
     {
       "name": "recovery_old",
@@ -281,12 +270,7 @@
         "source_compartment": "I_old",
         "dest_compartment": "R_old"
       },
-      "rate_grad": {
-        "beta": { "const": 0.0 },
-        "gamma": { "pop": "I_old" },
-        "N0": { "const": 0.0 },
-        "I0": { "const": 0.0 }
-      }
+      "rate_grad": { "gamma": { "pop": "I_old" } }
     }
   ],
   "ode_equations": [],
