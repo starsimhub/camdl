@@ -117,34 +117,61 @@ enum Command {
 
     /// Compile a .camdl model to IR JSON (delegates to camdlc)
     #[command(after_help = "\
+This subcommand forwards all arguments verbatim to the OCaml compiler
+`camdlc`. Flags shown above belong to camdl; camdlc's own flags (e.g.
+`--set NAME=VALUE`, `--json-errors`, `--no-dim-check`) are parsed by
+camdlc itself. Run `camdlc --help` for the authoritative flag set.
+
 Examples:
-  # Compile a .camdl source to IR JSON on stdout
+  # Compile a .camdl source to IR JSON (stdout)
   camdl compile sir.camdl > sir.ir.json
 
-  # Write to a specific file
-  camdl compile sir.camdl --output sir.ir.json
+  # Override a parameter during compilation
+  camdl compile sir.camdl --set beta=0.3
+
+  # Machine-readable diagnostics
+  camdl compile sir.camdl --json-errors
 ")]
     Compile(Passthrough),
 
     /// Parse and type-check a .camdl model (delegates to camdlc)
     #[command(after_help = "\
+This subcommand forwards all arguments verbatim to the OCaml compiler
+`camdlc`. Run `camdlc check` with no arguments for usage, or see
+`camdlc --help` for global flags.
+
 Examples:
-  # Type-check a model, report errors/warnings
+  # Type-check a model, reporting errors/warnings
   camdl check sir.camdl
 
-  # Check with full dimension analysis output
-  camdl check sir.camdl --verbose
+  # Skip the dimensional-analysis checker (only for a confirmed false positive)
+  camdl check sir.camdl --no-dim-check
 ")]
     Check(Passthrough),
 
     /// Print model structure (delegates to camdlc)
     #[command(after_help = "\
+This subcommand forwards all arguments verbatim to the OCaml compiler
+`camdlc`. Input must be a .camdl source file (not a compiled .ir.json).
+Run `camdlc inspect` with no arguments for usage.
+
+Common options (all parsed by camdlc):
+  --summary           Compartments / transitions / parameters overview
+  --dims              Show declared dimensions and their levels
+  --compartments      List compartments (post-stratification)
+  --transitions       List transitions with their rate expressions
+  --tables            Show loaded table values
+  --ascii             Strip ANSI color from output
+
 Examples:
-  # Summary: compartments, transitions, parameters, dimensions
+  # Default summary
   camdl inspect sir.camdl
 
-  # Show loaded table values as well
+  # Show loaded tables as well
   camdl inspect sir.camdl --tables
+
+  # Transition rates only
+  camdl inspect sir.camdl --transitions
 ")]
     Inspect(Passthrough),
 }
