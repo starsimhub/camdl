@@ -23,6 +23,20 @@ and expr =
   | TimeFunc of string           (* name of the time function *)
   | TableLookup of string * expr list  (* table name, index exprs *)
   | Projected                    (* refers to projection output in likelihoods *)
+  (* Per-expression dimensional escape: asserts the wrapped subexpression
+     has dimension `(dim_p, dim_t)` without the checker verifying. The
+     user-supplied `reason` is retained for audit trails (run.json) and
+     is not consumed by runtime evaluation. Runtime semantics: identity —
+     evaluates `inner` and returns its value. See
+     docs/dev/proposals/notes/unchecked-dim-escape.md. *)
+  | UncheckedDim of unchecked_dim_expr
+
+and unchecked_dim_expr = {
+  inner:  expr;
+  dim_p:  int;
+  dim_t:  int;
+  reason: string;
+}
 
 (* ── Compartment ─────────────────────────────────────────────────────────────── *)
 

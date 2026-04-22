@@ -65,6 +65,10 @@ pub enum ResolvedExpr {
     },
     /// Returns `ctx.projected` (observation likelihood context only).
     Projected,
+    /// Dimensional escape; transparent at eval time (identity over
+    /// `inner`). The asserted dim is a compile-time concern only and
+    /// isn't stored here — the dim-checker has already consumed it.
+    UncheckedDim { inner: Box<ResolvedExpr> },
 }
 
 /// Returns true if the expression references compartment state (Pop, PopSum).
@@ -82,6 +86,7 @@ pub fn references_state(expr: &ResolvedExpr) -> bool {
         ResolvedExpr::Cond { pred, then_, else_ } =>
             references_state(pred) || references_state(then_) || references_state(else_),
         ResolvedExpr::TableLookup { index, .. } => references_state(index),
+        ResolvedExpr::UncheckedDim { inner } => references_state(inner),
         _ => false,
     }
 }
@@ -203,6 +208,11 @@ pub fn resolve_expr(expr: &Expr, ctx: &ResolveCtx<'_>) -> Result<ResolvedExpr, S
         }
 
         Expr::Projected(_) => Ok(ResolvedExpr::Projected),
+
+        Expr::UncheckedDim(w) => {
+            let inner = resolve_expr(&w.unchecked_dim.inner, ctx)?;
+            Ok(ResolvedExpr::UncheckedDim { inner: Box::new(inner) })
+        }
     }
 }
 
@@ -343,6 +353,12 @@ pub fn eval_resolved(expr: &ResolvedExpr, ctx: &EvalCtx<'_>) -> f64 {
             // likelihood fields).
             ctx.projected.unwrap_or(0.0)
         }
+
+        ResolvedExpr::UncheckedDim { inner } => {
+            // Identity at eval time. The dim assertion was consumed at
+            // compile time by the dim-checker.
+            eval_resolved(inner, ctx)
+        }
     }
 }
 
@@ -458,6 +474,10 @@ pub fn eval_resolved_deriv(expr: &ResolvedExpr, wrt: usize, ctx: &EvalCtx<'_>) -
             } else {
                 eval_resolved_deriv(else_, wrt, ctx)
             }
+        }
+
+        ResolvedExpr::UncheckedDim { inner } => {
+            eval_resolved_deriv(inner, wrt, ctx)
         }
     }
 }

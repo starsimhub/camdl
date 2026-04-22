@@ -450,6 +450,7 @@ let rec collect_pops = function
   | Ir.Cond c  -> collect_pops c.pred @ collect_pops c.then_ @ collect_pops c.else_
   | Ir.TimeFunc _ -> []
   | Ir.TableLookup (_, idx) -> List.concat_map collect_pops idx
+  | Ir.UncheckedDim u -> collect_pops u.inner
 
 let test_let_binding_is_inlined () =
   let src = {|
@@ -2594,6 +2595,106 @@ let test_multi_source_bimolecular_stoich () =
     "A + B --> C produces {A:-1, B:-1, C:+1}"
     expected got
 
+(* ── unchecked_dim per-expression dimensional escape (2026-04-22) ───────── *)
+
+(** Happy path: `unchecked_dim(expr, dim = population, reason = "…")`
+    compiles and produces an Ir.UncheckedDim with the asserted dim. *)
+let test_unchecked_dim_parses () =
+  let src = {|
+    time_unit = 'days
+    compartments { S, I, R }
+    parameters { beta : rate  alpha : real [1]  iota : real [P] }
+    transitions {
+      infection : S --> I
+        @ beta * unchecked_dim((I + iota)^alpha,
+                               dim = population,
+                               reason = "He et al. 2010 α-mixing exponent")
+                * S / (S + I + R)
+      recovery : I --> R @ beta * I
+    }
+    init { S = 999  I = 1 }
+    simulate { from = 0 'days  to = 10 'days }
+  |} in
+  let m = compile_expect_ok src in
+  (* The first transition's rate should contain an UncheckedDim node
+     somewhere in its AST. *)
+  let rec contains_unchecked = function
+    | Ir.UncheckedDim u ->
+      Alcotest.(check (pair int int)) "asserted dim is population (1,0)"
+        (1, 0) (u.Ir.dim_p, u.Ir.dim_t);
+      Alcotest.(check bool) "reason preserved" true
+        (u.Ir.reason = "He et al. 2010 α-mixing exponent");
+      true
+    | Ir.BinOp b -> contains_unchecked b.left || contains_unchecked b.right
+    | Ir.UnOp u  -> contains_unchecked u.arg
+    | Ir.Cond c  -> contains_unchecked c.pred || contains_unchecked c.then_ || contains_unchecked c.else_
+    | _ -> false
+  in
+  let tr = List.hd m.Ir.transitions in
+  Alcotest.(check bool) "transition rate contains UncheckedDim" true
+    (contains_unchecked tr.Ir.rate)
+
+(** Missing `reason` kwarg → E240. *)
+let test_unchecked_dim_requires_reason () =
+  let src = {|
+    time_unit = 'days
+    compartments { S, I }
+    parameters { beta : rate  alpha : real [1]  iota : real [P] }
+    transitions {
+      infect : S --> I
+        @ beta * unchecked_dim((I + iota)^alpha, dim = population) * S / (S + I)
+    }
+    init { S = 999  I = 1 }
+    simulate { from = 0 'days  to = 1 'days }
+  |} in
+  compile_expect_error_code ~code:"E240" ~contains:"reason" src
+
+(** Unknown dim name → E240 with domain-name hint. *)
+let test_unchecked_dim_unknown_dim_name () =
+  let src = {|
+    time_unit = 'days
+    compartments { S, I }
+    parameters { beta : rate  alpha : real [1]  iota : real [P] }
+    transitions {
+      infect : S --> I
+        @ beta * unchecked_dim((I + iota)^alpha,
+                               dim = bananas,
+                               reason = "test")
+                * S / (S + I)
+    }
+    init { S = 999  I = 1 }
+    simulate { from = 0 'days  to = 1 'days }
+  |} in
+  compile_expect_error_code ~code:"E240" ~contains:"bananas" src
+
+(** The He-style model compiles — a dimensionally-inhomogeneous rate
+    expression typechecks when wrapped in `unchecked_dim`. *)
+let test_unchecked_dim_he_style_typechecks () =
+  let src = {|
+    time_unit = 'days
+    compartments { S, E, I, R }
+    parameters {
+      beta  : rate
+      alpha : real [1]
+      iota  : real [P]
+      sigma : rate
+      gamma : rate
+    }
+    let N = S + E + I + R
+    transitions {
+      infect   : S --> E @ beta * unchecked_dim((I + iota)^alpha,
+                                                 dim = population,
+                                                 reason = "He 2010 mixing")
+                              * S / N
+      progress : E --> I @ sigma * E
+      recover  : I --> R @ gamma * I
+    }
+    init { S = 999  I = 1 }
+    simulate { from = 0 'days  to = 30 'days }
+  |} in
+  let _m = compile_expect_ok src in
+  ()
+
 (* ── Unit annotations on interpolated forcing (GH #8, 2026-04-22) ───────── *)
 
 (** Required tier-3 unit literal on sinusoidal forcing; IR dim
@@ -3421,6 +3522,12 @@ let () =
       Alcotest.test_case "poisson(rate = projected) parses"              `Quick test_poisson_rate_kwarg_parses;
       Alcotest.test_case "E250 positional arg in likelihood"             `Quick test_poisson_positional_errors;
       Alcotest.test_case "E251 unknown kwarg in likelihood"              `Quick test_likelihood_unknown_kwarg_errors;
+    ];
+    "unchecked_dim_escape", [
+      Alcotest.test_case "parses with all three kwargs"               `Quick test_unchecked_dim_parses;
+      Alcotest.test_case "missing `reason` → E240"                    `Quick test_unchecked_dim_requires_reason;
+      Alcotest.test_case "unknown dim name → E240"                    `Quick test_unchecked_dim_unknown_dim_name;
+      Alcotest.test_case "He 2010-style (I+ι)^α rate typechecks"      `Quick test_unchecked_dim_he_style_typechecks;
     ];
     "forcing_unit_annotations", [
       Alcotest.test_case "'per_day → dim (0,-1)"                     `Quick test_sinusoidal_per_day_dim;

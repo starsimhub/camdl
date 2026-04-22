@@ -26,6 +26,7 @@ let prec_binop = function
 let prec_expr : Ir.expr -> int = function
   | Ir.Const _ | Ir.Param _ | Ir.Pop _ | Ir.PopSum _
   | Ir.Time | Ir.TimeFunc _ | Ir.TableLookup _ | Ir.Projected -> 10
+  | Ir.UncheckedDim _ -> 10   (* function-call-like, atomic *)
   | Ir.BinOp { op; _ } -> prec_binop op
   | Ir.UnOp  _         -> 9
   | Ir.Cond  _         -> 1
@@ -149,6 +150,10 @@ and pp_inner ~mode ~split ~ascii ppf = function
     pp ~mode ~split ~ascii ppf then_;
     Fmt.pf ppf " else ";
     pp ~mode ~split ~ascii ppf else_
+  | Ir.UncheckedDim u ->
+    Fmt.pf ppf "unchecked_dim(";
+    pp ~mode ~split ~ascii ppf u.inner;
+    Fmt.pf ppf ", dim = (%d,%d))" u.dim_p u.dim_t
 
 (* ── Convenience: build split_fn from a model + stratification info ──────── *)
 

@@ -129,6 +129,24 @@ pub struct ProjectedExpr {
     pub projected: (),
 }
 
+/// Per-expression dimensional escape. Asserts that the wrapped
+/// subexpression has dimension `(dim_p, dim_t)` without the
+/// dim-checker verifying — the programmer takes responsibility.
+/// Runtime semantics: identity — the evaluator unwraps `inner` and
+/// returns its value. See
+/// `docs/dev/proposals/notes/unchecked-dim-escape.md`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct UncheckedDimExpr {
+    pub inner:  Box<Expr>,
+    pub dim:    (i32, i32),
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct UncheckedDimWrap {
+    pub unchecked_dim: UncheckedDimExpr,
+}
+
 // ── Expression ────────────────────────────────────────────────────────────────
 
 /// Pure, total, first-order expression language.  Each variant serialises to
@@ -148,6 +166,7 @@ pub enum Expr {
     TimeFunc(TimeFuncWrap),
     TableLookup(TableLookupWrap),
     Projected(ProjectedExpr),
+    UncheckedDim(UncheckedDimWrap),
 }
 
 // ── Convenience constructors ──────────────────────────────────────────────────

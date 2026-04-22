@@ -217,6 +217,12 @@ fn check_expr(expr: &Expr, ctx: &RefCtx<'_>, allow_projected: bool, errors: &mut
                 check_expr(idx, ctx, allow_projected, errors);
             }
         }
+        Expr::UncheckedDim(w) => {
+            // Recurse into the inner expression for name-resolution
+            // checks — the escape only affects dim-check, not name
+            // resolution.
+            check_expr(&w.unchecked_dim.inner, ctx, allow_projected, errors);
+        }
     }
 }
 

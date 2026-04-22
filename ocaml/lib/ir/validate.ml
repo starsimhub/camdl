@@ -56,6 +56,7 @@ let check_expr_refs ~comps ~params ~tables ~tfs errors e =
     | TableLookup (t, idxs) ->
       (if not (SS.mem t tables) then errors := UnknownTable t :: !errors);
       List.iter go idxs
+    | UncheckedDim u -> go u.inner
   in
   go e
 

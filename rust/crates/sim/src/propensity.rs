@@ -168,6 +168,13 @@ pub fn eval_expr(expr: &Expr, ctx: &EvalCtx<'_>) -> Result<f64, SimError> {
                 "Projected expression used outside observation likelihood context".into()
             ))
         }
+
+        Expr::UncheckedDim(w) => {
+            // Dimensional escape is a type-level assertion only; at
+            // runtime it's identity semantics — evaluate the inner
+            // expression and pass its value through unchanged.
+            eval_expr(&w.unchecked_dim.inner, ctx)
+        }
     }
 }
 
@@ -231,6 +238,12 @@ pub fn eval_expr_deriv(expr: &Expr, wrt: usize, ctx: &EvalCtx<'_>) -> f64 {
             } else {
                 eval_expr_deriv(&w.cond.else_, wrt, ctx)
             }
+        }
+
+        Expr::UncheckedDim(w) => {
+            // Derivative propagates through the escape — runtime
+            // gradients don't care about dim assertions.
+            eval_expr_deriv(&w.unchecked_dim.inner, wrt, ctx)
         }
     }
 }

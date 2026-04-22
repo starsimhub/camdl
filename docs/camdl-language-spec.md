@@ -159,16 +159,46 @@ Additional checks:
 Disable with `--no-dim-check` if a false positive is encountered (and file
 a bug).
 
-**Phenomenological models that intentionally break dimensional
-homogeneity.** Some formulations — e.g. the He et al. (2010) α-mixing
-term `(I + ι)^α` with non-integer `α` — use expressions that have no
-well-defined dimension by construction. These are legitimate modelling
-choices, not bugs. A proposed `unchecked_dim` per-expression escape
-captures the user's dimensional assertion at the call site rather than
-forcing `--no-dim-check` model-wide. See
-`docs/dev/proposals/notes/unchecked-dim-escape.md` for the design —
-**deferred, not yet implemented.** In the interim, use `--no-dim-check`
-with a prose note citing the phenomenological-mixing rationale.
+### 2.2.2 Phenomenological dimensional escape: `unchecked_dim`
+
+Some formulations intentionally break dimensional homogeneity. The
+canonical case is the He et al. (2010) α-mixing term `(I + ι)^α`
+with non-integer `α`: `P^0.976` has no well-defined dimension, but
+the formulation is empirically validated and widely used. These are
+legitimate modelling choices, not bugs.
+
+`unchecked_dim(expr, dim = NAME, reason = "…")` asserts that the
+wrapped expression has the named dimension without the dim-checker
+verifying the assertion. Surrounding rate expressions continue to
+dim-check normally — the escape is narrow and visible.
+
+```camdl
+transitions {
+  infection : S --> E
+    @ beta(t) * unchecked_dim((I + iota)^alpha,
+                              dim = population,
+                              reason = "He et al. 2010 α-mixing exponent")
+             * S / pop(t)
+}
+```
+
+Valid `dim` names: `dimensionless`, `population`, `time`, `rate`,
+`population_rate`, `per_population`. `reason` is required — a string
+documenting the assertion's legitimacy. The wrapper compiles to
+`Ir::UncheckedDim` and is transparent at runtime (identity over
+`inner`).
+
+**Choosing the asserted dimension.** The assertion must make the
+*surrounding* expression typecheck. For the He case above:
+`β(t)` is rate (T⁻¹), `S / pop(t)` is dimensionless, so
+`unchecked_dim(…)` must absorb the population-exponent for the full
+rate to be P·T⁻¹. Hence `dim = population`. A common mistake is
+asserting `dimensionless`, which leaves the full rate at T⁻¹ and
+triggers downstream dim errors.
+
+Use sparingly — `unchecked_dim` should feel like an escape hatch,
+not a normal tool. When a build has `unchecked_dim` sites, each
+should be reviewed in code review for legitimacy.
 
 References for the canonical case:
 

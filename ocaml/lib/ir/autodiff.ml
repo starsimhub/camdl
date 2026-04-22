@@ -23,6 +23,12 @@ let rec differentiate (e : expr) (param : string) : expr =
   | TableLookup _ -> Const 0.0
   | Projected     -> Const 0.0
 
+  (* Dimensional escape: wrapper is a type-level assertion only, no
+     runtime semantics. Differentiate the inner and drop the wrapper
+     — gradient expressions are consumed numerically by NUTS, not
+     re-checked for dimensional consistency. *)
+  | UncheckedDim u -> differentiate u.inner param
+
   (* Parameter reference — 1 if it's the target, 0 otherwise *)
   | Param p -> if p = param then Const 1.0 else Const 0.0
 
@@ -94,6 +100,7 @@ let rec differentiate (e : expr) (param : string) : expr =
         | Cond c        -> mentions p c.pred || mentions p c.then_ || mentions p c.else_
         | TimeFunc _    -> false
         | TableLookup (_, args) -> List.exists (mentions p) args
+        | UncheckedDim u -> mentions p u.inner
       in
       if mentions param b.left || mentions param b.right then
         failwith (Printf.sprintf

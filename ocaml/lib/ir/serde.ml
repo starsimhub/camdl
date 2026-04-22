@@ -134,6 +134,12 @@ let rec expr_to_json (e : expr) : Yojson.Safe.t =
       ("table",   str tbl);
       ("indices", arr (List.map expr_to_json idxs));
     ])]
+  | UncheckedDim u ->
+    obj [("unchecked_dim", obj [
+      ("inner",  expr_to_json u.inner);
+      ("dim",    arr [int u.dim_p; int u.dim_t]);
+      ("reason", str u.reason);
+    ])]
 
 let bin_op_of_str = function
   | "add" -> Add | "sub" -> Sub | "mul" -> Mul
@@ -186,6 +192,18 @@ let rec expr_of_json (j : Yojson.Safe.t) : expr =
       let tbl  = as_string (member "table" tl) in
       let idxs = List.map expr_of_json (as_list (member "indices" tl)) in
       TableLookup (tbl, idxs)
+    | ["unchecked_dim"] ->
+      let u = List.assoc "unchecked_dim" kvs in
+      let dim_arr = as_list (member "dim" u) in
+      (match dim_arr with
+       | [p; t] ->
+         UncheckedDim {
+           inner  = expr_of_json (member "inner" u);
+           dim_p  = as_int p;
+           dim_t  = as_int t;
+           reason = as_string (member "reason" u);
+         }
+       | _ -> fail "unchecked_dim.dim must be [P, T] pair")
     | _ ->
       fail "unrecognised expr object with keys [%s]" (String.concat ", " keys)
     )

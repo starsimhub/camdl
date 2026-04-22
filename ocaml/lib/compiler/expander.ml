@@ -1071,6 +1071,73 @@ let rec resolve_expr ctx (env : (string * string) list) (e : expr) : Ir.expr =
          ~message:"date() requires a top-level origin declaration, e.g. origin = date(\"2020-01-01\")"
          ();
        Ir.Const 0.0)
+  | EFuncCall ("unchecked_dim", args) ->
+    (* Per-expression dimensional escape. Grammar:
+         unchecked_dim(<expr>, dim = <name>, reason = "why")
+       where <name> is one of: dimensionless, population, time, rate,
+       population_rate, per_population. Compiles to `Ir.UncheckedDim`
+       with the inner expression resolved recursively and the asserted
+       (P, T) dimension packed from the name. The dim-checker uses
+       the declared dim authoritatively and does NOT unify the inner
+       expression's dim — that's the whole point of the escape. *)
+    let dim_of_name n = match n with
+      | "dimensionless"    -> Some (0, 0)
+      | "population"       -> Some (1, 0)
+      | "time"             -> Some (0, 1)
+      | "rate"             -> Some (0, -1)
+      | "population_rate"  -> Some (1, -1)
+      | "per_population"   -> Some (-1, 0)
+      | _ -> None
+    in
+    let get_kw k = List.assoc_opt k args in
+    let positional = List.filter_map (fun (k, e) -> if k = "" then Some e else None) args in
+    let inner_expr = match positional with
+      | [e] -> e
+      | _ ->
+        Diagnostics.error ctx.diags ~code:"E240"
+          ~loc:Diagnostics.no_loc
+          ~message:"unchecked_dim takes exactly one positional argument"
+          ~hint:"usage: unchecked_dim(expr, dim = <name>, reason = \"...\")" ();
+        EConst 0.0
+    in
+    let dim_name = match get_kw "dim" with
+      | Some (EIdent (n, _)) -> n
+      | Some _ | None ->
+        Diagnostics.error ctx.diags ~code:"E240"
+          ~loc:Diagnostics.no_loc
+          ~message:"unchecked_dim requires `dim = <name>` keyword argument"
+          ~detail:"Domain names: dimensionless, population, time, rate, population_rate, per_population."
+          ~hint:"example: unchecked_dim((I + iota)^alpha, dim = population, reason = \"He et al. 2010 α-mixing\")"
+          ();
+        "dimensionless"
+    in
+    let (dim_p, dim_t) = match dim_of_name dim_name with
+      | Some pair -> pair
+      | None ->
+        Diagnostics.error ctx.diags ~code:"E240"
+          ~loc:Diagnostics.no_loc
+          ~message:(Printf.sprintf "unchecked_dim: unknown dim name '%s'" dim_name)
+          ~detail:"Valid: dimensionless, population, time, rate, population_rate, per_population."
+          ();
+        (0, 0)
+    in
+    let reason = match get_kw "reason" with
+      | Some (EIdent (s, _)) -> s
+      | Some _ | None ->
+        Diagnostics.error ctx.diags ~code:"E240"
+          ~loc:Diagnostics.no_loc
+          ~message:"unchecked_dim requires `reason = \"...\"` string kwarg"
+          ~detail:"A string documenting why the dimensional assertion is legitimate. \
+                   Escape hatches must be justified at the call site; see \
+                   docs/dev/proposals/notes/unchecked-dim-escape.md."
+          ~hint:"reason = \"He et al. 2010 α-mixing exponent\""
+          ();
+        "<no reason given>"
+    in
+    Ir.UncheckedDim {
+      Ir.inner  = resolve_expr ctx env inner_expr;
+      Ir.dim_p; Ir.dim_t; Ir.reason;
+    }
   | EFuncCall (fname, args) ->
     (* Built-in math functions → Ir.UnOp *)
     let builtin_un_op = match fname with
@@ -1818,6 +1885,7 @@ let classify_and_resolve_prior_spec ?(loc = Diagnostics.no_loc) ctx ~pname
       | Ir.Pop _ | Ir.PopSum _ -> ()  (* caught elsewhere *)
       | Ir.TimeFunc _ -> ()
       | Ir.TableLookup (_, args) -> List.iter check_refs args
+      | Ir.UncheckedDim u -> check_refs u.inner
     in
     List.iter (fun (_, e) -> check_refs e) resolved_args;
     `Hierarchical {
@@ -2174,6 +2242,7 @@ let resolve_comp_name ctx env e =
       | Ir.Time       -> "the time symbol"
       | Ir.Projected  -> "a projected value"
       | Ir.Pop _      -> "a compartment" (* unreachable by pattern *)
+      | Ir.UncheckedDim _ -> "a dimensional-escape expression"
     in
     Diagnostics.error ctx.diags
       ~code:"E264"
@@ -3318,6 +3387,7 @@ let build_model_structure ctx expanded_trs =
     | Ir.TableLookup (_, args) ->
       List.fold_left collect_numerator_pops acc args
     | Ir.Const _ | Ir.Param _ | Ir.Time | Ir.Projected | Ir.TimeFunc _ -> acc
+    | Ir.UncheckedDim u -> collect_numerator_pops acc u.inner
   in
   let seen_tr  = Hashtbl.create 4 in
   let seen_inf = Hashtbl.create 4 in

@@ -1,17 +1,15 @@
 ---
 date: 2026-04-22
-status: deferred
+status: shipped
 related: no-dim-check-hardening.md (same "escape hatch visibility" philosophy),
-  docs/camdl-language-spec.md §2.2.1 (dim analysis)
+  docs/camdl-language-spec.md §2.2.2 (dim analysis)
 ---
 
 # Per-expression dimensional escape: `unchecked_dim`
 
-Design note for a narrow, visible escape hatch that lets users
-compile dimensionally irregular subexpressions without disabling the
-checker for the whole model. Deferred — worth shipping but not
-blocking current work. Capturing the design so we get it right when
-we do land it.
+**Shipped 2026-04-22.** See spec §2.2.2 for user-facing docs. This
+note retains the design discussion (naming rationale, trade-offs
+considered, deferred follow-ups like the I400 audit trail).
 
 ## Motivation
 

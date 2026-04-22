@@ -256,6 +256,13 @@ let rec infer st ~ctx (e : expr) : dim =
      | Some d -> resolve st d
      | None -> fresh_var st)
   | Projected -> Known population
+  | UncheckedDim u ->
+    (* Per-expression dimensional escape. The declared dim is
+       authoritative; we do NOT recurse into `u.inner` for unification
+       purposes. That's the whole point of the escape — the inner
+       expression is allowed to be dimensionally irregular, e.g.
+       `(I + ι)^α` in the He et al. 2010 measles formulation. *)
+    Known (make u.dim_p u.dim_t)
   | BinOp b -> infer_binop st ~ctx b
   | UnOp u -> infer_unop st ~ctx u
   | Cond c -> infer_cond st ~ctx c
@@ -374,6 +381,11 @@ let rec propagate st ~ctx (e : expr) (expected : dim_vec) : unit =
         | _ -> ())
      | None -> ())
   | Pop _ | PopSum _ | Time | Projected -> ()
+  | UncheckedDim _ ->
+    (* The escape stops dim-propagation at this boundary — the inner
+       is explicitly exempted from checker-driven dimensional
+       constraints. *)
+    ()
   | TimeFunc name ->
     (* If the time function's dim is unknown, bind it *)
     (match Hashtbl.find_opt st.tf_dims name with
@@ -528,6 +540,7 @@ let rec read_dim st (e : expr) : dim =
      | Some d -> resolve st d
      | None -> Unknown (-1))
   | Projected -> Known population
+  | UncheckedDim u -> Known (make u.dim_p u.dim_t)
   | BinOp b -> read_dim_binop st b
   | UnOp u -> read_dim_unop st u
   | Cond c ->
@@ -608,6 +621,8 @@ let rec expr_to_short_string (e : expr) : string =
   | TimeFunc s -> Printf.sprintf "%s(t)" s
   | TableLookup (s, _) -> Printf.sprintf "%s[...]" s
   | Projected -> "projected"
+  | UncheckedDim u ->
+    Printf.sprintf "unchecked_dim(%s)" (expr_to_short_string u.inner)
   | BinOp b ->
     let op_str = match b.op with
       | Add -> "+" | Sub -> "-" | Mul -> "*" | Div -> "/"
