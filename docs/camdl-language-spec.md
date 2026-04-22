@@ -188,6 +188,61 @@ The `origin` value is stored in the IR (`"origin": "2019-01-01"`). It does not
 affect simulation dynamics — it is purely a coordinate reference for converting
 calendar dates to simulation time.
 
+### 2.3 Three tiers of dimensional information
+
+Dimensional information in a model can be declared at three levels of
+specificity. Each tier carries strictly more information than the
+next, and each is the right tool for a distinct class of declaration.
+Understanding the hierarchy makes the rest of §2 and §4–7 fit together.
+
+| Tier                    | Syntax                                               | Carries                        | Use when                                                         |
+|-------------------------|------------------------------------------------------|--------------------------------|------------------------------------------------------------------|
+| 1. **Kind keyword**     | `rate`, `probability`, `count`, `positive`, `real`   | Dimension (inferred from kind) | Common parameter cases (the 99% case).                           |
+| 2. **Bracket annotation** | `[T]`, `[T^-1]`, `[P]`, `[P/T]`, `[1]`               | Dimension only                 | Kind keyword is under-determined (`real`, `positive`).           |
+| 3. **Unit literal**     | `'days`, `'years`, `'per_day`, `'per_year`           | Dimension **+ scale**          | Concrete numeric data with a known real-world scale.             |
+
+**The tiers are complementary, not redundant.** They answer different
+questions about a value:
+
+- **Bracket annotations** answer *"what dimension does this parameter
+  have?"* — for values supplied later (at fit time via `--params`,
+  from priors, from inference). The compiler type-checks dimensions
+  without knowing scales. Scale is implicit: everything is in the
+  model's `time_unit`.
+
+- **Unit literals** answer *"what dimension AND what real-world scale
+  does this value have?"* — for concrete data (`time_unit`
+  declaration, duration literals like `5 'years`, table entries,
+  data loaded via `read()`). The compiler type-checks dimensions
+  AND normalises scale to the model's `time_unit`.
+
+You can't collapse tiers 2 and 3 into one syntax. Brackets can't
+carry scale: `[T]` says "time-dimension," not "days" vs. "years." A
+user supplying `beta = 0.3` via `--params` has agreed to provide it
+in model time units — the compiler doesn't need to convert. Unit
+literals can't be applied to unknowns: you can't write `beta :
+positive 'per_day` when `beta`'s value will be drawn from a prior,
+because the prior samples directly in model time units.
+
+**Subtyping.** Every unit literal decomposes to (dimension, scale).
+The dimension half plays the same type-checking role as a bracket;
+the scale half drives scale normalisation. A unit literal is
+strictly more informative than a bracket of the same dimension:
+
+```
+'years       ⊂    [T]     ⊂   (any time-dimensioned value)
+(dim+scale)       (dim)         (unconstrained)
+```
+
+**Kind keywords are a fourth, convenience layer on top** of the
+three tiers. They name common dimension patterns (`rate` ≡ `[T^-1]`,
+`probability` ≡ `[1]` with `[0,1]` domain, `count` ≡ `[P]`) so 99%
+of parameter declarations avoid bracket notation entirely. Use
+brackets only when the kind keyword is under-determined (`real`,
+`positive`); use unit literals only where concrete numeric values
+are attached. This section (§2.4, §6.1) shows tier-3 use on table
+values; §4.1.1 shows tier 2 on parameter declarations.
+
 ### 2.4 Table Unit Annotations
 
 Tables carry a single unit for all values:
@@ -788,6 +843,41 @@ value whose dimension matches `baseline`, so it naturally follows pattern (1).
 To use pattern (2), set `baseline = 1.0` (dimensionless) and multiply by the
 rate parameter explicitly. The dimensional analysis checker handles both
 correctly.
+
+### Known gap: interpolated forcing functions and dimensional analysis
+
+The `interpolated` constructor reads concrete numeric data from a file
+— a tier-3 use case (see §2.3) that should accept a unit literal to
+declare the scale of the file's values. **It currently does not.**
+Tracked as GitHub issue #8.
+
+Consequence: when an `interpolated` forcing carries a dimensioned
+quantity (e.g. `pop(t)` is a population count, `birthrate(t)` is a
+per-capita rate), the dim-checker sees the interpolated value as
+dimensionless. Downstream rate expressions that consume it then fail
+`E300` even when the model is mathematically correct. The canonical
+case is the He 2010 London measles replication, whose
+birth-recruitment rate references both `pop(t)` and `birthrate(t)`.
+
+Three short-term workarounds, in order of preference:
+
+1. **Use the forcing in a rate expression that's dimensionless by
+   construction** — e.g., multiply a seasonal forcing around 1.0
+   into a rate parameter that already carries the T⁻¹ dimension.
+   Most existing golden models take this path; the gap doesn't bite
+   them.
+
+2. **Compile with `--no-dim-check`** — disables the checker entirely
+   for the current build. Loses the protection that motivated having
+   a checker in the first place, so treat as a last-resort escape
+   hatch.
+
+3. **Wait for GH #8** — once the parser accepts unit literals on
+   `interpolated` declarations (e.g. `pop : interpolated 'count
+   { … }`, `birthrate : interpolated 'per_year { … }`), the gap
+   closes and the He 2010 path typechecks end-to-end.
+
+See `docs/dev/proposals/notes/` and GitHub issue #8 for progress.
 
 ---
 
