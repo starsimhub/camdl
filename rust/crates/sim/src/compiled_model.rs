@@ -236,6 +236,7 @@ fn eval_table_expr(
             };
             Ok(if r.is_nan() { 0.0 } else { r })
         }
+        Expr::UncheckedDim(w) => eval_table_expr(&w.unchecked_dim.inner, param_index, params),
         _ => Err(SimError::Validation(
             "unsupported expression type in table values (only Const and Param are valid)".to_string()
         )),

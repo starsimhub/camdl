@@ -929,18 +929,25 @@ let rec resolve_expr ctx (env : (string * string) list) (e : expr) : Ir.expr =
   match e with
   | EConst f     -> Ir.Const f
   | EUnit (f, u) ->
-    (* For rate units (per_day, per_year, etc.), emit Const(f) / Const(days)
-       instead of a pre-computed Const. This preserves the Const/Const division
-       structure that dimcheck recognizes as dimensionally ambiguous (inferred
-       from context as T⁻¹). For duration units, pre-compute is fine since
-       duration constants are typically used where P is expected. *)
+    (* Preserve the unit's dimension on the IR so Dimcheck can see it.
+       Duration units (`'days` etc.) wrap as UncheckedDim with dim = T;
+       rate units as UncheckedDim with dim = T⁻¹. The scalar is pre-
+       scaled into the model's time unit. For Count/Ratio we keep the
+       existing bare-Const behaviour since there is no time scale.
+       Fixes GH #9: previously `1 'days` became a bare dimensionless
+       Const, so `(gamma + mu) * 1 'days` type-checked as T⁻¹ and
+       `exp()` of it produced a spurious E301. *)
+    let scaled = unit_to_model_time ctx f u in
     (match u with
-     | PerDay | PerWeek | PerMonth | PerYear ->
-       let tu = days_per ctx.time_unit in
-       let divisor = days_per u /. tu in
-       if divisor = 1.0 then Ir.Const f
-       else Ir.BinOp { op = Div; left = Ir.Const f; right = Ir.Const divisor }
-     | _ -> Ir.Const (unit_to_model_time ctx f u))
+     | Count | Ratio -> Ir.Const scaled
+     | _ ->
+       let (p, t) = unit_lit_to_dim u in
+       Ir.UncheckedDim {
+         inner  = Ir.Const scaled;
+         dim_p  = p;
+         dim_t  = t;
+         reason = Printf.sprintf "unit literal '%s" (unit_lit_to_string u);
+       })
   | EIdent (name, l) -> (
     let loc = diag_loc_of_ast_ctx ctx l in
     match List.assoc_opt name env with
@@ -2409,13 +2416,18 @@ let expand_time_function_one ctx fname (env : (string * string) list) fkind (fun
                 ();
               Ir.Const 1.0
           in
-          let period_f = match period_expr with Ir.Const f -> f | _ ->
+          let unwrap_const = function
+            | Ir.Const f -> Some f
+            | Ir.UncheckedDim { inner = Ir.Const f; _ } -> Some f
+            | _ -> None
+          in
+          let period_f = match unwrap_const period_expr with Some f -> f | None ->
             Diagnostics.error ctx.diags ~code:"E405" ~loc:Diagnostics.no_loc
               ~message:(Printf.sprintf "periodic time function '%s': 'period' must be a constant when using 'on'" fname)
               ~hint:"Use a numeric literal for 'period', e.g. period = 365"
               ();
             1.0 in
-          let step_f = match step_expr with Ir.Const f -> f | _ ->
+          let step_f = match unwrap_const step_expr with Some f -> f | None ->
             Diagnostics.error ctx.diags ~code:"E405" ~loc:Diagnostics.no_loc
               ~message:(Printf.sprintf "periodic time function '%s': 'step' must be a constant when using 'on'" fname)
               ~hint:"Use a numeric literal for 'step', e.g. step = 1"

@@ -167,6 +167,25 @@ let run_validate (d : compile_detail) : bool =
     List.iter (diagnose_validate_error d.ctx) errs;
     true
 
+(** Run Dimcheck on a compiled model and route results into the diagnostic
+    context. Exposed so `camdlc check` runs the same pass as `camdlc compile`;
+    previously `check` skipped dimcheck entirely (GH #9). *)
+let run_dimcheck (d : compile_detail) : unit =
+  if not !no_dim_check then begin
+    let dc_result = Dimcheck.check_model d.model in
+    List.iter (fun (dc : Dimcheck.diagnostic) ->
+      match dc.severity with
+      | Dimcheck.Error ->
+        Diagnostics.error d.ctx.diags
+          ~code:dc.code ~loc:Diagnostics.no_loc
+          ~message:dc.message ?detail:dc.detail ?hint:dc.hint ()
+      | Dimcheck.Info ->
+        Diagnostics.info d.ctx.diags
+          ~code:dc.code ~loc:Diagnostics.no_loc
+          ~message:dc.message ?detail:dc.detail ?hint:dc.hint ()
+    ) dc_result.diagnostics
+  end
+
 let compile ?(name = "model") ?(filename = "<input>") (src : string) : (Ir.model, string) result =
   match compile_detail_result ~name ~filename src with
   | Ok d ->
@@ -174,32 +193,9 @@ let compile ?(name = "model") ?(filename = "<input>") (src : string) : (Ir.model
        2026-04-19 compiler review). *)
     if run_validate d then
       Diagnostics.report_and_exit d.ctx.diags d.source;
-    (* Dimensional analysis pass — runs before autodiff.
-       Dimension errors block compilation (like type errors).
-       Info diagnostics (I300: undetermined dimension) are non-blocking.
-       Use --no-dim-check to disable entirely. *)
-    if not !no_dim_check then begin
-      let dc_result = Dimcheck.check_model d.model in
-      List.iter (fun (dc : Dimcheck.diagnostic) ->
-        match dc.severity with
-        | Dimcheck.Error ->
-          Diagnostics.error d.ctx.diags
-            ~code:dc.code ~loc:Diagnostics.no_loc
-            ~message:dc.message ?detail:dc.detail ?hint:dc.hint ()
-        | Dimcheck.Info ->
-          (* M5 in 2026-04-19 review: previously promoted to Warning,
-             which confused JSON clients (I300 appeared as
-             `"severity": "warning"`) and triggered `-Werror`-style
-             CI. Now routes through the new Info level — non-blocking,
-             dimmed style, `"severity": "info"` in JSON. *)
-          Diagnostics.info d.ctx.diags
-            ~code:dc.code ~loc:Diagnostics.no_loc
-            ~message:dc.message ?detail:dc.detail ?hint:dc.hint ()
-      ) dc_result.diagnostics;
-      (* Dimension errors block compilation — render and exit *)
-      if Diagnostics.has_errors d.ctx.diags then
-        Diagnostics.report_and_exit d.ctx.diags d.source
-    end;
+    run_dimcheck d;
+    if Diagnostics.has_errors d.ctx.diags then
+      Diagnostics.report_and_exit d.ctx.diags d.source;
     (* Single render of any collected non-blocking diagnostics
        (expansion warnings + dimcheck infos/warnings). M3 in the
        2026-04-19 review: previously expansion warnings were rendered

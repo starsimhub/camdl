@@ -1090,7 +1090,15 @@ let run_check path =
   | Error e ->
     Fmt.epr "Error: %s@\n" e;
     exit 1
-  | Ok { model; ctx; summary; source } ->
+  | Ok d ->
+    (* Run Dimcheck so `camdlc check` matches the `compile` pipeline
+       (GH #9: previously check silently skipped dimcheck and reported
+       "no errors" on models that simulate would reject with E301). *)
+    Compiler.run_dimcheck d;
+    let ctx = d.Compiler.ctx in
+    let source = d.Compiler.source in
+    let model = d.Compiler.model in
+    let summary = d.Compiler.summary in
     if Diagnostics.has_errors ctx.diags then (
       Diagnostics.render_all ctx.diags source Fmt.stderr;
       exit 1

@@ -3538,7 +3538,13 @@
       "name": "school",
       "kind": {
         "periodic": {
-          "period": { "const": 365.25 },
+          "period": {
+            "unchecked_dim": {
+              "inner": { "const": 365.25 },
+              "dim": [ 0, 1 ],
+              "reason": "unit literal 'days"
+            }
+          },
           "values": [
             { "const": 1.0 },
             { "const": 1.0 },
