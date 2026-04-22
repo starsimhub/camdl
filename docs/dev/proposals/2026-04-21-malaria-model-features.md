@@ -919,14 +919,15 @@ landed work; update in place as each item ships.
 Goal: a 15-line Ross-Macdonald model that simulates correctly under
 Gillespie/tau-leap and fits real slide-positivity data.
 
-- [ ] **#1 multi-source transitions** (~1 week)
-  - [ ] Parser: `+` separator on source side of `-->`
-  - [ ] Expander: stoichiometry generation for bimolecular sources
-  - [ ] Propensity: multi-source rate evaluation + conservation check
-  - [ ] Error codes: source-dim mismatch, non-positive stoichiometry
-  - [ ] Tests: conservation under Gillespie, paired-seed regression
-  - [ ] Spec §N updated before implementation merges
-  - [ ] Golden: `ocaml/golden/ross_macdonald.camdl`
+- [x] **#1 multi-source transitions** (landed `d88eb7f`, 2026-04-21)
+  - [x] Parser: `+` separator on both sides of `-->`
+  - [x] Expander: multi-source stoich generation with catalyst collapse
+  - [x] Propensity: verified via Ross-Macdonald host-conservation test
+        (no code change — IR already general)
+  - [x] Error code E310 (fully-catalytic / no-net-effect)
+  - [x] Tests: 3 compiler tests + 1 Rust runtime conservation test
+  - [x] Spec §9.1.1 updated
+  - [x] Golden: `ocaml/golden/ross_macdonald.camdl` + `.ir.json`
 - [ ] **#4 diagnostic-test likelihood** (~1 week)
   - [ ] Parser: `diagnostic_test(base = …, sens = …, spec = …)`
   - [ ] IR: new `Likelihood::DiagnosticTest` variant
