@@ -164,36 +164,60 @@ let run_summary ppf (model : Ir.model) ctx (sum : Expander.model_summary) =
   ) else
     Fmt.pf ppf " (+ 0 filtered by where)";
   Fmt.pf ppf "@\n";
-  (* Parameters *)
+  (* Parameters — summary groups parameters by declared kind. Full
+     per-parameter listing is available via `camdlc inspect --parameters`.
+     Previously the default dumped all parameters inline, which scaled
+     badly: a Garki model with 17 params wraps to an unreadable blob.
+     Reports both declarations (source-level) and expanded count (IR
+     params after `p[dim]` stratification), matching the
+     compartments line's "N base × dim = M expanded" shape. *)
   lbl "  parameters      ";
-  num sum.param_count;
-  Fmt.pf ppf " declared";
+  let n_decl = sum.param_count in
+  let n_exp  = List.length model.parameters in
+  if n_decl = n_exp then (
+    num n_exp;
+    Fmt.pf ppf " declared"
+  ) else (
+    num n_decl;
+    Fmt.pf ppf " declared";
+    Fmt.pf ppf " \xe2\x86\x92 ";  (* → *)
+    num n_exp;
+    Fmt.pf ppf " expanded"
+  );
   if model.parameters <> [] then (
-    let names = List.map (fun (p : Ir.parameter) ->
-      let pkind_str k = match k with
-        | Ast.PRate -> "rate" | Ast.PProbability -> "probability"
-        | Ast.PPositive -> "positive" | Ast.PCount -> "count" | Ast.PReal -> "real"
-      in
-      let kind = match List.find_opt (fun pd ->
+    let pkind_str k = match k with
+      | Ast.PRate -> "rate" | Ast.PProbability -> "probability"
+      | Ast.PPositive -> "positive" | Ast.PCount -> "count" | Ast.PReal -> "real"
+    in
+    let kind_of (p : Ir.parameter) =
+      match List.find_opt (fun pd ->
           match pd with
           | Ast.PScalar s -> s.pname = p.name
           | Ast.PIndexed ix ->
             let prefix = ix.pname ^ "_" in
             String.length p.name > String.length prefix &&
             String.sub p.name 0 (String.length prefix) = prefix
-          ) ctx.param_decls with
-        | Some (Ast.PScalar pd)   -> pkind_str pd.pkind
-        | Some (Ast.PIndexed pd) -> pkind_str pd.pkind
-        | None -> "?"
-      in
-      Printf.sprintf "%s: %s" p.name kind
-    ) model.parameters in
-    Fmt.pf ppf " (";
-    List.iteri (fun i s ->
-      if i > 0 then Fmt.pf ppf ", ";
-      Term_style.param Fmt.string ppf s
-    ) names;
-    Fmt.pf ppf ")"
+        ) ctx.param_decls with
+      | Some (Ast.PScalar pd)  -> pkind_str pd.pkind
+      | Some (Ast.PIndexed pd) -> pkind_str pd.pkind
+      | None -> "?"
+    in
+    (* Count by kind, preserving a stable declaration-order-like
+       presentation: rate, probability, positive, count, real. *)
+    let kind_order = ["rate"; "probability"; "positive"; "count"; "real"] in
+    let counts_by_kind = List.map (fun k ->
+      (k, List.length (List.filter (fun p -> kind_of p = k) model.parameters))
+    ) kind_order in
+    let nonzero = List.filter (fun (_, n) -> n > 0) counts_by_kind in
+    if nonzero <> [] then (
+      Fmt.pf ppf " (";
+      List.iteri (fun i (k, n) ->
+        if i > 0 then Fmt.pf ppf ", ";
+        Fmt.pf ppf "%d " n;
+        Term_style.param Fmt.string ppf k
+      ) nonzero;
+      Fmt.pf ppf ")"
+    )
   );
   Fmt.pf ppf "@\n";
   (* Tables *)
@@ -315,6 +339,84 @@ let run_compartments ppf (model : Ir.model) ctx =
     Term_style.dimension Fmt.string ppf sd.sdim
   ) ctx.Expander.stratifies;
   Fmt.pf ppf ")@\n"
+
+(* ── --parameters ────────────────────────────────────────────────────────── *)
+
+(** Full parameter listing grouped by kind. Shows name, kind, bounds
+    (if declared), and any prior / hierarchical structure. Matches the
+    default's at-a-glance summary with a detailed view suitable for
+    larger models (Garki has 17 params, which wraps the one-line
+    summary's listing unreadably). *)
+let run_parameters ppf (model : Ir.model) (ctx : Expander.context) =
+  let pkind_str k = match k with
+    | Ast.PRate -> "rate" | Ast.PProbability -> "probability"
+    | Ast.PPositive -> "positive" | Ast.PCount -> "count" | Ast.PReal -> "real"
+  in
+  let kind_of (p : Ir.parameter) =
+    match List.find_opt (fun pd ->
+        match pd with
+        | Ast.PScalar s -> s.pname = p.name
+        | Ast.PIndexed ix ->
+          let prefix = ix.pname ^ "_" in
+          String.length p.name > String.length prefix &&
+          String.sub p.name 0 (String.length prefix) = prefix
+      ) ctx.Expander.param_decls with
+    | Some (Ast.PScalar pd)  -> pkind_str pd.pkind
+    | Some (Ast.PIndexed pd) -> pkind_str pd.pkind
+    | None -> "?"
+  in
+  let kind_order = ["rate"; "probability"; "positive"; "count"; "real"] in
+  List.iter (fun kind ->
+    let ps = List.filter (fun p -> kind_of p = kind) model.parameters in
+    if ps <> [] then begin
+      Term_style.dim_style Fmt.string ppf kind;
+      Fmt.pf ppf "@\n";
+      List.iter (fun (p : Ir.parameter) ->
+        Fmt.pf ppf "  ";
+        Term_style.param Fmt.string ppf p.name;
+        (match p.bounds with
+         | Some (lo, hi) -> Fmt.pf ppf "   in [%g, %g]" lo hi
+         | None -> ());
+        (match p.value with
+         | Some v when p.bounds = None ->
+           Term_style.dim_style Fmt.string ppf "  = ";
+           Fmt.pf ppf "%g" v
+         | _ -> ());
+        (match p.prior with
+         | Some _ ->
+           Term_style.dim_style Fmt.string ppf "  ~ prior"
+         | None -> ());
+        (match p.hierarchical with
+         | Some h ->
+           Term_style.dim_style Fmt.string ppf (Printf.sprintf "  ~ %s | " h.hkind);
+           (* Show referenced hyperparameter names *)
+           let parents = List.filter_map (fun (_, e) ->
+             match e with Ir.Param n -> Some n | _ -> None) h.hargs in
+           Fmt.pf ppf "%s" (String.concat ", " parents);
+           if h.hpool_over <> "" then
+             Fmt.pf ppf " [pool=%s]" h.hpool_over
+         | None -> ());
+        Fmt.pf ppf "@\n"
+      ) ps;
+      Fmt.pf ppf "@\n"
+    end
+  ) kind_order;
+  (* Catch-all for unknown-kind params (defensive) *)
+  let leftover = List.filter (fun p ->
+    not (List.mem (kind_of p) kind_order)
+  ) model.parameters in
+  if leftover <> [] then begin
+    Term_style.dim_style Fmt.string ppf "other";
+    Fmt.pf ppf "@\n";
+    List.iter (fun (p : Ir.parameter) ->
+      Fmt.pf ppf "  ";
+      Term_style.param Fmt.string ppf p.name;
+      Fmt.pf ppf "@\n"
+    ) leftover
+  end;
+  let n = List.length model.parameters in
+  Term_style.bold Fmt.string ppf (fmt_number n);
+  Fmt.pf ppf " declared parameters@\n"
 
 (* ── --transitions [PATTERN] ────────────────────────────────────────────── *)
 
@@ -907,6 +1009,7 @@ let run_tables ppf (model : Ir.model) ctx (pattern : string option) =
 type inspect_cmd =
   | Summary
   | Compartments
+  | Parameters
   | Transitions of string option        (* pattern *)
   | TransitionRate of string
   | TransitionCount of string option    (* pattern *)
@@ -960,6 +1063,8 @@ let run_inspect path opts =
        run_summary ppf model ctx summary
      | Compartments ->
        run_compartments ppf model ctx
+     | Parameters ->
+       run_parameters ppf model ctx
      | Transitions pat ->
        run_transitions ppf model ctx pat ~ascii:opts.ascii
      | TransitionRate name ->

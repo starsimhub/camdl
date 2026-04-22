@@ -46,11 +46,13 @@ let () =
     let dims      = ref false in
     let do_tables = ref false in
     let tables_pat = ref None in
+    let do_parameters = ref false in
     let rec parse = function
       | [] -> ()
       | "--summary"      :: tl -> summary := true;         parse tl
       | "--dims"         :: tl -> dims    := true;         parse tl
       | "--compartments" :: tl -> comps   := true;         parse tl
+      | "--parameters"   :: tl -> do_parameters := true;   parse tl
       | "--transitions"  :: tl ->
         do_transitions := true;
         (match tl with
@@ -92,6 +94,7 @@ let () =
       if !dims              then Inspect.Dims
       else if !do_tables    then Inspect.Tables !tables_pat
       else if !comps             then Inspect.Compartments
+      else if !do_parameters then Inspect.Parameters
       else if !do_transitions then Inspect.Transitions !transitions_pat
       else if !tr_count then Inspect.TransitionCount !transitions_pat
       else (match !tr_rate with
