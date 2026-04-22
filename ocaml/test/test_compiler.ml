@@ -2594,6 +2594,81 @@ let test_multi_source_bimolecular_stoich () =
     "A + B --> C produces {A:-1, B:-1, C:+1}"
     expected got
 
+(* ── Multi-compartment prevalence (GH #7) ────────────────────────────────── *)
+
+(** `prevalence(x3, y3)` should emit `CurrentPopSum [x3; y3]`. Use case
+    is the Garki observable `patent = x3 + y3` across multiple
+    host-state compartments. *)
+let test_prevalence_multi_arg () =
+  let src = {|
+    time_unit = 'days
+    compartments { S, I_mild, I_severe, R }
+    parameters { beta : rate  gamma : rate }
+    transitions {
+      infection : S --> I_mild @ beta * S * (I_mild + I_severe) / (S + I_mild + I_severe + R)
+      recovery_m : I_mild --> R @ gamma * I_mild
+      recovery_s : I_severe --> R @ gamma * I_severe
+    }
+    observations {
+      prev : {
+        projected = prevalence(I_mild, I_severe)
+        every = 1 'weeks
+        likelihood = poisson(rate = projected)
+      }
+    }
+    init { S = 999  I_mild = 1 }
+    simulate { from = 0 'days  to = 30 'days }
+  |} in
+  let m = compile_expect_ok src in
+  let obs = List.hd m.Ir.observations in
+  match obs.Ir.projection with
+  | Ir.CurrentPopSum names ->
+    let sorted = List.sort compare names in
+    Alcotest.(check (list string))
+      "multi-arg prevalence emits CurrentPopSum"
+      ["I_mild"; "I_severe"] sorted
+  | _ -> Alcotest.fail "expected CurrentPopSum for multi-arg prevalence"
+
+(** Indexed multi-arg: `prevalence(x3[a], y3[a])` in an age-stratified
+    observation context. *)
+let test_prevalence_multi_arg_indexed () =
+  let src = {|
+    time_unit = 'days
+    dimensions { age = [child, adult] }
+    compartments { S, I_m, I_s }
+    stratify(by = age)
+    parameters { beta : rate  gamma : rate }
+    transitions {
+      inf[a in age] : S[a] --> I_m[a] @ beta * S[a]
+      rec_m[a in age] : I_m[a] --> S[a] @ gamma * I_m[a]
+      rec_s[a in age] : I_s[a] --> S[a] @ gamma * I_s[a]
+    }
+    observations {
+      patent[a in age] : {
+        projected = prevalence(I_m[a], I_s[a])
+        every = 1 'weeks
+        likelihood = poisson(rate = projected)
+      }
+    }
+    init { S[child] = 500  S[adult] = 500 }
+    simulate { from = 0 'days  to = 30 'days }
+  |} in
+  let m = compile_expect_ok src in
+  (* Expect 2 observation streams (one per age); each with
+     CurrentPopSum over both stratum-specific compartments. *)
+  Alcotest.(check int) "two age-stratified obs streams"
+    2 (List.length m.Ir.observations);
+  List.iter (fun (o : Ir.observation_model) ->
+    match o.Ir.projection with
+    | Ir.CurrentPopSum names ->
+      (* Each stream should sum over exactly two compartments — the
+         stratum-specific I_m and I_s for its age. *)
+      Alcotest.(check int) "two summed compartments" 2 (List.length names);
+      assert (List.exists (fun n -> String.length n > 4 && String.sub n 0 4 = "I_m_") names);
+      assert (List.exists (fun n -> String.length n > 4 && String.sub n 0 4 = "I_s_") names)
+    | _ -> Alcotest.fail "expected CurrentPopSum"
+  ) m.Ir.observations
+
 (* ── Hierarchical priors: cycle + self-reference detection (Gate 2, C-class) ── *)
 
 (** C1. Self-reference: `alpha ~ normal(mu = alpha, ...)` must be
@@ -3251,6 +3326,10 @@ let () =
       Alcotest.test_case "poisson(rate = projected) parses"              `Quick test_poisson_rate_kwarg_parses;
       Alcotest.test_case "E250 positional arg in likelihood"             `Quick test_poisson_positional_errors;
       Alcotest.test_case "E251 unknown kwarg in likelihood"              `Quick test_likelihood_unknown_kwarg_errors;
+    ];
+    "multi_compartment_prevalence", [
+      Alcotest.test_case "prevalence(I_m, I_s) → CurrentPopSum"         `Quick test_prevalence_multi_arg;
+      Alcotest.test_case "indexed `prevalence(I_m[a], I_s[a])` per age" `Quick test_prevalence_multi_arg_indexed;
     ];
     "hierarchical_priors", [
       Alcotest.test_case "parses `alpha[age] ~ log_normal(mu=mu_h, sigma=s_h) | age`" `Quick test_hierarchical_prior_parses;

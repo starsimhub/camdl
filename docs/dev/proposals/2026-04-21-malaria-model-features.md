@@ -940,6 +940,32 @@ Gillespie/tau-leap and fits real slide-positivity data.
         observation using the sugar
 - [ ] **Wave 1 demo**: `docs/vignettes/ross_macdonald_fit.qmd`
   PMMH recovers `a, b_h, b_v` within 2σ on synthetic data.
+  (Blocked on downstream rerun against the GH #6 fix series —
+  `c87b275` → `2030a2c` → `d28664a`. Vignette draft at
+  `vincebuffalo.com/camdl/book/vignettes/ross-macdonald.html`
+  currently cites the stale pfilter log-ll of −15980; post-fix
+  it's −134.8, within Binomial noise of the analytical oracle.
+  Awaiting downstream to re-run against current main.)
+
+> **Scratch-state incident during Wave 1 validation.** While the
+> book agent was exercising the Ross-Macdonald vignette end-to-end,
+> four independent code paths were found evaluating likelihood
+> argument expressions (e.g. `p = projected / N` in
+> `diagnostic_test`) against a zero-filled scratch `IntState` rather
+> than the actual compartment counts. Silent wrong-answer class:
+> `diagnostic_test` + any state-dependent binomial/bernoulli
+> likelihood produced garbage surveys and garbage log-likelihoods.
+> All four paths fixed (`c87b275`, `2030a2c`, `d28664a`, `b4babd9`).
+> Full accounting in
+> `docs/dev/incidents/2026-04-22-observation-sampler-scratch-state.md`
+> including audit-technique and structural-fix lessons. The incident
+> is out-of-scope for the malaria proposal per se, but was
+> triggered by and is blocking exercise of this proposal's Wave 1
+> features (multi-source + diagnostic_test) and Wave 2 #3 (which
+> would have hit the same path had PMMH on the Garki fixture run).
+> A further hardening pass (integration test for state-dependent
+> likelihoods, symptom-semantics audit of all obs/likelihood eval
+> sites) is planned before Wave 3 implementation begins.
 
 ### Wave 2 — "Garki fittable" (~3 weeks)
 
