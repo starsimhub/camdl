@@ -1005,6 +1005,69 @@ Both produce the same stoichiometry `{S_h:-1, I_h:+1}` and the same
 rate expression. Prefer the multi-source form when two compartments
 jointly determine the event — the `+` makes the dependency explicit.
 
+### 9.1.2 Probabilistic branching (`X --> { A : p, B : 1-p }`)
+
+When a single event has multiple possible destination compartments
+chosen probabilistically — symptomatic vs asymptomatic infection,
+mild vs severe vs fatal progression, detected vs missed case —
+write the destinations as a weighted set:
+
+```camdl
+# An infection event produces a symptomatic case with probability
+# p_symp, otherwise asymptomatic.
+infection : S --> { I_symp : p_symp, I_asym : 1 - p_symp }
+  @ beta * S * (I_symp + I_asym) / N
+
+# Age-indexed branching (malaria use case).
+bite[a in age] : X[a] --> { Y_symp[a] : p_symp[a], Y_asym[a] : 1 - p_symp[a] }
+  @ h_eff * X[a]
+```
+
+**Semantics.** Pure compile-time sugar. Each branch expands to its
+own IR transition with rate `weight_i × original_rate` and
+stoichiometry `{source: -1, dest_i: +1}`. The existing source-
+grouping machinery in every stochastic backend (Gillespie, tau-leap,
+chain-binomial) correctly groups transitions sharing a source and
+performs a **single multinomial split** at firing time — *not* two
+independent draws, which would double-consume the source at high
+incidence. See `sim/src/chain_binomial.rs` §Euler-multinomial for
+the algorithm (matches pomp's `reulermultinom`).
+
+For the example above, `S --> { I_symp : p_symp, I_asym : 1 - p_symp }
+@ r` produces two IR transitions:
+
+| Name              | Stoich            | Rate                  |
+|-------------------|-------------------|-----------------------|
+| `infection_I_symp` | `{S:-1, I_symp:+1}` | `p_symp * r`         |
+| `infection_I_asym` | `{S:-1, I_asym:+1}` | `(1 - p_symp) * r`   |
+
+The total exit rate from `S` is `p_symp * r + (1 - p_symp) * r = r`,
+so the overall depletion rate is unchanged; only the destination
+distribution is refined.
+
+**Branch naming.** The compiler appends the destination compartment
+name to the transition's base name to disambiguate. Indexed
+transitions combine the index suffix and branch suffix:
+`bite[a in age] : X[a] --> { Y_symp[a] : …, Y_asym[a] : … } @ …`
+produces `bite_child_Y_symp`, `bite_child_Y_asym`,
+`bite_adult_Y_symp`, `bite_adult_Y_asym`.
+
+**When to use it.** When the biology is "one event, multiple
+outcomes chosen stochastically at the moment of the event." When the
+biology is "two separate ongoing processes from the same compartment
+with different rates" (e.g., death and recovery from I), use two
+plain transitions — the runtime treats them identically under
+source-grouping, but the DSL intent differs and two transitions
+reads more naturally.
+
+**Weights.** The weight of each branch is any scalar expression with
+dimension `probability` (dimensionless, domain `[0, 1]`). The
+compiler does not enforce that weights sum to 1 — users can write
+rate-weighted branches where the sum differs from 1 (e.g., for a
+fraction of events going to an "other" compartment that's implicit).
+Most users will write `{A : p, B : 1 - p}` for binary branching or
+an explicit last entry `1 - sum-of-others` for n-way branching.
+
 ### 9.2 Indexed Transitions
 
 ```camdl

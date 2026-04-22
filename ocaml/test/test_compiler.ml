@@ -2590,6 +2590,116 @@ let test_multi_source_bimolecular_stoich () =
     "A + B --> C produces {A:-1, B:-1, C:+1}"
     expected got
 
+(* ── Probabilistic branching on destination (Wave 2 / #2) ───────────────── *)
+
+(** Parser accepts `X --> {Y : p, Z : 1-p} @ rate`. *)
+let test_branching_parses () =
+  let src = {|
+    time_unit = 'days
+    compartments { S, Y, Z }
+    parameters {
+      beta   : rate        in [0.001, 5.0]
+      p_symp : probability in [0.01, 0.99]
+    }
+    transitions {
+      infection : S --> { Y : p_symp, Z : 1 - p_symp }  @ beta * S
+    }
+    init { S = 1000 }
+    simulate { from = 0 'days  to = 50 'days }
+  |} in
+  let m = compile_expect_ok src in
+  (* Should expand to exactly TWO transitions. *)
+  Alcotest.(check int)
+    "branching desugars to one transition per branch"
+    2 (List.length m.Ir.transitions)
+
+(** Equivalence: the branching sugar produces the same IR as two
+    hand-written transitions with the weight-scaled rates. *)
+let test_branching_equivalent_to_two_transitions () =
+  let sugar_src = {|
+    time_unit = 'days
+    compartments { S, Y, Z }
+    parameters {
+      beta   : rate        in [0.001, 5.0]
+      p_symp : probability in [0.01, 0.99]
+    }
+    transitions {
+      infection : S --> { Y : p_symp, Z : 1 - p_symp }  @ beta * S
+    }
+    init { S = 1000 }
+    simulate { from = 0 'days  to = 50 'days }
+  |} in
+  let manual_src = {|
+    time_unit = 'days
+    compartments { S, Y, Z }
+    parameters {
+      beta   : rate        in [0.001, 5.0]
+      p_symp : probability in [0.01, 0.99]
+    }
+    transitions {
+      to_Y : S --> Y  @ p_symp * (beta * S)
+      to_Z : S --> Z  @ (1 - p_symp) * (beta * S)
+    }
+    init { S = 1000 }
+    simulate { from = 0 'days  to = 50 'days }
+  |} in
+  let ms = compile_expect_ok sugar_src in
+  let mm = compile_expect_ok manual_src in
+  (* Match transitions by destination compartment (the one with delta = +1). *)
+  let stoich_of (t : Ir.transition) = List.sort compare t.Ir.stoichiometry in
+  let dest_of (t : Ir.transition) =
+    match List.find_opt (fun (_, d) -> d > 0) t.Ir.stoichiometry with
+    | Some (n, _) -> n
+    | None -> Alcotest.failf "transition %s has no destination" t.Ir.name
+  in
+  let by_dest lst =
+    List.map (fun t -> (dest_of t, t)) lst
+    |> List.sort (fun (a, _) (b, _) -> compare a b)
+  in
+  let sugar_by_dst  = by_dest ms.Ir.transitions in
+  let manual_by_dst = by_dest mm.Ir.transitions in
+  Alcotest.(check (list string))
+    "same set of destinations"
+    (List.map fst manual_by_dst)
+    (List.map fst sugar_by_dst);
+  List.iter2 (fun (d_s, (s : Ir.transition)) (d_m, (m : Ir.transition)) ->
+    assert (d_s = d_m);
+    Alcotest.(check bool)
+      (Printf.sprintf "stoich for dest %s matches" d_s)
+      true
+      (stoich_of s = stoich_of m);
+    Alcotest.(check bool)
+      (Printf.sprintf "rate for dest %s matches" d_s)
+      true
+      (s.Ir.rate = m.Ir.rate)
+  ) sugar_by_dst manual_by_dst
+
+(** Indexed branching: `bite[a in age] : X[a] --> {Y_s[a] : p[a], Y_a[a] : 1-p[a]}`.
+    Should produce |age| × 2 = 4 transitions for age = [child, adult]. *)
+let test_branching_indexed_by_age () =
+  let src = {|
+    time_unit = 'days
+    dimensions { age = [child, adult] }
+    compartments { X, Y_s, Y_a }
+    stratify(by = age)
+    parameters {
+      h_eff  : rate
+      p_symp_child : probability
+      p_symp_adult : probability
+    }
+    transitions {
+      bite[a in age] : X[a] --> { Y_s[a] : p_symp_child, Y_a[a] : 1 - p_symp_child }
+        @ h_eff * X[a]
+    }
+    init { X[child] = 500  X[adult] = 500 }
+    simulate { from = 0 'days  to = 30 'days }
+  |} in
+  let m = compile_expect_ok src in
+  (* 2 age values × 2 branches = 4 generated transitions. *)
+  Alcotest.(check int)
+    "indexed branching expands to |age|*|branches| transitions"
+    4 (List.length m.Ir.transitions)
+
 (* ── diagnostic_test likelihood sugar (Wave 1 / #4) ──────────────────────── *)
 
 (** Minimal model exercising `diagnostic_test(base = binomial, sens, spec)`. *)
@@ -2966,6 +3076,11 @@ let () =
       Alcotest.test_case "poisson(rate = projected) parses"              `Quick test_poisson_rate_kwarg_parses;
       Alcotest.test_case "E250 positional arg in likelihood"             `Quick test_poisson_positional_errors;
       Alcotest.test_case "E251 unknown kwarg in likelihood"              `Quick test_likelihood_unknown_kwarg_errors;
+    ];
+    "branching_destinations", [
+      Alcotest.test_case "parser accepts `X --> {Y:p, Z:1-p}`"         `Quick test_branching_parses;
+      Alcotest.test_case "desugars to two weight-scaled transitions"    `Quick test_branching_equivalent_to_two_transitions;
+      Alcotest.test_case "indexed `[a in age]` expands per age × branch" `Quick test_branching_indexed_by_age;
     ];
     "multi_source_transitions", [
       Alcotest.test_case "parser accepts `S + I --> I + I`"              `Quick test_multi_source_parses;

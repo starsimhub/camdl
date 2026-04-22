@@ -1354,15 +1354,14 @@ let expand_transitions_counted ctx =
   let expanded = List.concat_map (fun tr ->
     let combos = cartesian_product tr.trindices ctx in
     let tr_filtered = ref 0 in
-    let results = List.filter_map (fun env ->
+    let results = List.map (fun env ->
       let pass_guard = match tr.trguard with
         | None   -> true
         | Some g -> eval_guard env g
       in
-      if not pass_guard then (incr filtered; incr tr_filtered; None)
+      if not pass_guard then (incr filtered; incr tr_filtered; [])
       else begin
         let src_names = List.map (resolve_stoich_ref ctx env) tr.trsrc in
-        let dst_names = List.map (resolve_stoich_ref ctx env) tr.trdst in
         (* Extract rate wrappers: overdispersed(rate, σ²) or
            deterministic(rate). Mismatched arg shapes are a hard
            error (reported as C1 in the 2026-04-19 review) — before
@@ -1405,83 +1404,91 @@ let expand_transitions_counted ctx =
             (tr.trrate, Ir.DrawPoisson)
           | _ -> (tr.trrate, Ir.DrawPoisson)
         in
-        let rate = normalize_expr (resolve_expr ctx env raw_rate) in
-        (* Build raw entries from sources (−1 each) and destinations (+1 each).
-           A compartment appearing in both lists contributes 0 net — these
-           catalysts are summed to zero and then dropped, because
-           (a) the IR validator rejects zero-delta entries, and
-           (b) any rate-expression dependency on the catalyst is preserved
-               through the rate AST itself, so the dep graph still pulls
-               it in for sparse propensity updates. *)
-        let raw_entries =
-          List.map (fun n -> (n, -1)) src_names
-          @ List.map (fun n -> (n,  1)) dst_names
+        (* Build one IR transition given resolved destinations and a
+           (possibly weight-scaled) raw rate. `name_suffix` gets
+           appended to the transition name — used for branches to
+           disambiguate `infect` → `infect_symp` / `infect_asym`. *)
+        let emit_one dst_refs raw_rate_for_branch name_suffix =
+          let dst_names = List.map (resolve_stoich_ref ctx env) dst_refs in
+          let rate = normalize_expr (resolve_expr ctx env raw_rate_for_branch) in
+          let raw_entries =
+            List.map (fun n -> (n, -1)) src_names
+            @ List.map (fun n -> (n,  1)) dst_names
+          in
+          let collapse entries =
+            let order = ref [] in
+            let tbl = Hashtbl.create 8 in
+            List.iter (fun (n, d) ->
+              if not (Hashtbl.mem tbl n) then order := n :: !order;
+              let prev = try Hashtbl.find tbl n with Not_found -> 0 in
+              Hashtbl.replace tbl n (prev + d)
+            ) entries;
+            List.filter_map (fun n ->
+              let d = Hashtbl.find tbl n in
+              if d = 0 then None else Some (n, d)
+            ) (List.rev !order)
+          in
+          let stoich = collapse raw_entries in
+          let sole_with_sign sign =
+            let matches = List.filter (fun (_, d) ->
+              if sign < 0 then d < 0 else d > 0) stoich in
+            match matches with
+            | [(n, _)] -> Some n
+            | _        -> None
+          in
+          let src_meta = sole_with_sign (-1) in
+          let dst_meta = sole_with_sign   1  in
+          if stoich = [] && (src_names <> [] || dst_names <> []) then begin
+            Diagnostics.error ctx.diags
+              ~code:"E310"
+              ~loc:Diagnostics.no_loc
+              ~message:(Printf.sprintf
+                "transition '%s' has no net effect: sources and destinations cancel"
+                tr.trname)
+              ~hint:"remove catalyst compartments that appear on both sides, \
+                     or declare the transition with a non-trivial net stoichiometry"
+              ()
+          end;
+          let origin_kind = infer_origin_kind src_meta dst_meta rate in
+          let parts = name_parts_from_bindings tr.trindices env in
+          let base_name =
+            if parts = [] then tr.trname
+            else tr.trname ^ "_" ^ String.concat "_" parts
+          in
+          let tr_name = match name_suffix with
+            | None -> base_name
+            | Some s -> base_name ^ "_" ^ s
+          in
+          {
+            Ir.name            = tr_name;
+            Ir.stoichiometry   = stoich;
+            Ir.rate            = rate;
+            Ir.metadata        = Some {
+              Ir.origin_kind        = Some origin_kind;
+              Ir.source_compartment = src_meta;
+              Ir.dest_compartment   = dst_meta;
+            };
+            Ir.draw_method     = draw_method;
+            Ir.rate_grad       = [];  (* populated later by autodiff pass *)
+          }
         in
-        (* Sum deltas by compartment name, then drop zeros. Preserve
-           first-appearance order for deterministic IR output. *)
-        let collapse entries =
-          let order = ref [] in
-          let tbl = Hashtbl.create 8 in
-          List.iter (fun (n, d) ->
-            if not (Hashtbl.mem tbl n) then order := n :: !order;
-            let prev = try Hashtbl.find tbl n with Not_found -> 0 in
-            Hashtbl.replace tbl n (prev + d)
-          ) entries;
-          List.filter_map (fun n ->
-            let d = Hashtbl.find tbl n in
-            if d = 0 then None else Some (n, d)
-          ) (List.rev !order)
-        in
-        let stoich = collapse raw_entries in
-        (* Preserve legacy single-source/single-dest metadata for the
-           coupling-sugar detector when the collapsed stoichiometry has
-           exactly one net source and one net destination. Multi-source
-           and multi-dest transitions set these to None, which disables
-           coupling-sugar auto-detection for them (the explicit form is
-           the canonical encoding). *)
-        let sole_with_sign sign =
-          let matches = List.filter (fun (_, d) ->
-            if sign < 0 then d < 0 else d > 0) stoich in
-          match matches with
-          | [(n, _)] -> Some n
-          | _        -> None
-        in
-        let src_meta = sole_with_sign (-1) in
-        let dst_meta = sole_with_sign   1  in
-        (* E310: fully-catalytic multi-source transition — user wrote
-           sources and destinations but they all cancel to zero net
-           effect. Almost always a model error. *)
-        if stoich = [] && (src_names <> [] || dst_names <> []) then begin
-          Diagnostics.error ctx.diags
-            ~code:"E310"
-            ~loc:Diagnostics.no_loc
-            ~message:(Printf.sprintf
-              "transition '%s' has no net effect: sources and destinations cancel"
-              tr.trname)
-            ~hint:"remove catalyst compartments that appear on both sides, \
-                   or declare the transition with a non-trivial net stoichiometry"
-            ()
-        end;
-        let origin_kind = infer_origin_kind src_meta dst_meta rate in
-        let parts = name_parts_from_bindings tr.trindices env in
-        let tr_name =
-          if parts = [] then tr.trname
-          else tr.trname ^ "_" ^ String.concat "_" parts
-        in
-        Some {
-          Ir.name            = tr_name;
-          Ir.stoichiometry   = stoich;
-          Ir.rate            = rate;
-          Ir.metadata        = Some {
-            Ir.origin_kind        = Some origin_kind;
-            Ir.source_compartment = src_meta;
-            Ir.dest_compartment   = dst_meta;
-          };
-          Ir.draw_method     = draw_method;
-          Ir.rate_grad       = [];  (* populated later by autodiff pass *)
-        }
+        (* Dispatch on destination form.
+           - DstSum: one emitted transition per combo (classic path).
+           - DstBranch: one transition per branch, with rate = weight_i
+             * raw_rate. The suffix is derived from the branch's
+             destination compartment (pre-stratification) so the final
+             transition names are stable across index expansion. *)
+        match tr.trdst with
+        | DstSum dsts -> [emit_one dsts raw_rate None]
+        | DstBranch branches ->
+          List.map (fun ((dst_ref, weight) : (Ast.stoich_ref * Ast.expr)) ->
+            let (dst_base, _idx) = dst_ref in
+            let scaled_rate = Ast.EBinOp (Ast.Mul, weight, raw_rate) in
+            emit_one [dst_ref] scaled_rate (Some dst_base)
+          ) branches
       end
     ) combos in
+    let results = List.concat results in
     (* Warn if a where guard filtered ALL combinations to zero transitions *)
     (match tr.trguard with
      | Some g when results = [] && combos <> [] ->

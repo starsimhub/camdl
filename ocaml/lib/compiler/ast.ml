@@ -87,15 +87,24 @@ type table_decl = {
 (** A stoichiometry reference: compartment name + optional indices *)
 type stoich_ref = string * index_item list
 
+(** Transition destination form.
+    - [DstSum] is the ordinary case: a `+`-separated list of destination
+      compartments, each contributing +1 to stoichiometry. Singleton =
+      classic, ≥ 2 = multi-dest (wave 1 / malaria #1).
+    - [DstBranch] (wave 2 / malaria #2) is a probabilistic branch:
+      `X --> { A : w_A, B : w_B } @ rate`. The expander desugars each
+      branch into its own IR transition with rate `w_i * rate`. The
+      existing chain-binomial / tau-leap source-grouping machinery
+      then performs the correct multinomial split at firing time. *)
+type destination_form =
+  | DstSum    of stoich_ref list
+  | DstBranch of (stoich_ref * expr) list
+
 type transition_decl = {
   trname    : string;
   trindices : index_binding list;
-  (* List form (wave 1 / malaria #1): empty = sourceless/destinationless,
-     singleton = classic single-source/-dest, ≥ 2 = multi-source /
-     multi-dest. DSL syntax: `A + B --> C + D`. Catalysts (compartments
-     appearing in both lists) are collapsed to net-zero by the expander. *)
   trsrc     : stoich_ref list;
-  trdst     : stoich_ref list;
+  trdst     : destination_form;
   trrate    : expr;
   trguard   : guard option;
   trtag     : string option;

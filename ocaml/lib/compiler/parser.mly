@@ -316,15 +316,21 @@ transition_decl:
   (* inline: name[...] : srcs --> dsts @ rate where guard *)
   | name = IDENT ibs = index_bindings_opt COLON srcs = stoich_ref_list ARROW dsts = stoich_ref_list AT rate = expr guard = where_clause_opt
       { { trname = name; trindices = ibs;
-          trsrc = srcs; trdst = dsts;
+          trsrc = srcs; trdst = DstSum dsts;
           trrate = rate; trguard = guard; trtag = None;
           trloc = Parser_errors.ast_loc_of ~sp:$startpos ~ep:$endpos } }
   (* block form: name[...] : srcs --> dsts { rate = ...; tag = ... } *)
   | name = IDENT ibs = index_bindings_opt COLON srcs = stoich_ref_list ARROW dsts = stoich_ref_list LBRACE tbody = transition_body RBRACE
       { let (rate, guard, tag) = tbody in
         { trname = name; trindices = ibs;
-          trsrc = srcs; trdst = dsts;
+          trsrc = srcs; trdst = DstSum dsts;
           trrate = rate; trguard = guard; trtag = tag;
+          trloc = Parser_errors.ast_loc_of ~sp:$startpos ~ep:$endpos } }
+  (* branching: name[...] : srcs --> { D1 : w1, D2 : w2, ... } @ rate where guard *)
+  | name = IDENT ibs = index_bindings_opt COLON srcs = stoich_ref_list ARROW LBRACE branches = separated_nonempty_list(COMMA, branch_entry) RBRACE AT rate = expr guard = where_clause_opt
+      { { trname = name; trindices = ibs;
+          trsrc = srcs; trdst = DstBranch branches;
+          trrate = rate; trguard = guard; trtag = None;
           trloc = Parser_errors.ast_loc_of ~sp:$startpos ~ep:$endpos } }
 
 stoich_ref_list:
@@ -333,6 +339,9 @@ stoich_ref_list:
 
 stoich_ref_item:
   | name = IDENT idxs = index_items_opt { (name, idxs) }
+
+branch_entry:
+  | dst = stoich_ref_item COLON weight = expr { (dst, weight) }
 
 index_items_opt:
   | (* empty *) { [] }

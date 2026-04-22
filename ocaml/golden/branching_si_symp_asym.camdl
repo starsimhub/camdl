@@ -1,0 +1,54 @@
+# Probabilistic branching test: S --> {I_symp : p_symp, I_asym : 1-p_symp}
+# under mass-action infection.
+#
+# Wave 2 / malaria #2 runtime correctness fixture. The branching sugar
+# desugars to two transitions that share source S. The chain-binomial
+# and tau-leap source-grouping machinery must then perform a single
+# multinomial split at firing time — not two independent Binomials
+# (which would double-consume S under high incidence).
+#
+# Conservation invariants:
+#   - S + I_symp + I_asym = N  (total population constant)
+#   - E[I_symp] / (E[I_symp] + E[I_asym]) ≈ p_symp  (branching fraction)
+# The first catches double-consumption; the second catches incorrect
+# splits.
+
+time_unit = 'days
+
+compartments { S, I_symp, I_asym }
+
+let N = S + I_symp + I_asym
+
+parameters {
+  beta   : rate        in [0.01, 10.0]
+  p_symp : probability in [0.01, 0.99]
+  N0     : count       in [100, 10000]
+  I0     : count       in [1, 1000]
+}
+
+transitions {
+  infection : S --> { I_symp : p_symp, I_asym : 1 - p_symp }
+    @ beta * S * (I_symp + I_asym) / N
+}
+
+init {
+  S      = N0 - I0
+  I_symp = I0
+}
+
+simulate {
+  from = 0 'days
+  to   = 60 'days
+}
+
+scenarios {
+  baseline {
+    label = "60/40 symp split"
+    set = {
+      beta   = 0.5
+      p_symp = 0.6
+      N0     = 1000
+      I0     = 10
+    }
+  }
+}
