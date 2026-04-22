@@ -610,6 +610,29 @@ impl CompiledModel {
             })
             .collect::<Result<_, _>>()?;
 
+        // Enforce the "overdispersion σ² is state-independent" invariant
+        // that CPM (`correlated_pf.rs`) and PGAS gamma-density eval
+        // (`pgas.rs:528`) assume. If σ² references compartment state,
+        // those sites would silently evaluate against a zero scratch.
+        // Reject at compile time rather than produce a wrong likelihood.
+        // Incident: 2026-04-22-observation-sampler-scratch-state.md.
+        for (tr, od) in model.transitions.iter().zip(&overdispersion) {
+            if let Some(od_expr) = od {
+                if crate::resolved_expr::references_state(od_expr) {
+                    return Err(SimError::Validation(format!(
+                        "transition '{}': overdispersion σ² expression \
+                         references compartment state (Pop / PopSum), which \
+                         is not supported. σ² must be a function of \
+                         parameters, time, and constants only. If you need \
+                         state-dependent overdispersion, open an issue — it \
+                         requires reworking three independent eval sites \
+                         that currently assume σ² is state-independent.",
+                        tr.name
+                    )));
+                }
+            }
+        }
+
         let rate_grads: Vec<Vec<(String, ResolvedExpr)>> = model.transitions.iter()
             .map(|tr| {
                 tr.rate_grad.iter()

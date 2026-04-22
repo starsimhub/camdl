@@ -16,35 +16,49 @@ use rand::prelude::Distribution;
 use rand_distr::{Gamma, Normal};
 
 /// Build a dmeasure closure for IF2 (per-particle params).
-/// Takes (projected, observed, params) → log-likelihood.
+/// Takes (projected, observed, counts, params) → log-likelihood.
+///
+/// `counts` is the integer-compartment state at the observation time
+/// (local-indexed). Required even if the likelihood's arg expressions
+/// don't currently reference compartment state — the `diagnostic_test`
+/// sugar and any hand-inlined `p = projected / N` need it, and passing
+/// a zero scratch silently corrupts those cases. See
+/// `docs/dev/incidents/2026-04-22-observation-sampler-scratch-state.md`.
 pub fn compile_obs_loglik_if2(
     obs_model: &ObservationModel,
     compiled: Arc<CompiledModel>,
-) -> Box<dyn Fn(f64, f64, &[f64]) -> f64 + Send + Sync> {
+) -> Box<dyn Fn(f64, f64, &[i64], &[f64]) -> f64 + Send + Sync> {
     let resolved = resolve_likelihood_from_model(&obs_model.likelihood, &compiled)
         .unwrap_or_else(|e| panic!("observation likelihood resolution failed: {:?}", e));
-    let int_s = IntState::new(compiled.int_local_to_global.len());
     let real_s = RealState::new(compiled.real_local_to_global.len());
+    let n_int  = compiled.int_local_to_global.len();
 
-    Box::new(move |projected: f64, observed: f64, params: &[f64]| {
+    Box::new(move |projected: f64, observed: f64, counts: &[i64], params: &[f64]| {
+        assert_eq!(counts.len(), n_int,
+            "compile_obs_loglik_if2: counts length {} != expected {}", counts.len(), n_int);
+        let int_s = IntState::from_vec(counts.to_vec());
         eval_likelihood_resolved(&resolved, projected, observed, params, &compiled, &int_s, &real_s)
     })
 }
 
 /// Build a dmeasure closure for pfilter (fixed params).
-/// Takes (projected, observed) → log-likelihood.
+/// Takes (projected, observed, counts) → log-likelihood.
+/// See `compile_obs_loglik_if2` for the rationale behind `counts`.
 pub fn compile_obs_loglik_pf(
     obs_model: &ObservationModel,
     compiled: Arc<CompiledModel>,
     params: &[f64],
-) -> Box<dyn Fn(f64, f64) -> f64 + Send + Sync> {
+) -> Box<dyn Fn(f64, f64, &[i64]) -> f64 + Send + Sync> {
     let resolved = resolve_likelihood_from_model(&obs_model.likelihood, &compiled)
         .unwrap_or_else(|e| panic!("observation likelihood resolution failed: {:?}", e));
     let params = params.to_vec();
-    let int_s = IntState::new(compiled.int_local_to_global.len());
     let real_s = RealState::new(compiled.real_local_to_global.len());
+    let n_int  = compiled.int_local_to_global.len();
 
-    Box::new(move |projected: f64, observed: f64| {
+    Box::new(move |projected: f64, observed: f64, counts: &[i64]| {
+        assert_eq!(counts.len(), n_int,
+            "compile_obs_loglik_pf: counts length {} != expected {}", counts.len(), n_int);
+        let int_s = IntState::from_vec(counts.to_vec());
         eval_likelihood_resolved(&resolved, projected, observed, &params, &compiled, &int_s, &real_s)
     })
 }

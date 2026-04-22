@@ -35,16 +35,15 @@ thread_local! {
 /// Run `f` with a mutable reference to this thread's scratch IntState,
 /// resized (zero-filled) to `n`. Avoids heap allocation in the obs
 /// hot path on steady-state calls.
-fn with_scratch_int<R>(n: usize, f: impl FnOnce(&IntState) -> R) -> R {
-    SCRATCH_INT.with(|cell| {
-        let mut borrow = cell.borrow_mut();
-        if borrow.counts.len() < n {
-            borrow.counts.resize(n, 0);
-        }
-        for v in borrow.counts[..n].iter_mut() { *v = 0; }
-        f(&borrow)
-    })
-}
+// The zero-scratch helper `with_scratch_int` was deleted as part of
+// the GH #6 fix series. It was the footgun at the centre of four
+// independent bug sites — each caller had a real `counts` slice in
+// hand but was using this helper to get a zero-filled IntState, then
+// evaluating likelihood expressions against that empty state. The
+// fix in all four sites was to swap to `with_scratch_int_from_counts`,
+// which populates the scratch from the caller's real counts. Keeping
+// only the populating variant makes "forget to populate" impossible
+// because the API doesn't offer it. See incident 2026-04-22.
 
 /// Run `f` with a mutable IntState whose first `n` entries mirror
 /// the given `counts` slice. Same reuse pattern as `with_scratch_int`.
@@ -184,10 +183,6 @@ pub struct MultiStreamObsModel {
     streams: Vec<Stream>,
     obs_times: Vec<f64>,
     compiled: Arc<CompiledModel>,
-    /// Number of integer compartments, used to allocate a per-call scratch
-    /// `IntState` when evaluating `Expr` projections. Allocation happens at
-    /// observation ticks only — not in the propensity hot loop.
-    n_int: usize,
     /// Zero real state; likelihood eval never reads real compartments and
     /// `RealState` has no interior mutability.
     real_s: RealState,
@@ -208,13 +203,11 @@ impl MultiStreamObsModel {
     /// returns 0.0. For trait-generic contexts (PF, IF2) that don't need it,
     /// prefer `NullObsModel`.
     pub fn empty(compiled: Arc<CompiledModel>) -> Self {
-        let n_int = compiled.int_local_to_global.len();
         let real_s = RealState::new(compiled.real_local_to_global.len());
         MultiStreamObsModel {
             streams: vec![],
             obs_times: vec![],
             compiled,
-            n_int,
             real_s,
         }
     }
@@ -258,14 +251,12 @@ impl MultiStreamObsModel {
             });
         }
 
-        let n_int = compiled.int_local_to_global.len();
         let real_s = RealState::new(compiled.real_local_to_global.len());
 
         Ok(MultiStreamObsModel {
             streams,
             obs_times,
             compiled,
-            n_int,
             real_s,
         })
     }
@@ -353,7 +344,16 @@ impl ObservationModel<ParticleState> for MultiStreamObsModel {
                 si, &state.flow_accumulators, &state.counts, params,
             );
             let s = &self.streams[si];
-            with_scratch_int(self.n_int, |int_s| {
+            // GH #6 (third-strike fix): evaluate likelihood arg
+            // expressions against the particle's actual compartment
+            // state, not a zero scratch. This is the path that
+            // `bootstrap_filter` calls via the trait. Previous fixes
+            // patched adjacent methods (sample, mean, flow-form
+            // log_likelihood) but left this one broken; as a result
+            // `camdl pfilter` on state-dependent likelihoods produced
+            // log-ll off by ~100× (book agent observed -15980 where
+            // ~-146 was expected). See incident 2026-04-22.
+            with_scratch_int_from_counts(&state.counts, |int_s| {
                 eval_likelihood_resolved(
                     &s.resolved, projected, s.observations[obs_idx],
                     params, &self.compiled, int_s, &self.real_s,

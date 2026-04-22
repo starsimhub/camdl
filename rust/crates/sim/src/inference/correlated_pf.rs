@@ -277,9 +277,11 @@ pub fn bootstrap_filter_correlated(
     }
     // Also reject if different overdispersed transitions evaluate
     // to distinct σ² values — the global sigma_sq picked below
-    // would be wrong for all but the first. Since σ² is
-    // state-independent (checked above), evaluation at zero state
-    // is a sound comparison.
+    // would be wrong for all but the first. σ² is state-independent
+    // by construction: `CompiledModel::new()` rejects models whose
+    // overdispersion σ² references compartment state
+    // (docs/dev/incidents/2026-04-22-observation-sampler-scratch-state.md),
+    // so evaluation at a zero scratch is sound here.
     if n_overdispersed > 1 {
         let int_s = crate::state::IntState::new(n_int);
         let real_s = crate::state::RealState::new(model.real_local_to_global.len());
