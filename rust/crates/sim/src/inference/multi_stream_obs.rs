@@ -159,6 +159,50 @@ impl StreamProjection {
     }
 }
 
+/// Evaluate a pre-resolved [`StreamProjection`] at a single snapshot
+/// of (flows, counts, params). Shared between the in-sim scoring path
+/// (`MultiStreamObsModel::project_stream_with_params`) and the CLI's
+/// synthetic-obs emission path (`main.rs::project_all_obs_times`).
+///
+/// For `FlowSum`, `flows` holds per-transition cumulative counters
+/// since the last observation (the caller is responsible for computing
+/// the interval delta if the semantics demand it — scoring already
+/// does so via per-stream flow accumulators, and the CLI emission path
+/// uses the "delta between consecutive obs times" convention).
+///
+/// For `IntCompSum` and `Expr`, `counts` is the integer-compartment
+/// state at the observation instant; `flows` is unread.
+///
+/// `t` is currently unused by any projection kind but threaded for
+/// forward compatibility with time-dependent projections.
+pub fn eval_stream_projection(
+    projection: &StreamProjection,
+    flows: &[u64],
+    counts: &[i64],
+    params: &[f64],
+    compiled: &CompiledModel,
+    real_s: &RealState,
+    t: f64,
+) -> f64 {
+    match projection {
+        StreamProjection::FlowSum(idxs) => {
+            idxs.iter().map(|&i| flows[i] as f64).sum()
+        }
+        StreamProjection::IntCompSum(idxs) => {
+            idxs.iter().map(|&i| counts[i] as f64).sum()
+        }
+        StreamProjection::Expr(expr) => {
+            with_scratch_int_from_counts(counts, |scratch| {
+                let ctx = EvalCtx {
+                    model: compiled, int_s: scratch, real_s, params,
+                    t, projected: None, int_float_override: None,
+                };
+                eval_resolved(expr, &ctx)
+            })
+        }
+    }
+}
+
 fn resolve_int_comp(compiled: &CompiledModel, name: &str) -> Option<usize> {
     let global = *compiled.comp_index.get(name)?;
     compiled.global_to_int[global]
@@ -271,27 +315,10 @@ impl MultiStreamObsModel {
         counts: &[i64],
         params: &[f64],
     ) -> f64 {
-        match &self.streams[stream_idx].projection {
-            StreamProjection::FlowSum(idxs) => {
-                idxs.iter().map(|&i| flows[i] as f64).sum()
-            }
-            StreamProjection::IntCompSum(idxs) => {
-                idxs.iter().map(|&i| counts[i] as f64).sum()
-            }
-            StreamProjection::Expr(expr) => {
-                with_scratch_int_from_counts(counts, |scratch| {
-                    let ctx = EvalCtx {
-                        model: &self.compiled,
-                        int_s: scratch,
-                        real_s: &self.real_s,
-                        params,
-                        t: 0.0,
-                        projected: None, int_float_override: None,
-                    };
-                    eval_resolved(expr, &ctx)
-                })
-            }
-        }
+        eval_stream_projection(
+            &self.streams[stream_idx].projection,
+            flows, counts, params, &self.compiled, &self.real_s, 0.0,
+        )
     }
 
     /// Project + score from raw per-particle arrays. Used by PGAS which

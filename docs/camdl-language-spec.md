@@ -1560,23 +1560,45 @@ incidence(transition[patch = p])         named index: pins `patch = p`, sums
                                          over the rest (order-independent)
 prevalence(compartment)                  current population
 prevalence(compartment[age = child])     named index on compartment
-prevalence(comp1, comp2, …)              sum-across-compartments prevalence
 ```
 
-**Multi-compartment prevalence** (GH #7, 2026-04-22). `prevalence`
-accepts multiple positional arguments, each a compartment name or
-indexed compartment reference. The projection is the sum of current
-populations across all of them — what's needed for pooled-group
-surveys like Garki's patent prevalence `x3 + y3`. Indexed forms
-compose: `prevalence(I_mild[a], I_severe[a])` in an age-stratified
-observation block gives per-age patent prevalence summed over the
-two clinical states.
+**Arithmetic projections** (the general form). Beyond `incidence()`
+and `prevalence()` sugar, `projected` accepts any expression over
+compartment state, parameters, and time. Pooled-group prevalence,
+prevalence-as-proportion, and arbitrary derived observables compose
+naturally:
 
-Emits `Ir::Projection::CurrentPopSum(names)` when the arg list
-expands to more than one concrete compartment; single-compartment
-args emit `CurrentPop(name)` as before. Same IR variant the
-stratified-bare-name expansion already used internally, now
-user-addressable.
+```camdl
+observations {
+  # Pooled-group count (Garki patent prevalence across x3, y3).
+  patent_count : {
+    projected = x3 + y3
+    likelihood = poisson(rate = projected)
+    every = 1 'months
+  }
+
+  # Prevalence-as-proportion — the canonical surveillance form.
+  slide_positivity : {
+    projected = (I_m + I_s) / (S + I_m + I_s + R)
+    likelihood = diagnostic_test(
+      base = binomial(n = N_tested, p = projected),
+      sens = rho_sens, spec = rho_spec
+    )
+    every = 1 'weeks
+  }
+}
+```
+
+Arithmetic projections emit `Ir::Projection::DerivedExpr`. Both the
+forward-simulation emission path (`camdl simulate --obs`) and the
+likelihood-scoring path (pfilter / PGAS / IF2) share a single
+evaluator (`sim::inference::multi_stream_obs::eval_stream_projection`),
+so they agree on semantics by construction. If you find yourself
+wanting a "multi-compartment prevalence" shortcut, write the sum
+directly: `projected = x + y` is the general form; `prevalence(x)`
+is kept as sugar only for the single-compartment case where the
+named function clarifies intent.
+
 
 **Both indexed forms sum over unspecified dimensions.** The only difference
 is how the index is matched:

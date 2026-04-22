@@ -2594,80 +2594,76 @@ let test_multi_source_bimolecular_stoich () =
     "A + B --> C produces {A:-1, B:-1, C:+1}"
     expected got
 
-(* ── Multi-compartment prevalence (GH #7) ────────────────────────────────── *)
+(* ── DerivedExpr projection (GH #7 resolution, 2026-04-22) ──────────────── *)
 
-(** `prevalence(x3, y3)` should emit `CurrentPopSum [x3; y3]`. Use case
-    is the Garki observable `patent = x3 + y3` across multiple
-    host-state compartments. *)
-let test_prevalence_multi_arg () =
+(** Bare arithmetic in `projected = ...` — the general form for pooled
+    prevalence, fractions, and any state-dependent scalar observable.
+    Proves the DSL supports `x + y` without needing a `prevalence(x, y)`
+    shortcut. Emits `Ir::DerivedExpr`. *)
+let test_projected_bare_sum_emits_derived_expr () =
   let src = {|
     time_unit = 'days
-    compartments { S, I_mild, I_severe, R }
-    parameters { beta : rate  gamma : rate }
+    compartments { S, I_m, I_s, R }
+    parameters { beta : rate  gamma : rate  rho : rate }
     transitions {
-      infection : S --> I_mild @ beta * S * (I_mild + I_severe) / (S + I_mild + I_severe + R)
-      recovery_m : I_mild --> R @ gamma * I_mild
-      recovery_s : I_severe --> R @ gamma * I_severe
+      infect    : S --> I_m   @ beta * S * (I_m + I_s) / (S + I_m + I_s + R)
+      worsen    : I_m --> I_s @ rho * I_m
+      recover_m : I_m --> R   @ gamma * I_m
+      recover_s : I_s --> R   @ gamma * I_s
     }
     observations {
       prev : {
-        projected = prevalence(I_mild, I_severe)
-        every = 1 'weeks
+        projected = I_m + I_s
+        every     = 1 'weeks
         likelihood = poisson(rate = projected)
       }
     }
-    init { S = 999  I_mild = 1 }
+    init { S = 999  I_m = 1 }
     simulate { from = 0 'days  to = 30 'days }
   |} in
   let m = compile_expect_ok src in
   let obs = List.hd m.Ir.observations in
   match obs.Ir.projection with
-  | Ir.CurrentPopSum names ->
-    let sorted = List.sort compare names in
-    Alcotest.(check (list string))
-      "multi-arg prevalence emits CurrentPopSum"
-      ["I_mild"; "I_severe"] sorted
-  | _ -> Alcotest.fail "expected CurrentPopSum for multi-arg prevalence"
+  | Ir.DerivedExpr _ -> ()  (* shape is right; CLI path evaluates it *)
+  | other ->
+    Alcotest.failf "expected DerivedExpr, got %s"
+      (match other with
+       | Ir.CurrentPop _ -> "CurrentPop"
+       | Ir.CurrentPopSum _ -> "CurrentPopSum"
+       | Ir.CumulativeFlow _ -> "CumulativeFlow"
+       | Ir.DerivedExpr _ -> "DerivedExpr")
 
-(** Indexed multi-arg: `prevalence(x3[a], y3[a])` in an age-stratified
-    observation context. *)
-let test_prevalence_multi_arg_indexed () =
+(** Prevalence-as-proportion — the canonical Garki/surveillance form.
+    `projected = (I_m + I_s) / (S + I_m + I_s + R)`. Compiles, and the
+    CLI synthetic-obs path evaluates it correctly (book-agent end-to-end
+    verified). *)
+let test_projected_proportion_compiles () =
   let src = {|
     time_unit = 'days
-    dimensions { age = [child, adult] }
-    compartments { S, I_m, I_s }
-    stratify(by = age)
-    parameters { beta : rate  gamma : rate }
+    compartments { S, I_m, I_s, R }
+    parameters { beta : rate  gamma : rate  rho : rate  N_tested : count
+                 rho_sens : probability  rho_spec : probability }
     transitions {
-      inf[a in age] : S[a] --> I_m[a] @ beta * S[a]
-      rec_m[a in age] : I_m[a] --> S[a] @ gamma * I_m[a]
-      rec_s[a in age] : I_s[a] --> S[a] @ gamma * I_s[a]
+      infect    : S --> I_m   @ beta * S * (I_m + I_s) / (S + I_m + I_s + R)
+      worsen    : I_m --> I_s @ rho * I_m
+      recover_m : I_m --> R   @ gamma * I_m
+      recover_s : I_s --> R   @ gamma * I_s
     }
     observations {
-      patent[a in age] : {
-        projected = prevalence(I_m[a], I_s[a])
-        every = 1 'weeks
-        likelihood = poisson(rate = projected)
+      slide : {
+        projected = (I_m + I_s) / (S + I_m + I_s + R)
+        every     = 1 'weeks
+        likelihood = diagnostic_test(
+          base = binomial(n = N_tested, p = projected),
+          sens = rho_sens, spec = rho_spec
+        )
       }
     }
-    init { S[child] = 500  S[adult] = 500 }
+    init { S = 999  I_m = 1 }
     simulate { from = 0 'days  to = 30 'days }
   |} in
-  let m = compile_expect_ok src in
-  (* Expect 2 observation streams (one per age); each with
-     CurrentPopSum over both stratum-specific compartments. *)
-  Alcotest.(check int) "two age-stratified obs streams"
-    2 (List.length m.Ir.observations);
-  List.iter (fun (o : Ir.observation_model) ->
-    match o.Ir.projection with
-    | Ir.CurrentPopSum names ->
-      (* Each stream should sum over exactly two compartments — the
-         stratum-specific I_m and I_s for its age. *)
-      Alcotest.(check int) "two summed compartments" 2 (List.length names);
-      assert (List.exists (fun n -> String.length n > 4 && String.sub n 0 4 = "I_m_") names);
-      assert (List.exists (fun n -> String.length n > 4 && String.sub n 0 4 = "I_s_") names)
-    | _ -> Alcotest.fail "expected CurrentPopSum"
-  ) m.Ir.observations
+  let _m = compile_expect_ok src in
+  ()
 
 (* ── Hierarchical priors: cycle + self-reference detection (Gate 2, C-class) ── *)
 
@@ -3327,9 +3323,9 @@ let () =
       Alcotest.test_case "E250 positional arg in likelihood"             `Quick test_poisson_positional_errors;
       Alcotest.test_case "E251 unknown kwarg in likelihood"              `Quick test_likelihood_unknown_kwarg_errors;
     ];
-    "multi_compartment_prevalence", [
-      Alcotest.test_case "prevalence(I_m, I_s) → CurrentPopSum"         `Quick test_prevalence_multi_arg;
-      Alcotest.test_case "indexed `prevalence(I_m[a], I_s[a])` per age" `Quick test_prevalence_multi_arg_indexed;
+    "derived_expr_projections", [
+      Alcotest.test_case "`projected = I_m + I_s` emits DerivedExpr"    `Quick test_projected_bare_sum_emits_derived_expr;
+      Alcotest.test_case "`projected = (I_m + I_s) / N` compiles"       `Quick test_projected_proportion_compiles;
     ];
     "hierarchical_priors", [
       Alcotest.test_case "parses `alpha[age] ~ log_normal(mu=mu_h, sigma=s_h) | age`" `Quick test_hierarchical_prior_parses;

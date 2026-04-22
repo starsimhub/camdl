@@ -1098,8 +1098,37 @@ pub(crate) fn project_all_obs_times(
             }).collect()
         }
         ir::observation::Projection::DerivedExpr(_) => {
-            eprintln!("error: DerivedExpr projection not yet supported for synthetic observations");
-            std::process::exit(1);
+            // Delegated to the shared `StreamProjection` evaluator in
+            // `sim::inference::multi_stream_obs`. Same primitive the
+            // scoring path uses, so forward simulation and likelihood
+            // scoring agree on DerivedExpr semantics by construction.
+            use sim::inference::multi_stream_obs::{
+                StreamProjection, eval_stream_projection,
+            };
+            use sim::state::RealState;
+            let compiled = sim::CompiledModel::new(model.clone())
+                .unwrap_or_else(|e| {
+                    eprintln!("error: DerivedExpr projection — model compile: {:?}", e);
+                    std::process::exit(1);
+                });
+            let stream_proj = StreamProjection::from_ir(
+                &obs_ir.projection, &compiled, &obs_ir.name,
+            ).unwrap_or_else(|e| {
+                eprintln!("error: DerivedExpr projection — resolve: {}", e);
+                std::process::exit(1);
+            });
+            let real_s = RealState::new(compiled.real_local_to_global.len());
+            let params = compiled.default_params.clone();
+            // FlowSum is never produced by DerivedExpr, but pass an
+            // empty slice so the helper's signature is uniform.
+            let empty_flows: &[u64] = &[];
+            obs_times.iter().map(|&obs_t| {
+                let snap = snap_at(traj, obs_t);
+                eval_stream_projection(
+                    &stream_proj, empty_flows, &snap.int_state.counts,
+                    &params, &compiled, &real_s, obs_t,
+                )
+            }).collect()
         }
     }
 }

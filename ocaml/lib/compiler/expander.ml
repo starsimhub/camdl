@@ -2702,33 +2702,11 @@ let expand_observations ctx =
            Ir.CumulativeFlow (String.concat "_" (n :: List.map (index_item_to_str env) idxs))
          | _ -> Ir.CumulativeFlow "?")
       | ProjDerived (EFuncCall ("prevalence", args)) ->
-        (* GH #7: accept multiple positional args for pooled-group
-           prevalence — `prevalence(I_mild, I_severe)` or
-           `prevalence(x3[a], y3[a])`. Each arg must resolve to a
-           concrete compartment name; results are summed as a
-           CurrentPopSum. The IR variant already exists (used for
-           sums-over-strata by the single-arg stratified path); this
-           extends it to explicit multi-arg user syntax. *)
-        let positional = List.filter_map (fun (k, e) ->
-          if k = "" then Some e else None
-        ) args in
-        let resolve_one = function
-          | EIdent (n, _) ->
-            (* Bare name: same stratified-or-not logic as prevalence_projection. *)
-            if Hashtbl.mem ctx.expanded_comp_tbl n then [n]
-            else if Hashtbl.mem ctx.comp_tbl n then expand_compartment_name ctx n
-            else [n]
-          | EIndex (n, idxs) ->
-            let idx_vals = List.map (index_item_to_str env) idxs in
-            let concrete = String.concat "_" (n :: idx_vals) in
-            [concrete]
-          | _ -> ["?"]
-        in
-        let all_names = List.concat_map resolve_one positional in
-        (match all_names with
-         | []        -> Ir.CurrentPop "?"
-         | [single]  -> Ir.CurrentPop single
-         | many      -> Ir.CurrentPopSum many)
+        (match List.assoc_opt "" args with
+         | Some (EIdent (n, _))    -> prevalence_projection n []
+         | Some (EIndex (n, idxs)) ->
+           prevalence_projection n (List.map (index_item_to_str env) idxs)
+         | _ -> Ir.CurrentPop "?")
       | ProjDerived (EIdent (name, _)) ->
         (* Disambiguate: is this a compartment (prevalence) or transition (flow)? *)
         if Hashtbl.mem ctx.expanded_comp_tbl name then
