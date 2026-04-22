@@ -424,10 +424,48 @@ obs_kv:
             | "binomial"      -> LikBinomial     args
             | "beta_binomial" -> LikBetaBinomial args
             | "bernoulli"     -> LikBernoulli    args
+            (* diagnostic_test(base = <binomial|bernoulli>(…, p = π), sens, spec)
+               is pure compile-time sugar: it rewrites the inner `p`
+               expression from π to  sens·π + (1−spec)·(1−π)
+               — the probability that a truly-positive fraction π
+               produces a positive observation under an imperfect
+               test. The IR sees just Binomial/Bernoulli, so the
+               runtime path is identical to hand-inlining the same
+               algebra (see wave 1 / malaria #4). *)
+            | "diagnostic_test" ->
+              let find k = List.assoc_opt k args in
+              (match find "base", find "sens", find "spec" with
+               | Some (EFuncCall (base_kind, base_args)), Some sens_e, Some spec_e ->
+                 let one_minus e = EBinOp (Sub, EConst 1.0, e) in
+                 let rewrite_p =
+                   List.map (fun (k, v) ->
+                     if k = "p" then
+                       let p_adj =
+                         EBinOp (Add,
+                           EBinOp (Mul, sens_e, v),
+                           EBinOp (Mul, one_minus spec_e, one_minus v))
+                       in (k, p_adj)
+                     else (k, v))
+                 in
+                 (match base_kind with
+                  | "binomial"  -> LikBinomial  (rewrite_p base_args)
+                  | "bernoulli" -> LikBernoulli (rewrite_p base_args)
+                  | other ->
+                    Parser_errors.push_error ~sp:$startpos ~ep:$endpos
+                      ~code:"E253"
+                      ~msg:(Printf.sprintf
+                        "diagnostic_test base must be binomial(...) or bernoulli(...); got %s(...)"
+                        other);
+                    LikBinomial [])
+               | _ ->
+                 Parser_errors.push_error ~sp:$startpos ~ep:$endpos
+                   ~code:"E254"
+                   ~msg:"diagnostic_test requires keyword args base = <binomial|bernoulli>(...), sens = <expr>, spec = <expr>";
+                 LikBinomial [])
             | s ->
               Parser_errors.push_error ~sp:$startpos ~ep:$endpos
                 ~code:"E104"
-                ~msg:(Printf.sprintf "unknown likelihood '%s': expected one of neg_binomial, poisson, normal, binomial, beta_binomial, bernoulli" s);
+                ~msg:(Printf.sprintf "unknown likelihood '%s': expected one of neg_binomial, poisson, normal, binomial, beta_binomial, bernoulli, diagnostic_test" s);
               LikPoisson args)
         | _ ->
           Parser_errors.push_error ~sp:$startpos ~ep:$endpos

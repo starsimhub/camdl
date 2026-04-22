@@ -1530,6 +1530,68 @@ beta_binomial(n = EXPR, alpha = EXPR, beta = EXPR)
 bernoulli(p = EXPR)                            binary outcome
 ```
 
+### 13.2.1 Diagnostic-test likelihood sugar
+
+Surveillance data is almost never perfectly observed — slide
+microscopy, RDTs, and PCR all have sensitivity < 1 and specificity
+< 1. The `diagnostic_test` sugar absorbs the measurement-model
+correction so the DSL reads like the biology:
+
+```camdl
+observations {
+  slide_positivity : {
+    projected  = prevalence(I)
+    every      = 1 'weeks
+    likelihood = diagnostic_test(
+      base = binomial(n = N_tested, p = projected / N),
+      sens = rho_sens,
+      spec = rho_spec
+    )
+  }
+}
+```
+
+**Semantics.** Pure compile-time rewrite. If true positive fraction
+is π, the probability of a positive test outcome is
+
+```
+p_observed  =  sens · π  +  (1 − spec) · (1 − π)
+```
+
+— the first term is a true-positive (infected and detected), the
+second is a false-positive (uninfected but mistakenly positive). The
+compiler rewrites the inner likelihood's `p = π` to this expression,
+producing IR byte-identical to a hand-inlined
+
+```camdl
+likelihood = binomial(
+  n = N_tested,
+  p = rho_sens * projected / N + (1 - rho_spec) * (1 - projected / N)
+)
+```
+
+**Supported bases.**
+
+- `binomial(n = …, p = …)` — survey of `n` individuals, count positives.
+- `bernoulli(p = …)` — single test per individual, 0/1 outcome.
+
+Other likelihood families (`poisson`, `neg_binomial`, `normal`,
+`beta_binomial`) aren't meaningful as diagnostic-test bases
+(sens/spec correct a probability, not a count-mean or variance) and
+produce `E253` when used.
+
+**Parameters.** `sens` and `spec` can be anything in `[0, 1]`: fixed
+constants, parameters with priors (for joint estimation of test
+characteristics with the transmission model), or expressions.
+Dimensional type is `probability`; the compiler checks domain.
+
+**Diagnostics.**
+
+- `E253` — base must be `binomial(...)` or `bernoulli(...)`; other
+  likelihood families rejected.
+- `E254` — missing one of the required keyword arguments `base`,
+  `sens`, `spec`.
+
 ### 13.3 Indexed Observations
 
 ```camdl

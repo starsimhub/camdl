@@ -2590,6 +2590,194 @@ let test_multi_source_bimolecular_stoich () =
     "A + B --> C produces {A:-1, B:-1, C:+1}"
     expected got
 
+(* ── diagnostic_test likelihood sugar (Wave 1 / #4) ──────────────────────── *)
+
+(** Minimal model exercising `diagnostic_test(base = binomial, sens, spec)`. *)
+let test_diagnostic_test_parses () =
+  let src = {|
+    time_unit = 'days
+    compartments { S, I, R }
+    parameters {
+      beta     : rate        in [0.001, 5.0]
+      gamma    : rate        in [0.01, 1.0]
+      rho_sens : probability in [0.5, 1.0]
+      rho_spec : probability in [0.5, 1.0]
+      N_tested : count       in [10, 10000]
+    }
+    transitions {
+      infection : S --> I @ beta * S * I / (S + I + R)
+      recovery  : I --> R @ gamma * I
+    }
+    observations {
+      slide_positivity : {
+        projected = prevalence(I)
+        every = 1 'weeks
+        likelihood = diagnostic_test(
+          base = binomial(n = N_tested, p = projected),
+          sens = rho_sens,
+          spec = rho_spec
+        )
+      }
+    }
+    init { S = 999  I = 1 }
+    simulate { from = 0 'days  to = 14 'days }
+  |} in
+  let m = compile_expect_ok src in
+  match (List.hd m.observations).likelihood with
+  | Ir.Binomial _ -> ()  (* sugar desugared to Binomial ✓ *)
+  | _ -> Alcotest.fail "expected Binomial after diagnostic_test desugar"
+
+(** The sugar must produce IR byte-identical to the hand-inlined
+    `binomial(n, p = sens * projected + (1 - spec) * (1 - projected))`
+    form. This is the canonical correctness guarantee. *)
+let test_diagnostic_test_equivalence () =
+  let sugar_src = {|
+    time_unit = 'days
+    compartments { S, I, R }
+    parameters {
+      beta     : rate        in [0.001, 5.0]
+      gamma    : rate        in [0.01, 1.0]
+      rho_sens : probability in [0.5, 1.0]
+      rho_spec : probability in [0.5, 1.0]
+      N_tested : count       in [10, 10000]
+    }
+    transitions {
+      infection : S --> I @ beta * S * I / (S + I + R)
+      recovery  : I --> R @ gamma * I
+    }
+    observations {
+      slide_positivity : {
+        projected = prevalence(I)
+        every = 1 'weeks
+        likelihood = diagnostic_test(
+          base = binomial(n = N_tested, p = projected),
+          sens = rho_sens,
+          spec = rho_spec
+        )
+      }
+    }
+    init { S = 999  I = 1 }
+    simulate { from = 0 'days  to = 14 'days }
+  |} in
+  let manual_src = {|
+    time_unit = 'days
+    compartments { S, I, R }
+    parameters {
+      beta     : rate        in [0.001, 5.0]
+      gamma    : rate        in [0.01, 1.0]
+      rho_sens : probability in [0.5, 1.0]
+      rho_spec : probability in [0.5, 1.0]
+      N_tested : count       in [10, 10000]
+    }
+    transitions {
+      infection : S --> I @ beta * S * I / (S + I + R)
+      recovery  : I --> R @ gamma * I
+    }
+    observations {
+      slide_positivity : {
+        projected = prevalence(I)
+        every = 1 'weeks
+        likelihood = binomial(
+          n = N_tested,
+          p = rho_sens * projected + (1 - rho_spec) * (1 - projected)
+        )
+      }
+    }
+    init { S = 999  I = 1 }
+    simulate { from = 0 'days  to = 14 'days }
+  |} in
+  let m_sugar  = compile_expect_ok sugar_src  in
+  let m_manual = compile_expect_ok manual_src in
+  match (List.hd m_sugar.observations).likelihood,
+        (List.hd m_manual.observations).likelihood with
+  | Ir.Binomial s, Ir.Binomial m ->
+    Alcotest.(check bool) "n expressions equal" true (s.n = m.n);
+    Alcotest.(check bool) "p expressions equal" true (s.p = m.p)
+  | _ -> Alcotest.fail "both models should have Binomial likelihood"
+
+(** Bernoulli base (one test per individual). *)
+let test_diagnostic_test_bernoulli () =
+  let src = {|
+    time_unit = 'days
+    compartments { S, I, R }
+    parameters {
+      beta     : rate        in [0.001, 5.0]
+      gamma    : rate        in [0.01, 1.0]
+      rho_sens : probability in [0.5, 1.0]
+      rho_spec : probability in [0.5, 1.0]
+    }
+    transitions {
+      infection : S --> I @ beta * S * I / (S + I + R)
+      recovery  : I --> R @ gamma * I
+    }
+    observations {
+      any_positive : {
+        projected = prevalence(I)
+        every = 1 'days
+        likelihood = diagnostic_test(
+          base = bernoulli(p = projected),
+          sens = rho_sens,
+          spec = rho_spec
+        )
+      }
+    }
+    init { S = 999  I = 1 }
+    simulate { from = 0 'days  to = 14 'days }
+  |} in
+  let m = compile_expect_ok src in
+  match (List.hd m.observations).likelihood with
+  | Ir.Bernoulli _ -> ()
+  | _ -> Alcotest.fail "expected Bernoulli after diagnostic_test desugar"
+
+let test_diagnostic_test_bad_base () =
+  let src = {|
+    time_unit = 'days
+    compartments { S, I, R }
+    parameters { beta : rate  gamma : rate  rho_sens : probability  rho_spec : probability }
+    transitions {
+      infection : S --> I @ beta * S * I / (S + I + R)
+      recovery  : I --> R @ gamma * I
+    }
+    observations {
+      cases : {
+        projected = prevalence(I)
+        every = 1 'weeks
+        likelihood = diagnostic_test(
+          base = poisson(rate = projected),
+          sens = rho_sens,
+          spec = rho_spec
+        )
+      }
+    }
+    init { S = 999  I = 1 }
+    simulate { from = 0 'days  to = 14 'days }
+  |} in
+  compile_expect_error_code ~code:"E253" ~contains:"poisson" src
+
+let test_diagnostic_test_missing_kwargs () =
+  let src = {|
+    time_unit = 'days
+    compartments { S, I, R }
+    parameters { beta : rate  gamma : rate  rho_sens : probability  N_tested : count }
+    transitions {
+      infection : S --> I @ beta * S * I / (S + I + R)
+      recovery  : I --> R @ gamma * I
+    }
+    observations {
+      cases : {
+        projected = prevalence(I)
+        every = 1 'weeks
+        likelihood = diagnostic_test(
+          base = binomial(n = N_tested, p = projected),
+          sens = rho_sens
+        )
+      }
+    }
+    init { S = 999  I = 1 }
+    simulate { from = 0 'days  to = 14 'days }
+  |} in
+  compile_expect_error_code ~code:"E254" ~contains:"diagnostic_test" src
+
 let () =
   Alcotest.run "compiler" [
     "golden", [
@@ -2784,5 +2972,12 @@ let () =
       Alcotest.test_case "catalyst collapse preserves single-source IR"  `Quick test_multi_source_catalyst_collapses;
       Alcotest.test_case "bimolecular A + B --> C → {A:-1, B:-1, C:+1}"  `Quick test_multi_source_bimolecular_stoich;
       Alcotest.test_case "indexed `bite[a in age]` expands per age"      `Quick test_multi_source_indexed_by_age;
+    ];
+    "diagnostic_test_likelihood", [
+      Alcotest.test_case "parses + rewrites p to sens·π + (1−spec)·(1−π)" `Quick test_diagnostic_test_parses;
+      Alcotest.test_case "IR equivalent to hand-inlined correction"        `Quick test_diagnostic_test_equivalence;
+      Alcotest.test_case "bernoulli base supported"                        `Quick test_diagnostic_test_bernoulli;
+      Alcotest.test_case "E253 rejects unsupported base (poisson)"        `Quick test_diagnostic_test_bad_base;
+      Alcotest.test_case "E254 rejects missing kwargs"                    `Quick test_diagnostic_test_missing_kwargs;
     ];
   ]
