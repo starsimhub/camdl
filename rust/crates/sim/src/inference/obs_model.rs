@@ -24,6 +24,14 @@ use rand_distr::{Gamma, Normal};
 /// sugar and any hand-inlined `p = projected / N` need it, and passing
 /// a zero scratch silently corrupts those cases. See
 /// `docs/dev/incidents/2026-04-22-observation-sampler-scratch-state.md`.
+///
+/// **Note on allocation**: this closure currently allocates a Vec per
+/// call (`counts.to_vec()`). Fine for the current uses (`camdl
+/// simulate --obs` calls this ~tens of times per run; ~2 KB total).
+/// **If this is ever wired into a hot inference loop — per-particle
+/// per-obs — copy the thread-local scratch pattern from
+/// `MultiStreamObsModel`** (`with_scratch_int_from_counts`). The
+/// hot-path pattern is already proven and zero-alloc.
 pub fn compile_obs_loglik_if2(
     obs_model: &ObservationModel,
     compiled: Arc<CompiledModel>,

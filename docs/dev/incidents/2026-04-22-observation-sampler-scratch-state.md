@@ -181,6 +181,50 @@ inspection of "where did this IntState come from?" Three of those
 sites would have revealed the scratch-pool helper, and the trait
 impl would have been among them.
 
+## Why deleting the helper didn't regress perf
+
+Relevant context that was missing when the third-strike deletion
+landed: `with_scratch_int` was originally added as a **performance
+optimization** in commit `e77ab11` (perf(obs): thread-local scratch
+IntState eliminates hot-loop alloc, IM2). The concern was that PF/IF2
+hot paths allocated `IntState::new(n_int)` per-particle,
+per-observation, per-stream — hundreds of thousands of heap allocs
+per full filter pass.
+
+The optimization was a `thread_local! SCRATCH_INT: RefCell<IntState>`
+plus **two** helpers that both reuse that buffer:
+
+- `with_scratch_int(n, f)` — zero-fills the buffer
+- `with_scratch_int_from_counts(counts, f)` — `copy_from_slice`s
+  the caller's counts into the buffer
+
+Deleting only the zero-fill variant **preserves the optimization
+entirely**. Both helpers share the `SCRATCH_INT` thread-local; the
+only functional difference is the final populate step (`for v in ...
+{ *v = 0; }` vs `copy_from_slice(counts)`). The retained variant is
+if anything marginally *faster* on the populate step (SIMD memcpy
+beats per-entry zero). All five hot-path sites in
+`multi_stream_obs.rs` now use the populating helper and reuse the
+same thread-local buffer with zero per-call allocation.
+
+The per-call allocation concern does apply to the smaller set of
+fixes in `obs_model.rs` (`compile_obs_sample_pf`,
+`compile_obs_mean_pf`, the two dead `compile_obs_loglik_*`). Those
+closures don't use the thread-local pattern — they were outside the
+IM2 perf-fix scope — and my third-strike fix swapped their captured
+zero `IntState` for a per-call `IntState::from_vec(counts.to_vec())`.
+That's one Vec alloc per call. Quantified:
+
+- `camdl simulate --obs` for a weekly-obs 1-year model: 53 calls × 40
+  bytes ≈ 2 KB per simulate run. Negligible next to simulation work.
+- Dead functions `compile_obs_loglik_if2` / `_pf`: zero callers in
+  production. Documented with a note: if future callers wire these
+  into a hot inference path, use the thread-local pattern from
+  `multi_stream_obs.rs` (zero-alloc per call).
+
+Net: no perf regression on any hot path. A small, non-hot Vec alloc
+per obs emission that's ≈0.001% of simulate runtime.
+
 ## Third-strike structural fix: delete the footgun
 
 The third fix did something the first two didn't: **deleted the
