@@ -316,7 +316,14 @@ impl MultiStreamObsModel {
         (0..self.streams.len()).map(|si| {
             let projected = self.project_stream_with_params(si, cum_flows, counts, params);
             let s = &self.streams[si];
-            with_scratch_int(self.n_int, |int_s| {
+            // GitHub #6 fix: the likelihood's p/mean/sd expressions can
+            // reference compartment state (e.g. `p = projected / N`
+            // with `N = S + I + R`). Evaluate against actual counts,
+            // not a zero scratch — the zero scratch silently turned
+            // PopSum-valued denominators into 0 → NaN, which the
+            // binomial sampler clamped to low values, producing
+            // surveys wildly inconsistent with true prevalence.
+            with_scratch_int_from_counts(counts, |int_s| {
                 eval_likelihood_resolved(
                     &s.resolved, projected, s.observations[obs_idx],
                     params, &self.compiled, int_s, &self.real_s,
@@ -368,7 +375,10 @@ impl ObservationModel<ParticleState> for MultiStreamObsModel {
                 si, &state.flow_accumulators, &state.counts, params,
             );
             let s = &self.streams[si];
-            with_scratch_int(self.n_int, |int_s| {
+            // GitHub #6: evaluate likelihood args against actual state,
+            // not zero scratch. Otherwise state-dependent denominators
+            // in p/mean/sd expressions blow up.
+            with_scratch_int_from_counts(&state.counts, |int_s| {
                 sample_obs_resolved(
                     &s.resolved, projected, params,
                     &self.compiled, int_s, &self.real_s, rng,
@@ -385,7 +395,8 @@ impl ObservationModel<ParticleState> for MultiStreamObsModel {
                 si, &state.flow_accumulators, &state.counts, params,
             );
             let s = &self.streams[si];
-            with_scratch_int(self.n_int, |int_s| {
+            // GitHub #6: actual state, not zero scratch.
+            with_scratch_int_from_counts(&state.counts, |int_s| {
                 eval_obs_mean_resolved(
                     &s.resolved, projected, params,
                     &self.compiled, int_s, &self.real_s,

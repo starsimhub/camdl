@@ -61,6 +61,12 @@ transitions {
   death_Sv : S_v --> @ mu_v * S_v
   death_Ev : E_v --> @ mu_v * E_v
   death_Iv : I_v --> @ mu_v * I_v
+
+  # Mosquito recruitment: constant influx balancing mean mortality at
+  # the equilibrium size M0. Classical Ross-Macdonald assumes a
+  # stationary vector population; without this the mosquitoes drain to
+  # zero and the epidemic collapses (GitHub #5).
+  birth_v  :     --> S_v       @ mu_v * M0
 }
 
 observations {

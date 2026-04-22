@@ -291,6 +291,23 @@
         "dest_compartment": null
       },
       "rate_grad": { "mu_v": { "pop": "I_v" } }
+    },
+    {
+      "name": "birth_v",
+      "stoichiometry": [ [ "S_v", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": { "param": "mu_v" },
+          "right": { "param": "M0" }
+        }
+      },
+      "metadata": {
+        "origin_kind": "inflow",
+        "source_compartment": null,
+        "dest_compartment": "S_v"
+      },
+      "rate_grad": { "mu_v": { "param": "M0" }, "M0": { "param": "mu_v" } }
     }
   ],
   "ode_equations": [],
