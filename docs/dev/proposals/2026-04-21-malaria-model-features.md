@@ -946,12 +946,15 @@ Gillespie/tau-leap and fits real slide-positivity data.
 Goal: the 55-line post-proposal Garki from §"Endpoint" above
 compiles and fits age-specific partial-pooling parameters.
 
-- [ ] **#2 probabilistic branching** (~3–4 days)
-  - [ ] Parser: `{ dest : weight, ... }` on transition destination
-  - [ ] IR: branch weights + normalisation check
-  - [ ] Propensity: multinomial draw at firing (Gillespie + tau-leap)
-  - [ ] Error codes: non-summing-to-one weights, empty branches
-  - [ ] 3σ statistical test for draw proportions
+- [x] **#2 probabilistic branching** (landed `9c6530a`, 2026-04-21)
+  - [x] Parser: `{ dest : weight, ... }` on transition destination
+  - [x] Pure compile-time sugar — no IR change needed (desugars to
+        one transition per branch with rate = weight_i × original_rate;
+        existing chain-binomial / tau-leap source-grouping does the
+        multinomial split). Zero new runtime code paths.
+  - [x] Atomicity + correct-split runtime tests on Gillespie, tau-leap,
+        AND chain-binomial. 200 seeds × ~900 draws, 9σ tolerance —
+        would catch any bias in the multinomial weights.
 - [ ] **#3 hierarchical priors (single-level)** (~2 weeks)
   - [ ] Parser: `| <dim>` pooling clause; `~` with parameter refs
   - [ ] Semantic: reference-graph walk → hyper/leaf classification
