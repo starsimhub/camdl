@@ -2561,6 +2561,7 @@ let () =
       Alcotest.test_case "polio_age"               `Quick (test_golden "polio_age");
       Alcotest.test_case "polio_spatial_5"         `Quick (test_golden "polio_spatial_5");
       Alcotest.test_case "seir_seasonal_patch"     `Quick (test_golden "seir_seasonal_patch");
+      Alcotest.test_case "ross_macdonald"          `Quick (test_golden "ross_macdonald");
       (* Goldens missing from the list as of 2026-04-19 (C8 in the
          compiler review). Each has a committed .camdl + .ir.json but
          the compile-and-roundtrip coverage was absent, so a

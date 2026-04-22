@@ -145,6 +145,42 @@ fn test_propensity_non_negativity() {
     }
 }
 
+/// Multi-source transitions (wave 1 / malaria #1): catalyst compartments
+/// on both sides of a transition collapse to net-zero stoichiometry. The
+/// rate expression still references the catalyst, and the net source /
+/// destination update is still atomic. For Ross-Macdonald:
+///   - `bite`    : S_h + I_v --> I_h + I_v   net: {S_h:-1, I_h:+1}
+///   - `infect_v`: S_v + I_h --> E_v + I_h   net: {S_v:-1, E_v:+1}
+/// Host population H = S_h + I_h is conserved exactly at every snapshot
+/// (recovery is internal; no transition adds or removes a host net).
+#[test]
+fn test_ross_macdonald_host_conservation() {
+    let mut model = load_model(&golden_path("ross_macdonald"));
+    apply_baseline(&mut model);
+    let compiled = CompiledModel::new(model.clone()).unwrap();
+    let params = &compiled.default_params.clone();
+    let config = gillespie_config(&model);
+
+    let local_idx = |name: &str| -> usize {
+        let g = *compiled.comp_index.get(name).expect("compartment");
+        compiled.global_to_int[g].expect("integer compartment")
+    };
+    let idx_sh = local_idx("S_h");
+    let idx_ih = local_idx("I_h");
+
+    for seed in 0..10u64 {
+        let traj = GillespieSim.run(&compiled, params, seed, &config).unwrap();
+        let h0 = traj.snapshots[0].int_state.counts[idx_sh]
+               + traj.snapshots[0].int_state.counts[idx_ih];
+        for snap in &traj.snapshots {
+            let h = snap.int_state.counts[idx_sh] + snap.int_state.counts[idx_ih];
+            assert_eq!(h, h0,
+                "host population drift at t={} seed={}: {} != {}",
+                snap.t, seed, h, h0);
+        }
+    }
+}
+
 #[test]
 fn test_determinism_same_seed() {
     let mut model = load_model(&golden_path("sir_basic"));

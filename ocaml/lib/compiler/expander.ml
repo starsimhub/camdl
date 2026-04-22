@@ -1361,8 +1361,8 @@ let expand_transitions_counted ctx =
       in
       if not pass_guard then (incr filtered; incr tr_filtered; None)
       else begin
-        let src_name = Option.map (resolve_stoich_ref ctx env) tr.trsrc in
-        let dst_name = Option.map (resolve_stoich_ref ctx env) tr.trdst in
+        let src_names = List.map (resolve_stoich_ref ctx env) tr.trsrc in
+        let dst_names = List.map (resolve_stoich_ref ctx env) tr.trdst in
         (* Extract rate wrappers: overdispersed(rate, σ²) or
            deterministic(rate). Mismatched arg shapes are a hard
            error (reported as C1 in the 2026-04-19 review) — before
@@ -1406,11 +1406,63 @@ let expand_transitions_counted ctx =
           | _ -> (tr.trrate, Ir.DrawPoisson)
         in
         let rate = normalize_expr (resolve_expr ctx env raw_rate) in
-        let origin_kind = infer_origin_kind src_name dst_name rate in
-        let stoich =
-          (match src_name with Some s -> [(s, -1)] | None -> []) @
-          (match dst_name with Some d -> [(d,  1)] | None -> [])
+        (* Build raw entries from sources (−1 each) and destinations (+1 each).
+           A compartment appearing in both lists contributes 0 net — these
+           catalysts are summed to zero and then dropped, because
+           (a) the IR validator rejects zero-delta entries, and
+           (b) any rate-expression dependency on the catalyst is preserved
+               through the rate AST itself, so the dep graph still pulls
+               it in for sparse propensity updates. *)
+        let raw_entries =
+          List.map (fun n -> (n, -1)) src_names
+          @ List.map (fun n -> (n,  1)) dst_names
         in
+        (* Sum deltas by compartment name, then drop zeros. Preserve
+           first-appearance order for deterministic IR output. *)
+        let collapse entries =
+          let order = ref [] in
+          let tbl = Hashtbl.create 8 in
+          List.iter (fun (n, d) ->
+            if not (Hashtbl.mem tbl n) then order := n :: !order;
+            let prev = try Hashtbl.find tbl n with Not_found -> 0 in
+            Hashtbl.replace tbl n (prev + d)
+          ) entries;
+          List.filter_map (fun n ->
+            let d = Hashtbl.find tbl n in
+            if d = 0 then None else Some (n, d)
+          ) (List.rev !order)
+        in
+        let stoich = collapse raw_entries in
+        (* Preserve legacy single-source/single-dest metadata for the
+           coupling-sugar detector when the collapsed stoichiometry has
+           exactly one net source and one net destination. Multi-source
+           and multi-dest transitions set these to None, which disables
+           coupling-sugar auto-detection for them (the explicit form is
+           the canonical encoding). *)
+        let sole_with_sign sign =
+          let matches = List.filter (fun (_, d) ->
+            if sign < 0 then d < 0 else d > 0) stoich in
+          match matches with
+          | [(n, _)] -> Some n
+          | _        -> None
+        in
+        let src_meta = sole_with_sign (-1) in
+        let dst_meta = sole_with_sign   1  in
+        (* E310: fully-catalytic multi-source transition — user wrote
+           sources and destinations but they all cancel to zero net
+           effect. Almost always a model error. *)
+        if stoich = [] && (src_names <> [] || dst_names <> []) then begin
+          Diagnostics.error ctx.diags
+            ~code:"E310"
+            ~loc:Diagnostics.no_loc
+            ~message:(Printf.sprintf
+              "transition '%s' has no net effect: sources and destinations cancel"
+              tr.trname)
+            ~hint:"remove catalyst compartments that appear on both sides, \
+                   or declare the transition with a non-trivial net stoichiometry"
+            ()
+        end;
+        let origin_kind = infer_origin_kind src_meta dst_meta rate in
         let parts = name_parts_from_bindings tr.trindices env in
         let tr_name =
           if parts = [] then tr.trname
@@ -1422,8 +1474,8 @@ let expand_transitions_counted ctx =
           Ir.rate            = rate;
           Ir.metadata        = Some {
             Ir.origin_kind        = Some origin_kind;
-            Ir.source_compartment = src_name;
-            Ir.dest_compartment   = dst_name;
+            Ir.source_compartment = src_meta;
+            Ir.dest_compartment   = dst_meta;
           };
           Ir.draw_method     = draw_method;
           Ir.rate_grad       = [];  (* populated later by autodiff pass *)

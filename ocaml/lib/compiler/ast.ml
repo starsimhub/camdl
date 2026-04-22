@@ -90,8 +90,12 @@ type stoich_ref = string * index_item list
 type transition_decl = {
   trname    : string;
   trindices : index_binding list;
-  trsrc     : stoich_ref option;
-  trdst     : stoich_ref option;
+  (* List form (wave 1 / malaria #1): empty = sourceless/destinationless,
+     singleton = classic single-source/-dest, ≥ 2 = multi-source /
+     multi-dest. DSL syntax: `A + B --> C + D`. Catalysts (compartments
+     appearing in both lists) are collapsed to net-zero by the expander. *)
+  trsrc     : stoich_ref list;
+  trdst     : stoich_ref list;
   trrate    : expr;
   trguard   : guard option;
   trtag     : string option;

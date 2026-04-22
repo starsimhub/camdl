@@ -945,6 +945,66 @@ importation[a in age, p in patch] : --> I[a, p]
   @ import_rate * age_weights[a] * patch_weights[p]
 ```
 
+### 9.1.1 Multi-source transitions (`A + B --> …`)
+
+Either side of `-->` accepts a `+`-separated list of compartments. Each
+source contributes `-1` and each destination contributes `+1` to the
+transition's net stoichiometry. This exposes the IR's already-general
+`stoichiometry: Vec<(name, int)>` shape to the DSL — the same
+construct the Rust runtime has always consumed.
+
+**Bimolecular mass-action** (vector-host transmission, pair formation,
+cell-cell interactions):
+
+```camdl
+# Host infection from an infectious mosquito bite.
+bite     : S_h + I_v --> I_h + I_v   @ a * b_h * S_h * I_v / H
+
+# Mosquito infection from biting an infectious host.
+infect_v : S_v + I_h --> E_v + I_h   @ a * b_v * S_v * I_h / H
+
+# Chemistry-style two-reactant reaction.
+react    : A + B --> C               @ k * A * B
+```
+
+Atomic firing: a single Gillespie / tau-leap / chain-binomial step
+applies the *vector* of deltas at once. For `bite`, `S_h`
+decrements and `I_h` increments together — no intermediate state.
+
+**Catalyst collapse.** A compartment appearing on both sides of the
+arrow contributes `−1` and `+1`, which sum to `0`. Zero-delta
+entries are dropped from the stoichiometry because (a) they produce
+no net state change, and (b) the IR validator rejects `delta == 0`.
+The rate expression's reference to the catalyst is preserved, so
+the propensity dependency graph still wires it in.
+
+- `bite : S_h + I_v --> I_h + I_v @ …`  →  stoichiometry `{S_h: -1, I_h: +1}`.
+- `react : A + B --> C @ …`             →  stoichiometry `{A: -1, B: -1, C: +1}`.
+
+**No-net-effect error (E310).** A transition where every delta
+collapses to zero (all compartments are pure catalysts) emits
+`E310`: "transition 'X' has no net effect: sources and destinations
+cancel". Almost always a model error; the hint suggests removing
+catalysts or adding a non-trivial destination.
+
+**When to use it.** Multi-source is the canonical encoding for any
+two-population mass-action event — transmission that depends on two
+pop classes (S × I), predator-prey-style interactions, chemistry.
+Single-source with the catalyst referenced only in the rate is
+equivalent in the IR but hides the biological structure:
+
+```camdl
+# Clear (reads like the biology).
+bite : S_h + I_v --> I_h + I_v  @ a * b_h * S_h * I_v / H
+
+# Equivalent IR, less clear.
+bite : S_h --> I_h              @ a * b_h * S_h * I_v / H
+```
+
+Both produce the same stoichiometry `{S_h:-1, I_h:+1}` and the same
+rate expression. Prefer the multi-source form when two compartments
+jointly determine the event — the `+` makes the dependency explicit.
+
 ### 9.2 Indexed Transitions
 
 ```camdl

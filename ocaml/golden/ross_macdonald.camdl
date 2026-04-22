@@ -1,0 +1,89 @@
+# Ross-Macdonald malaria model (Ross 1911; Macdonald 1957).
+#
+# Canonical two-species host-vector transmission. Exercises the
+# multi-source transition syntax (`S + I --> I + I`, `Sv + Ih --> Ev + Ih`)
+# that landed as malaria-model-features.md #1.
+#
+# Biology:
+#   - H hosts (S_h susceptible / I_h infectious), constant size.
+#   - M mosquitoes (S_v / E_v exposed / I_v infectious).
+#   - `bite`:        an infectious mosquito bites a susceptible host →
+#                    that host becomes infectious. Rate a·b_h·I_v per
+#                    susceptible per unit time.
+#   - `infect_v`:    an infectious host is bitten by a susceptible
+#                    mosquito → that mosquito becomes exposed. Rate
+#                    a·b_v·I_h / H per susceptible mosquito per unit
+#                    time.
+#   - `eip`:         exposed mosquito matures to infectious at rate σ.
+#   - `recover`:     infectious host clears to susceptible at rate r.
+#   - `death_*`:     mosquito death at rate μ_v (all compartments).
+#
+# Catalysts (I_h in the bite rate, I_v in the infect_v rate) appear
+# on both sides of the transition; the expander collapses them to
+# net-zero stoichiometry while the rate expression retains its
+# dependency on them for dep-graph tracking.
+
+time_unit = 'days
+
+compartments { S_h, I_h, S_v, E_v, I_v }
+
+let H = S_h + I_h
+let M = S_v + E_v + I_v
+
+parameters {
+  a        : rate        in [0.1,    1.0 ]    # human-biting rate per mosquito
+  b_h      : probability in [0.05,   0.8 ]    # P(infection | infectious bite on host)
+  b_v      : probability in [0.05,   0.5 ]    # P(infection | bite on infectious host)
+  r        : rate        in [0.005,  0.5 ]    # host recovery rate
+  sigma_v  : rate        in [0.05,   0.5 ]    # 1 / mean EIP
+  mu_v     : rate        in [0.01,   0.3 ]    # mosquito mortality rate
+  H0       : count       in [100,    100000]
+  M0       : count       in [100,    1000000]
+  I_h0     : count       in [1,      10000]
+}
+
+transitions {
+  # Host side. `bite` is a multi-source transition with I_v as a
+  # catalyst: it appears on both sides, so net stoichiometry is
+  # {S_h:-1, I_h:+1}, while the rate expression keeps the I_v
+  # reference so the dep graph wires it in.
+  bite     : S_h + I_v --> I_h + I_v  @ a * b_h * S_h * I_v / H
+  recover  : I_h       --> S_h        @ r * I_h
+
+  # Vector side. `infect_v` has I_h as catalyst → net {S_v:-1, E_v:+1}.
+  infect_v : S_v + I_h --> E_v + I_h  @ a * b_v * S_v * I_h / H
+  eip      : E_v       --> I_v        @ sigma_v * E_v
+
+  # Mosquito mortality (sourceless destinations — exit the pool).
+  death_Sv : S_v --> @ mu_v * S_v
+  death_Ev : E_v --> @ mu_v * E_v
+  death_Iv : I_v --> @ mu_v * I_v
+}
+
+init {
+  S_h = H0 - I_h0
+  I_h = I_h0
+  S_v = M0
+}
+
+simulate {
+  from = 0 'days
+  to   = 365 'days
+}
+
+scenarios {
+  baseline {
+    label = "endemic transmission"
+    set = {
+      a       = 0.3
+      b_h     = 0.2
+      b_v     = 0.1
+      r       = 0.05
+      sigma_v = 0.1
+      mu_v    = 0.1
+      H0      = 1000
+      M0      = 5000
+      I_h0    = 10
+    }
+  }
+}

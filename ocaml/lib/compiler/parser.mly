@@ -313,23 +313,26 @@ transition_list:
   | trs = list(transition_decl) { trs }
 
 transition_decl:
-  (* inline: name[...] : src --> dst @ rate where guard *)
-  | name = IDENT ibs = index_bindings_opt COLON src = stoich_ref_opt ARROW dst = stoich_ref_opt AT rate = expr guard = where_clause_opt
+  (* inline: name[...] : srcs --> dsts @ rate where guard *)
+  | name = IDENT ibs = index_bindings_opt COLON srcs = stoich_ref_list ARROW dsts = stoich_ref_list AT rate = expr guard = where_clause_opt
       { { trname = name; trindices = ibs;
-          trsrc = src; trdst = dst;
+          trsrc = srcs; trdst = dsts;
           trrate = rate; trguard = guard; trtag = None;
           trloc = Parser_errors.ast_loc_of ~sp:$startpos ~ep:$endpos } }
-  (* block form: name[...] : src --> dst { rate = ...; tag = ... } *)
-  | name = IDENT ibs = index_bindings_opt COLON src = stoich_ref_opt ARROW dst = stoich_ref_opt LBRACE tbody = transition_body RBRACE
+  (* block form: name[...] : srcs --> dsts { rate = ...; tag = ... } *)
+  | name = IDENT ibs = index_bindings_opt COLON srcs = stoich_ref_list ARROW dsts = stoich_ref_list LBRACE tbody = transition_body RBRACE
       { let (rate, guard, tag) = tbody in
         { trname = name; trindices = ibs;
-          trsrc = src; trdst = dst;
+          trsrc = srcs; trdst = dsts;
           trrate = rate; trguard = guard; trtag = tag;
           trloc = Parser_errors.ast_loc_of ~sp:$startpos ~ep:$endpos } }
 
-stoich_ref_opt:
-  | (* empty *) { None }
-  | name = IDENT idxs = index_items_opt { Some (name, idxs) }
+stoich_ref_list:
+  | (* empty *)                                           { [] }
+  | items = separated_nonempty_list(PLUS, stoich_ref_item) { items }
+
+stoich_ref_item:
+  | name = IDENT idxs = index_items_opt { (name, idxs) }
 
 index_items_opt:
   | (* empty *) { [] }
