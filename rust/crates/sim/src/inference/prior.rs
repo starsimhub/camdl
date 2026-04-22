@@ -20,6 +20,22 @@ use crate::inference::obs_loglik::lgamma;
 /// 0.5 · ln(2π), used in Gaussian log-densities.
 const HALF_LN_2PI: f64 = 0.918_938_533_204_672_8;
 
+/// Scale tag for `log_density` and the hierarchical evaluator.
+///
+/// The phantom distinction makes it an explicit function argument whether
+/// callers are passing a natural (θ) or transformed (z = f(θ)) value.
+/// Primary payoff: IC3 Jacobian double-count was a class of bug where
+/// `TransformedNormal` returned a z-scale density while callers also
+/// added `log|dθ/dz|` — this tag documents the contract at every call
+/// site so future contributors can't silently repeat the mistake.
+#[derive(Debug, Clone, Copy)]
+pub enum Scale {
+    /// θ — the natural parameter value (rate, probability, etc.).
+    Natural,
+    /// z = f(θ) — the unconstrained-transform value (e.g. z = ln θ).
+    Transformed,
+}
+
 /// Prior distribution for one estimated parameter.
 #[derive(Clone, Debug)]
 pub enum Prior {

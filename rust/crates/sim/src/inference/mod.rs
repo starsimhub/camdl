@@ -22,6 +22,7 @@ pub mod obs_model;
 pub mod multi_stream_obs;
 pub mod chain_binomial_process;
 pub mod prior;
+pub mod hierarchical;
 pub mod pmmh;
 pub mod correlated_pf;
 pub mod pgas;

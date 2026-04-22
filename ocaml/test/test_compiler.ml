@@ -2594,6 +2594,56 @@ let test_multi_source_bimolecular_stoich () =
     "A + B --> C produces {A:-1, B:-1, C:+1}"
     expected got
 
+(* ── Hierarchical priors: cycle + self-reference detection (Gate 2, C-class) ── *)
+
+(** C1. Self-reference: `alpha ~ normal(mu = alpha, ...)` must be
+    rejected at compile time. *)
+let test_hierarchical_self_reference_rejected () =
+  let src = {|
+    time_unit = 'days
+    compartments { S, I }
+    parameters {
+      alpha : rate ~ log_normal(mu = alpha, sigma = 0.5)
+    }
+    transitions { infect : S --> I @ alpha * S }
+    init { S = 100  I = 1 }
+    simulate { from = 0 'days  to = 10 'days }
+  |} in
+  compile_expect_error_code ~code:"E236" ~contains:"alpha" src
+
+(** C2. Two-parameter cycle: `a ~ f(b); b ~ f(a)` — rejected. *)
+let test_hierarchical_cycle_rejected () =
+  let src = {|
+    time_unit = 'days
+    compartments { S, I }
+    parameters {
+      alpha : rate ~ log_normal(mu = beta,  sigma = 0.5)
+      beta  : rate ~ log_normal(mu = alpha, sigma = 0.5)
+    }
+    transitions { infect : S --> I @ alpha * S }
+    init { S = 100  I = 1 }
+    simulate { from = 0 'days  to = 10 'days }
+  |} in
+  compile_expect_error_code ~code:"E236" ~contains:"cycle" src
+
+(** C3. Deep chain (3 levels): `c ~ f(b); b ~ f(a); a ~ Normal(...)`
+    must compile cleanly — it's a legitimate hierarchy, not a cycle. *)
+let test_hierarchical_three_level_chain_compiles () =
+  let src = {|
+    time_unit = 'days
+    compartments { S, I }
+    parameters {
+      grand_mu  : rate     ~ half_normal(sigma = 1.0)
+      mu_alpha  : rate     ~ log_normal(mu = grand_mu, sigma = 0.5)
+      alpha     : rate     ~ log_normal(mu = mu_alpha, sigma = 0.3)
+    }
+    transitions { infect : S --> I @ alpha * S }
+    init { S = 100  I = 1 }
+    simulate { from = 0 'days  to = 10 'days }
+  |} in
+  let _m = compile_expect_ok src in
+  ()
+
 (* ── Hierarchical priors (Wave 2 / #3, Gate 1: parse + IR) ──────────────── *)
 
 (** Parser accepts `| <dim>` pooling clause on an indexed param's prior. *)
@@ -3206,6 +3256,9 @@ let () =
       Alcotest.test_case "parses `alpha[age] ~ log_normal(mu=mu_h, sigma=s_h) | age`" `Quick test_hierarchical_prior_parses;
       Alcotest.test_case "scalar leaf populates Ir.parameter.hierarchical"          `Quick test_hierarchical_scalar_leaf_ir_shape;
       Alcotest.test_case "indexed leaf expands per dim with shared hyperparents"     `Quick test_hierarchical_indexed_ir_shape;
+      Alcotest.test_case "C1: self-reference rejected (E236)"                        `Quick test_hierarchical_self_reference_rejected;
+      Alcotest.test_case "C2: cycle rejected (E236)"                                 `Quick test_hierarchical_cycle_rejected;
+      Alcotest.test_case "C3: 3-level chain compiles cleanly"                        `Quick test_hierarchical_three_level_chain_compiles;
     ];
     "branching_destinations", [
       Alcotest.test_case "parser accepts `X --> {Y:p, Z:1-p}`"         `Quick test_branching_parses;

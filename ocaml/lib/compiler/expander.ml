@@ -2831,6 +2831,98 @@ let expand_observations ctx =
     ) combos
   ) ctx.obs_decls
 
+(* ── Hierarchical-prior cycle / self-reference check ─────────────────────── *)
+
+(** Collect the set of parameter names referenced anywhere inside an
+    AST expression. Used by the cycle detector. *)
+let rec collect_param_refs known_params acc = function
+  | EConst _ | EUnit _ -> acc
+  | EIdent (name, _) when List.mem name known_params -> name :: acc
+  | EIdent (_, _) -> acc
+  | EIndex (_, items) ->
+    List.fold_left (fun a item ->
+      match item with
+      | IPosn e | INamed (_, e) -> collect_param_refs known_params a e
+    ) acc items
+  | EBinOp (_, l, r) ->
+    let a = collect_param_refs known_params acc l in
+    collect_param_refs known_params a r
+  | EUnOp (_, e) -> collect_param_refs known_params acc e
+  | ESum (_, _, body) -> collect_param_refs known_params acc body
+  | ECond (p, t, e) ->
+    let a = collect_param_refs known_params acc p in
+    let a = collect_param_refs known_params a t in
+    collect_param_refs known_params a e
+  | EFuncCall (_, args) ->
+    List.fold_left (fun a (_, e) -> collect_param_refs known_params a e) acc args
+  | EList es ->
+    List.fold_left (fun a e -> collect_param_refs known_params a e) acc es
+  | ERange (lo, hi) ->
+    let a = collect_param_refs known_params acc lo in
+    collect_param_refs known_params a hi
+
+(** Check hierarchical prior reference graph for self-references and
+    cycles. Wave 2 / malaria #3 Gate 2 — risks C1, C2. Legitimate deep
+    chains (risk C3) pass cleanly. *)
+let check_hierarchical_cycles ctx =
+  let known_params = List.filter_map (function
+    | PScalar  { pname; _ } -> Some pname
+    | PIndexed { pname; _ } -> Some pname
+  ) ctx.param_decls in
+  (* Build adjacency: param → list of params its prior references. *)
+  let adj = Hashtbl.create 16 in
+  List.iter (fun pd ->
+    let (pname, pprior) = match pd with
+      | PScalar  { pname; pprior; _ } -> (pname, pprior)
+      | PIndexed { pname; pprior; _ } -> (pname, pprior)
+    in
+    match pprior with
+    | None -> Hashtbl.replace adj pname []
+    | Some ps ->
+      let refs = List.fold_left (fun acc (_, e) ->
+        collect_param_refs known_params acc e
+      ) [] ps.ps_args in
+      Hashtbl.replace adj pname (List.sort_uniq compare refs)
+  ) ctx.param_decls;
+
+  (* DFS-based cycle detection. Emits E236 with a clear message. *)
+  let visited  = Hashtbl.create 16 in
+  let on_stack = Hashtbl.create 16 in
+  let rec dfs node path =
+    if Hashtbl.mem on_stack node then begin
+      (* Cycle detected — path contains the cycle. *)
+      let cycle_nodes =
+        let rec take_from acc = function
+          | [] -> List.rev acc
+          | n :: _ when n = node -> List.rev (n :: acc)
+          | n :: rest -> take_from (n :: acc) rest
+        in take_from [] path
+      in
+      let desc =
+        if List.length cycle_nodes <= 1 then
+          Printf.sprintf "parameter '%s' references itself in its prior" node
+        else
+          Printf.sprintf "cycle in hierarchical prior references: %s -> %s"
+            (String.concat " -> " cycle_nodes) node
+      in
+      Diagnostics.error ctx.diags
+        ~code:"E236"
+        ~loc:Diagnostics.no_loc
+        ~message:desc
+        ~hint:"hierarchical priors must form a DAG: hyperparents declared \
+               independently, leaves reference them"
+        ()
+    end
+    else if not (Hashtbl.mem visited node) then begin
+      Hashtbl.add on_stack node ();
+      let neighbours = try Hashtbl.find adj node with Not_found -> [] in
+      List.iter (fun n -> dfs n (node :: path)) neighbours;
+      Hashtbl.remove on_stack node;
+      Hashtbl.add visited node ()
+    end
+  in
+  Hashtbl.iter (fun node _ -> dfs node []) adj
+
 (* ── Shadowing check ──────────────────────────────────────────────────────── *)
 
 (** Emit W103 for any let binding whose name also appears as a stratum value. *)
@@ -3218,6 +3310,8 @@ let expand_detail ?(source_dir = "") ?(filename = "<input>") (name : string) (de
   build_lookup_tables ctx;
   (* W103 shadowing check: let bindings vs stratum values *)
   check_shadowing ctx;
+  (* E236: hierarchical-prior cycle / self-reference detection (#3 gate 2) *)
+  check_hierarchical_cycles ctx;
   (* E217: check that guard expressions only reference dim levels / loop vars *)
   check_guards ctx;
   (* Save original transitions before desugaring *)
