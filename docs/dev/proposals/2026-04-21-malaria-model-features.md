@@ -928,13 +928,16 @@ Gillespie/tau-leap and fits real slide-positivity data.
   - [x] Tests: 3 compiler tests + 1 Rust runtime conservation test
   - [x] Spec §9.1.1 updated
   - [x] Golden: `ocaml/golden/ross_macdonald.camdl` + `.ir.json`
-- [ ] **#4 diagnostic-test likelihood** (~1 week)
-  - [ ] Parser: `diagnostic_test(base = …, sens = …, spec = …)`
-  - [ ] IR: new `Likelihood::DiagnosticTest` variant
-  - [ ] Scoring + sampling paths (log-pmf, gradients, draws)
-  - [ ] Error codes: invalid base likelihood, sens/spec out of [0,1]
-  - [ ] Tests: equivalence to hand-inlined correction (byte-identical)
-  - [ ] Spec §12 updated
+- [x] **#4 diagnostic-test likelihood** (landed `674c451`, 2026-04-21)
+  - [x] Parser: `diagnostic_test(base = …, sens = …, spec = …)`
+  - [x] Pure compile-time sugar — no IR change needed (rewrites
+        inner `p` to `sens·π + (1−spec)·(1−π)`, emits base Binomial
+        or Bernoulli); scoring + sampling + gradient paths unchanged
+  - [x] Error codes E253 (bad base), E254 (missing kwarg)
+  - [x] Equivalence test: sugar IR byte-identical to hand-inlined
+  - [x] Spec §13.2.1 updated
+  - [x] Ross-Macdonald golden extended with slide_positivity
+        observation using the sugar
 - [ ] **Wave 1 demo**: `docs/vignettes/ross_macdonald_fit.qmd`
   PMMH recovers `a, b_h, b_v` within 2σ on synthetic data.
 
