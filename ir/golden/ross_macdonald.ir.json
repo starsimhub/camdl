@@ -610,6 +610,7 @@
         1.0
       ],
       "prior": null,
+      "hierarchical": null,
       "transform": null,
       "initial_value": null,
       "param_kind": "rate",
@@ -623,6 +624,7 @@
         0.8
       ],
       "prior": null,
+      "hierarchical": null,
       "transform": null,
       "initial_value": null,
       "param_kind": "probability",
@@ -636,6 +638,7 @@
         0.5
       ],
       "prior": null,
+      "hierarchical": null,
       "transform": null,
       "initial_value": null,
       "param_kind": "probability",
@@ -649,6 +652,7 @@
         0.5
       ],
       "prior": null,
+      "hierarchical": null,
       "transform": null,
       "initial_value": null,
       "param_kind": "rate",
@@ -662,6 +666,7 @@
         0.5
       ],
       "prior": null,
+      "hierarchical": null,
       "transform": null,
       "initial_value": null,
       "param_kind": "rate",
@@ -675,6 +680,7 @@
         0.3
       ],
       "prior": null,
+      "hierarchical": null,
       "transform": null,
       "initial_value": null,
       "param_kind": "rate",
@@ -688,6 +694,7 @@
         1.0
       ],
       "prior": null,
+      "hierarchical": null,
       "transform": null,
       "initial_value": null,
       "param_kind": "probability",
@@ -701,6 +708,7 @@
         1.0
       ],
       "prior": null,
+      "hierarchical": null,
       "transform": null,
       "initial_value": null,
       "param_kind": "probability",
@@ -714,6 +722,7 @@
         100000.0
       ],
       "prior": null,
+      "hierarchical": null,
       "transform": null,
       "initial_value": null,
       "param_kind": "count",
@@ -727,6 +736,7 @@
         1000000.0
       ],
       "prior": null,
+      "hierarchical": null,
       "transform": null,
       "initial_value": null,
       "param_kind": "count",
@@ -740,6 +750,7 @@
         10000.0
       ],
       "prior": null,
+      "hierarchical": null,
       "transform": null,
       "initial_value": null,
       "param_kind": "count",
@@ -753,6 +764,7 @@
         10000.0
       ],
       "prior": null,
+      "hierarchical": null,
       "transform": null,
       "initial_value": null,
       "param_kind": "count",

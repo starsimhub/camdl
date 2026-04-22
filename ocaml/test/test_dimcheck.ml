@@ -74,7 +74,7 @@ let empty_model
 let mk_compartment name : compartment = { name; kind = Integer }
 
 let mk_param ?(kind = None) ?(dim = None) ?(value = None) name : parameter =
-  { name; value; bounds = None; prior = None; transform = None;
+  { name; value; bounds = None; prior = None; hierarchical = None; transform = None;
     initial_value = None; param_kind = kind; param_dim = dim }
 
 let mk_transition ?(stoich = []) name rate : transition =

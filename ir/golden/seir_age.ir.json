@@ -137,6 +137,83 @@
         "origin_kind": "transmission",
         "source_compartment": "S_child",
         "dest_compartment": "E_child"
+      },
+      "rate_grad": {
+        "beta": {
+          "bin_op": {
+            "op": "mul",
+            "left": {
+              "pop": "S_child"
+            },
+            "right": {
+              "bin_op": {
+                "op": "add",
+                "left": {
+                  "bin_op": {
+                    "op": "div",
+                    "left": {
+                      "bin_op": {
+                        "op": "mul",
+                        "left": {
+                          "table_lookup": {
+                            "table": "C_age",
+                            "indices": [
+                              {
+                                "const": 0.0
+                              }
+                            ]
+                          }
+                        },
+                        "right": {
+                          "pop": "I_child"
+                        }
+                      }
+                    },
+                    "right": {
+                      "pop_sum": [
+                        "S_child",
+                        "E_child",
+                        "I_child",
+                        "R_child"
+                      ]
+                    }
+                  }
+                },
+                "right": {
+                  "bin_op": {
+                    "op": "div",
+                    "left": {
+                      "bin_op": {
+                        "op": "mul",
+                        "left": {
+                          "table_lookup": {
+                            "table": "C_age",
+                            "indices": [
+                              {
+                                "const": 1.0
+                              }
+                            ]
+                          }
+                        },
+                        "right": {
+                          "pop": "I_adult"
+                        }
+                      }
+                    },
+                    "right": {
+                      "pop_sum": [
+                        "S_adult",
+                        "E_adult",
+                        "I_adult",
+                        "R_adult"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
       }
     },
     {
@@ -238,6 +315,83 @@
         "origin_kind": "transmission",
         "source_compartment": "S_adult",
         "dest_compartment": "E_adult"
+      },
+      "rate_grad": {
+        "beta": {
+          "bin_op": {
+            "op": "mul",
+            "left": {
+              "pop": "S_adult"
+            },
+            "right": {
+              "bin_op": {
+                "op": "add",
+                "left": {
+                  "bin_op": {
+                    "op": "div",
+                    "left": {
+                      "bin_op": {
+                        "op": "mul",
+                        "left": {
+                          "table_lookup": {
+                            "table": "C_age",
+                            "indices": [
+                              {
+                                "const": 2.0
+                              }
+                            ]
+                          }
+                        },
+                        "right": {
+                          "pop": "I_child"
+                        }
+                      }
+                    },
+                    "right": {
+                      "pop_sum": [
+                        "S_child",
+                        "E_child",
+                        "I_child",
+                        "R_child"
+                      ]
+                    }
+                  }
+                },
+                "right": {
+                  "bin_op": {
+                    "op": "div",
+                    "left": {
+                      "bin_op": {
+                        "op": "mul",
+                        "left": {
+                          "table_lookup": {
+                            "table": "C_age",
+                            "indices": [
+                              {
+                                "const": 3.0
+                              }
+                            ]
+                          }
+                        },
+                        "right": {
+                          "pop": "I_adult"
+                        }
+                      }
+                    },
+                    "right": {
+                      "pop_sum": [
+                        "S_adult",
+                        "E_adult",
+                        "I_adult",
+                        "R_adult"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
       }
     },
     {
@@ -267,6 +421,11 @@
         "origin_kind": "intrinsic",
         "source_compartment": "E_child",
         "dest_compartment": "I_child"
+      },
+      "rate_grad": {
+        "sigma": {
+          "pop": "E_child"
+        }
       }
     },
     {
@@ -296,6 +455,11 @@
         "origin_kind": "intrinsic",
         "source_compartment": "E_adult",
         "dest_compartment": "I_adult"
+      },
+      "rate_grad": {
+        "sigma": {
+          "pop": "E_adult"
+        }
       }
     },
     {
@@ -325,6 +489,11 @@
         "origin_kind": "intrinsic",
         "source_compartment": "I_child",
         "dest_compartment": "R_child"
+      },
+      "rate_grad": {
+        "gamma": {
+          "pop": "I_child"
+        }
       }
     },
     {
@@ -354,6 +523,11 @@
         "origin_kind": "intrinsic",
         "source_compartment": "I_adult",
         "dest_compartment": "R_adult"
+      },
+      "rate_grad": {
+        "gamma": {
+          "pop": "I_adult"
+        }
       }
     }
   ],
@@ -390,8 +564,11 @@
         0.5
       ],
       "prior": null,
+      "hierarchical": null,
       "transform": null,
-      "initial_value": null
+      "initial_value": null,
+      "param_kind": "rate",
+      "param_dim": null
     },
     {
       "name": "sigma",
@@ -401,8 +578,11 @@
         1.0
       ],
       "prior": null,
+      "hierarchical": null,
       "transform": null,
-      "initial_value": null
+      "initial_value": null,
+      "param_kind": "rate",
+      "param_dim": null
     },
     {
       "name": "gamma",
@@ -412,8 +592,11 @@
         1.0
       ],
       "prior": null,
+      "hierarchical": null,
       "transform": null,
-      "initial_value": null
+      "initial_value": null,
+      "param_kind": "rate",
+      "param_dim": null
     }
   ],
   "initial_conditions": {

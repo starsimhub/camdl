@@ -62,10 +62,13 @@ type param_type = PRate | PProbability | PPositive | PCount | PReal
 (** Explicit dimension annotation: (P exponent, T exponent) *)
 type dim_annotation = int * int
 
-(** Prior distribution specification: ~ name(key = val, ...) *)
+(** Prior distribution specification: ~ name(key = val, ...) [| dim_name]
+    The optional `| dim_name` clause marks a hierarchical / partially-
+    pooled prior (wave 2 / malaria #3). None = plain prior. *)
 type prior_spec = {
-  ps_name: string;                    (** distribution name: "log_normal", "beta", etc. *)
-  ps_args: (string * expr) list;      (** keyword arguments *)
+  ps_name:      string;                    (** distribution name: "log_normal", "beta", etc. *)
+  ps_args:      (string * expr) list;      (** keyword arguments *)
+  ps_pool_over: string option;              (** `| <dim>` pooling clause *)
 }
 
 type param_decl =

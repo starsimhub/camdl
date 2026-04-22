@@ -671,12 +671,29 @@ let transform_of_json j =
   | "log" -> Log | "logit" -> Logit | "identity" -> Identity
   | s -> fail "unknown transform '%s'" s
 
+let hierarchical_prior_to_json (h : hierarchical_prior) : Yojson.Safe.t =
+  obj [
+    ("kind",       str h.hkind);
+    ("args",       obj (List.map (fun (k, e) -> (k, expr_to_json e)) h.hargs));
+    ("pool_over",  str h.hpool_over);
+  ]
+
+let hierarchical_prior_of_json j : hierarchical_prior =
+  {
+    hkind      = as_string (member "kind" j);
+    hargs      = (match member "args" j with
+                  | `Assoc kvs -> List.map (fun (k, v) -> (k, expr_of_json v)) kvs
+                  | _ -> fail "hierarchical prior args must be an object");
+    hpool_over = as_string (member "pool_over" j);
+  }
+
 let parameter_to_json (p : parameter) : Yojson.Safe.t =
   obj [
     ("name",          str p.name);
     ("value",         match p.value         with None -> null | Some v  -> flt v);
     ("bounds",        match p.bounds        with None -> null | Some (lo, hi) -> arr [flt lo; flt hi]);
     ("prior",         match p.prior         with None -> null | Some pr -> prior_dist_to_json pr);
+    ("hierarchical",  match p.hierarchical  with None -> null | Some h  -> hierarchical_prior_to_json h);
     ("transform",     match p.transform     with None -> null | Some tr -> transform_to_json tr);
     ("initial_value", match p.initial_value with None -> null | Some v  -> flt v);
     ("param_kind",    match p.param_kind    with None -> null | Some k  -> str k);
@@ -691,6 +708,7 @@ let parameter_of_json j =
       | Some (`List [lo; hi]) -> Some (as_float lo, as_float hi)
       | _ -> fail "bounds must be a two-element array [lo, hi]");
     prior         = (match member_opt "prior"         j with Some `Null | None -> None | Some p -> Some (prior_dist_of_json p));
+    hierarchical  = (match member_opt "hierarchical"  j with Some `Null | None -> None | Some h -> Some (hierarchical_prior_of_json h));
     transform     = (match member_opt "transform"     j with Some `Null | None -> None | Some t -> Some (transform_of_json  t));
     initial_value = (match member_opt "initial_value" j with Some `Null | None -> None | Some v -> Some (as_float v));
     param_kind    = (match member_opt "param_kind"    j with Some `Null | None -> None | Some k -> Some (as_string k));

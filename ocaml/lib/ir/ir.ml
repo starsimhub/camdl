@@ -184,11 +184,28 @@ type prior_dist =
 
 type transform = Log | Logit | Identity
 
+(** Hierarchical prior (wave 2 / malaria #3). When a parameter's prior
+    references other parameters, we can't fold the args down to floats
+    — they're evaluated at inference time against the current
+    hyperparameter values. [hkind] names the distribution (same as
+    [prior_dist] constructor names, but stringly-typed here because
+    args carry expressions rather than the existing float fields).
+    [hargs] are keyword → expression pairs (e.g. [("mu", Param "mu_h"),
+    ("sigma", Param "sigma_h")]). [hpool_over] is the dimension name
+    from the `| age` pooling clause — empty string when the leaf is a
+    flat scalar with hyperparent references (no indexed pooling). *)
+type hierarchical_prior = {
+  hkind:       string;
+  hargs:       (string * expr) list;
+  hpool_over:  string;
+}
+
 type parameter = {
   name:          string;
   value:         float option;  (* None = must be supplied at runtime via --params / --set *)
   bounds:        (float * float) option;  (* optional [lo, hi] constraint for inference/validation *)
   prior:         prior_dist option;
+  hierarchical:  hierarchical_prior option;  (* Some iff a leaf in a hierarchical pool; mutually exclusive with prior. *)
   transform:     transform option;
   initial_value: float option;
   param_kind:    string option;  (* DSL type: "rate", "probability", "positive", "count", "real" *)

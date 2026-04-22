@@ -1,0 +1,88 @@
+# Garki post-proposal: uses all five Wave-2 features that have landed.
+# Wave 1 features #1 (multi-source) and #4 (diagnostic_test) already in.
+# Wave 2 feature #2 (multinomial branching) in.
+# Wave 2 feature #3 (hierarchical priors) — Gate 1: compiles. Inference
+# integration is Phase 3.
+
+time_unit = 'days
+
+dimensions { age = [child, adult] }
+compartments { X, Y1, Y2, Y3, Sv, Ev, Iv }
+stratify(by = age, only = [X, Y1, Y2, Y3])
+
+parameters {
+  # Global parameters (not pooled).
+  bite_rate : rate       in [0.1,   1.0]   # human-biting rate per mosquito
+  b_h      : probability in [0.05,  0.8]
+  b_v      : probability in [0.05,  0.5]
+  r2       : rate        in [0.001, 0.5]
+  delta    : rate        in [0.001, 0.3]
+  sigma_v  : rate        in [0.05,  0.5]
+  mu_v     : rate        in [0.01,  0.3]
+  rho_sens : probability in [0.5,   1.0]
+  rho_spec : probability in [0.5,   1.0]
+
+  # Hyperparameters for partial pooling across age groups.
+  mu_r1       : rate     ~ half_normal(sigma = 0.1)
+  sigma_r1    : positive ~ half_normal(sigma = 0.05)
+  mu_alpha    : rate     ~ half_normal(sigma = 0.05)
+  sigma_alpha : positive ~ half_normal(sigma = 0.02)
+  alpha_psymp : positive ~ gamma(shape = 2, rate = 1)
+  beta_psymp  : positive ~ gamma(shape = 2, rate = 1)
+
+  # Leaves: per-age values pooled under the hyperparameters above.
+  r1[age]     : rate        ~ log_normal(mu = mu_r1,    sigma = sigma_r1)    | age
+  alpha[age]  : rate        ~ log_normal(mu = mu_alpha, sigma = sigma_alpha) | age
+  p_symp[age] : probability ~ beta(alpha = alpha_psymp, beta = beta_psymp)   | age
+
+  # Fixed initial conditions / observation parameters.
+  H0       : count in [100, 100000]
+  M0       : count in [100, 1000000]
+  I_h0     : count in [1,   10000]
+  N_tested : count in [10,  10000]
+}
+
+let I_h   = Y1[child] + Y1[adult] + Y2[child] + Y2[adult]
+let N_h   = X[child] + X[adult] + Y1[child] + Y1[adult]
+          + Y2[child] + Y2[adult] + Y3[child] + Y3[adult]
+
+transitions {
+  # Wave 1 #1: bimolecular bite (Iv as catalyst).
+  # (Branching into Y1_symp / Y1_asym across multi-source destinations
+  # is gated on a grammar extension for `X + catalyst --> {branches} +
+  # catalyst`; deferred to a follow-up. For Gate 1 of #3, the bite
+  # uses a single destination — the age-indexed p_symp enters via
+  # the progression rate rather than destination choice.)
+  bite[a in age] : X[a] + Iv --> Y1[a] + Iv
+    @ bite_rate * b_h * X[a] * Iv / N_h
+
+  # Vector-side coupling (Wave 1 #1).
+  infect_v : Sv + I_h --> Ev + I_h @ bite_rate * b_v * Sv * I_h / N_h
+
+  # Per-age progression — classic transitions, age-indexed leaf params.
+  recover[a in age] : Y1[a] --> X[a]  @ r1[a]    * Y1[a]
+  acquire[a in age] : Y1[a] --> Y2[a] @ alpha[a] * Y1[a]
+  clear[a in age]   : Y2[a] --> Y3[a] @ r2       * Y2[a]
+  wane[a in age]    : Y3[a] --> X[a]  @ delta    * Y3[a]
+
+  vec_eip : Ev --> Iv @ sigma_v * Ev
+  death_Sv : Sv --> @ mu_v * Sv
+  death_Ev : Ev --> @ mu_v * Ev
+  death_Iv : Iv --> @ mu_v * Iv
+}
+
+# Wave 1 #4: diagnostic_test likelihood for slide-positivity surveys.
+observations {
+  slide_positivity[a in age] : {
+    projected  = prevalence(Y1[a] + Y2[a])
+    every      = 1 'weeks
+    likelihood = diagnostic_test(
+      base = binomial(n = N_tested, p = projected / N_h),
+      sens = rho_sens,
+      spec = rho_spec
+    )
+  }
+}
+
+init { X[child] = 400  X[adult] = 600  Sv = 5000 }
+simulate { from = 0 'days  to = 365 'days }

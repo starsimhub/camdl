@@ -197,6 +197,7 @@ rule token = parse
   | '^'     { CARET }
   | '@'     { AT }
   | '~'     { TILDE }
+  | '|'     { PIPE }
   | '<'     { LT }
   | '>'     { GT }
 

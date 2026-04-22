@@ -1619,6 +1619,10 @@ let validate_prior_values dist_name vals =
   | "exponential" -> pos_check "rate"
   | _ -> None
 
+type prior_classification =
+  [ `Plain        of Ir.prior_dist
+  | `Hierarchical of Ir.hierarchical_prior ]
+
 let resolve_prior_spec ?(loc = Diagnostics.no_loc) ctx ~pname (ps : prior_spec) : Ir.prior_dist =
   (* Prefix every diagnostic message with the parameter name so users
      can locate bad priors in models with many parameters. *)
@@ -1732,6 +1736,72 @@ let resolve_prior_spec ?(loc = Diagnostics.no_loc) ctx ~pname (ps : prior_spec) 
     | _ -> err_invalid_placeholder (* unreachable — name was validated above *)
   end
 
+(** Classify a prior as plain (float-valued args) or hierarchical
+    (expression-valued args, e.g. parameter references). A prior is
+    hierarchical iff:
+    - the declaration has an explicit `| dim` pool clause (ps_pool_over
+      is Some), OR
+    - any argument expression contains a non-constant term (parameter
+      reference) — this allows flat-scalar leaves with hyperparent
+      references, without forcing a pooling dimension.
+    Wave 2 / malaria #3. *)
+let classify_and_resolve_prior_spec ?(loc = Diagnostics.no_loc) ctx ~pname
+      (ps : prior_spec) : prior_classification =
+  let has_non_const_arg =
+    List.exists (fun (_, e) -> not (is_const_expr e)) ps.ps_args
+  in
+  let is_hierarchical = ps.ps_pool_over <> None || has_non_const_arg in
+  if not is_hierarchical then
+    `Plain (resolve_prior_spec ~loc ctx ~pname ps)
+  else begin
+    (* Validate distribution name but allow parameter references in args. *)
+    let qualify msg = Printf.sprintf "parameter '%s': %s" pname msg in
+    (match prior_arg_signature ps.ps_name with
+     | Some _ -> ()
+     | None ->
+       Diagnostics.error ctx.diags
+         ~code:"E232" ~loc
+         ~message:(qualify (Printf.sprintf "unknown prior distribution '%s'" ps.ps_name))
+         ~detail:"Valid distributions: uniform, normal, log_normal, half_normal, beta, gamma, exponential."
+         ~hint:"Check the spelling and available distributions."
+         ());
+    let resolved_args = List.map (fun (k, e) ->
+      (k, normalize_expr (resolve_expr ctx [] e))
+    ) ps.ps_args in
+    (* Validate every parameter reference in the resolved args points
+       at a declared parameter. Unknown names are typos or misuse. *)
+    let param_names = List.filter_map (function
+      | PScalar  { pname; _ } -> Some pname
+      | PIndexed { pname; _ } -> Some pname
+    ) ctx.param_decls in
+    let rec check_refs e =
+      match e with
+      | Ir.Param n when not (List.mem n param_names) ->
+        Diagnostics.error ctx.diags
+          ~code:"E230" ~loc
+          ~message:(qualify (Printf.sprintf
+            "prior argument references unknown parameter '%s'" n))
+          ~detail:"Hierarchical priors may reference hyperparameters \
+                   declared in the same `parameters { }` block. \
+                   `%s` is not a declared parameter."
+          ~hint:"Check spelling, or declare the hyperparameter first."
+          ()
+      | Ir.Param _ | Ir.Const _ | Ir.Projected | Ir.Time -> ()
+      | Ir.BinOp b -> check_refs b.left; check_refs b.right
+      | Ir.UnOp  u -> check_refs u.arg
+      | Ir.Cond  c -> check_refs c.pred; check_refs c.then_; check_refs c.else_
+      | Ir.Pop _ | Ir.PopSum _ -> ()  (* caught elsewhere *)
+      | Ir.TimeFunc _ -> ()
+      | Ir.TableLookup (_, args) -> List.iter check_refs args
+    in
+    List.iter (fun (_, e) -> check_refs e) resolved_args;
+    `Hierarchical {
+      Ir.hkind      = ps.ps_name;
+      Ir.hargs      = resolved_args;
+      Ir.hpool_over = Option.value ~default:"" ps.ps_pool_over;
+    }
+  end
+
 let expand_parameters ctx =
   let from_params = List.concat_map (fun pd ->
     match pd with
@@ -1739,11 +1809,17 @@ let expand_parameters ctx =
       let bounds = resolve_bounds ctx pbounds in
       let pk = Some (param_kind_to_string pkind) in
       let loc = diag_loc_of_ast_ctx ctx ploc in
-      let prior = Option.map (resolve_prior_spec ctx ~loc ~pname) pprior in
+      let (prior, hierarchical) = match pprior with
+        | None -> (None, None)
+        | Some ps -> (match classify_and_resolve_prior_spec ctx ~loc ~pname ps with
+                      | `Plain p        -> (Some p, None)
+                      | `Hierarchical h -> (None, Some h))
+      in
       [{ Ir.name          = pname;
          Ir.value         = None;
          Ir.bounds        = bounds;
          Ir.prior         = prior;
+         Ir.hierarchical  = hierarchical;
          Ir.transform     = None;
          Ir.initial_value = None;
          Ir.param_kind    = pk;
@@ -1754,12 +1830,18 @@ let expand_parameters ctx =
       let bounds = resolve_bounds ctx pbounds in
       let pk = Some (param_kind_to_string pkind) in
       let loc = diag_loc_of_ast_ctx ctx ploc in
-      let prior = Option.map (resolve_prior_spec ctx ~loc ~pname) pprior in
+      let (prior, hierarchical) = match pprior with
+        | None -> (None, None)
+        | Some ps -> (match classify_and_resolve_prior_spec ctx ~loc ~pname ps with
+                      | `Plain p        -> (Some p, None)
+                      | `Hierarchical h -> (None, Some h))
+      in
       List.map (fun v ->
         { Ir.name          = pname ^ "_" ^ v;
           Ir.value         = None;
           Ir.bounds        = bounds;
           Ir.prior         = prior;
+          Ir.hierarchical  = hierarchical;
           Ir.transform     = None;
           Ir.initial_value = None;
           Ir.param_kind    = pk;
@@ -1797,6 +1879,7 @@ let expand_parameters ctx =
              Ir.value         = Some v;
              Ir.bounds        = None;
              Ir.prior         = None;
+             Ir.hierarchical  = None;
              Ir.transform     = None;
              Ir.initial_value = None;
              Ir.param_kind    = Some (param_kind_to_string pk);

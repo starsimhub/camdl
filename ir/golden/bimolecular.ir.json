@@ -135,6 +135,7 @@
         1.0
       ],
       "prior": null,
+      "hierarchical": null,
       "transform": null,
       "initial_value": null,
       "param_kind": "rate",
@@ -148,6 +149,7 @@
         10000.0
       ],
       "prior": null,
+      "hierarchical": null,
       "transform": null,
       "initial_value": null,
       "param_kind": "count",
@@ -161,6 +163,7 @@
         10000.0
       ],
       "prior": null,
+      "hierarchical": null,
       "transform": null,
       "initial_value": null,
       "param_kind": "count",

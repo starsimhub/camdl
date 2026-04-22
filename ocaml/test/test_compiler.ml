@@ -2043,18 +2043,22 @@ let src_with_prior prior_expr = Printf.sprintf {|
 (* ── E230: non-constant prior argument ──────────────────────────────────── *)
 
 let test_e230_non_const_arg () =
-  (* Reference a parameter in a prior arg — not a compile-time constant. *)
+  (* After wave 2 / #3 landed hierarchical priors, a reference to a
+     declared parameter in a prior arg is legitimately non-const (it's
+     a hyperparent). Undeclared names are still an error — caught by
+     the generic name-resolution pass as E100 "undeclared name". This
+     test pins that behaviour: the error still fires, just under the
+     canonical code. *)
   let src = {|
     time_unit = 'days
     parameters {
-      x    : rate in [0.01, 1.0]
-      beta : rate in [0.01, 2.0] ~ log_normal(mu = x, sigma = 0.5)
+      beta : rate in [0.01, 2.0] ~ log_normal(mu = undeclared, sigma = 0.5)
     }
     compartments { S }
     init { S = 1 }
     simulate { from = 0 'days  to = 1 'days }
   |} in
-  compile_expect_error_code ~code:"E230" ~contains:"parameter 'beta'" src
+  compile_expect_error_code ~code:"E100" ~contains:"undeclared" src
 
 (* ── E231: missing required kwarg ──────────────────────────────────────── *)
 
@@ -2590,6 +2594,127 @@ let test_multi_source_bimolecular_stoich () =
     "A + B --> C produces {A:-1, B:-1, C:+1}"
     expected got
 
+(* ── Hierarchical priors (Wave 2 / #3, Gate 1: parse + IR) ──────────────── *)
+
+(** Parser accepts `| <dim>` pooling clause on an indexed param's prior. *)
+let test_hierarchical_prior_parses () =
+  let src = {|
+    time_unit = 'days
+    dimensions { age = [child, adult] }
+    compartments { S, I }
+    stratify(by = age, only = [S, I])
+    parameters {
+      mu_alpha    : rate     ~ half_normal(sigma = 0.1)
+      sigma_alpha : positive ~ half_normal(sigma = 0.05)
+      alpha[age]  : rate     ~ log_normal(mu = mu_alpha, sigma = sigma_alpha) | age
+      beta        : rate     in [0.001, 5.0]
+    }
+    transitions {
+      infect[a in age]  : S[a] --> I[a]  @ beta * S[a] * (I[child] + I[adult])
+      recover[a in age] : I[a] --> S[a]  @ alpha[a] * I[a]
+    }
+    init { S[child] = 500  S[adult] = 500  I[child] = 5 }
+    simulate { from = 0 'days  to = 60 'days }
+  |} in
+  let _m = compile_expect_ok src in
+  ()
+
+(** Hierarchical plain-scalar plumbing: a scalar leaf (no `| dim`) whose
+    prior references another parameter is ALSO hierarchical. Used when the
+    hyperparent structure is flat (no pooling across dimensions).
+
+    Shape of the IR after expansion:
+    - mu_beta, sigma_beta: `parameter.prior = Some (Normal_p / HalfNormal ...)`,
+      `parameter.hierarchical = None`
+    - beta: `parameter.prior = None`, `parameter.hierarchical = Some {...}`
+    The `hierarchical` field stores the kwarg expressions so inference can
+    resolve them against current hyperparam values at evaluation time. *)
+let test_hierarchical_scalar_leaf_ir_shape () =
+  let src = {|
+    time_unit = 'days
+    compartments { S, I, R }
+    parameters {
+      mu_beta    : rate     ~ half_normal(sigma = 1.0)
+      sigma_beta : positive ~ half_normal(sigma = 0.5)
+      beta       : rate     ~ log_normal(mu = mu_beta, sigma = sigma_beta)
+      gamma      : rate     in [0.01, 1.0]
+    }
+    transitions {
+      infection : S --> I @ beta * S * I / (S + I + R)
+      recovery  : I --> R @ gamma * I
+    }
+    init { S = 999  I = 1 }
+    simulate { from = 0 'days  to = 30 'days }
+  |} in
+  let m = compile_expect_ok src in
+  let find_param n =
+    List.find_opt (fun (p : Ir.parameter) -> p.Ir.name = n) m.Ir.parameters
+  in
+  let mu_p = Option.get (find_param "mu_beta") in
+  let sig_p = Option.get (find_param "sigma_beta") in
+  let beta_p = Option.get (find_param "beta") in
+  (* Hyperparents carry plain priors. *)
+  Alcotest.(check bool) "mu_beta has plain prior"
+    true (mu_p.Ir.prior <> None && mu_p.Ir.hierarchical = None);
+  Alcotest.(check bool) "sigma_beta has plain prior"
+    true (sig_p.Ir.prior <> None && sig_p.Ir.hierarchical = None);
+  (* beta is a leaf: hierarchical, no float prior. *)
+  Alcotest.(check bool) "beta has hierarchical prior"
+    true (beta_p.Ir.prior = None && beta_p.Ir.hierarchical <> None);
+  match beta_p.Ir.hierarchical with
+  | Some h ->
+    Alcotest.(check string) "leaf dist kind" "log_normal" h.Ir.hkind;
+    (* `mu` arg references parameter mu_beta *)
+    let mu_arg = List.assoc "mu" h.Ir.hargs in
+    Alcotest.(check bool) "mu arg references mu_beta"
+      true (mu_arg = Ir.Param "mu_beta");
+    let sig_arg = List.assoc "sigma" h.Ir.hargs in
+    Alcotest.(check bool) "sigma arg references sigma_beta"
+      true (sig_arg = Ir.Param "sigma_beta")
+  | None -> Alcotest.fail "expected Some hierarchical"
+
+(** Indexed hierarchical param: `alpha[age]` with `| age` pool clause
+    should produce one IR parameter per age value, each with the same
+    hierarchical structure pointing at the shared hyperparameters. *)
+let test_hierarchical_indexed_ir_shape () =
+  let src = {|
+    time_unit = 'days
+    dimensions { age = [child, adult] }
+    compartments { S, I }
+    stratify(by = age, only = [S, I])
+    parameters {
+      mu_alpha    : rate     ~ half_normal(sigma = 0.1)
+      sigma_alpha : positive ~ half_normal(sigma = 0.05)
+      alpha[age]  : rate     ~ log_normal(mu = mu_alpha, sigma = sigma_alpha) | age
+      beta        : rate     in [0.001, 5.0]
+    }
+    transitions {
+      infect[a in age]  : S[a] --> I[a]  @ beta * S[a] * (I[child] + I[adult])
+      recover[a in age] : I[a] --> S[a]  @ alpha[a] * I[a]
+    }
+    init { S[child] = 500  S[adult] = 500  I[child] = 5 }
+    simulate { from = 0 'days  to = 60 'days }
+  |} in
+  let m = compile_expect_ok src in
+  let names = List.map (fun (p : Ir.parameter) -> p.Ir.name) m.Ir.parameters
+              |> List.sort compare in
+  (* alpha should be expanded into alpha_child and alpha_adult. *)
+  Alcotest.(check bool) "alpha_child is a parameter"
+    true (List.mem "alpha_child" names);
+  Alcotest.(check bool) "alpha_adult is a parameter"
+    true (List.mem "alpha_adult" names);
+  (* Both should have hierarchical priors pointing at mu_alpha / sigma_alpha. *)
+  List.iter (fun n ->
+    let p = List.find (fun (p : Ir.parameter) -> p.Ir.name = n) m.Ir.parameters in
+    match p.Ir.hierarchical with
+    | Some h ->
+      Alcotest.(check string) (n ^ " dist kind") "log_normal" h.Ir.hkind;
+      Alcotest.(check string) (n ^ " pool_over") "age" h.Ir.hpool_over;
+      let mu_arg = List.assoc "mu" h.Ir.hargs in
+      Alcotest.(check bool) (n ^ " mu refs mu_alpha") true (mu_arg = Ir.Param "mu_alpha");
+    | None -> Alcotest.failf "%s missing hierarchical prior" n
+  ) ["alpha_child"; "alpha_adult"]
+
 (* ── Probabilistic branching on destination (Wave 2 / #2) ───────────────── *)
 
 (** Parser accepts `X --> {Y : p, Z : 1-p} @ rate`. *)
@@ -3076,6 +3201,11 @@ let () =
       Alcotest.test_case "poisson(rate = projected) parses"              `Quick test_poisson_rate_kwarg_parses;
       Alcotest.test_case "E250 positional arg in likelihood"             `Quick test_poisson_positional_errors;
       Alcotest.test_case "E251 unknown kwarg in likelihood"              `Quick test_likelihood_unknown_kwarg_errors;
+    ];
+    "hierarchical_priors", [
+      Alcotest.test_case "parses `alpha[age] ~ log_normal(mu=mu_h, sigma=s_h) | age`" `Quick test_hierarchical_prior_parses;
+      Alcotest.test_case "scalar leaf populates Ir.parameter.hierarchical"          `Quick test_hierarchical_scalar_leaf_ir_shape;
+      Alcotest.test_case "indexed leaf expands per dim with shared hyperparents"     `Quick test_hierarchical_indexed_ir_shape;
     ];
     "branching_destinations", [
       Alcotest.test_case "parser accepts `X --> {Y:p, Z:1-p}`"         `Quick test_branching_parses;

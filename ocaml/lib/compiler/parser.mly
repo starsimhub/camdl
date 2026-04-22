@@ -35,6 +35,7 @@
 %token INIT TIMEPOINTS SCENARIOS EXTENDS STRATIFY LET FROM TO WHERE SUM
 %token CONSECUTIVE IN BY DIMENSIONS ONLY REAL INTEGER RATE PROBABILITY POSITIVE COUNT
 %token AND OR NOT IF THEN ELSE EVERY UNTIL AT_KW FORMAT DESCRIPTION TAG NULL TRANSFER LIKELIHOOD ORIGIN BALANCE EVENTS ADD AT_DAY
+%token PIPE
 
 %token EOF
 
@@ -182,8 +183,12 @@ param_decl:
                    ploc = Parser_errors.ast_loc_of ~sp:$startpos ~ep:$endpos } }
 
 prior_clause:
+  (* plain prior: ~ normal(mu = 0, sigma = 1) *)
   | name = prior_name LPAREN args = separated_list(COMMA, prior_kwarg) RPAREN
-      { { ps_name = name; ps_args = args } }
+      { { ps_name = name; ps_args = args; ps_pool_over = None } }
+  (* hierarchical / pooled prior: ~ log_normal(mu = mu_h, sigma = sigma_h) | age *)
+  | name = prior_name LPAREN args = separated_list(COMMA, prior_kwarg) RPAREN PIPE dim = IDENT
+      { { ps_name = name; ps_args = args; ps_pool_over = Some dim } }
 
 (* Distribution names and keyword argument names accept identifiers AND
    common keywords (rate, count, etc.) that conflict with DSL reserved

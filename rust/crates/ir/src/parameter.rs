@@ -30,6 +30,35 @@ pub enum PriorDist {
     Fixed(f64),
 }
 
+// ── Hierarchical priors ───────────────────────────────────────────────────────
+
+/// Hierarchical prior for a leaf parameter in a pooled group (wave 2 /
+/// malaria #3).
+///
+/// A "leaf" is a parameter whose prior references *other parameters*
+/// (hyperparameters) rather than being a pure-constant distribution.
+/// At inference time the hyperparameters carry their own priors and are
+/// sampled jointly with the leaves; at each log-posterior evaluation
+/// the `args` expressions are resolved against the current
+/// hyperparameter values.
+///
+/// - `kind` names the distribution family: "normal", "log_normal",
+///   "half_normal", "beta", "gamma", "exponential", "uniform".
+///   (Stringly typed here rather than sharing `PriorDist`'s enum because
+///   the existing variants carry `f64` fields; hierarchical args are
+///   `Expr`.)
+/// - `args` are keyword → expression pairs (e.g. `"mu" → Param("mu_h")`,
+///   `"sigma" → Param("sigma_h")`).
+/// - `pool_over` names the dimension over which shrinkage is applied
+///   (from the DSL `| age` clause). Empty string for scalar leaves
+///   with hyperparent references but no pooling dimension.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct HierarchicalPrior {
+    pub kind:      String,
+    pub args:      std::collections::BTreeMap<String, crate::expr::Expr>,
+    pub pool_over: String,
+}
+
 // ── Parameter transform ───────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -52,6 +81,11 @@ pub struct Parameter {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bounds:        Option<(f64, f64)>,
     pub prior:         Option<PriorDist>,
+    /// Hierarchical prior for leaves in pooled groups; mutually exclusive
+    /// with `prior`. Populated by the compiler when a prior's args
+    /// reference other parameters.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hierarchical:  Option<HierarchicalPrior>,
     pub transform:     Option<Transform>,
     pub initial_value: Option<f64>,
     /// DSL parameter type: "rate", "probability", "positive", "count", "real".

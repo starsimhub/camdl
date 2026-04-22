@@ -365,6 +365,7 @@
         10.0
       ],
       "prior": null,
+      "hierarchical": null,
       "transform": null,
       "initial_value": null,
       "param_kind": "rate",
@@ -378,6 +379,7 @@
         0.99
       ],
       "prior": null,
+      "hierarchical": null,
       "transform": null,
       "initial_value": null,
       "param_kind": "probability",
@@ -391,6 +393,7 @@
         10000.0
       ],
       "prior": null,
+      "hierarchical": null,
       "transform": null,
       "initial_value": null,
       "param_kind": "count",
@@ -404,6 +407,7 @@
         1000.0
       ],
       "prior": null,
+      "hierarchical": null,
       "transform": null,
       "initial_value": null,
       "param_kind": "count",

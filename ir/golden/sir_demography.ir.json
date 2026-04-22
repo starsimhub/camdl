@@ -65,6 +65,31 @@
         "origin_kind": "transmission",
         "source_compartment": "S",
         "dest_compartment": "I"
+      },
+      "rate_grad": {
+        "beta": {
+          "bin_op": {
+            "op": "mul",
+            "left": {
+              "pop": "S"
+            },
+            "right": {
+              "bin_op": {
+                "op": "div",
+                "left": {
+                  "pop": "I"
+                },
+                "right": {
+                  "pop_sum": [
+                    "S",
+                    "I",
+                    "R"
+                  ]
+                }
+              }
+            }
+          }
+        }
       }
     },
     {
@@ -94,6 +119,11 @@
         "origin_kind": "intrinsic",
         "source_compartment": "I",
         "dest_compartment": "R"
+      },
+      "rate_grad": {
+        "gamma": {
+          "pop": "I"
+        }
       }
     },
     {
@@ -123,6 +153,15 @@
         "origin_kind": "inflow",
         "source_compartment": null,
         "dest_compartment": "S"
+      },
+      "rate_grad": {
+        "mu": {
+          "pop_sum": [
+            "S",
+            "I",
+            "R"
+          ]
+        }
       }
     },
     {
@@ -148,6 +187,11 @@
         "origin_kind": "outflow",
         "source_compartment": "S",
         "dest_compartment": null
+      },
+      "rate_grad": {
+        "mu": {
+          "pop": "S"
+        }
       }
     },
     {
@@ -173,6 +217,11 @@
         "origin_kind": "outflow",
         "source_compartment": "I",
         "dest_compartment": null
+      },
+      "rate_grad": {
+        "mu": {
+          "pop": "I"
+        }
       }
     },
     {
@@ -198,6 +247,11 @@
         "origin_kind": "outflow",
         "source_compartment": "R",
         "dest_compartment": null
+      },
+      "rate_grad": {
+        "mu": {
+          "pop": "R"
+        }
       }
     }
   ],
@@ -215,8 +269,11 @@
         2.0
       ],
       "prior": null,
+      "hierarchical": null,
       "transform": null,
-      "initial_value": null
+      "initial_value": null,
+      "param_kind": "rate",
+      "param_dim": null
     },
     {
       "name": "gamma",
@@ -226,8 +283,11 @@
         1.0
       ],
       "prior": null,
+      "hierarchical": null,
       "transform": null,
-      "initial_value": null
+      "initial_value": null,
+      "param_kind": "rate",
+      "param_dim": null
     },
     {
       "name": "mu",
@@ -237,8 +297,11 @@
         0.01
       ],
       "prior": null,
+      "hierarchical": null,
       "transform": null,
-      "initial_value": null
+      "initial_value": null,
+      "param_kind": "rate",
+      "param_dim": null
     },
     {
       "name": "N0",
@@ -248,8 +311,11 @@
         1000000.0
       ],
       "prior": null,
+      "hierarchical": null,
       "transform": null,
-      "initial_value": null
+      "initial_value": null,
+      "param_kind": "count",
+      "param_dim": null
     },
     {
       "name": "I0",
@@ -259,8 +325,11 @@
         10000.0
       ],
       "prior": null,
+      "hierarchical": null,
       "transform": null,
-      "initial_value": null
+      "initial_value": null,
+      "param_kind": "count",
+      "param_dim": null
     }
   ],
   "initial_conditions": {

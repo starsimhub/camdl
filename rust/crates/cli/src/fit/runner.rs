@@ -1546,9 +1546,9 @@ mod tests {
             ode_equations: vec![], time_functions: vec![], tables: vec![],
             interventions: vec![], observations: vec![],
             parameters: vec![
-                Parameter { name: "beta".into(), value: Some(0.3), bounds: Some((0.01, 2.0)), prior: None, transform: None, initial_value: None, param_kind: None, param_dim: None },
-                Parameter { name: "gamma".into(), value: Some(0.1), bounds: Some((0.01, 1.0)), prior: None, transform: None, initial_value: None, param_kind: None, param_dim: None },
-                Parameter { name: "N0".into(), value: Some(1000.0), bounds: Some((100.0, 100000.0)), prior: None, transform: None, initial_value: None, param_kind: None, param_dim: None },
+                Parameter { name: "beta".into(), value: Some(0.3), bounds: Some((0.01, 2.0)), prior: None, transform: None, initial_value: None, param_kind: None, param_dim: None, hierarchical: None },
+                Parameter { name: "gamma".into(), value: Some(0.1), bounds: Some((0.01, 1.0)), prior: None, transform: None, initial_value: None, param_kind: None, param_dim: None, hierarchical: None },
+                Parameter { name: "N0".into(), value: Some(1000.0), bounds: Some((100.0, 100000.0)), prior: None, transform: None, initial_value: None, param_kind: None, param_dim: None, hierarchical: None },
             ],
             initial_conditions: InitialConditions::Explicit({
                 let mut m = HashMap::new();
@@ -1627,11 +1627,11 @@ mod tests {
         let beta_with_ir_prior = Parameter {
             name: "beta".into(), value: None, bounds: Some((0.01, 2.0)),
             prior: Some(PriorDist::LogNormal(LogNormalPrior { mu: -1.0, sigma: 0.5 })),
-            transform: None, initial_value: None, param_kind: None, param_dim: None,
+            transform: None, initial_value: None, param_kind: None, param_dim: None, hierarchical: None,
         };
         let gamma_no_prior = Parameter {
             name: "gamma".into(), value: None, bounds: Some((0.05, 1.0)),
-            prior: None, transform: None, initial_value: None, param_kind: None, param_dim: None,
+            prior: None, transform: None, initial_value: None, param_kind: None, param_dim: None, hierarchical: None,
         };
         let model = ir::Model {
             name: "t".into(), version: "0.3".into(), time_unit: "days".into(),
