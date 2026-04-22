@@ -1089,6 +1089,13 @@ fn prior_log_density_and_grad_z(
             let dlp_dtheta = -rate;
             dlp_dtheta * param.transform_deriv(z)
         }
+        // Hierarchical priors need an env-aware density AND gradient to
+        // drive NUTS correctly. PGAS+NUTS with hierarchical leaves is
+        // tracked as Gate 3b — needs env threaded through this function
+        // signature. For Gate 3a (PMMH + hierarchical), PMMH does not
+        // call this function. Until 3b lands: model compiles + PMMH
+        // works + NUTS on hierarchical coords is disabled-by-infinity.
+        Prior::Hierarchical(_) => return (f64::NEG_INFINITY, 0.0),
     };
     (lp, dlp_dz)
 }

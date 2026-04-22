@@ -332,11 +332,15 @@ pub fn run_pmmh_cli(
 
                 // Stream trace row to disk (respecting burn-in/thin)
                 if step >= burn_in && (step - burn_in).is_multiple_of(thin) {
+                    let env = sim::inference::hierarchical::NamedParams {
+                        names: &config.param_names,
+                        values: params,
+                    };
                     let log_prior: f64 = config.estimated_params.iter().zip(priors.iter())
                         .map(|(spec, prior)| {
                             let theta = params[spec.index];
                             let z = spec.to_transformed(theta);
-                            prior.log_density(theta, z)
+                            prior.log_density_env(theta, z, &env)
                         })
                         .sum();
                     let log_posterior = loglik + log_prior;
@@ -370,6 +374,7 @@ pub fn run_pmmh_cli(
 
             let result = run_pmmh(
                 &config.estimated_params, &priors, &config.base_params,
+                &config.param_names,
                 &pmmh_config, &config.observations, &eval_loglik, eval_corr_ref, chain_seed,
                 Some(&progress_cb), resume_states[chain_id].clone(), config_hash.clone(),
             );

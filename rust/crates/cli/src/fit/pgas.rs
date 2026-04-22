@@ -114,6 +114,13 @@ pub fn run_pgas_cli(
                 Prior::Exponential { rate } => {
                     eprintln!("    {:12} Exponential(rate={:.4})", spec.name, rate);
                 }
+                Prior::Hierarchical(h) => {
+                    let parents: Vec<String> = h.args.values()
+                        .filter_map(|e| if let ir::expr::Expr::Param(p) = e { Some(p.param.clone()) } else { None })
+                        .collect();
+                    eprintln!("    {:12} Hierarchical {}(...) | pool_over={} | parents=[{}]",
+                        spec.name, h.kind, h.pool_over, parents.join(", "));
+                }
             }
         }
     }

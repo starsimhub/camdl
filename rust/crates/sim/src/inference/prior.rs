@@ -56,6 +56,13 @@ pub enum Prior {
     Gamma { shape: f64, rate: f64 },
     /// Exponential(rate). Supported on [0, inf).
     Exponential { rate: f64 },
+    /// Hierarchical prior: args are expressions that reference other
+    /// parameters (hyperparents). Wave 2 / malaria #3 Gate 3. At each
+    /// log-density call, args are resolved against a
+    /// [`crate::inference::hierarchical::ParamEnv`]. The density
+    /// function lives in the `hierarchical` module; this variant is
+    /// a thin carrier for the IR data.
+    Hierarchical(ir::parameter::HierarchicalPrior),
 }
 
 impl Prior {
@@ -128,6 +135,27 @@ impl Prior {
                 if natural < 0.0 { return f64::NEG_INFINITY; }
                 rate.ln() - rate * natural
             }
+            // Hierarchical priors require a `ParamEnv` to resolve their
+            // expression-valued args. Callers without an env (older code
+            // paths: adaptive-proposal bookkeeping, trace display) see
+            // an Hierarchical variant as f64::NEG_INFINITY here — safe
+            // fallback. New callers should use `log_density_env`.
+            Prior::Hierarchical(_) => f64::NEG_INFINITY,
+        }
+    }
+
+    /// Env-aware log-density. Semantically identical to `log_density`
+    /// for non-hierarchical variants (env is ignored). For
+    /// `Prior::Hierarchical`, resolves arg expressions against `env`.
+    /// Wave 2 / malaria #3 Gate 3.
+    pub fn log_density_env<E: crate::inference::hierarchical::ParamEnv>(
+        &self, natural: f64, transformed: f64, env: &E,
+    ) -> f64 {
+        match self {
+            Prior::Hierarchical(hp) =>
+                crate::inference::hierarchical::hierarchical_log_density(
+                    hp, natural, transformed, env, Scale::Natural),
+            _ => self.log_density(natural, transformed),
         }
     }
 

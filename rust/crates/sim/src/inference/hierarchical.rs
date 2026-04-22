@@ -39,13 +39,37 @@ pub trait ParamEnv {
 }
 
 impl ParamEnv for std::collections::HashMap<String, f64> {
-    fn get(&self, name: &str) -> Option<f64> { self.get(name).copied() }
+    fn get(&self, name: &str) -> Option<f64> {
+        std::collections::HashMap::get(self, name).copied()
+    }
 }
 
 impl ParamEnv for &[(String, f64)] {
     fn get(&self, name: &str) -> Option<f64> {
         self.iter().find(|(n, _)| n == name).map(|(_, v)| *v)
     }
+}
+
+/// Zero-allocation env backed by parallel name/value slices.
+/// Used by the MCMC inner loop where the name slice is constant across
+/// proposals and only the value slice moves. Wave 2 / #3 Gate 3.
+pub struct NamedParams<'a> {
+    pub names:  &'a [String],
+    pub values: &'a [f64],
+}
+
+impl<'a> ParamEnv for NamedParams<'a> {
+    fn get(&self, name: &str) -> Option<f64> {
+        // Linear scan is fine — param vectors are small (<100) and this
+        // is called O(n_leaves) times per MCMC step, not per-substep.
+        self.names.iter().position(|n| n == name).map(|i| self.values[i])
+    }
+}
+
+/// The "empty env" — used when calling `log_density_env` with a
+/// non-hierarchical prior. Returns None for every lookup.
+impl ParamEnv for () {
+    fn get(&self, _name: &str) -> Option<f64> { None }
 }
 
 /// Lightweight expression evaluator for hierarchical-prior arguments.

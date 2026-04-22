@@ -249,10 +249,15 @@ impl AdaptiveProposal {
 pub type CorrelatedEvalFn<'a> = dyn Fn(&[f64], &super::correlated_pf::PFRandomState)
     -> f64 + 'a;
 
+// `param_names`: full parameter names, parallel to `base_params` (positional,
+// not subset to estimated params). Used to build the name → value env for
+// hierarchical prior resolution. Wave 2 / #3 Gate 3a. When no hierarchical
+// priors are in `priors`, this slice can be empty — no lookups happen.
 pub fn run_pmmh(
     if2_params: &[EstimatedParam],
     priors: &[Prior],
     base_params: &[f64],
+    param_names: &[String],
     config: &PMMHConfig,
     observations: &[Observation],
     eval_loglik: &dyn Fn(&[f64], u64) -> f64,
@@ -265,6 +270,14 @@ pub fn run_pmmh(
     let d = if2_params.len();
     assert_eq!(d, priors.len(), "priors must match if2_params length");
     assert_eq!(d, config.proposal_sd.len(), "proposal_sd must match if2_params length");
+    // Whether any prior is hierarchical — determines if we need to
+    // build an env. Zero-cost when the model has no hierarchical
+    // priors (common case).
+    let has_hierarchical = priors.iter().any(|p| matches!(p, Prior::Hierarchical(_)));
+    if has_hierarchical {
+        assert_eq!(param_names.len(), base_params.len(),
+            "param_names must be aligned with base_params for hierarchical priors");
+    }
 
     use super::correlated_pf::PFRandomState;
 
@@ -340,10 +353,16 @@ pub fn run_pmmh(
         } else {
             eval_loglik(&current_params, seed.wrapping_add(0))
         };
-        current_log_prior = if2_params.iter().zip(priors.iter())
-            .zip(current_transformed.iter())
-            .map(|((p, prior), &z)| prior.log_density(current_params[p.index], z))
-            .sum();
+        {
+            let env = crate::inference::hierarchical::NamedParams {
+                names: param_names,
+                values: &current_params,
+            };
+            current_log_prior = if2_params.iter().zip(priors.iter())
+                .zip(current_transformed.iter())
+                .map(|((p, prior), &z)| prior.log_density_env(current_params[p.index], z, &env))
+                .sum();
+        }
 
         // Track MAP
         map_log_posterior = current_ll + current_log_prior;
@@ -397,11 +416,18 @@ pub fn run_pmmh(
             proposed_params[spec.index] = spec.from_transformed(proposed_transformed[i]);
         }
 
-        // Log prior at proposed params
-        let proposed_log_prior: f64 = if2_params.iter().zip(priors.iter())
-            .zip(proposed_transformed.iter())
-            .map(|((p, prior), &z)| prior.log_density(proposed_params[p.index], z))
-            .sum();
+        // Log prior at proposed params (env-aware for hierarchical priors;
+        // plain variants ignore the env and return the same value as before).
+        let proposed_log_prior: f64 = {
+            let env = crate::inference::hierarchical::NamedParams {
+                names: param_names,
+                values: &proposed_params,
+            };
+            if2_params.iter().zip(priors.iter())
+                .zip(proposed_transformed.iter())
+                .map(|((p, prior), &z)| prior.log_density_env(proposed_params[p.index], z, &env))
+                .sum()
+        };
 
         // Evaluate PF: correlated or independent
         let proposed_randoms: Option<PFRandomState>;

@@ -41,6 +41,11 @@ pub struct FitRunConfig {
     pub model_declared: ir::Model,
     pub model_ir_json: String,
     pub base_params: Vec<f64>,
+    /// Names of all parameters, parallel to `base_params`. Built from
+    /// `model.parameters` at setup time. Used by the PMMH / PGAS
+    /// hierarchical-prior env to resolve `Expr::Param(name)` references
+    /// against current values. Wave 2 / #3 Gate 3a.
+    pub param_names: Vec<String>,
     pub estimated_params: Vec<EstimatedParam>,
     /// Canonical observation times (shared across all streams).
     pub observations: Vec<Observation>,
@@ -266,12 +271,15 @@ impl FitRunConfig {
                  [estimate]\n    I0 = { bounds = [1, 500], ivp = true }".into());
         }
 
+        let param_names: Vec<String> =
+            model.parameters.iter().map(|p| p.name.clone()).collect();
         Ok(FitRunConfig {
             compiled: Arc::new(compiled),
             model,
             model_declared,
             model_ir_json,
             base_params,
+            param_names,
             estimated_params: if2_params,
             observations,
             streams,
@@ -1317,6 +1325,12 @@ pub fn resolve_prior(
         if let Some(ref pd) = ir_param.prior {
             return (Prior::from_ir(pd), "model");
         }
+        // Hierarchical priors carry expression-valued args; wrap them
+        // verbatim — evaluation at each MCMC step resolves references
+        // against current hyperparameter values. Wave 2 / #3 Gate 3a.
+        if let Some(ref hp) = ir_param.hierarchical {
+            return (Prior::Hierarchical(hp.clone()), "model (hierarchical)");
+        }
     }
     // 3. fallback
     (Prior::Flat, "flat (default)")
@@ -1356,33 +1370,33 @@ pub fn validate_prior_transform_compat(
         let is_log   = matches!(transform, Transform::Log { .. });
         let is_logit = matches!(transform, Transform::Logit { .. });
 
+        let prior_name = match &prior {
+            Prior::TransformedNormal { .. } => "log_normal",
+            Prior::Beta { .. }              => "beta",
+            Prior::HalfNormal { .. }        => "half_normal",
+            Prior::Gamma { .. }             => "gamma",
+            Prior::Exponential { .. }       => "exponential",
+            Prior::Normal { .. }            => "normal",
+            Prior::Uniform { .. }           => "uniform",
+            Prior::Flat                     => "flat",
+            Prior::Hierarchical(h)          => h.kind.as_str(),
+        };
+        let transform_name = match &transform {
+            Transform::Log { .. }   => "Log",
+            Transform::Logit { .. } => "Logit",
+            Transform::None         => "None",
+        };
+        let support_desc = match &prior {
+            Prior::TransformedNormal { .. } => "log_normal",
+            Prior::Beta { .. }              => "beta",
+            _                               => "positive-support",
+        };
         let err = |needs: &str| Err(format!(
             "parameter '{}': prior {} is incompatible with transform {}; \
              {} priors require a {} transform. Either fix the param_kind \
              in the model (or the `transform` override in fit.toml), or \
              pick a different prior.\n  (prior source: {})",
-            name,
-            match prior {
-                Prior::TransformedNormal { .. } => "log_normal",
-                Prior::Beta { .. }              => "beta",
-                Prior::HalfNormal { .. }        => "half_normal",
-                Prior::Gamma { .. }             => "gamma",
-                Prior::Exponential { .. }       => "exponential",
-                Prior::Normal { .. }            => "normal",
-                Prior::Uniform { .. }           => "uniform",
-                Prior::Flat                     => "flat",
-            },
-            match transform {
-                Transform::Log { .. }   => "Log",
-                Transform::Logit { .. } => "Logit",
-                Transform::None         => "None",
-            },
-            match prior {
-                Prior::TransformedNormal { .. } => "log_normal",
-                Prior::Beta { .. }              => "beta",
-                _                               => "positive-support",
-            },
-            needs, source,
+            name, prior_name, transform_name, support_desc, needs, source,
         ));
 
         match prior {
@@ -1406,6 +1420,17 @@ pub fn validate_prior_transform_compat(
             Prior::Uniform { .. } | Prior::Normal { .. } | Prior::Flat => {
                 // Compatible with any transform.
             }
+            // Hierarchical priors carry the same kind string ("log_normal",
+            // "half_normal", ...) as their plain counterpart. Reuse the
+            // same transform compatibility rules by matching on hkind.
+            // Wave 2 / #3 Gate 3a.
+            Prior::Hierarchical(ref h) => match h.kind.as_str() {
+                "log_normal" | "half_normal" | "gamma" | "exponential" => {
+                    if !is_log { return err("Log"); }
+                }
+                "beta" => { if !is_logit { return err("Logit"); } }
+                _ => {} // uniform / normal: any transform ok
+            },
         }
     }
     Ok(())
