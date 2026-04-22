@@ -154,9 +154,12 @@ fn generate_one_dataset(
         let sampler = sim::inference::obs_model::compile_obs_sample_pf(
             obs_ir, compiled.clone(), &params,
         );
-        let draws: Vec<f64> = (0..times.len())
-            .map(|ti| sampler(projected[ti], &mut obs_rng))
-            .collect();
+        // GH #6: pass compartment state at each obs time so likelihood
+        // arg expressions (e.g. p = projected / N) resolve correctly.
+        let draws: Vec<f64> = times.iter().enumerate().map(|(ti, &obs_t)| {
+            let snap = crate::snap_at(&traj, obs_t);
+            sampler(projected[ti], &snap.int_state.counts, &mut obs_rng)
+        }).collect();
         all_times.push(times);
         all_draws.push(draws);
     }

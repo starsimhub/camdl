@@ -150,38 +150,55 @@ pub(crate) fn eval_likelihood_resolved(
 // ── rmeasure: observation model sampler ─────────────────────────────────────
 
 /// Build an rmeasure closure for pfilter (fixed params).
-/// Takes (projected, rng) → observation draw.
+/// Takes (projected, counts, rng) → observation draw.
+///
+/// `counts` must be the integer-compartment state (local-indexed) at
+/// the observation time. The sampler evaluates likelihood argument
+/// expressions (e.g. `p = projected / PopSum([S, I, R])`) against
+/// this state. Passing a zero-filled slice silently corrupts
+/// state-dependent likelihoods — see
+/// `docs/dev/incidents/2026-04-22-observation-sampler-scratch-state.md`.
 pub fn compile_obs_sample_pf(
     obs_model: &ObservationModel,
     compiled: Arc<CompiledModel>,
     params: &[f64],
-) -> Box<dyn Fn(f64, &mut crate::rng::StatefulRng) -> f64> {
+) -> Box<dyn Fn(f64, &[i64], &mut crate::rng::StatefulRng) -> f64> {
     let resolved = resolve_likelihood_from_model(&obs_model.likelihood, &compiled)
         .unwrap_or_else(|e| panic!("observation likelihood resolution failed: {:?}", e));
     let params = params.to_vec();
-    let int_s = IntState::new(compiled.int_local_to_global.len());
     let real_s = RealState::new(compiled.real_local_to_global.len());
+    let n_int  = compiled.int_local_to_global.len();
 
-    Box::new(move |projected: f64, rng: &mut StatefulRng| {
+    Box::new(move |projected: f64, counts: &[i64], rng: &mut StatefulRng| {
+        // GH #6 fix: evaluate likelihood args against the real state,
+        // not a zero-filled scratch. Caller is responsible for passing
+        // the compartment snapshot at the obs time.
+        assert_eq!(counts.len(), n_int,
+            "compile_obs_sample_pf: counts length {} != expected {}", counts.len(), n_int);
+        let int_s = IntState::from_vec(counts.to_vec());
         sample_obs_resolved(&resolved, projected, &params, &compiled, &int_s, &real_s, rng)
     })
 }
 
 /// Build a function that computes the observation model MEAN (no sampling).
-/// Takes (projected) → E[y | projected, params].
-/// Used for obs_mean in prediction diagnostics.
+/// Takes (projected, counts) → E[y | projected, state, params].
+/// Used for obs_mean in prediction diagnostics. See
+/// `compile_obs_sample_pf` for the rationale behind the counts arg.
 pub fn compile_obs_mean_pf(
     obs_model: &ObservationModel,
     compiled: Arc<CompiledModel>,
     params: &[f64],
-) -> Box<dyn Fn(f64) -> f64> {
+) -> Box<dyn Fn(f64, &[i64]) -> f64> {
     let resolved = resolve_likelihood_from_model(&obs_model.likelihood, &compiled)
         .unwrap_or_else(|e| panic!("observation likelihood resolution failed: {:?}", e));
     let params = params.to_vec();
-    let int_s = IntState::new(compiled.int_local_to_global.len());
     let real_s = RealState::new(compiled.real_local_to_global.len());
+    let n_int  = compiled.int_local_to_global.len();
 
-    Box::new(move |projected: f64| {
+    Box::new(move |projected: f64, counts: &[i64]| {
+        assert_eq!(counts.len(), n_int,
+            "compile_obs_mean_pf: counts length {} != expected {}", counts.len(), n_int);
+        let int_s = IntState::from_vec(counts.to_vec());
         eval_obs_mean_resolved(&resolved, projected, &params, &compiled, &int_s, &real_s)
     })
 }

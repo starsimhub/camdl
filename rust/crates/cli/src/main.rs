@@ -752,7 +752,15 @@ fn run_simulate(a: &args::SimulateArgs) {
                 );
 
                 for (ti, &obs_t) in obs_times.iter().enumerate() {
-                    let draw = sampler(projected_values[ti], &mut obs_rng);
+                    // GH #6 fix: pass the actual compartment state at
+                    // the obs time so the likelihood p/mean expressions
+                    // can resolve references like `N = S + I + R` —
+                    // otherwise the sampler uses a zero-filled scratch
+                    // and PopSum-valued denominators explode to NaN.
+                    let snap = snap_at(&traj, obs_t);
+                    let draw = sampler(
+                        projected_values[ti], &snap.int_state.counts, &mut obs_rng,
+                    );
                     obs_data[si].push(ObsRow {
                         time: obs_t,
                         replicate: run_idx + 1,
