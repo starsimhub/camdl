@@ -345,11 +345,19 @@ let time_func_kind_of_json j =
   | _ -> fail "time_func_kind must be a single-key object"
 
 let time_function_to_json (tf : time_function) : Yojson.Safe.t =
-  obj [("name", str tf.name); ("kind", time_func_kind_to_json tf.kind)]
+  let (p, t) = tf.dim in
+  obj [
+    ("name", str tf.name);
+    ("kind", time_func_kind_to_json tf.kind);
+    ("dim",  arr [int p; int t]);
+  ]
 
 let time_function_of_json j =
   { name = as_string (member "name" j);
-    kind = time_func_kind_of_json (member "kind" j) }
+    kind = time_func_kind_of_json (member "kind" j);
+    dim  = (match member "dim" j with
+            | `List [p; t] -> (as_int p, as_int t)
+            | _ -> fail "time_function.dim must be a two-element [P, T] array"); }
 
 (* ── Table ───────────────────────────────────────────────────────────────── *)
 

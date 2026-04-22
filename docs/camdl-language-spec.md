@@ -199,7 +199,7 @@ Understanding the hierarchy makes the rest of §2 and §4–7 fit together.
 |-------------------------|------------------------------------------------------|--------------------------------|------------------------------------------------------------------|
 | 1. **Kind keyword**     | `rate`, `probability`, `count`, `positive`, `real`   | Dimension (inferred from kind) | Common parameter cases (the 99% case).                           |
 | 2. **Bracket annotation** | `[T]`, `[T^-1]`, `[P]`, `[P/T]`, `[1]`               | Dimension only                 | Kind keyword is under-determined (`real`, `positive`).           |
-| 3. **Unit literal**     | `'days`, `'years`, `'per_day`, `'per_year`           | Dimension **+ scale**          | Concrete numeric data with a known real-world scale.             |
+| 3. **Unit literal**     | `'days`, `'years`, `'per_day`, `'per_year`, `'count`, `'ratio` | Dimension **+ scale**          | Concrete numeric data with a known real-world scale.             |
 
 **The tiers are complementary, not redundant.** They answer different
 questions about a value:
@@ -241,7 +241,18 @@ of parameter declarations avoid bracket notation entirely. Use
 brackets only when the kind keyword is under-determined (`real`,
 `positive`); use unit literals only where concrete numeric values
 are attached. This section (§2.4, §6.1) shows tier-3 use on table
-values; §4.1.1 shows tier 2 on parameter declarations.
+values; §4.1.1 shows tier 2 on parameter declarations; §7 (Forcing)
+requires tier 3 on every forcing declaration.
+
+**`'ratio` vs `probability`**: both are dimensionless, but they're
+not synonyms. `'ratio` (tier 3) is the **unbounded** dimensionless
+case — a multiplier that could be 0.7, 1.3, 50, used for seasonal
+forcings, school-term indicators, reporting multipliers. `probability`
+(tier 1, parameter kind) is the **bounded** dimensionless case —
+values constrained to [0, 1] with an automatic logit transform for
+inference. Reach for `'ratio` when you want an arbitrary multiplier;
+reach for `probability` when you want a bounded probability
+parameter.
 
 ### 2.4 Table Unit Annotations
 
@@ -844,40 +855,44 @@ To use pattern (2), set `baseline = 1.0` (dimensionless) and multiply by the
 rate parameter explicitly. The dimensional analysis checker handles both
 correctly.
 
-### Known gap: interpolated forcing functions and dimensional analysis
+### Required unit literal (tier-3)
 
-The `interpolated` constructor reads concrete numeric data from a file
-— a tier-3 use case (see §2.3) that should accept a unit literal to
-declare the scale of the file's values. **It currently does not.**
-Tracked as GitHub issue #8.
+**Every forcing declaration must carry a tier-3 unit literal** between
+the kind keyword and the block. The literal states both the scale
+(values are normalised to the model `time_unit` at expand time) and
+the dimension (used by the dim-checker as authoritative — no
+value-based inference fallback). GH #8.
 
-Consequence: when an `interpolated` forcing carries a dimensioned
-quantity (e.g. `pop(t)` is a population count, `birthrate(t)` is a
-per-capita rate), the dim-checker sees the interpolated value as
-dimensionless. Downstream rate expressions that consume it then fail
-`E300` even when the model is mathematically correct. The canonical
-case is the He 2010 London measles replication, whose
-birth-recruitment rate references both `pop(t)` and `birthrate(t)`.
+```camdl
+forcing {
+  seasonal  : sinusoidal   'ratio    { baseline = 1.0  amplitude = 0.3  … }
+  beta_seas : sinusoidal   'per_day  { baseline = beta  amplitude = amp  … }
+  school    : periodic     'ratio    { values = [0.7, 1.3, 0.7, …]  … }
+  pop       : interpolated 'count    { data = "…"  time_col = t  value_col = pop  method = "linear" }
+  birthrate : interpolated 'per_year { data = "…"  time_col = t  value_col = rate  method = "linear" }
+}
+```
 
-Three short-term workarounds, in order of preference:
+Omitting the literal is a syntax error (E001). Previously the parser
+accepted forcings without annotations and fell back on value-based
+dimensional inference, which silently went wrong for `interpolated`
+(data-file values are always literal constants → dimensionless) and
+caused E300 dim-check failures on correct models. The required-literal
+design eliminates that class of bug at parse time.
 
-1. **Use the forcing in a rate expression that's dimensionless by
-   construction** — e.g., multiply a seasonal forcing around 1.0
-   into a rate parameter that already carries the T⁻¹ dimension.
-   Most existing golden models take this path; the gap doesn't bite
-   them.
+Unit-literal choices for forcings in practice:
 
-2. **Compile with `--no-dim-check`** — disables the checker entirely
-   for the current build. Loses the protection that motivated having
-   a checker in the first place, so treat as a last-resort escape
-   hatch.
-
-3. **Wait for GH #8** — once the parser accepts unit literals on
-   `interpolated` declarations (e.g. `pop : interpolated 'count
-   { … }`, `birthrate : interpolated 'per_year { … }`), the gap
-   closes and the He 2010 path typechecks end-to-end.
-
-See `docs/dev/proposals/notes/` and GitHub issue #8 for progress.
+- **`'ratio`** — dimensionless multiplier around 1.0. Most seasonal
+  forcings (sinusoidal with `baseline = 1.0`), day-of-week
+  reporting factors, school-term indicators.
+- **`'per_day` / `'per_week` / `'per_month` / `'per_year`** — rate
+  forcings. The value is in the named per-unit; the expander
+  rescales it to the model `time_unit` (e.g. `'per_year` with
+  `time_unit = 'days` multiplies all stored values by 1/365.2425).
+- **`'count`** — raw population count. For `pop(t)` and similar
+  demographic covariates.
+- **`'days` / `'years`** — duration-valued forcings. Rare in
+  practice.
 
 ---
 

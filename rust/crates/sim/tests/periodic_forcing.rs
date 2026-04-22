@@ -20,6 +20,8 @@ fn model_with_periodic(period: f64, values: Vec<f64>) -> CompiledModel {
             period: Expr::Const(ConstExpr { value: period }),
             values: values.iter().map(|&v| Expr::Const(ConstExpr { value: v })).collect(),
         }),
+        // GH #8: 'ratio dim — dimensionless multiplier (0/1 indicator here)
+        dim: (0, 0),
     };
     let model = Model {
         name: "test".into(),

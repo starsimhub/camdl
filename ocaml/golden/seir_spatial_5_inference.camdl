@@ -34,7 +34,7 @@ parameters {
 
 # Seasonal forcing: square wave (school term)
 forcing {
-  school : periodic {
+  school : periodic 'ratio {
     period = 365.25 'days
     step   = 1 'days
     on     = [0:182]

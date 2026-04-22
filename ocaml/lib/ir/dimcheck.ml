@@ -492,33 +492,16 @@ let init_table_dims st (tables : table list) =
 (* ── Infer time function dimensions ─────────────────────────────────────── *)
 
 let init_tf_dims st (tfs : time_function list) =
+  (* GH #8: every forcing declaration carries a tier-3 unit literal
+     (e.g. `'per_day`, `'count`, `'ratio`) and the expander populates
+     `time_function.dim` from it. The dim-checker uses that as
+     authoritative — no value-based inference — because
+     value-based inference fails for `interpolated` (data-file values
+     are always EConst → dimensionless) and the declared dim is
+     strictly more informative for the other three kinds too. *)
   List.iter (fun (tf : time_function) ->
-    let ctx = Printf.sprintf "time function '%s'" tf.name in
-    let dim = match tf.kind with
-      | Sinusoidal s ->
-        (* Output = baseline + amplitude * sin(...), so dim = dim(baseline) *)
-        let db = infer st ~ctx s.baseline in
-        let da = infer st ~ctx s.amplitude in
-        ignore (unify st ~loc:ctx db da);
-        db
-      | Piecewise p ->
-        (* All values must have same dim *)
-        let dims = List.map (fun e -> infer st ~ctx e) p.values in
-        (match dims with
-         | [] -> Known dimensionless
-         | d :: rest -> List.fold_left (fun acc d2 -> unify st ~loc:ctx acc d2) d rest)
-      | Interpolated i ->
-        let dims = List.map (fun e -> infer st ~ctx e) i.values in
-        (match dims with
-         | [] -> Known dimensionless
-         | d :: rest -> List.fold_left (fun acc d2 -> unify st ~loc:ctx acc d2) d rest)
-      | Periodic p ->
-        let dims = List.map (fun e -> infer st ~ctx e) p.values in
-        (match dims with
-         | [] -> Known dimensionless
-         | d :: rest -> List.fold_left (fun acc d2 -> unify st ~loc:ctx acc d2) d rest)
-    in
-    Hashtbl.replace st.tf_dims tf.name dim
+    let (p, t) = tf.dim in
+    Hashtbl.replace st.tf_dims tf.name (Known (make p t))
   ) tfs
 
 (* ── Read-only dimension query (no fresh vars, no diagnostics) ─────────── *)

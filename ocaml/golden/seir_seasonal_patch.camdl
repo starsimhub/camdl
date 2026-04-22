@@ -24,7 +24,7 @@ parameters {
 }
 
 forcing {
-  seasonal[p in patch] : sinusoidal {
+  seasonal[p in patch] : sinusoidal 'per_day {
     amplitude = amp[p]
     period    = 365.0
     baseline  = baseline

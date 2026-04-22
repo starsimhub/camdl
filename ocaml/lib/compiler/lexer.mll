@@ -143,6 +143,8 @@ rule token = parse
   | "'per_week"  { UNIT_IDENT "per_week" }
   | "'per_month" { UNIT_IDENT "per_month" }
   | "'per_year"  { UNIT_IDENT "per_year" }
+  | "'count"     { UNIT_IDENT "count" }
+  | "'ratio"     { UNIT_IDENT "ratio" }
 
   (* Numbers — underscore separators allowed between digit groups (1_000_000) *)
   | int_lit '.' digit* (['e' 'E'] ['+' '-']? int_lit)?

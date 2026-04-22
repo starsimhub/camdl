@@ -4,19 +4,52 @@
   "time_unit": "days",
   "description": null,
   "compartments": [
-    { "name": "S_urban", "kind": "integer" },
-    { "name": "S_rural", "kind": "integer" },
-    { "name": "E_urban", "kind": "integer" },
-    { "name": "E_rural", "kind": "integer" },
-    { "name": "I_urban", "kind": "integer" },
-    { "name": "I_rural", "kind": "integer" },
-    { "name": "R_urban", "kind": "integer" },
-    { "name": "R_rural", "kind": "integer" }
+    {
+      "name": "S_urban",
+      "kind": "integer"
+    },
+    {
+      "name": "S_rural",
+      "kind": "integer"
+    },
+    {
+      "name": "E_urban",
+      "kind": "integer"
+    },
+    {
+      "name": "E_rural",
+      "kind": "integer"
+    },
+    {
+      "name": "I_urban",
+      "kind": "integer"
+    },
+    {
+      "name": "I_rural",
+      "kind": "integer"
+    },
+    {
+      "name": "R_urban",
+      "kind": "integer"
+    },
+    {
+      "name": "R_rural",
+      "kind": "integer"
+    }
   ],
   "transitions": [
     {
       "name": "infection_urban",
-      "stoichiometry": [ [ "S_urban", -1 ], [ "E_urban", 1 ] ],
+      "stoichiometry": [
+        [
+          "S_urban",
+          -1
+        ],
+        [
+          "E_urban",
+          1
+        ]
+      ],
       "rate": {
         "bin_op": {
           "op": "div",
@@ -26,15 +59,28 @@
               "left": {
                 "bin_op": {
                   "op": "mul",
-                  "left": { "time_func": { "name": "seasonal_urban" } },
-                  "right": { "pop": "S_urban" }
+                  "left": {
+                    "time_func": {
+                      "name": "seasonal_urban"
+                    }
+                  },
+                  "right": {
+                    "pop": "S_urban"
+                  }
                 }
               },
-              "right": { "pop": "I_urban" }
+              "right": {
+                "pop": "I_urban"
+              }
             }
           },
           "right": {
-            "pop_sum": [ "S_urban", "E_urban", "I_urban", "R_urban" ]
+            "pop_sum": [
+              "S_urban",
+              "E_urban",
+              "I_urban",
+              "R_urban"
+            ]
           }
         }
       },
@@ -46,7 +92,16 @@
     },
     {
       "name": "infection_rural",
-      "stoichiometry": [ [ "S_rural", -1 ], [ "E_rural", 1 ] ],
+      "stoichiometry": [
+        [
+          "S_rural",
+          -1
+        ],
+        [
+          "E_rural",
+          1
+        ]
+      ],
       "rate": {
         "bin_op": {
           "op": "div",
@@ -56,15 +111,28 @@
               "left": {
                 "bin_op": {
                   "op": "mul",
-                  "left": { "time_func": { "name": "seasonal_rural" } },
-                  "right": { "pop": "S_rural" }
+                  "left": {
+                    "time_func": {
+                      "name": "seasonal_rural"
+                    }
+                  },
+                  "right": {
+                    "pop": "S_rural"
+                  }
                 }
               },
-              "right": { "pop": "I_rural" }
+              "right": {
+                "pop": "I_rural"
+              }
             }
           },
           "right": {
-            "pop_sum": [ "S_rural", "E_rural", "I_rural", "R_rural" ]
+            "pop_sum": [
+              "S_rural",
+              "E_rural",
+              "I_rural",
+              "R_rural"
+            ]
           }
         }
       },
@@ -76,12 +144,25 @@
     },
     {
       "name": "progression_urban",
-      "stoichiometry": [ [ "E_urban", -1 ], [ "I_urban", 1 ] ],
+      "stoichiometry": [
+        [
+          "E_urban",
+          -1
+        ],
+        [
+          "I_urban",
+          1
+        ]
+      ],
       "rate": {
         "bin_op": {
           "op": "mul",
-          "left": { "param": "sigma" },
-          "right": { "pop": "E_urban" }
+          "left": {
+            "param": "sigma"
+          },
+          "right": {
+            "pop": "E_urban"
+          }
         }
       },
       "metadata": {
@@ -89,16 +170,33 @@
         "source_compartment": "E_urban",
         "dest_compartment": "I_urban"
       },
-      "rate_grad": { "sigma": { "pop": "E_urban" } }
+      "rate_grad": {
+        "sigma": {
+          "pop": "E_urban"
+        }
+      }
     },
     {
       "name": "progression_rural",
-      "stoichiometry": [ [ "E_rural", -1 ], [ "I_rural", 1 ] ],
+      "stoichiometry": [
+        [
+          "E_rural",
+          -1
+        ],
+        [
+          "I_rural",
+          1
+        ]
+      ],
       "rate": {
         "bin_op": {
           "op": "mul",
-          "left": { "param": "sigma" },
-          "right": { "pop": "E_rural" }
+          "left": {
+            "param": "sigma"
+          },
+          "right": {
+            "pop": "E_rural"
+          }
         }
       },
       "metadata": {
@@ -106,16 +204,33 @@
         "source_compartment": "E_rural",
         "dest_compartment": "I_rural"
       },
-      "rate_grad": { "sigma": { "pop": "E_rural" } }
+      "rate_grad": {
+        "sigma": {
+          "pop": "E_rural"
+        }
+      }
     },
     {
       "name": "recovery_urban",
-      "stoichiometry": [ [ "I_urban", -1 ], [ "R_urban", 1 ] ],
+      "stoichiometry": [
+        [
+          "I_urban",
+          -1
+        ],
+        [
+          "R_urban",
+          1
+        ]
+      ],
       "rate": {
         "bin_op": {
           "op": "mul",
-          "left": { "param": "gamma" },
-          "right": { "pop": "I_urban" }
+          "left": {
+            "param": "gamma"
+          },
+          "right": {
+            "pop": "I_urban"
+          }
         }
       },
       "metadata": {
@@ -123,16 +238,33 @@
         "source_compartment": "I_urban",
         "dest_compartment": "R_urban"
       },
-      "rate_grad": { "gamma": { "pop": "I_urban" } }
+      "rate_grad": {
+        "gamma": {
+          "pop": "I_urban"
+        }
+      }
     },
     {
       "name": "recovery_rural",
-      "stoichiometry": [ [ "I_rural", -1 ], [ "R_rural", 1 ] ],
+      "stoichiometry": [
+        [
+          "I_rural",
+          -1
+        ],
+        [
+          "R_rural",
+          1
+        ]
+      ],
       "rate": {
         "bin_op": {
           "op": "mul",
-          "left": { "param": "gamma" },
-          "right": { "pop": "I_rural" }
+          "left": {
+            "param": "gamma"
+          },
+          "right": {
+            "pop": "I_rural"
+          }
         }
       },
       "metadata": {
@@ -140,7 +272,11 @@
         "source_compartment": "I_rural",
         "dest_compartment": "R_rural"
       },
-      "rate_grad": { "gamma": { "pop": "I_rural" } }
+      "rate_grad": {
+        "gamma": {
+          "pop": "I_rural"
+        }
+      }
     }
   ],
   "ode_equations": [],
@@ -149,25 +285,47 @@
       "name": "seasonal_urban",
       "kind": {
         "sinusoidal": {
-          "amplitude": { "param": "amp_urban" },
-          "period": { "const": 365.0 },
-          "phase": { "const": 0.0 },
-          "baseline": { "param": "baseline" }
+          "amplitude": {
+            "param": "amp_urban"
+          },
+          "period": {
+            "const": 365.0
+          },
+          "phase": {
+            "const": 0.0
+          },
+          "baseline": {
+            "param": "baseline"
+          }
         }
       },
-      "dim": [ 0, -1 ]
+      "dim": [
+        0,
+        -1
+      ]
     },
     {
       "name": "seasonal_rural",
       "kind": {
         "sinusoidal": {
-          "amplitude": { "param": "amp_rural" },
-          "period": { "const": 365.0 },
-          "phase": { "const": 0.0 },
-          "baseline": { "param": "baseline" }
+          "amplitude": {
+            "param": "amp_rural"
+          },
+          "period": {
+            "const": 365.0
+          },
+          "phase": {
+            "const": 0.0
+          },
+          "baseline": {
+            "param": "baseline"
+          }
         }
       },
-      "dim": [ 0, -1 ]
+      "dim": [
+        0,
+        -1
+      ]
     }
   ],
   "tables": [],
@@ -177,7 +335,10 @@
     {
       "name": "sigma",
       "value": null,
-      "bounds": [ 0.01, 1.0 ],
+      "bounds": [
+        0.01,
+        1.0
+      ],
       "prior": null,
       "hierarchical": null,
       "transform": null,
@@ -188,7 +349,10 @@
     {
       "name": "gamma",
       "value": null,
-      "bounds": [ 0.01, 1.0 ],
+      "bounds": [
+        0.01,
+        1.0
+      ],
       "prior": null,
       "hierarchical": null,
       "transform": null,
@@ -199,7 +363,10 @@
     {
       "name": "baseline",
       "value": null,
-      "bounds": [ 0.01, 1.0 ],
+      "bounds": [
+        0.01,
+        1.0
+      ],
       "prior": null,
       "hierarchical": null,
       "transform": null,
@@ -210,7 +377,10 @@
     {
       "name": "amp_urban",
       "value": null,
-      "bounds": [ 0.0, 1.0 ],
+      "bounds": [
+        0.0,
+        1.0
+      ],
       "prior": null,
       "hierarchical": null,
       "transform": null,
@@ -221,7 +391,10 @@
     {
       "name": "amp_rural",
       "value": null,
-      "bounds": [ 0.0, 1.0 ],
+      "bounds": [
+        0.0,
+        1.0
+      ],
       "prior": null,
       "hierarchical": null,
       "transform": null,
@@ -232,7 +405,10 @@
     {
       "name": "N0_urban",
       "value": null,
-      "bounds": [ 100.0, 1000000.0 ],
+      "bounds": [
+        100.0,
+        1000000.0
+      ],
       "prior": null,
       "hierarchical": null,
       "transform": null,
@@ -243,7 +419,10 @@
     {
       "name": "N0_rural",
       "value": null,
-      "bounds": [ 100.0, 1000000.0 ],
+      "bounds": [
+        100.0,
+        1000000.0
+      ],
       "prior": null,
       "hierarchical": null,
       "transform": null,
@@ -254,7 +433,10 @@
     {
       "name": "I0",
       "value": null,
-      "bounds": [ 1.0, 1000.0 ],
+      "bounds": [
+        1.0,
+        1000.0
+      ],
       "prior": null,
       "hierarchical": null,
       "transform": null,
@@ -268,16 +450,30 @@
       "S_urban": {
         "bin_op": {
           "op": "sub",
-          "left": { "param": "N0_urban" },
-          "right": { "param": "I0" }
+          "left": {
+            "param": "N0_urban"
+          },
+          "right": {
+            "param": "I0"
+          }
         }
       },
-      "I_urban": { "param": "I0" },
-      "S_rural": { "param": "N0_rural" }
+      "I_urban": {
+        "param": "I0"
+      },
+      "S_rural": {
+        "param": "N0_rural"
+      }
     }
   },
   "output": {
-    "times": { "regular": { "start": 0.0, "step": 1.0, "end": 365.0 } },
+    "times": {
+      "regular": {
+        "start": 0.0,
+        "step": 1.0,
+        "end": 365.0
+      }
+    },
     "format": "tsv",
     "trajectory": true,
     "observations": true
@@ -309,15 +505,40 @@
     }
   ],
   "model_structure": {
-    "dimensions": [ { "name": "patch", "values": [ "urban", "rural" ] } ],
+    "dimensions": [
+      {
+        "name": "patch",
+        "values": [
+          "urban",
+          "rural"
+        ]
+      }
+    ],
     "compartment_dims": {
-      "S": [ "patch" ],
-      "E": [ "patch" ],
-      "I": [ "patch" ],
-      "R": [ "patch" ]
+      "S": [
+        "patch"
+      ],
+      "E": [
+        "patch"
+      ],
+      "I": [
+        "patch"
+      ],
+      "R": [
+        "patch"
+      ]
     },
-    "base_compartments": [ "S", "E", "I", "R" ],
-    "transmission_transitions": [ "infection" ],
-    "infectious_compartments": [ "I" ]
+    "base_compartments": [
+      "S",
+      "E",
+      "I",
+      "R"
+    ],
+    "transmission_transitions": [
+      "infection"
+    ],
+    "infectious_compartments": [
+      "I"
+    ]
   }
 }

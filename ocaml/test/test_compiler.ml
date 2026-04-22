@@ -1049,7 +1049,7 @@ let test_sinusoidal_time_func () =
       I0    : count
     }
     forcing {
-      seasonal : sinusoidal {
+      seasonal : sinusoidal 'ratio {
         amplitude = 0.3
         period    = 365.0
         phase     = 0.0
@@ -1105,7 +1105,7 @@ let test_time_func_in_rate () =
       I0    : count
     }
     forcing {
-      seasonal : sinusoidal {
+      seasonal : sinusoidal 'ratio {
         amplitude = 0.3
         period    = 365.0
         phase     = 0.0
@@ -1689,7 +1689,7 @@ let test_bare_func_name_in_rate () =
       I0    : count
     }
     forcing {
-      seasonal : sinusoidal {
+      seasonal : sinusoidal 'ratio {
         amplitude = 0.3
         period    = 365.0
         phase     = 0.0
@@ -1726,7 +1726,7 @@ let test_unknown_func_call_e100 () =
       I0    : count
     }
     forcing {
-      seasonal : sinusoidal {
+      seasonal : sinusoidal 'ratio {
         amplitude = 0.3
         period    = 365.0
         phase     = 0.0
@@ -1770,7 +1770,7 @@ let test_time_func_param_arg () =
       I0    : count
     }
     forcing {
-      seasonal : sinusoidal {
+      seasonal : sinusoidal 'ratio {
         amplitude = alpha
         period    = 365.0
         phase     = 0.0
@@ -2594,6 +2594,105 @@ let test_multi_source_bimolecular_stoich () =
     "A + B --> C produces {A:-1, B:-1, C:+1}"
     expected got
 
+(* ── Unit annotations on interpolated forcing (GH #8, 2026-04-22) ───────── *)
+
+(** Required tier-3 unit literal on sinusoidal forcing; IR dim
+    populated from it. *)
+let test_sinusoidal_per_day_dim () =
+  let src = {|
+    time_unit = 'days
+    compartments { S }
+    parameters { amp : rate  baseline : rate }
+    forcing {
+      seasonal : sinusoidal 'per_day {
+        amplitude = amp
+        period    = 365.25 'days
+        phase     = 0.0
+        baseline  = baseline
+      }
+    }
+    transitions { infect : S --> @ seasonal * S }
+    init { S = 1000 }
+    simulate { from = 0 'days  to = 10 'days }
+  |} in
+  let m = compile_expect_ok src in
+  match m.Ir.time_functions with
+  | [tf] ->
+    let (p, t) = tf.Ir.dim in
+    Alcotest.(check (pair int int)) "'per_day → (0,-1)" (0, -1) (p, t)
+  | _ -> Alcotest.fail "expected one time_function"
+
+(** The `'ratio` literal for dimensionless multipliers. *)
+let test_sinusoidal_ratio_dim () =
+  let src = {|
+    time_unit = 'days
+    compartments { S }
+    parameters { beta : rate }
+    forcing {
+      seasonal : sinusoidal 'ratio {
+        amplitude = 0.3
+        period    = 365.25 'days
+        phase     = 0.0
+        baseline  = 1.0
+      }
+    }
+    transitions { infect : S --> @ beta * seasonal * S }
+    init { S = 1000 }
+    simulate { from = 0 'days  to = 10 'days }
+  |} in
+  let m = compile_expect_ok src in
+  match m.Ir.time_functions with
+  | [tf] -> Alcotest.(check (pair int int)) "'ratio → (0,0)" (0, 0) tf.Ir.dim
+  | _ -> Alcotest.fail "expected one time_function"
+
+(** `'count` unit literal — for population-count forcings. *)
+let test_sinusoidal_count_dim () =
+  let src = {|
+    time_unit = 'days
+    compartments { S }
+    parameters { p : count  q : rate }
+    forcing {
+      popsize : sinusoidal 'count {
+        amplitude = 0.0
+        period    = 365 'days
+        phase     = 0.0
+        baseline  = p
+      }
+    }
+    transitions { out : S --> @ q * S }
+    init { S = 1 }
+    simulate { from = 0 'days  to = 1 'days }
+  |} in
+  let m = compile_expect_ok src in
+  match m.Ir.time_functions with
+  | [tf] -> Alcotest.(check (pair int int)) "'count → (1,0)" (1, 0) tf.Ir.dim
+  | _ -> Alcotest.fail "expected one time_function"
+
+(** Forcing decl without a unit literal now fails at parse time. *)
+let test_forcing_without_unit_errors () =
+  (* GH #8: every forcing declaration MUST carry a tier-3 unit
+     literal. Pre-fix, omitting the literal silently produced a
+     dimensionless-by-default forcing and the dim-checker later
+     disagreed with downstream rate expressions. Post-fix, the parser
+     rejects the shape entirely (E001 syntax error). *)
+  let src = {|
+    time_unit = 'days
+    compartments { S }
+    parameters { baseline : rate }
+    forcing {
+      seasonal : sinusoidal {
+        amplitude = 0.3
+        period    = 365.25 'days
+        phase     = 0.0
+        baseline  = baseline
+      }
+    }
+    transitions { out : S --> @ baseline * seasonal * S }
+    init { S = 1 }
+    simulate { from = 0 'days  to = 1 'days }
+  |} in
+  compile_expect_error_code ~code:"E001" ~contains:"" src
+
 (* ── DerivedExpr projection (GH #7 resolution, 2026-04-22) ──────────────── *)
 
 (** Bare arithmetic in `projected = ...` — the general form for pooled
@@ -3322,6 +3421,12 @@ let () =
       Alcotest.test_case "poisson(rate = projected) parses"              `Quick test_poisson_rate_kwarg_parses;
       Alcotest.test_case "E250 positional arg in likelihood"             `Quick test_poisson_positional_errors;
       Alcotest.test_case "E251 unknown kwarg in likelihood"              `Quick test_likelihood_unknown_kwarg_errors;
+    ];
+    "forcing_unit_annotations", [
+      Alcotest.test_case "'per_day → dim (0,-1)"                     `Quick test_sinusoidal_per_day_dim;
+      Alcotest.test_case "'ratio → dim (0,0)"                        `Quick test_sinusoidal_ratio_dim;
+      Alcotest.test_case "'count → dim (1,0)"                        `Quick test_sinusoidal_count_dim;
+      Alcotest.test_case "forcing without unit literal is an error" `Quick test_forcing_without_unit_errors;
     ];
     "derived_expr_projections", [
       Alcotest.test_case "`projected = I_m + I_s` emits DerivedExpr"    `Quick test_projected_bare_sum_emits_derived_expr;

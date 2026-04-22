@@ -16,6 +16,16 @@ let dummy_loc = { file = ""; line = 0; col = 0; end_line = 0; end_col = 0 }
 type unit_lit =
   | Days | Weeks | Months | Years
   | PerDay | PerWeek | PerMonth | PerYear
+  (* Tier-3 population count (dim P, scale 1). For interpolated
+     forcings that carry raw counts (e.g. `pop : interpolated 'count`). *)
+  | Count
+  (* Tier-3 dimensionless multiplier (dim (0,0), scale 1). The canonical
+     choice for forcings that carry a unitless factor around 1.0 —
+     seasonal forcing, school-term indicator, reporting multiplier.
+     Distinct from the `probability` parameter kind: `'ratio` is the
+     unbounded dimensionless case (scalar could be 0.7, 1.3, 50, …),
+     `probability` is the bounded [0,1] case. *)
+  | Ratio
 
 type bin_op =
   | Add | Sub | Mul | Div | Pow
@@ -195,6 +205,12 @@ type func_decl = {
   fname    : string;
   findices : index_binding list;
   fkind    : string;
+  (* Required tier-3 unit literal (GH #8): annotates the
+     scale/dimension of values produced by this forcing function.
+     E.g. `pop : interpolated 'count`, `birthrate : interpolated
+     'per_year`, `seasonal : sinusoidal 'ratio`. The dim-checker
+     uses this authoritatively — no value-based inference fallback. *)
+  funit    : unit_lit;
   fargs    : (string * expr) list;
 }
 

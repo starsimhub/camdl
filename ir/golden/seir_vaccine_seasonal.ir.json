@@ -4,16 +4,40 @@
   "time_unit": "days",
   "description": null,
   "compartments": [
-    { "name": "S", "kind": "integer" },
-    { "name": "E", "kind": "integer" },
-    { "name": "I", "kind": "integer" },
-    { "name": "R", "kind": "integer" },
-    { "name": "V", "kind": "integer" }
+    {
+      "name": "S",
+      "kind": "integer"
+    },
+    {
+      "name": "E",
+      "kind": "integer"
+    },
+    {
+      "name": "I",
+      "kind": "integer"
+    },
+    {
+      "name": "R",
+      "kind": "integer"
+    },
+    {
+      "name": "V",
+      "kind": "integer"
+    }
   ],
   "transitions": [
     {
       "name": "infection",
-      "stoichiometry": [ [ "S", -1 ], [ "E", 1 ] ],
+      "stoichiometry": [
+        [
+          "S",
+          -1
+        ],
+        [
+          "E",
+          1
+        ]
+      ],
       "rate": {
         "bin_op": {
           "op": "div",
@@ -26,17 +50,35 @@
                   "left": {
                     "bin_op": {
                       "op": "mul",
-                      "left": { "param": "beta" },
-                      "right": { "time_func": { "name": "seasonal" } }
+                      "left": {
+                        "param": "beta"
+                      },
+                      "right": {
+                        "time_func": {
+                          "name": "seasonal"
+                        }
+                      }
                     }
                   },
-                  "right": { "pop": "S" }
+                  "right": {
+                    "pop": "S"
+                  }
                 }
               },
-              "right": { "pop": "I" }
+              "right": {
+                "pop": "I"
+              }
             }
           },
-          "right": { "pop_sum": [ "S", "E", "I", "R", "V" ] }
+          "right": {
+            "pop_sum": [
+              "S",
+              "E",
+              "I",
+              "R",
+              "V"
+            ]
+          }
         }
       },
       "metadata": {
@@ -57,21 +99,53 @@
                     "left": {
                       "bin_op": {
                         "op": "mul",
-                        "left": { "time_func": { "name": "seasonal" } },
-                        "right": { "pop": "S" }
+                        "left": {
+                          "time_func": {
+                            "name": "seasonal"
+                          }
+                        },
+                        "right": {
+                          "pop": "S"
+                        }
                       }
                     },
-                    "right": { "pop": "I" }
+                    "right": {
+                      "pop": "I"
+                    }
                   }
                 },
-                "right": { "pop_sum": [ "S", "E", "I", "R", "V" ] }
+                "right": {
+                  "pop_sum": [
+                    "S",
+                    "E",
+                    "I",
+                    "R",
+                    "V"
+                  ]
+                }
               }
             },
             "right": {
               "bin_op": {
                 "op": "mul",
-                "left": { "pop_sum": [ "S", "E", "I", "R", "V" ] },
-                "right": { "pop_sum": [ "S", "E", "I", "R", "V" ] }
+                "left": {
+                  "pop_sum": [
+                    "S",
+                    "E",
+                    "I",
+                    "R",
+                    "V"
+                  ]
+                },
+                "right": {
+                  "pop_sum": [
+                    "S",
+                    "E",
+                    "I",
+                    "R",
+                    "V"
+                  ]
+                }
               }
             }
           }
@@ -80,12 +154,25 @@
     },
     {
       "name": "progression",
-      "stoichiometry": [ [ "E", -1 ], [ "I", 1 ] ],
+      "stoichiometry": [
+        [
+          "E",
+          -1
+        ],
+        [
+          "I",
+          1
+        ]
+      ],
       "rate": {
         "bin_op": {
           "op": "mul",
-          "left": { "param": "sigma" },
-          "right": { "pop": "E" }
+          "left": {
+            "param": "sigma"
+          },
+          "right": {
+            "pop": "E"
+          }
         }
       },
       "metadata": {
@@ -93,16 +180,33 @@
         "source_compartment": "E",
         "dest_compartment": "I"
       },
-      "rate_grad": { "sigma": { "pop": "E" } }
+      "rate_grad": {
+        "sigma": {
+          "pop": "E"
+        }
+      }
     },
     {
       "name": "recovery",
-      "stoichiometry": [ [ "I", -1 ], [ "R", 1 ] ],
+      "stoichiometry": [
+        [
+          "I",
+          -1
+        ],
+        [
+          "R",
+          1
+        ]
+      ],
       "rate": {
         "bin_op": {
           "op": "mul",
-          "left": { "param": "gamma" },
-          "right": { "pop": "I" }
+          "left": {
+            "param": "gamma"
+          },
+          "right": {
+            "pop": "I"
+          }
         }
       },
       "metadata": {
@@ -110,16 +214,33 @@
         "source_compartment": "I",
         "dest_compartment": "R"
       },
-      "rate_grad": { "gamma": { "pop": "I" } }
+      "rate_grad": {
+        "gamma": {
+          "pop": "I"
+        }
+      }
     },
     {
       "name": "waning",
-      "stoichiometry": [ [ "R", -1 ], [ "S", 1 ] ],
+      "stoichiometry": [
+        [
+          "R",
+          -1
+        ],
+        [
+          "S",
+          1
+        ]
+      ],
       "rate": {
         "bin_op": {
           "op": "mul",
-          "left": { "param": "omega" },
-          "right": { "pop": "R" }
+          "left": {
+            "param": "omega"
+          },
+          "right": {
+            "pop": "R"
+          }
         }
       },
       "metadata": {
@@ -127,16 +248,33 @@
         "source_compartment": "R",
         "dest_compartment": "S"
       },
-      "rate_grad": { "omega": { "pop": "R" } }
+      "rate_grad": {
+        "omega": {
+          "pop": "R"
+        }
+      }
     },
     {
       "name": "vacc_waning",
-      "stoichiometry": [ [ "V", -1 ], [ "S", 1 ] ],
+      "stoichiometry": [
+        [
+          "V",
+          -1
+        ],
+        [
+          "S",
+          1
+        ]
+      ],
       "rate": {
         "bin_op": {
           "op": "mul",
-          "left": { "param": "omega" },
-          "right": { "pop": "V" }
+          "left": {
+            "param": "omega"
+          },
+          "right": {
+            "pop": "V"
+          }
         }
       },
       "metadata": {
@@ -144,16 +282,33 @@
         "source_compartment": "V",
         "dest_compartment": "S"
       },
-      "rate_grad": { "omega": { "pop": "V" } }
+      "rate_grad": {
+        "omega": {
+          "pop": "V"
+        }
+      }
     },
     {
       "name": "reversion",
-      "stoichiometry": [ [ "V", -1 ], [ "E", 1 ] ],
+      "stoichiometry": [
+        [
+          "V",
+          -1
+        ],
+        [
+          "E",
+          1
+        ]
+      ],
       "rate": {
         "bin_op": {
           "op": "mul",
-          "left": { "param": "reversion_rate" },
-          "right": { "pop": "V" }
+          "left": {
+            "param": "reversion_rate"
+          },
+          "right": {
+            "pop": "V"
+          }
         }
       },
       "metadata": {
@@ -161,7 +316,11 @@
         "source_compartment": "V",
         "dest_compartment": "E"
       },
-      "rate_grad": { "reversion_rate": { "pop": "V" } }
+      "rate_grad": {
+        "reversion_rate": {
+          "pop": "V"
+        }
+      }
     }
   ],
   "ode_equations": [],
@@ -170,26 +329,45 @@
       "name": "seasonal",
       "kind": {
         "sinusoidal": {
-          "amplitude": { "param": "alpha" },
-          "period": { "const": 365.25 },
-          "phase": { "param": "phi_season" },
-          "baseline": { "const": 1.0 }
+          "amplitude": {
+            "param": "alpha"
+          },
+          "period": {
+            "const": 365.25
+          },
+          "phase": {
+            "param": "phi_season"
+          },
+          "baseline": {
+            "const": 1.0
+          }
         }
       },
-      "dim": [ 0, 0 ]
+      "dim": [
+        0,
+        0
+      ]
     }
   ],
   "tables": [],
   "interventions": [
     {
       "name": "sia_round_1",
-      "schedule": { "at_times": [ 180.0, 545.0, 910.0 ] },
+      "schedule": {
+        "at_times": [
+          180.0,
+          545.0,
+          910.0
+        ]
+      },
       "actions": [
         {
           "fraction_transfer": {
             "src": "S",
             "dst": "V",
-            "fraction": { "param": "vacc_frac" }
+            "fraction": {
+              "param": "vacc_frac"
+            }
           }
         }
       ]
@@ -313,15 +491,27 @@
       "S": {
         "bin_op": {
           "op": "sub",
-          "left": { "param": "N0" },
-          "right": { "param": "I0" }
+          "left": {
+            "param": "N0"
+          },
+          "right": {
+            "param": "I0"
+          }
         }
       },
-      "I": { "param": "I0" }
+      "I": {
+        "param": "I0"
+      }
     }
   },
   "output": {
-    "times": { "regular": { "start": 0.0, "step": 1.0, "end": 1095.7275 } },
+    "times": {
+      "regular": {
+        "start": 0.0,
+        "step": 1.0,
+        "end": 1095.7275
+      }
+    },
     "format": "tsv",
     "trajectory": true,
     "observations": true
@@ -357,16 +547,34 @@
       "name": "with_sia",
       "label": "with SIA rounds",
       "params": {},
-      "enable": [ "sia_round_1" ],
+      "enable": [
+        "sia_round_1"
+      ],
       "disable": [],
       "t_end": null
     }
   ],
   "model_structure": {
     "dimensions": [],
-    "compartment_dims": { "S": [], "E": [], "I": [], "R": [], "V": [] },
-    "base_compartments": [ "S", "E", "I", "R", "V" ],
-    "transmission_transitions": [ "infection" ],
-    "infectious_compartments": [ "I" ]
+    "compartment_dims": {
+      "S": [],
+      "E": [],
+      "I": [],
+      "R": [],
+      "V": []
+    },
+    "base_compartments": [
+      "S",
+      "E",
+      "I",
+      "R",
+      "V"
+    ],
+    "transmission_transitions": [
+      "infection"
+    ],
+    "infectious_compartments": [
+      "I"
+    ]
   }
 }

@@ -120,6 +120,10 @@ let parse_date_to_float origin_str date_str time_unit =
     | Weeks | PerWeek -> 7.0
     | Months | PerMonth -> 365.2425 /. 12.0
     | Years | PerYear -> 365.2425
+    | Count | Ratio ->
+      (* Unreachable: time_unit is validated to be a time unit at
+         parse time. Non-time unit here means upstream malformed the AST. *)
+      invalid_arg "parse_date_to_float: time_unit must be a time unit"
   in
   float_of_int delta /. days time_unit
 
@@ -562,6 +566,11 @@ let days_per = function
   | Weeks    -> 7.0              | PerWeek  -> 7.0
   | Months   -> 365.2425 /. 12.0 | PerMonth -> 365.2425 /. 12.0
   | Years    -> 365.2425          | PerYear  -> 365.2425
+  | Count | Ratio ->
+    (* `days_per` is the time-scale machinery; non-time units don't
+       have a time-per-unit ratio. Callers must dispatch on the unit
+       kind and avoid calling this on `'count` / `'ratio`. *)
+    invalid_arg "days_per: non-time unit has no time scale"
 
 (* Convert a unit literal expression to a float in the model's declared
    time_unit.  The computation goes through days as the universal intermediate:
@@ -575,6 +584,7 @@ let days_per = function
 let unit_lit_to_string = function
   | Days -> "days" | Weeks -> "weeks" | Months -> "months" | Years -> "years"
   | PerDay -> "per_day" | PerWeek -> "per_week" | PerMonth -> "per_month" | PerYear -> "per_year"
+  | Count -> "count" | Ratio -> "ratio"
 
 let unit_to_model_time ctx f u =
   let tu = days_per ctx.time_unit in
@@ -583,6 +593,21 @@ let unit_to_model_time ctx f u =
     f *. days_per u /. tu
   | PerDay | PerWeek | PerMonth | PerYear ->
     f /. days_per u *. tu
+  | Count | Ratio ->
+    (* Tier-3 non-time units (GH #8). No time scale; values pass
+       through unchanged. The dimension information is captured via
+       `unit_lit_to_dim` and stored on the `time_function.dim` field
+       for the dim-checker to consume. *)
+    f
+
+(** Dimension tuple (P_exp, T_exp) for a unit literal. Used when a
+    unit literal annotates a tier-3 declaration (tables, forcing
+    functions — GH #8) to drive dimensional analysis. *)
+let unit_lit_to_dim = function
+  | Days | Weeks | Months | Years      -> (0, 1)   (* time *)
+  | PerDay | PerWeek | PerMonth | PerYear -> (0, -1) (* rate *)
+  | Count                              -> (1, 0)   (* population *)
+  | Ratio                              -> (0, 0)   (* dimensionless multiplier *)
 
 (* ── Stratification helpers ──────────────────────────────────────────────── *)
 
@@ -2224,7 +2249,7 @@ let get_expr_list_kwarg ctx kwargs key =
     | EList es -> List.map (resolve_expr ctx []) es
     | _ -> [resolve_expr ctx [] e]
 
-let expand_time_function_one ctx fname (env : (string * string) list) fkind fargs =
+let expand_time_function_one ctx fname (env : (string * string) list) fkind (funit : unit_lit) fargs =
   let get_kw key =
     match List.assoc_opt key fargs with
     | None   ->
@@ -2390,7 +2415,32 @@ let expand_time_function_one ctx fname (env : (string * string) list) fkind farg
         ();
       Ir.Piecewise { breakpoints = []; values = [] }
   in
-  { Ir.name = fname; Ir.kind }
+  (* GH #8: the forcing's tier-3 unit literal drives both the stored-
+     value scale normalisation and the declared dimension. Scale is 1.0
+     for `'count` / `'ratio` (counts and dimensionless multipliers pass
+     through); non-trivial for rate units (e.g. `'per_year` with
+     `time_unit = 'days` gives 1/365.2425). The dim-checker reads
+     `time_function.dim` authoritatively — no value-based inference. *)
+  let scale = unit_to_model_time ctx 1.0 funit in
+  let scale_expr e =
+    if scale = 1.0 then e
+    else Ir.BinOp { op = Mul; left = e; right = Ir.Const scale }
+  in
+  let kind = if scale = 1.0 then kind else
+    match kind with
+    | Ir.Sinusoidal s ->
+      Ir.Sinusoidal { s with
+        Ir.amplitude = scale_expr s.amplitude;
+        Ir.baseline  = scale_expr s.baseline }
+    | Ir.Piecewise p ->
+      Ir.Piecewise { p with Ir.values = List.map scale_expr p.values }
+    | Ir.Interpolated i ->
+      Ir.Interpolated { i with Ir.values = List.map scale_expr i.values }
+    | Ir.Periodic p ->
+      Ir.Periodic { p with Ir.values = List.map scale_expr p.values }
+  in
+  let dim = unit_lit_to_dim funit in
+  { Ir.name = fname; Ir.kind; Ir.dim }
 
 (** Expand ODE equations from the DSL's `ode { X = expr }` blocks into
     IR `ode_equation` records.
@@ -2414,13 +2464,13 @@ let expand_ode_equations ctx : Ir.ode_equation list =
 let expand_time_functions ctx : Ir.time_function list =
   List.concat_map (fun (fd : func_decl) ->
     if fd.findices = [] then
-      [expand_time_function_one ctx fd.fname [] fd.fkind fd.fargs]
+      [expand_time_function_one ctx fd.fname [] fd.fkind fd.funit fd.fargs]
     else begin
       let combos = cartesian_product fd.findices ctx in
       List.map (fun env ->
         let parts = name_parts_from_bindings fd.findices env in
         let fname = fd.fname ^ "_" ^ String.concat "_" parts in
-        expand_time_function_one ctx fname env fd.fkind fd.fargs
+        expand_time_function_one ctx fname env fd.fkind fd.funit fd.fargs
       ) combos
     end
   ) ctx.func_decls

@@ -80,6 +80,12 @@ type time_func_kind =
 type time_function = {
   name: string;
   kind: time_func_kind;
+  (* Required declared dimension from the forcing's tier-3 unit literal
+     (e.g. `'count`, `'per_year`, `'ratio`). The dim-checker uses this
+     authoritatively. The expander has already applied the scale
+     factor to stored values so runtime interpolation returns values
+     in the model's `time_unit`. GH #8. *)
+  dim:  int * int;
 }
 
 (* ── Tables ──────────────────────────────────────────────────────────────────── *)

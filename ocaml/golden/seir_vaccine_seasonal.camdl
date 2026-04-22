@@ -18,7 +18,7 @@ parameters {
 }
 
 forcing {
-  seasonal : sinusoidal {
+  seasonal : sinusoidal 'ratio {
     amplitude = alpha
     period    = 365.25
     phase     = phi_season

@@ -122,10 +122,12 @@ unit_lit:
     | "per_week"  -> PerWeek
     | "per_month" -> PerMonth
     | "per_year"  -> PerYear
+    | "count"     -> Count
+    | "ratio"     -> Ratio
     | s ->
       Parser_errors.push_error ~sp:$startpos ~ep:$endpos
         ~code:"E102"
-        ~msg:(Printf.sprintf "unknown unit '%s': expected one of 'days, 'weeks, 'months, 'years, 'per_day, 'per_week, 'per_month, 'per_year" s);
+        ~msg:(Printf.sprintf "unknown unit '%s': expected one of 'days, 'weeks, 'months, 'years, 'per_day, 'per_week, 'per_month, 'per_year, 'count, 'ratio" s);
       Days }
 
 (* ── Compartment block ──────────────────────────────────────────────────── *)
@@ -303,8 +305,13 @@ func_list:
   | fs = list(func_decl) { fs }
 
 func_decl:
-  | name = IDENT ibs = index_bindings_opt COLON kind = IDENT LBRACE args = func_args RBRACE
-      { { fname = name; findices = ibs; fkind = kind; fargs = args } }
+  (* Required tier-3 unit literal between kind and block — e.g.
+     `pop : interpolated 'count { … }`, `birthrate : interpolated 'per_year { … }`,
+     `seasonal : sinusoidal 'ratio { … }`. Parallels `tables { t :
+     dim 'unit = ... }`. The dim-checker uses the declared dim
+     authoritatively; no value-based inference fallback (GH #8). *)
+  | name = IDENT ibs = index_bindings_opt COLON kind = IDENT u = unit_lit LBRACE args = func_args RBRACE
+      { { fname = name; findices = ibs; fkind = kind; funit = u; fargs = args } }
 
 func_args:
   | kvs = list(func_arg) { kvs }

@@ -49,4 +49,11 @@ pub enum TimeFuncKind {
 pub struct TimeFunction {
     pub name: String,
     pub kind: TimeFuncKind,
+    /// Declared dimension from the forcing's tier-3 unit literal
+    /// (GH #8): `(P_exp, T_exp)`. E.g. `(0, -1)` for `'per_day`,
+    /// `(1, 0)` for `'count`, `(0, 0)` for `'ratio`. Always present —
+    /// the parser requires a unit literal on every forcing
+    /// declaration, so the dim-checker can use this authoritatively
+    /// without falling back on value-based inference.
+    pub dim: (i32, i32),
 }
