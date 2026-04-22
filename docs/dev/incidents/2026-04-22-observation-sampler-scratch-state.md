@@ -5,13 +5,24 @@
 issues [#5](https://github.com/vsbuffalo/camdl/issues/5) and
 [#6](https://github.com/vsbuffalo/camdl/issues/6).
 **Found in:** `rust/crates/sim/src/inference/multi_stream_obs.rs`
-**Status:** First attempted fix (`c87b275`) **did not fix the user-facing
-bug** — it patched an adjacent code path. Actual fix in `2030a2c`.
+**Status:** Three strikes before the bug was fully closed.
+- First fix (`c87b275`, 05:53 UTC) — patched `MultiStreamObsModel`
+  scoring-helper path. Issue closed.
+- Book agent reopened 11 minutes later: CLI `--obs` path still broken.
+- Second fix (`2030a2c`) — patched `compile_obs_sample_pf`. Issue
+  closed.
+- Book agent reopened again: `camdl pfilter` still broken (log-ll off
+  by ~100×).
+- Third fix (`d28664a`) — patched `ObservationModel::log_likelihood`
+  trait impl on `MultiStreamObsModel`. **Also deleted the
+  zero-scratch helper entirely** so the bug class cannot recur at a
+  future fifth path. Issue closed for real this time.
+
 Hardening proposal (phantom types on `IntState`) captured below — **held,
-not implemented**. See the "Meta-incident" section at the bottom: this
-bug revealed a deeper design smell (scratch-`IntState` construction
-scattered across multiple independent code paths) that the hardening
-proposal would address.
+not implemented**. The helper-deletion in the third fix is a cheaper
+structural fix that achieves similar protection: if the API doesn't
+offer a "get a zero-filled IntState" call, no one can accidentally use
+one. See the "Meta-incident" section for the full accounting.
 
 ---
 
@@ -130,6 +141,71 @@ why this recurrence is itself load-bearing.
 Companion fixture bug (GH #5): the Ross-Macdonald golden was missing a
 mosquito-recruitment transition, so `M → 0` and the epidemic collapsed.
 One-line addition of `birth_v : --> S_v @ mu_v * M0`.
+
+## Meta-meta-incident: even the proactive audit missed the third path
+
+Between the second fix and the third, I did a "proactive audit" of
+all `IntState` construction sites in `sim/` and `cli/`. The audit
+found five latent instances of the same bug class and flagged the
+fixes. I committed the fixes (`obs_model.rs` dead functions,
+overdispersion-state-independence invariant) in the commit message
+for the audit round.
+
+The audit **still missed the site that was actively broken** — the
+`ObservationModel::log_likelihood` trait impl on
+`MultiStreamObsModel`. The book agent's reopen comment came in
+concurrent with my audit commit.
+
+Why the audit missed it: I grepped `IntState::new\|IntState::from_vec\|
+IntState {` across the codebase. The missed site uses
+`with_scratch_int(...)` — a thread-local-pool helper that doesn't
+construct an `IntState` at its callsite at all; it borrows a reused
+scratch from `SCRATCH_INT: RefCell<IntState>`. My grep pattern was
+shaped by my mental model of the bug ("someone makes a zero
+`IntState`"), not by the bug's actual manifestation in the codebase
+("someone evaluates a likelihood expression against a state they
+forgot to populate").
+
+**Audit-technique lesson**: audit by the *symptom semantics*, not by
+the syntactic form. The right grep here would have been something
+like:
+
+```sh
+# Every place a likelihood expression is evaluated — find all of
+# them, regardless of how they got their IntState.
+grep -rn 'eval_likelihood_resolved\|sample_obs_resolved\|eval_obs_mean_resolved' sim/
+```
+
+That grep would have found every eval site and forced a per-site
+inspection of "where did this IntState come from?" Three of those
+sites would have revealed the scratch-pool helper, and the trait
+impl would have been among them.
+
+## Third-strike structural fix: delete the footgun
+
+The third fix did something the first two didn't: **deleted the
+zero-scratch helper entirely.** The helper
+`with_scratch_int(n, f)` in `multi_stream_obs.rs` existed precisely
+for "construct a zero IntState for expression evaluation" — the exact
+anti-pattern at the centre of all four bug sites. Every caller had
+real `counts` in hand but was using the zero helper anyway. The
+sibling `with_scratch_int_from_counts(counts, f)` has always existed
+alongside it.
+
+Removing the zero variant leaves only the populating one. The API
+no longer offers the mistake. Future code paths that evaluate a
+likelihood expression can only get a populated state, because that's
+the only way to get a scratch. This is a smaller, cheaper version of
+the phantom-type proposal — same protection, no refactor.
+
+The general lesson: **if a helper's purpose is 'do X incorrectly,'
+consider whether any caller actually wants that, and if not, delete
+it.** The zero-scratch existed because at one point some code path
+legitimately needed a zero state (the `log_likelihood_from_flows`
+deprecated helper still does, by passing a zero slice explicitly).
+But the thread-local pool variant was only ever used by the broken
+sites. Deleting it cost one line of code; it eliminated a class of
+bugs that had struck four times in 12 hours.
 
 ## Meta-incident: the first fix closed the issue but didn't fix the bug
 
