@@ -159,6 +159,24 @@ Additional checks:
 Disable with `--no-dim-check` if a false positive is encountered (and file
 a bug).
 
+**Phenomenological models that intentionally break dimensional
+homogeneity.** Some formulations — e.g. the He et al. (2010) α-mixing
+term `(I + ι)^α` with non-integer `α` — use expressions that have no
+well-defined dimension by construction. These are legitimate modelling
+choices, not bugs. A proposed `unchecked_dim` per-expression escape
+captures the user's dimensional assertion at the call site rather than
+forcing `--no-dim-check` model-wide. See
+`docs/dev/proposals/notes/unchecked-dim-escape.md` for the design —
+**deferred, not yet implemented.** In the interim, use `--no-dim-check`
+with a prose note citing the phenomenological-mixing rationale.
+
+References for the canonical case:
+
+- He, Ionides, & King (2010). *J. R. Soc. Interface* 7(43): 271–283.
+  doi:10.1098/rsif.2009.0151.
+- Bretó, He, Ionides, & King (2009). *Annals of Applied Statistics*
+  3(1): 319–348. doi:10.1214/08-AOAS201.
+
 ### 2.3 Date Literals
 
 The `date("YYYY-MM-DD")` expression converts an ISO 8601 date to a float offset
