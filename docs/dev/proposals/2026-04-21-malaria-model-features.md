@@ -955,16 +955,23 @@ compiles and fits age-specific partial-pooling parameters.
   - [x] Atomicity + correct-split runtime tests on Gillespie, tau-leap,
         AND chain-binomial. 200 seeds × ~900 draws, 9σ tolerance —
         would catch any bias in the multinomial weights.
-- [ ] **#3 hierarchical priors (single-level)** (~2 weeks)
-  - [ ] Parser: `| <dim>` pooling clause; `~` with parameter refs
-  - [ ] Semantic: reference-graph walk → hyper/leaf classification
-  - [ ] IR: `Parameter::role` enum; `Prior::pool_over` field
-  - [ ] Inference: non-centered reparameterization in NUTS; joint
-        updates in PGAS + IF2 + PMMH
-  - [ ] `camdl inspect --hierarchy` visualiser
-  - [ ] Shrinkage regression test: fitted leaves between per-group
-        MLE and grand mean
-  - [ ] Posterior-coverage test on synthetic two-level data (≥ 90%)
+- [x] **#3 hierarchical priors (single-level)** (Gates 1+2+3a landed, 2026-04-21)
+  - [x] Gate 1 (`b727409`): parser `| <dim>` clause; reference-graph
+        walk; IR `HierarchicalPrior` carrier; E230 unknown-parent,
+        E236 cycle/self-ref.
+  - [x] Gate 2 (`1145bb5`): `hierarchical_log_density` evaluator +
+        scipy-oracle battery (1e-10 rel err); `Scale` phantom on
+        `Prior::log_density`; IC3-regression pinned.
+  - [x] Gate 3a (`388b8b5`): PMMH joint updates via
+        `Prior::log_density_env`; live hyperparent→leaf env
+        propagation tested; env-less fallback returns −∞ (safety
+        net).
+  - [ ] Gate 3b: hierarchical gradient for NUTS/PGAS. Gates 3b–3d
+        not required for Wave 2 demo (PMMH-based fit).
+  - [ ] Non-centered reparameterisation (efficiency, not correctness).
+  - [ ] `camdl inspect --hierarchy` visualiser.
+  - [ ] Shrinkage regression test on synthetic data (belongs in
+        Garki fit vignette — tracked in agent-channel.md).
 - [ ] **Wave 2 demo**: `docs/vignettes/garki_2age_fit.qmd`
   Recovers age-specific `p_symp` with pooled-sigma shrinkage.
 

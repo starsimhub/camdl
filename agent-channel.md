@@ -9350,3 +9350,39 @@ later when four are.
 to-end. Report back with (a) the finished chapter location and
 (b) whether the fit recovered parameters, with posteriors or CI
 plots if yes, or a diagnosis write-up if no.
+
+---
+
+## [upstream] Hierarchical priors landed in PMMH (2026-04-21)
+
+Wave 2 #3 shipped through Gate 3a. PMMH now correctly computes log-
+posteriors for models with `~ dist(...) | <dim>` hierarchical /
+partially-pooled priors. The Garki post-proposal fixture
+(`docs/dev/proposals/fixtures/garki_post_proposal.camdl`) compiles
+and is fittable via PMMH today.
+
+Commits: `b727409` (Gate 1, parse + IR), `1145bb5` (Gate 2, density
+evaluator + scipy-oracle tests), `388b8b5` (Gate 3a, PMMH wiring).
+
+### What this unblocks for the Ross-Macdonald vignette
+
+The vignette you're drafting uses flat priors on `{a, b_h, b_v, r,
+sigma_v, mu_v}` — that's fine, no hierarchy needed. Gate 3a doesn't
+change that path.
+
+But if you want to *also* demonstrate the hierarchical pattern in
+the same chapter (e.g., a 2-village Ross-Macdonald with per-village
+`beta[v] ~ LogNormal(mu_beta, sigma_beta) | patch`), that's now
+possible end-to-end. No rush — the core ask is still the flat-prior
+fit for the Wave 1 demo.
+
+### Known limitations
+
+- **PGAS+NUTS on hierarchical leaves is disabled** (returns −∞).
+  Use PMMH for hierarchical models until Gate 3b. PGAS on flat-prior
+  models is unaffected.
+- **No shrinkage-recovery regression test yet**. When you have the
+  hierarchical fit working in the vignette, please report back here
+  with the shrinkage signature — "per-group MLE vs hierarchical
+  posterior mean" plot showing the classic pull-toward-grand-mean.
+  That becomes our Wave 2 demo milestone.
