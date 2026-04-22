@@ -2521,6 +2521,51 @@ let test_multi_source_catalyst_collapses () =
     "catalyst-collapsed multi-source stoich == single-source stoich"
     s_single s_multi
 
+(** Indexed multi-source: `bite[a in age] : X[a] + Iv --> I[a] + Iv`.
+    Should expand to one transition per age value, each with Iv as a
+    catalyst (collapsed to net zero) and X[a] → I[a] as the net flow.
+    The stratified pattern is the canonical malaria use case. *)
+let test_multi_source_indexed_by_age () =
+  let src = {|
+    time_unit = 'days
+    dimensions { age = [child, adult] }
+    compartments { X, I, Iv }
+    stratify(by = age, only = [X, I])
+    parameters {
+      a_bite : rate in [0.01, 1.0]
+      b_h    : probability
+    }
+    let N = X[child] + X[adult] + I[child] + I[adult]
+    transitions {
+      bite[a in age] : X[a] + Iv --> I[a] + Iv  @ a_bite * b_h * X[a] * Iv / N
+    }
+    init { X[child] = 100  X[adult] = 100  Iv = 10 }
+    simulate { from = 0 'days  to = 30 'days }
+  |} in
+  let m = compile_expect_ok src in
+  (* Should expand to exactly two transitions (one per age value),
+     each with net stoich {X[a]:-1, I[a]:+1} — Iv collapsed. *)
+  let names = List.map (fun (t : Ir.transition) -> t.Ir.name) m.Ir.transitions in
+  let sort_strs = List.sort compare in
+  Alcotest.(check (list string))
+    "one indexed transition per age value"
+    ["bite_adult"; "bite_child"]
+    (sort_strs names);
+  List.iter (fun t ->
+    let stoich = List.sort compare t.Ir.stoichiometry in
+    let suffix =
+      if t.Ir.name = "bite_child" then "child"
+      else "adult"
+    in
+    let expected = List.sort compare [
+      (Printf.sprintf "X_%s" suffix, -1);
+      (Printf.sprintf "I_%s" suffix,  1);
+    ] in
+    Alcotest.(check (list (pair string int)))
+      (Printf.sprintf "%s stoich has catalyst Iv collapsed" t.Ir.name)
+      expected stoich
+  ) m.Ir.transitions
+
 (** True bimolecular (non-catalyst) source: `A + B --> C`. Stoichiometry
     must be {A: -1, B: -1, C: +1}. *)
 let test_multi_source_bimolecular_stoich () =
@@ -2738,5 +2783,6 @@ let () =
       Alcotest.test_case "parser accepts `S + I --> I + I`"              `Quick test_multi_source_parses;
       Alcotest.test_case "catalyst collapse preserves single-source IR"  `Quick test_multi_source_catalyst_collapses;
       Alcotest.test_case "bimolecular A + B --> C → {A:-1, B:-1, C:+1}"  `Quick test_multi_source_bimolecular_stoich;
+      Alcotest.test_case "indexed `bite[a in age]` expands per age"      `Quick test_multi_source_indexed_by_age;
     ];
   ]

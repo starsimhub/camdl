@@ -1,0 +1,43 @@
+# Bimolecular reaction A + B --> C (wave 1 / malaria #1).
+#
+# Canonical non-catalyst multi-source test: both reactants decrement,
+# single product increments. Conservation laws:
+#   A(t) + C(t) = A(0)   (every A that disappears became a C)
+#   B(t) + C(t) = B(0)   (every B that disappears became a C)
+# If multi-source firing is NOT atomic (A decremented but B not, or
+# vice versa), these invariants break.
+
+time_unit = 'days
+
+compartments { A, B, C }
+
+let N = A + B + C
+
+parameters {
+  k   : rate  in [0.0001, 1.0]
+  A0  : count in [1, 10000]
+  B0  : count in [1, 10000]
+}
+
+transitions {
+  # Density-normalized mass-action so the rate dimension is P·T^-1
+  # (matches the malaria convention — see malaria_two_species.camdl).
+  react : A + B --> C  @ k * A * B / N
+}
+
+init {
+  A = A0
+  B = B0
+}
+
+simulate {
+  from = 0 'days
+  to   = 50 'days
+}
+
+scenarios {
+  baseline {
+    label = "equal reactants"
+    set = { k = 0.001  A0 = 100  B0 = 100 }
+  }
+}
