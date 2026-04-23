@@ -67,10 +67,17 @@ struct Cli {
     #[command(subcommand)]
     command: Command,
 
-    /// Log verbosity; overrides RUST_LOG (error/warn/info/debug/trace)
-    #[arg(long, global = true, default_value = "warn", value_name = "LEVEL",
+    /// Log verbosity; overrides RUST_LOG (error/warn/info/debug/trace).
+    /// When unset, defaults to `warn` unless `--progress plain` (or
+    /// `auto` resolving to plain on non-TTY stderr) is in effect, in
+    /// which case we bump to `info` so the plain-mode per-chain
+    /// progress lines — which are emitted via `log::info!` — actually
+    /// reach the user. Passing `--verbosity` explicitly always wins,
+    /// including explicit `--verbosity warn` with `--progress plain`
+    /// (self-silencing is a valid user choice). See GH #14.
+    #[arg(long, global = true, value_name = "LEVEL",
           help_heading = "Global options")]
-    verbosity: log::LevelFilter,
+    verbosity: Option<log::LevelFilter>,
 
     /// Progress output mode for long-running subcommands (`fit run`,
     /// `simulate`, `if2`, ...). `auto` uses indicatif bars on a TTY and
@@ -224,9 +231,33 @@ struct Passthrough {
 fn main() {
     let cli = Cli::parse();
 
-    // Logger: CLI flag > RUST_LOG > default warn
+    // Resolve the effective verbosity. Precedence:
+    //   1. Explicit --verbosity wins over everything.
+    //   2. Else, if `--progress plain` is in effect (or `auto` on
+    //      non-TTY stderr), bump to `info` — plain-mode progress
+    //      lines are emitted via `log::info!` and would otherwise
+    //      be silently filtered by the default `warn` threshold
+    //      (GH #14, comment re: silent plain mode).
+    //   3. Else, RUST_LOG env → else `warn`.
+    //
+    // Note — a cleaner long-term design (option 2 in Vince's GH #14
+    // comment) would route progress through a dedicated non-`log::*`
+    // channel, making "progress visibility" independent of "log
+    // filter." That decouples user-facing progress from
+    // developer-facing logging, which is the right mental model but
+    // a bigger refactor; this auto-bump is the minimal fix.
+    let progress_wants_info = match cli.progress {
+        args::types::ProgressMode::Plain => true,
+        args::types::ProgressMode::Auto =>
+            !std::io::IsTerminal::is_terminal(&std::io::stderr()),
+        args::types::ProgressMode::Pretty | args::types::ProgressMode::None => false,
+    };
+    let effective_verbosity: log::LevelFilter = cli.verbosity.unwrap_or(
+        if progress_wants_info { log::LevelFilter::Info } else { log::LevelFilter::Warn }
+    );
+
     env_logger::Builder::from_env(
-        env_logger::Env::default().default_filter_or(cli.verbosity.as_str())
+        env_logger::Env::default().default_filter_or(effective_verbosity.as_str())
     ).init();
 
     // Progress output policy (GH #14). Must run after env_logger so that
