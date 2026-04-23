@@ -1,0 +1,37 @@
+# Tolerance + MC power for the he2010_pfilter_loglik case.
+# Empirical reference numbers from pomp 2000-particle × 20-replicate run:
+#   mean loglik ≈ -5827.4  sd across reps ≈ 12.7
+
+[checks.loglik]
+compare   = "mean"
+tol_abs   = 35.0
+rationale = """
+pomp pfilter at the published London MLE, 2000 particles × 20
+replicates: mean ≈ -5827.4, per-replicate SD ≈ 12.7. MC SE of the
+mean at n=10 camdl replicates is SD/sqrt(n) ≈ 4.0 nats; at pomp's
+n=20 reference the reference-side SE is ≈ 2.8 nats. Combined SE of
+the difference of means ≈ sqrt(4.0² + 2.8²) ≈ 4.9 nats.
+
+tol_abs = 35 nats ≈ 7× combined SE. Catches systematic biases ≥
+~20 nats at >95% power. That bar is above the continuous-vs-
+discrete normal obs-model offset (estimated ≤ 10 nats across 1096
+observations for this data, since the obs-scale SDs are large
+enough that log-density ≈ log-mass-per-unit-interval) and below
+the class of bug this case is meant to flag: pfilter resampling
+errors, observation-likelihood evaluation bugs, or mismatched
+bootstrap semantics between the two implementations. A 100-nat
+bias would fire at ≥20σ.
+
+Use tol_abs (not tol_rel) because log-lik differences are
+additive-natural: "camdl is 30 nats worse than pomp" has a
+well-defined interpretation whereas "camdl is 0.5% worse" does
+not (the zero point of log-lik is arbitrary).
+
+Per-particle-count scaling note: the particle count is pinned at
+2000 on both sides via case.toml. If either side changes N_particles
+without the other following, the comparison is apples-to-oranges
+(pfilter log-lik has a well-known negative bias that scales roughly
+as 1/N_particles). The staleness machinery catches this — case.toml
+is part of the case_sha, so changing --particles flips the fixture
+stale and forces a matched regen.
+"""

@@ -272,6 +272,12 @@ Current cases:
   size. Zero external runtime; the harness's own dogfood.
 - `he2010_forward` — He et al. 2010 London measles vs pomp at the
   published MLE. Regression lock for GH #11.
+- `boarding_school_sir` — pomp's canonical bare SIR tutorial
+  (Anderson & May 1991 boarding-school flu).
+- `he2010_pfilter_loglik` — particle-filter log-lik at matched
+  (parameters, particles, time grid) vs pomp's pfilter. Validates
+  the observation-likelihood path and resampling algorithm, not
+  just the simulator.
 
 L9's fast path runs as part of `make test-rust` (and therefore the
 pre-push hook and CI). The `external_validation` test at

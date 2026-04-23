@@ -113,6 +113,15 @@ The harness rejects checks with empty rationales at load time.
   chain_binomial vs reulermultinom on a bare SIR without covariates,
   events, or inhomogeneous mixing. Total infections agree to ~0.1%,
   peak daily infections to ~0.4%.
+- **he2010_pfilter_loglik** — particle-filter log-likelihood of He et al.
+  2010 London measles at the published MLE. Sibling to he2010_forward
+  that validates a different slice: where he2010_forward checks the
+  process model + cohort/birth pipeline, this case checks the pfilter
+  algorithm, observation-likelihood evaluation, and resampling.
+  Uses `batch-replicated` mode (one camdl invocation with
+  `--replicates N`). Agreement: camdl −5828.7 vs pomp −5827.4 (N=10
+  vs N=20, 2000 particles both sides), difference 1.4 nats, well
+  inside the 35-nat tolerance.
 
-Coming next (per the proposal):
-- he2010_pfilter_loglik — pfilter log-lik at the MLE
+Coming later: IF2 MLE cross-check, spatial SIR, NumPyro / Stan
+references for Bayesian-posterior cases.

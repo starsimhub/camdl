@@ -9,6 +9,72 @@ use crate::manifest::CamdlSpec;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+/// One batch-mode invocation's record — camdl runs once, writes a
+/// long-format TSV containing all replicates, harness then summarises
+/// via `summarise::summarise_long_tsv`.
+#[derive(Debug, Clone)]
+pub struct BatchRun {
+    pub output_tsv: PathBuf,
+    pub exit_code: Option<i32>,
+    #[allow(dead_code)]
+    pub stdout_path: PathBuf,
+    pub stderr_path: PathBuf,
+}
+
+impl BatchRun {
+    pub fn succeeded(&self) -> bool { matches!(self.exit_code, Some(0)) }
+}
+
+pub fn run_camdl_batch(
+    spec: &CamdlSpec,
+    case_dir: &Path,
+    runs_dir: &Path,
+) -> anyhow::Result<BatchRun> {
+    std::fs::create_dir_all(runs_dir)
+        .map_err(|e| anyhow::anyhow!("create {}: {}", runs_dir.display(), e))?;
+    let abs_runs_dir = std::fs::canonicalize(runs_dir)
+        .map_err(|e| anyhow::anyhow!("canonicalize {}: {}", runs_dir.display(), e))?;
+    let out_path = abs_runs_dir.join("batch_output.tsv");
+
+    let args: Vec<String> = spec.command.iter().map(|tok| {
+        match tok.as_str() {
+            "@model"      => spec.model.to_string_lossy().into_owned(),
+            "@params"     => spec.params.as_ref()
+                               .map(|p| p.to_string_lossy().into_owned())
+                               .unwrap_or_default(),
+            "@n_seeds"    => spec.n_seeds.to_string(),
+            "@seed_base"  => spec.seed_base.to_string(),
+            "@batch_out"  => out_path.to_string_lossy().into_owned(),
+            other         => other.to_string(),
+        }
+    }).collect();
+
+    if args.is_empty() {
+        return Err(anyhow::anyhow!("case.toml camdl.command is empty"));
+    }
+    let (prog, rest) = args.split_first().unwrap();
+
+    let stdout_path = abs_runs_dir.join("stdout.log");
+    let stderr_path = abs_runs_dir.join("stderr.log");
+    let stdout = std::fs::File::create(&stdout_path)?;
+    let stderr = std::fs::File::create(&stderr_path)?;
+
+    let status = Command::new(prog)
+        .args(rest)
+        .current_dir(case_dir)
+        .stdout(stdout)
+        .stderr(stderr)
+        .status()
+        .map_err(|e| anyhow::anyhow!("spawn {}: {}", prog, e))?;
+
+    Ok(BatchRun {
+        output_tsv: out_path,
+        exit_code: status.code(),
+        stdout_path,
+        stderr_path,
+    })
+}
+
 #[derive(Debug, Clone)]
 pub struct CamdlRun {
     pub seed: u64,

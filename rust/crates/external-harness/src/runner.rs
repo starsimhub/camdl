@@ -2,7 +2,7 @@
 
 use crate::compare::{self, CheckResult, Outcome};
 use crate::hashing;
-use crate::manifest::{CaseManifest, ExpectedManifest, FixtureManifest, ReferenceSpec, SummarySpec};
+use crate::manifest::{CamdlMode, CaseManifest, ExpectedManifest, FixtureManifest, ReferenceSpec, SummarySpec};
 use crate::subprocess;
 use crate::summarise;
 use crate::summary::Summary;
@@ -60,35 +60,54 @@ pub fn run_case(case_dir: &Path) -> anyhow::Result<CaseOutcome> {
         });
     }
 
-    // Camdl runs (skipped entirely for analytical cases where we only
-    // want to test the reference fixture itself; analytical cases still
-    // need a "camdl side" though, since the whole point is to compare
-    // camdl's simulation to the closed form).
-    let mut runs = Vec::with_capacity(case.camdl.n_seeds);
-    for i in 0..case.camdl.n_seeds {
-        let seed = case.camdl.seed_base + i as u64;
-        let run = subprocess::run_camdl_seed(&case.camdl, case_dir, &run_dir, seed)?;
-        if !run.succeeded() {
-            return Ok(CaseOutcome {
-                name: case.name.clone(),
-                status: Status::Crash(format!(
-                    "camdl exit={:?} on seed={} (see {})",
-                    run.exit_code, run.seed, run.stderr_path.display())),
-                checks: vec![],
-                run_dir,
-            });
+    // Camdl runs. Two shapes:
+    //   PerSeed (default):  n_seeds separate invocations, each → per-seed
+    //                        obs.tsv, summariser walks the dir tree.
+    //   BatchReplicated:    one invocation with replicate flags → single
+    //                        long-format TSV; same summariser path as the
+    //                        reference side.
+    let camdl_summary = match case.camdl.mode {
+        CamdlMode::PerSeed => {
+            let mut runs = Vec::with_capacity(case.camdl.n_seeds);
+            for i in 0..case.camdl.n_seeds {
+                let seed = case.camdl.seed_base + i as u64;
+                let run = subprocess::run_camdl_seed(&case.camdl, case_dir, &run_dir, seed)?;
+                if !run.succeeded() {
+                    return Ok(CaseOutcome {
+                        name: case.name.clone(),
+                        status: Status::Crash(format!(
+                            "camdl exit={:?} on seed={} (see {})",
+                            run.exit_code, run.seed, run.stderr_path.display())),
+                        checks: vec![],
+                        run_dir,
+                    });
+                }
+                runs.push(run);
+            }
+            match &case.summary {
+                SummarySpec::Prebaked => {
+                    return Err(anyhow::anyhow!(
+                        "summary.kind = 'prebaked' is for the reference side only; \
+                         case.toml must declare a summary spec for camdl's output"));
+                }
+                SummarySpec::EnsembleStats { .. } => summarise::summarise_runs(&case.summary, &runs)?,
+            }
         }
-        runs.push(run);
-    }
-
-    // Summarise camdl output.
-    let camdl_summary = match &case.summary {
-        SummarySpec::Prebaked => {
-            return Err(anyhow::anyhow!(
-                "summary.kind = 'prebaked' is for the reference side only; \
-                 case.toml must declare a summary spec for camdl's output"));
+        CamdlMode::BatchReplicated => {
+            let batch = subprocess::run_camdl_batch(&case.camdl, case_dir, &run_dir)?;
+            if !batch.succeeded() {
+                return Ok(CaseOutcome {
+                    name: case.name.clone(),
+                    status: Status::Crash(format!(
+                        "camdl batch exit={:?} (see {})",
+                        batch.exit_code, batch.stderr_path.display())),
+                    checks: vec![],
+                    run_dir,
+                });
+            }
+            summarise::summarise_long_tsv(&case.summary, &batch.output_tsv,
+                &case.camdl.batch_seed_col)?
         }
-        SummarySpec::EnsembleStats { .. } => summarise::summarise_runs(&case.summary, &runs)?,
     };
     camdl_summary.write_tsv(&run_dir.join("camdl_summary.tsv"))?;
 

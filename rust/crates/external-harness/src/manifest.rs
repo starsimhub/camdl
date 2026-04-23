@@ -34,8 +34,12 @@ pub enum CaseCategory {
 pub struct CamdlSpec {
     pub model: PathBuf,
     pub params: Option<PathBuf>,
-    /// Command template. `@model` and `@params` are placeholders resolved
-    /// against `model` and `params` above. `@seed` is replaced per-run.
+    /// Command template. Placeholders:
+    /// - `@model` / `@params` resolve to the case's `model` / `params`.
+    /// - `@seed` — per-run seed (per-seed mode only).
+    /// - `@obs_out` — per-seed output TSV path (per-seed mode only).
+    /// - `@n_seeds` / `@seed_base` — batch-replicated mode only.
+    /// - `@batch_out` — single output TSV path for batch-replicated mode.
     pub command: Vec<String>,
     pub n_seeds: usize,
     pub seed_base: u64,
@@ -43,11 +47,38 @@ pub struct CamdlSpec {
     /// Placeholders: `@seed_dir` for the per-seed directory.
     #[serde(default = "default_output_spec")]
     pub output: String,
+    /// Execution mode.
+    ///
+    /// - `per-seed` (default): the harness invokes camdl `n_seeds`
+    ///   times with different seeds, each producing its own TSV under
+    ///   `seeds/<seed>/obs.tsv`. Natural for forward simulation.
+    /// - `batch-replicated`: the harness invokes camdl **once** with
+    ///   the full replicate count; camdl writes a long-format TSV
+    ///   with one row per replicate. Natural for pfilter log-lik
+    ///   (`camdl pfilter --replicates N --output ...`), PMMH traces,
+    ///   etc. Reads through the same long-TSV summariser as the
+    ///   reference side, so stat specs look identical either way.
+    #[serde(default)]
+    pub mode: CamdlMode,
+    /// For `batch-replicated` mode: name of the seed column in the
+    /// output TSV that camdl produces (e.g. `seed` for `camdl pfilter`).
+    #[serde(default = "default_batch_seed_col")]
+    pub batch_seed_col: String,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum CamdlMode {
+    #[default]
+    PerSeed,
+    BatchReplicated,
 }
 
 fn default_output_spec() -> String { "@seed_dir/obs.tsv".to_string() }
 
 fn default_seed_col() -> String { "sim".to_string() }
+
+fn default_batch_seed_col() -> String { "seed".to_string() }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(tag = "kind", rename_all = "kebab-case")]
