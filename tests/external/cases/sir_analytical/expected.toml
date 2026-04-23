@@ -1,0 +1,33 @@
+# Tolerance for the mean final attack rate at R0=3, N0=10,000, 20 seeds.
+#
+# Every check must carry a rationale including a Monte Carlo power
+# statement (proposal principle #5). The harness rejects checks with
+# empty rationales at load time.
+
+[checks.final_R]
+compare   = "mean"
+tol_rel   = 0.01
+rationale = """
+Analytical final size at R0=3 is r_∞ ≈ 0.9405, so at N0=10,000 the
+expected mean total R is ≈9,405. Observed reporting noise is Poisson
+on daily recoveries, which is unbiased for the total across 365 days
+(sum of Poissons is Poisson with the true total as its rate).
+
+Empirically measured cross-seed SD at n=20 seeds: ≈94, which is
+roughly 2× the naive CLT estimate from the branching approximation
+(~40) — stochastic SIR variance includes both the branching-phase
+uncertainty and the peak-timing jitter that the CLT argument does
+not capture. MC SE of the mean at n=20 is therefore 94/sqrt(20) ≈
+21, or ~0.22% of the analytical mean.
+
+A tol_rel of 1% (≈4.5× MC SE) catches systematic biases ≥ ~1.2%
+with power ≥ 0.95 (one-sided: 1% tolerance corresponds to a 0.9405 pp
+gap, which at SE=0.22% is 4.1σ). That is tight enough to detect a
+mislabelled backend (e.g. accidentally running ODE), a miscomputed
+transition rate, or a unit-conversion error in params — the three
+classes of "silent wrong simulator" that this case's job is to guard
+against.
+
+If a future refactor of the chain_binomial backend changes cross-seed
+SD materially, rerun the case empirically and update this rationale.
+"""

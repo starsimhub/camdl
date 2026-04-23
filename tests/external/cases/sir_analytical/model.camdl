@@ -1,0 +1,39 @@
+# Bare SIR at R0 = 3, used as the harness dogfood case.
+# Closed-form final-size: R_∞ satisfies 1 - R_∞ = exp(-R0 · R_∞).
+# For R0 = 3: R_∞ ≈ 0.9405 — see reference/derivation.md for the numerics.
+
+time_unit = 'days
+
+compartments { S, I, R }
+
+let N = S + I + R
+
+parameters {
+  beta  : rate  in [0.001, 2.0]
+  gamma : rate  in [0.001, 1.0]
+  N0    : count in [100, 1000000]
+  I0    : count in [1, 1000]
+}
+
+transitions {
+  infection : S --> I  @ beta * S * (I / N)
+  recovery  : I --> R  @ gamma * I
+}
+
+observations {
+  recoveries : {
+    projected  = incidence(recovery)
+    every      = 1 'days
+    likelihood = poisson(rate = projected)
+  }
+}
+
+init {
+  S = N0 - I0
+  I = I0
+}
+
+simulate {
+  from = 0 'days
+  to   = 365 'days
+}

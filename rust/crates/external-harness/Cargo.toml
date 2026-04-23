@@ -1,0 +1,22 @@
+[package]
+name = "external-harness"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "External validation harness: runs camdl against cached reference outputs with tolerance checks. See docs/dev/proposals/2026-04-23-external-validation-harness.md."
+
+[[bin]]
+name = "external-harness"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+sha2 = "0.10"
+walkdir = "2"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+anyhow = "1"
+
+[dev-dependencies]
+tempfile = "3"
