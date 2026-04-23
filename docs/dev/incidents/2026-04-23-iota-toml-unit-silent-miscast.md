@@ -4,7 +4,8 @@
 **Discovered:** 2026-04-23 during He et al. (2010) pomp vs camdl forward-simulation comparison
 **Found in:** parameter TOML authoring; upstream boundary is the TOML loader (no dim check on param values)
 **Status:** Workaround lands in the vignette's param file (`iota = 2.9`); upstream fix tracked as GH #12
-**Related:** GH #11 (the forward-sim divergence that surfaced this), GH #12 (the UX proposal for typed param TOML)
+**Related:** GH #11 (the forward-sim divergence that surfaced this), GH #12 (the UX proposal for typed param TOML);
+sibling incident `2026-04-23-forcing-rescale-double-conversion.md` — same class on the forcing-rescale surface (strike two, same day, same model)
 
 ---
 
