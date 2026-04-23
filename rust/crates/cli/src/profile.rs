@@ -201,11 +201,10 @@ pub fn cmd_profile(a: &crate::args::ProfileArgs) {
 
     // Plain-mode fallback (GH #14): throttled log lines since bars are
     // hidden under --progress plain. Shared across rayon workers via
-    // Mutex — contention is negligible at the per-job cadence.
+    // Mutex — contention is negligible at the per-job cadence. Cadence
+    // from progress::DEFAULT_THROTTLE.
     let plain = crate::progress::is_plain();
-    let throttle = std::sync::Mutex::new(
-        crate::progress::Throttle::new(std::time::Duration::from_secs(30))
-    );
+    let throttle = std::sync::Mutex::new(crate::progress::Throttle::default());
     if plain {
         log::info!("profile: {} grid points × {} starts = {} jobs",
             grid_points.len(), n_starts, total_jobs);

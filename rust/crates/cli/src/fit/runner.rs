@@ -655,9 +655,8 @@ fn run_one_chain(
     let plain = crate::progress::is_plain();
     // RefCell so the progress closure can be `Fn` (run_if2_with_progress
     // takes `&dyn Fn`). The callback is single-threaded per chain.
-    let throttle = std::cell::RefCell::new(
-        crate::progress::Throttle::new(std::time::Duration::from_secs(30))
-    );
+    // Cadence from progress::DEFAULT_THROTTLE.
+    let throttle = std::cell::RefCell::new(crate::progress::Throttle::default());
 
     let progress_cb = |iter: usize, loglik: f64| {
         if let Some(bar) = pb {

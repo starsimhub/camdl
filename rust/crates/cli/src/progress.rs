@@ -86,9 +86,24 @@ pub fn is_none() -> bool { resolved() == Resolved::None }
 ///     }
 /// }
 /// ```
+/// Default cadence for plain-mode per-chain progress lines. Chosen to
+/// produce a handful of lines for a typical 2-hour scout (36 chains ×
+/// one line per 30s = ~240 lines total) — enough for `tail -f` to show
+/// motion without overwhelming the log. Consumers should prefer
+/// `Throttle::default()` over hard-coding this value.
+///
+/// If/when `--progress-interval` lands (GH #14 stretch), this becomes
+/// the default the flag overrides.
+pub const DEFAULT_THROTTLE: Duration = Duration::from_secs(30);
+
 pub struct Throttle {
     min_interval: Duration,
     last: Option<Instant>,
+}
+
+impl Default for Throttle {
+    /// 30-second cadence — see `DEFAULT_THROTTLE`.
+    fn default() -> Self { Self::new(DEFAULT_THROTTLE) }
 }
 
 impl Throttle {
