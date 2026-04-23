@@ -125,3 +125,66 @@ The harness rejects checks with empty rationales at load time.
 
 Coming later: IF2 MLE cross-check, spatial SIR, NumPyro / Stan
 references for Bayesian-posterior cases.
+
+## Validating that the harness actually catches regressions
+
+The harness's value proposition rests on the claim that it will fail
+loudly when camdl produces scientifically wrong output. The easiest
+way to see that for yourself is to inject a plausible one-line bug
+in the simulator, rebuild, and run the harness. This is a
+five-minute exercise; repeat any time you want evidence that L9 is
+earning its keep.
+
+**Procedure (demonstrated 2026-04-23):**
+
+Inject a 10% scale error on every interpolated forcing value —
+the flavour of bug GH #11 was (the forcing-rescale double-
+conversion). In `rust/crates/sim/src/propensity.rs` inside
+`eval_time_func`'s `CompiledTimeFuncKind::Interpolated` branch, wrap
+each returned value in `0.9 * (…)`. Rebuild (`make install`). Run
+`./rust/target/debug/external-harness run-all`.
+
+Expected output:
+
+```
+  run    boarding_school_sir            pass (2 checks, 0.1s)
+  run    he2010_forward                 FAIL (3 checks, 0.7s)
+    FAIL last52_cases [mean] — mean: camdl=18738.750000, ref=27637.910000, diff=8.899e3 (32.20%); tol_rel=0.25
+    FAIL total_cases [mean] — mean: camdl=436467.300000, ref=538602.385000, diff=1.021e5 (18.96%); tol_rel=0.05
+  run    he2010_pfilter_loglik          FAIL (1 checks, 45.6s)
+    FAIL loglik [mean] — mean: camdl=-12456.374650, ref=-5827.354959, diff=6.629e3 (113.76%); tol_abs=35
+  run    sir_analytical                 pass (1 checks, 0.2s)
+
+── summary ──
+2 passed, 2 failed, 0 stale, 0 crashed  in 46.7s
+```
+
+Notes to interpret:
+
+- Cases that use interpolated forcings (he2010_forward,
+  he2010_pfilter_loglik) fail loudly with quantified diffs against
+  the cached reference. Cases that don't (sir_analytical,
+  boarding_school_sir) remain green — no false positives.
+- `he2010_pfilter_loglik` is particularly sensitive: a 10% forcing
+  bias produces a 6,629-nat log-lik shift (~6 nats per obs across
+  1,096 observations). The pfilter integrates over the whole time
+  series, which makes it a strong discriminator of any model-drift
+  bug; a forward-sim case alone would have flagged the total-cases
+  discrepancy but not the full-shape divergence.
+- Each failure message includes the observed-vs-expected means,
+  the absolute and relative diffs, and the tolerance that fired.
+  A reviewer seeing this output on a PR can immediately tell (a)
+  which stat broke, (b) by how much, and (c) whether it's a
+  near-miss or catastrophic.
+
+Revert the one-line edit, `make install`, rerun — all four cases
+return to green.
+
+**Why there isn't a built-in sabotage flag:** we considered a
+hidden `--inject-bias X` flag to automate this check. Rejected as
+overkill — the harness's job is to fail when camdl is wrong, and
+we demonstrate that by running against a deliberately-wrong camdl
+when we need the evidence. A standing flag would add surface area
+(flag, docs, footgun if left on in production) without protection
+over the manual procedure. For systematic sensitivity
+quantification, `cargo-mutants` is the off-the-shelf tool.
