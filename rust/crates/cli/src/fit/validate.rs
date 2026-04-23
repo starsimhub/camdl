@@ -445,10 +445,17 @@ fn run_profiles(
         .template("{prefix:>12} [{bar:20}] {pos}/{len}")
         .unwrap();
 
+    // Plain-mode fallback for --progress plain (GH #14).
+    let plain = crate::progress::is_plain();
+    let no_progress = crate::progress::is_none();
+
     let results: Vec<ProfileResult> = config.estimated_params.par_iter().map(|focal| {
         let pb = mp.add(ProgressBar::new(n_grid as u64));
         pb.set_style(style.clone());
         pb.set_prefix(focal.name.clone());
+        if plain {
+            log::info!("validate profile: start {} ({} grid points)", focal.name, n_grid);
+        }
 
         let mle_value = mle_params[focal.index];
         let (lo, hi) = if focal.lower.is_finite() && focal.upper.is_finite() {
@@ -518,8 +525,16 @@ fn run_profiles(
                 }
             }
             pb.inc(1);
+            if plain && !no_progress {
+                log::info!("validate profile {}: {}/{} (last ll={:.1})",
+                    focal.name, pb.position(), n_grid,
+                    profile_points.last().map(|(_, ll)| *ll).unwrap_or(f64::NAN));
+            }
         }
         pb.finish();
+        if plain {
+            log::info!("validate profile {} done", focal.name);
+        }
 
         // Write profile TSV
         {

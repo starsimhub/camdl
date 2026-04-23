@@ -311,8 +311,14 @@ pub fn run_pmmh_cli(
 
             let bar = &bars[chain_id];
             let accepted_count = AtomicUsize::new(0);
-            let is_tty = std::io::IsTerminal::is_terminal(&std::io::stderr());
             let chain_start = std::time::Instant::now();
+            // Plain-mode progress emission (GH #14). Pretty and plain
+            // modes are mutually exclusive at a point in time: under
+            // pretty, the bar is live and the log line would be noise;
+            // under plain, the bar is hidden and the log line is the
+            // only signal the user gets.
+            let plain = crate::progress::is_plain();
+            let no_progress = crate::progress::is_none();
 
             // Streaming trace: use TraceWriter with append mode when resuming
             let chain_dir = format!("{}/pmmh/chain_{}", fit.fit.output_dir, chain_id + 1);
@@ -355,19 +361,30 @@ pub fn run_pmmh_cli(
 
                 // Progress display (always, regardless of burn-in/thin)
                 if step.is_multiple_of(100) || step == n_steps - 1 {
-                    if is_tty {
+                    if no_progress {
+                        // --progress none: suppress entirely.
+                    } else if plain {
+                        let elapsed = chain_start.elapsed().as_secs();
+                        if loglik.is_finite() {
+                            log::info!(
+                                "pmmh chain {}: step {}/{} ({:.0}%) acc={:.0}% ll={:.1} elapsed={}s",
+                                chain_id + 1, step, n_steps,
+                                step as f64 / n_steps as f64 * 100.0,
+                                acc * 100.0, loglik, elapsed);
+                        } else {
+                            log::info!(
+                                "pmmh chain {}: step {}/{} ({:.0}%) acc={:.0}% ll=-inf elapsed={}s",
+                                chain_id + 1, step, n_steps,
+                                step as f64 / n_steps as f64 * 100.0,
+                                acc * 100.0, elapsed);
+                        }
+                    } else {
                         bar.set_position(step as u64 + 1);
                         if loglik.is_finite() {
                             bar.set_message(format!("ll={:.1} acc={:.0}%", loglik, acc * 100.0));
                         } else {
                             bar.set_message(format!("ll=-inf acc={:.0}%", acc * 100.0));
                         }
-                    } else {
-                        let elapsed = chain_start.elapsed().as_secs();
-                        eprintln!("[pmmh] chain {}: {}/{} ({:.0}%) acc={:.0}% ll={:.1} elapsed={}s",
-                            chain_id + 1, step, n_steps,
-                            step as f64 / n_steps as f64 * 100.0,
-                            acc * 100.0, loglik, elapsed);
                     }
                 }
             };
@@ -382,6 +399,10 @@ pub fn run_pmmh_cli(
             bar.finish_with_message(format!(
                 "ll={:.1} acc={:.0}%", result.map_loglik, result.acceptance_rate * 100.0
             ));
+            if plain {
+                log::info!("pmmh chain {} done: MAP ll={:.1} acc={:.0}%",
+                    chain_id + 1, result.map_loglik, result.acceptance_rate * 100.0);
+            }
 
             // Save resume state for future --resume
             let resume_path = format!("{}/resume_state.bin", chain_dir);

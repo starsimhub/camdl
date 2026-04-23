@@ -199,6 +199,18 @@ pub fn cmd_profile(a: &crate::args::ProfileArgs) {
     overall_pb.set_style(overall_style);
     overall_pb.set_prefix("profile");
 
+    // Plain-mode fallback (GH #14): throttled log lines since bars are
+    // hidden under --progress plain. Shared across rayon workers via
+    // Mutex — contention is negligible at the per-job cadence.
+    let plain = crate::progress::is_plain();
+    let throttle = std::sync::Mutex::new(
+        crate::progress::Throttle::new(std::time::Duration::from_secs(30))
+    );
+    if plain {
+        log::info!("profile: {} grid points × {} starts = {} jobs",
+            grid_points.len(), n_starts, total_jobs);
+    }
+
     // Initialize rayon global pool (controls all parallelism: grid jobs + particles).
     if parallel > 0 {
         let _ = rayon::ThreadPoolBuilder::new()
@@ -240,6 +252,12 @@ pub fn cmd_profile(a: &crate::args::ProfileArgs) {
             );
 
             overall_pb.inc(1);
+            if plain {
+                let done = overall_pb.position();
+                if throttle.lock().map(|mut t| t.ready()).unwrap_or(true) || done == total_jobs as u64 {
+                    log::info!("profile: {}/{} jobs complete", done, total_jobs);
+                }
+            }
 
             match result {
                 Ok(r) => (grid_idx, focal_values, r.final_loglik, r.mle),
