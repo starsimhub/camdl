@@ -89,6 +89,41 @@ make sim MODEL=ir/golden/sir_basic.ir.json
 rust/target/release/compartmental simulate <model.ir.json> --traj /tmp/traj.tsv --obs /tmp/obs.tsv
 ```
 
+## Debugging a diverging simulation
+
+When a simulation's dynamics don't match a reference implementation (pomp,
+Stan, a paper's published trajectory), the first tool is the per-substep
+tracer built into the chain-binomial backend:
+
+```bash
+CAMDL_TRACE_STEPS=1 camdl simulate model.camdl --params p.toml \
+    --backend chain_binomial --dt 1 --seed 1 --obs-only /tmp/obs.tsv \
+    2> /tmp/trace.tsv 1>/dev/null
+```
+
+The trace dumps one TSV row per substep to **stderr** with columns:
+`t`, all compartment counts, all `flow_<name>` (counts per substep), all
+`rate_<name>` (total per-source rates evaluated this substep), and
+`total_pop`. Redirect stderr to a file — stdout carries the normal TSV
+simulation output, so keep them separate.
+
+Workflow: pick a few diagnostic times (t=1, after seasonal onset, at
+peak, post-epidemic trough) and compare the rate/flow columns against
+hand-computed values from the reference implementation's rate
+expressions. A mismatch at t=1 localizes to init or rate construction; a
+mismatch that grows over time localizes to dynamics (noise, forcing
+interaction, event ordering).
+
+Other logging channels worth knowing about:
+- `log::debug!` in `pgas.rs`, `particle_filter.rs`, `if2.rs`: inference
+  diagnostics (-inf logliks, skipped observations, density mismatches).
+  Enable with `RUST_LOG=camdl_sim=debug` or similar.
+- `CAMDL_TRACE_STEPS=1` also activates in `intervention.rs` — logs
+  intervention firings alongside the substep trace.
+
+Before inventing new logging, check the existing paths above. They
+already cover most per-step/per-iteration diagnostics.
+
 ## Architecture
 
 ### The IR as contract
