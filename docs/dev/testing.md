@@ -66,7 +66,7 @@ another.
 │  L7  Cross-language        tests/test_ocaml_to_rust.sh        │
 │      integration             — compile .camdl → simulate      │
 │                                                               │
-│  L8  Book build (prose)    docs/book/  (mdbook build)         │
+│  L8  Book build (prose)    ../camdl-book  (external repo)     │
 │                                                               │
 │  L9  External validation   tests/external/cases/              │
 │      (vs pomp, analytical)   — external-harness binary        │
@@ -214,10 +214,19 @@ Invoked via `make test-integration`. Catches:
 Fixtures live in `tests/fixtures/exp_*.toml`. Each is a batch sweep
 config pointing at an `ocaml/golden/*.camdl`.
 
-### L8 — Book build
+### L8 — Book build (external repo)
 
-`cd docs/book && mdbook build`. Catches broken symlinks and dangling
-cross-refs in user-facing docs. Part of the pre-push hook.
+The book lives in `../camdl-book` now (Quarto-based, rendered
+separately). Its cells execute camdl commands during render and
+thereby integration-test the CLI surface — cell failures there
+often catch upstream CLI changes that the Rust/OCaml unit tests
+don't exercise. See `../camdl-book/CLAUDE.md` for the render
+workflow; its own CI runs the book build on PRs touching that
+repo.
+
+When making CLI-affecting changes in this repo, also render the
+book locally (`cd ../camdl-book && uv run quarto render`) before
+pushing, or expect the book's CI to catch it.
 
 ### L9 — External validation (against pomp, NumPyro, closed-form, …)
 
@@ -280,8 +289,11 @@ Mirrors CI — runs locally on every `git push`:
 4. `make update-golden` + assert `ir/golden/` and `ocaml/golden/`
    unchanged (catches schema changes you forgot to regenerate goldens
    for)
-5. `mdbook build` (skipped if mdbook isn't installed)
-6. `make test-integration`
+5. `make test-integration`
+
+(The book used to be built here via `mdbook`; it now lives in
+`../camdl-book` with its own CI. Remove any stale `.githooks/pre-push`
+entry that still invokes `mdbook build` if present.)
 
 **Bypass only for documentation-only commits with `--no-verify`.**
 Otherwise never — see the comment at the top of the hook about the
