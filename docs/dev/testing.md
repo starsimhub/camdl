@@ -67,8 +67,21 @@ another.
 │      integration             — compile .camdl → simulate      │
 │                                                               │
 │  L8  Book build (prose)    docs/book/  (mdbook build)         │
+│                                                               │
+│  L9  External validation   tests/external/cases/              │
+│      (vs pomp, analytical)   — external-harness binary        │
 └───────────────────────────────────────────────────────────────┘
 ```
+
+**Self-consistency vs external validation.** L1–L8 all answer "does
+camdl agree with itself?"  — golden IR matches source, Rust matches
+OCaml, synthetic fits recover truth, etc. L9 answers "does camdl
+agree with the outside world?" by comparing against pomp, NumPyro,
+or closed-form solutions at the same parameters. Both classes are
+necessary: self-consistency catches regressions fast and cheap;
+external validation catches the class of bug where camdl is
+internally consistent but scientifically wrong (GH #11 being the
+case in point).
 
 ### L1 — OCaml compiler + dimcheck
 
@@ -205,6 +218,56 @@ config pointing at an `ocaml/golden/*.camdl`.
 
 `cd docs/book && mdbook build`. Catches broken symlinks and dangling
 cross-refs in user-facing docs. Part of the pre-push hook.
+
+### L9 — External validation (against pomp, NumPyro, closed-form, …)
+
+The other test layers are **self-consistency** checks: they verify
+camdl does what camdl's authors think camdl does. L9 compares camdl's
+output to an **external reference** (pomp, NumPyro, Stan, an
+analytical solution) and fails when the two disagree beyond a
+per-case tolerance. Motivated by GH #11 (2026-04-23): the iota
+miscast and forcing-rescale double-conversion bugs were dimensionally
+valid, passed every internal test, and were only detectable against
+pomp. L9 exists to close that class of gap.
+
+```bash
+# Fast path — uses cached reference fixtures, no external tooling needed.
+cargo build --manifest-path rust/Cargo.toml -p external-harness
+./rust/target/debug/external-harness run tests/external/cases/<case>
+
+# Regen path — re-runs the reference tool (R + pomp, Python + NumPyro, …)
+# and refreshes the cached fixture. Requires the reference runtime.
+CAMDL_REGEN_EXTERNAL=1 ./rust/target/debug/external-harness run tests/external/cases/<case>
+# or equivalently:
+./rust/target/debug/external-harness regen tests/external/cases/<case>
+```
+
+Cases live in `tests/external/cases/<name>/` with a `case.toml`
+(what to run), an `expected.toml` (tolerances + required Monte Carlo
+power rationale per check), a `reference/` directory (the external
+driver + pinned dependencies), and a `fixtures/` directory (cached
+summary + MANIFEST.toml). Staleness is detected via three sha256
+hashes (reference directory, case files, harness version) — any
+mismatch fails with a regen instruction; there is no silent drift.
+
+Current cases:
+- `sir_analytical` — bare SIR at R0=3 vs Kermack–McKendrick final-
+  size. Zero external runtime; the harness's own dogfood.
+- `he2010_forward` — He et al. 2010 London measles vs pomp at the
+  published MLE. Regression lock for GH #11.
+
+Not currently in CI — running cargo-test style against the fast path
+is tracked as a follow-up. For now, run locally before changes to
+`chain_binomial.rs`, `propensity.rs`, forcing evaluation, the
+observation layer, or anything that could affect simulation
+numerical output. Any new reference model graduating out of
+`camdl-vignettes/bench/` should land here as a regression lock.
+
+**Design reference:**
+`docs/dev/proposals/2026-04-23-external-validation-harness.md`.
+
+**Operator reference (how to run, how to add a case):**
+`tests/external/README.md`.
 
 ## CI / pre-push
 
