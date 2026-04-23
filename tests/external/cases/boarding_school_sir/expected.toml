@@ -1,0 +1,42 @@
+# Tolerance + Monte Carlo power analysis for the boarding_school_sir case.
+# Empirical reference numbers (200-seed pomp ensemble at the fixed params):
+#   total_infections  mean ≈ 735  sd ≈ 6   (cross-seed CV ≈ 0.9%)
+#   peak_infections   mean ≈ 151  sd ≈ 9   (cross-seed CV ≈ 6.2%)
+
+[checks.total_infections]
+compare   = "mean"
+tol_rel   = 0.02
+rationale = """
+At n=20 camdl seeds the MC SE of the mean is approximately
+sd/sqrt(n) ≈ 6.4/sqrt(20) ≈ 1.4, or ~0.2% of the reference mean
+(~735). tol_rel = 2% is ~10× MC SE — tight enough to catch
+systematic biases ≥ 1.8% at >95% power, loose enough to absorb
+both camdl's n=20 sampling noise and pomp's 200-seed summary SE
+(~0.06% of mean).
+
+The motivating bug class here is subtle — this case exists to
+catch structural divergences between chain_binomial and
+reulermultinom on a closed SIR (no covariates, no events, no
+inhomogeneous mixing). Such divergences would typically shift
+the attack rate by percents, not orders of magnitude, so we want
+tighter tolerance than he2010_forward gets away with. 2% is
+comfortably below the 5% he2010 bar.
+"""
+
+[checks.peak_infections]
+compare   = "mean"
+tol_rel   = 0.08
+rationale = """
+pomp's 200-seed ensemble shows peak daily infections mean ≈ 151
+with cross-seed SD ≈ 9 (CV ≈ 6.2%). At n=20 camdl seeds the MC SE
+of the mean is ≈ 9/sqrt(20) ≈ 2.0, or ~1.3% of the mean. tol_rel
+= 8% is ~6× MC SE — catches systematic biases ≥ ~7% at >95% power.
+
+Looser than total_infections because peak-height is more
+sensitive to stochastic timing: if camdl and pomp happen to
+peak 1 day apart in an individual realisation, the ensemble
+peak means can drift even when the long-run dynamics agree. 8%
+absorbs that without missing structural bugs — a true divergence
+in how the chain-binomial variance scales would move the peak
+by more than 10%.
+"""

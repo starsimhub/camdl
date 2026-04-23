@@ -1,0 +1,35 @@
+# Boarding-school flu outbreak — reference for pomp's canonical SIR
+# tutorial (Anderson & May 1991; pomp::bsflu dataset).
+#
+# Simple closed-population SIR with a single index case, 14-day window.
+# The classical attack-rate narrative: R0 ≈ 3, ~94% eventually infected.
+# Used by the external-validation harness to cross-check camdl's
+# chain_binomial backend against pomp's reulermultinom.
+
+time_unit = 'days
+
+compartments { S, I, R }
+
+let N = S + I + R
+
+parameters {
+  Beta  : rate  in [0.1, 10.0]
+  gamma : rate  in [0.1, 10.0]
+  N0    : count in [100, 10000]
+  I0    : count in [1, 100]
+}
+
+transitions {
+  infection : S --> I  @ Beta * S * I / N
+  recovery  : I --> R  @ gamma * I
+}
+
+init {
+  S = N0 - I0
+  I = I0
+}
+
+simulate {
+  from = 0 'days
+  to   = 14 'days
+}

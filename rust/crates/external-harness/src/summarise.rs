@@ -112,9 +112,15 @@ fn read_tsv_columns(
 ) -> anyhow::Result<HashMap<String, Vec<f64>>> {
     let content = std::fs::read_to_string(path)
         .map_err(|e| anyhow::anyhow!("read {}: {}", path.display(), e))?;
-    let mut lines = content.lines();
+    // Skip leading comment lines (`# ...`) and blank lines — camdl's
+    // --output trajectory TSV emits a `# camdl x.y.z` version header,
+    // and reference scripts sometimes prepend provenance comments.
+    let mut lines = content.lines().filter(|l| {
+        let t = l.trim_start();
+        !t.is_empty() && !t.starts_with('#')
+    });
     let header = lines.next().ok_or_else(|| anyhow::anyhow!(
-        "{}: empty TSV", path.display()))?;
+        "{}: empty TSV (only comments or blanks)", path.display()))?;
     let header_fields: Vec<&str> = header.split('\t').collect();
     let mut col_idx: HashMap<&str, usize> = HashMap::new();
     for (i, name) in header_fields.iter().enumerate() {

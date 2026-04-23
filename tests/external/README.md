@@ -86,8 +86,19 @@ The harness rejects checks with empty rationales at load time.
   to the closed-form final-size `r_∞ ≈ 0.9405`. Runs in <1s with 20
   seeds. Requires no external tooling; regeneration of its fixture is
   manual (edit `derivation.md` and `fixtures/summary.tsv` together).
+- **he2010_forward** — He et al. 2010 London measles at the published
+  MLE vs pomp 6.4. Environmental Gamma noise, interpolated pop +
+  birthrate covariates, cohort school-entry pulse, term-time
+  seasonality. Regression lock for GH #11 (iota + forcing-rescale
+  double-conversion bugs). 20 camdl seeds vs 200 pomp seeds; total
+  21-year cases within ~0.3% of pomp's ensemble mean, persistence
+  rate 20/20 vs 200/200.
+- **boarding_school_sir** — Anderson & May (1991) boarding-school flu
+  narrative via pomp's canonical SIR: closed population of 763, R0=3,
+  14-day window. Structurally simplest pomp case; validates
+  chain_binomial vs reulermultinom on a bare SIR without covariates,
+  events, or inhomogeneous mixing. Total infections agree to ~0.1%,
+  peak daily infections to ~0.4%.
 
 Coming next (per the proposal):
-- he2010_forward — pomp vs camdl on He et al. 2010 London measles
-- boarding_school_sir — pomp's canonical SIR tutorial
 - he2010_pfilter_loglik — pfilter log-lik at the MLE

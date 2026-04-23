@@ -1,0 +1,8 @@
+renv/library/
+renv/staging/
+renv/cache/
+renv/source/
+renv/activate.R
+out/
+.Rhistory
+.RData

@@ -1,0 +1,13 @@
+# Parameters for the canonical boarding-school SIR narrative.
+# R0 = Beta / gamma = 3.0; 1-day mean infectious period.
+# N0 = 763 matches the Anderson & May (1991) / pomp::bsflu school size.
+Beta  = 1.5
+gamma = 0.5
+N0    = 763
+# I0 = 5 rather than 1: with R0 = 3 and I0 = 1, stochastic extinction
+# before takeoff is ~1/R0 = 33%, which makes the ensemble bimodal and
+# awkward to tolerance-check cleanly. I0 = 5 drops extinction below
+# 0.5% while keeping the "small index case" narrative. pomp's bsflu
+# estimates I0 as a free parameter; this fixed value lives in the
+# stable-outbreak regime of that posterior.
+I0    = 5
