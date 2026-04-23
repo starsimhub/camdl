@@ -229,7 +229,8 @@ pub fn regen_case(case_dir: &Path) -> anyhow::Result<FixtureManifest> {
             "reference script did not produce expected ensemble TSV at {}",
             ensemble_path.display()));
     }
-    let summary = crate::summarise::summarise_long_tsv(&case.summary, &ensemble_path, &seed_col)?;
+    let (summary, n_seeds_reference) = crate::summarise::summarise_long_tsv_with_seed_count(
+        &case.summary, &ensemble_path, &seed_col)?;
 
     let fixture_summary_path = case_dir.join("fixtures").join("summary.tsv");
     summary.write_tsv(&fixture_summary_path)?;
@@ -251,7 +252,7 @@ pub fn regen_case(case_dir: &Path) -> anyhow::Result<FixtureManifest> {
         generated_command: Some(format!("external-harness regen (via {})", run_script.display())),
         generated_in_docker: std::env::var("CAMDL_EXTERNAL_USE_DOCKER")
             .ok().is_some_and(|v| v == "1"),
-        n_seeds_reference: case.camdl.n_seeds,
+        n_seeds_reference,
         seed_base: case.camdl.seed_base,
     };
     let manifest_path = case_dir.join("fixtures").join("MANIFEST.toml");

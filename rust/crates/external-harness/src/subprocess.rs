@@ -86,20 +86,25 @@ pub fn run_camdl_seed(
 /// Invoke `reference/run.sh` (or analog) for the regen path.
 /// Returns the exit status; the reference script is expected to write
 /// `fixtures/summary.tsv` itself.
-#[allow(dead_code)]  // used by regen path, wired in next session
 pub fn run_reference(
     run_script: &Path,
     case_dir: &Path,
     log_path: &Path,
 ) -> anyhow::Result<std::process::ExitStatus> {
+    // The subprocess cwd is case_dir, but run_script may be an absolute
+    // path (when the caller already joined case_dir with the relative
+    // script path). Canonicalise before handing to bash so the result
+    // doesn't depend on how the caller assembled the path.
+    let script_abs = std::fs::canonicalize(run_script)
+        .map_err(|e| anyhow::anyhow!("canonicalize {}: {}", run_script.display(), e))?;
     let log = std::fs::File::create(log_path)?;
     let log_err = log.try_clone()?;
     let status = Command::new("bash")
-        .arg(run_script)
+        .arg(&script_abs)
         .current_dir(case_dir)
         .stdout(log)
         .stderr(log_err)
         .status()
-        .map_err(|e| anyhow::anyhow!("spawn reference {}: {}", run_script.display(), e))?;
+        .map_err(|e| anyhow::anyhow!("spawn reference {}: {}", script_abs.display(), e))?;
     Ok(status)
 }

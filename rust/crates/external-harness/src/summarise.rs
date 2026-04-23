@@ -22,6 +22,14 @@ pub fn summarise_long_tsv(
     tsv_path: &Path,
     seed_col: &str,
 ) -> anyhow::Result<Summary> {
+    summarise_long_tsv_with_seed_count(spec, tsv_path, seed_col).map(|(s, _)| s)
+}
+
+pub fn summarise_long_tsv_with_seed_count(
+    spec: &SummarySpec,
+    tsv_path: &Path,
+    seed_col: &str,
+) -> anyhow::Result<(Summary, usize)> {
     let stats = match spec {
         SummarySpec::EnsembleStats { stats } => stats,
         SummarySpec::Prebaked => {
@@ -48,13 +56,14 @@ pub fn summarise_long_tsv(
         }
     }
 
+    let n_seeds = per_seed.len();
     let mut summary = Summary::default();
     for stat in stats {
         let samples = aggregate_across_seeds(stat, &per_seed)?;
         let (name, row) = Summary::from_samples(&stat.name, &samples);
         summary.rows.insert(name, row);
     }
-    Ok(summary)
+    Ok((summary, n_seeds))
 }
 
 pub fn summarise_runs(
@@ -139,8 +148,14 @@ fn aggregate_across_seeds(
     stat: &StatSpec,
     per_seed: &HashMap<u64, HashMap<String, Vec<f64>>>,
 ) -> anyhow::Result<Vec<f64>> {
+    // Sort by seed before aggregation so the summary is deterministic
+    // across runs — HashMap iteration order otherwise shuffles the
+    // summation order and shifts the last bit of `mean` / `sd`.
+    let mut seeds: Vec<u64> = per_seed.keys().copied().collect();
+    seeds.sort_unstable();
     let mut samples: Vec<f64> = Vec::with_capacity(per_seed.len());
-    for (_seed, cols) in per_seed {
+    for seed in seeds {
+        let cols = per_seed.get(&seed).unwrap();
         let col = cols.get(&stat.over).ok_or_else(|| anyhow::anyhow!(
             "stat '{}': column '{}' missing", stat.name, stat.over))?;
         let scoped: &[f64] = match stat.scope.as_deref() {
