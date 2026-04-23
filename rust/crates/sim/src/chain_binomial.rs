@@ -46,7 +46,9 @@ pub struct StepScratch {
     /// Gamma multipliers actually used during step_one, in source-group order.
     /// Populated by step_one for each overdispersed source group encountered.
     /// Used by PGAS to record the gamma drawn at each substep for transition
-    /// density evaluation. Cleared before each step_one call by the caller.
+    /// density evaluation. Cleared at the start of every `step_one` call —
+    /// callers may read it after the call to retrieve the draws from the
+    /// most recent step. Pre-clearing by the caller is redundant but harmless.
     pub gamma_used: Vec<f64>,
 }
 
@@ -148,7 +150,6 @@ fn run_chain_binomial(
         // (once at t_end inside step_one, once at the new t here).
         // See docs/dev/incidents/2026-04-17-chain-binomial-double-fire.md.
         flows.fill(0);
-        scratch.gamma_used.clear();
         step_one(model, &mut int_s.counts, &mut flows, params, t, dt, &mut rng, &mut scratch)?;
 
         // Accumulate flows into output FlowVec
@@ -219,6 +220,12 @@ pub fn step_one(
     // Copy current counts into scratch IntState for propensity evaluation.
     // This is a memcpy into pre-allocated memory, not a heap allocation.
     scratch.int_s.counts.copy_from_slice(counts);
+
+    // Reset per-step output buffer. Without this, overdispersed() models
+    // accumulate one f64 per source-group per substep per particle for the
+    // entire life of the scratch — an unbounded leak in IF2/PF/PMMH which
+    // reuse a single scratch across iterations. See issue #10.
+    scratch.gamma_used.clear();
 
     eval_propensities(model, &scratch.int_s, &scratch.real_s, params, t,
                       &mut scratch.propensities)?;
