@@ -6,3 +6,4 @@ renv/activate.R
 out/
 .Rhistory
 .RData
+renv
