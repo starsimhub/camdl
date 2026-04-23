@@ -191,7 +191,7 @@ pub fn cmd_profile(a: &crate::args::ProfileArgs) {
         grid_points.len(), dim_str, n_starts, total_jobs, n_particles, n_iterations);
 
     // ── Progress bar ─────────────────────────────────────────────────────
-    let mp = MultiProgress::new();
+    let mp = MultiProgress::with_draw_target(crate::progress::draw_target());
     let overall_style = ProgressStyle::with_template(
         "  {prefix:>12} {bar:40.cyan/dim} {pos:>3}/{len:3} {msg}"
     ).unwrap().progress_chars("━╸─");

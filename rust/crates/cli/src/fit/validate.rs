@@ -440,7 +440,7 @@ fn run_profiles(
     use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 
     let n_grid = 21; // points per profile
-    let mp = MultiProgress::new();
+    let mp = MultiProgress::with_draw_target(crate::progress::draw_target());
     let style = ProgressStyle::default_bar()
         .template("{prefix:>12} [{bar:20}] {pos}/{len}")
         .unwrap();

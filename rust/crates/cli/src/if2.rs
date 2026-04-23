@@ -40,6 +40,14 @@ fn run_one_chain(
     pb: Option<&ProgressBar>,
 ) -> IF2Result {
     let chain_seed = crate::util::derive_chain_seed(base_seed, chain_id);
+    let n_iter = config.n_iterations;
+    let plain = crate::progress::is_plain();
+    // RefCell so the progress closure can be `Fn`: run_if2_with_progress
+    // takes `&dyn Fn`. The callback is single-threaded per chain, so
+    // interior mutation is safe.
+    let throttle = std::cell::RefCell::new(
+        crate::progress::Throttle::new(std::time::Duration::from_secs(30))
+    );
 
     let progress_cb = |iter: usize, loglik: f64| {
         if let Some(bar) = pb {
@@ -48,6 +56,15 @@ fn run_one_chain(
                 bar.set_message(format!("ll={:.1}", loglik));
             } else {
                 bar.set_message("ll=-inf".to_string());
+            }
+        }
+        if plain && throttle.borrow_mut().ready() {
+            if loglik.is_finite() {
+                log::info!("if2 chain {} iter {}/{} ll={:.1}",
+                    chain_id + 1, iter + 1, n_iter, loglik);
+            } else {
+                log::info!("if2 chain {} iter {}/{} ll=-inf",
+                    chain_id + 1, iter + 1, n_iter);
             }
         }
     };
@@ -62,6 +79,10 @@ fn run_one_chain(
 
     if let Some(bar) = pb {
         bar.finish_with_message(format!("ll={:.1}", result.final_loglik));
+    }
+    if plain {
+        log::info!("if2 chain {} done iter {}/{} final_ll={:.1}",
+            chain_id + 1, n_iter, n_iter, result.final_loglik);
     }
 
     result
@@ -321,7 +342,10 @@ pub fn cmd_if2(a: &crate::args::If2Args) {
     let if2_params = Arc::new(if2_params);
 
     // ── Multi-chain execution with indicatif progress ──────────────────────
-    let mp = MultiProgress::new();
+    // GH #14: draw target reflects `--progress` mode. In plain/none modes
+    // the bars are hidden; per-chain log::info! lines emitted from the
+    // progress callback provide agent-/tee-/ssh-friendly progress.
+    let mp = MultiProgress::with_draw_target(crate::progress::draw_target());
     let bar_style = ProgressStyle::default_bar()
         .template("  chain {prefix} [{bar:25.cyan/dim}] {pos}/{len} {msg}")
         .unwrap()

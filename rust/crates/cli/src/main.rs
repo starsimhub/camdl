@@ -24,6 +24,7 @@ pub mod version;
 // mod voi; // not mature enough for alpha
 #[allow(dead_code)] mod if2;
 mod profile;
+mod progress;
 
 /// Terminal formatting helpers. Pure ANSI SGR codes, no dependencies.
 /// Respects NO_COLOR (https://no-color.org/) — when set, all formatting
@@ -70,6 +71,14 @@ struct Cli {
     #[arg(long, global = true, default_value = "warn", value_name = "LEVEL",
           help_heading = "Global options")]
     verbosity: log::LevelFilter,
+
+    /// Progress output mode for long-running subcommands (`fit run`,
+    /// `simulate`, `if2`, ...). `auto` uses indicatif bars on a TTY and
+    /// plain timestamped log lines otherwise; `plain` forces plain lines
+    /// (use under `tee`, `&> log`, `ssh`, or CI). See GH #14.
+    #[arg(long, global = true, default_value_t = args::types::ProgressMode::Auto,
+          value_name = "MODE", help_heading = "Global options")]
+    progress: args::types::ProgressMode,
 }
 
 #[derive(Subcommand)]
@@ -219,6 +228,10 @@ fn main() {
     env_logger::Builder::from_env(
         env_logger::Env::default().default_filter_or(cli.verbosity.as_str())
     ).init();
+
+    // Progress output policy (GH #14). Must run after env_logger so that
+    // plain-mode log lines from callbacks reach the configured filter.
+    progress::init(cli.progress);
 
     match cli.command {
         Command::Simulate(a)            => run_simulate(&a),

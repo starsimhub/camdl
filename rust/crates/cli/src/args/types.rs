@@ -80,6 +80,48 @@ impl std::fmt::Display for Backend {
     }
 }
 
+// ─── ProgressMode ─────────────────────────────────────────────────────────────
+
+/// Controls how long-running subcommands (`fit run`, `simulate`, `pfilter`,
+/// ...) report progress. Rationale and semantics: see GH #14.
+///
+/// - `auto`   — pretty indicatif bars if stderr is a TTY, otherwise plain
+///              timestamped log lines. The default.
+/// - `pretty` — force indicatif bars regardless of TTY detection.
+/// - `plain`  — force plain text lines (no `\r`, no ANSI). The mode to use
+///              under `tee`, `&> log`, `ssh`, CI, or any non-interactive
+///              driver that wants to tail/grep progress.
+/// - `none`   — suppress progress output entirely.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, clap::ValueEnum)]
+pub enum ProgressMode {
+    #[default]
+    #[value(name = "auto")]
+    Auto,
+    #[value(name = "pretty")]
+    Pretty,
+    #[value(name = "plain")]
+    Plain,
+    #[value(name = "none")]
+    None,
+}
+
+impl ProgressMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Auto   => "auto",
+            Self::Pretty => "pretty",
+            Self::Plain  => "plain",
+            Self::None   => "none",
+        }
+    }
+}
+
+impl std::fmt::Display for ProgressMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 // ─── SeedSpec ─────────────────────────────────────────────────────────────────
 
 /// `--seeds 1:100`  or  `--seeds 1,2,42`

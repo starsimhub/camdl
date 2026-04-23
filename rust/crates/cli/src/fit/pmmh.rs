@@ -242,7 +242,7 @@ pub fn run_pmmh_cli(
             .map(|(p, &sd)| format!("{}={:.4}", p.name, sd))
             .collect::<Vec<_>>().join(", "));
 
-    let mp = indicatif::MultiProgress::new();
+    let mp = indicatif::MultiProgress::with_draw_target(crate::progress::draw_target());
     let bar_style = indicatif::ProgressStyle::default_bar()
         .template("  chain {prefix} [{bar:25.cyan/dim}] {pos}/{len} {msg}")
         .unwrap()

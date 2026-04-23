@@ -651,6 +651,14 @@ fn run_one_chain(
     let process = config.build_process();
     let obs_model = config.build_obs_model();
 
+    let n_iter = config.if2_config.n_iterations;
+    let plain = crate::progress::is_plain();
+    // RefCell so the progress closure can be `Fn` (run_if2_with_progress
+    // takes `&dyn Fn`). The callback is single-threaded per chain.
+    let throttle = std::cell::RefCell::new(
+        crate::progress::Throttle::new(std::time::Duration::from_secs(30))
+    );
+
     let progress_cb = |iter: usize, loglik: f64| {
         if let Some(bar) = pb {
             bar.set_position((iter + 1) as u64);
@@ -658,6 +666,15 @@ fn run_one_chain(
                 bar.set_message(format!("ll={:.1}", loglik));
             } else {
                 bar.set_message("ll=-inf".to_string());
+            }
+        }
+        if plain && throttle.borrow_mut().ready() {
+            if loglik.is_finite() {
+                log::info!("fit chain {} iter {}/{} ll={:.1}",
+                    chain_id + 1, iter + 1, n_iter, loglik);
+            } else {
+                log::info!("fit chain {} iter {}/{} ll=-inf",
+                    chain_id + 1, iter + 1, n_iter);
             }
         }
     };
@@ -673,6 +690,10 @@ fn run_one_chain(
 
     if let Some(bar) = pb {
         bar.finish_with_message(format!("ll={:.1}", result.final_loglik));
+    }
+    if plain {
+        log::info!("fit chain {} done iter {}/{} final_ll={:.1}",
+            chain_id + 1, n_iter, n_iter, result.final_loglik);
     }
 
     result
@@ -693,7 +714,10 @@ pub fn run_chains_with_per_chain_params(
         config.n_chains, config.if2_config.n_particles, config.if2_config.n_iterations,
         config.if2_config.cooling_fraction, config.if2_config.dt);
 
-    let mp = MultiProgress::new();
+    // GH #14: draw target reflects --progress mode. In plain/none modes the
+    // bars are hidden; per-chain log::info! lines from the progress callback
+    // carry the state for tee/ssh/CI consumers.
+    let mp = MultiProgress::with_draw_target(crate::progress::draw_target());
     let bar_style = ProgressStyle::default_bar()
         .template("  chain {prefix} [{bar:25.cyan/dim}] {pos}/{len} {msg}")
         .unwrap()
