@@ -10,6 +10,53 @@ use crate::summary::Summary;
 use std::collections::HashMap;
 use std::path::Path;
 
+/// Summarise a long-format ensemble TSV: one row per (seed × time) with a
+/// named `seed_col` identifying seeds and `stats.over` naming the value
+/// column. This is the natural output shape for R/pomp (`simulate(..., nsim=N)`
+/// in long format) and most Python/NumPyro references.
+///
+/// Groups by seed, then applies each `StatSpec` the same way
+/// `summarise_runs` does for the per-seed-directory layout used by camdl.
+pub fn summarise_long_tsv(
+    spec: &SummarySpec,
+    tsv_path: &Path,
+    seed_col: &str,
+) -> anyhow::Result<Summary> {
+    let stats = match spec {
+        SummarySpec::EnsembleStats { stats } => stats,
+        SummarySpec::Prebaked => {
+            return Err(anyhow::anyhow!(
+                "summarise_long_tsv called with Prebaked spec"));
+        }
+    };
+    let needed_cols: std::collections::HashSet<&str> = std::iter::once(seed_col)
+        .chain(stats.iter().map(|s| s.over.as_str()))
+        .collect();
+    let cols = read_tsv_columns(tsv_path, &needed_cols)?;
+
+    // Partition rows by seed.
+    let seed_values = cols.get(seed_col).ok_or_else(|| anyhow::anyhow!(
+        "{}: seed column '{}' missing", tsv_path.display(), seed_col))?;
+    let n_rows = seed_values.len();
+    let mut per_seed: HashMap<u64, HashMap<String, Vec<f64>>> = HashMap::new();
+    for i in 0..n_rows {
+        let seed = seed_values[i] as u64;
+        let entry = per_seed.entry(seed).or_default();
+        for (name, vs) in &cols {
+            if name == seed_col { continue; }
+            entry.entry(name.clone()).or_default().push(vs[i]);
+        }
+    }
+
+    let mut summary = Summary::default();
+    for stat in stats {
+        let samples = aggregate_across_seeds(stat, &per_seed)?;
+        let (name, row) = Summary::from_samples(&stat.name, &samples);
+        summary.rows.insert(name, row);
+    }
+    Ok(summary)
+}
+
 pub fn summarise_runs(
     spec: &SummarySpec,
     runs: &[CamdlRun],

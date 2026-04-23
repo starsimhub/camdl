@@ -47,6 +47,8 @@ pub struct CamdlSpec {
 
 fn default_output_spec() -> String { "@seed_dir/obs.tsv".to_string() }
 
+fn default_seed_col() -> String { "sim".to_string() }
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(tag = "kind", rename_all = "kebab-case")]
 pub enum ReferenceSpec {
@@ -63,6 +65,15 @@ pub enum ReferenceSpec {
         /// Typically the `reference/` directory itself.
         #[serde(default)]
         fingerprint_dir: Option<PathBuf>,
+        /// Path to the long-format ensemble TSV the reference script
+        /// writes. Relative to the case directory. The harness reads
+        /// this on regen to compute the fresh summary.
+        ensemble_tsv: PathBuf,
+        /// Name of the seed column in `ensemble_tsv`. Common values:
+        /// pomp's `simulate` uses `sim`; numpyro typically uses `chain`
+        /// or `sample`.
+        #[serde(default = "default_seed_col")]
+        seed_col: String,
     },
     /// Shell-out to a Python (NumPyro, etc.) driver. Same semantics.
     PyNumpyro {

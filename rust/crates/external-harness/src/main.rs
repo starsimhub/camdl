@@ -24,9 +24,21 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Run a specific case's fast path (cached fixture only; no regen).
+    /// Run a specific case. Fast path by default; set
+    /// `CAMDL_REGEN_EXTERNAL=1` or pass `--regen` to invoke the reference
+    /// script first and refresh the cached fixture.
     Run {
         /// Path to the case directory (contains case.toml).
+        case: PathBuf,
+        /// Invoke the reference script first, regenerating the fixture
+        /// before running camdl. Equivalent to `CAMDL_REGEN_EXTERNAL=1`.
+        #[arg(long)]
+        regen: bool,
+    },
+    /// Regenerate a case's fixture from its reference script without
+    /// proceeding to the camdl fast path. Useful for updating fixtures
+    /// in isolation (e.g., after a reference-tooling version bump).
+    Regen {
         case: PathBuf,
     },
     /// List all cases in `tests/external/cases/`.
@@ -53,13 +65,27 @@ enum Command {
         seed_base: Option<u64>,
         #[arg(long)]
         n_seeds: Option<usize>,
+        /// Compute summary.tsv from a pre-existing long-format ensemble
+        /// TSV (skipping the reference script). Useful for seeding a
+        /// new case's fixture from published ensemble output without
+        /// running R locally.
+        #[arg(long, value_name = "PATH")]
+        from_ensemble: Option<PathBuf>,
     },
 }
 
 fn main() {
     let cli = Cli::parse();
     match cli.command {
-        Command::Run { case } => {
+        Command::Run { case, regen } => {
+            let want_regen = regen
+                || std::env::var("CAMDL_REGEN_EXTERNAL").ok().is_some_and(|v| v == "1");
+            if want_regen {
+                if let Err(e) = runner::regen_case(&case) {
+                    eprintln!("regen error: {:#}", e);
+                    std::process::exit(2);
+                }
+            }
             let outcome = runner::run_case(&case).unwrap_or_else(|e| {
                 eprintln!("harness error: {:#}", e);
                 std::process::exit(2);
@@ -72,8 +98,15 @@ fn main() {
                 | Status::ToleranceFail   => std::process::exit(1),
             }
         }
-        Command::Bootstrap { case, write, seed_base, n_seeds } => {
-            if let Err(e) = bootstrap(&case, write, seed_base, n_seeds) {
+        Command::Regen { case } => {
+            if let Err(e) = runner::regen_case(&case) {
+                eprintln!("regen error: {:#}", e);
+                std::process::exit(2);
+            }
+            println!("regen complete for {}", case.display());
+        }
+        Command::Bootstrap { case, write, seed_base, n_seeds, from_ensemble } => {
+            if let Err(e) = bootstrap(&case, write, seed_base, n_seeds, from_ensemble.as_deref()) {
                 eprintln!("bootstrap error: {:#}", e);
                 std::process::exit(2);
             }
@@ -97,8 +130,9 @@ fn bootstrap(
     write: bool,
     seed_base_override: Option<u64>,
     n_seeds_override: Option<usize>,
+    from_ensemble: Option<&std::path::Path>,
 ) -> anyhow::Result<()> {
-    use manifest::{CaseManifest, FixtureManifest};
+    use manifest::{CaseManifest, FixtureManifest, ReferenceSpec};
     let case_text = std::fs::read_to_string(case_dir.join("case.toml"))
         .map_err(|e| anyhow::anyhow!("read case.toml: {}", e))?;
     let case: CaseManifest = toml::from_str(&case_text)
@@ -117,11 +151,30 @@ fn bootstrap(
 
     if !write { return Ok(()); }
 
+    // If given --from-ensemble, compute fixtures/summary.tsv from the
+    // supplied long-format TSV (using the case's summary spec). The seed
+    // column name is read from the reference spec (only r-pomp carries it
+    // in v1).
+    if let Some(ensemble_path) = from_ensemble {
+        let seed_col = match &case.reference {
+            ReferenceSpec::RPomp { seed_col, .. } => seed_col.clone(),
+            _ => return Err(anyhow::anyhow!(
+                "--from-ensemble requires case.reference.kind = 'r-pomp' in v1 \
+                 (seed_col lives on that variant)")),
+        };
+        let summary = summarise::summarise_long_tsv(&case.summary, ensemble_path, &seed_col)?;
+        let summary_path = case_dir.join("fixtures").join("summary.tsv");
+        std::fs::create_dir_all(case_dir.join("fixtures"))?;
+        summary.write_tsv(&summary_path)?;
+        println!("wrote {} (from --from-ensemble {})", summary_path.display(), ensemble_path.display());
+    }
+
     let summary_path = case_dir.join("fixtures").join("summary.tsv");
     if !summary_path.exists() {
         return Err(anyhow::anyhow!(
-            "fixtures/summary.tsv must exist before --write (author it first, \
-             then re-run bootstrap)"));
+            "fixtures/summary.tsv must exist before MANIFEST can be written \
+             (either author it by hand, or pass --from-ensemble PATH to \
+             derive it from a long-format reference TSV)"));
     }
     let fixture_sha = hashing::sha256_file(&summary_path)?;
 

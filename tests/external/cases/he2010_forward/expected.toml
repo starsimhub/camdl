@@ -1,0 +1,69 @@
+# Tolerance + Monte Carlo power analysis for the he2010_forward case.
+# Every check requires a rationale including a power statement.
+
+[checks.total_cases]
+compare   = "mean"
+tol_rel   = 0.05
+rationale = """
+The pomp reference at the published MLE shows total 21-year cases per
+sim in the range ~520k–554k, with ensemble mean ~538k and empirical
+cross-seed SD ~11k (200-seed ensemble in
+camdl-vignettes/he2010-forward/bench/pomp/out/pomp_ensemble.tsv).
+The cross-seed CV is therefore ~2%; at n=20 seeds on the camdl side
+the MC SE of the mean is ~11k/sqrt(20)/538k ≈ 0.45% of the mean.
+
+tol_rel = 5% is ≈11× MC SE — loose enough to absorb both our n=20
+camdl sampling noise and whatever cross-seed-base variance pomp's
+200-seed summary carries, tight enough to fail at >10× MC SE for any
+systematic bias. The motivating class of bugs (iota miscast, forcing
+rescale double-conversion) shifts the mean by 1–2 orders of
+magnitude, so they surface at >50σ here. Detection of subtler bugs
+(~5% systematic bias in total cases) requires bumping n_seeds or
+tightening the tolerance; both are follow-ups.
+"""
+
+[checks.persistence_rate]
+compare   = "proportion-test"
+alpha     = 0.01
+rationale = """
+Two-sample z-test for proportions at α = 0.01 gives consistent
+sensitivity across the full [0, 1] persistence range, where a fixed
+absolute tolerance would be too tight at p=0.5 and too loose at
+p≈1.0. pomp at the MLE has persistence_rate = 1.0 (200/200 sims
+persist past the 50-case-last-year threshold). camdl at the fixed
+MLE should also be ≈1.0 on an endemic model — if it isn't, the
+simulator is losing the chain into extinction, which is the exact
+failure mode #11 diagnosed.
+
+Power: at p1 = p2 ≈ 1.0 the test compares two near-degenerate
+binomials; any meaningful drop on the camdl side (say persistence
+0.95 with 20 seeds, p2 = 1.0 with 200) gives z ≈ 2.2 and rejects at
+α = 0.05 but not α = 0.01 with this n. For the #11 class of bug
+(persistence → 0), the rejection is at z = ∞ effectively. If a
+future regression causes a subtle persistence drop (say 95% instead
+of 100%), we may need to bump n_seeds or loosen α — flagged as a
+v2 concern.
+"""
+
+[checks.last52_cases]
+compare   = "mean"
+tol_rel   = 0.25
+rationale = """
+Last-year case totals are substantially more variable across seeds
+than cumulative totals — pomp's 200-seed ensemble shows last52_cases
+ranging from 0 to ~55000, reflecting the biennial-epidemic cycle's
+sensitivity to the phase of the last year in the simulation window.
+Empirical cross-seed SD is ~15000 on a mean of ~2200 — a CV of
+nearly 7. At n=20 camdl seeds the MC SE is therefore ~15000/sqrt(20)
+≈ 3355, or ~150% of the mean — worse than the mean itself.
+
+tol_rel = 25% is therefore *inside* MC SE; this check is effectively
+diagnostic-only at n=20 seeds and will pass/fail noisily. It's
+included because the motivating bug drove last52_cases to zero,
+making the bug detectable at this tolerance at any reasonable n —
+but readers should not interpret a green on this check as evidence
+of subtle-bias detection power. To turn this into a real regression
+check, bump to n_seeds ≥ 200 (matching pomp), at which point MC SE
+drops to ~15000/sqrt(200) ≈ 1060 = ~48% of the mean — still loose,
+but usable. v2 todo.
+"""

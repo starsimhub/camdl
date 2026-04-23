@@ -1,0 +1,45 @@
+name = "he2010_forward"
+description = """
+He, Ionides & King (2010) London measles, forward simulation at the
+published MLE. Stochastic SEIR with environmental Gamma noise,
+interpolated population + birthrate covariates, cohort school-entry
+pulse, term-time seasonal forcing. Regression lock for issue #11
+(the iota + forcing-rescale double-bug pair) — those specific silent
+wrong-answer bugs cannot resurface without this case failing.
+"""
+category = "forward-simulation"
+
+[camdl]
+model     = "model.camdl"
+params    = "params.toml"
+command   = [
+    "camdl", "simulate",
+    "@model", "--params", "@params",
+    "--backend", "chain_binomial", "--dt", "1.0",
+    "--seed", "@seed",
+    "--obs-only", "@obs_out",
+]
+n_seeds   = 20
+seed_base = 42
+
+[reference]
+kind         = "r-pomp"
+run          = "reference/run.sh"
+ensemble_tsv = "reference/out/pomp_ensemble.tsv"
+seed_col     = "sim"
+
+[summary]
+kind = "ensemble-stats"
+stats = [
+    # Per-seed total cases summed over all 21 years of weekly observation.
+    # pomp's `cases` column is renamed to `weekly_cases` by run.sh so
+    # this single spec drives both sides.
+    { name = "total_cases",      aggregate = "sum",  over = "weekly_cases", scope = "per-seed" },
+    # Per-seed total over the last 52 weeks — the persistence signature.
+    # The #11 bug drove last-year cases from pomp's ~40 to camdl's 0.
+    { name = "last52_cases",     aggregate = "sum",  over = "weekly_cases", scope = "last-year-per-seed" },
+    # Fraction of seeds whose last-year total exceeds the persistence
+    # threshold. pomp at the MLE: 200/200 = 1.0. Broken camdl: 0/20000.
+    # Compared via the two-sample proportion test in expected.toml.
+    { name = "persistence_rate", aggregate = "frac", over = "weekly_cases", scope = "last-year-per-seed", threshold = 50 },
+]

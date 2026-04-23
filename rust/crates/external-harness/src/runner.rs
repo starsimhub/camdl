@@ -165,8 +165,13 @@ pub fn compute_reference_sha(spec: &ReferenceSpec, case_dir: &Path) -> anyhow::R
         ReferenceSpec::Analytical { derivation } => {
             hashing::sha256_file(&case_dir.join(derivation))
         }
-        ReferenceSpec::RPomp { run, fingerprint_dir }
-        | ReferenceSpec::PyNumpyro { run, fingerprint_dir }
+        ReferenceSpec::RPomp { run, fingerprint_dir, .. } => {
+            let target = fingerprint_dir
+                .clone()
+                .unwrap_or_else(|| run.parent().unwrap_or_else(|| Path::new(".")).to_path_buf());
+            hashing::sha256_dir(&case_dir.join(target))
+        }
+        ReferenceSpec::PyNumpyro { run, fingerprint_dir }
         | ReferenceSpec::Stan { run, fingerprint_dir } => {
             let target = fingerprint_dir
                 .clone()
@@ -174,6 +179,126 @@ pub fn compute_reference_sha(spec: &ReferenceSpec, case_dir: &Path) -> anyhow::R
             hashing::sha256_dir(&case_dir.join(target))
         }
     }
+}
+
+/// Invoke the reference script and compute a fresh summary from its
+/// output. Writes the new `fixtures/summary.tsv` and `fixtures/MANIFEST.toml`.
+/// Returns the new fixture MANIFEST so the caller can proceed to rerun
+/// the fast path against the fresh fixture.
+pub fn regen_case(case_dir: &Path) -> anyhow::Result<FixtureManifest> {
+    let case: CaseManifest = load_toml(&case_dir.join("case.toml"))?;
+
+    let (run_script, ensemble_tsv, seed_col) = match &case.reference {
+        ReferenceSpec::Analytical { .. } => {
+            return Err(anyhow::anyhow!(
+                "case '{}' has reference.kind = 'analytical'; regen is manual \
+                 (edit reference/derivation.md and fixtures/summary.tsv together, \
+                 then `external-harness bootstrap --write`).",
+                case.name));
+        }
+        ReferenceSpec::RPomp { run, ensemble_tsv, seed_col, .. } => {
+            (run.clone(), ensemble_tsv.clone(), seed_col.clone())
+        }
+        ReferenceSpec::PyNumpyro { .. } | ReferenceSpec::Stan { .. } => {
+            return Err(anyhow::anyhow!(
+                "regen for this reference kind not yet wired (the ensemble_tsv \
+                 / seed_col fields live on RPomp for v1; generalise when we \
+                 actually add a numpyro case)"));
+        }
+    };
+
+    // Prepare a timestamped run directory for the reference log.
+    let ts = chrono::Utc::now().format("%Y%m%dT%H%M%S").to_string();
+    let run_dir = case_dir.join("..").join("..").join("runs").join(&case.name).join(format!("regen-{}", ts));
+    std::fs::create_dir_all(&run_dir)
+        .map_err(|e| anyhow::anyhow!("create {}: {}", run_dir.display(), e))?;
+
+    eprintln!("running reference: {}", run_script.display());
+    let log_path = run_dir.join("reference.log");
+    let status = crate::subprocess::run_reference(&case_dir.join(&run_script), case_dir, &log_path)?;
+    if !status.success() {
+        return Err(anyhow::anyhow!(
+            "reference script exited {:?}; log: {}",
+            status.code(), log_path.display()));
+    }
+
+    // Read the ensemble and summarise.
+    let ensemble_path = case_dir.join(&ensemble_tsv);
+    if !ensemble_path.exists() {
+        return Err(anyhow::anyhow!(
+            "reference script did not produce expected ensemble TSV at {}",
+            ensemble_path.display()));
+    }
+    let summary = crate::summarise::summarise_long_tsv(&case.summary, &ensemble_path, &seed_col)?;
+
+    let fixture_summary_path = case_dir.join("fixtures").join("summary.tsv");
+    summary.write_tsv(&fixture_summary_path)?;
+
+    // Rewrite MANIFEST with fresh hashes and provenance.
+    let reference_sha = compute_reference_sha(&case.reference, case_dir)?;
+    let case_sha = compute_case_sha(&case, case_dir)?;
+    let fixture_sha = hashing::sha256_file(&fixture_summary_path)?;
+
+    let fm = FixtureManifest {
+        reference_sha, case_sha,
+        harness_version: HARNESS_VERSION.to_string(),
+        fixture_sha,
+        pomp_version: detect_pomp_version(case_dir),
+        r_version: detect_r_version(),
+        python_version: None,
+        generated_at: chrono::Utc::now().to_rfc3339(),
+        generated_on: Some(format!("{}-{}", std::env::consts::OS, std::env::consts::ARCH)),
+        generated_command: Some(format!("external-harness regen (via {})", run_script.display())),
+        generated_in_docker: std::env::var("CAMDL_EXTERNAL_USE_DOCKER")
+            .ok().is_some_and(|v| v == "1"),
+        n_seeds_reference: case.camdl.n_seeds,
+        seed_base: case.camdl.seed_base,
+    };
+    let manifest_path = case_dir.join("fixtures").join("MANIFEST.toml");
+    let text = toml::to_string_pretty(&fm)
+        .map_err(|e| anyhow::anyhow!("serialize MANIFEST: {}", e))?;
+    std::fs::write(&manifest_path, text)
+        .map_err(|e| anyhow::anyhow!("write {}: {}", manifest_path.display(), e))?;
+    eprintln!("wrote {}", manifest_path.display());
+    Ok(fm)
+}
+
+fn detect_pomp_version(case_dir: &Path) -> Option<String> {
+    // Read from renv.lock if present — cheap string search for the pomp
+    // package version, avoiding a full JSON parse dep.
+    let renv = case_dir.join("reference").join("renv.lock");
+    let text = std::fs::read_to_string(&renv).ok()?;
+    // Look for `"pomp": { ... "Version": "X.Y" ...}`. Small state machine.
+    let bytes = text.as_bytes();
+    let needle = b"\"pomp\"";
+    let mut i = 0;
+    while i + needle.len() < bytes.len() {
+        if &bytes[i..i + needle.len()] == needle {
+            // Find the next `"Version"`.
+            let rest = &text[i..];
+            if let Some(v_idx) = rest.find("\"Version\"") {
+                let after = &rest[v_idx + "\"Version\"".len()..];
+                if let Some(q1) = after.find('"') {
+                    let after2 = &after[q1 + 1..];
+                    if let Some(q2) = after2.find('"') {
+                        return Some(after2[..q2].to_string());
+                    }
+                }
+            }
+            break;
+        }
+        i += 1;
+    }
+    None
+}
+
+fn detect_r_version() -> Option<String> {
+    let out = std::process::Command::new("Rscript")
+        .arg("-e")
+        .arg("cat(paste(R.version$major, R.version$minor, sep='.'))")
+        .output().ok()?;
+    if !out.status.success() { return None; }
+    String::from_utf8(out.stdout).ok().map(|s| s.trim().to_string())
 }
 
 pub fn compute_case_sha(case: &CaseManifest, case_dir: &Path) -> anyhow::Result<String> {

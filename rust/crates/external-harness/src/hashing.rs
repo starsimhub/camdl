@@ -27,6 +27,12 @@ pub fn sha256_bytes(bytes: &[u8]) -> String {
 /// filesystem ordering doesn't affect the result. The hash incorporates
 /// both the relative path and the file contents so moving a file between
 /// directories changes the hash.
+///
+/// Paths whose relative form matches any of the prefixes in
+/// `REFERENCE_IGNORE_PREFIXES` are skipped. These are runtime artifacts
+/// of external reference tooling — renv library restores, docker build
+/// output, reference-script output files — none of which should
+/// participate in staleness detection for the reference script itself.
 pub fn sha256_dir(root: &Path) -> anyhow::Result<String> {
     let mut entries: Vec<(String, Vec<u8>)> = Vec::new();
     for entry in walkdir::WalkDir::new(root)
@@ -37,6 +43,7 @@ pub fn sha256_dir(root: &Path) -> anyhow::Result<String> {
         let rel = entry.path().strip_prefix(root)
             .map_err(|e| anyhow::anyhow!("strip_prefix {}: {}", entry.path().display(), e))?;
         let rel_str = rel.to_string_lossy().replace('\\', "/");
+        if should_ignore(&rel_str) { continue; }
         let bytes = std::fs::read(entry.path())
             .map_err(|e| anyhow::anyhow!("read {}: {}", entry.path().display(), e))?;
         entries.push((rel_str, bytes));
@@ -51,6 +58,32 @@ pub fn sha256_dir(root: &Path) -> anyhow::Result<String> {
         hasher.update(&bytes);
     }
     Ok(hex::encode(hasher.finalize()))
+}
+
+/// Relative paths matching any of these prefixes are excluded from the
+/// reference-directory hash. These are all runtime artifacts of the
+/// external reference tooling, not part of the tooling itself:
+/// - `renv/library/` `renv/staging/` `renv/cache/` `renv/source/`
+///   `renv/activate.R` — populated on first `renv::restore()`.
+/// - `out/` — reference script output (the ensemble TSV itself lives
+///   here; it's what the harness *consumes*, not part of the script).
+/// - `.Rhistory` `.RData` — R session artifacts.
+/// - `__pycache__/` `.venv/` — Python equivalents.
+const REFERENCE_IGNORE_PREFIXES: &[&str] = &[
+    "renv/library/",
+    "renv/staging/",
+    "renv/cache/",
+    "renv/source/",
+    "renv/activate.R",
+    "out/",
+    ".Rhistory",
+    ".RData",
+    "__pycache__/",
+    ".venv/",
+];
+
+fn should_ignore(rel_path: &str) -> bool {
+    REFERENCE_IGNORE_PREFIXES.iter().any(|pfx| rel_path.starts_with(pfx))
 }
 
 /// Hash over a list of files concatenated in caller-specified order.
