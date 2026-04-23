@@ -240,15 +240,23 @@ valid, passed every internal test, and were only detectable against
 pomp. L9 exists to close that class of gap.
 
 ```bash
-# Fast path — uses cached reference fixtures, no external tooling needed.
-cargo build --manifest-path rust/Cargo.toml -p external-harness
-./rust/target/debug/external-harness run tests/external/cases/<case>
+# Fast path via cargo test — every `make test-rust` runs this; no
+# external tooling needed (cached reference fixtures only).
+cargo test --test external_validation --manifest-path rust/Cargo.toml
+
+# Same, with per-case pass/fail visible:
+cargo test --test external_validation --manifest-path rust/Cargo.toml -- --nocapture
+
+# Direct harness invocation (equivalent; better for iterative debugging):
+cd rust && cargo build -p external-harness
+./target/debug/external-harness run-all                        # all cases
+./target/debug/external-harness run tests/external/cases/<case>  # single case
 
 # Regen path — re-runs the reference tool (R + pomp, Python + NumPyro, …)
 # and refreshes the cached fixture. Requires the reference runtime.
-CAMDL_REGEN_EXTERNAL=1 ./rust/target/debug/external-harness run tests/external/cases/<case>
+CAMDL_REGEN_EXTERNAL=1 ./target/debug/external-harness run-all
 # or equivalently:
-./rust/target/debug/external-harness regen tests/external/cases/<case>
+./target/debug/external-harness regen tests/external/cases/<case>
 ```
 
 Cases live in `tests/external/cases/<name>/` with a `case.toml`
@@ -265,12 +273,18 @@ Current cases:
 - `he2010_forward` — He et al. 2010 London measles vs pomp at the
   published MLE. Regression lock for GH #11.
 
-Not currently in CI — running cargo-test style against the fast path
-is tracked as a follow-up. For now, run locally before changes to
-`chain_binomial.rs`, `propensity.rs`, forcing evaluation, the
-observation layer, or anything that could affect simulation
-numerical output. Any new reference model graduating out of
-`camdl-vignettes/bench/` should land here as a regression lock.
+L9's fast path runs as part of `make test-rust` (and therefore the
+pre-push hook and CI). The `external_validation` test at
+`rust/tests/external_validation.rs` shells out to the
+`external-harness` binary; cargo-test reports it as a single `ok`
+line, and the per-case breakdown appears inline in test output.
+Failure messages include tolerance diffs and a hint to re-run with
+`--nocapture` for full detail.
+
+On fixture staleness (edited `reference/` or `model.camdl` /
+`params.toml` without regenerating): the test fails with a clear
+STALE message and the exact `CAMDL_REGEN_EXTERNAL=1` command to
+regenerate.
 
 **Design reference:**
 `docs/dev/proposals/2026-04-23-external-validation-harness.md`.

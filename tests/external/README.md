@@ -31,18 +31,32 @@ tests/external/
 From the repo root:
 
 ```bash
-# Build the harness binary
-cargo build --release --manifest-path rust/Cargo.toml -p external-harness
+# All cases via cargo test (the pre-push/CI path — no external tooling)
+cargo test --test external_validation --manifest-path rust/Cargo.toml -- --nocapture
 
-# Run a single case (fast path: cached fixtures only, no external tooling)
-./rust/target/debug/external-harness run tests/external/cases/sir_analytical
+# Or via the harness binary directly (built by cargo when needed)
+cd rust && cargo build -p external-harness
+./target/debug/external-harness run-all
+
+# Single case
+./target/debug/external-harness run ../tests/external/cases/sir_analytical
+
+# Regen (rebuilds cached fixture from the reference tool; requires R/etc.)
+CAMDL_REGEN_EXTERNAL=1 ./target/debug/external-harness run-all
+./target/debug/external-harness regen ../tests/external/cases/he2010_forward
 ```
 
-Expected output on success:
+Expected `run-all` output on success:
 
 ```
-PASS sir_analytical (1 checks)
-  ok  final_R [mean]
+running 3 external-validation cases under tests/external/cases
+
+  run    boarding_school_sir            pass (2 checks, 0.2s)
+  run    he2010_forward                 pass (3 checks, 0.8s)
+  run    sir_analytical                 pass (1 checks, 0.3s)
+
+── summary ──
+3 passed, 0 failed, 0 stale, 0 crashed  in 1.3s
 ```
 
 ## Adding a new case

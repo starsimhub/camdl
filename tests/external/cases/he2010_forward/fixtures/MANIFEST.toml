@@ -1,12 +1,10 @@
 reference_sha = "184c65ff548850482fa425f3ffe850999bb5fa466c7367762626b164c0ddec23"
-case_sha = "5167553a880c0ed9193e53df87c4c39f413c5b5db9cc0a06c7efaccc063823c1"
+case_sha = "fbb3a525b4f47cc537093757506f4225bc7e1366878eca4ee6bc2e86bacbb00b"
 harness_version = "0.1.0"
 fixture_sha = "589b92a6dcb8dce69e2dbdaf44b8a39c362da0d7a350c4058d38173558f6182c"
-pomp_version = "6.4"
-r_version = "4.5.3"
-generated_at = "2026-04-23T18:09:40.612601+00:00"
+generated_at = "2026-04-23T18:41:56.681913+00:00"
 generated_on = "macos-aarch64"
-generated_command = "external-harness regen (via reference/run.sh)"
+generated_command = "external-harness bootstrap"
 generated_in_docker = false
-n_seeds_reference = 200
+n_seeds_reference = 20
 seed_base = 42

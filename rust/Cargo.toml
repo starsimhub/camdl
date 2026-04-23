@@ -20,5 +20,16 @@ resolver = "2"
 name = "golden_deser"
 path = "tests/golden_deser.rs"
 
+[[test]]
+name = "external_validation"
+path = "tests/external_validation.rs"
+
 [dev-dependencies]
 ir = { path = "crates/ir" }
+
+# Dev-dep on external-harness is declared so cargo builds the binary and
+# exposes CARGO_BIN_EXE_external-harness to tests/external_validation.rs.
+# external-harness's lib.rs is an empty stub; the actual code lives in
+# the binary modules. Dependency is on path only; no version pinning
+# because it's in the same workspace.
+external-harness = { path = "crates/external-harness" }

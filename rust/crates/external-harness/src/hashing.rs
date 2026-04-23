@@ -88,12 +88,22 @@ fn should_ignore(rel_path: &str) -> bool {
 
 /// Hash over a list of files concatenated in caller-specified order.
 /// Used for `case_sha` — model + params + case.toml + expected.toml.
+///
+/// The hash incorporates each file's **basename** (not its full path) so
+/// the result is stable across relative-vs-absolute and
+/// workspace-relative-vs-test-cwd invocations. File CONTENTS drive the
+/// hash; directory location does not. (If moving a case to a different
+/// directory should invalidate its fixture, that concern is covered by
+/// the separate `reference_sha` or by the case_toml contents themselves.)
 pub fn sha256_files(paths: &[&Path]) -> anyhow::Result<String> {
     let mut hasher = Sha256::new();
     for p in paths {
         let bytes = std::fs::read(p)
             .map_err(|e| anyhow::anyhow!("read {}: {}", p.display(), e))?;
-        hasher.update(p.to_string_lossy().as_bytes());
+        let basename = p.file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or("");
+        hasher.update(basename.as_bytes());
         hasher.update(b"\0");
         hasher.update(&(bytes.len() as u64).to_le_bytes());
         hasher.update(&bytes);

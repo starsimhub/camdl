@@ -41,6 +41,17 @@ enum Command {
     Regen {
         case: PathBuf,
     },
+    /// Run every case under `tests/external/cases/` and print a summary
+    /// at the end. Exits non-zero if any case failed. CAMDL_REGEN_EXTERNAL=1
+    /// also regenerates each case's fixture before its fast-path run.
+    RunAll {
+        #[arg(long, default_value = "tests/external/cases")]
+        root: PathBuf,
+        /// Regenerate fixtures before running. Equivalent to
+        /// `CAMDL_REGEN_EXTERNAL=1`.
+        #[arg(long)]
+        regen: bool,
+    },
     /// List all cases in `tests/external/cases/`.
     #[allow(dead_code)]
     List {
@@ -98,6 +109,19 @@ fn main() {
                 | Status::ToleranceFail   => std::process::exit(1),
             }
         }
+        Command::RunAll { root, regen } => {
+            let want_regen = regen
+                || std::env::var("CAMDL_REGEN_EXTERNAL").ok().is_some_and(|v| v == "1");
+            match run_all(&root, want_regen) {
+                Ok(all_passed) => {
+                    if !all_passed { std::process::exit(1); }
+                }
+                Err(e) => {
+                    eprintln!("run-all error: {:#}", e);
+                    std::process::exit(2);
+                }
+            }
+        }
         Command::Regen { case } => {
             if let Err(e) = runner::regen_case(&case) {
                 eprintln!("regen error: {:#}", e);
@@ -123,6 +147,126 @@ fn main() {
             }
         }
     }
+}
+
+fn run_all(root: &std::path::Path, regen: bool) -> anyhow::Result<bool> {
+    use runner::Status;
+
+    let mut cases: Vec<PathBuf> = std::fs::read_dir(root)
+        .map_err(|e| anyhow::anyhow!("read {}: {}", root.display(), e))?
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_type().map(|t| t.is_dir()).unwrap_or(false))
+        .map(|e| e.path())
+        .filter(|p| p.join("case.toml").exists())
+        .collect();
+    cases.sort();
+
+    if cases.is_empty() {
+        return Err(anyhow::anyhow!(
+            "no cases found under {} (expected subdirectories each containing case.toml)",
+            root.display()));
+    }
+
+    let n_cases = cases.len();
+    let start = std::time::Instant::now();
+    println!("running {} external-validation cases under {}", n_cases, root.display());
+    println!();
+
+    let mut outcomes: Vec<(String, runner::CaseOutcome, std::time::Duration)> = Vec::with_capacity(n_cases);
+    for case_dir in &cases {
+        let name = case_dir.file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or("?").to_string();
+        let t0 = std::time::Instant::now();
+
+        if regen {
+            print!("  regen  {:30} ", name);
+            std::io::Write::flush(&mut std::io::stdout()).ok();
+            match runner::regen_case(case_dir) {
+                Ok(_) => println!("ok ({:.1}s)", t0.elapsed().as_secs_f64()),
+                Err(e) => {
+                    println!("FAIL");
+                    eprintln!("    {}", e);
+                    outcomes.push((name.clone(), runner::CaseOutcome {
+                        name: name.clone(),
+                        status: Status::Crash(format!("regen error: {}", e)),
+                        checks: vec![],
+                        run_dir: case_dir.clone(),
+                    }, t0.elapsed()));
+                    continue;
+                }
+            }
+        }
+
+        print!("  run    {:30} ", name);
+        std::io::Write::flush(&mut std::io::stdout()).ok();
+        let outcome = match runner::run_case(case_dir) {
+            Ok(o) => o,
+            Err(e) => {
+                println!("ERROR");
+                eprintln!("    harness error: {:#}", e);
+                outcomes.push((name.clone(), runner::CaseOutcome {
+                    name: name.clone(),
+                    status: Status::Crash(format!("harness error: {}", e)),
+                    checks: vec![],
+                    run_dir: case_dir.clone(),
+                }, t0.elapsed()));
+                continue;
+            }
+        };
+        let elapsed = t0.elapsed();
+        let tag = match &outcome.status {
+            Status::Pass              => "pass",
+            Status::Stale(_)          => "STALE",
+            Status::Crash(_)          => "CRASH",
+            Status::ToleranceFail     => "FAIL",
+        };
+        println!("{} ({} checks, {:.1}s)", tag, outcome.checks.len(), elapsed.as_secs_f64());
+        if !matches!(outcome.status, Status::Pass) {
+            // Print failure detail inline so users don't need to re-run
+            // the single case to see what broke.
+            match &outcome.status {
+                Status::Stale(msg) | Status::Crash(msg) => eprintln!("    {}", msg),
+                Status::ToleranceFail => {
+                    for c in &outcome.checks {
+                        if c.outcome == compare::Outcome::Fail {
+                            eprintln!("    FAIL {} [{}] — {}", c.stat, c.kind_description, c.detail);
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        outcomes.push((name, outcome, elapsed));
+    }
+
+    // Summary
+    let total = start.elapsed();
+    let mut pass = 0usize; let mut fail = 0usize; let mut stale = 0usize; let mut crash = 0usize;
+    for (_, o, _) in &outcomes {
+        match o.status {
+            Status::Pass => pass += 1,
+            Status::Stale(_) => stale += 1,
+            Status::Crash(_) => crash += 1,
+            Status::ToleranceFail => fail += 1,
+        }
+    }
+    println!();
+    println!("── summary ──");
+    println!("{} passed, {} failed, {} stale, {} crashed  in {:.1}s",
+        pass, fail, stale, crash, total.as_secs_f64());
+    if fail + stale + crash > 0 {
+        println!();
+        for (name, o, _) in &outcomes {
+            match &o.status {
+                Status::Pass => {}
+                Status::Stale(_)  => println!("  STALE  {}", name),
+                Status::Crash(_)  => println!("  CRASH  {}", name),
+                Status::ToleranceFail => println!("  FAIL   {}", name),
+            }
+        }
+    }
+    Ok(fail + stale + crash == 0)
 }
 
 fn bootstrap(
