@@ -51,6 +51,11 @@ impl CandidateLabel {
 
 /// One candidate's clean-PF score: combined log-likelihood plus the
 /// per-replicate raw values (kept for diagnostics + downstream gating).
+///
+/// Fields beyond what `select_winner_summary` reads are written but not
+/// yet read — Step 7 (`chain_evaluations.tsv`) and Step 8 (compound
+/// gate) consume them.
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct CandidateScore {
     pub chain_id: usize,
@@ -65,6 +70,7 @@ pub struct CandidateScore {
 }
 
 /// Best candidate within a single chain.
+#[allow(dead_code)]  // `theta` is consumed in Step 7 (final_params.toml writer).
 #[derive(Debug, Clone)]
 pub struct ChainWinner {
     pub chain_id: usize,
@@ -77,6 +83,7 @@ pub struct ChainWinner {
 /// Full output of clean evaluation: every (chain × candidate) score, a
 /// per-chain winner table, and the index into `per_chain_winners` of the
 /// overall maximum.
+#[allow(dead_code)]  // `all_scores` is consumed in Step 7 (chain_evaluations.tsv writer).
 #[derive(Debug, Clone)]
 pub struct CleanEvalOutcome {
     /// All 3 × n_chains candidate scores, in deterministic order:

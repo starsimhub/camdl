@@ -4,6 +4,7 @@
 //! obs_loglik construction from IR observation model, chain execution,
 //! chain-agreement (Â) computation, and MAD-based auto rw_sd calibration.
 
+use crate::fit::clean_eval;
 use crate::fit::config::FitToml;
 use crate::fit::state::FitState;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
@@ -73,11 +74,25 @@ pub struct FitRunConfig {
 }
 
 /// Result of running multiple IF2 chains.
+///
+/// `best_chain` / `best_loglik` are the clean-eval winner (Step 6:
+/// proposal §Proposal 1). They no longer reflect in-run noisy
+/// `IF2Result::final_loglik` argmax — that selection had a ~40-nat
+/// extraction bias. `winning_label` records which of the three
+/// candidate heuristics produced the winning θ̂ (final-iter mean,
+/// tail mean, or best-in-run iter); `best_se` is the clean-eval
+/// standard error of the combined log-likelihood; `clean_eval`
+/// preserves the full 3 × n_chains score table for downstream gating
+/// and TSV emission (Steps 7–9).
+#[allow(dead_code)]  // `best_se` / `winning_label` / `clean_eval` consumed in Steps 7–9.
 pub struct ChainResults {
     pub results: Vec<(usize, IF2Result)>,
     pub best_chain: usize,
     pub best_loglik: f64,
+    pub best_se: f64,
+    pub winning_label: super::clean_eval::CandidateLabel,
     pub chain_agreement: HashMap<String, f64>,
+    pub clean_eval: super::clean_eval::CleanEvalOutcome,
 }
 
 impl FitRunConfig {
@@ -780,20 +795,36 @@ pub fn run_chains_with_per_chain_params(
         eprintln!();
     }
 
-    // Find best chain
-    let (best_chain, best_loglik) = results.iter()
-        .max_by(|a, b| a.1.final_loglik.total_cmp(&b.1.final_loglik))
-        .map(|(id, r)| (*id, r.final_loglik))
-        .unwrap();
-
-    // Compute chain agreement (Â)
+    // Compute chain agreement (Â) on the per-iteration param-mean
+    // trajectories — independent of clean-eval scoring.
     let chain_agreement = compute_chain_agreement(&results, &config.estimated_params, config.if2_config.n_iterations);
 
+    // Step 6 (proposal §Proposal 1): clean-eval re-scoring at high
+    // particle count and M replicates. The winner is the argmax over
+    // logmeanexp-combined logliks across (chain × candidate). Replaces
+    // the prior `argmax over result.final_loglik`, which was driven by
+    // 500-particle in-run PF noise and exhibited a ~40-nat extraction
+    // bias on production runs. The in-run trace above is preserved for
+    // diagnostics (Unit B territory).
+    eprintln!("\nclean-eval: re-scoring candidates ({} chains × 3 candidates × {} replicates @ {} particles)...",
+        results.len(), config.clean_eval.n_replicates, config.clean_eval.n_particles);
+    let clean_eval_outcome = clean_eval::run_clean_eval(
+        config, &results, &config.clean_eval, config.seed,
+    ).unwrap_or_else(|e| {
+        eprintln!("error: clean-eval failed: {}", e);
+        std::process::exit(1);
+    });
+
+    let (best_chain, best_loglik, best_se, winning_label) =
+        select_winner_summary(&clean_eval_outcome);
+
     // Report
-    eprintln!("\nbest chain: {} (loglik={:.2})", best_chain + 1, best_loglik);
+    eprintln!("\nbest chain: {} (loglik={:.2} ± {:.2}, candidate={})",
+        best_chain + 1, best_loglik, best_se, winning_label.as_str());
     if config.n_chains > 1 {
-        let logliks: Vec<f64> = results.iter().map(|(_, r)| r.final_loglik).collect();
-        eprintln!("chain logliks: [{}]",
+        let logliks: Vec<f64> = clean_eval_outcome.per_chain_winners.iter()
+            .map(|w| w.loglik).collect();
+        eprintln!("chain clean logliks: [{}]",
             logliks.iter().map(|l| format!("{:.1}", l)).collect::<Vec<_>>().join(", "));
     }
 
@@ -824,7 +855,26 @@ pub fn run_chains_with_per_chain_params(
         }
     }
 
-    ChainResults { results, best_chain, best_loglik, chain_agreement }
+    ChainResults {
+        results,
+        best_chain,
+        best_loglik,
+        best_se,
+        winning_label,
+        chain_agreement,
+        clean_eval: clean_eval_outcome,
+    }
+}
+
+/// Pure helper: extract the (chain_id, ll, se, label) summary from a
+/// `CleanEvalOutcome`. Factored out so the wiring change in
+/// `run_chains_with_per_chain_params` is unit-testable without paying
+/// for a real IF2 + PF run. Tested in `tests::winner_summary_*`.
+fn select_winner_summary(
+    outcome: &clean_eval::CleanEvalOutcome,
+) -> (usize, f64, f64, clean_eval::CandidateLabel) {
+    let w = &outcome.per_chain_winners[outcome.overall_winner_idx];
+    (w.chain_id, w.loglik, w.se, w.label)
 }
 
 /// Compute Gelman-Rubin 1992 R-hat across chains (last half of
@@ -1558,6 +1608,61 @@ pub fn compute_config_hash(fit: &super::config::FitToml, config: &FitRunConfig) 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Step 6 wiring regression: when in-run `IF2Result::final_loglik`
+    /// disagrees with the clean-eval winner, `select_winner_summary`
+    /// must follow clean-eval. The handoff calls this out as the
+    /// canonical Step 6 test ("synthetic 2-chain run picks the
+    /// higher-clean-ll chain even when the other has higher in-run
+    /// final_loglik"). Since `run_chains_with_per_chain_params`
+    /// requires a real PF, we test the post-IF2 selection helper
+    /// (`select_winner_summary`) on a `CleanEvalOutcome` constructed
+    /// via `run_clean_eval_with_scorer`. The synthetic IF2Results
+    /// carry deliberately misleading `final_loglik` values; the
+    /// helper must ignore them.
+    #[test]
+    fn winner_summary_follows_clean_eval_not_in_run_loglik() {
+        use crate::fit::clean_eval::{run_clean_eval_with_scorer, CandidateLabel};
+        use crate::fit::config_v2::{CleanEvalConfig, CombineMode};
+        use sim::inference::if2::{IF2IterResult, IF2Result};
+
+        // Two chains. Chain 0 has *higher* in-run final_loglik (the
+        // misleading number); chain 1 has thetas the deterministic
+        // scorer prefers. Clean-eval should pick chain 1.
+        let mk_chain = |theta: f64, in_run_ll: f64| IF2Result {
+            iterations: vec![IF2IterResult {
+                iteration: 0,
+                loglik: in_run_ll,
+                if2_perturbed_loglik: in_run_ll,
+                param_means: vec![theta],
+                param_diag: vec![],
+            }],
+            mle: vec![theta],
+            final_loglik: in_run_ll,
+            last_loglik: in_run_ll,
+        };
+        let results = vec![
+            (0usize, mk_chain(0.5,  -10.0)), // misleading: best in-run
+            (1usize, mk_chain(50.0, -200.0)),
+        ];
+
+        let scorer = |theta: &[f64], _: usize, _: u64| {
+            // Clean PF prefers theta around 50.
+            if theta[0] < 10.0 { -100.0 } else { -50.0 }
+        };
+        let cfg = CleanEvalConfig {
+            n_particles: 1, n_replicates: 4, combine: CombineMode::LogMeanExp,
+        };
+        let outcome = run_clean_eval_with_scorer(&results, &cfg, 0, scorer).unwrap();
+
+        let (best_chain, best_ll, best_se, label) = select_winner_summary(&outcome);
+        assert_eq!(best_chain, 1, "clean-eval must pick chain 1 despite chain 0's higher in-run loglik");
+        assert!((best_ll - (-50.0)).abs() < 1e-12);
+        assert!(best_se.abs() < 1e-12, "deterministic scorer → SE = 0");
+        // Single-iter chains: all 3 candidate labels collapse to the
+        // same θ; ties resolve to the first-seen (FinalIter).
+        assert_eq!(label, CandidateLabel::FinalIter);
+    }
 
     /// Verify that write_chain_outputs writes correct values for BOTH
     /// estimated and fixed parameters. Regression test for bug where
