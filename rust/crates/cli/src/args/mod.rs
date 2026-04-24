@@ -376,6 +376,20 @@ pub struct FitRunArgs {
     /// Proceed even if prior scout stage failed convergence gate
     #[arg(long)]
     pub allow_nonconverged_scout: bool,
+
+    /// Override [stages.<stage>.clean_eval] n_particles. Requires --stage so
+    /// scout and refine clean-eval settings can be overridden independently.
+    #[arg(long, value_name = "N", requires = "stage")]
+    pub clean_eval_particles: Option<usize>,
+
+    /// Override [stages.<stage>.clean_eval] n_replicates. Requires --stage.
+    #[arg(long, value_name = "M", requires = "stage")]
+    pub clean_eval_reps: Option<usize>,
+
+    /// Override [stages.<stage>.gate] decibans_thresh (the inter-chain
+    /// log-likelihood-spread floor, in decibans). Requires --stage.
+    #[arg(long, value_name = "DB", requires = "stage")]
+    pub decibans_thresh: Option<f64>,
 }
 
 #[derive(Args)]
@@ -930,4 +944,66 @@ pub struct CompareArgs {
 pub struct DelegateArgs {
     #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
     pub args: Vec<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::CommandFactory;
+
+    fn try_parse_fit_run(args: &[&str]) -> Result<FitRunArgs, clap::Error> {
+        let mut full: Vec<&str> = vec!["camdl", "fit", "run"];
+        full.extend(args);
+        let cli = Cli::try_parse_from(full)?;
+        match cli.command {
+            Command::Fit(FitCommand::Run(a)) => Ok(a),
+            _ => unreachable!("expected fit run"),
+        }
+    }
+
+    #[test]
+    fn fit_run_clean_eval_overrides_parse_with_stage() {
+        let a = try_parse_fit_run(&[
+            "fit.toml",
+            "--stage", "scout",
+            "--clean-eval-particles", "8000",
+            "--clean-eval-reps", "16",
+            "--decibans-thresh", "60.0",
+        ]).expect("should parse with --stage");
+        assert_eq!(a.clean_eval_particles, Some(8000));
+        assert_eq!(a.clean_eval_reps, Some(16));
+        assert_eq!(a.decibans_thresh, Some(60.0));
+        assert_eq!(a.stage.as_deref(), Some("scout"));
+    }
+
+    #[test]
+    fn fit_run_clean_eval_particles_requires_stage() {
+        let err = try_parse_fit_run(&[
+            "fit.toml", "--clean-eval-particles", "8000",
+        ]).err().expect("should reject without --stage");
+        assert_eq!(err.kind(), clap::error::ErrorKind::MissingRequiredArgument);
+    }
+
+    #[test]
+    fn fit_run_decibans_thresh_requires_stage() {
+        let err = try_parse_fit_run(&[
+            "fit.toml", "--decibans-thresh", "60.0",
+        ]).err().expect("should reject without --stage");
+        assert_eq!(err.kind(), clap::error::ErrorKind::MissingRequiredArgument);
+    }
+
+    #[test]
+    fn fit_run_clean_eval_defaults_are_none() {
+        let a = try_parse_fit_run(&["fit.toml"]).unwrap();
+        assert!(a.clean_eval_particles.is_none());
+        assert!(a.clean_eval_reps.is_none());
+        assert!(a.decibans_thresh.is_none());
+    }
+
+    #[test]
+    fn cli_command_factory_builds() {
+        // Smoke test — guards against malformed clap derives that would
+        // panic at runtime instead of producing a parse error.
+        let _ = Cli::command();
+    }
 }

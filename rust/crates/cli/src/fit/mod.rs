@@ -183,6 +183,12 @@ pub fn cmd_fit_run_v2(a: &crate::args::FitRunArgs) {
     let stage_filter          = a.stage.clone();
     let starts_from_override  = a.starts_from.as_ref().map(|s| resolve_starts_from_arg(s));
     let allow_nonconverged_scout = a.allow_nonconverged_scout;
+    // CLI overrides for clean_eval / gate. clap enforces requires=stage so
+    // these only fire when a single stage is selected, keeping scout and
+    // refine independently overridable.
+    let cli_clean_eval_particles = a.clean_eval_particles;
+    let cli_clean_eval_reps      = a.clean_eval_reps;
+    let cli_decibans_thresh      = a.decibans_thresh;
     let sweep_specs: Vec<(String, Vec<f64>)> = a.sweep.iter()
         .map(|s| (s.name.clone(), s.values.clone()))
         .collect();
@@ -558,7 +564,18 @@ pub fn cmd_fit_run_v2(a: &crate::args::FitRunArgs) {
         let mut stage_best_chain: Option<usize> = None;
 
         match stage {
-            Stage::IF2 { chains, particles, iterations, cooling, .. } => {
+            Stage::IF2 { chains, particles, iterations, cooling, clean_eval, gate, .. } => {
+                // Resolve effective clean_eval / gate: stage TOML, then CLI
+                // override (per Step 4 — overrides are stage-scoped because
+                // clap requires --stage). CLI flags pass `requires = "stage"`
+                // so they cannot be set when running multiple stages, which
+                // would otherwise apply the same value to scout and refine
+                // and defeat independent tuning.
+                let mut effective_clean_eval = clean_eval.clone();
+                if let Some(n) = cli_clean_eval_particles { effective_clean_eval.n_particles = n; }
+                if let Some(m) = cli_clean_eval_reps      { effective_clean_eval.n_replicates = m; }
+                let mut effective_gate = gate.clone();
+                if let Some(db) = cli_decibans_thresh     { effective_gate.decibans_thresh = db; }
                 let prior_state = effective_starts.as_ref().and_then(|dir| {
                     state::FitState::load(dir).ok()
                 });
@@ -613,7 +630,7 @@ pub fn cmd_fit_run_v2(a: &crate::args::FitRunArgs) {
                     None => (None, Vec::new()),
                 };
 
-                let run_config = runner::FitRunConfig::build(
+                let mut run_config = runner::FitRunConfig::build(
                     &sweep_legacy,
                     prior_state.as_ref(),
                     *chains, *particles, *iterations,
@@ -622,6 +639,8 @@ pub fn cmd_fit_run_v2(a: &crate::args::FitRunArgs) {
                     eprintln!("error building run config: {}", e);
                     std::process::exit(1);
                 });
+                run_config.clean_eval = effective_clean_eval;
+                run_config.gate = effective_gate;
 
                 std::fs::create_dir_all(&stage_dir).unwrap_or_else(|e| {
                     eprintln!("error creating {}: {}", stage_dir.display(), e);

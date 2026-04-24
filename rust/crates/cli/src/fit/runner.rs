@@ -61,6 +61,15 @@ pub struct FitRunConfig {
     /// Flows into `SMCConfig.skip_first_obs_from_loglik`. See
     /// docs/dev/proposals/2026-04-18-ic-free-inference.md.
     pub ic_free: bool,
+    /// Clean-evaluation re-scoring config (Step 4 plumbing for §Proposal 1).
+    /// Set per stage at the `camdl fit run` dispatch site (CLI overrides
+    /// over stage TOML); legacy `camdl fit scout`/`fit refine` use the
+    /// `Default` (4000 × 8, logmeanexp). Consumed by Step 5.
+    pub clean_eval: super::config_v2::CleanEvalConfig,
+    /// Compound scout-convergence gate config (Step 4 plumbing for
+    /// §Proposal 3). Same per-stage override semantics as `clean_eval`.
+    /// Consumed by Step 8.
+    pub gate: super::config_v2::GateConfig,
 }
 
 /// Result of running multiple IF2 chains.
@@ -287,6 +296,8 @@ impl FitRunConfig {
             n_chains,
             seed,
             ic_free,
+            clean_eval: super::config_v2::CleanEvalConfig::default(),
+            gate: super::config_v2::GateConfig::default(),
         })
     }
 
