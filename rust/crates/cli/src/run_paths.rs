@@ -159,6 +159,60 @@ pub fn format_dataset_dir(idx: usize) -> String {
     format!("ds_{:02}", idx)
 }
 
+// ─── profile layout ──────────────────────────────────────────────────────────
+
+/// Directory for one profile run (the top of its CAS tree):
+///
+/// ```text
+/// <root>/profiles/<stem>-<profile_hash[:8]>/
+/// ```
+///
+/// `stem` is derived from the invoking config file or model name, same
+/// convention as `fit_run_dir`. When absent or empty, falls back to the
+/// hash prefix alone.
+///
+/// See docs/dev/proposals/2026-04-24-profile-cas-integration.md.
+pub fn profile_run_dir(root: &Path, stem: Option<&str>, profile_hash: &str) -> PathBuf {
+    let hash_prefix = &profile_hash[..8.min(profile_hash.len())];
+    let dirname = match stem {
+        Some(s) if !s.is_empty() => format!("{}-{}", s, hash_prefix),
+        _ => hash_prefix.to_string(),
+    };
+    root.join("profiles").join(dirname)
+}
+
+/// Directory for one grid point within a profile:
+///
+/// ```text
+/// <profile_dir>/points/{point_idx:05d}/
+/// ```
+///
+/// Flat-indexed over the Cartesian product of focal axes. The
+/// `focal.toml` inside this directory disambiguates which coordinate
+/// this point represents without consumers having to parse back
+/// from `point_idx` to axis values.
+pub fn profile_point_dir(profile_dir: &Path, point_idx: usize) -> PathBuf {
+    profile_dir.join("points").join(format!("{:05}", point_idx))
+}
+
+/// Directory for one (grid point, start) mini-fit:
+///
+/// ```text
+/// <profile_dir>/points/{point_idx:05d}/start_{start_idx}/
+/// ```
+///
+/// This directory holds a `RunKind::FitStage` run.json — each start is
+/// independently cacheable, so a crash that kills one start leaves the
+/// others intact and resumable.
+pub fn profile_point_start_dir(
+    profile_dir: &Path,
+    point_idx: usize,
+    start_idx: usize,
+) -> PathBuf {
+    profile_point_dir(profile_dir, point_idx)
+        .join(format!("start_{}", start_idx))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -276,5 +330,30 @@ mod tests {
         // crash-bug.
         let p = fit_run_dir(Path::new("/out"), None, "abc");
         assert_eq!(p, Path::new("/out/fits/abc"));
+    }
+
+    #[test]
+    fn profile_layout() {
+        let hash = "a".repeat(64);
+        let p = profile_run_dir(Path::new("/out"), Some("fit_r0"), &hash);
+        assert_eq!(p, Path::new("/out/profiles/fit_r0-aaaaaaaa"));
+        let pt = profile_point_dir(&p, 42);
+        assert_eq!(pt, Path::new("/out/profiles/fit_r0-aaaaaaaa/points/00042"));
+        let st = profile_point_start_dir(&p, 42, 2);
+        assert_eq!(st, Path::new("/out/profiles/fit_r0-aaaaaaaa/points/00042/start_2"));
+    }
+
+    #[test]
+    fn profile_point_zero_padded() {
+        // Grid sizes up to 99,999 points produce sortable ls output.
+        // Larger grids (>100k) fall back to non-padded width but still
+        // sort lexicographically within their own width class.
+        let p = profile_run_dir(Path::new("/r"), None, &"0".repeat(64));
+        assert!(profile_point_dir(&p, 0)
+            .to_str().unwrap().ends_with("00000"));
+        assert!(profile_point_dir(&p, 42)
+            .to_str().unwrap().ends_with("00042"));
+        assert!(profile_point_dir(&p, 99999)
+            .to_str().unwrap().ends_with("99999"));
     }
 }
