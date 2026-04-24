@@ -404,6 +404,16 @@ pub enum Stage {
         cooling: f64,
         #[serde(default)]
         starts_from: StartsFrom,
+        /// Clean-evaluation re-scoring of candidate parameter points after
+        /// IF2 finishes. See proposal §Proposal 1. Defaults give 4000
+        /// particles × 8 replicates combined via logmeanexp.
+        #[serde(default)]
+        clean_eval: CleanEvalConfig,
+        /// Compound gate thresholds for chain agreement (Â) and
+        /// inter-chain log-likelihood spread (decibans). See proposal
+        /// §Proposal 3.
+        #[serde(default)]
+        gate: GateConfig,
     },
 
     #[serde(rename = "pgas")]
@@ -471,6 +481,81 @@ impl Stage {
             Stage::PGAS { chains, .. } => *chains,
             Stage::PMMH { chains, .. } => *chains,
             Stage::PFilter { .. } => 1,
+        }
+    }
+}
+
+// ─── Clean-evaluation + gate (IF2 scout/refine) ─────────────────────────────
+
+/// How to combine M independent particle-filter replicate log-likelihoods
+/// into a single score for ranking candidate parameter points.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CombineMode {
+    /// log( (1/M) Σ exp(ll_k) ) — unbiased on the likelihood scale.
+    LogMeanExp,
+    /// (1/M) Σ ll_k — biased low, but lower variance.
+    Mean,
+}
+
+impl Default for CombineMode {
+    fn default() -> Self { CombineMode::LogMeanExp }
+}
+
+/// Re-evaluate IF2 candidate points (final iter, tail mean, best-in-run)
+/// with a high-particle, multi-replicate clean PF before declaring a
+/// winner. Closes the ~40-nat extraction bias from argmax over noisy
+/// 500-particle in-run evaluations. See proposal §Proposal 1.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct CleanEvalConfig {
+    /// Particle count per clean PF replicate. Must be ≫ in-run scout
+    /// particle count to bring SE under control.
+    #[serde(default = "default_clean_eval_particles")]
+    pub n_particles: usize,
+    /// Independent PF replicates per candidate. Combined via `combine`.
+    #[serde(default = "default_clean_eval_replicates")]
+    pub n_replicates: usize,
+    #[serde(default)]
+    pub combine: CombineMode,
+}
+
+fn default_clean_eval_particles() -> usize { 4000 }
+fn default_clean_eval_replicates() -> usize { 8 }
+
+impl Default for CleanEvalConfig {
+    fn default() -> Self {
+        Self {
+            n_particles: default_clean_eval_particles(),
+            n_replicates: default_clean_eval_replicates(),
+            combine: CombineMode::default(),
+        }
+    }
+}
+
+/// Compound scout-convergence gate: chain agreement (Â) AND inter-chain
+/// log-likelihood spread (decibans, with an SE-aware floor). See
+/// proposal §Proposal 3.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct GateConfig {
+    /// Maximum tolerated chain-agreement statistic Â (Gelman–Rubin–style
+    /// applied to IF2 chain tails). Pass requires `max(Â) < a_thresh`.
+    #[serde(default = "default_a_thresh")]
+    pub a_thresh: f64,
+    /// Floor on the decibans-spread threshold. The effective threshold
+    /// is `max(decibans_thresh, 8 × max(SE) × NATS_TO_DB)` so noisy
+    /// chains aren't penalised by Monte-Carlo variance.
+    #[serde(default = "default_decibans_thresh")]
+    pub decibans_thresh: f64,
+}
+
+fn default_a_thresh() -> f64 { 1.01 }
+fn default_decibans_thresh() -> f64 { 30.0 }
+
+impl Default for GateConfig {
+    fn default() -> Self {
+        Self {
+            a_thresh: default_a_thresh(),
+            decibans_thresh: default_decibans_thresh(),
         }
     }
 }
@@ -2022,6 +2107,103 @@ cooling = 0.7
         });
         assert_eq!(cfg.per_fit_prefix(101, Some(2)),
                    std::path::PathBuf::from("synthetic").join("ds_02").join("fit_101"));
+    }
+
+    #[test]
+    fn if2_stage_clean_eval_and_gate_default_when_omitted() {
+        let cfg = parse(r#"
+[model]
+camdl = "models/sir.camdl"
+
+[data.observations]
+weekly_cases = "data/cases.tsv"
+
+[estimate]
+beta = { bounds = [0.01, 2.0] }
+
+[fixed]
+N0 = 1000
+
+[stages.scout]
+method = "if2"
+chains = 4
+particles = 500
+iterations = 30
+cooling = 0.9
+        "#).unwrap();
+
+        match &cfg.stages["scout"] {
+            Stage::IF2 { clean_eval, gate, .. } => {
+                assert_eq!(clean_eval.n_particles, 4000);
+                assert_eq!(clean_eval.n_replicates, 8);
+                assert_eq!(clean_eval.combine, CombineMode::LogMeanExp);
+                assert!((gate.a_thresh - 1.01).abs() < 1e-12);
+                assert!((gate.decibans_thresh - 30.0).abs() < 1e-12);
+            }
+            _ => panic!("expected IF2 stage"),
+        }
+    }
+
+    #[test]
+    fn if2_stage_clean_eval_and_gate_parse_overrides() {
+        let cfg = parse(r#"
+[model]
+camdl = "models/sir.camdl"
+
+[data.observations]
+weekly_cases = "data/cases.tsv"
+
+[estimate]
+beta = { bounds = [0.01, 2.0] }
+
+[fixed]
+N0 = 1000
+
+[stages.scout]
+method = "if2"
+chains = 4
+particles = 500
+iterations = 30
+cooling = 0.9
+clean_eval = { n_particles = 8000, n_replicates = 16, combine = "mean" }
+gate = { a_thresh = 1.05, decibans_thresh = 60.0 }
+
+[stages.refine]
+method = "if2"
+chains = 4
+particles = 1000
+iterations = 60
+cooling = 0.95
+
+[stages.refine.clean_eval]
+n_particles = 12000
+
+[stages.refine.gate]
+decibans_thresh = 100.0
+        "#).unwrap();
+
+        match &cfg.stages["scout"] {
+            Stage::IF2 { clean_eval, gate, .. } => {
+                assert_eq!(clean_eval.n_particles, 8000);
+                assert_eq!(clean_eval.n_replicates, 16);
+                assert_eq!(clean_eval.combine, CombineMode::Mean);
+                assert!((gate.a_thresh - 1.05).abs() < 1e-12);
+                assert!((gate.decibans_thresh - 60.0).abs() < 1e-12);
+            }
+            _ => panic!("expected IF2 stage"),
+        }
+
+        // refine: partial overrides — unset fields take defaults
+        match &cfg.stages["refine"] {
+            Stage::IF2 { clean_eval, gate, .. } => {
+                assert_eq!(clean_eval.n_particles, 12000);
+                assert_eq!(clean_eval.n_replicates, 8);            // default
+                assert_eq!(clean_eval.combine, CombineMode::LogMeanExp); // default
+                assert!((gate.a_thresh - 1.01).abs() < 1e-12);     // default
+                assert!((gate.decibans_thresh - 100.0).abs() < 1e-12);
+            }
+            _ => panic!("expected IF2 stage"),
+        }
     }
 
     #[test]

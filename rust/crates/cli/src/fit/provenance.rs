@@ -476,6 +476,8 @@ mod tests {
             chains: 4, particles: 1000, iterations: 50,
             cooling: 0.7,
             starts_from: super::super::config_v2::StartsFrom::Random,
+            clean_eval: Default::default(),
+            gate: Default::default(),
         };
         let h1 = fit_stage_hash("model", &obs, &est, &fixed, "mle", &stage, 1).unwrap();
         let h2 = fit_stage_hash("model", &obs, &est, &fixed, "mle", &stage, 1).unwrap();
@@ -493,6 +495,8 @@ mod tests {
             chains: 4, particles: 1000, iterations: 50,
             cooling: 0.7,
             starts_from: super::super::config_v2::StartsFrom::Random,
+            clean_eval: Default::default(),
+            gate: Default::default(),
         };
         let h1 = fit_stage_hash("model_a", &obs, &est, &fixed, "mle", &stage, 1).unwrap();
         let h2 = fit_stage_hash("model_b", &obs, &est, &fixed, "mle", &stage, 1).unwrap();
@@ -509,6 +513,8 @@ mod tests {
             chains: 4, particles: 1000, iterations: 50,
             cooling: 0.7,
             starts_from: super::super::config_v2::StartsFrom::Random,
+            clean_eval: Default::default(),
+            gate: Default::default(),
         };
         let h1 = fit_stage_hash("model", &obs, &est, &fixed, "mle", &stage, 1).unwrap();
         let h2 = fit_stage_hash("model", &obs, &est, &fixed, "mle", &stage, 2).unwrap();
@@ -525,11 +531,15 @@ mod tests {
             chains: 4, particles: 1000, iterations: 50,
             cooling: 0.7,
             starts_from: super::super::config_v2::StartsFrom::Random,
+            clean_eval: Default::default(),
+            gate: Default::default(),
         };
         let stage2 = super::super::config_v2::Stage::IF2 {
             chains: 8, particles: 1000, iterations: 50,
             cooling: 0.7,
             starts_from: super::super::config_v2::StartsFrom::Random,
+            clean_eval: Default::default(),
+            gate: Default::default(),
         };
         let h1 = fit_stage_hash("model", &obs, &est, &fixed, "mle", &stage1, 1).unwrap();
         let h2 = fit_stage_hash("model", &obs, &est, &fixed, "mle", &stage2, 1).unwrap();
