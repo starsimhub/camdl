@@ -56,6 +56,40 @@
 /// Nats → decibans: 1 nat ≈ 4.342944819 dB.
 pub const NATS_TO_DB: f64 = 10.0 / std::f64::consts::LN_10;
 
+/// Numerically-stable `log(mean(exp(xs)))` = `logsumexp(xs) - ln(len)`.
+///
+/// Used to combine M replicate particle-filter log-likelihood estimates
+/// into a single unbiased (on the likelihood scale) summary. The raw PF
+/// log-lik estimator is *downward*-biased by `Var(ℓ)/2` on the log
+/// scale even though `exp(ℓ)` is unbiased; combining on the likelihood
+/// scale via `log(mean(exp(ℓ_k)))` recovers the unbiased combined
+/// estimate. See proposal 2026-04-24-if2-scout-findings-remediation.md
+/// §Proposal 1.
+///
+/// Returns `NEG_INFINITY` on empty input; `NaN` propagates through.
+pub fn logmeanexp(xs: &[f64]) -> f64 {
+    if xs.is_empty() {
+        return f64::NEG_INFINITY;
+    }
+    let m = xs.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+    if !m.is_finite() {
+        return m;
+    }
+    let sum_exp: f64 = xs.iter().map(|&x| (x - m).exp()).sum();
+    m + (sum_exp / xs.len() as f64).ln()
+}
+
+/// Sample standard deviation (N-1 denominator). Returns 0.0 for len<2.
+pub fn sample_sd(xs: &[f64]) -> f64 {
+    if xs.len() < 2 {
+        return 0.0;
+    }
+    let n = xs.len() as f64;
+    let mean = xs.iter().sum::<f64>() / n;
+    let var = xs.iter().map(|&x| (x - mean).powi(2)).sum::<f64>() / (n - 1.0);
+    var.sqrt()
+}
+
 /// Jeffreys qualitative label for an evidence magnitude in decibans. The
 /// input is the *signed* Δlog-lik in dB; the label describes the magnitude,
 /// and the caller decides whether to prefix with "for" / "against" based on
@@ -215,6 +249,52 @@ mod tests {
         let (n, db) = evidence_cells(f64::NAN);
         assert!(n.contains("NaN"));
         assert_eq!(db, "—");
+    }
+
+    #[test]
+    fn logmeanexp_constant_is_identity() {
+        // mean of identical values equals the value itself.
+        assert!((logmeanexp(&[0.0, 0.0, 0.0]) - 0.0).abs() < 1e-12);
+        assert!((logmeanexp(&[-7.3, -7.3, -7.3, -7.3]) - (-7.3)).abs() < 1e-12);
+    }
+
+    #[test]
+    fn logmeanexp_is_numerically_stable() {
+        // Naive exp of -1e6 underflows to 0; stable form must not.
+        // log((e^-1e6 + e^0)/2) = log(1/2) ≈ -0.6931 (the -1e6 term is
+        // negligible). Naive implementation would return -inf or NaN.
+        let got = logmeanexp(&[-1e6, 0.0]);
+        assert!((got - (-(2.0f64).ln())).abs() < 1e-9, "got {}", got);
+    }
+
+    #[test]
+    fn logmeanexp_matches_pf_bias_example() {
+        // Two PF reps ℓ_1 = -100, ℓ_2 = -98. logmeanexp > mean because
+        // the likelihoods combine on the likelihood scale:
+        // log((e^-100 + e^-98)/2) = -98 + log((e^-2 + 1)/2)
+        let xs = [-100.0, -98.0];
+        let lme = logmeanexp(&xs);
+        let arith = (xs[0] + xs[1]) / 2.0;
+        assert!(lme > arith, "logmeanexp {} should exceed arithmetic mean {}", lme, arith);
+        // Analytic value: -98 + ln((1 + e^-2) / 2) ≈ -98.566
+        let expected = -98.0 + ((1.0 + (-2f64).exp()) / 2.0).ln();
+        assert!((lme - expected).abs() < 1e-9, "got {}, expected {}", lme, expected);
+    }
+
+    #[test]
+    fn logmeanexp_edge_cases() {
+        assert_eq!(logmeanexp(&[]), f64::NEG_INFINITY);
+        assert_eq!(logmeanexp(&[f64::NEG_INFINITY]), f64::NEG_INFINITY);
+        assert!(logmeanexp(&[f64::NAN, 0.0]).is_nan());
+    }
+
+    #[test]
+    fn sample_sd_basic() {
+        assert_eq!(sample_sd(&[]), 0.0);
+        assert_eq!(sample_sd(&[5.0]), 0.0);
+        // sd of [1, 2, 3, 4, 5] is sqrt(2.5) ≈ 1.5811 with N-1 denom.
+        let got = sample_sd(&[1.0, 2.0, 3.0, 4.0, 5.0]);
+        assert!((got - 2.5f64.sqrt()).abs() < 1e-9, "got {}", got);
     }
 
     #[test]
