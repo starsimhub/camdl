@@ -18,6 +18,7 @@ These are done. The book agent can use any of these without caveat.
 | Proposal | Commit(s) | What it gives the book author |
 |---|---|---|
 | `2026-04-23-external-validation-harness.md` | 426f272, e630fd7, 672540a, others | L9 regression layer catching camdl-vs-pomp divergence. Means a refined fit can be sanity-checked against pomp at matched config; any drift in forward-simulation or pfilter log-lik shows up in `cargo test --test external_validation`. |
+| `2026-04-23-evidence-in-decibans.md` | this commit | `camdl compare` now emits an `evidence` column alongside `Δelpd`: dB + Jeffreys label (`substantial`/`strong`/`decisive`/`overwhelming`) so reviewers can parse evidence magnitude without computing exp(Δelpd) in their head. JSON output gains `delta_elpd_db` + `evidence_label` fields. Helper `cli/src/evidence.rs` is the single source of truth for the conversion + Jeffreys scale; Unit A compound gate (next) reuses it for cross-chain spread reporting. |
 | `2026-04-24-profile-cas-integration.md` (v1) | ea91535, 6b2bed4, 5f57260, 8e9e271, 06f565b | `camdl profile` writes to the CAS tree, resume-on-crash, mid-run plotting from `profile.tsv`. The 2D profile-likelihood surface for he2010 can now survive the 12-hour wall-time risk. |
 | `2026-04-11-dimensional-analysis.md` (Phase 1 + 2) | earlier | `'per_year` / `'days` / etc. on forcings and tables, checked at compile time. Model authoring is safer. |
 | Progress flag (`--progress plain`) | 75230d7, 153044d | Agent-readable per-chain progress in long fits; `plain` mode emits `log::info!` lines after the auto-bump. |
@@ -90,7 +91,12 @@ implementation lands. Then ship Unit A as one PR and Unit B as a
 second (or bundled). Unit C files as its own issue with the shared-
 resume-codepath question flagged explicitly.
 
-### `2026-04-23-evidence-in-decibans.md` (evidence in decibans)
+### ~~`2026-04-23-evidence-in-decibans.md`~~ (shipped)
+
+Moved to the "Shipped" table above. `camdl compare` + JSON both
+carry dB + Jeffreys labels alongside the existing nats column.
+
+Earlier proposal state (now obsolete, preserved for context):
 
 **State:** Approved for implementation; minimal single-session
 change per the proposal's §Implementation sketch.
@@ -213,10 +219,11 @@ Four queued items, in order. The first two are approximately equal
 priority and can ship in either order; items 3 and 4 unblock the
 he2010 rerun together.
 
-1. **evidence-in-decibans** — single session. Gives `camdl compare`
-   and every Δlog-lik surface a dB/Jeffreys-label framing. Pairs
-   naturally with the IF2-remediation compound gate (item 2), which
-   reports its cross-chain spread in decibans.
+1. ~~**evidence-in-decibans** — shipped in this commit.~~ `camdl
+   compare` surfaces dB + Jeffreys label alongside Δelpd/nats.
+   JSON output has `delta_elpd_db` + `evidence_label`. Helper
+   (`cli/src/evidence.rs`) is the single source of truth — Unit A's
+   compound gate reuses it for cross-chain spread formatting.
 
 2. **IF2 scout remediation, Unit A** — Proposal 1 (clean-eval
    selection) + Proposal 3 (compound gate with $\widehat{A}$ +
@@ -224,7 +231,7 @@ he2010 rerun together.
    work; this is the load-bearing fix for the he2010 analysis. After
    this lands, the scout's reported MLE is no longer selection-biased
    on PF noise, and the gate catches "all chains agreed on one bad
-   basin" which parameter-$\widehat{R}$ misses.
+   basin" which parameter-$\widehat{R}$ misses. **This is up next.**
 
 3. **IF2 scout remediation, Unit B** — Proposal 2 (raise in-run
    trace particles to 2000; add rolling-mean overlay). Small

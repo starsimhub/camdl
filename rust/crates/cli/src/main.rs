@@ -25,6 +25,7 @@ pub mod version;
 #[allow(dead_code)] mod if2;
 mod profile;
 mod progress;
+mod evidence;
 
 /// Terminal formatting helpers. Pure ANSI SGR codes, no dependencies.
 /// Respects NO_COLOR (https://no-color.org/) — when set, all formatting

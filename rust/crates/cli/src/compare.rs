@@ -211,8 +211,11 @@ fn render_table(rows: &[Row], base_idx: usize, metrics: &[String], t_mismatch: b
     let want_crps = metrics.iter().any(|m| m == "crps");
     let want_pit  = metrics.iter().any(|m| m == "pit_cov90" || m == "pit");
 
+    // Δelpd (nats) is the primary machine-readable column; "evidence"
+    // (decibans + Jeffreys label) is the human-interpretable alongside —
+    // see docs/dev/proposals/2026-04-23-evidence-in-decibans.md §Scope.
     let mut header = vec!["Model".to_string(), "T_score".into(), "elpd".into(),
-        "Δelpd".into(), "E_T".into(), "se(Δ)".into()];
+        "Δelpd".into(), "E_T".into(), "se(Δ)".into(), "evidence".into()];
     if want_crps { header.push("crps".into()); header.push("Δcrps".into()); }
     if want_pit  { header.push("PIT_cov90".into()); }
 
@@ -229,7 +232,9 @@ fn render_table(rows: &[Row], base_idx: usize, metrics: &[String], t_mismatch: b
             row.push("—".into());   // Δelpd
             row.push("—".into());   // E_T
             row.push("—".into());   // se(Δ)
+            row.push("—".into());   // evidence (dB + Jeffreys label)
         } else if t_mismatch {
+            row.push("—".into());
             row.push("—".into());
             row.push("—".into());
             row.push("—".into());
@@ -238,6 +243,8 @@ fn render_table(rows: &[Row], base_idx: usize, metrics: &[String], t_mismatch: b
             row.push(format!("{:+.2}", d));
             row.push(fmt_e_value(d.exp()));
             row.push(format!("{:.2}", se));
+            let (_, evidence) = crate::evidence::evidence_cells(d);
+            row.push(evidence);
         }
         if want_crps {
             row.push(format!("{:.3}", r.trace.mean_crps()));
@@ -316,7 +323,7 @@ fn render_md(rows: &[Row], base_idx: usize, metrics: &[String], t_mismatch: bool
     let want_crps = metrics.iter().any(|m| m == "crps");
     let want_pit  = metrics.iter().any(|m| m == "pit_cov90" || m == "pit");
 
-    let mut header = vec!["Model", "T_score", "elpd", "Δelpd", "E_T", "se(Δ)"];
+    let mut header = vec!["Model", "T_score", "elpd", "Δelpd", "E_T", "se(Δ)", "evidence"];
     if want_crps { header.push("crps"); header.push("Δcrps"); }
     if want_pit  { header.push("PIT_cov90"); }
     println!("| {} |", header.join(" | "));
@@ -333,11 +340,14 @@ fn render_md(rows: &[Row], base_idx: usize, metrics: &[String], t_mismatch: bool
             cells.push("—".into());  // Δelpd
             cells.push("—".into());  // E_T
             cells.push("—".into());  // se(Δ)
+            cells.push("—".into());  // evidence
         } else {
             let (d, se) = paired_delta(&r.trace, base, Field::LogScore);
             cells.push(format!("{:+.2}", d));
             cells.push(fmt_e_value(d.exp()));
             cells.push(format!("{:.2}", se));
+            let (_, evidence) = crate::evidence::evidence_cells(d);
+            cells.push(evidence);
         }
         if want_crps {
             cells.push(format!("{:.3}", r.trace.mean_crps()));
@@ -365,12 +375,24 @@ fn render_json(rows: &[Row], base_idx: usize, metrics: &[String]) {
         let mean_dcrps = if r.trace.n_scored() == 0 { f64::NAN }
             else { d_crps / r.trace.n_scored() as f64 };
         let e_t = if d_elpd.is_finite() { d_elpd.exp() } else { f64::NAN };
+        // Evidence: Δelpd (nats) → decibans + Jeffreys label. Derived
+        // field for human-interpretable consumption; nats remain the
+        // primary machine-readable quantity (delta_elpd). See
+        // docs/dev/proposals/2026-04-23-evidence-in-decibans.md.
+        let (d_elpd_db, evidence_label) = if d_elpd.is_finite() {
+            let db = d_elpd * crate::evidence::NATS_TO_DB;
+            (option_finite(db), serde_json::json!(crate::evidence::jeffreys_label(db)))
+        } else {
+            (serde_json::Value::Null, serde_json::Value::Null)
+        };
         json!({
             "name": r.name,
             "path": r.path,
             "t_score": r.trace.n_scored(),
             "elpd": r.trace.elpd(),
             "delta_elpd": option_finite(d_elpd),
+            "delta_elpd_db": d_elpd_db,
+            "evidence_label": evidence_label,
             "e_t": option_finite(e_t),
             "se_delta_elpd": option_finite(se_elpd),
             "mean_crps": r.trace.mean_crps(),
