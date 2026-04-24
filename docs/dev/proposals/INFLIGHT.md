@@ -28,6 +28,68 @@ These are done. The book agent can use any of these without caveat.
 The book agent should plan around these as landing imminently, but
 not yet available.
 
+### `2026-04-24-if2-scout-findings-remediation.md` (IF2 scout fix — biggest item) 🔴
+
+**State:** Pending upstream review; Unit A is the critical piece for
+anyone continuing the he2010 analysis.
+
+**What it addresses:** Five findings established empirically on the
+he2010 synthetic recovery vignette:
+1. 6-parameter scout reported a point 358 nats below truth with
+   $\widehat{R} \approx 1.000$ across all 36 chains — classic silent
+   wrong-answer: parameter-level agreement on a catastrophically bad
+   basin.
+2. Fixed-$s_0$ scout had a 40.2-nat extraction bias in the selection
+   step (500-particle argmax on 36 chains → $\mathbb{E}[\max]$ ceiling
+   ≈ 80 nats).
+3. In-run trace log-likelihoods are PF-noise-dominated at 500
+   particles (SD ≈ 30 nats), not convergence signal.
+4. Parameter $\widehat{R}$ is **structurally biased toward 1** in the
+   IF2 setting by construction of the cooling kernel — it's a
+   genuinely different statistic from MCMC's Gelman–Rubin, deserves a
+   different name ($\widehat{A}$ / `chain_agreement`).
+5. Basin-quality failure is invisible to parameter-only diagnostics.
+
+**Proposed fix, three units:**
+
+- **Unit A (ship first):** Proposal 1 (clean-eval selection in scout
+  AND refine, multi-candidate per chain) + Proposal 3 (compound gate
+  with $\widehat{A}$ + decibans-spread, with the Rhat → $\widehat{A}$
+  rename). Target file: `rust/crates/cli/src/fit/runner.rs`. Days of
+  work, not weeks.
+- **Unit B (independent, small):** Proposal 2 — raise in-run trace
+  particles 500→2000, add rolling-mean overlay to trace plots (raw
+  track always retained). One-file change.
+- **Unit C (separate large issue):** Proposal 4 — `--resume` and
+  `--warm-restart` for MLE stages, sharing serialization with the
+  existing Bayesian-stage resume infrastructure. Weeks of work; file
+  separately.
+
+**Why the book agent wants this:** This is the actual fix for the
+he2010 analysis's reported biases. The current vignette shows scouts
+with 40-nat extraction bias and one with a 358-nat basin failure that
+the pipeline silently reports as converged. Unit A alone makes the
+he2010 rerun a different (and defensible) analysis. Unit C makes the
+vignette's pedagogical "iteration budget is a hyperparameter, not a
+ritual" lesson reproducible with a `--resume --warm-restart` demo.
+
+**Blockers:** None technically. Relationship to other proposals:
+- Uses decibans framing for the cross-chain spread gate → pairs
+  naturally with `2026-04-23-evidence-in-decibans.md` (can ship in
+  either order; if decibans ships first, the gate's threshold text
+  reads natively in dB without a conversion footnote).
+- Cooling semantics already clarified via `62da628` + `docs/methods/cooling.md`;
+  Finding 4's reasoning about PF-noise-dominated traces cites the
+  corrected cf50 interpretation.
+- Supersedes parts of `2026-04-19-refine-gates-scout-convergence.md`
+  (Rhat-only gate) with the compound $\widehat{A}$ + decibans gate.
+
+**Plan:** Review Unit A's proposed `fit.toml` schema additions
+(`clean_eval`, `gate`, `trace` blocks) and CLI flags before any
+implementation lands. Then ship Unit A as one PR and Unit B as a
+second (or bundled). Unit C files as its own issue with the shared-
+resume-codepath question flagged explicitly.
+
 ### `2026-04-23-evidence-in-decibans.md` (evidence in decibans)
 
 **State:** Approved for implementation; minimal single-session
@@ -147,15 +209,42 @@ vital-dynamics patterns). Not a he2010 concern.
 
 ## What the book agent should treat as the actionable stack
 
-Two queued items, in order:
+Four queued items, in order. The first two are approximately equal
+priority and can ship in either order; items 3 and 4 unblock the
+he2010 rerun together.
 
-1. **evidence-in-decibans** — next up, single session. After this, `camdl compare` and every Δlog-lik surface have dB framing. Book chapter on model comparison can write directly against the shipped UX.
+1. **evidence-in-decibans** — single session. Gives `camdl compare`
+   and every Δlog-lik surface a dB/Jeffreys-label framing. Pairs
+   naturally with the IF2-remediation compound gate (item 2), which
+   reports its cross-chain spread in decibans.
 
-2. **vignette fit.toml cooling updates** — bundle with the next he2010 rerun. Before that, spend one run confirming whether the current refine actually converges (check `best_loglik` differential between scout and refine).
+2. **IF2 scout remediation, Unit A** — Proposal 1 (clean-eval
+   selection) + Proposal 3 (compound gate with $\widehat{A}$ +
+   decibans-spread, rename `rhat` → `chain_agreement`). Days of
+   work; this is the load-bearing fix for the he2010 analysis. After
+   this lands, the scout's reported MLE is no longer selection-biased
+   on PF noise, and the gate catches "all chains agreed on one bad
+   basin" which parameter-$\widehat{R}$ misses.
 
-Everything else (cooling presentation, nightly regen, further
-profile work) is polish or deferred and doesn't need to block the
-book agent.
+3. **IF2 scout remediation, Unit B** — Proposal 2 (raise in-run
+   trace particles to 2000; add rolling-mean overlay). Small
+   self-contained UX win; ship independently or bundle with Unit A.
+
+4. **vignette fit.toml cooling updates + he2010 rerun** — bundle with
+   Unit A landing so the rerun exercises both the corrected cooling
+   (0.70 scout, 0.05 refine — was 0.9/0.95 in the vignette configs)
+   AND the corrected selection pipeline. Doing both in one pass
+   avoids two reruns and gives a single clean baseline for the book
+   chapter. Before committing: check `best_loglik` differential
+   between scout and refine in the current (pre-fix) vignette run to
+   quantify how much of the bias comes from cooling vs. selection.
+
+**Deferred until after 1–4**: cooling presentation (pure polish),
+nightly regen (waiting for CI slot), Unit C resume/warm-restart
+(weeks of work, separate issue).
+
+**Not in the book agent's path at all**: malaria-model-features,
+vital-dynamics proposals (future DSL work, not he2010-relevant).
 
 ## Index of incidents (for pattern-matching)
 
