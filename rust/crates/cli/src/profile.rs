@@ -1,20 +1,37 @@
 //! `camdl profile` — profile likelihood via parallel IF2 runs.
 //!
-//! For a focal parameter, fix it at a grid of values and run IF2 to
-//! maximize over the remaining parameters at each grid point. The
-//! profile likelihood shows how the MLE changes as you move the focal
-//! parameter — revealing identifiability, confidence intervals, and
-//! parameter interactions.
+//! For one or more focal parameters, fix them at a grid of values and
+//! run IF2 to maximise over the remaining parameters at each grid
+//! point. The profile likelihood shows how the MLE changes as you move
+//! the focal parameter(s) — revealing identifiability, confidence
+//! intervals, and parameter interactions. 2D profiles (two `--sweep`
+//! flags) produce a likelihood surface suitable for contour plotting.
 //!
-//! Usage:
-//!   camdl profile MODEL --params P.toml --data cases.tsv \
-//!       --focal R0 --grid "10,20,30,40,50,60,70,80" \
-//!       --rw-sd "sigma=0.01,gamma=0.01,rho=0.02" \
-//!       --particles 1000 --iterations 50 --starts 3 \
-//!       --parallel 4 --dt 1.0 --seed 1
+//! ## CAS integration (2026-04-24 rewrite)
 //!
-//! Output: profile_{focal}.tsv with columns:
-//!   focal_value  max_loglik  [all estimated param means]
+//! Every (grid_point × start) combination is a cacheable mini-fit.
+//! State lives under:
+//!
+//! ```text
+//! <root>/profiles/<stem>-<profile_hash[:8]>/
+//!   run.json                                    # RunKind::Profile
+//!   profile.tsv                                 # derived rollup
+//!   points/
+//!     {point_idx:05d}/
+//!       focal.toml                              # pinned focal values
+//!       start_{start_idx}/
+//!         run.json                              # RunKind::FitStage
+//!         mle.toml                              # MLE at this start
+//! ```
+//!
+//! Each `start_{k}/run.json` is written atomically (tmp-then-rename);
+//! crash mid-IF2 leaves no run.json and the next invocation reruns
+//! that start. Completed starts are preserved bit-for-bit. The rollup
+//! is rewritten atomically after every completion, so it's always
+//! current-as-of-last-finished-start.
+//!
+//! Design: docs/dev/proposals/2026-04-24-profile-cas-integration.md.
+//! Supersedes GH #15's streaming-TSV + --resume approach.
 
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use rayon::prelude::*;
@@ -29,9 +46,14 @@ use sim::{
     },
 };
 use std::collections::HashMap;
-use std::io::Write;
-use std::sync::Arc;
+use std::path::Path;
+use std::sync::{Arc, Mutex};
 
+use crate::hashing::sha256_hex;
+use crate::run_meta::{FitStageMeta, GridAxis, ProfileMeta, Run, RunKind};
+use crate::run_paths::{
+    output_root, profile_point_dir, profile_point_start_dir, profile_run_dir,
+};
 
 pub fn cmd_profile(a: &crate::args::ProfileArgs) {
     let ir_path = a.model.to_string_lossy().into_owned();
@@ -41,16 +63,15 @@ pub fn cmd_profile(a: &crate::args::ProfileArgs) {
     let n_starts = a.starts;
     let cooling = a.cooling;
     let dt = a.inference.dt;
-    let seed = a.inference.seed;
+    let seed_base = a.inference.seed;
     let parallel = a.inference.parallel;
-    let output_path: Option<String> = a.output.as_ref().map(|p| p.to_string_lossy().into_owned());
+    let output_tsv_path: Option<String> = a.output.as_ref().map(|p| p.to_string_lossy().into_owned());
     let scenario_name = a.scenario.scenario.clone();
     let flow_name = a.flow.flow.clone();
     let overrides: HashMap<String, f64> = a.model_overrides.param.iter()
         .map(|p| (p.name.clone(), p.value))
         .collect();
 
-    // focal names come from the sweep specs; grid values inline
     let focal_names: Vec<String> = a.sweep.iter().map(|s| s.name.clone()).collect();
 
     struct FocalGrid { name: String, values: Vec<f64>, param_idx: usize }
@@ -67,20 +88,26 @@ pub fn cmd_profile(a: &crate::args::ProfileArgs) {
     };
 
     // Load model
-    let (mut model, _model_json) = crate::util::load_model(&ir_path)
+    let (mut model, model_json) = crate::util::load_model(&ir_path)
         .unwrap_or_else(|e| { eprintln!("error: {}", e); std::process::exit(1); });
 
     for pf in &a.model_overrides.params {
-        crate::util::apply_params_file(&mut model, &pf.to_string_lossy()).unwrap_or_else(|e| { eprintln!("{}", e); std::process::exit(1); });
+        crate::util::apply_params_file(&mut model, &pf.to_string_lossy())
+            .unwrap_or_else(|e| { eprintln!("{}", e); std::process::exit(1); });
     }
     if let Some(ref name) = scenario_name {
         if let Some(preset) = model.presets.iter().find(|p| p.name == *name) {
-            for p in &mut model.parameters { if let Some(&v) = preset.params.get(&p.name) { p.value = Some(v); } }
+            for p in &mut model.parameters {
+                if let Some(&v) = preset.params.get(&p.name) { p.value = Some(v); }
+            }
         }
     }
-    for p in &mut model.parameters { if let Some(&v) = overrides.get(&p.name) { p.value = Some(v); } }
+    for p in &mut model.parameters {
+        if let Some(&v) = overrides.get(&p.name) { p.value = Some(v); }
+    }
 
-    let compiled = Arc::new(CompiledModel::new(model.clone()).unwrap_or_else(|e| { eprintln!("{:?}", e); std::process::exit(1); }));
+    let compiled = Arc::new(CompiledModel::new(model.clone())
+        .unwrap_or_else(|e| { eprintln!("{:?}", e); std::process::exit(1); }));
     let base_params = compiled.default_params.clone();
 
     let observations: Vec<Observation> = crate::pfilter::load_data_tsv_pub(&data_path)
@@ -88,26 +115,26 @@ pub fn cmd_profile(a: &crate::args::ProfileArgs) {
         .into_iter().map(|o| Observation { time: o.time, value: o.value }).collect();
     let observations = Arc::new(observations);
 
-    // Flow indices
     let flow_indices = crate::util::resolve_flow_indices(&model, flow_name.as_deref())
         .unwrap_or_else(|e| { eprintln!("error: {}", e); std::process::exit(1); });
     let flow_indices = Arc::new(flow_indices);
 
     for sw in &a.sweep {
         let idx = compiled.param_index.get(sw.name.as_str()).copied()
-            .unwrap_or_else(|| { eprintln!("focal parameter '{}' not found", sw.name); std::process::exit(1); });
-        focal_grids.push(FocalGrid { name: sw.name.clone(), values: sw.values.clone(), param_idx: idx });
+            .unwrap_or_else(|| {
+                eprintln!("focal parameter '{}' not found", sw.name);
+                std::process::exit(1);
+            });
+        focal_grids.push(FocalGrid {
+            name: sw.name.clone(),
+            values: sw.values.clone(),
+            param_idx: idx,
+        });
     }
 
     let fixed_names: std::collections::HashSet<String> = a.fixed.iter().cloned().collect();
-
-    // Build IF2 param specs (excluding focal + fixed params)
-    // Focal params are fixed at grid values by the profile loop.
-    // Fixed params are held constant at their --params values.
     let exclude: std::collections::HashSet<String> = focal_names.iter()
-        .chain(fixed_names.iter())
-        .cloned()
-        .collect();
+        .chain(fixed_names.iter()).cloned().collect();
 
     let param_names_to_estimate: Vec<String> = if rw_sd_auto {
         model.parameters.iter()
@@ -134,12 +161,9 @@ pub fn cmd_profile(a: &crate::args::ProfileArgs) {
 
     let if2_params = crate::fit::runner::build_if2_params_from_specs(
         &model, &compiled, &base_params, &specs,
-    ).unwrap_or_else(|e| {
-        eprintln!("error: {}", e); std::process::exit(1);
-    });
+    ).unwrap_or_else(|e| { eprintln!("error: {}", e); std::process::exit(1); });
     let if2_params = Arc::new(if2_params);
 
-    // Build process + observation model via traits
     let process = Arc::new(ChainBinomialProcess::new(compiled.clone()));
     let obs_model_obj: Arc<dyn ObservationModel<ParticleState> + Send + Sync> = {
         let obs_block = model.observations.first();
@@ -171,7 +195,6 @@ pub fn cmd_profile(a: &crate::args::ProfileArgs) {
     };
 
     // Build Cartesian product of all focal grids.
-    // Each job is a Vec<(param_idx, value)> for the focal params at that grid point.
     let mut grid_points: Vec<Vec<(usize, f64)>> = vec![vec![]];
     for fg in &focal_grids {
         let mut expanded = Vec::new();
@@ -184,13 +207,113 @@ pub fn cmd_profile(a: &crate::args::ProfileArgs) {
         }
         grid_points = expanded;
     }
-
     let total_jobs = grid_points.len() * n_starts;
-    let dim_str = focal_grids.iter().map(|fg| format!("{}={}", fg.name, fg.values.len())).collect::<Vec<_>>().join(" × ");
+
+    // ── CAS setup ──────────────────────────────────────────────────────
+    //
+    // Hash inputs:
+    //   - model_hash:         structural hash of the compiled IR
+    //   - base_params_hash:   canonical serialization of base_params
+    //   - focal_params + grid:embedded as JSON for a stable hash
+    //   - if2_config_hash:    (iterations, particles, cooling, dt, starts)
+    //   - seed_base
+    //
+    // Profile-level hash = sha256 over all of the above. Any change to
+    // any input ⇒ different profile_hash ⇒ different output directory
+    // ⇒ fresh run (no false cache hits from stale results). This is
+    // exactly the cache-miss semantics `camdl simulate --cas` uses.
+    let model_hash = crate::hashing::model_hash(&model_json);
+    let base_params_canonical = {
+        // Canonical serialization: name=value lines sorted by name.
+        let mut lines: Vec<String> = model.parameters.iter()
+            .map(|p| format!("{}={}", p.name,
+                p.value.unwrap_or(base_params[compiled.param_index[p.name.as_str()]])))
+            .collect();
+        lines.sort();
+        lines.join("\n")
+    };
+    let base_params_hash = sha256_hex(base_params_canonical.as_bytes());
+
+    let if2_config_canonical = format!(
+        "iterations={}\nparticles={}\ncooling={}\ndt={}\nstarts={}",
+        n_iterations, n_particles, cooling, dt, n_starts,
+    );
+    let if2_config_hash = sha256_hex(if2_config_canonical.as_bytes());
+
+    let grid_spec: Vec<GridAxis> = focal_grids.iter().map(|fg| GridAxis {
+        param: fg.name.clone(),
+        values: fg.values.clone(),
+    }).collect();
+    let grid_canonical = serde_json::to_string(&grid_spec).unwrap_or_default();
+
+    let profile_canonical = format!(
+        "{}\n{}\n{}\n{}\n{}\n{}",
+        model_hash, base_params_hash,
+        focal_names.join(","),
+        grid_canonical, if2_config_hash, seed_base,
+    );
+    let profile_hash = sha256_hex(profile_canonical.as_bytes());
+
+    let root = output_root(None, None);  // respects env vars / config if wired upstream
+    let stem = crate::hashing::path_stem_slug(&ir_path);
+    let profile_dir = profile_run_dir(&root, stem.as_deref(), &profile_hash);
+    if let Err(e) = std::fs::create_dir_all(&profile_dir) {
+        eprintln!("error: cannot create {}: {}", profile_dir.display(), e);
+        std::process::exit(1);
+    }
+    eprintln!("profile tree: {}", profile_dir.display());
+
+    // Write profile-level run.json up front (wall_time_seconds = 0 for
+    // now; overwritten at the end with the actual total).
+    let argv: Vec<String> = std::env::args().collect();
+    let profile_meta = ProfileMeta {
+        model: ir_path.clone(),
+        model_hash: model_hash.clone(),
+        focal_params: focal_names.clone(),
+        grid: grid_spec,
+        n_starts,
+        if2_config_hash: if2_config_hash.clone(),
+        base_params_hash: base_params_hash.clone(),
+        seed_base,
+        total_jobs,
+    };
+    let profile_run = Run {
+        hash: profile_hash.clone(),
+        version: crate::version::VERSION_SHORT.to_string(),
+        created_at: crate::cas::iso8601_utc(std::time::SystemTime::now()),
+        argv: argv.clone(),
+        wall_time_seconds: 0.0,
+        kind: RunKind::Profile(profile_meta),
+    };
+    if let Err(e) = profile_run.write(&profile_dir) {
+        eprintln!("warning: could not write profile run.json: {}", e);
+    }
+
+    // Write one focal.toml per grid point so consumers can answer
+    // "which coordinate is point 00042" without parsing the index back
+    // into axis values. Written once up front; unchanging over the run.
+    for (gi, point) in grid_points.iter().enumerate() {
+        let point_dir = profile_point_dir(&profile_dir, gi);
+        if let Err(e) = std::fs::create_dir_all(&point_dir) {
+            eprintln!("warning: cannot create {}: {}", point_dir.display(), e);
+            continue;
+        }
+        let focal_toml_path = point_dir.join("focal.toml");
+        if focal_toml_path.exists() { continue; }
+        let mut body = String::from("# Pinned focal parameter values for this grid point.\n\n");
+        for (fg, &(_, val)) in focal_grids.iter().zip(point.iter()) {
+            body.push_str(&format!("{} = {}\n", fg.name, val));
+        }
+        let _ = std::fs::write(&focal_toml_path, body);
+    }
+
+    let dim_str = focal_grids.iter()
+        .map(|fg| format!("{}={}", fg.name, fg.values.len()))
+        .collect::<Vec<_>>().join(" × ");
     eprintln!("profile: {} grid ({}) × {} starts = {} IF2 runs ({} particles × {} iter each)",
         grid_points.len(), dim_str, n_starts, total_jobs, n_particles, n_iterations);
 
-    // ── Progress bar ─────────────────────────────────────────────────────
+    // ── Progress display ────────────────────────────────────────────────
     let mp = MultiProgress::with_draw_target(crate::progress::draw_target());
     let overall_style = ProgressStyle::with_template(
         "  {prefix:>12} {bar:40.cyan/dim} {pos:>3}/{len:3} {msg}"
@@ -198,111 +321,376 @@ pub fn cmd_profile(a: &crate::args::ProfileArgs) {
     let overall_pb = mp.add(ProgressBar::new(total_jobs as u64));
     overall_pb.set_style(overall_style);
     overall_pb.set_prefix("profile");
-
-    // Plain-mode fallback (GH #14): throttled log lines since bars are
-    // hidden under --progress plain. Shared across rayon workers via
-    // Mutex — contention is negligible at the per-job cadence. Cadence
-    // from progress::DEFAULT_THROTTLE.
     let plain = crate::progress::is_plain();
-    let throttle = std::sync::Mutex::new(crate::progress::Throttle::default());
+    let progress_throttle = Mutex::new(crate::progress::Throttle::default());
     if plain {
         log::info!("profile: {} grid points × {} starts = {} jobs",
             grid_points.len(), n_starts, total_jobs);
     }
 
-    // Initialize rayon global pool (controls all parallelism: grid jobs + particles).
+    // ── Cache-hit scan ─────────────────────────────────────────────────
+    //
+    // A start is considered complete iff its start_dir contains a
+    // parseable run.json. Pre-scan to count cache hits (for the
+    // progress display) and skip them from the job list.
+    let jobs: Vec<(usize, usize)> = (0..grid_points.len())
+        .flat_map(|gi| (0..n_starts).map(move |si| (gi, si)))
+        .collect();
+
+    let mut cached: Vec<(usize, usize)> = Vec::new();
+    let mut remaining: Vec<(usize, usize)> = Vec::new();
+    for &(gi, si) in &jobs {
+        let start_dir = profile_point_start_dir(&profile_dir, gi, si);
+        if Run::read(&start_dir).is_ok() {
+            cached.push((gi, si));
+        } else {
+            remaining.push((gi, si));
+        }
+    }
+    if !cached.is_empty() {
+        eprintln!("profile: {} of {} starts already cached — resuming",
+            cached.len(), total_jobs);
+        overall_pb.inc(cached.len() as u64);
+    }
+
     if parallel > 0 {
         let _ = rayon::ThreadPoolBuilder::new()
             .num_threads(parallel)
             .build_global();
     }
 
-    // Job list: (grid_point_idx, start_idx)
-    let jobs: Vec<(usize, usize)> = (0..grid_points.len())
-        .flat_map(|gi| (0..n_starts).map(move |si| (gi, si)))
-        .collect();
+    // Shared throttle for rollup rewrites. Not a hard requirement for
+    // v1 (a rollup rewrite is <1s at realistic grid sizes), but at
+    // very small grids with very fast IF2 runs we could rewrite every
+    // few ms and burn I/O unnecessarily. Throttle to at most once per
+    // second across all threads; last-completion-wins guarantees the
+    // final state is always correct regardless of coalesced writes.
+    let rollup_throttle = Mutex::new(std::time::Instant::now()
+        - std::time::Duration::from_secs(10));
+    let start_time = std::time::Instant::now();
 
-    let results: Vec<(usize, Vec<f64>, f64, Vec<f64>)> = {
-        jobs.par_iter().map(|&(grid_idx, start_idx)| {
-            let process = Arc::clone(&process);
-            let obs_model_obj = Arc::clone(&obs_model_obj);
-            let if2_params = Arc::clone(&if2_params);
-            let focal_values: Vec<f64> = grid_points[grid_idx].iter().map(|&(_, v)| v).collect();
+    // ── Run the remaining jobs in parallel, writing each completion
+    //    atomically to its own start_{k}/ directory. ────────────────────
+    // Focal-axis names in declared order (shared with rewrite_rollup
+    // for column ordering). Own the strings so the closure + final
+    // rewrite can borrow without lifetime gymnastics.
+    let focal_names_ordered: Vec<String> =
+        focal_grids.iter().map(|fg| fg.name.clone()).collect();
 
-            // Set focal parameters
-            let mut params = base_params.clone();
-            for &(idx, val) in &grid_points[grid_idx] {
-                params[idx] = val;
+    remaining.par_iter().for_each(|&(grid_idx, start_idx)| {
+        let process = Arc::clone(&process);
+        let obs_model_obj = Arc::clone(&obs_model_obj);
+        let if2_params = Arc::clone(&if2_params);
+        let focal_values: Vec<f64> = grid_points[grid_idx].iter().map(|&(_, v)| v).collect();
+
+        // Pin focal parameters
+        let mut params = base_params.clone();
+        for &(idx, val) in &grid_points[grid_idx] {
+            params[idx] = val;
+        }
+
+        let config = IF2Config {
+            n_particles, n_iterations,
+            cooling_fraction: cooling, cooling_target_iters: n_iterations, dt,
+            t_start: process.compiled.model.simulation.t_start,
+            simplex_groups: vec![],
+            skip_first_obs_from_loglik: false,
+        };
+        let job_seed = seed_base ^ (grid_idx as u64 * 1000 + start_idx as u64);
+        let job_t0 = std::time::Instant::now();
+
+        let result = run_if2(
+            &*process, &*obs_model_obj, &params, &if2_params, &config, job_seed,
+        );
+        let elapsed = job_t0.elapsed().as_secs_f64();
+
+        // Write the start's artifacts atomically: mle.toml first, then
+        // run.json via Run::write (which is tmp-then-rename). If the
+        // process dies between the two, the next invocation sees no
+        // run.json and reruns — mle.toml alone is not enough to mark
+        // the start complete.
+        let start_dir = profile_point_start_dir(&profile_dir, grid_idx, start_idx);
+        if let Err(e) = std::fs::create_dir_all(&start_dir) {
+            eprintln!("warning: cannot create {}: {}", start_dir.display(), e);
+            return;
+        }
+
+        let (final_loglik, mle_params): (f64, Vec<f64>) = match result {
+            Ok(r) => (r.final_loglik, r.mle),
+            Err(_) => (f64::NEG_INFINITY, params.clone()),
+        };
+
+        // Per-start mle.toml: pretty-printed MLE for human inspection
+        // and for the rollup reducer to read back.
+        let mle_toml = render_mle_toml(&if2_params, &focal_values,
+            &focal_grids.iter().map(|fg| fg.name.as_str()).collect::<Vec<_>>(),
+            &mle_params, final_loglik);
+        let _ = std::fs::write(start_dir.join("mle.toml"), mle_toml);
+
+        // Per-start run.json: RunKind::FitStage with profile backref.
+        let start_hash_input = format!(
+            "{}|point={}|start={}|seed={}",
+            profile_hash, grid_idx, start_idx, job_seed,
+        );
+        let start_hash = sha256_hex(start_hash_input.as_bytes());
+        let start_run = Run {
+            hash: start_hash,
+            version: crate::version::VERSION_SHORT.to_string(),
+            created_at: crate::cas::iso8601_utc(std::time::SystemTime::now()),
+            argv: argv.clone(),
+            wall_time_seconds: elapsed,
+            kind: RunKind::FitStage(FitStageMeta {
+                fit_hash: String::new(),
+                stage: "if2".to_string(),
+                method: "if2".to_string(),
+                seed: job_seed,
+                n_chains: 1,
+                algorithm: serde_json::json!({
+                    "particles":  n_particles,
+                    "iterations": n_iterations,
+                    "cooling":    cooling,
+                    "dt":         dt,
+                }),
+                best_loglik: if final_loglik.is_finite() { Some(final_loglik) } else { None },
+                best_chain:  Some(0),
+                starts_from: None,
+                derived_from: None,
+                parent_profile_hash: Some(profile_hash.clone()),
+                profile_point_idx:   Some(grid_idx),
+                profile_start_idx:   Some(start_idx),
+            }),
+        };
+        if let Err(e) = start_run.write(&start_dir) {
+            eprintln!("warning: could not write {}/run.json: {}",
+                start_dir.display(), e);
+        }
+
+        // Progress tick.
+        overall_pb.inc(1);
+        if plain {
+            let done = overall_pb.position();
+            let ready = progress_throttle.lock()
+                .map(|mut t| t.ready()).unwrap_or(true);
+            if ready || done == total_jobs as u64 {
+                log::info!("profile: {}/{} jobs complete", done, total_jobs);
             }
+        }
 
-            let config = IF2Config {
-                n_particles, n_iterations,
-                cooling_fraction: cooling, cooling_target_iters: n_iterations, dt,
-                t_start: process.compiled.model.simulation.t_start,
-                simplex_groups: vec![],
-                // Profile doesn't surface ic_free; it's a 2D β-γ scan
-                // assuming a committed initial state.
-                skip_first_obs_from_loglik: false,
-            };
-            let job_seed = seed ^ (grid_idx as u64 * 1000 + start_idx as u64);
-
-            let result = run_if2(
-                &*process, &*obs_model_obj, &params, &if2_params, &config, job_seed,
-            );
-
-            overall_pb.inc(1);
-            if plain {
-                let done = overall_pb.position();
-                if throttle.lock().map(|mut t| t.ready()).unwrap_or(true) || done == total_jobs as u64 {
-                    log::info!("profile: {}/{} jobs complete", done, total_jobs);
-                }
+        // Rollup rewrite — throttled to once per second across threads.
+        // Last-completion-wins; if three threads finish within the
+        // same second, only one rewrite fires but it reflects all
+        // three because rewrite reads the whole tree fresh.
+        let should_rewrite = {
+            let mut last = rollup_throttle.lock().unwrap();
+            let now = std::time::Instant::now();
+            if now.duration_since(*last) >= std::time::Duration::from_secs(1) {
+                *last = now;
+                true
+            } else { false }
+        };
+        if should_rewrite {
+            if let Err(e) = rewrite_rollup(&profile_dir, &focal_names_ordered,
+                &if2_params, grid_points.len()) {
+                eprintln!("warning: rollup rewrite failed: {}", e);
             }
-
-            match result {
-                Ok(r) => (grid_idx, focal_values, r.final_loglik, r.mle),
-                Err(_) => (grid_idx, focal_values, f64::NEG_INFINITY, params),
-            }
-        }).collect()
-    };
+        }
+    });
 
     overall_pb.finish_with_message("done");
 
-    // ── Aggregate: best loglik per grid point across starts ──────────────
-    let mut best: HashMap<usize, (Vec<f64>, f64, Vec<f64>)> = HashMap::new();
-    for (grid_idx, focal_vals, loglik, mle_params) in results {
-        let entry = best.entry(grid_idx).or_insert((focal_vals.clone(), f64::NEG_INFINITY, vec![]));
-        if loglik > entry.1 {
-            *entry = (focal_vals, loglik, mle_params);
-        }
+    // Final rollup rewrite (unthrottled) — guarantees the committed
+    // profile.tsv reflects every completed start, not just the ones
+    // that won the throttle race.
+    if let Err(e) = rewrite_rollup(&profile_dir, &focal_names_ordered,
+        &if2_params, grid_points.len()) {
+        eprintln!("warning: final rollup rewrite failed: {}", e);
     }
 
-    // ── Output TSV ───────────────────────────────────────────────────────
-    let mut out: Box<dyn std::io::Write> = match &output_path {
-        Some(path) => {
-            let f = std::fs::File::create(path)
-                .unwrap_or_else(|e| { eprintln!("cannot create {}: {}", path, e); std::process::exit(1); });
-            Box::new(std::io::BufWriter::new(f))
-        }
-        None => Box::new(std::io::stdout().lock()),
-    };
-
-    writeln!(out, "# {}", crate::version::VERSION).unwrap();
-    for fg in &focal_grids { write!(out, "{}\t", fg.name).unwrap(); }
-    write!(out, "max_loglik").unwrap();
-    for spec in if2_params.iter() { write!(out, "\t{}", spec.name).unwrap(); }
-    writeln!(out).unwrap();
-
-    let mut sorted: Vec<_> = best.into_iter().collect();
-    sorted.sort_by_key(|&(idx, _)| idx);
-
-    for (_, (focal_vals, loglik, mle_params)) in sorted {
-        for v in &focal_vals { write!(out, "{:.4}\t", v).unwrap(); }
-        write!(out, "{:.2}", loglik).unwrap();
-        for spec in if2_params.iter() { write!(out, "\t{:.6}", mle_params[spec.index]).unwrap(); }
-        writeln!(out).unwrap();
+    // Patch the profile-level run.json with total wall time now that
+    // the run is complete.
+    if let Ok(mut pr) = Run::read(&profile_dir) {
+        pr.wall_time_seconds = start_time.elapsed().as_secs_f64();
+        let _ = pr.write(&profile_dir);
     }
 
-    if let Some(ref path) = output_path {
-        eprintln!("profile written to {}", path);
+    // Optional: mirror profile.tsv to the user's --output path.
+    if let Some(ref path) = output_tsv_path {
+        let src = profile_dir.join("profile.tsv");
+        if src.exists() {
+            match std::fs::copy(&src, path) {
+                Ok(_) => eprintln!("profile written to {}", path),
+                Err(e) => eprintln!("warning: could not copy profile.tsv to {}: {}", path, e),
+            }
+        }
+    } else {
+        eprintln!("profile.tsv: {}", profile_dir.join("profile.tsv").display());
     }
 }
+
+/// Render a per-start MLE TOML file. Human-readable; also the format
+/// `rewrite_rollup` reads back to reconstruct the rollup.
+fn render_mle_toml(
+    if2_params: &[sim::inference::if2::EstimatedParam],
+    focal_values: &[f64],
+    focal_names: &[&str],
+    mle: &[f64],
+    final_loglik: f64,
+) -> String {
+    let mut body = String::new();
+    body.push_str("# Per-start MLE for one profile grid point.\n\n");
+    body.push_str(&format!("final_loglik = {}\n\n", final_loglik));
+    body.push_str("[focal]\n");
+    for (name, v) in focal_names.iter().zip(focal_values.iter()) {
+        body.push_str(&format!("{} = {}\n", name, v));
+    }
+    body.push_str("\n[mle]\n");
+    for spec in if2_params.iter() {
+        body.push_str(&format!("{} = {}\n", spec.name, mle[spec.index]));
+    }
+    body
+}
+
+/// Scan the per-start CAS tree and rewrite `profile.tsv` as the
+/// derived rollup. One row per grid point, each row the winning start
+/// (max final_loglik) across `n_starts`. Written atomically via
+/// tmp-then-rename so concurrent rollups (from racing threads) never
+/// expose a truncated intermediate.
+fn rewrite_rollup(
+    profile_dir: &Path,
+    focal_names: &[String],
+    if2_params: &[sim::inference::if2::EstimatedParam],
+    n_grid_points: usize,
+) -> std::io::Result<()> {
+    // For each grid point, find the winning start by scanning its
+    // start_{k}/ subdirs for mle.toml. If no starts have finished yet
+    // for this point, skip the row (partial rollup — consumers see
+    // only completed points).
+    let mut rows: Vec<RollupRow> = Vec::new();
+    for gi in 0..n_grid_points {
+        let point_dir = profile_point_dir(profile_dir, gi);
+        let Ok(dir_iter) = std::fs::read_dir(&point_dir) else { continue; };
+
+        let mut best: Option<ParsedMle> = None;
+        let mut wall_time_sum: f64 = 0.0;
+        let mut best_start: Option<usize> = None;
+        for entry in dir_iter.flatten() {
+            let fname = entry.file_name();
+            let name = fname.to_string_lossy();
+            let Some(start_idx_str) = name.strip_prefix("start_") else { continue; };
+            let Ok(start_idx) = start_idx_str.parse::<usize>() else { continue; };
+            let start_dir = entry.path();
+
+            // Use run.json's wall_time_seconds for summation. Skip
+            // starts with missing/broken run.json — they're incomplete.
+            let Ok(start_run) = Run::read(&start_dir) else { continue; };
+            wall_time_sum += start_run.wall_time_seconds;
+
+            let mle_path = start_dir.join("mle.toml");
+            let Ok(mle_text) = std::fs::read_to_string(&mle_path) else { continue; };
+            let Some(parsed) = parse_mle_toml(&mle_text, if2_params, focal_names) else { continue; };
+            match &best {
+                Some(b) if parsed.final_loglik <= b.final_loglik => {}
+                _ => {
+                    best = Some(parsed);
+                    best_start = Some(start_idx);
+                }
+            }
+        }
+
+        if let (Some(best), Some(best_start)) = (best, best_start) {
+            let _ = gi;  // order preserved by outer loop; field elided.
+            rows.push(RollupRow {
+                focal_values: best.focal_values,
+                best_loglik: best.final_loglik,
+                best_start_idx: best_start,
+                mle: best.mle,
+                wall_time_sum,
+            });
+        }
+    }
+
+    // Render.
+    let mut body = String::new();
+    body.push_str(&format!("# {}\n", crate::version::VERSION));
+    body.push_str(&format!("# total_points={} completed={}\n",
+        n_grid_points, rows.len()));
+    for name in focal_names { body.push_str(&format!("{}\t", name)); }
+    body.push_str("best_loglik\tbest_start_idx\twall_time_seconds");
+    for spec in if2_params.iter() { body.push_str(&format!("\t{}", spec.name)); }
+    body.push('\n');
+    for row in &rows {
+        for v in &row.focal_values { body.push_str(&format!("{:.4}\t", v)); }
+        body.push_str(&format!("{:.4}\t{}\t{:.3}",
+            row.best_loglik, row.best_start_idx, row.wall_time_sum));
+        for spec in if2_params.iter() {
+            body.push_str(&format!("\t{:.6}", row.mle[spec.index]));
+        }
+        body.push('\n');
+    }
+
+    // Atomic write.
+    let final_path = profile_dir.join("profile.tsv");
+    let tmp_path = profile_dir.join("profile.tsv.tmp");
+    std::fs::write(&tmp_path, body)?;
+    std::fs::rename(&tmp_path, &final_path)?;
+    Ok(())
+}
+
+struct RollupRow {
+    focal_values: Vec<f64>,
+    best_loglik: f64,
+    best_start_idx: usize,
+    mle: Vec<f64>,
+    wall_time_sum: f64,
+}
+
+struct ParsedMle {
+    final_loglik: f64,
+    focal_values: Vec<f64>,
+    mle: Vec<f64>,
+}
+
+fn parse_mle_toml(
+    text: &str,
+    if2_params: &[sim::inference::if2::EstimatedParam],
+    focal_names: &[String],
+) -> Option<ParsedMle> {
+    let doc: toml::Value = toml::from_str(text).ok()?;
+    let final_loglik = toml_as_f64(doc.get("final_loglik")?)?;
+    let focal = doc.get("focal")?.as_table()?;
+    let mle = doc.get("mle")?.as_table()?;
+
+    // Extract focal values in the caller's declared order (the column
+    // order of the rollup TSV header), not in TOML key order.
+    let mut focal_values: Vec<f64> = Vec::with_capacity(focal_names.len());
+    for name in focal_names {
+        let v = focal.get(name).and_then(toml_as_f64)?;
+        focal_values.push(v);
+    }
+
+    let mle_len = if2_params.iter().map(|s| s.index).max().unwrap_or(0) + 1;
+    let mut mle_values: Vec<f64> = vec![0.0; mle_len];
+    for spec in if2_params.iter() {
+        if let Some(v) = mle.get(&spec.name).and_then(toml_as_f64) {
+            if mle_values.len() <= spec.index {
+                mle_values.resize(spec.index + 1, 0.0);
+            }
+            mle_values[spec.index] = v;
+        }
+    }
+
+    Some(ParsedMle { final_loglik, focal_values, mle: mle_values })
+}
+
+/// Accept TOML numeric values whether they serialised as Integer
+/// (`R0 = 50`) or Float (`R0 = 50.0`). `toml::Value::as_float()`
+/// returns `None` for Integers, which would silently drop any focal
+/// value that happened to be a whole number.
+fn toml_as_f64(v: &toml::Value) -> Option<f64> {
+    match v {
+        toml::Value::Float(f)   => Some(*f),
+        toml::Value::Integer(i) => Some(*i as f64),
+        _ => None,
+    }
+}
+
