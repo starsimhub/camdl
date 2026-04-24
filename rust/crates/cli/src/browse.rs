@@ -77,6 +77,15 @@ fn load_sim_entry(dir: &Path, cwd: &Path) -> Option<RunEntry> {
 enum KindFilter { Sim, Fit, Both }
 
 pub fn cmd_list(a: &crate::args::ListArgs) {
+    // --parent=HASH: enumerate the grid-point × start runs of one
+    // specific profile. Takes precedence over the default sim/fit
+    // enumeration because it's a more specific request; the other
+    // filters (since, limit, format) still apply.
+    if let Some(parent_hash) = a.parent.as_ref() {
+        list_profile_children(&a.root.to_string_lossy(), parent_hash, a);
+        return;
+    }
+
     let root = a.root.to_string_lossy();
     let filter_since: Option<std::time::Duration> = a.since.as_ref().map(|d| d.0);
     let filter_kind = match a.kind.as_str() {
@@ -136,6 +145,86 @@ pub fn cmd_list(a: &crate::args::ListArgs) {
             if !filtered_fits.is_empty() { eprintln!("{}", "sims".bold()); }
             print_table(&filtered_runs, now);
         }
+    }
+}
+
+/// Enumerate the grid-point × start children of one profile, identified
+/// by a hash prefix. Scans `<root>/profiles/*/points/*/start_*/run.json`
+/// and prints those whose `parent_profile_hash` starts with the given
+/// prefix. Minimal output — a richer "loglik + wall_time per point" view
+/// is a v2 follow-up per the profile-CAS proposal.
+fn list_profile_children(
+    root: &str,
+    parent_hash_prefix: &str,
+    a: &crate::args::ListArgs,
+) {
+    use crate::run_meta::{Run, RunKind};
+
+    let root_path = std::path::Path::new(root);
+    let profiles_root = root_path.join("profiles");
+    if !profiles_root.exists() {
+        eprintln!("no profiles under {}", profiles_root.display());
+        return;
+    }
+
+    let mut matches: Vec<(std::path::PathBuf, Run)> = Vec::new();
+    for dir in walkdir_all(&profiles_root) {
+        let rj = dir.join("run.json");
+        if !rj.exists() { continue; }
+        let Ok(text) = std::fs::read_to_string(&rj) else { continue; };
+        let Ok(run) = serde_json::from_str::<Run>(&text) else { continue; };
+        if let RunKind::FitStage(ref m) = run.kind {
+            if m.parent_profile_hash.as_deref()
+                .is_some_and(|h| h.starts_with(parent_hash_prefix))
+            {
+                matches.push((dir, run));
+            }
+        }
+    }
+
+    if matches.is_empty() {
+        eprintln!("no grid-point runs found with parent hash prefix '{}'", parent_hash_prefix);
+        return;
+    }
+
+    // Sort by (point_idx, start_idx) for natural grid-traversal order.
+    matches.sort_by_key(|(_, run)| match &run.kind {
+        RunKind::FitStage(m) => (m.profile_point_idx.unwrap_or(usize::MAX),
+                                  m.profile_start_idx.unwrap_or(usize::MAX)),
+        _ => (usize::MAX, usize::MAX),
+    });
+
+    let limit = if a.all { matches.len() } else { a.limit.min(matches.len()) };
+
+    if a.format.as_deref() == Some("json") {
+        // Minimal JSON array for scripting. Full `Run` round-trip.
+        let slice: Vec<&Run> = matches.iter().take(limit).map(|(_, r)| r).collect();
+        match serde_json::to_string_pretty(&slice) {
+            Ok(s)  => println!("{}", s),
+            Err(e) => eprintln!("json error: {}", e),
+        }
+        return;
+    }
+
+    eprintln!("{}", "profile grid-point starts".bold());
+    eprintln!("  {:<6} {:<6} {:>14} {:>10}  {}",
+        "point", "start", "best_loglik", "wall_s", "path");
+    for (dir, run) in matches.iter().take(limit) {
+        let RunKind::FitStage(ref m) = run.kind else { continue; };
+        let point = m.profile_point_idx.map(|n| n.to_string()).unwrap_or("?".into());
+        let start = m.profile_start_idx.map(|n| n.to_string()).unwrap_or("?".into());
+        let ll = m.best_loglik
+            .map(|x| format!("{:.2}", x))
+            .unwrap_or_else(|| "—".into());
+        let wall = format!("{:.1}", run.wall_time_seconds);
+        let rel = dir.strip_prefix(root_path)
+            .unwrap_or(dir)
+            .display()
+            .to_string();
+        eprintln!("  {:<6} {:<6} {:>14} {:>10}  {}", point, start, ll, wall, rel.dimmed());
+    }
+    if matches.len() > limit {
+        eprintln!("  ... {} more (use --all to show)", matches.len() - limit);
     }
 }
 

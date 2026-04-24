@@ -770,9 +770,15 @@ pub struct ListArgs {
     #[arg(long)]
     pub since: Option<ListDuration>,
 
-    /// Filter by run kind: sim, fit, or both
+    /// Filter by run kind: sim, fit, profile, or both (sim+fit)
     #[arg(long, default_value = "both")]
     pub kind: String,
+
+    /// Filter by parent run hash (e.g. the grid-point × start children
+    /// of a specific `profile` run). Matches on `parent_profile_hash`
+    /// in each run's metadata. Accepts short prefixes (8+ chars).
+    #[arg(long, value_name = "HASH")]
+    pub parent: Option<String>,
 
     /// Maximum number of results to display
     #[arg(long, default_value_t = 50, conflicts_with = "all")]
