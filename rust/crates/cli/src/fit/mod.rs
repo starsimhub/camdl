@@ -27,6 +27,8 @@ pub mod trace_writer;
 pub mod synthetic;
 pub mod summary;
 pub mod gating;
+#[allow(dead_code)]  // wired into runner.rs in Step 6
+pub mod clean_eval;
 
 use config::FitToml;
 
