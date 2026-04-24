@@ -866,6 +866,27 @@ pub fn run_chains_with_per_chain_params(
     }
 }
 
+impl ChainResults {
+    /// Per-chain clean-eval log-likelihoods in chain-id order. Used by
+    /// scout/refine/validate to populate `FitState.chain_clean_logliks`
+    /// for the compound scout-convergence gate (Step 8).
+    pub fn chain_clean_logliks(&self) -> Vec<f64> {
+        let mut v: Vec<(usize, f64)> = self.clean_eval.per_chain_winners.iter()
+            .map(|w| (w.chain_id, w.loglik)).collect();
+        v.sort_by_key(|(id, _)| *id);
+        v.into_iter().map(|(_, ll)| ll).collect()
+    }
+
+    /// Per-chain clean-eval standard errors in chain-id order, parallel
+    /// to `chain_clean_logliks`.
+    pub fn chain_clean_ses(&self) -> Vec<f64> {
+        let mut v: Vec<(usize, f64)> = self.clean_eval.per_chain_winners.iter()
+            .map(|w| (w.chain_id, w.se)).collect();
+        v.sort_by_key(|(id, _)| *id);
+        v.into_iter().map(|(_, se)| se).collect()
+    }
+}
+
 /// Pure helper: extract the (chain_id, ll, se, label) summary from a
 /// `CleanEvalOutcome`. Factored out so the wiring change in
 /// `run_chains_with_per_chain_params` is unit-testable without paying
@@ -2212,6 +2233,8 @@ cooling = 0.5
             tail_chain_agreement: HashMap::new(),
             ivp_params: Vec::new(),
             chain_logliks: Vec::new(),
+            chain_clean_logliks: Vec::new(),
+            chain_clean_ses: Vec::new(),
         };
 
         let config = FitRunConfig::build(

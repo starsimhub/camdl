@@ -39,13 +39,19 @@ pub fn run_refine(
         starts_from, prior_state.best_loglik,
         prior_state.n_good_chains.unwrap_or(prior_state.n_chains));
 
-    // Gate 1: scout tail chain-agreement (Â) convergence. See
-    // docs/dev/proposals/2026-04-19-refine-gates-scout-convergence.md.
-    match crate::fit::gating::check_scout_convergence(&prior_state) {
+    // Gate 1: compound scout-convergence check (Â + decibans-spread).
+    // See docs/dev/proposals/2026-04-19-refine-gates-scout-convergence.md
+    // and the §Proposal 3 extension in the 2026-04-24 if2-scout
+    // remediation proposal. The legacy `camdl fit refine` subcommand
+    // doesn't carry a per-stage GateConfig, so the proposal's defaults
+    // (a_thresh=1.01, decibans_thresh=30.0) apply.
+    let gate = crate::fit::config_v2::GateConfig::default();
+    match crate::fit::gating::check_scout_convergence(&prior_state, &gate) {
         crate::fit::gating::ScoutGateVerdict::Ok => {}
         crate::fit::gating::ScoutGateVerdict::SoftWarn { param_agreement } => {
-            eprintln!("\x1b[33m  warning:\x1b[0m scout tail Â is in the 1.05–1.10 \
-                       grey zone for: {}",
+            eprintln!("\x1b[33m  warning:\x1b[0m scout tail Â in the SoftWarn \
+                       band ([{:.2}, {:.2})) for: {}",
+                crate::fit::gating::A_SOFT, gate.a_thresh,
                 param_agreement.iter()
                     .map(|(n, r)| format!("{} (Â={:.2})", n, r))
                     .collect::<Vec<_>>().join(", "));
@@ -58,6 +64,18 @@ pub fn run_refine(
                 loglik_spread, prior_state.best_loglik,
                 None,
             );
+            if allow_nonconverged_scout {
+                eprintln!("\x1b[33m  warning:\x1b[0m {}", msg);
+                eprintln!("\n  --allow-nonconverged-scout: proceeding anyway.");
+            } else {
+                return Err(msg);
+            }
+        }
+        crate::fit::gating::ScoutGateVerdict::DecibansSpread {
+            delta_db, threshold_db, sigma_max, chain_logliks,
+        } => {
+            let msg = crate::fit::gating::format_decibans_spread_verdict(
+                delta_db, threshold_db, sigma_max, &chain_logliks);
             if allow_nonconverged_scout {
                 eprintln!("\x1b[33m  warning:\x1b[0m {}", msg);
                 eprintln!("\n  --allow-nonconverged-scout: proceeding anyway.");
@@ -185,6 +203,8 @@ pub fn run_refine(
         tail_chain_agreement: chain_results.chain_agreement.clone(),
         ivp_params: refine_ivp_params,
         chain_logliks: refine_chain_logliks,
+        chain_clean_logliks: chain_results.chain_clean_logliks(),
+        chain_clean_ses: chain_results.chain_clean_ses(),
     };
     state.save(&stage_dir)?;
 

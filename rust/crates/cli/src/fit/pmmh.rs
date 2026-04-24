@@ -497,6 +497,8 @@ pub fn run_pmmh_cli(
         tail_chain_agreement: HashMap::new(),
         ivp_params: Vec::new(),
         chain_logliks: Vec::new(),
+        chain_clean_logliks: Vec::new(),
+        chain_clean_ses: Vec::new(),
     };
     state.save(&stage_dir)?;
 

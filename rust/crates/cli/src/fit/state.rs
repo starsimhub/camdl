@@ -51,6 +51,23 @@ pub struct FitState {
     /// serialise.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub chain_logliks: Vec<f64>,
+
+    /// Per-chain CLEAN-EVAL log-likelihoods — the de-biased combined
+    /// score for each chain's winning candidate, in chain-id order. New
+    /// in proposal §Proposal 1 (Step 8); the compound scout-convergence
+    /// gate uses these together with `chain_clean_ses` to compute an
+    /// SE-aware decibans-spread threshold. Absent in pre-§Proposal 1
+    /// fit_state files; the gate falls back to the chain-agreement-only
+    /// check when this is empty.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub chain_clean_logliks: Vec<f64>,
+
+    /// Per-chain clean-eval standard errors, parallel to
+    /// `chain_clean_logliks`. `max(SE)` drives the SE-aware decibans
+    /// floor: noisier chains get proportionally more tolerance before
+    /// the spread gate fires. New in §Proposal 1 (Step 8).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub chain_clean_ses: Vec<f64>,
 }
 
 impl FitState {

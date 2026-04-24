@@ -168,6 +168,8 @@ pub fn run_scout(fit: &FitToml, seed: u64, force: bool) -> Result<(), String> {
         tail_chain_agreement: chain_results.chain_agreement.clone(),
         ivp_params,
         chain_logliks,
+        chain_clean_logliks: chain_results.chain_clean_logliks(),
+        chain_clean_ses: chain_results.chain_clean_ses(),
     };
     state.save(&stage_dir)?;
 

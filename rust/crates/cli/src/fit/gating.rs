@@ -16,18 +16,24 @@
 //! Both gates produce actionable error messages that name the failing
 //! values AND suggest fixes.
 
+use super::config_v2::GateConfig;
 use super::state::FitState;
+use crate::evidence::NATS_TO_DB;
 
-/// Hard threshold: any non-IVP param with tail Â > this blocks
-/// refine from running. Matches Brooks-Gelman-Rubin convention
-/// (the underlying formula is G-R 1992; we relabel the output as
-/// chain agreement because it is applied to IF2 optimizer chains,
-/// not posterior samples).
+/// Legacy hard threshold for the chain-agreement Â check. Retained as
+/// a documented constant because it informs the SoftWarn band's upper
+/// bound when `gate.a_thresh` is configured loosely. Step 8 (proposal
+/// §Proposal 3) shifts the *effective* hard threshold to
+/// `gate.a_thresh` (default 1.01) — a deliberate tightening; see the
+/// proposal.
 pub const A_HARD: f64 = 1.10;
 
-/// Soft threshold: params between these get a prominent warning but
-/// refine still runs. Matches the existing scout diagnostic
-/// colour-coding (red ≥ 1.10, yellow 1.05–1.10, green < 1.05).
+/// Soft threshold: params between this and `gate.a_thresh` get a
+/// prominent warning but refine still runs. When `gate.a_thresh ≤
+/// A_SOFT` the SoftWarn band is empty (every above-soft Â also
+/// exceeds the hard gate). Matches the existing scout diagnostic
+/// colour-coding (red ≥ a_thresh, yellow A_SOFT..a_thresh,
+/// green < A_SOFT).
 pub const A_SOFT: f64 = 1.05;
 
 /// Minimum ε for Gate 2. Scout's noise floor on a typical PF-based
@@ -37,17 +43,17 @@ pub const A_SOFT: f64 = 1.05;
 pub const LOGLIK_EPSILON_MIN: f64 = 3.0;
 
 /// Verdict from the pre-refine convergence check. `SoftWarn` callers
-/// should print the named parameters prominently. `Hard` callers
-/// should error unless the user passed `--allow-nonconverged-scout`,
-/// in which case downgrade to SoftWarn.
+/// should print the named parameters prominently. `Hard` and
+/// `DecibansSpread` callers should error unless the user passed
+/// `--allow-nonconverged-scout`, in which case downgrade to a warning.
 #[derive(Debug)]
 pub enum ScoutGateVerdict {
     Ok,
     SoftWarn { param_agreement: Vec<(String, f64)> },
     Hard {
-        /// All non-IVP params with Â > A_HARD. Named and sorted
-        /// worst-first so the error message leads with the most
-        /// obvious failure.
+        /// All non-IVP params with Â ≥ `gate.a_thresh`. Named and
+        /// sorted worst-first so the error message leads with the
+        /// most obvious failure.
         failing: Vec<(String, f64)>,
         /// Every non-IVP Â, for the full diagnostic table.
         all_structural: Vec<(String, f64)>,
@@ -57,10 +63,37 @@ pub enum ScoutGateVerdict {
         /// spread is the strongest signal of multi-modality.
         loglik_spread: f64,
     },
+    /// New in §Proposal 3 (Step 8): chain agreement Â passed but the
+    /// inter-chain CLEAN-EVAL log-likelihood spread (in decibans)
+    /// exceeded `max(gate.decibans_thresh, 8 · max(SE) · NATS_TO_DB)`.
+    /// Strong signal that chains landed in different basins even with
+    /// per-parameter trajectories that look stable.
+    DecibansSpread {
+        delta_db: f64,
+        threshold_db: f64,
+        sigma_max: f64,
+        chain_logliks: Vec<f64>,
+    },
 }
 
 /// Check scout's fit_state for pre-refine convergence.
-pub fn check_scout_convergence(scout: &FitState) -> ScoutGateVerdict {
+///
+/// Compound gate (Step 8, proposal §Proposal 3):
+///
+/// 1. Chain-agreement Â on every non-IVP param must be `< gate.a_thresh`.
+///    Failure → `Hard`. Â in `[A_SOFT, gate.a_thresh)` → `SoftWarn`.
+/// 2. If both `chain_clean_logliks` and `chain_clean_ses` are populated
+///    (≥ 2 entries), the inter-chain decibans-spread of clean-eval
+///    log-likelihoods must be below
+///    `max(gate.decibans_thresh, 8 · max(SE) · NATS_TO_DB)`. The
+///    SE-aware floor prevents penalising chains whose Monte-Carlo
+///    spread alone could explain the observed log-lik spread.
+///    Failure → `DecibansSpread`.
+///
+/// Legacy fit_state files (no `tail_chain_agreement`) return `Ok` —
+/// the caller is expected to warn and proceed. Same fall-through for
+/// missing `chain_clean_*` (the decibans check simply isn't run).
+pub fn check_scout_convergence(scout: &FitState, gate: &GateConfig) -> ScoutGateVerdict {
     // Absent tail_chain_agreement means legacy fit_state — can't gate.
     // Caller handles the warn-and-proceed branch.
     if scout.tail_chain_agreement.is_empty() {
@@ -84,9 +117,10 @@ pub fn check_scout_convergence(scout: &FitState) -> ScoutGateVerdict {
     let worst = structural.iter().map(|(_, r)| *r)
         .fold(0.0_f64, f64::max);
 
-    if worst > A_HARD {
+    // Step 1 — Â check.
+    if worst >= gate.a_thresh {
         let failing: Vec<(String, f64)> = structural.iter()
-            .filter(|(_, r)| *r > A_HARD)
+            .filter(|(_, r)| *r >= gate.a_thresh)
             .cloned().collect();
         let loglik_spread = if scout.chain_logliks.len() >= 2 {
             let hi = scout.chain_logliks.iter().cloned()
@@ -95,20 +129,50 @@ pub fn check_scout_convergence(scout: &FitState) -> ScoutGateVerdict {
                 .fold(f64::INFINITY, f64::min);
             hi - lo
         } else { 0.0 };
-        ScoutGateVerdict::Hard {
+        return ScoutGateVerdict::Hard {
             failing,
             all_structural: structural,
             ivp,
             loglik_spread,
-        }
-    } else if worst > A_SOFT {
-        let warnable: Vec<(String, f64)> = structural.into_iter()
-            .filter(|(_, r)| *r > A_SOFT)
-            .collect();
-        ScoutGateVerdict::SoftWarn { param_agreement: warnable }
-    } else {
-        ScoutGateVerdict::Ok
+        };
     }
+    if worst >= A_SOFT {
+        // SoftWarn band only exists when gate.a_thresh > A_SOFT;
+        // otherwise the previous branch consumed everything above
+        // A_SOFT and we don't reach here.
+        let warnable: Vec<(String, f64)> = structural.into_iter()
+            .filter(|(_, r)| *r >= A_SOFT)
+            .collect();
+        return ScoutGateVerdict::SoftWarn { param_agreement: warnable };
+    }
+
+    // Step 2 — decibans-spread check on clean-eval logliks. Skipped
+    // when the scout is pre-§Proposal 1 and didn't write the new fields.
+    if scout.chain_clean_logliks.len() >= 2
+        && scout.chain_clean_ses.len() == scout.chain_clean_logliks.len()
+    {
+        let hi = scout.chain_clean_logliks.iter().cloned()
+            .fold(f64::NEG_INFINITY, f64::max);
+        let lo = scout.chain_clean_logliks.iter().cloned()
+            .fold(f64::INFINITY, f64::min);
+        let delta_db = (hi - lo) * NATS_TO_DB;
+
+        let sigma_max = scout.chain_clean_ses.iter().cloned()
+            .fold(0.0_f64, f64::max);
+        let se_floor_db = 8.0 * sigma_max * NATS_TO_DB;
+        let threshold_db = gate.decibans_thresh.max(se_floor_db);
+
+        if delta_db >= threshold_db {
+            return ScoutGateVerdict::DecibansSpread {
+                delta_db,
+                threshold_db,
+                sigma_max,
+                chain_logliks: scout.chain_clean_logliks.clone(),
+            };
+        }
+    }
+
+    ScoutGateVerdict::Ok
 }
 
 /// Compute the ε tolerance for Gate 2: `max(LOGLIK_EPSILON_MIN,
@@ -157,6 +221,51 @@ pub fn check_loglik_regression(
              looked like.\" Investigate before re-running.",
             scout_best, refine_best, delta, epsilon))
     }
+}
+
+/// Render the DecibansSpread verdict as a human error message.
+/// Names the spread, the threshold (and which limb of `max(...)` it
+/// came from), and the per-chain logliks in nats and decibans so the
+/// user can see whether one chain is the obvious outlier.
+pub fn format_decibans_spread_verdict(
+    delta_db: f64,
+    threshold_db: f64,
+    sigma_max: f64,
+    chain_logliks: &[f64],
+) -> String {
+    let se_floor_db = 8.0 * sigma_max * NATS_TO_DB;
+    let floor_source = if se_floor_db >= threshold_db {
+        format!("8 · σ_max · NATS_TO_DB = 8 · {:.2} · {:.3} ≈ {:.1} dB",
+            sigma_max, NATS_TO_DB, se_floor_db)
+    } else {
+        format!("user-configured floor decibans_thresh = {:.1} dB", threshold_db)
+    };
+    let mut msg = format!(
+        "scout chains landed in different basins.\n\n  \
+         clean-eval log-likelihood spread:\n    \
+         Δℓ = {:.2} dB > threshold = {:.2} dB ({})\n\n  \
+         Per-chain clean logliks (nats / dB from worst):\n",
+        delta_db, threshold_db, floor_source);
+    let lo = chain_logliks.iter().cloned().fold(f64::INFINITY, f64::min);
+    let mut sorted: Vec<(usize, f64)> = chain_logliks.iter().enumerate()
+        .map(|(i, &v)| (i, v)).collect();
+    sorted.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    for (i, ll) in &sorted {
+        msg.push_str(&format!("    chain {:<2}  ℓ = {:>9.2}  ({:+.2} dB from worst)\n",
+            i + 1, ll, (ll - lo) * NATS_TO_DB));
+    }
+    msg.push_str("\n  Pick one:\n    \
+                  - re-run scout with more chains (the wider the spread,\n      \
+                    the higher the chance one chain is in the right basin)\n    \
+                  - inspect chain_evaluations.tsv to see which candidate\n      \
+                    label dominated each chain — divergent labels are a\n      \
+                    multimodality signal\n    \
+                  - if the spread is genuinely Monte-Carlo noise, raise\n      \
+                    [stages.scout.clean_eval] n_particles or n_replicates\n    \
+                  - relax the gate via [stages.scout.gate].decibans_thresh\n      \
+                    or pass --decibans-thresh on the next run\n\n  \
+                  To proceed anyway:  camdl fit run fit.toml --allow-nonconverged-scout");
+    msg
 }
 
 /// Render the Gate 1 Hard verdict as a human error message.
@@ -241,7 +350,17 @@ mod tests {
                 .map(|(k, v)| (k.to_string(), *v)).collect(),
             ivp_params: ivp_params.iter().map(|s| s.to_string()).collect(),
             chain_logliks: chain_logliks.to_vec(),
+            chain_clean_logliks: vec![],
+            chain_clean_ses: vec![],
         }
+    }
+
+    /// Legacy GateConfig matching the pre-§Proposal 3 thresholds —
+    /// useful for tests that exercise the SoftWarn band and IVP
+    /// exemption logic, both of which were defined before the new
+    /// stricter default `a_thresh = 1.01`.
+    fn legacy_gate() -> GateConfig {
+        GateConfig { a_thresh: A_HARD, decibans_thresh: f64::INFINITY }
     }
 
     #[test]
@@ -252,7 +371,7 @@ mod tests {
             &[-60.2, -62.5, -63.3, -64.5, -66.2, -68.7, -854.6],
             -60.2,
         );
-        match check_scout_convergence(&s) {
+        match check_scout_convergence(&s, &legacy_gate()) {
             ScoutGateVerdict::Hard { failing, loglik_spread, .. } => {
                 let names: Vec<&str> = failing.iter()
                     .map(|(n, _)| n.as_str()).collect();
@@ -281,7 +400,7 @@ mod tests {
             &[-60.2, -60.5],
             -60.2,
         );
-        match check_scout_convergence(&s) {
+        match check_scout_convergence(&s, &legacy_gate()) {
             ScoutGateVerdict::Ok => (),
             other => panic!("expected Ok (IVP exempt), got {:?}", other),
         }
@@ -295,7 +414,7 @@ mod tests {
             &[-60.2, -60.5],
             -60.2,
         );
-        match check_scout_convergence(&s) {
+        match check_scout_convergence(&s, &legacy_gate()) {
             ScoutGateVerdict::SoftWarn { param_agreement } => {
                 let names: Vec<&str> = param_agreement.iter()
                     .map(|(n, _)| n.as_str()).collect();
@@ -313,9 +432,102 @@ mod tests {
         // caller treats this as "unknown, warn and proceed" via the
         // Ok verdict.
         let s = make_state(&[], &[], &[-60.0], -60.0);
-        match check_scout_convergence(&s) {
+        match check_scout_convergence(&s, &legacy_gate()) {
             ScoutGateVerdict::Ok => (),
             other => panic!("legacy state → Ok, got {:?}", other),
+        }
+    }
+
+    /// Step 8: under the new strict default (`a_thresh = 1.01`),
+    /// structural Â of 1.05 is already a hard fail — even though the
+    /// pre-§Proposal 3 gate would have only soft-warned at this value.
+    /// This is the intended tightening; documented here so a future
+    /// reader doesn't try to "fix" it.
+    #[test]
+    fn default_gate_is_strict_about_chain_agreement() {
+        let s = make_state(
+            &[("beta", 1.05), ("gamma", 1.001)],
+            &[],
+            &[-60.0, -60.5],
+            -60.0,
+        );
+        match check_scout_convergence(&s, &GateConfig::default()) {
+            ScoutGateVerdict::Hard { failing, .. } => {
+                let names: Vec<&str> = failing.iter().map(|(n, _)| n.as_str()).collect();
+                assert!(names.contains(&"beta"),
+                    "default a_thresh = 1.01 must fail beta (Â=1.05): {:?}", names);
+            }
+            other => panic!("expected Hard under default gate, got {:?}", other),
+        }
+    }
+
+    /// Step 8 — SE-aware floor case from the handoff: small SE means
+    /// `8·σ_max·NATS_TO_DB` is below the user-configured floor, so the
+    /// floor binds. A spread of 100 dB exceeds 30 dB → DecibansSpread.
+    #[test]
+    fn decibans_spread_fails_when_floor_is_binding() {
+        // Spread = 100 dB → 100 / NATS_TO_DB ≈ 23.03 nats.
+        let mut s = make_state(
+            &[("beta", 1.001)],
+            &[],
+            &[-60.0, -60.0],   // legacy chain_logliks unused by gate 2
+            -60.0,
+        );
+        s.chain_clean_logliks = vec![-60.0, -60.0 - 100.0 / NATS_TO_DB];
+        s.chain_clean_ses = vec![0.5, 0.5];   // 8·0.5·NATS_TO_DB ≈ 17.4 dB < 30 dB
+
+        let gate = GateConfig { a_thresh: 1.10, decibans_thresh: 30.0 };
+        match check_scout_convergence(&s, &gate) {
+            ScoutGateVerdict::DecibansSpread {
+                delta_db, threshold_db, sigma_max, chain_logliks,
+            } => {
+                assert!((delta_db - 100.0).abs() < 0.5,
+                    "delta_db ≈ 100 dB; got {}", delta_db);
+                assert!((threshold_db - 30.0).abs() < 1e-9,
+                    "30 dB floor must bind (8·σ·NATS_TO_DB ≈ 17.4 dB < 30); got {}",
+                    threshold_db);
+                assert!((sigma_max - 0.5).abs() < 1e-12);
+                assert_eq!(chain_logliks.len(), 2);
+            }
+            other => panic!("expected DecibansSpread, got {:?}", other),
+        }
+    }
+
+    /// Step 8 — SE-aware floor case from the handoff: large SE pushes
+    /// the threshold above the user-configured floor (8·5·NATS_TO_DB
+    /// ≈ 173.7 dB), so a 100 dB spread now passes.
+    #[test]
+    fn decibans_spread_passes_when_se_aware_floor_dominates() {
+        let mut s = make_state(
+            &[("beta", 1.001)],
+            &[],
+            &[-60.0, -60.0],
+            -60.0,
+        );
+        s.chain_clean_logliks = vec![-60.0, -60.0 - 100.0 / NATS_TO_DB];
+        s.chain_clean_ses = vec![5.0, 5.0];   // 8·5·NATS_TO_DB ≈ 173.7 dB
+
+        let gate = GateConfig { a_thresh: 1.10, decibans_thresh: 30.0 };
+        match check_scout_convergence(&s, &gate) {
+            ScoutGateVerdict::Ok => (),
+            other => panic!("expected Ok (SE-aware floor dominates), got {:?}", other),
+        }
+    }
+
+    /// Step 8 — when clean-eval fields are absent (legacy fit_state
+    /// or pre-§Proposal 1), the decibans check is skipped silently.
+    /// The Â check still runs.
+    #[test]
+    fn missing_clean_eval_fields_skip_decibans_check() {
+        let s = make_state(
+            &[("beta", 1.001)],
+            &[],
+            &[-60.0, -200.0],   // huge legacy spread, but Step 2 doesn't use this
+            -60.0,
+        );
+        match check_scout_convergence(&s, &GateConfig::default()) {
+            ScoutGateVerdict::Ok => (),
+            other => panic!("missing clean_eval fields → Ok; got {:?}", other),
         }
     }
 

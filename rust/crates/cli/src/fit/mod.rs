@@ -592,11 +592,18 @@ pub fn cmd_fit_run_v2(a: &crate::args::FitRunArgs) {
                     (Option<f64>, Vec<f64>) = match prior_state.as_ref() {
                     Some(ps) => {
                         use gating::ScoutGateVerdict;
-                        match gating::check_scout_convergence(ps) {
+                        // Compound gate (Â + decibans-spread). Reads
+                        // the GateConfig from the *consuming* stage —
+                        // i.e. refine's [stages.refine.gate] governs
+                        // how strictly we judge the scout it consumes.
+                        // CLI overrides already merged into
+                        // `effective_gate` above (Step 4).
+                        match gating::check_scout_convergence(ps, &effective_gate) {
                             ScoutGateVerdict::Ok => {}
                             ScoutGateVerdict::SoftWarn { param_agreement } => {
                                 eprintln!("\x1b[33m  warning:\x1b[0m prior stage tail Â in \
-                                           1.05–1.10 grey zone for: {}",
+                                           SoftWarn band ([{:.2}, {:.2})) for: {}",
+                                    gating::A_SOFT, effective_gate.a_thresh,
                                     param_agreement.iter()
                                         .map(|(n, r)| format!("{} (Â={:.2})", n, r))
                                         .collect::<Vec<_>>().join(", "));
@@ -620,6 +627,27 @@ pub fn cmd_fit_run_v2(a: &crate::args::FitRunArgs) {
                                         "scout_tail_agreement_gate".to_string(),
                                     ));
                                     break; // exit stages loop for this sweep point
+                                } else {
+                                    eprintln!("error: {}", msg);
+                                    std::process::exit(1);
+                                }
+                            }
+                            ScoutGateVerdict::DecibansSpread {
+                                delta_db, threshold_db, sigma_max, chain_logliks,
+                            } => {
+                                let msg = gating::format_decibans_spread_verdict(
+                                    delta_db, threshold_db, sigma_max, &chain_logliks);
+                                if allow_nonconverged_scout {
+                                    eprintln!("\x1b[33m  warning:\x1b[0m {}", msg);
+                                    eprintln!("\n  --allow-nonconverged-scout: proceeding anyway.");
+                                } else if has_sweep {
+                                    eprintln!("\x1b[33m  sweep-skip:\x1b[0m {}", msg);
+                                    sweep_failures.push((
+                                        cell_i, pt_idx,
+                                        stage_name.to_string(),
+                                        "scout_decibans_spread_gate".to_string(),
+                                    ));
+                                    break;
                                 } else {
                                     eprintln!("error: {}", msg);
                                     std::process::exit(1);
@@ -761,6 +789,8 @@ pub fn cmd_fit_run_v2(a: &crate::args::FitRunArgs) {
                         .filter(|p| p.ivp).map(|p| p.name.clone()).collect(),
                     chain_logliks: chain_results.results.iter()
                         .map(|(_, r)| r.final_loglik).collect(),
+                    chain_clean_logliks: chain_results.chain_clean_logliks(),
+                    chain_clean_ses: chain_results.chain_clean_ses(),
                 };
                 fit_state.save(&stage_dir.to_string_lossy()).unwrap_or_else(|e| {
                     eprintln!("warning: could not save fit_state: {}", e);
