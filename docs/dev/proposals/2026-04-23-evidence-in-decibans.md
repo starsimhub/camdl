@@ -180,40 +180,68 @@ $-5827$" does not.
   comparisons, harness failure messages involving Δlog-lik,
   preq-score differences, DIC/AIC/BIC differences, etc.).
 
-## The Jeffreys / Jaynes evidence scale
+## The evidence scale (Jeffreys + camdl extension)
 
-The interpretive labels that accompany decibans have been stable
-for ~80 years across Jeffreys, Good, Jaynes, and Kass & Raftery,
-modulo threshold tweaks. We propose the following, in deciban
-terms:
+The interpretive labels on this scale have two distinct provenances,
+and the distinction matters for any text that cites them:
 
-| Evidence (dB) | Odds ratio | Label |
-|---|---|---|
-| 0 – 5 | 1:1 to 3:1 | `indeterminate` |
-| 5 – 10 | 3:1 to 10:1 | `substantial` |
-| 10 – 15 | 10:1 to ~30:1 | `strong` |
-| 15 – 20 | ~30:1 to 100:1 | `very strong` |
-| 20 – 40 | 100:1 to 10⁴:1 | `decisive` |
-| 40+ | > 10⁴:1 | `overwhelming` |
+| Evidence (dB) | Odds ratio | Label | Source |
+|---|---|---|---|
+| 0 – 5 | 1:1 to 3:1 | `indeterminate` | Jeffreys 1961 ("barely worth mentioning") |
+| 5 – 10 | 3:1 to 10:1 | `substantial` | Jeffreys 1961 |
+| 10 – 15 | 10:1 to ~30:1 | `strong` | Jeffreys 1961 |
+| 15 – 20 | ~30:1 to 100:1 | `very strong` | Jeffreys 1961 |
+| 20 – 40 | 100:1 to 10⁴:1 | `decisive` | Jeffreys 1961 (but unbounded — "decisive" is >20 dB in the original) |
+| 40+ | > 10⁴:1 | `overwhelming` | **camdl pedagogical extension; not Jeffreys, not Jaynes** |
+
+Tiers 1–5 with breakpoints at 0/5/10/15/20 dB are Jeffreys (1961,
+*Theory of Probability*, Appendix B). The original Jeffreys scale has
+five tiers and the top tier ("decisive") is **open-ended** — anything
+above 20 dB is just "decisive" in Jeffreys' historical scale. That is
+the authoritative reference table, and any Bayesian reviewer will
+recognise the first five rows as Jeffreys verbatim.
+
+The split of Jeffreys' unbounded "decisive" into camdl's "decisive"
+(20–40 dB) and "overwhelming" (40+ dB) is a **camdl pedagogical
+extension**, not a historical scale. It is not from Jaynes —
+*Probability Theory: The Logic of Science* ch. 4 uses decibans
+quantitatively as the currency of Bayesian evidence but does not
+publish a labeled tier scale. Nor is it Kass & Raftery 1995, whose
+alternative four-tier revision uses different breakpoints (8.7 /
+26.1 / 43.4 dB on the 2 ln BF scale).
+
+**Motivation for the camdl extension.** Epi model comparisons on
+multi-year weekly-observation datasets routinely produce
+log-likelihood differences in the thousands of decibans. Jeffreys'
+unbounded "decisive" collapses the "reviewer-threshold significant"
+regime (20–40 dB) with the "10⁴:1 or greater odds" regime (40+ dB)
+into one qualitative bucket, which teaches the reader nothing about
+relative magnitude. The 40 dB break marks the point where evidence
+ratios exceed 10⁴:1 — which for typical epi likelihood surfaces is
+the boundary between "you have to work hard to dismiss this" and
+"even an adversarial reviewer can't reasonably dismiss this." That
+pedagogical distinction is worth a tier; naming it makes the
+qualitative difference surface on every `camdl compare` row.
 
 A few notes on this table:
 
 - **Boundaries are pedagogical, not scientific.** Like Jeffreys'
   original, the thresholds are round numbers chosen for memorable
-  progression (5 dB per tier). They are not statistical
-  decision rules. A reader seeing "+18 dB, very strong" should
-  read this as "the model is substantially preferred, though not
-  decisively," not as a claim about a specific calibrated
-  frequentist error rate.
+  progression (5 dB per tier). They are not statistical decision
+  rules. A reader seeing "+18 dB, very strong" should read this as
+  "the model is substantially preferred, though not decisively," not
+  as a claim about a specific calibrated frequentist error rate.
 - **The scale is symmetric.** Negative evidence uses the same
-  labels with `against` instead of `for`. "-22 dB, decisive
-  against $M_1$."
-- **The `overwhelming` tier**, introduced by Jaynes, is
-  particularly useful in epi, where likelihood surfaces can have
-  enormous curvature and model comparisons over full weekly-case
-  series routinely produce 40+ dB differences. A published
-  measles model likely beats an unstructured baseline by
-  $10^4$ dB or more — "decisive" is already weaker than truth.
+  labels with `against` instead of `for`. "-22 dB, decisive against
+  $M_1$."
+- **Attribution honesty.** Any documentation, blog post, or talk
+  referencing this scale should cite Jeffreys 1961 for the first
+  five tiers and note that `overwhelming` is camdl-specific. A claim
+  that the six-tier scale is "standard" or "Jaynes" is factually
+  wrong. Good (1950, *Probability and the Weighing of Evidence*) is
+  the primary citation for decibans as a unit; Jeffreys (1961) is
+  the primary citation for the tier concept and the first five
+  labels.
 
 ## Scope: where dB appears, where it does not
 
@@ -300,7 +328,7 @@ This is a deliberate nudge toward the correct workflow.
 Single-line, labeled, with the qualitative scaffolding:
 
 ```
-Δlogℒ    +27.3 nats   (+118.6 dB, "decisive" — Jeffreys scale)
+Δlogℒ    +5.5 nats   (+23.9 dB, "decisive" — Jeffreys scale)
 ```
 
 For multi-metric comparison output (`camdl compare`):
@@ -308,8 +336,8 @@ For multi-metric comparison output (`camdl compare`):
 ```
 Model comparison: fits/measles_v2 vs fits/measles_v1
 
-  ΔlogℒmaMLE       +27.3 nats    +118.6 dB    decisive
-  Δpreq-sum        +15.2 nats    +66.0 dB     overwhelming
+  ΔlogℒmaMLE       +27.3 nats    +118.6 dB    overwhelming
+  Δpreq-sum        +3.5 nats     +15.2 dB     very strong
   ΔAIC             −54.6
   per-obs Δlogℒ    +0.025 nats   +0.108 dB    (/obs; N=1096)
 ```
@@ -417,7 +445,7 @@ they have stabilized across ~80 years of independent usage, which
 is the sense in which they're calibrated. We're not advocating
 for treating the thresholds as decision rules; we're using them
 as an interpretive scaffold for readers who otherwise have no
-frame of reference for "+27 nats."
+frame of reference for "+5 nats."
 
 ### "Readers won't know what decibans mean"
 
@@ -445,7 +473,7 @@ pfilter run with MC-error SD of ±3 nats (= ±13 dB). The fix is
 to display MC error when it's known, just as we do elsewhere:
 
 ```
-Δlogℒ    +27.3 ± 3.2 nats   (+118.6 ± 13.9 dB, "decisive")
+Δlogℒ    +5.5 ± 0.7 nats   (+23.9 ± 3.0 dB, "decisive")
 ```
 
 The interval conveys "even at the pessimistic end, decisive
@@ -454,12 +482,13 @@ than a point estimate without an interval, regardless of unit.
 
 ## Open questions for review
 
-1. **Threshold boundaries.** Jeffreys' original table, Kass &
-   Raftery's revision, and Jaynes' extension disagree mildly on
-   the break points. Proposal uses 5-dB steps for mnemonic
-   simplicity; alternative is to follow Kass & Raftery exactly
-   (break points at 2, 6, 10, 10 in nats = 8.7, 26.1, 43.4,
-   43.4 dB).
+1. **Threshold boundaries.** Jeffreys' original table and Kass &
+   Raftery's revision disagree mildly on the break points.
+   Proposal uses Jeffreys' 5-dB steps for mnemonic simplicity,
+   with a camdl-specific split of his unbounded top tier into
+   "decisive" (20–40 dB) and "overwhelming" (40+ dB); alternative
+   is to follow Kass & Raftery exactly (break points at 2, 6, 10
+   in 2 ln BF = 8.7, 26.1, 43.4 dB).
 2. **`indeterminate` vs `anecdotal` vs empty** for the 0–5 dB
    tier. Jeffreys called it "not worth more than a bare mention";
    Kass & Raftery used "anecdotal." We propose `indeterminate`

@@ -12,15 +12,46 @@
 //! Jacobian cancels and the value is a scale-free log-likelihood ratio), not
 //! for raw absolute log-likelihoods (whose additive constant is arbitrary).
 //!
-//! Jeffreys scale (camdl convention, 5-dB steps, symmetric for negative
-//! values; Jeffreys 1961, with the "overwhelming" tier from Jaynes):
+//! Evidence scale (labels and thresholds). Attribution is split, and the
+//! split matters — do not move labels without updating the citations:
 //!
-//!   0 – 5 dB    indeterminate (odds 1:1 to 3:1)
-//!   5 – 10 dB   substantial   (odds 3:1 to 10:1)
-//!   10 – 15 dB  strong        (odds 10:1 to ~30:1)
-//!   15 – 20 dB  very strong   (odds ~30:1 to 100:1)
-//!   20 – 40 dB  decisive      (odds 100:1 to 10⁴:1)
-//!   40+ dB      overwhelming  (odds > 10⁴:1)
+//!   0 – 5 dB    indeterminate   (odds 1:1 to 3:1)
+//!   5 – 10 dB   substantial     (odds 3:1 to 10:1)
+//!   10 – 15 dB  strong          (odds 10:1 to ~30:1)
+//!   15 – 20 dB  very strong     (odds ~30:1 to 100:1)
+//!   20 – 40 dB  decisive        (odds 100:1 to 10⁴:1)
+//!   40+ dB      overwhelming    (odds > 10⁴:1)
+//!
+//! Tiers 1–5 (0/5/10/15/20 dB breakpoints) are **Jeffreys 1961**,
+//! *Theory of Probability*, Appendix B. The Jeffreys original has
+//! five tiers and the top one ("decisive") is unbounded: anything
+//! above 20 dB is "decisive" in the historical scale.
+//!
+//! The 20–40 dB / 40+ dB split of Jeffreys' unbounded top tier into
+//! "decisive" and "overwhelming" is a **camdl pedagogical
+//! extension**, not Jeffreys' or anyone else's. The motivation is
+//! that epi model comparisons on multi-year weekly data routinely
+//! produce log-likelihood differences in the thousands of decibans —
+//! Jeffreys' "decisive, 20 dB and up" qualitatively collapses the
+//! "borderline significant" regime with the "10^150 times more
+//! likely" regime, which teaches nothing about relative magnitude.
+//! The 40 dB break is where cross-validation evidence ratios start
+//! exceeding 10⁴:1 (log₁₀ BF > 4), which for typical epi likelihood
+//! surfaces marks the point where "you have to work hard to
+//! dismiss this" becomes "even an adversarial reviewer can't
+//! reasonably dismiss this."
+//!
+//! Good (1950), *Probability and the Weighing of Evidence*, is the
+//! primary source for decibans as a unit and the weight-of-evidence
+//! framing; Jaynes (*Probability Theory: The Logic of Science*,
+//! ch. 4) uses decibans extensively but does **not** publish a
+//! labeled tier scale. Any attribution of "overwhelming" to Jaynes
+//! is incorrect — the tier is camdl's own extension of Jeffreys.
+//!
+//! Kass & Raftery (1995, JASA) is the modern alternative: four
+//! tiers at 2 ln(BF) thresholds of 2/6/10, which correspond to
+//! 8.7/26.1/43.4 dB — not 5-dB boundaries, so the two scales are
+//! not interchangeable without conversion.
 
 /// Nats → decibans: 1 nat ≈ 4.342944819 dB.
 pub const NATS_TO_DB: f64 = 10.0 / std::f64::consts::LN_10;
