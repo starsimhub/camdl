@@ -1341,11 +1341,25 @@ impl Default for StartsFrom {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum CoolingSpec {
-    /// Fraction of initial perturbation magnitude remaining at the final
-    /// iteration. 0.70 means perturbations shrink to 70% of their starting
-    /// scale over the full run. Lower values = more aggressive cooling
-    /// (better for exploration/scout); higher values = gentler cooling
-    /// (better for refinement near an optimum).
+    /// IF2 cooling fraction, pomp's `cooling.fraction.50` convention: at
+    /// the **halfway** point of the stage's iterations, the perturbation
+    /// SD is `cooling_fraction × initial`; at the **end**, it is
+    /// `cooling_fraction² × initial`. The parameter is stage-length-
+    /// invariant: a stage with cooling=0.70 over 30 iters and one over
+    /// 200 iters both end at the same SD × initial ratio (0.49).
+    ///
+    /// Higher values (closer to 1) = **gentler cooling**, SD stays large,
+    /// chains keep exploring. Used for **scout** (code default 0.70 →
+    /// final SD = 49% of initial; the cross-chain Rhat diagnostic at the
+    /// end is what identifies basins).
+    ///
+    /// Lower values (closer to 0) = **aggressive cooling**, SD collapses,
+    /// chains quench onto a single point. Used for **refine** (code
+    /// default 0.05 → final SD = 0.25% of initial) and **validate**
+    /// (same).
+    ///
+    /// See `docs/methods/cooling.md` for the formula, worked examples,
+    /// and a per-iteration empirical table.
     Fixed(f64),
     #[serde(rename = "auto")]
     Auto,

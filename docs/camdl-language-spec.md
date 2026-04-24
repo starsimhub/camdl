@@ -2828,9 +2828,13 @@ heteroscedastic variance).
 - Mixed: `--rw-sd "R0=5,sigma=auto"` — explicit where you know, auto
   where you don't.
 
-**`--regime`**: IF2 presets — `scout` (8 chains, 500 particles,
-cooling=0.5), `refine` (4 chains, 1000 particles, cooling=0.95),
-`validate` (4 chains, 5000 particles, cooling=0.95).
+**`--regime`**: IF2 presets — `scout` (8 chains, 500 particles, 30 iters,
+cooling=0.70 — mild cooling for basin exploration), `refine` (4 chains,
+1000 particles, 50 iters, cooling=0.05 — aggressive cooling to converge
+onto scout's best), `validate` (4 chains, 5000 particles, 100 iters,
+cooling=0.05 — final polish). Authoritative constants:
+`rust/crates/cli/src/fit/{scout,refine}.rs`. Cooling is pomp's cf50
+convention (halfway-SD fraction); see `docs/methods/cooling.md`.
 
 **`--ivp "S0,I0"`**: Initial value parameters, perturbed only at t=0.
 

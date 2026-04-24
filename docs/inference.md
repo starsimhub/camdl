@@ -469,17 +469,30 @@ iterations:
 
 Three presets for the typical workflow:
 
-**Scout** (`--regime scout`): 8 chains, 200 particles, 20 iterations, no
-cooling. Pure exploration — chains wander freely to map the likelihood surface.
-Use this first to find problems: Is the surface multimodal? Which parameters are
-identifiable? Is the observation model appropriate?
+**Scout** (`--regime scout`): 8 chains, 500 particles, 30 iterations,
+**cooling = 0.70 (mild)**. Exploration — chains stay hot enough to wander
+across basins rather than quenching onto the first local optimum. Over
+the 30-iter stage the perturbation SD shrinks only from 1.0× to 0.49×
+initial. Use this first to find problems: Is the surface multimodal?
+Which parameters are identifiable? Is the observation model appropriate?
+The cross-chain Rhat at the end of scout is the multi-modality
+diagnostic.
 
 **Refine** (`--regime refine`): 4 chains, 1000 particles, 50 iterations,
-cooling=0.95. Converge to the MLE from the best scout endpoints. Check Rhat for
-convergence.
+**cooling = 0.05 (aggressive)**. Starts from scout's best-chain parameters
+and collapses chains tightly onto the local MLE — final SD is 0.25% of
+initial, so particle clouds concentrate near scout's endpoint. Check
+Rhat for convergence across chains.
 
-**Validate** (`--regime validate`): 4 chains, 5000 particles, 100 iterations.
-Full convergence for publication-quality estimates.
+**Validate** (`--regime validate`): 4 chains, 5000 particles, 100
+iterations, **cooling = 0.05**. Full convergence for publication-quality
+estimates.
+
+Cooling is pomp's `cooling.fraction.50` (cf50) convention: the parameter
+is the halfway-point SD fraction, the end-of-stage SD is its square.
+Authoritative constants are in `rust/crates/cli/src/fit/{scout,refine}.rs`.
+Formula, worked example, and empirical iter-by-iter table:
+`docs/methods/cooling.md`.
 
 ### IVP parameters
 

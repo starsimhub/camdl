@@ -6,10 +6,13 @@
 //!       [--chains 4] [--regime scout|refine|validate] \
 //!       [--cooling 0.95] [--dt 1.0] [--seed 1] [--parallel 4]
 //!
-//! Regimes set sensible defaults:
-//!   scout:    8 chains, 200 particles, 20 iters, no cooling, random starts
-//!   refine:   4 chains, 1000 particles, 50 iters, cooling=0.95
-//!   validate: 4 chains, 5000 particles, 100 iters, cooling=0.95
+//! Regimes set sensible defaults (authoritative constants live in
+//! rust/crates/cli/src/fit/{scout,refine}.rs; camdl if2 --regime uses
+//! the same values). Cooling fractions follow pomp's cf50 convention —
+//! see docs/methods/cooling.md for the worked formula.
+//!   scout:    8 chains, 500 particles,  30 iters, cooling=0.70  (mild — find basins)
+//!   refine:   4 chains, 1000 particles, 50 iters, cooling=0.05  (aggressive — converge to MLE)
+//!   validate: 4 chains, 5000 particles, 100 iters, cooling=0.05  (aggressive — final polish)
 //!
 //! Output: parameter traces TSV to stdout, diagnostics + Rhat to stderr.
 //!   With --output-dir: writes per-chain traces + summary JSON.
