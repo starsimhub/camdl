@@ -80,12 +80,12 @@ pub fn run_validate(fit: &FitToml, starts_from: &str, seed: u64, force: bool) ->
     let chain_results = runner::run_chains_with_diagnostics(&config, &collector);
     let if2_elapsed = t0_if2.elapsed();
 
-    let all_converged = chain_results.rhat.values().all(|&r| r < 1.1);
+    let all_converged = chain_results.chain_agreement.values().all(|&r| r < 1.1);
     if !all_converged {
-        let max_rhat = chain_results.rhat.values().cloned().fold(0.0_f64, f64::max);
-        let n_unconverged = chain_results.rhat.values().filter(|&&r| r > 1.1).count();
-        let n_total = chain_results.rhat.len();
-        collector.push(DiagnosticKind::ConvergenceIncomplete { max_rhat, n_unconverged, n_total });
+        let max_chain_agreement = chain_results.chain_agreement.values().cloned().fold(0.0_f64, f64::max);
+        let n_unconverged = chain_results.chain_agreement.values().filter(|&&r| r > 1.1).count();
+        let n_total = chain_results.chain_agreement.len();
+        collector.push(DiagnosticKind::ConvergenceIncomplete { max_chain_agreement, n_unconverged, n_total });
     }
 
     let best = &chain_results.results.iter()
@@ -215,7 +215,7 @@ pub fn run_validate(fit: &FitToml, starts_from: &str, seed: u64, force: bool) ->
         rw_sd,
         loglik_type: Some("if2".into()),
         acceptance_rate: None,
-        tail_rhat: chain_results.rhat.clone(),
+        tail_chain_agreement: chain_results.chain_agreement.clone(),
         ivp_params: config.estimated_params.iter()
             .filter(|p| p.ivp).map(|p| p.name.clone()).collect(),
         chain_logliks: chain_results.results.iter()
@@ -635,8 +635,8 @@ fn write_fit_record(
             "loglik_sd": metadata.loglik_sd,
             "ess_at_mle": metadata.ess_at_mle.map(|(m, n)| serde_json::json!({"mean": m, "min": n})),
             "convergence": {
-                "rhat_max": results.rhat.values().cloned().fold(0.0_f64, f64::max),
-                "all_converged": results.rhat.values().all(|&r| r < 1.1),
+                "chain_agreement_max": results.chain_agreement.values().cloned().fold(0.0_f64, f64::max),
+                "all_converged": results.chain_agreement.values().all(|&r| r < 1.1),
             },
             "identifiability": profiles.iter().map(|p| {
                 (p.name.clone(), serde_json::json!({
@@ -689,11 +689,11 @@ fn write_fit_report(
     for spec in &config.estimated_params {
         let best = &results.results.iter()
             .find(|(id, _)| *id == results.best_chain).unwrap().1;
-        let rhat = results.rhat.get(&spec.name).copied().unwrap_or(f64::NAN);
+        let agreement = results.chain_agreement.get(&spec.name).copied().unwrap_or(f64::NAN);
         let profile = profiles.iter().find(|p| p.name == spec.name);
         let ci = profile.map(|p| format!("[{:.4}, {:.4}]", p.ci_lower, p.ci_upper))
             .unwrap_or_else(|| "—".into());
-        writeln!(f, "  {:12} = {:<12.6} Rhat={:.3}  CI_95={}", spec.name, best.mle[spec.index], rhat, ci).unwrap();
+        writeln!(f, "  {:12} = {:<12.6} Â={:.3}  CI_95={}", spec.name, best.mle[spec.index], agreement, ci).unwrap();
     }
     writeln!(f).unwrap();
     writeln!(f, "Fixed parameters:").unwrap();
@@ -725,16 +725,16 @@ fn write_summary(
         "holdout_loglik": holdout_ll,
         "ess_at_mle": metadata.ess_at_mle.map(|(m, n)| serde_json::json!({"mean": m, "min": n})),
         "input_hash": metadata.input_hash,
-        "converged": results.rhat.values().all(|&r| r < 1.1),
+        "converged": results.chain_agreement.values().all(|&r| r < 1.1),
         "parameters": config.estimated_params.iter().map(|spec| {
-            let rhat = results.rhat.get(&spec.name).copied().unwrap_or(f64::NAN);
+            let agreement = results.chain_agreement.get(&spec.name).copied().unwrap_or(f64::NAN);
             let best = &results.results.iter()
                 .find(|(id, _)| *id == results.best_chain).unwrap().1;
             let profile = profiles.iter().find(|p| p.name == spec.name);
             serde_json::json!({
                 "name": spec.name,
                 "estimate": best.mle[spec.index],
-                "rhat": rhat,
+                "chain_agreement": agreement,
                 "ci_95": profile.map(|p| vec![p.ci_lower, p.ci_upper]),
                 "curvature": profile.map(|p| p.curvature),
             })

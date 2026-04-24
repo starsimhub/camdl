@@ -45,9 +45,9 @@ pub fn run_status(fit: &FitToml) -> Result<(), String> {
                 .and_then(|v| v.as_bool())
                 .unwrap_or(false);
             let symbol = if converged { "\x1b[32m✓\x1b[0m" } else { "\x1b[33m~\x1b[0m" };
-            let rhat_str = if converged { "Rhat < 1.05" } else { "Rhat > 1.1" };
+            let agreement_str = if converged { "Â < 1.05" } else { "Â > 1.1" };
             println!("  refine:    {} complete ({} chains, {}, loglik {:.1})",
-                symbol, state.n_chains, rhat_str, state.best_loglik);
+                symbol, state.n_chains, agreement_str, state.best_loglik);
             print_stale_warning(state, "refine");
         }
         None => {
@@ -141,12 +141,12 @@ pub fn run_status(fit: &FitToml) -> Result<(), String> {
             let value = state.start_values.get(name).copied().unwrap_or(0.0);
             let rw = state.rw_sd.get(name).copied().or(spec.rw_sd).unwrap_or(0.0);
 
-            // Get Rhat from summary
-            let rhat = summary.as_ref()
+            // Get Â (chain agreement) from summary
+            let chain_agreement = summary.as_ref()
                 .and_then(|s| s.get("parameters"))
                 .and_then(|p| p.as_array())
                 .and_then(|arr| arr.iter().find(|p| p.get("name").and_then(|n| n.as_str()) == Some(name)))
-                .and_then(|p| p.get("rhat"))
+                .and_then(|p| p.get("chain_agreement"))
                 .and_then(|v| v.as_f64());
 
             // Get CI from profiles
@@ -154,11 +154,11 @@ pub fn run_status(fit: &FitToml) -> Result<(), String> {
 
             let mut line = format!("    {:12} = {:<12.6} rw_sd={:<8.4}", name, value, rw);
 
-            if let Some(&r) = rhat.as_ref() {
+            if let Some(&r) = chain_agreement.as_ref() {
                 if r < 1.1 {
                     line.push_str(" \x1b[32m✓\x1b[0m identified");
                 } else {
-                    line.push_str(&format!(" \x1b[33m~ Rhat={:.2}\x1b[0m", r));
+                    line.push_str(&format!(" \x1b[33m~ Â={:.2}\x1b[0m", r));
                 }
             }
 

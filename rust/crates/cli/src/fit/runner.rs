@@ -2,7 +2,7 @@
 //!
 //! Handles: model loading, EstimatedParam construction from fit.toml,
 //! obs_loglik construction from IR observation model, chain execution,
-//! Rhat computation, and MAD-based auto rw_sd calibration.
+//! chain-agreement (Â) computation, and MAD-based auto rw_sd calibration.
 
 use crate::fit::config::FitToml;
 use crate::fit::state::FitState;
@@ -68,7 +68,7 @@ pub struct ChainResults {
     pub results: Vec<(usize, IF2Result)>,
     pub best_chain: usize,
     pub best_loglik: f64,
-    pub rhat: HashMap<String, f64>,
+    pub chain_agreement: HashMap<String, f64>,
 }
 
 impl FitRunConfig {
@@ -775,8 +775,8 @@ pub fn run_chains_with_per_chain_params(
         .map(|(id, r)| (*id, r.final_loglik))
         .unwrap();
 
-    // Compute Rhat
-    let rhat = compute_rhat(&results, &config.estimated_params, config.if2_config.n_iterations);
+    // Compute chain agreement (Â)
+    let chain_agreement = compute_chain_agreement(&results, &config.estimated_params, config.if2_config.n_iterations);
 
     // Report
     eprintln!("\nbest chain: {} (loglik={:.2})", best_chain + 1, best_loglik);
@@ -786,32 +786,34 @@ pub fn run_chains_with_per_chain_params(
             logliks.iter().map(|l| format!("{:.1}", l)).collect::<Vec<_>>().join(", "));
     }
 
-    // Report Rhat with diagnostic warnings
+    // Report Â (chain agreement) with diagnostic warnings
     if config.n_chains > 1 {
-        let max_rhat = rhat.values().cloned().fold(0.0_f64, f64::max);
+        let max_chain_agreement = chain_agreement.values().cloned().fold(0.0_f64, f64::max);
         let logliks: Vec<f64> = results.iter().map(|(_, r)| r.final_loglik).collect();
         let ll_spread = logliks.iter().cloned().fold(f64::NEG_INFINITY, f64::max)
             - logliks.iter().cloned().fold(f64::INFINITY, f64::min);
 
-        eprintln!("\nRhat:");
+        // Â = chain agreement (renamed from Rhat: this is not a posterior
+        // mixing statistic; it measures IF2 optimizer chain agreement).
+        eprintln!("\nÂ:");
         for spec in &config.estimated_params {
-            if let Some(&r) = rhat.get(&spec.name) {
+            if let Some(&r) = chain_agreement.get(&spec.name) {
                 let status = if r < 1.1 { "\x1b[32m✓\x1b[0m" } else if r < 1.5 { "\x1b[33m~\x1b[0m" } else { "\x1b[31m✗\x1b[0m" };
-                eprintln!("  {:12} Rhat={:.3} {}", spec.name, r, status);
+                eprintln!("  {:12} Â={:.3} {}", spec.name, r, status);
             }
         }
 
-        // Diagnostic: high Rhat + large loglik spread → chains in different basins
-        if max_rhat > 1.5 && ll_spread > 50.0 {
-            collector.push(DiagnosticKind::MultimodalLikelihood { ll_spread, max_rhat });
-        } else if max_rhat > 1.1 {
-            let n_unconverged = rhat.values().filter(|&&r| r > 1.1).count();
-            let n_total = rhat.len();
-            collector.push(DiagnosticKind::ConvergenceIncomplete { max_rhat, n_unconverged, n_total });
+        // Diagnostic: high Â + large loglik spread → chains in different basins
+        if max_chain_agreement > 1.5 && ll_spread > 50.0 {
+            collector.push(DiagnosticKind::MultimodalLikelihood { ll_spread, max_chain_agreement });
+        } else if max_chain_agreement > 1.1 {
+            let n_unconverged = chain_agreement.values().filter(|&&r| r > 1.1).count();
+            let n_total = chain_agreement.len();
+            collector.push(DiagnosticKind::ConvergenceIncomplete { max_chain_agreement, n_unconverged, n_total });
         }
     }
 
-    ChainResults { results, best_chain, best_loglik, rhat }
+    ChainResults { results, best_chain, best_loglik, chain_agreement }
 }
 
 /// Compute Gelman-Rubin 1992 R-hat across chains (last half of
@@ -831,14 +833,18 @@ pub fn gelman_rubin_1992(
     if2_params: &[EstimatedParam],
     n_iterations: usize,
 ) -> HashMap<String, f64> {
-    compute_rhat(results, if2_params, n_iterations)
+    compute_chain_agreement(results, if2_params, n_iterations)
 }
 
-/// Compute Rhat across chains (last half of iterations).
+/// Compute chain agreement (Â) across IF2 chains (last half of
+/// iterations). The underlying formula is Gelman-Rubin 1992 R̂; the
+/// renamed output label reflects that this is applied to IF2
+/// optimizer chains, not posterior samples. See
+/// docs/dev/proposals/2026-04-24-if2-scout-findings-remediation.md.
 ///
 /// See [`gelman_rubin_1992`] for the split-chain / rank-norm
 /// caveat.
-pub fn compute_rhat(
+pub fn compute_chain_agreement(
     results: &[(usize, IF2Result)],
     if2_params: &[EstimatedParam],
     n_iterations: usize,
@@ -853,7 +859,7 @@ pub fn compute_rhat(
     // resumed chain's "last half" started at an absolute iteration
     // index that didn't correspond to the physical last half of its
     // trace. Now each chain defines its own last-half window.
-    let mut rhat_map = HashMap::new();
+    let mut agreement_map = HashMap::new();
 
     let chain_tail = |r: &IF2Result, spec: &EstimatedParam| -> Vec<f64> {
         let len = r.iterations.len().max(n_iterations);
@@ -886,14 +892,14 @@ pub fn compute_rhat(
         let between = chain_means.iter().map(|&m| (m - grand_mean).powi(2)).sum::<f64>()
             * min_tail / (n_chains - 1).max(1) as f64;
         let within = chain_vars.iter().sum::<f64>() / n_chains as f64;
-        let rhat = if within > 0.0 {
+        let agreement = if within > 0.0 {
             (((min_tail - 1.0) / min_tail * within + between / min_tail) / within).sqrt()
         } else { f64::NAN };
 
-        rhat_map.insert(spec.name.clone(), rhat);
+        agreement_map.insert(spec.name.clone(), agreement);
     }
 
-    rhat_map
+    agreement_map
 }
 
 /// Compute R-hat and ESS from per-chain parameter traces.
@@ -1121,7 +1127,7 @@ pub fn write_chain_outputs(
 }
 
 /// Build per-chain random starts for an IF2 dispatch. Each chain gets
-/// its own draw over the declared bounds so Rhat across chains reflects
+/// its own draw over the declared bounds so Â across chains reflects
 /// genuine independence-of-starts, not just per-chain RNG noise on a
 /// shared initial point.
 ///
@@ -1827,7 +1833,7 @@ cooling = 0.5
             rw_sd: HashMap::new(),
             loglik_type: Some("if2".into()),
             acceptance_rate: None,
-            tail_rhat: HashMap::new(),
+            tail_chain_agreement: HashMap::new(),
             ivp_params: Vec::new(),
             chain_logliks: Vec::new(),
         };

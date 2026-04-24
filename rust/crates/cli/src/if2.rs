@@ -14,7 +14,7 @@
 //!   refine:   4 chains, 1000 particles, 50 iters, cooling=0.05  (aggressive — converge to MLE)
 //!   validate: 4 chains, 5000 particles, 100 iters, cooling=0.05  (aggressive — final polish)
 //!
-//! Output: parameter traces TSV to stdout, diagnostics + Rhat to stderr.
+//! Output: parameter traces TSV to stdout, diagnostics + Â (chain agreement) to stderr.
 //!   With --output-dir: writes per-chain traces + summary JSON.
 
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
@@ -413,15 +413,15 @@ pub fn cmd_if2(a: &crate::args::If2Args) {
         eprintln!();
     }
 
-    // ── Compute Rhat across chains ────────────────────────────────────────
-    let rhat = crate::fit::runner::compute_rhat(&chain_results, &if2_params, n_iterations);
+    // ── Compute Â (chain agreement) across chains ──────────────────────────
+    let chain_agreement = crate::fit::runner::compute_chain_agreement(&chain_results, &if2_params, n_iterations);
     if n_chains > 1 {
         let n_tail = (n_iterations / 2).max(1);
-        eprintln!("\nRhat (across {} chains, last {} iterations):", n_chains, n_tail);
+        eprintln!("\nÂ (across {} chains, last {} iterations):", n_chains, n_tail);
         for spec in if2_params.iter() {
-            if let Some(&r) = rhat.get(&spec.name) {
+            if let Some(&r) = chain_agreement.get(&spec.name) {
                 let status = if r < 1.1 { "✓" } else if r < 1.5 { "~" } else { "✗" };
-                eprintln!("  {:12} Rhat={:.2} {}", spec.name, r, status);
+                eprintln!("  {:12} Â={:.2} {}", spec.name, r, status);
             }
         }
     }

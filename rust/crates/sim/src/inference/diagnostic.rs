@@ -46,10 +46,10 @@ pub enum DiagnosticKind {
     },
     MultimodalLikelihood {
         ll_spread: f64,
-        max_rhat: f64,
+        max_chain_agreement: f64,
     },
     ConvergenceIncomplete {
-        max_rhat: f64,
+        max_chain_agreement: f64,
         n_unconverged: usize,
         n_total: usize,
     },
@@ -171,7 +171,7 @@ impl DiagnosticKind {
             Self::InitialLoglikInfinite => Severity::Error,
             Self::RhatHigh { rhat, .. } if *rhat > 1.5 => Severity::Error,
             Self::RhatHigh { .. } => Severity::Warning,
-            Self::ConvergenceIncomplete { max_rhat, .. } if *max_rhat > 1.5 => Severity::Error,
+            Self::ConvergenceIncomplete { max_chain_agreement, .. } if *max_chain_agreement > 1.5 => Severity::Error,
             Self::ConvergenceIncomplete { .. } => Severity::Warning,
             Self::DivergentTransitions { .. } => Severity::Warning,
             Self::LowESS { ess_fraction, .. } if *ess_fraction < 0.05 => Severity::Error,
@@ -204,12 +204,12 @@ impl DiagnosticKind {
             Self::ChainDiverged { chain_id, n_chains } =>
                 format!("Chain {} of {} diverged from the others (MLE outside 3×MAD).",
                     chain_id, n_chains),
-            Self::MultimodalLikelihood { ll_spread, max_rhat } =>
+            Self::MultimodalLikelihood { ll_spread, max_chain_agreement } =>
                 format!("Likelihood surface may be multimodal: \
-                         loglik spread={:.1}, max Rhat={:.2}.", ll_spread, max_rhat),
-            Self::ConvergenceIncomplete { max_rhat, n_unconverged, n_total } =>
-                format!("{}/{} parameters have Rhat > 1.1 (max {:.2}).",
-                    n_unconverged, n_total, max_rhat),
+                         loglik spread={:.1}, max Â={:.2}.", ll_spread, max_chain_agreement),
+            Self::ConvergenceIncomplete { max_chain_agreement, n_unconverged, n_total } =>
+                format!("{}/{} parameters have Â > 1.1 (max {:.2}).",
+                    n_unconverged, n_total, max_chain_agreement),
             Self::LowESS { obs_time, ess, n_particles, .. } =>
                 format!("ESS dropped to {:.0}/{} at t={:.0}.",
                     ess, n_particles, obs_time),

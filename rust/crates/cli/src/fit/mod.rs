@@ -565,7 +565,7 @@ pub fn cmd_fit_run_v2(a: &crate::args::FitRunArgs) {
 
                 // Gate 1 — pre-stage: if this stage consumes a prior
                 // stage (starts_from), refuse to run when the prior
-                // stage's tail-Rhat failed convergence on any
+                // stage's tail Â failed convergence on any
                 // non-IVP param. Skipped when starts_from is absent
                 // (this stage is itself the scout). Overridable via
                 // --allow-nonconverged-scout. See proposal
@@ -576,11 +576,11 @@ pub fn cmd_fit_run_v2(a: &crate::args::FitRunArgs) {
                         use gating::ScoutGateVerdict;
                         match gating::check_scout_convergence(ps) {
                             ScoutGateVerdict::Ok => {}
-                            ScoutGateVerdict::SoftWarn { param_rhats } => {
-                                eprintln!("\x1b[33m  warning:\x1b[0m prior stage tail-Rhat in \
+                            ScoutGateVerdict::SoftWarn { param_agreement } => {
+                                eprintln!("\x1b[33m  warning:\x1b[0m prior stage tail Â in \
                                            1.05–1.10 grey zone for: {}",
-                                    param_rhats.iter()
-                                        .map(|(n, r)| format!("{} (Rhat={:.2})", n, r))
+                                    param_agreement.iter()
+                                        .map(|(n, r)| format!("{} (Â={:.2})", n, r))
                                         .collect::<Vec<_>>().join(", "));
                             }
                             ScoutGateVerdict::Hard { failing, all_structural, ivp, loglik_spread } => {
@@ -599,7 +599,7 @@ pub fn cmd_fit_run_v2(a: &crate::args::FitRunArgs) {
                                     sweep_failures.push((
                                         cell_i, pt_idx,
                                         stage_name.to_string(),
-                                        "scout_tail_rhat_gate".to_string(),
+                                        "scout_tail_agreement_gate".to_string(),
                                     ));
                                     break; // exit stages loop for this sweep point
                                 } else {
@@ -633,7 +633,7 @@ pub fn cmd_fit_run_v2(a: &crate::args::FitRunArgs) {
                 // When a stage has no `starts_from` predecessor and runs
                 // > 1 chain, give each chain its own random starting
                 // point from bounds. This matches v1 scout's default
-                // and is what makes Rhat across chains meaningful —
+                // and is what makes Â across chains meaningful —
                 // chains starting from the same point only diverge via
                 // per-chain RNG, so their between-chain variance
                 // reflects sampling noise rather than
@@ -726,7 +726,7 @@ pub fn cmd_fit_run_v2(a: &crate::args::FitRunArgs) {
                     rw_sd,
                     loglik_type: Some("if2".into()),
                     acceptance_rate: None,
-                    tail_rhat: chain_results.rhat.clone(),
+                    tail_chain_agreement: chain_results.chain_agreement.clone(),
                     ivp_params: run_config.estimated_params.iter()
                         .filter(|p| p.ivp).map(|p| p.name.clone()).collect(),
                     chain_logliks: chain_results.results.iter()

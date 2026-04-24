@@ -475,8 +475,8 @@ pub fn run_pgas_cli(
         acceptance_rate: Some(best_chain.1.iter()
             .map(|s| s.accepted.iter().filter(|&&a| a).count() as f64 / s.accepted.len().max(1) as f64)
             .sum::<f64>() / best_chain.1.len().max(1) as f64),
-        // Bayesian stage, no IF2-style Rhat.
-        tail_rhat: HashMap::new(),
+        // Bayesian stage, no IF2-style Â (chain agreement).
+        tail_chain_agreement: HashMap::new(),
         ivp_params: Vec::new(),
         chain_logliks: Vec::new(),
     };

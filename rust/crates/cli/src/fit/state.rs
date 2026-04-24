@@ -29,16 +29,16 @@ pub struct FitState {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub acceptance_rate: Option<f64>,
 
-    /// Per-parameter tail-Rhat (last half of iterations). Populated at
-    /// end-of-stage so downstream stages (notably refine) can gate on
-    /// scout's convergence without re-running. Absent in legacy
-    /// fit_state.toml files — downstream readers must treat absence as
-    /// "unknown, proceed with warning," not "converged."
+    /// Per-parameter tail chain-agreement Â (last half of iterations).
+    /// Populated at end-of-stage so downstream stages (notably refine)
+    /// can gate on scout's convergence without re-running. Absent in
+    /// legacy fit_state.toml files — downstream readers must treat
+    /// absence as "unknown, proceed with warning," not "converged."
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
-    pub tail_rhat: HashMap<String, f64>,
+    pub tail_chain_agreement: HashMap<String, f64>,
 
     /// Names of estimated parameters declared `ivp = true`. Refine's
-    /// Rhat gate exempts these — IVP parameters are expected to be
+    /// Â gate exempts these — IVP parameters are expected to be
     /// harder to identify and shouldn't block the pipeline when
     /// structural convergence is fine. Stored here (not re-derived
     /// from fit.toml in the downstream) so the two can't drift.

@@ -39,15 +39,15 @@ pub fn run_refine(
         starts_from, prior_state.best_loglik,
         prior_state.n_good_chains.unwrap_or(prior_state.n_chains));
 
-    // Gate 1: scout tail-Rhat convergence. See
+    // Gate 1: scout tail chain-agreement (Â) convergence. See
     // docs/dev/proposals/2026-04-19-refine-gates-scout-convergence.md.
     match crate::fit::gating::check_scout_convergence(&prior_state) {
         crate::fit::gating::ScoutGateVerdict::Ok => {}
-        crate::fit::gating::ScoutGateVerdict::SoftWarn { param_rhats } => {
-            eprintln!("\x1b[33m  warning:\x1b[0m scout tail-Rhat is in the 1.05–1.10 \
+        crate::fit::gating::ScoutGateVerdict::SoftWarn { param_agreement } => {
+            eprintln!("\x1b[33m  warning:\x1b[0m scout tail Â is in the 1.05–1.10 \
                        grey zone for: {}",
-                param_rhats.iter()
-                    .map(|(n, r)| format!("{} (Rhat={:.2})", n, r))
+                param_agreement.iter()
+                    .map(|(n, r)| format!("{} (Â={:.2})", n, r))
                     .collect::<Vec<_>>().join(", "));
             eprintln!("  proceeding with refine, but scout's convergence is \
                        weaker than ideal — inspect results carefully.");
@@ -121,7 +121,7 @@ pub fn run_refine(
     )?;
 
     // Check convergence
-    let all_converged = chain_results.rhat.values().all(|&r| r < 1.1);
+    let all_converged = chain_results.chain_agreement.values().all(|&r| r < 1.1);
     let loglik_spread = {
         let logliks: Vec<f64> = chain_results.results.iter()
             .map(|(_, r)| r.final_loglik).collect();
@@ -130,14 +130,14 @@ pub fn run_refine(
     };
 
     if !all_converged {
-        let max_rhat = chain_results.rhat.values().cloned().fold(0.0_f64, f64::max);
-        let n_unconverged = chain_results.rhat.values().filter(|&&r| r > 1.1).count();
-        let n_total = chain_results.rhat.len();
-        collector.push(DiagnosticKind::ConvergenceIncomplete { max_rhat, n_unconverged, n_total });
+        let max_chain_agreement = chain_results.chain_agreement.values().cloned().fold(0.0_f64, f64::max);
+        let n_unconverged = chain_results.chain_agreement.values().filter(|&&r| r > 1.1).count();
+        let n_total = chain_results.chain_agreement.len();
+        collector.push(DiagnosticKind::ConvergenceIncomplete { max_chain_agreement, n_unconverged, n_total });
     }
     if loglik_spread > 10.0 {
-        let max_rhat = chain_results.rhat.values().cloned().fold(0.0_f64, f64::max);
-        collector.push(DiagnosticKind::MultimodalLikelihood { ll_spread: loglik_spread, max_rhat });
+        let max_chain_agreement = chain_results.chain_agreement.values().cloned().fold(0.0_f64, f64::max);
+        collector.push(DiagnosticKind::MultimodalLikelihood { ll_spread: loglik_spread, max_chain_agreement });
     }
 
     // Best chain's MLE
@@ -182,7 +182,7 @@ pub fn run_refine(
         rw_sd,
         loglik_type: Some("if2".into()),
         acceptance_rate: None,
-        tail_rhat: chain_results.rhat.clone(),
+        tail_chain_agreement: chain_results.chain_agreement.clone(),
         ivp_params: refine_ivp_params,
         chain_logliks: refine_chain_logliks,
     };
@@ -265,13 +265,13 @@ fn write_summary(
         "converged": converged,
         "loglik_spread": loglik_spread,
         "parameters": config.estimated_params.iter().map(|spec| {
-            let rhat = results.rhat.get(&spec.name).copied().unwrap_or(f64::NAN);
+            let agreement = results.chain_agreement.get(&spec.name).copied().unwrap_or(f64::NAN);
             let best = &results.results.iter()
                 .find(|(id, _)| *id == results.best_chain).unwrap().1;
             serde_json::json!({
                 "name": spec.name,
                 "estimate": best.mle[spec.index],
-                "rhat": rhat,
+                "chain_agreement": agreement,
             })
         }).collect::<Vec<_>>(),
     });

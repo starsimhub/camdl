@@ -165,7 +165,7 @@ pub fn run_scout(fit: &FitToml, seed: u64, force: bool) -> Result<(), String> {
         rw_sd: HashMap::new(),
         loglik_type: Some("if2".into()),
         acceptance_rate: None,
-        tail_rhat: chain_results.rhat.clone(),
+        tail_chain_agreement: chain_results.chain_agreement.clone(),
         ivp_params,
         chain_logliks,
     };
@@ -231,10 +231,10 @@ fn write_summary(
         "best_chain": results.best_chain + 1,
         "initial_loglik": initial_loglik,
         "parameters": config.estimated_params.iter().map(|spec| {
-            let rhat = results.rhat.get(&spec.name).copied().unwrap_or(f64::NAN);
+            let agreement = results.chain_agreement.get(&spec.name).copied().unwrap_or(f64::NAN);
             serde_json::json!({
                 "name": spec.name,
-                "rhat": rhat,
+                "chain_agreement": agreement,
                 "rw_sd": spec.rw_sd,
             })
         }).collect::<Vec<_>>(),

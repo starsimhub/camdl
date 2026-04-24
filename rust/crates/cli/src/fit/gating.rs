@@ -4,8 +4,8 @@
 //! scout" failure mode documented in
 //! `docs/dev/proposals/2026-04-19-refine-gates-scout-convergence.md`:
 //!
-//! - Gate 1 (pre-refine): scout's tail-Rhat on every non-IVP estimated
-//!   parameter must be ≤ `RHAT_HARD`. If it isn't, refine refuses to
+//! - Gate 1 (pre-refine): scout's tail chain-agreement (Â) on every
+//!   non-IVP estimated parameter must be ≤ `A_HARD`. If it isn't, refine refuses to
 //!   start. Overridable via `--allow-nonconverged-scout`.
 //!
 //! - Gate 2 (post-refine): refine's best loglik must not regress
@@ -18,14 +18,17 @@
 
 use super::state::FitState;
 
-/// Hard threshold: any non-IVP param with tail-Rhat > this blocks
-/// refine from running. Matches Brooks-Gelman-Rubin convention.
-pub const RHAT_HARD: f64 = 1.10;
+/// Hard threshold: any non-IVP param with tail Â > this blocks
+/// refine from running. Matches Brooks-Gelman-Rubin convention
+/// (the underlying formula is G-R 1992; we relabel the output as
+/// chain agreement because it is applied to IF2 optimizer chains,
+/// not posterior samples).
+pub const A_HARD: f64 = 1.10;
 
 /// Soft threshold: params between these get a prominent warning but
 /// refine still runs. Matches the existing scout diagnostic
 /// colour-coding (red ≥ 1.10, yellow 1.05–1.10, green < 1.05).
-pub const RHAT_SOFT: f64 = 1.05;
+pub const A_SOFT: f64 = 1.05;
 
 /// Minimum ε for Gate 2. Scout's noise floor on a typical PF-based
 /// loglik estimator at reasonable particle counts. `epsilon` takes the
@@ -40,15 +43,15 @@ pub const LOGLIK_EPSILON_MIN: f64 = 3.0;
 #[derive(Debug)]
 pub enum ScoutGateVerdict {
     Ok,
-    SoftWarn { param_rhats: Vec<(String, f64)> },
+    SoftWarn { param_agreement: Vec<(String, f64)> },
     Hard {
-        /// All non-IVP params with Rhat > RHAT_HARD. Named and sorted
+        /// All non-IVP params with Â > A_HARD. Named and sorted
         /// worst-first so the error message leads with the most
         /// obvious failure.
         failing: Vec<(String, f64)>,
-        /// Every non-IVP Rhat, for the full diagnostic table.
+        /// Every non-IVP Â, for the full diagnostic table.
         all_structural: Vec<(String, f64)>,
-        /// IVP Rhats (reported but not gated).
+        /// IVP Â values (reported but not gated).
         ivp: Vec<(String, f64)>,
         /// Spread across scout's per-chain final logliks. A wide
         /// spread is the strongest signal of multi-modality.
@@ -58,9 +61,9 @@ pub enum ScoutGateVerdict {
 
 /// Check scout's fit_state for pre-refine convergence.
 pub fn check_scout_convergence(scout: &FitState) -> ScoutGateVerdict {
-    // Absent tail_rhat means legacy fit_state — can't gate. Caller
-    // handles the warn-and-proceed branch.
-    if scout.tail_rhat.is_empty() {
+    // Absent tail_chain_agreement means legacy fit_state — can't gate.
+    // Caller handles the warn-and-proceed branch.
+    if scout.tail_chain_agreement.is_empty() {
         return ScoutGateVerdict::Ok;
     }
 
@@ -68,11 +71,11 @@ pub fn check_scout_convergence(scout: &FitState) -> ScoutGateVerdict {
         .map(|s| s.as_str()).collect();
     let mut structural: Vec<(String, f64)> = Vec::new();
     let mut ivp: Vec<(String, f64)> = Vec::new();
-    for (name, &rhat) in &scout.tail_rhat {
+    for (name, &agreement) in &scout.tail_chain_agreement {
         if ivp_set.contains(name.as_str()) {
-            ivp.push((name.clone(), rhat));
+            ivp.push((name.clone(), agreement));
         } else {
-            structural.push((name.clone(), rhat));
+            structural.push((name.clone(), agreement));
         }
     }
     structural.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
@@ -81,9 +84,9 @@ pub fn check_scout_convergence(scout: &FitState) -> ScoutGateVerdict {
     let worst = structural.iter().map(|(_, r)| *r)
         .fold(0.0_f64, f64::max);
 
-    if worst > RHAT_HARD {
+    if worst > A_HARD {
         let failing: Vec<(String, f64)> = structural.iter()
-            .filter(|(_, r)| *r > RHAT_HARD)
+            .filter(|(_, r)| *r > A_HARD)
             .cloned().collect();
         let loglik_spread = if scout.chain_logliks.len() >= 2 {
             let hi = scout.chain_logliks.iter().cloned()
@@ -98,11 +101,11 @@ pub fn check_scout_convergence(scout: &FitState) -> ScoutGateVerdict {
             ivp,
             loglik_spread,
         }
-    } else if worst > RHAT_SOFT {
+    } else if worst > A_SOFT {
         let warnable: Vec<(String, f64)> = structural.into_iter()
-            .filter(|(_, r)| *r > RHAT_SOFT)
+            .filter(|(_, r)| *r > A_SOFT)
             .collect();
-        ScoutGateVerdict::SoftWarn { param_rhats: warnable }
+        ScoutGateVerdict::SoftWarn { param_agreement: warnable }
     } else {
         ScoutGateVerdict::Ok
     }
@@ -167,18 +170,18 @@ pub fn format_hard_verdict(
 ) -> String {
     let mut msg = String::from(
         "refine stage requires scout convergence.\n\n  \
-         Scout tail-Rhat (last half of iterations):\n");
-    for (name, rhat) in all_structural {
-        let marker = if *rhat > RHAT_HARD { "✗" }
-                     else if *rhat > RHAT_SOFT { "~" }
+         Scout tail Â (last half of iterations):\n");
+    for (name, agreement) in all_structural {
+        let marker = if *agreement > A_HARD { "✗" }
+                     else if *agreement > A_SOFT { "~" }
                      else { " " };
-        msg.push_str(&format!("    {} {:<10} Rhat = {:>6.3}{}\n",
-            marker, name, rhat,
-            if *rhat > RHAT_HARD { "   (> 1.10)" } else { "" }));
+        msg.push_str(&format!("    {} {:<10} Â = {:>6.3}{}\n",
+            marker, name, agreement,
+            if *agreement > A_HARD { "   (> 1.10)" } else { "" }));
     }
-    for (name, rhat) in ivp {
-        msg.push_str(&format!("      {:<10} Rhat = {:>6.3}   (ivp — not gated)\n",
-            name, rhat));
+    for (name, agreement) in ivp {
+        msg.push_str(&format!("      {:<10} Â = {:>6.3}   (ivp — not gated)\n",
+            name, agreement));
     }
     if loglik_spread > 0.0 {
         msg.push_str(&format!("\n  Scout loglik spread: {:.1} (best chain loglik {:.1})\n",
@@ -188,7 +191,7 @@ pub fn format_hard_verdict(
         msg.push_str("  -> likelihood surface is almost certainly multi-modal.\n");
     }
     msg.push_str(&format!("\n  Failing: {}\n",
-        failing.iter().map(|(n, r)| format!("{} (Rhat={:.2})", n, r))
+        failing.iter().map(|(n, r)| format!("{} (Â={:.2})", n, r))
             .collect::<Vec<_>>().join(", ")));
     msg.push_str("\n  Pick one:\n    \
                   - re-run scout with more chains or iterations\n    \
@@ -215,7 +218,7 @@ mod tests {
     use std::collections::HashMap;
 
     fn make_state(
-        tail_rhat: &[(&str, f64)],
+        tail_chain_agreement: &[(&str, f64)],
         ivp_params: &[&str],
         chain_logliks: &[f64],
         best_loglik: f64,
@@ -234,7 +237,7 @@ mod tests {
             rw_sd: HashMap::new(),
             loglik_type: Some("if2".into()),
             acceptance_rate: None,
-            tail_rhat: tail_rhat.iter()
+            tail_chain_agreement: tail_chain_agreement.iter()
                 .map(|(k, v)| (k.to_string(), *v)).collect(),
             ivp_params: ivp_params.iter().map(|s| s.to_string()).collect(),
             chain_logliks: chain_logliks.to_vec(),
@@ -242,7 +245,7 @@ mod tests {
     }
 
     #[test]
-    fn hard_gate_fires_when_structural_rhat_exceeds_threshold() {
+    fn hard_gate_fires_when_structural_agreement_exceeds_threshold() {
         let s = make_state(
             &[("beta", 3.5), ("gamma", 1.2), ("I0", 16.5)],
             &["I0"],
@@ -254,9 +257,9 @@ mod tests {
                 let names: Vec<&str> = failing.iter()
                     .map(|(n, _)| n.as_str()).collect();
                 assert!(names.contains(&"beta"),
-                    "beta (Rhat=3.5) must fail the gate: {:?}", names);
+                    "beta (Â=3.5) must fail the gate: {:?}", names);
                 assert!(names.contains(&"gamma"),
-                    "gamma (Rhat=1.2) must fail: {:?}", names);
+                    "gamma (Â=1.2) must fail: {:?}", names);
                 // IVP param I0 must NOT appear in failing.
                 assert!(!names.contains(&"I0"),
                     "I0 is ivp — must not be in failing: {:?}", names);
@@ -269,8 +272,8 @@ mod tests {
     }
 
     #[test]
-    fn ivp_rhat_not_gated_even_when_extreme() {
-        // All structural params are green; only IVP has extreme Rhat.
+    fn ivp_agreement_not_gated_even_when_extreme() {
+        // All structural params are green; only IVP has extreme Â.
         // Gate should pass — IVP is expected to be hard to identify.
         let s = make_state(
             &[("beta", 1.02), ("gamma", 1.01), ("I0", 16.5), ("R_init", 5.5)],
@@ -293,8 +296,8 @@ mod tests {
             -60.2,
         );
         match check_scout_convergence(&s) {
-            ScoutGateVerdict::SoftWarn { param_rhats } => {
-                let names: Vec<&str> = param_rhats.iter()
+            ScoutGateVerdict::SoftWarn { param_agreement } => {
+                let names: Vec<&str> = param_agreement.iter()
                     .map(|(n, _)| n.as_str()).collect();
                 assert!(names.contains(&"beta"));
                 assert!(!names.contains(&"gamma"),
@@ -305,8 +308,8 @@ mod tests {
     }
 
     #[test]
-    fn legacy_state_with_no_rhat_returns_ok() {
-        // Absent tail_rhat (legacy fit_state from pre-2026-04-19):
+    fn legacy_state_with_no_agreement_returns_ok() {
+        // Absent tail_chain_agreement (legacy fit_state from pre-2026-04-19):
         // caller treats this as "unknown, warn and proceed" via the
         // Ok verdict.
         let s = make_state(&[], &[], &[-60.0], -60.0);

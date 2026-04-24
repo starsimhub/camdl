@@ -67,6 +67,7 @@ pub const NATS_TO_DB: f64 = 10.0 / std::f64::consts::LN_10;
 /// §Proposal 1.
 ///
 /// Returns `NEG_INFINITY` on empty input; `NaN` propagates through.
+#[allow(dead_code)]  // consumed by fit::clean_eval (Unit A, Step 5) — landed here first so the API is stable
 pub fn logmeanexp(xs: &[f64]) -> f64 {
     if xs.is_empty() {
         return f64::NEG_INFINITY;
@@ -80,6 +81,7 @@ pub fn logmeanexp(xs: &[f64]) -> f64 {
 }
 
 /// Sample standard deviation (N-1 denominator). Returns 0.0 for len<2.
+#[allow(dead_code)]  // consumed by fit::clean_eval (Unit A, Step 5)
 pub fn sample_sd(xs: &[f64]) -> f64 {
     if xs.len() < 2 {
         return 0.0;
