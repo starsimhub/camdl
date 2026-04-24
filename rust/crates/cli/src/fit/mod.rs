@@ -1052,6 +1052,9 @@ pub fn cmd_fit_run_v2(a: &crate::args::FitRunArgs) {
                 starts_from: starts_from_ref,
                 derived_from: sweep_config.provenance.as_ref()
                     .and_then(|p| p.derived_from.clone()),
+                parent_profile_hash: None,
+                profile_point_idx: None,
+                profile_start_idx: None,
             }),
         };
         if let Err(e) = stage_run.write(&stage_dir) {
@@ -1332,6 +1335,9 @@ fn write_v1_stage_run(
             best_chain,
             starts_from: starts_from_ref,
             derived_from: None,
+            parent_profile_hash: None,
+            profile_point_idx: None,
+            profile_start_idx: None,
         }),
     };
     if let Err(e) = run.write(stage_dir) {

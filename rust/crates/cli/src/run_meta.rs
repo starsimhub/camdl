@@ -61,6 +61,13 @@ pub enum RunKind {
     /// at `<fit_dir>/real/fit_<seed>/<stage>/` or
     /// `<fit_dir>/synthetic/ds_NN/fit_<seed>/<stage>/`.
     FitStage(FitStageMeta),
+    /// A profile-likelihood scan: Cartesian product over N focal
+    /// parameter axes × `n_starts` independent IF2 mini-fits per
+    /// grid point. The directory contains `profile.tsv` (derived
+    /// rollup) and `points/{idx:05d}/start_{k}/` subtrees, where
+    /// each `start_{k}/` is itself a `FitStage` run. See
+    /// docs/dev/proposals/2026-04-24-profile-cas-integration.md.
+    Profile(ProfileMeta),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -151,6 +158,57 @@ pub struct FitStageMeta {
     /// treats this as a display hint.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub derived_from: Option<String>,
+    /// Parent profile hash, when this FitStage is a grid-point × start
+    /// child of a `RunKind::Profile`. Absent for standalone fit stages.
+    /// Optional to preserve round-trip compatibility with existing
+    /// fit-stage run.json files.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_profile_hash: Option<String>,
+    /// Grid-point index within the parent profile (flat index over
+    /// the Cartesian product of focal axes). Set iff
+    /// `parent_profile_hash` is set.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub profile_point_idx: Option<usize>,
+    /// Start index within this grid point (0..n_starts).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub profile_start_idx: Option<usize>,
+}
+
+/// Metadata for a `RunKind::Profile` run. The shape mirrors pomp's
+/// and pfilter's convention of fanning out mini-fits over a grid;
+/// every child start is a `FitStage` carrying its own seed and MLE.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProfileMeta {
+    /// Model file path (display only).
+    pub model: String,
+    /// Full model IR hash.
+    pub model_hash: String,
+    /// Ordered focal params. Order determines column order in the
+    /// rollup TSV and is part of the profile-level hash.
+    pub focal_params: Vec<String>,
+    /// One axis per focal param, each with an explicit value list
+    /// (mirroring the `--sweep NAME=V1,V2,...` CLI surface).
+    pub grid: Vec<GridAxis>,
+    /// Independent IF2 starts per grid point.
+    pub n_starts: usize,
+    /// Hash of the IF2 stage config (iterations, particles, cooling, dt).
+    pub if2_config_hash: String,
+    /// Hash of the base parameter vector (before focal-param pinning).
+    pub base_params_hash: String,
+    /// Seed base. Per-start seeds derive as a function of this +
+    /// point_idx + start_idx.
+    pub seed_base: u64,
+    /// Total (grid_size × n_starts). Display only.
+    pub total_jobs: usize,
+}
+
+/// One axis of a profile grid. `values` is the explicit list the
+/// user supplied via `--sweep NAME=V1,V2,...`; the CLI parser
+/// already splits on commas and converts to f64.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GridAxis {
+    pub param: String,
+    pub values: Vec<f64>,
 }
 
 /// Stable reference to a parent stage. Uses the stage *name* plus its
@@ -341,6 +399,9 @@ mod tests {
                     stage_hash: Some("beef1234".repeat(8)),
                 }),
                 derived_from: None,
+                parent_profile_hash: None,
+                profile_point_idx: None,
+                profile_start_idx: None,
             }),
         }
     }
@@ -471,6 +532,9 @@ mod tests {
                 best_chain: None,
                 starts_from: None,
                 derived_from: None,
+                parent_profile_hash: None,
+                profile_point_idx: None,
+                profile_start_idx: None,
             }),
         };
         let json = serde_json::to_string(&stage).unwrap();
@@ -568,6 +632,9 @@ mod tests {
                     stage: "scout".into(), stage_hash: None,
                 }),
                 derived_from: None,
+                parent_profile_hash: None,
+                profile_point_idx: None,
+                profile_start_idx: None,
             }),
         };
         let json = serde_json::to_string(&r).unwrap();
@@ -593,11 +660,95 @@ mod tests {
                 algorithm: serde_json::Value::Null,
                 best_loglik: None, best_chain: None, starts_from: None,
                 derived_from: None,
+                parent_profile_hash: None,
+                profile_point_idx: None,
+                profile_start_idx: None,
             }),
         };
         let json = serde_json::to_string(&r).unwrap();
         assert!(!json.contains("best_loglik"));
         assert!(!json.contains("best_chain"));
         assert!(!json.contains("starts_from"));
+        assert!(!json.contains("parent_profile_hash"));
+    }
+
+    #[test]
+    fn profile_run_roundtrip() {
+        let r = Run {
+            hash: "a".repeat(64),
+            version: "v".into(),
+            created_at: "2026-04-24T00:00:00Z".into(),
+            argv: vec!["camdl".into(), "profile".into()],
+            wall_time_seconds: 3600.0,
+            kind: RunKind::Profile(ProfileMeta {
+                model: "he2010_london.camdl".into(),
+                model_hash: "b".repeat(64),
+                focal_params: vec!["R0".into(), "gamma".into()],
+                grid: vec![
+                    GridAxis { param: "R0".into(), values: vec![40.0, 50.0, 60.0] },
+                    GridAxis { param: "gamma".into(), values: vec![0.1, 0.2] },
+                ],
+                n_starts: 3,
+                if2_config_hash: "c".repeat(64),
+                base_params_hash: "d".repeat(64),
+                seed_base: 42,
+                total_jobs: 18,
+            }),
+        };
+        let json = serde_json::to_string(&r).unwrap();
+        assert!(json.contains(r#""kind":"profile""#),
+            "kind discriminator missing from JSON: {}", json);
+        let parsed: Run = serde_json::from_str(&json).unwrap();
+        match parsed.kind {
+            RunKind::Profile(m) => {
+                assert_eq!(m.focal_params, vec!["R0", "gamma"]);
+                assert_eq!(m.grid.len(), 2);
+                assert_eq!(m.grid[0].values, vec![40.0, 50.0, 60.0]);
+                assert_eq!(m.total_jobs, 18);
+            }
+            _ => panic!("expected Profile kind"),
+        }
+    }
+
+    #[test]
+    fn fit_stage_with_profile_backref_roundtrips() {
+        // A grid-point × start child under a profile: FitStageMeta with
+        // parent_profile_hash + profile_point_idx + profile_start_idx
+        // populated. Verifies the optional fields round-trip correctly.
+        let r = Run {
+            hash: "e".repeat(64),
+            version: "v".into(),
+            created_at: "2026-04-24T00:00:00Z".into(),
+            argv: vec!["camdl".into(), "profile".into()],
+            wall_time_seconds: 120.0,
+            kind: RunKind::FitStage(FitStageMeta {
+                fit_hash: "".into(),    // no parent Fit; parent is a Profile
+                stage: "if2".into(),
+                method: "if2".into(),
+                seed: 142,
+                n_chains: 1,
+                algorithm: serde_json::Value::Null,
+                best_loglik: Some(-5827.35),
+                best_chain: Some(0),
+                starts_from: None,
+                derived_from: None,
+                parent_profile_hash: Some("f".repeat(64)),
+                profile_point_idx: Some(7),
+                profile_start_idx: Some(2),
+            }),
+        };
+        let json = serde_json::to_string(&r).unwrap();
+        assert!(json.contains("parent_profile_hash"));
+        assert!(json.contains("profile_point_idx"));
+        assert!(json.contains("profile_start_idx"));
+        let parsed: Run = serde_json::from_str(&json).unwrap();
+        match parsed.kind {
+            RunKind::FitStage(m) => {
+                assert_eq!(m.parent_profile_hash, Some("f".repeat(64)));
+                assert_eq!(m.profile_point_idx, Some(7));
+                assert_eq!(m.profile_start_idx, Some(2));
+            }
+            _ => panic!("expected FitStage"),
+        }
     }
 }
