@@ -234,13 +234,56 @@ fn write_summary(
     initial_loglik: f64,
     input_hash: &str,
 ) -> Result<(), String> {
-    let summary = serde_json::json!({
+    let summary = build_scout_summary_json(
+        results, &config.estimated_params, config.n_chains, initial_loglik, input_hash,
+    );
+    let path = format!("{}/scout_summary.json", dir);
+    let contents = serde_json::to_string_pretty(&summary)
+        .map_err(|e| format!("json error: {}", e))?;
+    std::fs::write(&path, contents)
+        .map_err(|e| format!("cannot write {}: {}", path, e))
+}
+
+/// Build the scout_summary.json document. Pure on `(results, config,
+/// initial_loglik, input_hash)` so the schema is unit-testable without
+/// running a real scout. Step 9 (§Proposal 1) added the top-level
+/// `chain_agreement` map and the per-chain `chains` array carrying the
+/// clean-eval winner ll/se/label for each chain.
+pub(crate) fn build_scout_summary_json(
+    results: &runner::ChainResults,
+    estimated_params: &[sim::inference::if2::EstimatedParam],
+    n_chains: usize,
+    initial_loglik: f64,
+    input_hash: &str,
+) -> serde_json::Value {
+    let chain_agreement_map: serde_json::Map<String, serde_json::Value> = estimated_params.iter()
+        .map(|spec| {
+            let v = results.chain_agreement.get(&spec.name).copied().unwrap_or(f64::NAN);
+            (spec.name.clone(), serde_json::json!(v))
+        })
+        .collect();
+
+    let mut chain_winners: Vec<&crate::fit::clean_eval::ChainWinner> =
+        results.clean_eval.per_chain_winners.iter().collect();
+    chain_winners.sort_by_key(|w| w.chain_id);
+    let chains: Vec<serde_json::Value> = chain_winners.iter().map(|w| {
+        serde_json::json!({
+            "chain_id": w.chain_id + 1,
+            "clean_loglik": w.loglik,
+            "clean_se": w.se,
+            "winning_candidate_label": w.label.as_str(),
+        })
+    }).collect();
+
+    serde_json::json!({
         "stage": "scout",
-        "n_chains": config.n_chains,
+        "n_chains": n_chains,
         "best_loglik": results.best_loglik,
         "best_chain": results.best_chain + 1,
         "initial_loglik": initial_loglik,
-        "parameters": config.estimated_params.iter().map(|spec| {
+        "chain_agreement": chain_agreement_map,
+        "chains": chains,
+        "parameters": estimated_params.iter().map(|spec| {
             let agreement = results.chain_agreement.get(&spec.name).copied().unwrap_or(f64::NAN);
             serde_json::json!({
                 "name": spec.name,
@@ -249,13 +292,7 @@ fn write_summary(
             })
         }).collect::<Vec<_>>(),
         "input_hash": input_hash,
-    });
-
-    let path = format!("{}/scout_summary.json", dir);
-    let contents = serde_json::to_string_pretty(&summary)
-        .map_err(|e| format!("json error: {}", e))?;
-    std::fs::write(&path, contents)
-        .map_err(|e| format!("cannot write {}: {}", path, e))
+    })
 }
 
 fn random_from_bounds(spec: &EstimatedParam, rng: &mut sim::rng::StatefulRng) -> f64 {
@@ -298,4 +335,74 @@ fn days_to_ymd(days: u64) -> (u64, u64, u64) {
     let m = if mp < 10 { mp + 3 } else { mp - 9 };
     let y = if m <= 2 { y + 1 } else { y };
     (y as u64, m, d)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::fit::clean_eval::{CandidateLabel, ChainWinner, CleanEvalOutcome};
+    use crate::fit::runner::ChainResults;
+    use sim::inference::if2::{EstimatedParam, Transform};
+
+    fn mk_param(name: &str, idx: usize) -> EstimatedParam {
+        EstimatedParam {
+            name: name.into(), index: idx, initial: 0.0,
+            lower: 0.0, upper: 10.0, rw_sd: 0.1, rw_sd_auto: false,
+            transform: Transform::None, ivp: false,
+        }
+    }
+
+    fn synthetic_results() -> ChainResults {
+        let outcome = CleanEvalOutcome {
+            all_scores: vec![],
+            per_chain_winners: vec![
+                ChainWinner { chain_id: 0, label: CandidateLabel::FinalIter,
+                    theta: vec![0.10, 0.20], loglik: -110.0, se: 1.5 },
+                ChainWinner { chain_id: 1, label: CandidateLabel::TailMeanLastK,
+                    theta: vec![0.30, 0.40], loglik: -50.0, se: 0.5 },
+            ],
+            overall_winner_idx: 1,
+        };
+        let mut chain_agreement = std::collections::HashMap::new();
+        chain_agreement.insert("beta".to_string(),  1.02);
+        chain_agreement.insert("gamma".to_string(), 1.07);
+        ChainResults {
+            results: vec![],
+            best_chain: 1,
+            best_loglik: -50.0,
+            best_se: 0.5,
+            winning_label: CandidateLabel::TailMeanLastK,
+            chain_agreement,
+            clean_eval: outcome,
+        }
+    }
+
+    /// Step 9: scout_summary.json carries a top-level `chain_agreement`
+    /// map and a per-chain `chains` array with clean-eval winner ll/se
+    /// + the candidate label that won. Catches a regression where a
+    /// downstream consumer (status, vignette) loses access to either.
+    #[test]
+    fn scout_summary_has_chain_agreement_and_per_chain_clean_eval() {
+        let results = synthetic_results();
+        let if2_params = vec![mk_param("beta", 0), mk_param("gamma", 1)];
+        let v = build_scout_summary_json(&results, &if2_params, 2, -200.0, "deadbeef");
+
+        assert_eq!(v["stage"], "scout");
+        assert_eq!(v["n_chains"], 2);
+        assert_eq!(v["best_chain"], 2);
+
+        let agreement = &v["chain_agreement"];
+        assert!((agreement["beta"].as_f64().unwrap() - 1.02).abs() < 1e-12);
+        assert!((agreement["gamma"].as_f64().unwrap() - 1.07).abs() < 1e-12);
+
+        let chains = v["chains"].as_array().expect("chains array present");
+        assert_eq!(chains.len(), 2, "one entry per chain");
+        // Sorted by chain_id ascending; chain_id is reported 1-based.
+        assert_eq!(chains[0]["chain_id"], 1);
+        assert_eq!(chains[0]["winning_candidate_label"], "final_iter");
+        assert!((chains[0]["clean_loglik"].as_f64().unwrap() - (-110.0)).abs() < 1e-12);
+        assert!((chains[0]["clean_se"].as_f64().unwrap() - 1.5).abs() < 1e-12);
+        assert_eq!(chains[1]["chain_id"], 2);
+        assert_eq!(chains[1]["winning_candidate_label"], "tail_mean_last_k");
+    }
 }

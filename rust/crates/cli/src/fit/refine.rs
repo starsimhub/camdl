@@ -285,14 +285,54 @@ fn write_summary(
     converged: bool,
     loglik_spread: f64,
 ) -> Result<(), String> {
-    let summary = serde_json::json!({
+    let summary = build_refine_summary_json(
+        results, &config.estimated_params, config.n_chains, converged, loglik_spread,
+    );
+    let path = format!("{}/refine_summary.json", dir);
+    std::fs::write(&path, serde_json::to_string_pretty(&summary).unwrap())
+        .map_err(|e| format!("cannot write {}: {}", path, e))
+}
+
+/// Build the refine_summary.json document. Pure on its inputs so the
+/// schema is unit-testable. Step 9 mirrors scout: a top-level
+/// `chain_agreement` map and a per-chain `chains` array with the
+/// clean-eval winner ll/se/label for each chain.
+pub(crate) fn build_refine_summary_json(
+    results: &runner::ChainResults,
+    estimated_params: &[sim::inference::if2::EstimatedParam],
+    n_chains: usize,
+    converged: bool,
+    loglik_spread: f64,
+) -> serde_json::Value {
+    let chain_agreement_map: serde_json::Map<String, serde_json::Value> = estimated_params.iter()
+        .map(|spec| {
+            let v = results.chain_agreement.get(&spec.name).copied().unwrap_or(f64::NAN);
+            (spec.name.clone(), serde_json::json!(v))
+        })
+        .collect();
+
+    let mut chain_winners: Vec<&crate::fit::clean_eval::ChainWinner> =
+        results.clean_eval.per_chain_winners.iter().collect();
+    chain_winners.sort_by_key(|w| w.chain_id);
+    let chains: Vec<serde_json::Value> = chain_winners.iter().map(|w| {
+        serde_json::json!({
+            "chain_id": w.chain_id + 1,
+            "clean_loglik": w.loglik,
+            "clean_se": w.se,
+            "winning_candidate_label": w.label.as_str(),
+        })
+    }).collect();
+
+    serde_json::json!({
         "stage": "refine",
-        "n_chains": config.n_chains,
+        "n_chains": n_chains,
         "best_loglik": results.best_loglik,
         "best_chain": results.best_chain + 1,
         "converged": converged,
         "loglik_spread": loglik_spread,
-        "parameters": config.estimated_params.iter().map(|spec| {
+        "chain_agreement": chain_agreement_map,
+        "chains": chains,
+        "parameters": estimated_params.iter().map(|spec| {
             let agreement = results.chain_agreement.get(&spec.name).copied().unwrap_or(f64::NAN);
             let best = &results.results.iter()
                 .find(|(id, _)| *id == results.best_chain).unwrap().1;
@@ -302,9 +342,5 @@ fn write_summary(
                 "chain_agreement": agreement,
             })
         }).collect::<Vec<_>>(),
-    });
-
-    let path = format!("{}/refine_summary.json", dir);
-    std::fs::write(&path, serde_json::to_string_pretty(&summary).unwrap())
-        .map_err(|e| format!("cannot write {}: {}", path, e))
+    })
 }

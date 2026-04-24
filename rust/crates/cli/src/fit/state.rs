@@ -88,3 +88,62 @@ impl FitState {
             .map_err(|e| format!("cannot write {}: {}", path, e))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn synthetic_state() -> FitState {
+        let mut tail_chain_agreement = HashMap::new();
+        tail_chain_agreement.insert("beta".into(), 1.02);
+        tail_chain_agreement.insert("gamma".into(), 1.07);
+        FitState {
+            stage: "scout".into(),
+            seed: 42,
+            timestamp: "2026-04-24T00:00:00Z".into(),
+            input_hash: Some("deadbeef".into()),
+            camdl_version: Some("0.1.0+test".into()),
+            best_loglik: -123.45,
+            initial_loglik: -200.0,
+            best_chain: 1,
+            n_chains: 2,
+            n_good_chains: Some(2),
+            start_values: HashMap::from([("beta".into(), 0.8)]),
+            rw_sd: HashMap::new(),
+            loglik_type: Some("if2".into()),
+            acceptance_rate: None,
+            tail_chain_agreement,
+            ivp_params: vec!["s0".into()],
+            chain_logliks: vec![-130.0, -123.45],
+            chain_clean_logliks: vec![-128.7, -123.1],
+            chain_clean_ses: vec![1.5, 0.8],
+        }
+    }
+
+    /// fit_state.toml round-trips through save/load with the new
+    /// Step-8/9 fields populated. Catches schema regressions where a
+    /// rename or type change would break inter-stage handoff.
+    #[test]
+    fn fit_state_round_trip_with_clean_eval_fields() {
+        let dir = std::env::temp_dir().join(format!(
+            "camdl_state_rt_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos(),
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let dir_str = dir.to_string_lossy().into_owned();
+
+        let s = synthetic_state();
+        s.save(&dir_str).unwrap();
+        let loaded = FitState::load(&dir_str).unwrap();
+
+        assert_eq!(loaded.chain_clean_logliks, vec![-128.7, -123.1]);
+        assert_eq!(loaded.chain_clean_ses, vec![1.5, 0.8]);
+        assert_eq!(loaded.chain_logliks, vec![-130.0, -123.45]);
+        assert_eq!(loaded.tail_chain_agreement.get("beta").copied(), Some(1.02));
+        assert_eq!(loaded.ivp_params, vec!["s0".to_string()]);
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+}

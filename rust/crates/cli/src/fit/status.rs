@@ -31,6 +31,7 @@ pub fn run_status(fit: &FitToml) -> Result<(), String> {
             let n_good = state.n_good_chains.unwrap_or(state.n_chains);
             println!("  scout:     \x1b[32m✓\x1b[0m complete ({} chains, best loglik {:.1}, {}/{} good)",
                 state.n_chains, state.best_loglik, n_good, state.n_chains);
+            print_decibans_spread(state);
             print_stale_warning(state, "scout");
         }
         None => println!("  scout:     \x1b[90m○ not started\x1b[0m"),
@@ -48,6 +49,7 @@ pub fn run_status(fit: &FitToml) -> Result<(), String> {
             let agreement_str = if converged { "Â < 1.05" } else { "Â > 1.1" };
             println!("  refine:    {} complete ({} chains, {}, loglik {:.1})",
                 symbol, state.n_chains, agreement_str, state.best_loglik);
+            print_decibans_spread(state);
             print_stale_warning(state, "refine");
         }
         None => {
@@ -295,6 +297,33 @@ fn load_summary(base_dir: &str, stage: &str) -> Option<serde_json::Value> {
     let path = format!("{}/{}/{}_summary.json", base_dir, stage, stage);
     std::fs::read_to_string(&path).ok()
         .and_then(|s| serde_json::from_str(&s).ok())
+}
+
+/// Render the compound scout-convergence gate's decibans-spread line.
+/// Reads `chain_clean_logliks` / `chain_clean_ses` from FitState and
+/// reports `Δ dB / threshold dB` together with a pass/fail glyph. Silent
+/// when the clean-eval data isn't available (legacy fit_state.toml or
+/// stages where clean-eval doesn't apply).
+fn print_decibans_spread(state: &FitState) {
+    if state.chain_clean_logliks.len() < 2
+        || state.chain_clean_ses.len() != state.chain_clean_logliks.len()
+    {
+        return;
+    }
+    let nats_to_db = crate::evidence::NATS_TO_DB;
+    let hi = state.chain_clean_logliks.iter().cloned()
+        .fold(f64::NEG_INFINITY, f64::max);
+    let lo = state.chain_clean_logliks.iter().cloned()
+        .fold(f64::INFINITY, f64::min);
+    let delta_db = (hi - lo) * nats_to_db;
+    let sigma_max = state.chain_clean_ses.iter().cloned()
+        .fold(0.0_f64, f64::max);
+    let se_floor_db = 8.0 * sigma_max * nats_to_db;
+    let default_floor_db = crate::fit::config_v2::GateConfig::default().decibans_thresh;
+    let threshold_db = default_floor_db.max(se_floor_db);
+    let glyph = if delta_db < threshold_db { "\x1b[32m✓\x1b[0m" } else { "\x1b[31m✗\x1b[0m" };
+    println!("             clean-eval Δ = {:.1} dB / threshold {:.1} dB (σ_max={:.2}) {}",
+        delta_db, threshold_db, sigma_max, glyph);
 }
 
 fn print_stale_warning(state: &FitState, stage: &str) {
