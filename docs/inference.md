@@ -447,7 +447,7 @@ the natural scale.
 dangerously large. If <0.1%, the parameter isn't exploring. The CLI warns with
 suggested adjustments.
 
-### Multi-chain and Rhat
+### Multi-chain and chain-agreement Â
 
 Run multiple independent IF2 chains from different random seeds to detect
 multimodality and assess convergence:
@@ -458,12 +458,20 @@ camdl if2 model.camdl --params p.toml --data cases.tsv \
     --particles 1000 --iterations 50 --seed 42
 ```
 
-**Rhat** measures across-chain agreement. Computed from the last half of
-iterations:
+**Chain-agreement Â** measures across-chain agreement (Gelman–Rubin 1992
+form, applied to IF2's per-iteration parameter-mean trajectory across
+chains; this is **not** a posterior mixing statistic — IF2 is an MLE
+optimizer, not a sampler, so Â here measures whether the optimizer's
+chains agreed on a basin, not whether a posterior has mixed). Computed
+from the last half of iterations:
 
-- Rhat < 1.1: converged (✓) — chains agree
-- Rhat 1.1-1.5: uncertain (~) — might need more iterations
-- Rhat > 1.5: not converged (✗) — surface may be multimodal
+- Â < 1.1: converged (✓) — chains agree
+- Â 1.1–1.5: uncertain (~) — might need more iterations
+- Â > 1.5: not converged (✗) — surface may be multimodal
+
+Note: Bayesian (PGAS, PMMH) outputs continue to use the name `rhat` for
+their own posterior-mixing diagnostics; only the MLE pipeline (scout /
+refine / validate) uses `chain_agreement` / Â.
 
 ### Regime presets
 
@@ -475,14 +483,15 @@ across basins rather than quenching onto the first local optimum. Over
 the 30-iter stage the perturbation SD shrinks only from 1.0× to 0.49×
 initial. Use this first to find problems: Is the surface multimodal?
 Which parameters are identifiable? Is the observation model appropriate?
-The cross-chain Rhat at the end of scout is the multi-modality
-diagnostic.
+The cross-chain Â at the end of scout, combined with the clean-eval
+decibans-spread gate (see camdl-inference-spec §6.1.1), is the
+multi-modality diagnostic.
 
 **Refine** (`--regime refine`): 4 chains, 1000 particles, 50 iterations,
 **cooling = 0.05 (aggressive)**. Starts from scout's best-chain parameters
 and collapses chains tightly onto the local MLE — final SD is 0.25% of
 initial, so particle clouds concentrate near scout's endpoint. Check
-Rhat for convergence across chains.
+Â for convergence across chains.
 
 **Validate** (`--regime validate`): 4 chains, 5000 particles, 100
 iterations, **cooling = 0.05**. Full convergence for publication-quality
@@ -730,16 +739,16 @@ Log-likelihood should improve monotonically (with noise). Parameters should
 approach stable values. If loglik oscillates without improving, rw_sd is too
 large. If parameters haven't moved after 20 iterations, rw_sd is too small.
 
-### IF2 Rhat diagnostics
+### IF2 chain-agreement diagnostics
 
 ```
-Rhat (across 4 chains, last 25 iterations):
-  R0           Rhat=1.02 ✓ range=[55.2, 58.1]
-  sigma        Rhat=1.01 ✓ range=[0.078, 0.080]
-  gamma        Rhat=3.20 ✗ range=[0.065, 0.120]
+Â (across 4 chains, last 25 iterations):
+  R0           Â=1.02 ✓ range=[55.2, 58.1]
+  sigma        Â=1.01 ✓ range=[0.078, 0.080]
+  gamma        Â=3.20 ✗ range=[0.065, 0.120]
 ```
 
-R₀ and sigma have converged (Rhat < 1.1, tight range). Gamma has not (Rhat=3.2,
+R₀ and sigma have converged (Â < 1.1, tight range). Gamma has not (Â=3.2,
 wide range). This means gamma is either poorly identified or the surface is
 multimodal along the gamma axis. Run a profile likelihood for gamma to
 distinguish.

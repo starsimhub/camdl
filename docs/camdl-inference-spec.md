@@ -436,6 +436,23 @@ amplitude = 0.02
 S0 = 3200
 E0 = 95
 I0 = 45
+
+[tail_chain_agreement]
+# Per-parameter Â over the last half of iterations. Refine reads
+# this to gate Stage 1 of its compound scout-convergence check.
+R0 = 1.02
+sigma = 1.01
+gamma = 1.07
+
+# Per-chain CLEAN-EVAL log-likelihoods + standard errors (in
+# chain-id order), produced by the Step-7 clean-eval re-scoring.
+# The compound scout-convergence gate combines these with
+# tail_chain_agreement to compute an SE-aware decibans-spread
+# threshold (see §6.1.1).
+chain_clean_logliks = [-3893.4, -3891.2, -3897.8, -3895.1, -3892.0, -3899.4, -3895.7, -3894.8]
+chain_clean_ses     = [   0.5,    0.4,    0.6,    0.5,    0.4,    0.7,    0.5,    0.5]
+
+ivp_params = ["S0", "E0", "I0"]
 ```
 
 ### 4.3 How Stages Chain
@@ -599,7 +616,7 @@ and reproduce the fit:
     "initial_loglik": -4523.7,
     "ess_at_mle": { "mean": 3842, "min": 1205 },
     "convergence": {
-      "rhat_max": 1.03,
+      "chain_agreement_max": 1.03,
       "all_converged": true
     },
     "identifiability": {
@@ -652,11 +669,64 @@ fit/{name}/scout/
 - `status`: "ok" | "warning" | "error"
 - `best_loglik`, `initial_loglik` (pfilter at starting params)
 - `ess_at_best`: mean and min ESS at best chain's parameters
-- Per-parameter: `rhat`, `range`, `recommended_rw_sd`,
-  `boundary_fraction`
+- Top-level `chain_agreement`: `{ <param>: Â }` map (per-parameter
+  IF2 chain-agreement statistic — Gelman–Rubin 1992 form applied to
+  IF2's per-iteration parameter-mean trajectory across chains; this
+  is **not** a posterior mixing statistic).
+- Per-parameter (`parameters[]`): `chain_agreement` (Â), `range`,
+  `recommended_rw_sd`, `boundary_fraction`.
+- Per-chain (`chains[]`): `chain_id` (1-based), `clean_loglik`,
+  `clean_se`, `winning_candidate_label` ∈ {`final_iter`,
+  `tail_mean_last_k`, `best_in_run_iter`}. The label records which
+  candidate heuristic produced this chain's clean-eval winner θ̂
+  (see §6.1.1 below).
 - `n_good_chains`: chains within 3×MAD of median (see §4.2)
 - `warnings`: list of diagnostic messages
 - `next_step`: "refine" | "fix_model" | "widen_bounds"
+
+#### 6.1.1 Clean-evaluation re-scoring and the compound gate
+
+Picking the winning chain by argmax over IF2's in-run 500-particle
+PF log-likelihood is biased by ~tens of nats (Monte Carlo noise gets
+selected on, not just signal), and "all Â small" alone fails to
+catch chains that agree per-parameter while sitting in different
+likelihood basins. After IF2 finishes, scout runs a clean-evaluation
+pass:
+
+1. **Candidate construction.** Each chain contributes three candidate
+   parameter vectors θ̂: the final-iteration mean (`final_iter`), the
+   arithmetic mean of param-means over the last K iterations (`tail_mean_last_k`,
+   K clamped to chain length), and the parameter vector at the
+   iteration with the largest finite in-run loglik (`best_in_run_iter`).
+2. **Independent re-scoring.** Each candidate is scored with M
+   independent high-particle PF replicates. Per-replicate logliks
+   are combined via `logmeanexp` (unbiased on the likelihood scale)
+   to a single combined score; the standard error is
+   `sample_sd(per_rep) / √M`. Defaults: `n_particles = 4000`,
+   `n_replicates = 8`, `combine = LogMeanExp`. Override per-stage
+   with `--clean-eval-particles N` / `--clean-eval-reps M`.
+3. **Per-chain winner.** Argmax over the three candidates names
+   that chain's winning θ̂, label, and SE. The maximum across
+   chains names the overall winner.
+
+The compound scout-convergence gate (read by `camdl fit refine`)
+passes iff:
+
+- `max(Â) < a_thresh` over per-parameter chain-agreement, **and**
+- `Δ_dB < threshold_dB` over the per-chain clean-eval logliks,
+
+where `Δ_dB = (max − min) · NATS_TO_DB` is the decibans spread,
+and `threshold_dB = max(decibans_thresh, 8 · σ_max · NATS_TO_DB)`
+with `σ_max = max(chain_clean_ses)`. The SE-aware floor prevents
+the gate from firing on noisy chains whose spread is statistically
+indistinguishable from zero. Defaults: `a_thresh = 1.01`,
+`decibans_thresh = 30.0`. Override per-stage with `--decibans-thresh X`.
+
+Status surfaces the verdict as
+`clean-eval Δ = X dB / threshold Y dB (σ_max=Z) ✓/✗` under scout and
+refine. The full per-(chain × candidate) score table is written to
+`<stage>/chain_evaluations.tsv` (header: `chain  candidate  loglik
+se  <param₁>  …`) and the run-root winner to `<stage>/final_params.toml`.
 
 ### 6.2 Refine
 
@@ -683,10 +753,14 @@ fit/{name}/refine/
 ```
 
 **refine_summary.json includes:**
-- `rhat` per parameter (across chains, last half of iterations)
-- `loglik_spread` across chains
-- `converged`: true if all Rhat < 1.1 and spread < 10
-- Per-parameter: `estimate`, `sd`, `cv`, `drift`
+- Top-level `chain_agreement`: `{ <param>: Â }` map (across chains,
+  last half of iterations).
+- `loglik_spread` across chains.
+- `converged`: true if all Â < 1.1 and spread < 10.
+- Per-parameter (`parameters[]`): `estimate`, `chain_agreement`,
+  `sd`, `cv`, `drift`.
+- Per-chain (`chains[]`): same shape as scout — `chain_id`,
+  `clean_loglik`, `clean_se`, `winning_candidate_label`.
 
 ### 6.3 Validate
 
@@ -754,7 +828,7 @@ convergence and identifiability:
 fit/he2010/ — He et al. 2010 London measles
 
   scout:     ✓ complete (8 chains, best loglik -3891.2, 6/8 good)
-  refine:    ✓ complete (4 chains, Rhat < 1.05, loglik -3804.9)
+  refine:    ✓ complete (4 chains, Â < 1.05, loglik -3804.9)
   validate:  ✓ complete (profiles clean, loglik -3804.9 ± 5.2)
 
   ESS at MLE: mean=3842, min=1205  ✓ filter is healthy

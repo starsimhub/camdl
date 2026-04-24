@@ -105,9 +105,11 @@ collapse onto a single point. This is deliberate:
 - At the end of the stage, the chain's final particle cloud
   occupies a moderate-sized neighbourhood of whatever local basin
   the chain gravitated toward.
-- The **cross-chain Rhat** diagnoses whether the chains agreed on a
-  single basin (converged, low Rhat) or scattered across multiple
-  (not converged, high Rhat — flags multi-modality).
+- The **cross-chain chain-agreement Â** diagnoses whether the chains
+  agreed on a single basin (converged, low Â) or scattered across
+  multiple (not converged, high Â — flags multi-modality). The
+  compound scout-convergence gate combines Â with a clean-eval
+  decibans-spread check; see `docs/camdl-inference-spec.md` §6.1.1.
 
 Scout's job is not to produce a single tight MLE estimate; it is to
 **discover whether a single basin exists** and where it roughly is.
