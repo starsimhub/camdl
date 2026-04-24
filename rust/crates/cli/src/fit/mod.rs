@@ -703,6 +703,16 @@ pub fn cmd_fit_run_v2(a: &crate::args::FitRunArgs) {
                     &stage_dir.to_string_lossy(), &chain_results.results,
                     &run_config.estimated_params, &param_names,
                     &run_config.base_params, &run_config.compiled,
+                    Some(&chain_results.clean_eval),
+                ).unwrap_or_else(|e| eprintln!("warning: {}", e));
+                runner::write_clean_eval_tsv(
+                    &stage_dir.to_string_lossy(),
+                    &chain_results.clean_eval, &run_config.estimated_params,
+                ).unwrap_or_else(|e| eprintln!("warning: {}", e));
+                runner::write_run_root_final_params(
+                    &stage_dir.to_string_lossy(),
+                    &chain_results.clean_eval, &run_config.estimated_params,
+                    &param_names, &run_config.base_params, &run_config.compiled,
                 ).unwrap_or_else(|e| eprintln!("warning: {}", e));
                 // Pre-filter starts — records whatever per-chain
                 // initial points IF2 actually received. With the

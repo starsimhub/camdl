@@ -228,6 +228,14 @@ pub fn run_validate(fit: &FitToml, starts_from: &str, seed: u64, force: bool) ->
     runner::write_chain_outputs(
         &stage_dir, &chain_results.results, &config.estimated_params,
         &param_names, &config.base_params, &config.compiled,
+        Some(&chain_results.clean_eval),
+    )?;
+    runner::write_clean_eval_tsv(
+        &stage_dir, &chain_results.clean_eval, &config.estimated_params,
+    )?;
+    runner::write_run_root_final_params(
+        &stage_dir, &chain_results.clean_eval, &config.estimated_params,
+        &param_names, &config.base_params, &config.compiled,
     )?;
     runner::write_chain_starts(
         &stage_dir, None, &config.estimated_params, n_chains,

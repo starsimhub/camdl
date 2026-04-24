@@ -1134,7 +1134,16 @@ fn mad(v: &[f64], center: f64) -> f64 {
     median(&mut abs_devs)
 }
 
-/// Write per-chain output files: parameter_traces.tsv and final_params.toml.
+/// Write per-chain output files: `parameter_traces.tsv` and
+/// `final_params.toml` under `<dir>/chain_<N>/`.
+///
+/// When `clean_eval` is `Some`, each chain's `final_params.toml` also
+/// records the clean-eval winning candidate label and SE for that chain
+/// (Step 7, proposal §Proposal 1). PMMH and other consumers that don't
+/// run clean-eval pass `None`. The winning θ̂ written into the TOML is
+/// also taken from the clean-eval per-chain winner when present (it can
+/// be the tail mean or best-in-run iter, not just `result.mle`); this
+/// is what makes scout→refine handoff consume the de-biased estimate.
 pub fn write_chain_outputs(
     dir: &str,
     results: &[(usize, IF2Result)],
@@ -1142,6 +1151,7 @@ pub fn write_chain_outputs(
     all_param_names: &[String],
     base_params: &[f64],
     compiled: &CompiledModel,
+    clean_eval: Option<&clean_eval::CleanEvalOutcome>,
 ) -> Result<(), String> {
     use std::io::Write;
 
@@ -1165,17 +1175,44 @@ pub fn write_chain_outputs(
             writeln!(f).unwrap();
         }
 
-        // Final params TOML (all params, not just estimated)
+        // Resolve this chain's clean-eval winner (if any). Falls back to
+        // `result.mle` when no clean_eval was run (PMMH path).
+        let chain_winner = clean_eval.and_then(|ce|
+            ce.per_chain_winners.iter().find(|w| w.chain_id == *chain_id));
+
+        // Final params TOML (all params, not just estimated). When a
+        // clean-eval winner is present, prefer its θ̂ over the IF2 MLE
+        // for any estimated param — this is what makes the de-biased
+        // tail mean / best-in-run iter actually flow into refine's
+        // starting point.
         let toml_path = format!("{}/final_params.toml", chain_dir);
         let mut f = std::fs::File::create(&toml_path)
             .map_err(|e| format!("cannot write {}: {}", toml_path, e))?;
         writeln!(f, "# {}", crate::version::VERSION).unwrap();
         writeln!(f, "# Chain {} final parameters", chain_id + 1).unwrap();
-        writeln!(f, "# loglik = {:.2}", result.final_loglik).unwrap();
+        let header_ll = chain_winner.map(|w| w.loglik).unwrap_or(result.final_loglik);
+        if let Some(w) = chain_winner {
+            writeln!(f, "# loglik = {:.2} ± {:.2} (clean-eval, candidate = {})",
+                header_ll, w.se, w.label.as_str()).unwrap();
+        } else {
+            writeln!(f, "# loglik = {:.2}", header_ll).unwrap();
+        }
         writeln!(f).unwrap();
+        // Provenance keys (Step 7): downstream tooling and humans can
+        // read these without parsing the comment header. Only emitted
+        // when clean_eval ran.
+        if let Some(w) = chain_winner {
+            writeln!(f, "loglik = {:.6}", w.loglik).unwrap();
+            writeln!(f, "se = {:.6}", w.se).unwrap();
+            writeln!(f, "winning_candidate_label = \"{}\"", w.label.as_str()).unwrap();
+            writeln!(f).unwrap();
+        }
         for name in all_param_names {
             let value = if let Some(spec) = if2_params.iter().find(|p| p.name == *name) {
-                result.mle[spec.index]
+                // Prefer clean-eval winner's θ for estimated params.
+                chain_winner
+                    .map(|w| w.theta[spec.index])
+                    .unwrap_or_else(|| result.mle[spec.index])
             } else if let Some(&idx) = compiled.param_index.get(name.as_str()) {
                 base_params[idx]
             } else {
@@ -1183,6 +1220,80 @@ pub fn write_chain_outputs(
             };
             writeln!(f, "{} = {}", name, format_param_value(value)).unwrap();
         }
+    }
+    Ok(())
+}
+
+/// Write `<dir>/chain_evaluations.tsv` — the full 3 × n_chains
+/// clean-eval score table. Schema:
+/// `chain\tcandidate\tloglik\tse\t<param_1>\t<param_2>\t…` with one
+/// header line + 3N data rows in chain-major / candidate-minor order.
+///
+/// Used downstream by reporting and the camdl-book vignettes to show
+/// which candidate heuristic dominated and whether per-rep PF noise
+/// (SE) is small relative to between-chain spread. See Step 7 in the
+/// Unit A handoff.
+pub fn write_clean_eval_tsv(
+    dir: &str,
+    outcome: &clean_eval::CleanEvalOutcome,
+    if2_params: &[EstimatedParam],
+) -> Result<(), String> {
+    use std::io::Write;
+    let path = format!("{}/chain_evaluations.tsv", dir);
+    let mut f = std::fs::File::create(&path)
+        .map_err(|e| format!("cannot write {}: {}", path, e))?;
+    writeln!(f, "# {}", crate::version::VERSION).unwrap();
+    write!(f, "chain\tcandidate\tloglik\tse").unwrap();
+    for spec in if2_params { write!(f, "\t{}", spec.name).unwrap(); }
+    writeln!(f).unwrap();
+    for s in &outcome.all_scores {
+        write!(f, "{}\t{}\t{:.6}\t{:.6}",
+            s.chain_id + 1, s.label.as_str(), s.loglik_combined, s.se).unwrap();
+        for spec in if2_params {
+            write!(f, "\t{:.6}", s.theta[spec.index]).unwrap();
+        }
+        writeln!(f).unwrap();
+    }
+    Ok(())
+}
+
+/// Write `<dir>/final_params.toml` at the stage root, capturing the
+/// overall clean-eval winner across all chains. Mirrors the per-chain
+/// TOML schema but identifies which chain produced it. Step 7,
+/// proposal §Proposal 1.
+pub fn write_run_root_final_params(
+    dir: &str,
+    outcome: &clean_eval::CleanEvalOutcome,
+    if2_params: &[EstimatedParam],
+    all_param_names: &[String],
+    base_params: &[f64],
+    compiled: &CompiledModel,
+) -> Result<(), String> {
+    use std::io::Write;
+    let w = &outcome.per_chain_winners[outcome.overall_winner_idx];
+    let path = format!("{}/final_params.toml", dir);
+    let mut f = std::fs::File::create(&path)
+        .map_err(|e| format!("cannot write {}: {}", path, e))?;
+    writeln!(f, "# {}", crate::version::VERSION).unwrap();
+    writeln!(f, "# winner: chain={} candidate={}",
+        w.chain_id + 1, w.label.as_str()).unwrap();
+    writeln!(f, "# loglik = {:.2} ± {:.2} (clean-eval logmeanexp over replicates)",
+        w.loglik, w.se).unwrap();
+    writeln!(f).unwrap();
+    writeln!(f, "loglik = {:.6}", w.loglik).unwrap();
+    writeln!(f, "se = {:.6}", w.se).unwrap();
+    writeln!(f, "winning_candidate_label = \"{}\"", w.label.as_str()).unwrap();
+    writeln!(f, "winning_chain = {}", w.chain_id + 1).unwrap();
+    writeln!(f).unwrap();
+    for name in all_param_names {
+        let value = if let Some(spec) = if2_params.iter().find(|p| p.name == *name) {
+            w.theta[spec.index]
+        } else if let Some(&idx) = compiled.param_index.get(name.as_str()) {
+            base_params[idx]
+        } else {
+            0.0
+        };
+        writeln!(f, "{} = {}", name, format_param_value(value)).unwrap();
     }
     Ok(())
 }
@@ -1763,7 +1874,7 @@ mod tests {
         let param_names: Vec<String> = vec!["beta".into(), "gamma".into(), "N0".into()];
         write_chain_outputs(
             dir.to_str().unwrap(), &results, &if2_params,
-            &param_names, &base_params, &compiled,
+            &param_names, &base_params, &compiled, None,
         ).unwrap();
 
         // Read back and verify
@@ -1781,6 +1892,155 @@ mod tests {
         assert_eq!(parsed["beta"], 0.5, "estimated param should be MLE value");
         assert_eq!(parsed["gamma"], 0.1, "fixed param gamma should be 0.1, not base_params[0]");
         assert_eq!(parsed["N0"], 1000.0, "fixed param N0 should be 1000.0, not base_params[0]");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Step 7: clean-eval TSV emission. Schema is
+    /// `chain\tcandidate\tloglik\tse\t<param...>` with one header line
+    /// + 3N data rows for N chains, in chain-major / candidate-minor
+    /// order. Verified for N=2.
+    #[test]
+    fn clean_eval_tsv_schema_and_rows() {
+        use crate::fit::clean_eval::{
+            CandidateLabel, CandidateScore, ChainWinner, CleanEvalOutcome,
+        };
+
+        let mk_score = |chain: usize, label: CandidateLabel, theta: Vec<f64>, ll: f64| {
+            CandidateScore {
+                chain_id: chain, label, theta, loglik_combined: ll, se: 0.5,
+                per_rep_logliks: vec![ll; 4],
+            }
+        };
+        let outcome = CleanEvalOutcome {
+            all_scores: vec![
+                mk_score(0, CandidateLabel::FinalIter,     vec![0.10, 0.20], -100.0),
+                mk_score(0, CandidateLabel::TailMeanLastK, vec![0.11, 0.21], -101.0),
+                mk_score(0, CandidateLabel::BestInRunIter, vec![0.12, 0.22], -99.0),
+                mk_score(1, CandidateLabel::FinalIter,     vec![0.30, 0.40], -50.0),
+                mk_score(1, CandidateLabel::TailMeanLastK, vec![0.31, 0.41], -49.0),
+                mk_score(1, CandidateLabel::BestInRunIter, vec![0.32, 0.42], -52.0),
+            ],
+            per_chain_winners: vec![
+                ChainWinner { chain_id: 0, label: CandidateLabel::BestInRunIter,
+                    theta: vec![0.12, 0.22], loglik: -99.0, se: 0.5 },
+                ChainWinner { chain_id: 1, label: CandidateLabel::TailMeanLastK,
+                    theta: vec![0.31, 0.41], loglik: -49.0, se: 0.5 },
+            ],
+            overall_winner_idx: 1,
+        };
+
+        let mk_param = |name: &str, idx: usize| EstimatedParam {
+            name: name.into(), index: idx, initial: 0.0,
+            lower: 0.0, upper: 10.0, rw_sd: 0.1, rw_sd_auto: false,
+            transform: Transform::None,
+            ivp: false,
+        };
+        let if2_params = vec![mk_param("beta", 0), mk_param("gamma", 1)];
+
+        let dir = std::env::temp_dir().join("camdl_test_clean_eval_tsv");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        write_clean_eval_tsv(dir.to_str().unwrap(), &outcome, &if2_params).unwrap();
+
+        let content = std::fs::read_to_string(dir.join("chain_evaluations.tsv")).unwrap();
+        let lines: Vec<&str> = content.lines().filter(|l| !l.starts_with('#')).collect();
+        assert_eq!(lines.len(), 1 + 6, "1 header + 3×2 rows");
+        assert_eq!(lines[0], "chain\tcandidate\tloglik\tse\tbeta\tgamma");
+        // First data row corresponds to chain 0, FinalIter, ll=-100.0.
+        assert!(lines[1].starts_with("1\tfinal_iter\t-100.000000\t0.500000\t0.100000\t0.200000"));
+        // Last data row: chain 1, BestInRunIter, ll=-52.0.
+        assert!(lines[6].starts_with("2\tbest_in_run_iter\t-52.000000\t0.500000\t0.320000\t0.420000"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Step 7: run-root `final_params.toml` carries the overall winner
+    /// chain + candidate label and writes the winner's θ̂ for estimated
+    /// params (here: chain 1's TailMean theta, NOT chain 0's MLE).
+    #[test]
+    fn run_root_final_params_uses_overall_winner() {
+        use crate::fit::clean_eval::{CandidateLabel, ChainWinner, CleanEvalOutcome};
+
+        let outcome = CleanEvalOutcome {
+            all_scores: vec![],
+            per_chain_winners: vec![
+                ChainWinner { chain_id: 0, label: CandidateLabel::FinalIter,
+                    theta: vec![0.10], loglik: -100.0, se: 0.3 },
+                ChainWinner { chain_id: 1, label: CandidateLabel::TailMeanLastK,
+                    theta: vec![0.42], loglik: -50.0, se: 0.2 },
+            ],
+            overall_winner_idx: 1,
+        };
+
+        use ir::{
+            model::{Compartment, CompartmentKind, InitialConditions, OutputConfig,
+                    OutputSchedule, SimulationConfig},
+            parameter::Parameter,
+        };
+
+        let if2_params = vec![EstimatedParam {
+            name: "beta".into(), index: 0, initial: 0.0,
+            lower: 0.0, upper: 10.0, rw_sd: 0.1, rw_sd_auto: false,
+            transform: Transform::None, ivp: false,
+        }];
+
+        // Minimal compiled stand-in. The writer only reads
+        // `compiled.param_index` for *fixed* params; here every name in
+        // `param_names` is in `if2_params`, so the lookup never fires.
+        // Compartments are required because CompiledModel::new validates
+        // them, but the simulation isn't run.
+        let model = ir::Model {
+            name: "t".into(), version: "0.3".into(), time_unit: "days".into(),
+            description: None, origin: None,
+            compartments: vec![
+                Compartment { name: "S".into(), kind: CompartmentKind::Integer },
+            ],
+            transitions: vec![], ode_equations: vec![],
+            time_functions: vec![], tables: vec![], interventions: vec![],
+            observations: vec![],
+            parameters: vec![Parameter {
+                name: "beta".into(), value: Some(0.0), bounds: Some((0.0, 10.0)),
+                prior: None, transform: None, initial_value: None,
+                param_kind: None, param_dim: None, hierarchical: None,
+            }],
+            initial_conditions: InitialConditions::Explicit({
+                let mut m = HashMap::new(); m.insert("S".into(), 100.0); m
+            }),
+            output: OutputConfig {
+                times: OutputSchedule::AtTimes(vec![0.0, 1.0]),
+                format: "tsv".into(), trajectory: true, observations: false,
+            },
+            simulation: SimulationConfig {
+                t_start: 0.0, t_end: 1.0, time_semantics: "continuous".into(),
+                dt: Some(1.0), rng_seed: Some(42),
+            },
+            presets: vec![], model_structure: None, balance: None,
+        };
+        let compiled = CompiledModel::new(model).unwrap();
+
+        let dir = std::env::temp_dir().join("camdl_test_run_root_final");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let param_names = vec!["beta".to_string()];
+        write_run_root_final_params(
+            dir.to_str().unwrap(), &outcome, &if2_params,
+            &param_names, &[0.0], &compiled,
+        ).unwrap();
+
+        let content = std::fs::read_to_string(dir.join("final_params.toml")).unwrap();
+        // Header records overall winner chain + candidate label.
+        assert!(content.contains("# winner: chain=2 candidate=tail_mean_last_k"),
+            "header missing or wrong: {}", content);
+        // Provenance keys.
+        assert!(content.contains("winning_candidate_label = \"tail_mean_last_k\""));
+        assert!(content.contains("winning_chain = 2"));
+        // The estimated-param value is the overall winner's θ (0.42),
+        // NOT chain 0's 0.10.
+        assert!(content.contains("beta = 0.42"),
+            "expected beta = 0.42 (winner's θ); got: {}", content);
 
         let _ = std::fs::remove_dir_all(&dir);
     }
