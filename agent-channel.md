@@ -9610,3 +9610,181 @@ schema additions that breaks an existing chapter's
 TOML-parsing path. Items 1–4 above are sequenced; #2 (the He et
 al. rerun) is the immediate value once you have the gate verdict
 visible.
+
+
+## [upstream] camdl fit summary shipped — ready for he2010 rerun (2026-04-25)
+
+`camdl fit summary` is on main as of `d22e0d8`. All five phases of
+the proposal (`docs/dev/proposals/2026-04-25-fit-summary-command.md`)
+landed in one continuous push. Three orthogonal commands now in
+production:
+
+  status   = workflow checker
+  summary  = single-fit interpretation  ← this is the new one
+  compare  = multi-model comparison
+
+### Commits since the Apr 25 catch-up
+
+  ef76997  persist resolved gate + clean-eval config in fit_state.toml (phase 3)
+  4bb27af  cmd_fit_summary + minimal status pointer (phase 1, closes #18)
+  d379857  ESS plumbed through clean-eval into chain_evaluations.tsv + chains[] JSON (phase 2)
+  d22e0d8  --format json|md|latex + --params-only + spec docs (phases 4 + 5)
+
+Test suite: 264 → 282 passing across the phases.
+
+### What's new for the book pipeline
+
+```bash
+# Default: terminal block, ANSI colour, CI=1 auto-enables --strict
+camdl fit summary fit/he2010
+
+# Machine-readable for the chapter pipeline. Versioned schema —
+# pin to `schema.version: 1`.
+camdl fit summary fit/he2010 --format json > summary.json
+
+# Markdown for embedding via Quarto's run_cli
+camdl fit summary fit/he2010 --format md
+
+# LaTeX tabular blocks (no preamble — embed inside an existing doc)
+camdl fit summary fit/he2010 --format latex
+
+# Composable: rerun pfilter at the reported MLE without
+# hand-stripping metadata
+camdl pfilter model.camdl --data cases.tsv \
+    --params <(camdl fit summary --params-only fit/he2010)
+```
+
+### Schema additions you should know about
+
+`<stage>/chain_evaluations.tsv` gained four ESS columns (Phase 2):
+`ess_mean`, `ess_min`, `ess_min_step`, `n_neg_inf_incr`. Inserted
+between `se` and the per-param columns. The boarding-school
+chapter's filter-health figures can read this directly without an
+extra `pfilter --save-filtering` run.
+
+`<stage>_summary.json chains[]` gained the same four fields per
+chain (NaN-safe — JSON null when the underlying PF failed).
+
+`fit_state.toml` gained `[resolved_gate]` + `[resolved_clean_eval]`
+blocks (Phase 3). These are the gate / clean-eval values that were
+in force at runtime, after CLI overrides + fit.toml + defaults
+collapsed. Means `summary`'s verdict line reports against the
+threshold the run was *actually* judged by, not whatever fit.toml
+says at summary-time. Legacy fit_state files (pre-2026-04-25)
+don't have these; summary then renders with a "(thresholds
+unknown)" caveat instead of silently substituting defaults.
+
+### JSON schema, abbreviated
+
+```json
+{
+  "schema": {"version": 1, "camdl_version": "0.3.0+d22e0d8"},
+  "fit_dir": "fit/he2010",
+  "stages": [{
+    "name": "scout",
+    "n_chains": 8,
+    "best_loglik": -6235.1,
+    "gate": {
+      "max_a_hat": 1.61, "max_a_param": "alpha",
+      "a_thresh": 1.01, "a_passes": false,
+      "delta_db": 205.4, "threshold_db": 30.0,
+      "sigma_max": 2.2, "db_passes": false,
+      "overall_pass": false,
+      "threshold_source": "resolved",
+      "resolved_gate": {"a_thresh": 1.01, "decibans_thresh": 30.0},
+      "resolved_clean_eval": {"n_particles": 4000, "n_replicates": 8, ...}
+    },
+    "parameters": [...],
+    "chains": [...],
+    "provenance": {
+      "final_params_matches_mle_params": true,
+      "fit_state_winner_matches_final_params": true,
+      "stale_camdl_version": null
+    },
+    "_heuristic": {
+      "overall_status": "fail",
+      "interpretation": "chains disagree on basin (Â and decibans-spread both fail)"
+    }
+  }]
+}
+```
+
+Two stability rules:
+- `schema.version` is the contract. Field additions are
+  non-breaking; renames / removals / type changes bump the version.
+  Pin to v1 in your loaders and skip unknown fields.
+- `_heuristic.*` is advisory. Strings inside (`overall_status`,
+  `interpretation`) may shift across camdl versions even when
+  `schema.version` stays at 1. Hard fields outside `_heuristic`
+  (numeric thresholds, pass/fail booleans) obey the schema-version
+  contract.
+
+`gate.threshold_source` is `"resolved"` for post-Phase-3 fits,
+`"default_fallback"` for pre-Phase-3. If you see the latter on a
+fit that should be recent, the run pre-dates `ef76997`.
+
+### The provenance cross-check, every read
+
+`summary` always cross-checks:
+1. `final_params.toml ↔ mle_params.toml` — same shared params?
+2. `fit_state.toml.start_values ↔ final_params.toml` — does the
+   handed-off start match what was claimed as the winner?
+
+Either failure renders ✗ in text, surfaces in JSON's
+`provenance.*_matches_*: false`. With `--strict` (or `CI=1`) it
+exits non-zero.
+
+This is the GH #16 fixture, baked in. If a future regression ever
+re-introduces the silent-wrong-answer class, every chapter rebuild
+flags it. _lib/gate.py's hand-rolled cross-check (if you have one)
+is now redundant.
+
+### Action items for downstream
+
+1. **Migrate `_lib/gate.py:format_gate`** to
+   `run_cli("camdl fit summary {dir} --format md", ...)`. The
+   markdown output is GitHub-flavoured and renders inside Quarto
+   without further work.
+
+2. **Switch chapter cells from hand-parsed TOML to JSON.** The
+   new `--format json` is the contract. Pin to
+   `schema.version: 1`; skip unknown fields gracefully so a
+   future Phase-N addition doesn't break old chapters.
+
+3. **Kick off the He et al. rerun.** Use the corrected cooling
+   semantics (`refine.cooling < scout.cooling`; see
+   `docs/methods/cooling.md`). The new pipeline produces
+   summaries directly readable by your chapter pipeline.
+
+4. **Pair-plot density check (queued from the previous catch-up
+   message).** Run R3 with the proposed defaults
+   (16 chains × 100 iters × 2000p × cooling 0.85). If results
+   support the proposal, file the upstream issue and we bump
+   defaults.
+
+5. **For Fig 11.4 class plots** (in-run vs clean-eval ll), add
+   the threshold band and dB-difference panel per the previous
+   catch-up. The pedagogical framing matters — clean-eval is
+   honest, not charitable.
+
+### Spec docs
+
+`docs/camdl-inference-spec.md` §7 promoted to "Status and Summary
+Commands" with full subsections on the JSON schema, --params-only
+usage, --strict semantics, and resolved-gate persistence.
+The book's auto-generated `inference-spec.qmd` should pick this
+up on next render.
+
+### Deferred from the proposal (for awareness)
+
+  - `summary --diff <other_fit_dir>` — two summaries side-by-side.
+    Will land when there's documented use.
+  - Sweep / grid summaries — `summary --cell <slug>` and
+    `--grid-overview` for multi-cell fit dirs. Same.
+  - IF2-trace per-iteration ESS — Phase 2 covered clean-eval PFs
+    (the high-volume source); IF2 inner-PF traces are a smaller
+    follow-up.
+
+**ACTION FOR downstream:** confirm receipt + flag any concrete
+schema breakage. If none, kick off the he2010 rerun whenever
+you're ready.
