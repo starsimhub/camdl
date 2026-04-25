@@ -409,6 +409,23 @@ fn build_if2_params(
 /// Run a quick pfilter at given params and return the loglik.
 /// Used by scout for initial_loglik baseline.
 pub fn run_quick_pfilter(config: &FitRunConfig, params: &[f64], n_particles: usize, seed: u64) -> f64 {
+    run_quick_pfilter_full(config, params, n_particles, seed).0
+}
+
+/// Variant of `run_quick_pfilter` that also returns filter-health
+/// statistics (mean / min ESS, the observation step where ESS is
+/// worst, and a count of −∞ log-likelihood increments). Cheap to
+/// compute since these are already in `PFilterResult.{ess_trace,
+/// ll_increments}` — phase 2 of the fit-summary proposal just plumbs
+/// them out instead of throwing them away.
+///
+/// On filter error returns `(NEG_INFINITY, FilterStats::failed())`.
+pub fn run_quick_pfilter_full(
+    config: &FitRunConfig,
+    params: &[f64],
+    n_particles: usize,
+    seed: u64,
+) -> (f64, super::clean_eval::FilterStats) {
     let process = config.build_process();
     let obs_model = config.build_obs_model();
     let smc_config = sim::inference::traits::SMCConfig {
@@ -417,8 +434,12 @@ pub fn run_quick_pfilter(config: &FitRunConfig, params: &[f64], n_particles: usi
     };
 
     match sim::inference::bootstrap_filter(&process, &obs_model, params, &smc_config, seed) {
-        Ok(result) => result.log_likelihood,
-        Err(_) => f64::NEG_INFINITY,
+        Ok(result) => {
+            let stats = super::clean_eval::FilterStats::from_pfilter_result(
+                &result.ess_trace, &result.ll_increments);
+            (result.log_likelihood, stats)
+        }
+        Err(_) => (f64::NEG_INFINITY, super::clean_eval::FilterStats::failed()),
     }
 }
 
@@ -1292,12 +1313,20 @@ pub fn write_clean_eval_tsv(
     let mut f = std::fs::File::create(&path)
         .map_err(|e| format!("cannot write {}: {}", path, e))?;
     writeln!(f, "# {}", crate::version::VERSION).unwrap();
-    write!(f, "chain\tcandidate\tloglik\tse").unwrap();
+    // Phase 2: ESS columns surface filter health at each clean-eval θ̂.
+    // `ess_min_step` is `-1` when no observations were scored (filter
+    // failed); `n_neg_inf_incr` counts steps where the filter
+    // completely lost the data.
+    write!(f, "chain\tcandidate\tloglik\tse\tess_mean\tess_min\tess_min_step\tn_neg_inf_incr").unwrap();
     for spec in if2_params { write!(f, "\t{}", spec.name).unwrap(); }
     writeln!(f).unwrap();
     for s in &outcome.all_scores {
-        write!(f, "{}\t{}\t{:.6}\t{:.6}",
-            s.chain_id + 1, s.label.as_str(), s.loglik_combined, s.se).unwrap();
+        let ess_min_step_str = s.filter_stats.ess_min_step
+            .map(|i| i.to_string()).unwrap_or_else(|| "-1".into());
+        write!(f, "{}\t{}\t{:.6}\t{:.6}\t{:.2}\t{:.2}\t{}\t{}",
+            s.chain_id + 1, s.label.as_str(), s.loglik_combined, s.se,
+            s.filter_stats.ess_mean, s.filter_stats.ess_min,
+            ess_min_step_str, s.filter_stats.n_neg_inf_increments).unwrap();
         for spec in if2_params {
             write!(f, "\t{:.6}", s.theta[spec.index]).unwrap();
         }
@@ -1812,7 +1841,8 @@ mod tests {
 
         let scorer = |theta: &[f64], _: usize, _: u64| {
             // Clean PF prefers theta around 50.
-            if theta[0] < 10.0 { -100.0 } else { -50.0 }
+            let ll = if theta[0] < 10.0 { -100.0 } else { -50.0 };
+            (ll, crate::fit::clean_eval::FilterStats::failed())
         };
         let cfg = CleanEvalConfig {
             n_particles: 1, n_replicates: 4, combine: CombineMode::LogMeanExp,
@@ -1963,6 +1993,7 @@ mod tests {
             CandidateScore {
                 chain_id: chain, label, theta, loglik_combined: ll, se: 0.5,
                 per_rep_logliks: vec![ll; 4],
+                filter_stats: crate::fit::clean_eval::FilterStats::failed(),
             }
         };
         let outcome = CleanEvalOutcome {
@@ -1976,9 +2007,9 @@ mod tests {
             ],
             per_chain_winners: vec![
                 ChainWinner { chain_id: 0, label: CandidateLabel::BestInRunIter,
-                    theta: vec![0.12, 0.22], loglik: -99.0, se: 0.5 },
+                    theta: vec![0.12, 0.22], loglik: -99.0, se: 0.5, filter_stats: crate::fit::clean_eval::FilterStats::failed() },
                 ChainWinner { chain_id: 1, label: CandidateLabel::TailMeanLastK,
-                    theta: vec![0.31, 0.41], loglik: -49.0, se: 0.5 },
+                    theta: vec![0.31, 0.41], loglik: -49.0, se: 0.5, filter_stats: crate::fit::clean_eval::FilterStats::failed() },
             ],
             overall_winner_idx: 1,
         };
@@ -2000,11 +2031,19 @@ mod tests {
         let content = std::fs::read_to_string(dir.join("chain_evaluations.tsv")).unwrap();
         let lines: Vec<&str> = content.lines().filter(|l| !l.starts_with('#')).collect();
         assert_eq!(lines.len(), 1 + 6, "1 header + 3×2 rows");
-        assert_eq!(lines[0], "chain\tcandidate\tloglik\tse\tbeta\tgamma");
-        // First data row corresponds to chain 0, FinalIter, ll=-100.0.
-        assert!(lines[1].starts_with("1\tfinal_iter\t-100.000000\t0.500000\t0.100000\t0.200000"));
-        // Last data row: chain 1, BestInRunIter, ll=-52.0.
-        assert!(lines[6].starts_with("2\tbest_in_run_iter\t-52.000000\t0.500000\t0.320000\t0.420000"));
+        // Phase 2 expanded the schema with ESS columns. Synthetic
+        // CandidateScore fixtures use FilterStats::failed() which has
+        // NaN ess_mean/min and `-1` for ess_min_step.
+        assert_eq!(lines[0],
+            "chain\tcandidate\tloglik\tse\tess_mean\tess_min\tess_min_step\tn_neg_inf_incr\tbeta\tgamma");
+        // Param values still occupy fixed offsets after the new
+        // ESS columns. Spot-check the param tail of two rows.
+        assert!(lines[1].starts_with("1\tfinal_iter\t-100.000000\t0.500000"),
+            "chain 1 final_iter prefix: {}", lines[1]);
+        assert!(lines[1].ends_with("\t0.100000\t0.200000"),
+            "chain 1 final_iter param suffix: {}", lines[1]);
+        assert!(lines[6].starts_with("2\tbest_in_run_iter\t-52.000000\t0.500000"));
+        assert!(lines[6].ends_with("\t0.320000\t0.420000"));
 
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -2020,9 +2059,9 @@ mod tests {
             all_scores: vec![],
             per_chain_winners: vec![
                 ChainWinner { chain_id: 0, label: CandidateLabel::FinalIter,
-                    theta: vec![0.10], loglik: -100.0, se: 0.3 },
+                    theta: vec![0.10], loglik: -100.0, se: 0.3, filter_stats: crate::fit::clean_eval::FilterStats::failed() },
                 ChainWinner { chain_id: 1, label: CandidateLabel::TailMeanLastK,
-                    theta: vec![0.42], loglik: -50.0, se: 0.2 },
+                    theta: vec![0.42], loglik: -50.0, se: 0.2, filter_stats: crate::fit::clean_eval::FilterStats::failed() },
             ],
             overall_winner_idx: 1,
         };
@@ -2142,7 +2181,7 @@ mod tests {
             all_scores: vec![],
             per_chain_winners: vec![
                 ChainWinner { chain_id: 5, label: CandidateLabel::BestInRunIter,
-                    theta: vec![87.668938], loglik: -6235.11, se: 2.19 },
+                    theta: vec![87.668938], loglik: -6235.11, se: 2.19, filter_stats: crate::fit::clean_eval::FilterStats::failed() },
             ],
             overall_winner_idx: 0,
         };
@@ -2255,16 +2294,16 @@ mod tests {
             all_scores: vec![
                 CandidateScore { chain_id: 0, label: CandidateLabel::FinalIter,
                     theta: vec![0.10, 0.20], loglik_combined: -110.0, se: 0.5,
-                    per_rep_logliks: vec![-110.0; 4] },
+                    per_rep_logliks: vec![-110.0; 4], filter_stats: crate::fit::clean_eval::FilterStats::failed() },
                 CandidateScore { chain_id: 1, label: CandidateLabel::TailMeanLastK,
                     theta: vec![0.31, 0.41], loglik_combined: -49.0, se: 0.4,
-                    per_rep_logliks: vec![-49.0; 4] },
+                    per_rep_logliks: vec![-49.0; 4], filter_stats: crate::fit::clean_eval::FilterStats::failed() },
             ],
             per_chain_winners: vec![
                 ChainWinner { chain_id: 0, label: CandidateLabel::FinalIter,
-                    theta: vec![0.10, 0.20], loglik: -110.0, se: 0.5 },
+                    theta: vec![0.10, 0.20], loglik: -110.0, se: 0.5, filter_stats: crate::fit::clean_eval::FilterStats::failed() },
                 ChainWinner { chain_id: 1, label: CandidateLabel::TailMeanLastK,
-                    theta: vec![0.31, 0.41], loglik: -49.0, se: 0.4 },
+                    theta: vec![0.31, 0.41], loglik: -49.0, se: 0.4, filter_stats: crate::fit::clean_eval::FilterStats::failed() },
             ],
             overall_winner_idx: 1,
         };

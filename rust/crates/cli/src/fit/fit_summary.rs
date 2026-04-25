@@ -305,6 +305,13 @@ impl Formatter {
         let best_idx = state.chain_clean_logliks.iter().enumerate()
             .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
             .map(|(i, _)| i);
+        // ESS columns added in Phase 2. Today fit_state.toml only
+        // carries the per-chain ll + se; per-chain ESS lives in
+        // <stage>_summary.json's `chains[]`. Phase 1 of summary keeps
+        // the table simple and reads only what's already in
+        // fit_state.toml; ESS surfacing in this table waits for a
+        // Phase 4 follow-up that loads <stage>_summary.json. Note
+        // here so a future reader doesn't think it was forgotten.
         s.push_str(&format!("    {:6} {:>12}   {:>6}\n", "chain", "clean_ll", "± se"));
         for i in 0..n {
             let ll = state.chain_clean_logliks[i];

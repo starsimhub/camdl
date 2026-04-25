@@ -276,11 +276,23 @@ pub(crate) fn build_scout_summary_json(
         results.clean_eval.per_chain_winners.iter().collect();
     chain_winners.sort_by_key(|w| w.chain_id);
     let chains: Vec<serde_json::Value> = chain_winners.iter().map(|w| {
+        // Phase 2: filter-health columns from the winner's M-replicate
+        // PFs at θ̂. NaN-safe — JSON null when unavailable.
+        let ess_mean = if w.filter_stats.ess_mean.is_finite() {
+            serde_json::json!(w.filter_stats.ess_mean)
+        } else { serde_json::Value::Null };
+        let ess_min = if w.filter_stats.ess_min.is_finite() {
+            serde_json::json!(w.filter_stats.ess_min)
+        } else { serde_json::Value::Null };
         serde_json::json!({
             "chain_id": w.chain_id + 1,
             "clean_loglik": w.loglik,
             "clean_se": w.se,
             "winning_candidate_label": w.label.as_str(),
+            "ess_mean": ess_mean,
+            "ess_min": ess_min,
+            "ess_min_step": w.filter_stats.ess_min_step,
+            "n_neg_inf_increments": w.filter_stats.n_neg_inf_increments,
         })
     }).collect();
 
@@ -366,9 +378,9 @@ mod tests {
             all_scores: vec![],
             per_chain_winners: vec![
                 ChainWinner { chain_id: 0, label: CandidateLabel::FinalIter,
-                    theta: vec![0.10, 0.20], loglik: -110.0, se: 1.5 },
+                    theta: vec![0.10, 0.20], loglik: -110.0, se: 1.5, filter_stats: crate::fit::clean_eval::FilterStats::failed() },
                 ChainWinner { chain_id: 1, label: CandidateLabel::TailMeanLastK,
-                    theta: vec![0.30, 0.40], loglik: -50.0, se: 0.5 },
+                    theta: vec![0.30, 0.40], loglik: -50.0, se: 0.5, filter_stats: crate::fit::clean_eval::FilterStats::failed() },
             ],
             overall_winner_idx: 1,
         };

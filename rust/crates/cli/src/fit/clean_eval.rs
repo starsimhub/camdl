@@ -49,6 +49,110 @@ impl CandidateLabel {
     }
 }
 
+/// Filter-health summary from one PF run. Aggregates `ess_trace`
+/// (per-observation ESS) and `ll_increments` (per-observation
+/// log-likelihood increment) into the four numbers users care about
+/// for "is the filter healthy at this θ?". Phase 2 of the fit-summary
+/// proposal — replaces the previous behaviour where every clean-eval
+/// PF computed ESS as a side-effect of resampling and then dropped it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct FilterStats {
+    /// Mean ESS across all observation steps. NaN when no observations.
+    pub ess_mean: f64,
+    /// Min ESS across all observation steps. NaN when no observations.
+    pub ess_min: f64,
+    /// Observation index (0-based) where ESS is worst. `None` when no
+    /// observations.
+    pub ess_min_step: Option<usize>,
+    /// Count of observation steps where ll_increment is −∞ — the
+    /// "filter completely lost the data at this step" signal. Different
+    /// from low ESS: −∞ means *zero* particles agreed with the
+    /// observation; low ESS means few particles dominated the weight.
+    pub n_neg_inf_increments: usize,
+    /// First observation step where ll_increment is −∞, or `None` if
+    /// there are no such steps. Useful for localising model
+    /// mis-specification — the `data[i]` you should look at.
+    pub neg_inf_first_step: Option<usize>,
+}
+
+impl FilterStats {
+    /// Sentinel value for failed PF runs. ESS fields are NaN, counts
+    /// are zero. Distinguishable from "successful PF with no
+    /// observations" because in that case `ess_min_step` is also `None`
+    /// — but the (NaN, NaN) ESS pair signals failure to a reader.
+    pub fn failed() -> Self {
+        Self {
+            ess_mean: f64::NAN,
+            ess_min:  f64::NAN,
+            ess_min_step: None,
+            n_neg_inf_increments: 0,
+            neg_inf_first_step:   None,
+        }
+    }
+
+    /// Aggregate per-observation ess + ll_increment series into the
+    /// summary numbers. Pure on its inputs; testable without running
+    /// a real PF. `ess_trace` and `ll_increments` come straight from
+    /// `PFilterResult`.
+    pub fn from_pfilter_result(ess_trace: &[f64], ll_increments: &[f64]) -> Self {
+        if ess_trace.is_empty() {
+            return Self {
+                ess_mean: f64::NAN,
+                ess_min:  f64::NAN,
+                ess_min_step: None,
+                n_neg_inf_increments: ll_increments.iter()
+                    .filter(|x| !x.is_finite() && x.is_sign_negative()).count(),
+                neg_inf_first_step: ll_increments.iter().position(
+                    |x| !x.is_finite() && x.is_sign_negative()),
+            };
+        }
+        let n = ess_trace.len() as f64;
+        let ess_mean = ess_trace.iter().sum::<f64>() / n;
+        let (ess_min_step, ess_min) = ess_trace.iter().enumerate()
+            .fold((0usize, f64::INFINITY), |(best_i, best_v), (i, &v)| {
+                if v < best_v { (i, v) } else { (best_i, best_v) }
+            });
+        let n_neg_inf = ll_increments.iter()
+            .filter(|x| !x.is_finite() && x.is_sign_negative()).count();
+        let neg_inf_first = ll_increments.iter().position(
+            |x| !x.is_finite() && x.is_sign_negative());
+        Self {
+            ess_mean,
+            ess_min,
+            ess_min_step: Some(ess_min_step),
+            n_neg_inf_increments: n_neg_inf,
+            neg_inf_first_step: neg_inf_first,
+        }
+    }
+
+    /// Combine M independent replicates into a single representative
+    /// `FilterStats`. Mean of mean-ESS, min of min-ESS (worst case),
+    /// step from the worst replicate's worst step. Sums neg-inf
+    /// counts. Used by clean-eval to summarise across the M PF
+    /// replicates per candidate.
+    pub fn aggregate(replicates: &[Self]) -> Self {
+        if replicates.is_empty() { return Self::failed(); }
+        let n = replicates.len() as f64;
+        let mean_of_means: f64 = replicates.iter().map(|s| s.ess_mean).sum::<f64>() / n;
+        let (min_step, min_v) = replicates.iter()
+            .filter_map(|s| s.ess_min_step.map(|i| (i, s.ess_min)))
+            .fold((None, f64::INFINITY), |(best_i, best_v), (i, v)| {
+                if v < best_v { (Some(i), v) } else { (best_i, best_v) }
+            });
+        let n_neg_inf: usize = replicates.iter().map(|s| s.n_neg_inf_increments).sum();
+        let first_neg_inf = replicates.iter()
+            .filter_map(|s| s.neg_inf_first_step)
+            .min();
+        Self {
+            ess_mean: mean_of_means,
+            ess_min:  min_v,
+            ess_min_step: min_step,
+            n_neg_inf_increments: n_neg_inf,
+            neg_inf_first_step:   first_neg_inf,
+        }
+    }
+}
+
 /// One candidate's clean-PF score: combined log-likelihood plus the
 /// per-replicate raw values (kept for diagnostics + downstream gating).
 ///
@@ -67,6 +171,10 @@ pub struct CandidateScore {
     /// Standard error of the combined score: `sample_sd(per_rep) / √M`.
     pub se: f64,
     pub per_rep_logliks: Vec<f64>,
+    /// Filter-health summary aggregated over the M replicates.
+    /// Phase 2 — surfaced in `chain_evaluations.tsv` and per-chain
+    /// `chains[]` of `<stage>_summary.json`.
+    pub filter_stats: FilterStats,
 }
 
 /// Best candidate within a single chain.
@@ -78,6 +186,10 @@ pub struct ChainWinner {
     pub theta: Vec<f64>,
     pub loglik: f64,
     pub se: f64,
+    /// Filter-health summary at the winning θ̂. Promoted to chain-level
+    /// for fast access — `summary` reads this directly without having
+    /// to scan `all_scores` for the winning row.
+    pub filter_stats: FilterStats,
 }
 
 /// Full output of clean evaluation: every (chain × candidate) score, a
@@ -154,7 +266,8 @@ fn pick_best_in_run(iters: &[sim::inference::if2::IF2IterResult]) -> Option<Vec<
 }
 
 /// Production entry point: clean-evaluate every (chain, candidate)
-/// using `runner::run_quick_pfilter` as the scorer.
+/// using `runner::run_quick_pfilter_full` as the scorer (returns
+/// loglik + filter stats so phase 2 surfaces don't lose ESS).
 pub fn run_clean_eval(
     run_config: &FitRunConfig,
     results: &[(usize, IF2Result)],
@@ -166,13 +279,13 @@ pub fn run_clean_eval(
         cfg,
         seed,
         |theta, n_particles, pf_seed| {
-            runner::run_quick_pfilter(run_config, theta, n_particles, pf_seed)
+            runner::run_quick_pfilter_full(run_config, theta, n_particles, pf_seed)
         },
     )
 }
 
-/// Test-friendly inner core. `scorer(theta, n_particles, seed) -> ll`
-/// is called `n_chains × 3 × n_replicates` times.
+/// Test-friendly inner core. `scorer(theta, n_particles, seed) ->
+/// (ll, FilterStats)` is called `n_chains × 3 × n_replicates` times.
 ///
 /// Seed scheme matches the handoff:
 /// `pf_seed = seed + chain_id*10_000 + cand_ix*1000 + rep_k`.
@@ -183,7 +296,7 @@ pub fn run_clean_eval_with_scorer<F>(
     scorer: F,
 ) -> Result<CleanEvalOutcome, String>
 where
-    F: Fn(&[f64], usize, u64) -> f64,
+    F: Fn(&[f64], usize, u64) -> (f64, FilterStats),
 {
     if results.is_empty() {
         return Err("run_clean_eval: no chain results to score".into());
@@ -207,15 +320,19 @@ where
         let mut chain_best: Option<usize> = None; // index into all_scores
         for (cand_ix, (label, theta)) in cands.iter().enumerate() {
             let mut per_rep = Vec::with_capacity(cfg.n_replicates);
+            let mut per_rep_stats = Vec::with_capacity(cfg.n_replicates);
             for k in 0..cfg.n_replicates {
                 let pf_seed = seed
                     .wrapping_add((*chain_id as u64).wrapping_mul(10_000))
                     .wrapping_add((cand_ix as u64).wrapping_mul(1000))
                     .wrapping_add(k as u64);
-                per_rep.push(scorer(theta, cfg.n_particles, pf_seed));
+                let (ll, stats) = scorer(theta, cfg.n_particles, pf_seed);
+                per_rep.push(ll);
+                per_rep_stats.push(stats);
             }
             let combined = combine(&per_rep, cfg.combine);
             let se = evidence::sample_sd(&per_rep) / (cfg.n_replicates as f64).sqrt();
+            let filter_stats = FilterStats::aggregate(&per_rep_stats);
 
             let score = CandidateScore {
                 chain_id: *chain_id,
@@ -224,6 +341,7 @@ where
                 loglik_combined: combined,
                 se,
                 per_rep_logliks: per_rep,
+                filter_stats,
             };
 
             let this_idx = all_scores.len();
@@ -249,6 +367,7 @@ where
             theta: w.theta.clone(),
             loglik: w.loglik_combined,
             se: w.se,
+            filter_stats: w.filter_stats,
         });
     }
 
@@ -369,7 +488,7 @@ mod tests {
 
         // Scorer: -10 for small thetas, -5 for large thetas (no noise).
         let scorer = |theta: &[f64], _n: usize, _seed: u64| {
-            if theta[0] < 5.0 { -10.0 } else { -5.0 }
+            (if theta[0] < 5.0 { -10.0 } else { -5.0 }, FilterStats::failed())
         };
 
         let cfg = CleanEvalConfig {
@@ -411,7 +530,7 @@ mod tests {
             // seed = 0 + 7*10_000 + cand_ix*1000 + rep_k.
             // Map rep_k = seed mod 1000 from {0..3} to {1.0..4.0}.
             let rep_k = (seed % 1000) as f64;
-            rep_k + 1.0
+            (rep_k + 1.0, FilterStats::failed())
         };
         let cfg = CleanEvalConfig {
             n_particles: 1, n_replicates: 4, combine: CombineMode::Mean,
@@ -436,7 +555,7 @@ mod tests {
         let results = vec![(0usize, r)];
         let scorer = |_t: &[f64], _n: usize, seed: u64| {
             let rep_k = (seed % 1000) as f64;
-            -10.0 + rep_k
+            (-10.0 + rep_k, FilterStats::failed())
         };
         let cfg_mean = CleanEvalConfig {
             n_particles: 1, n_replicates: 4, combine: CombineMode::Mean,
@@ -448,5 +567,51 @@ mod tests {
         let lme_out  = run_clean_eval_with_scorer(&results, &cfg_lme,  0, scorer).unwrap();
         // Same theta selected; the scores differ in the expected direction.
         assert!(lme_out.per_chain_winners[0].loglik > mean_out.per_chain_winners[0].loglik);
+    }
+
+    /// Phase 2: FilterStats::from_pfilter_result aggregates an ESS
+    /// trace + ll-increment series into the four numbers users care
+    /// about. Pure on its inputs, so we can pin the contract without a
+    /// real PF run.
+    #[test]
+    fn filter_stats_from_pfilter_result_basic() {
+        let ess = vec![1000.0, 800.0, 200.0, 400.0, 950.0];
+        let ll_incr = vec![-5.0, -6.0, -10.0, -7.0, -5.0];
+        let s = FilterStats::from_pfilter_result(&ess, &ll_incr);
+        assert!((s.ess_mean - 670.0).abs() < 1e-9, "mean: {}", s.ess_mean);
+        assert!((s.ess_min - 200.0).abs() < 1e-9, "min: {}", s.ess_min);
+        assert_eq!(s.ess_min_step, Some(2),
+            "argmin should be index 2 (the 200.0 entry)");
+        assert_eq!(s.n_neg_inf_increments, 0);
+        assert_eq!(s.neg_inf_first_step, None);
+    }
+
+    #[test]
+    fn filter_stats_counts_neg_inf_increments() {
+        let ess = vec![900.0, 800.0];
+        let ll_incr = vec![-5.0, f64::NEG_INFINITY];
+        let s = FilterStats::from_pfilter_result(&ess, &ll_incr);
+        assert_eq!(s.n_neg_inf_increments, 1);
+        assert_eq!(s.neg_inf_first_step, Some(1));
+    }
+
+    #[test]
+    fn filter_stats_aggregate_min_is_worst_case_across_replicates() {
+        let r1 = FilterStats {
+            ess_mean: 1000.0, ess_min: 500.0, ess_min_step: Some(3),
+            n_neg_inf_increments: 0, neg_inf_first_step: None,
+        };
+        let r2 = FilterStats {
+            ess_mean: 800.0, ess_min: 100.0, ess_min_step: Some(7),
+            n_neg_inf_increments: 2, neg_inf_first_step: Some(7),
+        };
+        let agg = FilterStats::aggregate(&[r1, r2]);
+        // Worst-case min, summed neg_inf, mean-of-means.
+        assert!((agg.ess_mean - 900.0).abs() < 1e-9);
+        assert!((agg.ess_min - 100.0).abs() < 1e-9);
+        assert_eq!(agg.ess_min_step, Some(7),
+            "the rep with the worst min wins ess_min_step");
+        assert_eq!(agg.n_neg_inf_increments, 2);
+        assert_eq!(agg.neg_inf_first_step, Some(7));
     }
 }
