@@ -21,11 +21,13 @@ pub mod refine;
 #[allow(dead_code)]
 pub mod validate;
 pub mod status;
+pub mod summary;
+pub mod fit_summary;
+pub use fit_summary::cmd_fit_summary;
 pub mod pmmh;
 pub mod pgas;
 pub mod trace_writer;
 pub mod synthetic;
-pub mod summary;
 pub mod gating;
 pub mod clean_eval;
 
@@ -168,7 +170,24 @@ fn print_stage_status(name: &str, stage_dir: &str) {
             }
         }
         Err(_) => {
-            println!("    {:12} \x1b[33m⚠\x1b[0m incomplete (no run.json)", name);
+            // GH #18: a stage that ran IF2 + clean-eval but failed
+            // the compound gate exits before writing run.json. The
+            // user has nonzero results on disk (fit_state.toml,
+            // mle_params.toml, etc.) and very much wants to know
+            // *why* refine refused to advance. Detect this case by
+            // checking for fit_state.toml; if present, point them at
+            // `summary` rather than lying with "(no completed stages
+            // found)". Full verdict lives in `camdl fit summary`.
+            let stage_path = std::path::Path::new(stage_dir);
+            if stage_path.join("fit_state.toml").exists() {
+                let parent = stage_path.parent()
+                    .map(|p| p.display().to_string())
+                    .unwrap_or_else(|| ".".into());
+                println!("    {:12} \x1b[31m✗\x1b[0m gate failed — see `camdl fit summary {}`",
+                    name, parent);
+            } else {
+                println!("    {:12} \x1b[33m⚠\x1b[0m incomplete (no run.json)", name);
+            }
         }
     }
 }

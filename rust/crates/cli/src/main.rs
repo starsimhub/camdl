@@ -207,6 +207,8 @@ enum FitCmd {
     Run(args::FitRunArgs),
     /// Show completion status for a fit
     Status(args::FitStatusArgs),
+    /// Render a single-fit interpretation summary (Â, gate verdict, MLE table)
+    Summary(args::FitSummaryArgs),
     /// Compare two fit.toml configs
     Diff(args::FitDiffArgs),
     /// Derive a new fit.toml from an existing one
@@ -271,6 +273,7 @@ fn main() {
         Command::Batch(BatchCmd::Status(a)) => batch::cmd_batch_status(&a),
         Command::Fit(FitCmd::Run(a))    => fit::cmd_fit_run_v2(&a),
         Command::Fit(FitCmd::Status(a)) => fit::cmd_fit_status(&a),
+        Command::Fit(FitCmd::Summary(a))=> fit::cmd_fit_summary(&a),
         Command::Fit(FitCmd::Diff(a))   => fit::cmd_fit_diff(&a),
         Command::Fit(FitCmd::New(a))    => fit::cmd_fit_new(&a),
         Command::Fit(FitCmd::Where(a))  => fit::cmd_fit_where(&a),

@@ -81,6 +81,8 @@ pub enum FitCommand {
     Run(FitRunArgs),
     /// Show completion status of a fit
     Status(FitStatusArgs),
+    /// Render a single-fit interpretation summary (Â, gate verdict, MLE table)
+    Summary(FitSummaryArgs),
     /// Compare two fit.toml configs
     Diff(FitDiffArgs),
     /// Derive a new fit.toml from an existing one
@@ -401,6 +403,44 @@ Examples:
 pub struct FitStatusArgs {
     /// Fit config file or results directory
     pub path: Option<PathBuf>,
+}
+
+#[derive(Args)]
+#[command(after_help = "\
+Examples:
+  # Render summary for a completed fit
+  camdl fit summary fit/he2010
+
+  # Just one stage
+  camdl fit summary fit/he2010 --stage scout
+
+  # Disable colour (useful for redirecting to a file)
+  camdl fit summary fit/he2010 --no-color
+
+  # Strict mode for CI: exit non-zero on provenance mismatch.
+  # Auto-enabled when CI=true or CI=1 in the environment.
+  camdl fit summary fit/he2010 --strict
+")]
+pub struct FitSummaryArgs {
+    /// Fit results directory (e.g. `fit/he2010`)
+    pub fit_dir: PathBuf,
+
+    /// Render only one stage's stanza
+    #[arg(long, value_name = "STAGE")]
+    pub stage: Option<String>,
+
+    /// Disable ANSI colour even on a TTY. Honours `NO_COLOR` env var
+    /// regardless of this flag.
+    #[arg(long)]
+    pub no_color: bool,
+
+    /// Exit non-zero on provenance mismatch (final_params.toml ↔
+    /// mle_params.toml disagrees, fit_state.toml winner doesn't match
+    /// final_params.toml, stale camdl version, etc.). Auto-enabled
+    /// when `CI=true` or `CI=1` is set in the environment, matching
+    /// cargo / pytest convention. See proposal §1, §6.
+    #[arg(long)]
+    pub strict: bool,
 }
 
 #[derive(Args)]
