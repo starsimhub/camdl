@@ -9386,3 +9386,227 @@ fit for the Wave 1 demo.
   with the shrinkage signature — "per-group MLE vs hierarchical
   posterior mean" plot showing the classic pull-toward-grand-mean.
   That becomes our Wave 2 demo milestone.
+
+
+## [upstream] Unit A complete + summary-command proposal in flight (2026-04-25)
+
+Big block of upstream work since the Apr 21 entries; the summary
+below is the catch-up. All of this is on `camdl/main` as of
+`4b3b0c1`. `git log` for the full history.
+
+### What shipped on main (commits)
+
+| commit    | scope                                                                                |
+|-----------|--------------------------------------------------------------------------------------|
+| `5159a09` | `evidence`: `logmeanexp`, `sample_sd` helpers (Unit A step 1)                        |
+| `66a5426` | rename `rhat` → `chain_agreement` (Â) — **MLE pipeline only**, Bayesian path untouched (step 2) |
+| `87eb0a6` | `[stages.<stage>.gate]` + `[stages.<stage>.clean_eval]` config schema (step 3)       |
+| `ae21e3f` | CLI flags: `--clean-eval-particles`, `--clean-eval-reps`, `--decibans-thresh` (step 4) |
+| `4a558f5` | `clean_eval` module: candidate construction (final_iter / tail_mean_last_k / best_in_run_iter) + replicate scoring (step 5) |
+| `faf4a45` | wire `clean_eval` into chain selection — replaces argmax-on-final-loglik (step 6)    |
+| `1b007b6` | `chain_evaluations.tsv` per-stage + run-root `final_params.toml` (step 7)            |
+| `b36cdcf` | compound scout-convergence gate: Â + decibans-spread, SE-aware floor (step 8)        |
+| `88c4d8a` | per-chain clean-eval keys in summary JSON + status decibans line (step 9)            |
+| `ba334a9` | docs: rhat → chain_agreement in `docs/camdl-inference-spec.md` + companion docs      |
+| `e1da148` | **fix #16 + #17**: mle_params.toml ↔ final_params.toml agree on θ̂; final_params.toml loadable via `--params` |
+| `4b3b0c1` | proposal: `camdl fit summary` (single-fit interpretation surface)                    |
+
+### Headlines for the book pipeline
+
+1. **Clean-eval pipeline is correct.** After IF2 finishes, scout
+   re-scores three candidates per chain (final-iter mean, tail mean
+   over last K, best-in-run iter) using M independent
+   high-particle PFs combined via `logmeanexp`. Argmax names the
+   winner. Defaults: `n_particles = 4000`, `n_replicates = 8`,
+   `combine = LogMeanExp`. CLI overrides per-stage:
+   `--clean-eval-particles N`, `--clean-eval-reps M`,
+   `--decibans-thresh X`.
+
+2. **Compound scout-convergence gate.** Replaces "all Â < 1.01"
+   with:
+   ```
+   pass iff
+     max(Â) < a_thresh                                    # Â leg
+     AND
+     Δ_dB < max(decibans_thresh, 8·σ_max·NATS_TO_DB)      # decibans-spread leg
+   ```
+   The SE-aware floor prevents the gate from firing on noisy
+   chains whose spread is statistically indistinguishable from
+   zero. Defaults: `a_thresh = 1.01`, `decibans_thresh = 30.0`.
+
+3. **MLE artefacts are now coherent (closed #16).** Before the
+   fix, `<stage>/mle_params.toml` could carry parameters from a
+   *different chain in a different basin* than
+   `<stage>/final_params.toml`, even within the same fit. Cause:
+   `mle_params.toml` was sourced from `IF2Result.mle` of the
+   winning chain, which is itself a fourth (biased) estimator
+   distinct from the three clean-eval candidates. Fix: every
+   user-facing parameter writer now sources from
+   `ChainResults::winner_theta()` (the clean-eval winner θ̂).
+   Regression test
+   `winner_theta_picks_clean_eval_winner_not_if2_argmax` pins the
+   discriminating fixture forever.
+
+4. **`final_params.toml` is now loadable via `camdl pfilter
+   --params <file>` (closed #17).** Pre-fix the writer emitted
+   `winning_candidate_label = "best_in_run_iter"` at TOML top
+   level; the params loader rejected the string. Fix: clean-eval
+   metadata moves under a `[provenance]` table that the loader
+   already skips. The `[provenance]` block carries `loglik`, `se`,
+   `chain`, `winning_candidate_label`. Top-level keys are
+   parameters only.
+
+5. **Schema rename `rhat` → `chain_agreement` is MLE-only.**
+   Bayesian (PGAS / PMMH) outputs still use `rhat` — those *are*
+   posterior samples and Gelman-Rubin's interpretation applies
+   there. IF2 chains are independent stochastic optimisers, not
+   posterior samples, so the MLE pipeline says `chain_agreement`
+   /Â. Don't rename `rhat` in `pmmh.qmd` or in
+   `pgas_diagnostics.py`'s own G-R computation.
+
+### Schema additions you should expect to see
+
+`<stage>_summary.json` (scout, refine; validate keeps its existing
+shape plus the same additions):
+
+- top-level `chain_agreement: { <param>: Â }` map
+- `chains: [ { chain_id (1-based), clean_loglik, clean_se,
+  winning_candidate_label } ]`
+
+`fit_state.toml`:
+
+- `tail_chain_agreement: { <param>: Â }`
+- `chain_clean_logliks: [f64]` (per-chain winner ll, in chain-id
+  order)
+- `chain_clean_ses: [f64]` (parallel SEs)
+- `chain_logliks: [f64]` (per-chain final IF2 ll, kept for the
+  regression gate)
+- `ivp_params: [String]`
+
+`<stage>/chain_evaluations.tsv`:
+`chain  candidate  loglik  se  <param₁>  <param₂> ...`
+3 × n_chains rows, chain-major / candidate-minor order.
+
+`<stage>/final_params.toml` (run-root and per-chain):
+top-level numeric param keys + a `[provenance]` table with
+`loglik`, `se`, `chain`, `winning_candidate_label`.
+
+`<stage>/mle_params.toml`:
+unchanged top-level shape (numeric param keys), expanded
+`[provenance]` block with `input_hash`, `model_hash`, `data_hashes`,
+`backend`, `dt`, plus the clean-eval fields above.
+
+Full schema in `docs/camdl-inference-spec.md` (`ba334a9` updated
+this; the book's `inference-spec.qmd` is auto-generated from it
+per the user's note).
+
+### Two upstream concerns to flag back
+
+**Concern 1: fit defaults are too small for measles-class data.**
+Current scout defaults (8 chains × 30 iters × 500 particles ×
+cooling 0.70) produce ~120 points/panel after last-half filtering
+— too sparse for a usable pair plot on a parameter like s₀ where
+the marginal is bimodal. Substantively agreed with the downstream
+proposal of 16 × 100 × 2000p × cooling 0.85 as a more honest
+default for non-trivial real-data fits. Open question: ship
+named presets (`fast` / `default` / `dense_pair_plot`) or
+auto-scale by model complexity? Filing as a separate issue
+once R3 results are in (we want evidence on the cost / clarity
+trade-off).
+
+**Concern 2: clean-eval ll on bad chains is *less negative* than
+their in-run final_ll, and that's confusing.** Real and expected,
+not a bug. Mechanism: PF log-likelihood is downward-biased; the
+bias scales with how degenerate the filter is. Bad parameters
+with too few particles → severe degeneration → bias of tens or
+hundreds of nats. Higher particle count + logmeanexp shrinks the
+bias. So bad chains' clean-eval ll lifts *toward* truth without
+ever reaching it; the gap remains real but visually compressed
+on shared y-axes.
+
+The chapter risk: a reader sees clean-eval values "cluster near
+truth" and thinks all chains are OK. Fix that with the chapter
+plot, not the pipeline:
+
+- Add a band at `truth_ll ± threshold/NATS_TO_DB` (≈ ±70 nats for
+  the 30 dB floor); bad chains visibly fall outside.
+- Plot Δll = clean_eval_ll − max(clean_eval_ll) in dB on a second
+  panel; good cluster at 0, bad chains at -100 to -200 dB.
+- Pair the figure with the gate verdict line (`Δ = X dB /
+  threshold Y dB ✗`) and a one-sentence callout: "clean-eval
+  doesn't rehabilitate bad chains — it stops the wrong-chain-wins-
+  by-PF-noise selection bug. The decibans-spread gate is what
+  tells you whether chains agree on a basin."
+
+These are documentation / chapter-prose fixes, not upstream code.
+The pedagogical framing matters: clean-eval's job is *honest*
+ll comparison, not *charitable* ll comparison.
+
+### What's coming next (proposal `4b3b0c1`)
+
+`camdl fit summary <fit_dir>` — single-fit interpretation command
+that fills the gap between `status` (workflow) and `compare`
+(multi-model). Three orthogonal commands, three orthogonal jobs.
+
+Phase plan, all in one PR:
+- **Phase 3:** persist resolved gate config + clean_eval config in
+  `fit_state.toml` so `summary`'s verdict line tells the truth even
+  when the run used CLI overrides or the user later edited
+  `fit.toml`. ~25 lines.
+- **Phase 1:** `cmd_fit_summary` + minimal status pointer for
+  GH #18. Resurrects `status.rs::run_status` (currently
+  `#![allow(dead_code)]`) as the formatter core, adds clean-eval
+  rows, gate verdict, provenance cross-check
+  (`final_params.toml ↔ mle_params.toml: ✓` — builds the #16
+  failure mode into every read forever). ANSI colour, `--no-color`,
+  `--stage`, `--strict` (auto-enabled when `CI={true,1}`).
+  ~330 lines.
+- **Phase 2:** ESS coverage end-to-end. Today every PF in the
+  pipeline computes per-step ESS as a side-effect of resampling,
+  then drops it — 192 PFs in a typical scout, all wasted. Phase 2
+  plumbs `FilterStats { ess_mean, ess_min, ess_min_step,
+  n_neg_inf_incr }` through `clean_eval.rs` + `if2.rs` and
+  persists into `chain_evaluations.tsv`,
+  `parameter_traces.tsv`, `<stage>_summary.json`.
+  Validate's `ess_at_mle.tsv` stays. ~120 lines.
+
+Phases 4 (`--format json|md|latex`) + 5 (`--params-only`) follow
+in separate PRs once the core surface is stable.
+
+After this PR the book pipeline can:
+
+- delete `_lib/gate.py:format_gate` and replace with
+  `run_cli("camdl fit summary {dir} --format md", ...)`.
+- stop hand-parsing TOML for chapter parameter tables —
+  `summary --format json` is a versioned schema (`schema.version`
+  field; `_heuristic` namespace for advisory fields like
+  `next_step` strings that may shift between camdl versions).
+- read ESS-at-θ̂ for scout/refine directly from
+  `chain_evaluations.tsv` instead of running an extra
+  `pfilter --save-filtering` per chapter.
+
+### Action items for downstream
+
+1. **Confirm schema consumption.** When the summary PR lands
+   (likely next session), audit any code in
+   `camdl-book/_lib/` that hand-parses fit artefacts and migrate
+   to `summary --format json`. The schema is versioned; pin to
+   `schema.version: 1`.
+2. **He et al. rerun under the new pipeline.** Use a fit.toml
+   with `cooling = 0.7` for scout and `cooling = 0.05` for refine
+   (see `docs/methods/cooling.md` — refine must be colder than
+   scout; existing book configs had this inverted).
+3. **Pair-plot density check.** Run R3 with the proposed defaults
+   (16 chains × 100 iters × 2000p × cooling 0.85) and report
+   whether the resulting points/panel produces a readable pair
+   plot. If it does, file the upstream issue we discussed and we
+   bump defaults.
+4. **Decibans spread visualisation.** When chapter renders Fig 11.4
+   class plots, add the threshold band and the dB-difference panel
+   per concern 2 above.
+
+**ACTION FOR downstream:** confirm receipt + flag anything in the
+schema additions that breaks an existing chapter's
+TOML-parsing path. Items 1–4 above are sequenced; #2 (the He et
+al. rerun) is the immediate value once you have the gate verdict
+visible.

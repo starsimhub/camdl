@@ -411,7 +411,7 @@ camdl fit summary <fit_dir> [--format text|md|json|latex] [--no-color]
       "gate": {
         "kind": "compound_scout_convergence",
         "verdict": "fail",
-        "effective_config": {
+        "resolved_config": {
           "a_thresh": 1.10,
           "decibans_thresh": 30.0,
           "comment": "as judged at runtime; persisted in fit_state.toml"
@@ -533,7 +533,7 @@ minimal-Phase-0 in `status` (closes GH #18 narrowly).**
 - *Summary command (~300 lines).* Wire `Command::Summary` into
   `Cli`. Resurrect `status.rs::run_status` as the core, rename →
   `summary.rs`, drop `#![allow(dead_code)]`, add the new sections
-  (compound-gate verdict with `effective_config`, per-chain
+  (compound-gate verdict reading `resolved_config`, per-chain
   clean-eval table, filter-health stanza, stage-progression line,
   provenance cross-check, boundary `defined` vs `effective`). Reuse
   `term::*` for ANSI and respect `NO_COLOR`. Tests: fixture-based
@@ -579,16 +579,25 @@ to assert the new columns; assert ESS-at-θ̂ is monotone in particle
 count on a synthetic well-behaved fixture; assert IF2 trace ESS is
 populated and bounded by particle count.
 
-**Phase 3 — Effective gate-config persistence (separate small fix,
+**Phase 3 — Resolved gate-config persistence (separate small fix,
 ships *with* Phase 1).**
-~25 lines. The compound-gate verdict is currently rendered against
-the *default* `decibans_thresh` even when the user overrode it via
-CLI (see `--decibans-thresh` from Step 4). Persist the *effective*
-`GateConfig` into `fit_state.toml` alongside the verdict so
-`summary` reports against the threshold the run was actually judged
-by. Without this, summary's verdict line is silently a fiction
-when CLI overrides were in play. Same class as the v0 config-drift
-issue; ship in the Phase 1 PR.
+~25 lines. Naming note: "resolved", not "effective" — the latter
+collides with ESS (effective sample size) which Phase 2 surfaces
+all over the same output. "Resolved" = the value that was actually
+in force at runtime, after the priority chain `CLI flag > fit.toml
+[stages.<stage>.gate] > GateConfig::default()` collapsed.
+
+The compound-gate verdict is currently rendered against the
+*default* `decibans_thresh` even when the user overrode it via
+CLI (`--decibans-thresh` from Step 4) or via fit.toml. Persist the
+*resolved* `GateConfig` (and parallel `CleanEvalConfig`) into
+`fit_state.toml` alongside the verdict so `summary` reports against
+the threshold the run was actually judged by — not whatever
+`fit.toml` happens to say at summary-time, which may have been
+edited since the run. Without this, summary's verdict line is
+silently a fiction when CLI overrides were in play, and drifts if
+the user edits `fit.toml` between fit and read. Same class as the
+v0 config-drift issue we filed earlier; ship in the Phase 1 PR.
 
 **Phase 4 — `--format json|md|latex`.**
 ~200 lines. Pure rendering of the summary struct. Tests: round-trip
@@ -725,10 +734,12 @@ review on 2026-04-25:
   (Δ +45.7 nats / 100 iter)` answers the same question Gate 2 (the
   regression gate) answers, and surfacing it on first read catches
   the rare case where refine locks into a worse local optimum.
-- **Decibans threshold persistence:** **persist effective gate
+- **Decibans threshold persistence:** **persist resolved gate
   config** in `fit_state.toml` alongside the verdict (Phase 3).
   Without this, `summary` would silently report against the default
   threshold even when the run was judged against a CLI override.
+  Naming "resolved" not "effective" to avoid collision with ESS
+  (effective sample size) — same word, completely different concept.
 - **`--strict` mode:** **yes**, with CI auto-detection. `CI=true`
   or `CI=1` triggers strict by default. Matches cargo / pytest.
 - **Sweep / grid fits:** **defer entirely**. Phase 1 prints a
@@ -767,7 +778,7 @@ review on 2026-04-25:
 
 A single PR with three commits:
 
-1. **Phase 3** (effective gate-config persistence) — small upstream
+1. **Phase 3** (resolved gate-config persistence) — small upstream
    change to `runner.rs` + `state.rs`. Lands first within the PR
    so Phase 1's verdict rendering reads a real threshold.
 2. **Phase 1** (`cmd_fit_summary` + minimal status pointer for #18).
