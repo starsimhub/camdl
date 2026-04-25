@@ -3,6 +3,8 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+use crate::fit::config_v2::{CleanEvalConfig, GateConfig};
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct FitState {
     pub stage: String,
@@ -68,6 +70,36 @@ pub struct FitState {
     /// the spread gate fires. New in §Proposal 1 (Step 8).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub chain_clean_ses: Vec<f64>,
+
+    /// Resolved compound-gate configuration as it was applied at the
+    /// end of this stage. "Resolved" = the value that was actually in
+    /// force at runtime, after the priority chain `CLI flag >
+    /// fit.toml [stages.<stage>.gate] > GateConfig::default()`
+    /// collapsed.
+    ///
+    /// Persisted so `camdl fit summary` can render the verdict line
+    /// against the threshold the run was actually judged by — not
+    /// against whatever `fit.toml` happens to say at summary-time
+    /// (which may have been edited since the run) and not against
+    /// `GateConfig::default()` (which may differ from the CLI override
+    /// the user passed). Without this, summary's verdict label is
+    /// silently a fiction whenever overrides were in play. See the
+    /// 2026-04-25 fit-summary-command proposal §Phase 3.
+    ///
+    /// `None` on legacy fit_state.toml files written before this field
+    /// existed — summary should render with a "(thresholds unknown)"
+    /// caveat in that case rather than silently substituting defaults.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resolved_gate: Option<GateConfig>,
+
+    /// Resolved clean-eval configuration as it was applied at the end
+    /// of this stage. Same priority chain and persistence rationale as
+    /// `resolved_gate` — what particle count and replicate count were
+    /// actually used to compute the per-chain `chain_clean_logliks`
+    /// and `chain_clean_ses` above. Without this, a reader can't
+    /// reproduce the clean-eval exactly. See proposal §Phase 3.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resolved_clean_eval: Option<CleanEvalConfig>,
 }
 
 impl FitState {
@@ -117,6 +149,8 @@ mod tests {
             chain_logliks: vec![-130.0, -123.45],
             chain_clean_logliks: vec![-128.7, -123.1],
             chain_clean_ses: vec![1.5, 0.8],
+            resolved_gate: Some(GateConfig::default()),
+            resolved_clean_eval: Some(CleanEvalConfig::default()),
         }
     }
 
@@ -143,7 +177,59 @@ mod tests {
         assert_eq!(loaded.chain_logliks, vec![-130.0, -123.45]);
         assert_eq!(loaded.tail_chain_agreement.get("beta").copied(), Some(1.02));
         assert_eq!(loaded.ivp_params, vec!["s0".to_string()]);
+        // Phase 3: resolved gate / clean-eval persisted with the
+        // verdict so summary can report against the threshold the
+        // run was actually judged by, not whatever fit.toml says
+        // at summary-time.
+        let gate = loaded.resolved_gate.as_ref().expect("resolved_gate persisted");
+        assert!((gate.a_thresh - 1.01).abs() < 1e-12);
+        assert!((gate.decibans_thresh - 30.0).abs() < 1e-12);
+        let ce = loaded.resolved_clean_eval.as_ref()
+            .expect("resolved_clean_eval persisted");
+        assert_eq!(ce.n_particles, 4000);
+        assert_eq!(ce.n_replicates, 8);
 
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Legacy fit_state.toml files written before Phase 3 lacked
+    /// `resolved_gate` and `resolved_clean_eval`. Loading must succeed
+    /// and surface them as `None`, so summary can render with a
+    /// "(thresholds unknown)" caveat instead of silently substituting
+    /// defaults. This is the contract the proposal's "honest
+    /// reporting over round-trip fidelity" choice rests on.
+    #[test]
+    fn fit_state_loads_legacy_file_with_no_resolved_config() {
+        let dir = std::env::temp_dir().join(format!(
+            "camdl_state_legacy_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos(),
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("fit_state.toml");
+        // Legacy contents — fields that existed before Phase 3 (no
+        // resolved_gate / resolved_clean_eval block). Mirrors what a
+        // pre-2026-04-25 fit_state.toml looked like.
+        std::fs::write(&path, r#"
+stage = "scout"
+seed = 42
+timestamp = "2026-04-20T00:00:00Z"
+best_loglik = -123.45
+initial_loglik = -200.0
+best_chain = 1
+n_chains = 2
+
+[start_values]
+beta = 0.8
+
+[rw_sd]
+"#).unwrap();
+        let loaded = FitState::load(dir.to_str().unwrap()).unwrap();
+        assert!(loaded.resolved_gate.is_none(),
+            "legacy file must surface resolved_gate as None, not silently default");
+        assert!(loaded.resolved_clean_eval.is_none(),
+            "legacy file must surface resolved_clean_eval as None");
         std::fs::remove_dir_all(&dir).ok();
     }
 }

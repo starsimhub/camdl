@@ -226,6 +226,10 @@ pub fn run_validate(fit: &FitToml, starts_from: &str, seed: u64, force: bool) ->
             .map(|(_, r)| r.final_loglik).collect(),
         chain_clean_logliks: chain_results.chain_clean_logliks(),
         chain_clean_ses: chain_results.chain_clean_ses(),
+        // Legacy `camdl fit validate` path. Doesn't apply a gate to
+        // refine; summary falls back accordingly. See proposal §Phase 3.
+        resolved_gate: None,
+        resolved_clean_eval: Some(crate::fit::config_v2::CleanEvalConfig::default()),
     };
     state.save(&stage_dir)?;
 

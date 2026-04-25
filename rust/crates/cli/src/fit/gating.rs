@@ -352,6 +352,8 @@ mod tests {
             chain_logliks: chain_logliks.to_vec(),
             chain_clean_logliks: vec![],
             chain_clean_ses: vec![],
+            resolved_gate: None,
+            resolved_clean_eval: None,
         }
     }
 

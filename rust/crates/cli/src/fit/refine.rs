@@ -206,6 +206,12 @@ pub fn run_refine(
         chain_logliks: refine_chain_logliks,
         chain_clean_logliks: chain_results.chain_clean_logliks(),
         chain_clean_ses: chain_results.chain_clean_ses(),
+        // Legacy `camdl fit refine` path uses GateConfig::default() to
+        // judge scout (line 48); persist that explicitly so summary
+        // doesn't have to guess. CLI overrides aren't supported on the
+        // legacy path. See proposal §Phase 3.
+        resolved_gate: Some(crate::fit::config_v2::GateConfig::default()),
+        resolved_clean_eval: Some(crate::fit::config_v2::CleanEvalConfig::default()),
     };
     state.save(&stage_dir)?;
 

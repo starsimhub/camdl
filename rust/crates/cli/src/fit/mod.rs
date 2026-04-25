@@ -668,8 +668,8 @@ pub fn cmd_fit_run_v2(a: &crate::args::FitRunArgs) {
                     eprintln!("error building run config: {}", e);
                     std::process::exit(1);
                 });
-                run_config.clean_eval = effective_clean_eval;
-                run_config.gate = effective_gate;
+                run_config.clean_eval = effective_clean_eval.clone();
+                run_config.gate = effective_gate.clone();
 
                 std::fs::create_dir_all(&stage_dir).unwrap_or_else(|e| {
                     eprintln!("error creating {}: {}", stage_dir.display(), e);
@@ -792,6 +792,16 @@ pub fn cmd_fit_run_v2(a: &crate::args::FitRunArgs) {
                         .map(|(_, r)| r.final_loglik).collect(),
                     chain_clean_logliks: chain_results.chain_clean_logliks(),
                     chain_clean_ses: chain_results.chain_clean_ses(),
+                    // Persist the gate / clean-eval config that was
+                    // *actually in force* — `effective_gate` and
+                    // `effective_clean_eval` above already collapsed the
+                    // priority chain (CLI flag > stage TOML > defaults).
+                    // `summary` reads these so its verdict line reports
+                    // against the threshold the run was judged by, not
+                    // whatever `fit.toml` says at summary-time.
+                    // See proposal §Phase 3.
+                    resolved_gate: Some(effective_gate.clone()),
+                    resolved_clean_eval: Some(effective_clean_eval.clone()),
                 };
                 fit_state.save(&stage_dir.to_string_lossy()).unwrap_or_else(|e| {
                     eprintln!("warning: could not save fit_state: {}", e);

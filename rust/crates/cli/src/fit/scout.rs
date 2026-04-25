@@ -171,6 +171,13 @@ pub fn run_scout(fit: &FitToml, seed: u64, force: bool) -> Result<(), String> {
         chain_logliks,
         chain_clean_logliks: chain_results.chain_clean_logliks(),
         chain_clean_ses: chain_results.chain_clean_ses(),
+        // Legacy `camdl fit scout` path: scout doesn't apply a gate
+        // itself (refine does), and there's no per-stage GateConfig to
+        // record. `summary` will fall back to the consumer's
+        // resolved_gate, or render with a "(thresholds unknown)"
+        // caveat if neither is available. See proposal §Phase 3.
+        resolved_gate: None,
+        resolved_clean_eval: None,
     };
     state.save(&stage_dir)?;
 
