@@ -885,6 +885,27 @@ impl ChainResults {
         v.sort_by_key(|(id, _)| *id);
         v.into_iter().map(|(_, se)| se).collect()
     }
+
+    /// Estimated-param θ̂ of the overall clean-eval winner. Indexed by
+    /// `EstimatedParam::index`, parallel to `IF2Result.mle`.
+    ///
+    /// **Use this — not `IF2Result.mle` of the winning chain — anywhere
+    /// the user-facing "MLE" parameters are needed** (e.g. building
+    /// `start_values` for a downstream stage, writing
+    /// `mle_params.toml`, status / summary tables). `IF2Result.mle` is
+    /// the IF2 chain's argmax over its own noisy `if2_perturbed_loglik`
+    /// — a fourth, biased estimator that the clean-eval pipeline was
+    /// introduced to replace. Reading `mle` after Step 6 produced the
+    /// silent-wrong-answer documented in GH #16: scout's `mle_params.toml`
+    /// could end up in a different basin from `final_params.toml` even
+    /// for the same fit, because clean-eval picked candidate
+    /// `tail_mean_last_k` or `best_in_run_iter` from a chain whose own
+    /// `IF2Result.mle` was a different (biased) point. See proposal
+    /// §Proposal 1.
+    pub fn winner_theta(&self) -> &[f64] {
+        &self.clean_eval.per_chain_winners[self.clean_eval.overall_winner_idx].theta
+    }
+
 }
 
 /// Pure helper: extract the (chain_id, ll, se, label) summary from a
@@ -1219,15 +1240,14 @@ pub fn write_chain_outputs(
             writeln!(f, "# loglik = {:.2}", header_ll).unwrap();
         }
         writeln!(f).unwrap();
-        // Provenance keys (Step 7): downstream tooling and humans can
-        // read these without parsing the comment header. Only emitted
-        // when clean_eval ran.
-        if let Some(w) = chain_winner {
-            writeln!(f, "loglik = {:.6}", w.loglik).unwrap();
-            writeln!(f, "se = {:.6}", w.se).unwrap();
-            writeln!(f, "winning_candidate_label = \"{}\"", w.label.as_str()).unwrap();
-            writeln!(f).unwrap();
-        }
+        // Param key/value pairs at the top level so the file is loadable
+        // via the standard params loader (`camdl pfilter --params …`,
+        // `simulate --params`). Clean-eval metadata moves to a
+        // `[provenance]` table at the bottom — keeping it within the
+        // file but out of the flat-key namespace. Pre-fix this lived
+        // at the top with `winning_candidate_label = "best_in_run_iter"`,
+        // which the params loader rejected as a non-numeric top-level
+        // key. See GH #17.
         for name in all_param_names {
             let value = if let Some(spec) = if2_params.iter().find(|p| p.name == *name) {
                 // Prefer clean-eval winner's θ for estimated params.
@@ -1240,6 +1260,14 @@ pub fn write_chain_outputs(
                 0.0
             };
             writeln!(f, "{} = {}", name, format_param_value(value)).unwrap();
+        }
+        if let Some(w) = chain_winner {
+            writeln!(f).unwrap();
+            writeln!(f, "[provenance]").unwrap();
+            writeln!(f, "loglik = {:.6}", w.loglik).unwrap();
+            writeln!(f, "se = {:.6}", w.se).unwrap();
+            writeln!(f, "chain = {}", chain_id + 1).unwrap();
+            writeln!(f, "winning_candidate_label = \"{}\"", w.label.as_str()).unwrap();
         }
     }
     Ok(())
@@ -1301,11 +1329,9 @@ pub fn write_run_root_final_params(
     writeln!(f, "# loglik = {:.2} ± {:.2} (clean-eval logmeanexp over replicates)",
         w.loglik, w.se).unwrap();
     writeln!(f).unwrap();
-    writeln!(f, "loglik = {:.6}", w.loglik).unwrap();
-    writeln!(f, "se = {:.6}", w.se).unwrap();
-    writeln!(f, "winning_candidate_label = \"{}\"", w.label.as_str()).unwrap();
-    writeln!(f, "winning_chain = {}", w.chain_id + 1).unwrap();
-    writeln!(f).unwrap();
+    // Top-level keys are parameters only — keeps the file loadable via
+    // the standard params loader. Clean-eval metadata lives in the
+    // `[provenance]` table at the bottom. See GH #17.
     for name in all_param_names {
         let value = if let Some(spec) = if2_params.iter().find(|p| p.name == *name) {
             w.theta[spec.index]
@@ -1316,6 +1342,12 @@ pub fn write_run_root_final_params(
         };
         writeln!(f, "{} = {}", name, format_param_value(value)).unwrap();
     }
+    writeln!(f).unwrap();
+    writeln!(f, "[provenance]").unwrap();
+    writeln!(f, "loglik = {:.6}", w.loglik).unwrap();
+    writeln!(f, "se = {:.6}", w.se).unwrap();
+    writeln!(f, "chain = {}", w.chain_id + 1).unwrap();
+    writeln!(f, "winning_candidate_label = \"{}\"", w.label.as_str()).unwrap();
     Ok(())
 }
 
@@ -2055,15 +2087,218 @@ mod tests {
         // Header records overall winner chain + candidate label.
         assert!(content.contains("# winner: chain=2 candidate=tail_mean_last_k"),
             "header missing or wrong: {}", content);
-        // Provenance keys.
+        // Provenance moved under [provenance] table — top-level keys
+        // are parameters only so the file is loadable via the standard
+        // params loader (GH #17). The metadata is still present, just
+        // under the right scope.
+        assert!(content.contains("[provenance]"),
+            "expected [provenance] table; got: {}", content);
         assert!(content.contains("winning_candidate_label = \"tail_mean_last_k\""));
-        assert!(content.contains("winning_chain = 2"));
+        assert!(content.contains("chain = 2"));
         // The estimated-param value is the overall winner's θ (0.42),
         // NOT chain 0's 0.10.
         assert!(content.contains("beta = 0.42"),
             "expected beta = 0.42 (winner's θ); got: {}", content);
 
+        // Schema invariant: `winning_candidate_label` (a string) is
+        // *not* a top-level key. Pre-fix, the params loader rejected
+        // the file because that string sat at top level next to
+        // numeric param keys. Detect a regression by parsing the
+        // file as a TOML table and asserting the top-level shape.
+        let parsed: toml::Value = toml::from_str(&content)
+            .expect("final_params.toml must parse as TOML");
+        let top = parsed.as_table().unwrap();
+        assert!(!top.contains_key("winning_candidate_label"),
+            "winning_candidate_label leaked back to top level (GH #17)");
+        for (k, v) in top {
+            if k == "provenance" { continue; }
+            assert!(v.as_float().is_some() || v.as_integer().is_some(),
+                "top-level key `{}` is `{:?}`, must be numeric (param) — \
+                 metadata belongs under [provenance]", k, v);
+        }
+
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Regression for GH #17: `final_params.toml` (run-root) must be
+    /// loadable by the standard params loader. Pre-fix the writer
+    /// emitted `winning_candidate_label = "best_in_run_iter"` at the
+    /// top level, which `load_params_toml` rejected with
+    /// `expected a number or table section, got String("…")`. The
+    /// post-fix writer keeps the metadata under a `[provenance]`
+    /// table, which the loader skips. This test asserts loadability
+    /// + correct parameter values, both of which are required for
+    /// "rerun pfilter at the reported MLE" workflows to function.
+    #[test]
+    fn final_params_toml_is_loadable_by_params_loader() {
+        use crate::fit::clean_eval::{CandidateLabel, ChainWinner, CleanEvalOutcome};
+        use ir::{
+            model::{Compartment, CompartmentKind, InitialConditions, OutputConfig,
+                    OutputSchedule, SimulationConfig},
+            parameter::Parameter,
+        };
+
+        let outcome = CleanEvalOutcome {
+            all_scores: vec![],
+            per_chain_winners: vec![
+                ChainWinner { chain_id: 5, label: CandidateLabel::BestInRunIter,
+                    theta: vec![87.668938], loglik: -6235.11, se: 2.19 },
+            ],
+            overall_winner_idx: 0,
+        };
+        let if2_params = vec![EstimatedParam {
+            name: "R0".into(), index: 0, initial: 0.0,
+            lower: 1.0, upper: 200.0, rw_sd: 1.0, rw_sd_auto: false,
+            transform: Transform::None, ivp: false,
+        }];
+        let model = ir::Model {
+            name: "t".into(), version: "0.3".into(), time_unit: "days".into(),
+            description: None, origin: None,
+            compartments: vec![
+                Compartment { name: "S".into(), kind: CompartmentKind::Integer },
+            ],
+            transitions: vec![], ode_equations: vec![],
+            time_functions: vec![], tables: vec![], interventions: vec![],
+            observations: vec![],
+            parameters: vec![Parameter {
+                name: "R0".into(), value: Some(0.0), bounds: Some((1.0, 200.0)),
+                prior: None, transform: None, initial_value: None,
+                param_kind: None, param_dim: None, hierarchical: None,
+            }],
+            initial_conditions: InitialConditions::Explicit({
+                let mut m = HashMap::new(); m.insert("S".into(), 100.0); m
+            }),
+            output: OutputConfig {
+                times: OutputSchedule::AtTimes(vec![0.0, 1.0]),
+                format: "tsv".into(), trajectory: true, observations: false,
+            },
+            simulation: SimulationConfig {
+                t_start: 0.0, t_end: 1.0, time_semantics: "continuous".into(),
+                dt: Some(1.0), rng_seed: Some(42),
+            },
+            presets: vec![], model_structure: None, balance: None,
+        };
+        let compiled = CompiledModel::new(model).unwrap();
+
+        let dir = std::env::temp_dir().join("camdl_test_final_params_loadable");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("final_params.toml");
+
+        write_run_root_final_params(
+            dir.to_str().unwrap(), &outcome, &if2_params,
+            &["R0".to_string()], &[0.0], &compiled,
+        ).unwrap();
+
+        // The actual contract: load_params_toml must return Ok and
+        // surface R0 as the clean-eval winner's value.
+        let loaded = crate::util::load_params_toml(path.to_str().unwrap())
+            .expect("final_params.toml must be loadable via load_params_toml \
+                     (GH #17). If this errored with `expected a number or \
+                     table section, got String(...)`, a top-level string \
+                     metadata key has leaked back into the writer.");
+        let r0 = loaded.get("R0").copied()
+            .expect("R0 must be present after load");
+        assert!((r0 - 87.668938).abs() < 1e-6,
+            "loaded R0 must equal clean-eval winner θ̂; got {}", r0);
+
+        // Provenance keys are intentionally NOT in the parameter map
+        // (the loader skips the [provenance] section).
+        assert!(!loaded.contains_key("winning_candidate_label"));
+        assert!(!loaded.contains_key("loglik"));
+        assert!(!loaded.contains_key("se"));
+        assert!(!loaded.contains_key("chain"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Regression for GH #16 (silent-wrong-answer): when the IF2-argmax
+    /// path (`IF2Result.mle`) and the clean-eval winner pick *different*
+    /// chain × candidate combinations, `ChainResults::winner_theta` must
+    /// return the clean-eval winner's θ̂ — not the IF2 chain's argmax.
+    /// This is what aligns mle_params.toml and final_params.toml so
+    /// downstream consumers see the same parameter vector either way.
+    ///
+    /// Setup: chain 0 has a phenomenal IF2 in-run loglik (would win
+    /// argmax-on-final-loglik) but its clean-eval candidates are all
+    /// modest. Chain 1's IF2 result is unremarkable but its
+    /// clean-eval `tail_mean_last_k` candidate scores best after PF
+    /// re-evaluation. The pre-fix code path (legacy `best.mle` of the
+    /// `chain_results.best_chain` chain) would pick chain 1's
+    /// `IF2Result.mle = final_iter` θ — but that's `[0.30, 0.40]`,
+    /// NOT the clean-eval winner θ `[0.31, 0.41]`. The fix uses
+    /// `winner_theta` so we get `[0.31, 0.41]`.
+    #[test]
+    fn winner_theta_picks_clean_eval_winner_not_if2_argmax() {
+        use crate::fit::clean_eval::{
+            CandidateLabel, CandidateScore, ChainWinner, CleanEvalOutcome,
+        };
+
+        // IF2 results (we never read .iterations downstream of
+        // winner_theta — those would only matter if the test exercised
+        // build_candidates as well). The .mle here represents what
+        // pre-fix code would have selected.
+        let if2_chain0 = sim::inference::if2::IF2Result {
+            mle: vec![0.10, 0.20],   // chain 0's IF2 argmax
+            final_loglik: -100.0,
+            last_loglik: -100.0,
+            iterations: vec![],
+        };
+        let if2_chain1 = sim::inference::if2::IF2Result {
+            mle: vec![0.30, 0.40],   // chain 1's IF2 argmax — pre-fix bug returned this
+            final_loglik: -50.0,
+            last_loglik: -50.0,
+            iterations: vec![],
+        };
+
+        let clean_eval = CleanEvalOutcome {
+            all_scores: vec![
+                CandidateScore { chain_id: 0, label: CandidateLabel::FinalIter,
+                    theta: vec![0.10, 0.20], loglik_combined: -110.0, se: 0.5,
+                    per_rep_logliks: vec![-110.0; 4] },
+                CandidateScore { chain_id: 1, label: CandidateLabel::TailMeanLastK,
+                    theta: vec![0.31, 0.41], loglik_combined: -49.0, se: 0.4,
+                    per_rep_logliks: vec![-49.0; 4] },
+            ],
+            per_chain_winners: vec![
+                ChainWinner { chain_id: 0, label: CandidateLabel::FinalIter,
+                    theta: vec![0.10, 0.20], loglik: -110.0, se: 0.5 },
+                ChainWinner { chain_id: 1, label: CandidateLabel::TailMeanLastK,
+                    theta: vec![0.31, 0.41], loglik: -49.0, se: 0.4 },
+            ],
+            overall_winner_idx: 1,
+        };
+
+        let mut chain_agreement = HashMap::new();
+        chain_agreement.insert("beta".to_string(),  1.05);
+        chain_agreement.insert("gamma".to_string(), 1.06);
+        let cr = ChainResults {
+            results: vec![(0, if2_chain0), (1, if2_chain1)],
+            best_chain: 1,
+            best_loglik: -49.0,
+            best_se: 0.4,
+            winning_label: CandidateLabel::TailMeanLastK,
+            chain_agreement,
+            clean_eval,
+        };
+
+        let theta = cr.winner_theta();
+        assert_eq!(theta, &[0.31, 0.41],
+            "winner_theta must return clean-eval winner θ̂ (chain 1 \
+             tail_mean_last_k = [0.31, 0.41]), NOT chain 1's \
+             IF2Result.mle (= [0.30, 0.40]). If this fails, \
+             mle_params.toml will diverge from final_params.toml — \
+             the GH #16 silent-wrong-answer is back.");
+
+        // Pre-fix path for reference: what `&best.mle` of best_chain returns.
+        let best = &cr.results.iter().find(|(id, _)| *id == cr.best_chain).unwrap().1;
+        assert_eq!(&best.mle, &vec![0.30, 0.40],
+            "sanity: chain 1's IF2 mle is [0.30, 0.40] (different \
+             from clean-eval winner [0.31, 0.41]) — this is what \
+             makes the test discriminate.");
+        assert_ne!(theta, best.mle.as_slice(),
+            "winner_theta and best.mle must differ in this fixture, \
+             else the test isn't catching the bug class");
     }
 
     /// resolve_prior precedence chain: fit.toml override → model IR → Flat.

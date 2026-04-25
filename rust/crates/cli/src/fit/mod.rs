@@ -755,12 +755,13 @@ pub fn cmd_fit_run_v2(a: &crate::args::FitRunArgs) {
                 runner::write_diagnostics(&stage_dir.to_string_lossy(), &chain_results.results)
                     .unwrap_or_else(|e| eprintln!("warning: {}", e));
 
-                // Write fit_state.toml for downstream stages
-                let best = &chain_results.results.iter()
-                    .find(|(id, _)| *id == chain_results.best_chain)
-                    .unwrap().1;
+                // Write fit_state.toml for downstream stages.
+                // Source params from the clean-eval winner θ̂ (GH #16) so
+                // mle_params.toml and final_params.toml agree, and so
+                // refine starts in the basin clean-eval actually picked.
+                let winner_theta = chain_results.winner_theta();
                 let start_values = runner::collect_all_params(
-                    &best.mle, &run_config.estimated_params, &run_config.model,
+                    winner_theta, &run_config.estimated_params, &run_config.model,
                     &run_config.base_params, &run_config.compiled,
                 );
                 let rw_sd = match runner::auto_rw_sd(&chain_results.results, &run_config.estimated_params) {
@@ -796,9 +797,9 @@ pub fn cmd_fit_run_v2(a: &crate::args::FitRunArgs) {
                     eprintln!("warning: could not save fit_state: {}", e);
                 });
 
-                // Write mle_params.toml
+                // Write mle_params.toml — clean-eval winner θ̂ (GH #16).
                 let all_params = runner::collect_all_params(
-                    &best.mle, &run_config.estimated_params, &run_config.model,
+                    winner_theta, &run_config.estimated_params, &run_config.model,
                     &run_config.base_params, &run_config.compiled,
                 );
                 let mle_path = format!("{}/mle_params.toml", stage_dir.display());

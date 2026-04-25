@@ -158,14 +158,15 @@ pub fn run_refine(
         collector.push(DiagnosticKind::MultimodalLikelihood { ll_spread: loglik_spread, max_chain_agreement });
     }
 
-    // Best chain's MLE
-    let best = &chain_results.results.iter()
-        .find(|(id, _)| *id == chain_results.best_chain)
-        .unwrap().1;
+    // Winner θ̂ — clean-eval pick across all chains (GH #16).
+    let winner_theta = chain_results.winner_theta();
 
-    // Start values for next stage
+    // Start values for next stage. Sourced from the clean-eval winner
+    // (not `IF2Result.mle` of the winning chain) so refine's
+    // mle_params.toml and final_params.toml carry the same parameter
+    // vector. See `ChainResults::winner_theta`.
     let start_values: HashMap<String, f64> = runner::collect_all_params(
-        &best.mle, &config.estimated_params, &config.model,
+        winner_theta, &config.estimated_params, &config.model,
         &config.base_params, &config.compiled,
     );
 
@@ -227,9 +228,9 @@ pub fn run_refine(
     )?;
     runner::write_diagnostics(&stage_dir, &chain_results.results)?;
 
-    // Write mle_params.toml
+    // Write mle_params.toml — clean-eval winner θ̂ (GH #16).
     let all_params = runner::collect_all_params(
-        &best.mle, &config.estimated_params, &config.model,
+        winner_theta, &config.estimated_params, &config.model,
         &config.base_params, &config.compiled,
     );
     let model_hash = hashing::model_hash(&config.model_ir_json);
@@ -334,11 +335,10 @@ pub(crate) fn build_refine_summary_json(
         "chains": chains,
         "parameters": estimated_params.iter().map(|spec| {
             let agreement = results.chain_agreement.get(&spec.name).copied().unwrap_or(f64::NAN);
-            let best = &results.results.iter()
-                .find(|(id, _)| *id == results.best_chain).unwrap().1;
+            let winner_theta = results.winner_theta();
             serde_json::json!({
                 "name": spec.name,
-                "estimate": best.mle[spec.index],
+                "estimate": winner_theta[spec.index],
                 "chain_agreement": agreement,
             })
         }).collect::<Vec<_>>(),

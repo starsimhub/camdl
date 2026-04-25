@@ -88,16 +88,20 @@ pub fn run_validate(fit: &FitToml, starts_from: &str, seed: u64, force: bool) ->
         collector.push(DiagnosticKind::ConvergenceIncomplete { max_chain_agreement, n_unconverged, n_total });
     }
 
-    let best = &chain_results.results.iter()
-        .find(|(id, _)| *id == chain_results.best_chain)
-        .unwrap().1;
+    // Winner θ̂ — the clean-eval pick across all chains. The PF run
+    // below MUST score the same parameter vector that final_params.toml
+    // and mle_params.toml report, otherwise the headline `loglik ± sd`
+    // describes a different point in parameter space than the user-
+    // facing artefacts. See GH #16 for the silent-wrong-answer that
+    // the older `best.mle`-of-winning-chain path produced.
+    let winner_theta = chain_results.winner_theta();
 
     // ── Phase 2: Precise pfilter at MLE ──────────────────────────────────────
     eprintln!("\nrunning pfilter at MLE with {} particles...", pfilter_particles);
 
     let mut mle_params = config.base_params.clone();
     for spec in &config.estimated_params {
-        mle_params[spec.index] = best.mle[spec.index];
+        mle_params[spec.index] = winner_theta[spec.index];
     }
 
     // If holdout data exists, run PF on full series (train + holdout)
@@ -189,7 +193,7 @@ pub fn run_validate(fit: &FitToml, starts_from: &str, seed: u64, force: bool) ->
 
     // ── Write outputs ────────────────────────────────────────────────────────
     let start_values: HashMap<String, f64> = runner::collect_all_params(
-        &best.mle, &config.estimated_params, &config.model,
+        winner_theta, &config.estimated_params, &config.model,
         &config.base_params, &config.compiled,
     );
 
@@ -244,9 +248,9 @@ pub fn run_validate(fit: &FitToml, starts_from: &str, seed: u64, force: bool) ->
     )?;
     runner::write_diagnostics(&stage_dir, &chain_results.results)?;
 
-    // mle_params.toml with provenance
+    // mle_params.toml with provenance — clean-eval winner θ̂ (GH #16).
     let all_params = runner::collect_all_params(
-        &best.mle, &config.estimated_params, &config.model,
+        winner_theta, &config.estimated_params, &config.model,
         &config.base_params, &config.compiled,
     );
     let model_hash = hashing::model_hash(&config.model_ir_json);
@@ -696,14 +700,13 @@ fn write_fit_report(
     }
     writeln!(f).unwrap();
     writeln!(f, "Estimated parameters:").unwrap();
+    let winner_theta = results.winner_theta();
     for spec in &config.estimated_params {
-        let best = &results.results.iter()
-            .find(|(id, _)| *id == results.best_chain).unwrap().1;
         let agreement = results.chain_agreement.get(&spec.name).copied().unwrap_or(f64::NAN);
         let profile = profiles.iter().find(|p| p.name == spec.name);
         let ci = profile.map(|p| format!("[{:.4}, {:.4}]", p.ci_lower, p.ci_upper))
             .unwrap_or_else(|| "—".into());
-        writeln!(f, "  {:12} = {:<12.6} Â={:.3}  CI_95={}", spec.name, best.mle[spec.index], agreement, ci).unwrap();
+        writeln!(f, "  {:12} = {:<12.6} Â={:.3}  CI_95={}", spec.name, winner_theta[spec.index], agreement, ci).unwrap();
     }
     writeln!(f).unwrap();
     writeln!(f, "Fixed parameters:").unwrap();
@@ -738,12 +741,11 @@ fn write_summary(
         "converged": results.chain_agreement.values().all(|&r| r < 1.1),
         "parameters": config.estimated_params.iter().map(|spec| {
             let agreement = results.chain_agreement.get(&spec.name).copied().unwrap_or(f64::NAN);
-            let best = &results.results.iter()
-                .find(|(id, _)| *id == results.best_chain).unwrap().1;
+            let winner_theta = results.winner_theta();
             let profile = profiles.iter().find(|p| p.name == spec.name);
             serde_json::json!({
                 "name": spec.name,
-                "estimate": best.mle[spec.index],
+                "estimate": winner_theta[spec.index],
                 "chain_agreement": agreement,
                 "ci_95": profile.map(|p| vec![p.ci_lower, p.ci_upper]),
                 "curvature": profile.map(|p| p.curvature),

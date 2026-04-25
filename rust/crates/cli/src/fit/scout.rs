@@ -125,14 +125,15 @@ pub fn run_scout(fit: &FitToml, seed: u64, force: bool) -> Result<(), String> {
         eprintln!();
     }
 
-    // Collect best chain's MLE parameters as start values
-    let best = &chain_results.results.iter()
-        .find(|(id, _)| *id == chain_results.best_chain)
-        .unwrap().1;
-    // Store ALL param values (estimated from MLE + fixed from base) so
-    // fit_state is self-contained and robust to model edits between stages.
+    // Collect winner θ̂ as start values. Use the clean-eval winner's
+    // theta — *not* the winning chain's `IF2Result.mle` — so the
+    // serialized parameters match what `final_params.toml` reports
+    // and what clean-eval actually re-scored. See `ChainResults::winner_theta`
+    // and GH #16 for the silent-wrong-answer that the older
+    // `&best.mle` path produced.
+    let winner_theta = chain_results.winner_theta();
     let start_values: HashMap<String, f64> = runner::collect_all_params(
-        &best.mle, &config.estimated_params, &config.model,
+        winner_theta, &config.estimated_params, &config.model,
         &config.base_params, &config.compiled,
     );
 
@@ -189,10 +190,11 @@ pub fn run_scout(fit: &FitToml, seed: u64, force: bool) -> Result<(), String> {
     )?;
     runner::write_diagnostics(&stage_dir, &chain_results.results)?;
 
-    // Write scout_best_params.toml — best chain's params for downstream use
-    // Named "scout_best" (not "mle") to signal these are scout-level estimates.
+    // Write scout_best_params.toml — winner's params for downstream use.
+    // Named "scout_best" (not "mle") to signal these are scout-level
+    // estimates. Source of truth is the clean-eval winner θ̂; see GH #16.
     let all_params = runner::collect_all_params(
-        &best.mle, &config.estimated_params, &config.model,
+        winner_theta, &config.estimated_params, &config.model,
         &config.base_params, &config.compiled,
     );
     let best_params_path = format!("{}/scout_best_params.toml", stage_dir);
