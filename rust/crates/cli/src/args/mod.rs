@@ -405,6 +405,18 @@ pub struct FitStatusArgs {
     pub path: Option<PathBuf>,
 }
 
+/// Output format for `camdl fit summary`. `text` is the default
+/// rendered terminal block with ANSI colour; `json` is a versioned
+/// machine-readable schema (`schema.version`); `md` and `latex` are
+/// document-friendly outputs for the book pipeline.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, clap::ValueEnum)]
+pub enum FitSummaryFormat {
+    Text,
+    Json,
+    Md,
+    Latex,
+}
+
 #[derive(Args)]
 #[command(after_help = "\
 Examples:
@@ -413,6 +425,17 @@ Examples:
 
   # Just one stage
   camdl fit summary fit/he2010 --stage scout
+
+  # Machine-readable JSON for the book pipeline
+  camdl fit summary fit/he2010 --format json > summary.json
+
+  # Markdown for embedding in a chapter
+  camdl fit summary fit/he2010 --format md
+
+  # Just the winner θ̂ as a flat params TOML, pipeable into
+  # `camdl pfilter --params`:
+  camdl fit summary fit/he2010 --params-only --stage validate \\
+    | camdl pfilter --params /dev/stdin model.camdl --data cases.tsv
 
   # Disable colour (useful for redirecting to a file)
   camdl fit summary fit/he2010 --no-color
@@ -428,6 +451,23 @@ pub struct FitSummaryArgs {
     /// Render only one stage's stanza
     #[arg(long, value_name = "STAGE")]
     pub stage: Option<String>,
+
+    /// Output format. `text` (default) emits the terminal block;
+    /// `json` emits a versioned `schema.version: 1` document; `md`
+    /// emits GitHub-flavoured Markdown; `latex` emits `\begin{tabular}`
+    /// blocks per section.
+    #[arg(long, value_enum, default_value_t = FitSummaryFormat::Text,
+          conflicts_with = "params_only")]
+    pub format: FitSummaryFormat,
+
+    /// Print only the winner θ̂ as a flat params TOML (no metadata,
+    /// no provenance, no headings — pipeable into `camdl pfilter
+    /// --params <(camdl fit summary --params-only ...)`). Combine
+    /// with `--stage <stage>` to pick which stage's winner to emit;
+    /// without `--stage`, prints the terminal stage in the pipeline
+    /// order (validate → refine → scout, whichever is present).
+    #[arg(long, conflicts_with = "format")]
+    pub params_only: bool,
 
     /// Disable ANSI colour even on a TTY. Honours `NO_COLOR` env var
     /// regardless of this flag.

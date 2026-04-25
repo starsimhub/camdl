@@ -453,6 +453,23 @@ chain_clean_logliks = [-3893.4, -3891.2, -3897.8, -3895.1, -3892.0, -3899.4, -38
 chain_clean_ses     = [   0.5,    0.4,    0.6,    0.5,    0.4,    0.7,    0.5,    0.5]
 
 ivp_params = ["S0", "E0", "I0"]
+
+# Resolved compound-gate config (Phase 3): the values actually in
+# force at runtime, after the priority chain
+#   CLI flag > [stages.<stage>.gate] > GateConfig::default()
+# collapsed. Persisted so `camdl fit summary` renders the verdict
+# against the threshold the run was actually judged by, not whatever
+# fit.toml says at summary-time. Absent on legacy fit_state.toml
+# files; summary then falls back to GateConfig::default() with a
+# "(thresholds unknown)" caveat.
+[resolved_gate]
+a_thresh = 1.01
+decibans_thresh = 30.0
+
+[resolved_clean_eval]
+n_particles = 4000
+n_replicates = 8
+combine = "log_mean_exp"
 ```
 
 ### 4.3 How Stages Chain
@@ -815,7 +832,18 @@ fit/{name}/validate/
 
 ---
 
-## 7. Status Command
+## 7. Status and Summary Commands
+
+camdl exposes three single-fit / multi-fit commands with sharp,
+non-overlapping responsibilities:
+
+| command                  | answers                                        | scope                |
+|--------------------------|------------------------------------------------|----------------------|
+| `camdl fit status <dir>` | "what's the state of my filesystem?"           | workflow checker     |
+| `camdl fit summary <dir>`| "what does this fit say?"                      | single-fit interpretation |
+| `camdl compare`          | "which of these models predicts better?"       | multi-model comparison |
+
+### 7.1 Status
 
 ```bash
 camdl fit status fit.toml
@@ -857,6 +885,145 @@ fit/he2010/ — He et al. 2010 London measles
   Next: camdl batch run experiment.toml \
           --params fit/he2010/validate/mle_params.toml
 ```
+
+A stage that ran IF2 + clean-eval but failed the compound gate
+(no `run.json`) is reported with a one-line pointer:
+
+```
+fit/he2010/
+    scout       ✗ gate failed — see `camdl fit summary fit/he2010`
+```
+
+— rather than the pre-Phase-1 lie "(no completed stages found)".
+
+### 7.2 Summary
+
+```bash
+camdl fit summary fit/he2010
+```
+
+Reads each MLE stage's `fit_state.toml` + `<stage>_summary.json` +
+`final_params.toml` + `mle_params.toml` and renders a per-stage
+interpretation block:
+
+- compound scout-convergence gate verdict (Â + decibans-spread,
+  rendered against the *resolved* gate config persisted in
+  `fit_state.toml` — i.e. the threshold the run was actually
+  judged by, not whatever `fit.toml` says at summary-time)
+- parameter table: estimated params with Â glyph, IVP marker
+- per-chain clean-eval table with winner row marked
+- provenance cross-check —
+  `final_params.toml ↔ mle_params.toml` and
+  `fit_state.toml ↔ final_params.toml`. The `final ↔ mle`
+  cross-check guards against the GH #16 silent-wrong-answer class
+  on every read.
+
+#### 7.2.1 Output formats
+
+| `--format`  | use case                                                             |
+|-------------|----------------------------------------------------------------------|
+| `text` (default) | terminal block with ANSI colour. Auto-disables under non-TTY; honours `NO_COLOR`. |
+| `json`      | machine-readable, versioned via `schema.version: 1`. The book pipeline reads this directly. |
+| `md`        | GitHub-flavoured Markdown. Embeddable in chapters via Quarto's `run_cli`. |
+| `latex`     | `\begin{tabular}` blocks per stage. No preamble — embed inside an existing document. |
+
+#### 7.2.2 JSON schema
+
+Top-level shape:
+
+```json
+{
+  "schema": {"version": 1, "camdl_version": "0.3.0+abc1234"},
+  "fit_dir": "fit/he2010",
+  "stages": [
+    {
+      "name": "scout",
+      "n_chains": 8,
+      "best_loglik": -6235.1,
+      "initial_loglik": -7891.0,
+      "camdl_version": "0.3.0+abc1234",
+      "gate": {
+        "max_a_hat": 1.61,
+        "max_a_param": "alpha",
+        "a_thresh": 1.01,
+        "a_passes": false,
+        "delta_db": 205.4,
+        "threshold_db": 30.0,
+        "sigma_max": 2.2,
+        "db_passes": false,
+        "overall_pass": false,
+        "threshold_source": "resolved",
+        "resolved_gate": {"a_thresh": 1.01, "decibans_thresh": 30.0},
+        "resolved_clean_eval": {"n_particles": 4000, "n_replicates": 8, "combine": "log_mean_exp"}
+      },
+      "stage_progression": null,
+      "parameters": [
+        {"name": "R0", "estimate": 87.67, "chain_agreement": 1.21, "ivp": false},
+        ...
+      ],
+      "chains": [
+        {"chain_id": 1, "clean_loglik": -6760.4, "clean_se": 2.4, "is_winner": false},
+        ...
+      ],
+      "provenance": {
+        "final_params_matches_mle_params": true,
+        "fit_state_winner_matches_final_params": true,
+        "stale_camdl_version": null
+      },
+      "_heuristic": {
+        "overall_status": "fail",
+        "interpretation": "chains disagree on basin (Â and decibans-spread both fail)"
+      }
+    }
+  ]
+}
+```
+
+Schema-stability rules:
+
+- **`schema.version` is the contract.** Adding fields is
+  non-breaking; renames / removals / type changes bump the version.
+  Consumers that don't recognise newly-added fields must skip them.
+- **`_heuristic` is advisory.** Strings inside (`overall_status`,
+  `interpretation`) may shift across camdl versions even at stable
+  `schema.version`. Hard fields outside `_heuristic` (numeric
+  thresholds, pass/fail booleans) obey the schema-version contract.
+- **`gate.threshold_source`** is `"resolved"` when the persisted
+  resolved gate config was found in `fit_state.toml` (the post-
+  Phase-3 case), and `"default_fallback"` for legacy fit_state files
+  written before Phase 3 — in which case the rendered thresholds
+  come from `GateConfig::default()` and may differ from what the
+  run was actually judged against.
+
+#### 7.2.3 `--params-only`
+
+```bash
+camdl pfilter model.camdl --data cases.tsv \
+    --params <(camdl fit summary --params-only fit/he2010)
+```
+
+Emits only the winner θ̂ as a flat parameter TOML — no headers
+beyond a single `# camdl ...` comment, no `[provenance]` block,
+no metadata. By default picks the *terminal* completed stage in
+pipeline order (validate → refine → scout). Combine with
+`--stage <stage>` to pick a different stage's winner.
+
+Use case: re-run the pfilter under a higher particle budget or a
+different RNG seed at the reported MLE, without hand-stripping
+metadata from `final_params.toml`.
+
+#### 7.2.4 `--strict`
+
+Exits non-zero on any provenance mismatch:
+- `final_params.toml` ↔ `mle_params.toml` disagree on the shared
+  parameter subset (the GH #16 silent-wrong-answer class)
+- `fit_state.toml`'s `start_values` diverge from the winner's θ̂ in
+  `final_params.toml`
+
+**Auto-enabled when `CI=true` or `CI=1` is set in the
+environment**, matching cargo / pytest convention. Without strict
+mode the cross-checks still render `✗` glyphs; the binary just
+exits 0 so interactive use isn't disrupted.
 
 ---
 
