@@ -13,7 +13,6 @@ pub mod config_v2;
 pub mod state;
 pub mod provenance;
 pub mod runner;
-pub mod status;
 pub mod summary;
 pub mod fit_summary;
 pub use fit_summary::cmd_fit_summary;
