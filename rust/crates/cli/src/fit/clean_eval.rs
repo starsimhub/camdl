@@ -496,6 +496,135 @@ mod tests {
         assert!(result.unwrap_err().contains("NaN"));
     }
 
+    /// The empirical anchor the original module never had: across many
+    /// synthetic trials, does clean-eval produce a loglik estimate that
+    /// is more accurate (lower RMSE relative to the true loglik) than a
+    /// single in-run-style PF call would be?
+    ///
+    /// Setup. We model two PF regimes by their estimator distributions:
+    ///
+    ///   - **In-run PF**: low particle count (~500), high per-rep
+    ///     variance. Modelled as `log L̂_in = log L − σ²/2 + σ Z` with
+    ///     σ ≈ 3 nats and Z ~ Normal(0,1). The −σ²/2 captures the
+    ///     standard PF downward bias on the log scale (Pitt, Silva,
+    ///     Giordani & Kohn 2012, JRSS-B; the PF estimator is unbiased
+    ///     on the likelihood scale but downward-biased by σ²/2 on the
+    ///     log scale).
+    ///   - **Clean PF**: high particle count, low per-rep variance.
+    ///     Modelled with σ ≈ 0.3 nats. Same downward-bias structure,
+    ///     just an order of magnitude tighter.
+    ///
+    /// Across N_TRIALS trials, we compare:
+    ///
+    ///   - Clean-eval (M=8 replicates of clean PF combined via
+    ///     `logmeanexp`): the post-strip workflow.
+    ///   - Single in-run PF call: what we'd report if we just used
+    ///     `IF2Result.final_loglik` directly without re-evaluation.
+    ///
+    /// Assertions: clean-eval has lower RMSE *and* lower mean absolute
+    /// error relative to the true loglik. Both directions of the
+    /// "clean is more accurate" claim are checked. The numerical
+    /// margins are intentionally loose so the test is robust to seed
+    /// variation while still catching a regression that would let the
+    /// in-run estimator beat clean-eval.
+    ///
+    /// This test validates the post-strip clean-eval system's central
+    /// claim. See `docs/dev/notes/2026-04-27-clean-eval-strip.md` for
+    /// the rationale.
+    #[test]
+    fn clean_eval_reduces_bias_and_variance_relative_to_single_in_run_pf() {
+        use sim::rng::StatefulRng;
+
+        const TRUE_LL: f64 = -100.0;
+        const SIGMA_IN_RUN: f64 = 3.0;
+        const SIGMA_CLEAN: f64 = 0.3;
+        const N_TRIALS: usize = 200;
+
+        // Standard PF estimator on log scale: E[log L̂] = log L − σ²/2.
+        let pf_sample = |rng: &mut StatefulRng, sigma: f64| -> f64 {
+            TRUE_LL - sigma * sigma / 2.0 + sigma * rng.normal()
+        };
+
+        // IF2Result with one iteration. The θ doesn't matter — the
+        // synthetic scorers don't read it.
+        let r = synthetic_result(vec![iter(0, TRUE_LL, TRUE_LL, vec![1.0])]);
+        let results = vec![(0usize, r)];
+        let cfg = CleanEvalConfig {
+            n_particles: 1,
+            n_replicates: 8,
+            combine: CombineMode::LogMeanExp,
+        };
+
+        let mut clean_errs = Vec::with_capacity(N_TRIALS);
+        let mut in_run_errs = Vec::with_capacity(N_TRIALS);
+
+        for trial in 0..N_TRIALS {
+            // Each trial gets a unique seed-namespace. Within the
+            // trial, the clean-eval seed scheme produces unique seeds
+            // per replicate via `pf_seed = base + chain*10_000 + rep_k`.
+            let trial_seed = 1_000_000_u64 + (trial as u64).wrapping_mul(100);
+
+            // Closure that mimics a high-particle clean PF.
+            let clean_scorer = |_: &[f64], _: usize, seed: u64| {
+                let mut rng = StatefulRng::new(seed);
+                (pf_sample(&mut rng, SIGMA_CLEAN), FilterStats::failed())
+            };
+            let outcome = run_clean_eval_with_scorer(
+                &results, &cfg, trial_seed, clean_scorer,
+            ).unwrap();
+            let clean_est = outcome.per_chain[0].loglik;
+            clean_errs.push((clean_est - TRUE_LL).abs());
+
+            // A single in-run-style estimate at the same θ (one PF
+            // call, low particle count) — what we'd report without
+            // clean re-evaluation.
+            let mut in_run_rng = StatefulRng::new(trial_seed.wrapping_add(999));
+            let in_run_est = pf_sample(&mut in_run_rng, SIGMA_IN_RUN);
+            in_run_errs.push((in_run_est - TRUE_LL).abs());
+        }
+
+        let rmse = |xs: &[f64]| -> f64 {
+            (xs.iter().map(|x| x * x).sum::<f64>() / xs.len() as f64).sqrt()
+        };
+        let mean = |xs: &[f64]| -> f64 {
+            xs.iter().sum::<f64>() / xs.len() as f64
+        };
+
+        let clean_rmse = rmse(&clean_errs);
+        let in_run_rmse = rmse(&in_run_errs);
+        let clean_mean_err = mean(&clean_errs);
+        let in_run_mean_err = mean(&in_run_errs);
+
+        // Direct claim: clean-eval is more accurate.
+        assert!(
+            clean_rmse < in_run_rmse,
+            "clean-eval RMSE ({:.3}) must be < single-in-run RMSE ({:.3}); \
+             this is the bias-reduction claim",
+            clean_rmse, in_run_rmse
+        );
+        assert!(
+            clean_mean_err < in_run_mean_err,
+            "clean-eval mean abs error ({:.3}) must be < single-in-run \
+             mean abs error ({:.3})",
+            clean_mean_err, in_run_mean_err
+        );
+
+        // Quantitative: with σ_clean=0.3 and σ_in_run=3.0, the
+        // theoretical std-ratio favoring clean is 10× before averaging,
+        // and `logmeanexp` over M=8 replicates further tightens clean.
+        // Asserting at least 5× margin keeps the test robust to seed
+        // variation while still catching a regression where clean-eval
+        // becomes no better than a single in-run call.
+        assert!(
+            clean_rmse * 5.0 < in_run_rmse,
+            "clean-eval RMSE ({:.3}) should be ≥5× lower than \
+             single-in-run RMSE ({:.3}); observed ratio is {:.3}× — \
+             the clean-eval pipeline is not delivering its expected \
+             accuracy gain",
+            clean_rmse, in_run_rmse, in_run_rmse / clean_rmse
+        );
+    }
+
     #[test]
     fn filter_stats_from_pfilter_result_basic() {
         let ess = vec![1000.0, 800.0, 200.0, 400.0, 950.0];
