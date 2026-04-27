@@ -13,7 +13,7 @@ pub mod config_v2;
 pub mod state;
 pub mod provenance;
 pub mod runner;
-pub mod summary;
+pub mod grid_summary;
 pub mod fit_summary;
 pub use fit_summary::cmd_fit_summary;
 pub mod pmmh;
@@ -1193,7 +1193,7 @@ pub fn cmd_fit_run_v2(a: &crate::args::FitRunArgs) {
         .unwrap_or_else(|| "mle".to_string());
 
     let source = if config.synthetic.is_some() { "synthetic" } else { "real" };
-    let mut rows: Vec<summary::SummaryRow> = Vec::new();
+    let mut rows: Vec<grid_summary::SummaryRow> = Vec::new();
     for (cell_i, cell) in cells.iter().enumerate() {
         let (dataset, cell_dir) = match cell.dataset_idx {
             Some(idx) => {
@@ -1206,7 +1206,7 @@ pub fn cmd_fit_run_v2(a: &crate::args::FitRunArgs) {
                 ("real".to_string(), dir)
             }
         };
-        match summary::read_cell_row(&cell_dir, &terminal_stage, &dataset, cell.fit_seed) {
+        match grid_summary::read_cell_row(&cell_dir, &terminal_stage, &dataset, cell.fit_seed) {
             Some(r) => rows.push(r),
             None    => eprintln!(
                 "warning: cell {}/{} ({} × fit_seed={}) produced no mle_params.toml at {}",
@@ -1216,13 +1216,13 @@ pub fn cmd_fit_run_v2(a: &crate::args::FitRunArgs) {
     }
 
     if !rows.is_empty() {
-        match summary::write_summary(&fit_dir, source, &rows) {
+        match grid_summary::write_summary(&fit_dir, source, &rows) {
             Ok(p)  => eprintln!("summary: {}", p.display()),
             Err(e) => eprintln!("warning: could not write summary.tsv: {}", e),
         }
         if config.synthetic.is_some() {
-            match summary::load_truth(&fit_dir) {
-                Ok(truth) => match summary::write_coverage(&fit_dir, &truth, &rows) {
+            match grid_summary::load_truth(&fit_dir) {
+                Ok(truth) => match grid_summary::write_coverage(&fit_dir, &truth, &rows) {
                     Ok(p)  => eprintln!("coverage: {}", p.display()),
                     Err(e) => eprintln!("warning: could not write coverage.tsv: {}", e),
                 },
