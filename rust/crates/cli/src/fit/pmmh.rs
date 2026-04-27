@@ -7,7 +7,7 @@
 use crate::fit::config::FitToml;
 use crate::fit::state::FitState;
 use crate::fit::runner::{self, FitRunConfig};
-use crate::fit::scout::now_iso8601_pub;
+use crate::cas::iso8601_utc;
 use rayon::prelude::*;
 use sim::inference::{
     if2::EstimatedParam,
@@ -480,7 +480,7 @@ pub fn run_pmmh_cli(
     let state = FitState {
         stage: "pmmh".into(),
         seed,
-        timestamp: now_iso8601_pub(),
+        timestamp: iso8601_utc(std::time::SystemTime::now()),
         input_hash: None,
         camdl_version: Some(crate::version::VERSION_SHORT.into()),
         best_loglik: map_result.map_loglik,

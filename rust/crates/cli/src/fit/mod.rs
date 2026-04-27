@@ -9,17 +9,10 @@
 //!   camdl fit status   fit.toml
 
 pub mod config;
-#[allow(dead_code)]
 pub mod config_v2;
 pub mod state;
 pub mod provenance;
 pub mod runner;
-#[allow(dead_code)]
-pub mod scout;
-#[allow(dead_code)]
-pub mod refine;
-#[allow(dead_code)]
-pub mod validate;
 pub mod status;
 pub mod summary;
 pub mod fit_summary;
@@ -792,7 +785,7 @@ pub fn cmd_fit_run_v2(a: &crate::args::FitRunArgs) {
                 let fit_state = state::FitState {
                     stage: stage_name.to_string(),
                     seed,
-                    timestamp: scout::now_iso8601_pub(),
+                    timestamp: crate::cas::iso8601_utc(std::time::SystemTime::now()),
                     input_hash: None,
                     camdl_version: Some(crate::version::VERSION_SHORT.into()),
                     best_loglik: chain_results.best_loglik,
@@ -1127,7 +1120,7 @@ pub fn cmd_fit_run_v2(a: &crate::args::FitRunArgs) {
         let stage_run = crate::run_meta::Run {
             hash: config_hash.clone(),
             version: crate::version::VERSION_SHORT.to_string(),
-            created_at: scout::now_iso8601_pub(),
+            created_at: crate::cas::iso8601_utc(std::time::SystemTime::now()),
             argv: std::env::args().collect(),
             wall_time_seconds: stage_elapsed.as_secs_f64(),
             kind: crate::run_meta::RunKind::FitStage(crate::run_meta::FitStageMeta {
@@ -1252,42 +1245,6 @@ pub fn cmd_fit_run_v2(a: &crate::args::FitRunArgs) {
     }
 }
 
-// ─── camdl fit diff ─────────────────────────────────────────────────────────
-
-/// Reshape a v1 FitToml so its `output_dir` points at the unified-tree
-/// cell directory (`<output_root>/fits/<stem>-<hash>/real/fit_<seed>/`).
-/// v1 stage writers (scout/refine/validate/pmmh/pgas) all use
-/// `fit.fit.output_dir` as "the directory under which my stage dir
-/// lives" — by overwriting it here we land them in the same shape as
-/// v2 without touching the stage-writer internals. Also writes (once)
-/// the top-level Run::Fit at the fit root so `camdl list` can surface
-/// the fit even before the first stage completes.
-#[allow(dead_code)] // v1 helper; the cmd_fit_scout/refine/... entry points that used it were removed 2026-04-20. Retained in case a fit-bridge path re-uses it.
-fn prepare_v1_cell(fit: &FitToml, fit_path: &str, seed: u64) -> (FitToml, std::path::PathBuf) {
-    let cell = fit.cell_dir(fit_path, seed).unwrap_or_else(|e| {
-        eprintln!("error: {}", e);
-        std::process::exit(1);
-    });
-    let fit_root = fit.fit_root(fit_path).unwrap_or_else(|e| {
-        eprintln!("error: {}", e);
-        std::process::exit(1);
-    });
-    if let Err(e) = std::fs::create_dir_all(&cell) {
-        eprintln!("error: cannot create {}: {}", cell.display(), e);
-        std::process::exit(1);
-    }
-    // Write the top-level Run::Fit if absent. Stage re-runs skip this.
-    if !fit_root.join("run.json").exists() {
-        let run_fit = build_v1_fit_run(fit, fit_path);
-        if let Err(e) = run_fit.write(&fit_root) {
-            eprintln!("warning: cannot write {}/run.json: {}", fit_root.display(), e);
-        }
-    }
-    let mut reshaped = fit.clone();
-    reshaped.fit.output_dir = cell.to_string_lossy().to_string();
-    (reshaped, fit_root)
-}
-
 /// Read an IR JSON string from a model path, compiling .camdl → IR on
 /// the fly. Returns "" on any read/compile failure (callers then skip
 /// hashing, matching the pre-existing `unwrap_or_default` semantics).
@@ -1298,152 +1255,6 @@ fn read_ir_json_or_empty(model_path: &str) -> String {
         crate::util::run_camdlc(model_path).unwrap_or_default()
     } else {
         std::fs::read_to_string(model_path).unwrap_or_default()
-    }
-}
-
-/// Build a Run::Fit record from a v1 FitToml. Analogous to
-/// `build_fit_run` for v2; emits the same schema so `camdl list`
-/// treats v1 fits identically.
-#[allow(dead_code)]
-fn build_v1_fit_run(fit: &FitToml, fit_path: &str) -> crate::run_meta::Run {
-    let fit_hash = fit.fit_content_hash(fit_path).unwrap_or_else(|e| {
-        eprintln!("error: {}", e);
-        std::process::exit(1);
-    });
-    let model_ir_json = read_ir_json_or_empty(&fit.fit.model);
-    let model_hash = if model_ir_json.is_empty() {
-        String::new()
-    } else {
-        crate::hashing::model_hash(&model_ir_json)
-    };
-    let fit_toml_bytes = std::fs::read(fit_path).unwrap_or_default();
-    let fit_toml_hash = crate::hashing::sha256_hex(&fit_toml_bytes);
-    let data_hashes: std::collections::HashMap<String, String> = fit.data.iter()
-        .filter_map(|(name, path)|
-            crate::hashing::file_hash(path).map(|h| (name.clone(), h)))
-        .collect();
-    let estimated: Vec<String> = fit.estimate.keys().cloned().collect();
-    let fixed: std::collections::HashMap<String, f64> = fit.fixed.iter()
-        .filter_map(|(k, v)| v.as_float().or_else(|| v.as_integer().map(|i| i as f64))
-            .map(|f| (k.clone(), f)))
-        .collect();
-    // v1 declares stages implicitly via [scout]/[refine]/[validate]/
-    // [pmmh]/[pgas] tables; the list reflects which are present in
-    // declaration order (not execution order — v1 has no chained
-    // stage graph).
-    let mut stages_declared: Vec<String> = Vec::new();
-    if fit.scout.is_some()    { stages_declared.push("scout".into()); }
-    if fit.refine.is_some()   { stages_declared.push("refine".into()); }
-    if fit.validate.is_some() { stages_declared.push("validate".into()); }
-    if fit.pmmh.is_some()     { stages_declared.push("pmmh".into()); }
-    if fit.pgas.is_some()     { stages_declared.push("pgas".into()); }
-    crate::run_meta::Run {
-        hash: fit_hash,
-        version: crate::version::VERSION_SHORT.to_string(),
-        created_at: crate::cas::iso8601_utc(std::time::SystemTime::now()),
-        argv: std::env::args().collect(),
-        wall_time_seconds: 0.0,
-        kind: crate::run_meta::RunKind::Fit(crate::run_meta::FitMeta {
-            model: fit.fit.model.clone(),
-            model_hash,
-            fit_toml_path: fit_path.to_string(),
-            fit_toml_hash,
-            data_hashes,
-            estimated,
-            fixed,
-            stages_declared,
-            ic_free: fit.fit.ic_free,
-        }),
-    }
-}
-
-/// After a v1 stage writer (scout / refine / …) has completed, write
-/// the unified-schema Run::FitStage `run.json` at the stage dir.
-/// Idempotent: re-running overwrites with fresh timing + hash.
-#[allow(dead_code)]
-fn write_v1_stage_run(
-    stage_dir: &std::path::Path,
-    fit_hash: &str,
-    stage: &str,
-    method: &str,
-    seed: u64,
-    n_chains: usize,
-    algorithm: serde_json::Value,
-    best_loglik: Option<f64>,
-    best_chain: Option<usize>,
-    wall_time_seconds: f64,
-    starts_from: Option<&str>,
-) {
-    // stage_hash for v1 is a modest content hash over the stage's
-    // filesystem output. v1 doesn't have v2's full stage-input hash
-    // because its stage config (StageConfig etc.) isn't versioned
-    // with the same discipline; hashing the actual output is the
-    // honest alternative.
-    let stage_hash = crate::hashing::file_hash(
-        &stage_dir.join("fit_state.toml").to_string_lossy())
-        .unwrap_or_default();
-    let starts_from_ref = starts_from.map(|dir_path| {
-        let p = std::path::Path::new(dir_path);
-        let stage_name = p.file_name()
-            .and_then(|s| s.to_str()).unwrap_or("unknown").to_string();
-        let stage_hash = match crate::run_meta::Run::read(p) {
-            Ok(r) => Some(r.hash),
-            Err(e) => {
-                eprintln!("warning: starts_from = {} has no readable \
-                          run.json ({}); provenance chain will record \
-                          stage_hash: null", dir_path, e);
-                None
-            }
-        };
-        crate::run_meta::StartsFromRef { stage: stage_name, stage_hash }
-    });
-    // Hash scope: (stage name + seed + stage output hash). Enough
-    // for cache-staleness detection; not pretending to be a full
-    // input-closure hash like v2's fit_stage_hash.
-    let run_hash = {
-        use sha2::{Sha256, Digest};
-        let mut h = Sha256::new();
-        h.update(stage.as_bytes()); h.update(b"\x00");
-        h.update(seed.to_le_bytes());
-        h.update(stage_hash.as_bytes());
-        hex::encode(h.finalize())
-    };
-    let run = crate::run_meta::Run {
-        hash: run_hash,
-        version: crate::version::VERSION_SHORT.to_string(),
-        created_at: crate::cas::iso8601_utc(std::time::SystemTime::now()),
-        argv: std::env::args().collect(),
-        wall_time_seconds,
-        kind: crate::run_meta::RunKind::FitStage(crate::run_meta::FitStageMeta {
-            fit_hash: fit_hash.to_string(),
-            stage: stage.to_string(),
-            method: method.to_string(),
-            seed,
-            n_chains,
-            algorithm,
-            best_loglik,
-            best_chain,
-            starts_from: starts_from_ref,
-            derived_from: None,
-            parent_profile_hash: None,
-            profile_point_idx: None,
-            profile_start_idx: None,
-        }),
-    };
-    if let Err(e) = run.write(stage_dir) {
-        eprintln!("warning: cannot write {}/run.json: {}", stage_dir.display(), e);
-    }
-}
-
-/// Read `best_loglik` and `best_chain` from a v1 stage's
-/// `fit_state.toml`. Returns `(None, None)` when unavailable (e.g.
-/// the stage didn't produce fit_state).
-#[allow(dead_code)]
-fn read_v1_stage_best(stage_dir: &std::path::Path) -> (Option<f64>, Option<usize>) {
-    use crate::fit::state::FitState;
-    match FitState::load(&stage_dir.to_string_lossy()) {
-        Ok(s) => (Some(s.best_loglik), Some(s.best_chain)),
-        Err(_) => (None, None),
     }
 }
 
@@ -1739,59 +1550,6 @@ pub fn cmd_fit_new(a: &crate::args::FitNewArgs) {
 }
 
 #[allow(dead_code)]
-fn parse_fit_args(args: &[String], _needs_starts_from: bool) -> (FitToml, String, u64, bool) {
-    let mut fit_path: Option<String> = None;
-    let mut seed = 1_u64;
-    let mut force = false;
-    let mut i = 0;
-
-    while i < args.len() {
-        match args[i].as_str() {
-            "--seed" => { i += 1; seed = args[i].parse().expect("--seed needs integer"); }
-            "--force" => { force = true; }
-            "--starts-from" => { i += 1; } // consumed by parse_starts_from / parse_optional_starts_from
-            "--check-variance" => {} // consumed by cmd_fit_pmmh
-            "--no-nuts" => {} // consumed by cmd_fit_pgas
-            "--diagonal-mass" => {} // consumed by cmd_fit_pgas
-            "--resume" => {} // consumed by cmd_fit_pgas / cmd_fit_pmmh
-            s if s.starts_with("--") => {
-                eprintln!("unknown flag: {}", s);
-                std::process::exit(1);
-            }
-            path => { fit_path = Some(path.to_string()); }
-        }
-        i += 1;
-    }
-
-    let fit_path = fit_path.unwrap_or_else(|| {
-        eprintln!("usage: camdl fit <scout|refine|validate|pmmh|pgas|status> FIT.toml");
-        std::process::exit(1);
-    });
-
-    let fit = FitToml::load(&fit_path).unwrap_or_else(|e| {
-        eprintln!("error: {}", e);
-        std::process::exit(1);
-    });
-
-    // Seed priority: CLI --seed > fit.toml seed > random from entropy.
-    // Im19 in 2026-04-19 inference review batch 3: previously the
-    // fallback was `dur.as_nanos() % 1_000_000` — only 20 bits of
-    // entropy. Birthday bound: ~1000 concurrent runs → 50% seed
-    // collision. Use the full u64 from nanosecond entropy instead.
-    let seed = if args.iter().any(|a| a == "--seed") {
-        seed
-    } else if let Some(s) = fit.fit.seed {
-        s
-    } else {
-        use std::time::SystemTime;
-        let dur = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap();
-        dur.as_nanos() as u64
-    };
-
-    (fit, fit_path, seed, force)
-}
-
-#[allow(dead_code)]
 /// Accept either a directory path or a git-style short hash for
 /// `--starts-from`. The heuristic: contains `/` or `\\` → path
 /// (today's behavior); else → resolve as Run.hash prefix via
@@ -1818,40 +1576,3 @@ fn resolve_starts_from_arg(raw: &str) -> String {
     }
 }
 
-#[allow(dead_code)]
-fn parse_optional_starts_from(args: &[String]) -> Option<String> {
-    for (i, arg) in args.iter().enumerate() {
-        if arg == "--starts-from" {
-            let raw = args.get(i + 1).cloned().unwrap_or_else(|| {
-                eprintln!("--starts-from requires a path or short hash");
-                std::process::exit(1);
-            });
-            return Some(resolve_starts_from_arg(&raw));
-        }
-    }
-    None
-}
-
-#[allow(dead_code)]
-fn parse_starts_from(args: &[String]) -> String {
-    for (i, arg) in args.iter().enumerate() {
-        if arg == "--starts-from" {
-            let raw = args.get(i + 1).cloned().unwrap_or_else(|| {
-                eprintln!("--starts-from requires a path or short hash");
-                std::process::exit(1);
-            });
-            return resolve_starts_from_arg(&raw);
-        }
-    }
-    eprintln!("error: --starts-from required for refine/validate");
-    eprintln!("  usage: camdl fit refine fit.toml --starts-from <path or short-hash>");
-    std::process::exit(1);
-}
-
-#[allow(dead_code)]
-fn load_model_for_validation(fit: &FitToml) -> (ir::Model, String) {
-    crate::util::load_model(&fit.fit.model).unwrap_or_else(|e| {
-        eprintln!("error: {}", e);
-        std::process::exit(1);
-    })
-}

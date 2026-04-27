@@ -7,7 +7,7 @@
 use crate::fit::config::FitToml;
 use crate::fit::state::FitState;
 use crate::fit::runner::FitRunConfig;
-use crate::fit::scout::now_iso8601_pub;
+use crate::cas::iso8601_utc;
 use sim::inference::{
     if2::EstimatedParam,
     pmmh::Prior,
@@ -461,7 +461,7 @@ pub fn run_pgas_cli(
     let state = FitState {
         stage: "pgas".into(),
         seed,
-        timestamp: now_iso8601_pub(),
+        timestamp: iso8601_utc(std::time::SystemTime::now()),
         input_hash: None,
         camdl_version: Some(crate::version::VERSION_SHORT.into()),
         best_loglik: best_sweep.log_complete_data_ll,

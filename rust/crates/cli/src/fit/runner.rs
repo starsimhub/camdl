@@ -745,11 +745,6 @@ fn run_one_chain(
     result
 }
 
-/// Run N chains with a diagnostic collector.
-pub fn run_chains_with_diagnostics(config: &FitRunConfig, collector: &DiagnosticCollector) -> ChainResults {
-    run_chains_with_per_chain_params(config, None, collector)
-}
-
 /// Run N chains with optional per-chain EstimatedParam overrides (for scout random starts).
 pub fn run_chains_with_per_chain_params(
     config: &FitRunConfig,
@@ -1488,20 +1483,6 @@ pub fn write_diagnostics(dir: &str, results: &[(usize, IF2Result)]) -> Result<()
         }
     }
     Ok(())
-}
-
-/// Compute input hash for provenance (shared by refine and validate).
-pub fn compute_fit_input_hash(fit: &FitToml, config: &FitRunConfig, seed: u64) -> String {
-    let fit_toml_bytes = toml::to_string(fit).unwrap_or_default().into_bytes();
-    let mut data_files: Vec<(String, Vec<u8>)> = fit.data.iter().map(|(name, path)| {
-        (name.clone(), std::fs::read(path).unwrap_or_default())
-    }).collect();
-    crate::hashing::fit_input_hash(
-        config.model_ir_json.as_bytes(),
-        &mut data_files,
-        &fit_toml_bytes,
-        seed,
-    )
 }
 
 /// Collect ALL parameter values (estimated + fixed) for MLE output.

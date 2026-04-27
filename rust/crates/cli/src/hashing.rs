@@ -214,48 +214,6 @@ pub fn fit_content_hash(
     hex::encode(h.finalize())
 }
 
-/// Fit-level input hash: `(model IR bytes, data files, fit.toml bytes,
-/// seed, version)` → full 64-char hex. Identifies the whole fit as a
-/// computation; written into `fit_state.toml.input_hash`. A change to
-/// any of (model, data, fit.toml, seed, camdl version) invalidates
-/// the cache.
-///
-/// Operates on raw byte slices (caller reads the files), matching the
-/// v1 `FitToml` world where fit.toml is hashed whole. The v2
-/// `FitConfigV2` world uses [`fit_stage_hash`] below, which
-/// decomposes the config into structured fields.
-///
-/// Was `fit::provenance::compute_input_hash` before the 2026-04-19
-/// unification.
-pub fn fit_input_hash(
-    model_ir_bytes: &[u8],
-    data_files: &mut [(String, Vec<u8>)],
-    fit_toml_bytes: &[u8],
-    seed: u64,
-) -> String {
-    let mut h = Sha256::new();
-    h.update(b"model\x00");
-    h.update(model_ir_bytes);
-    h.update(b"\x00data\x00");
-    data_files.sort_by(|a, b| a.0.cmp(&b.0));
-    for (name, bytes) in data_files.iter() {
-        h.update(name.as_bytes());
-        h.update(b"\x00");
-        h.update(bytes);
-        h.update(b"\x00");
-    }
-    h.update(b"fit\x00");
-    h.update(canonicalise_toml(fit_toml_bytes));
-    h.update(b"\x00seed\x00");
-    h.update(seed.to_le_bytes());
-    h.update(b"\x00version\x00");
-    h.update(version::VERSION_SHORT.as_bytes());
-    // Full 64-char hex, symmetric with fit_content_hash. v1
-    // fit_state.toml readers consume the hash as opaque string —
-    // no structural dependence on the 8-char width.
-    hex::encode(h.finalize())
-}
-
 /// Extract a directory-safe stem from a file path: basename without
 /// extension(s), slugified. Used to label fit / sim output
 /// directories so `ls output/fits/` shows recognisable names alongside
@@ -586,51 +544,4 @@ mod tests {
         assert!(file_hash("/does/not/exist/at/all").is_none());
     }
 
-    #[test]
-    fn fit_input_hash_deterministic() {
-        let model = b"ir:{}";
-        let mut data = vec![("cases".to_string(), b"t\ty\n1\t2\n".to_vec())];
-        let fit = b"[fit]\nmodel = \"x\"";
-        let h1 = fit_input_hash(model, &mut data.clone(), fit, 42);
-        let h2 = fit_input_hash(model, &mut data, fit, 42);
-        assert_eq!(h1, h2, "same inputs → same hash");
-        assert_eq!(h1.len(), 64,
-            "fit_input_hash returns full 64-char hex (widened in hardening \
-             ship-now #1; was 8 pre-hardening)");
-    }
-
-    #[test]
-    fn fit_input_hash_sensitivity() {
-        let model = b"ir:{}";
-        let data = vec![("cases".to_string(), b"a".to_vec())];
-        let fit = b"[fit]";
-        let base = fit_input_hash(model, &mut data.clone(), fit, 1);
-        // Change each input independently; hash must differ every time.
-        let diff_model = fit_input_hash(b"ir:{changed}", &mut data.clone(), fit, 1);
-        let diff_data  = fit_input_hash(model, &mut [("cases".into(), b"b".to_vec())], fit, 1);
-        let diff_fit   = fit_input_hash(model, &mut data.clone(), b"[fit]\nseed=1", 1);
-        let diff_seed  = fit_input_hash(model, &mut data.clone(), fit, 2);
-        assert_ne!(base, diff_model, "model change must invalidate");
-        assert_ne!(base, diff_data,  "data change must invalidate");
-        assert_ne!(base, diff_fit,   "fit.toml change must invalidate");
-        assert_ne!(base, diff_seed,  "seed change must invalidate");
-    }
-
-    #[test]
-    fn fit_input_hash_data_order_invariant() {
-        // Multi-stream fits can register streams in any order; hash must
-        // not depend on that. Regression guard on the sort-before-hash.
-        let model = b"ir";
-        let mut order_a = vec![
-            ("a".to_string(), b"1".to_vec()),
-            ("b".to_string(), b"2".to_vec()),
-        ];
-        let mut order_b = vec![
-            ("b".to_string(), b"2".to_vec()),
-            ("a".to_string(), b"1".to_vec()),
-        ];
-        let h_a = fit_input_hash(model, &mut order_a, b"", 1);
-        let h_b = fit_input_hash(model, &mut order_b, b"", 1);
-        assert_eq!(h_a, h_b, "stream order must not affect hash");
-    }
 }

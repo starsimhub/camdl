@@ -186,11 +186,6 @@ impl SyntheticSpec {
         Ok(())
     }
 
-    /// The effective dataset count, after applying the "omit → infer from
-    /// sim_seeds" rule.
-    pub fn effective_datasets(&self) -> usize {
-        self.datasets.unwrap_or_else(|| self.sim_seeds.to_vec().len())
-    }
 }
 
 /// Simulation-seeds spec: an explicit list or a range string (`"1:20"`).
@@ -577,10 +572,6 @@ pub enum StartsFrom {
 }
 
 
-impl StartsFrom {
-    pub fn is_random(&self) -> bool { matches!(self, StartsFrom::Random) }
-}
-
 impl<'de> serde::Deserialize<'de> for StartsFrom {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where D: serde::Deserializer<'de> {
@@ -802,11 +793,6 @@ impl FitConfigV2 {
         let output_root = crate::run_paths::output_root(
             None, self.output_dir.as_deref());
         Ok(crate::run_paths::fit_run_dir(&output_root, stem.as_deref(), &hash))
-    }
-
-    /// Output directory for a specific stage.
-    pub fn stage_dir(&self, config_path: &str, stage_name: &str) -> Result<PathBuf, String> {
-        Ok(self.fit_dir(config_path)?.join(stage_name))
     }
 
     /// The per-fit subdirectory under `fit_dir()` — always
@@ -1733,7 +1719,7 @@ iterations = 50
 cooling = 0.70
         "#).unwrap();
 
-        assert!(config.stages["mle"].starts_from().is_random());
+        assert!(matches!(config.stages["mle"].starts_from(), StartsFrom::Random));
     }
 
     #[test]
@@ -1842,7 +1828,7 @@ sim_seeds   = "1:20"
         let config = parse(&src).unwrap();
         let syn = config.synthetic.as_ref().expect("[synthetic] missing");
         assert_eq!(syn.true_params, "truth.toml");
-        assert_eq!(syn.effective_datasets(), 20);
+        assert_eq!(syn.datasets.unwrap_or_else(|| syn.sim_seeds.to_vec().len()), 20);
         assert!(syn.scenario.is_none());
     }
 
@@ -1856,7 +1842,7 @@ sim_seeds   = [7, 42, 101]
         let config = parse(&src).unwrap();
         let syn = config.synthetic.unwrap();
         assert!(syn.datasets.is_none(), "datasets should be inferred, not set");
-        assert_eq!(syn.effective_datasets(), 3);
+        assert_eq!(syn.sim_seeds.to_vec().len(), 3);
         syn.validate().expect("inferred count must validate");
     }
 
