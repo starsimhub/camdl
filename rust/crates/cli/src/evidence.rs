@@ -56,29 +56,6 @@
 /// Nats → decibans: 1 nat ≈ 4.342944819 dB.
 pub const NATS_TO_DB: f64 = 10.0 / std::f64::consts::LN_10;
 
-/// Numerically-stable `log(mean(exp(xs)))` = `logsumexp(xs) - ln(len)`.
-///
-/// Used to combine M replicate particle-filter log-likelihood estimates
-/// into a single unbiased (on the likelihood scale) summary. The raw PF
-/// log-lik estimator is *downward*-biased by `Var(ℓ)/2` on the log
-/// scale even though `exp(ℓ)` is unbiased; combining on the likelihood
-/// scale via `log(mean(exp(ℓ_k)))` recovers the unbiased combined
-/// estimate. See proposal 2026-04-24-if2-scout-findings-remediation.md
-/// §Proposal 1.
-///
-/// Returns `NEG_INFINITY` on empty input; `NaN` propagates through.
-pub fn logmeanexp(xs: &[f64]) -> f64 {
-    if xs.is_empty() {
-        return f64::NEG_INFINITY;
-    }
-    let m = xs.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
-    if !m.is_finite() {
-        return m;
-    }
-    let sum_exp: f64 = xs.iter().map(|&x| (x - m).exp()).sum();
-    m + (sum_exp / xs.len() as f64).ln()
-}
-
 /// Sample standard deviation (N-1 denominator). Returns 0.0 for len<2.
 pub fn sample_sd(xs: &[f64]) -> f64 {
     if xs.len() < 2 {
@@ -227,43 +204,6 @@ mod tests {
     }
 
     #[test]
-    fn logmeanexp_constant_is_identity() {
-        // mean of identical values equals the value itself.
-        assert!((logmeanexp(&[0.0, 0.0, 0.0]) - 0.0).abs() < 1e-12);
-        assert!((logmeanexp(&[-7.3, -7.3, -7.3, -7.3]) - (-7.3)).abs() < 1e-12);
-    }
-
-    #[test]
-    fn logmeanexp_is_numerically_stable() {
-        // Naive exp of -1e6 underflows to 0; stable form must not.
-        // log((e^-1e6 + e^0)/2) = log(1/2) ≈ -0.6931 (the -1e6 term is
-        // negligible). Naive implementation would return -inf or NaN.
-        let got = logmeanexp(&[-1e6, 0.0]);
-        assert!((got - (-(2.0f64).ln())).abs() < 1e-9, "got {}", got);
-    }
-
-    #[test]
-    fn logmeanexp_matches_pf_bias_example() {
-        // Two PF reps ℓ_1 = -100, ℓ_2 = -98. logmeanexp > mean because
-        // the likelihoods combine on the likelihood scale:
-        // log((e^-100 + e^-98)/2) = -98 + log((e^-2 + 1)/2)
-        let xs = [-100.0, -98.0];
-        let lme = logmeanexp(&xs);
-        let arith = (xs[0] + xs[1]) / 2.0;
-        assert!(lme > arith, "logmeanexp {} should exceed arithmetic mean {}", lme, arith);
-        // Analytic value: -98 + ln((1 + e^-2) / 2) ≈ -98.566
-        let expected = -98.0 + ((1.0 + (-2f64).exp()) / 2.0).ln();
-        assert!((lme - expected).abs() < 1e-9, "got {}, expected {}", lme, expected);
-    }
-
-    #[test]
-    fn logmeanexp_edge_cases() {
-        assert_eq!(logmeanexp(&[]), f64::NEG_INFINITY);
-        assert_eq!(logmeanexp(&[f64::NEG_INFINITY]), f64::NEG_INFINITY);
-        assert!(logmeanexp(&[f64::NAN, 0.0]).is_nan());
-    }
-
-    #[test]
     fn sample_sd_basic() {
         assert_eq!(sample_sd(&[]), 0.0);
         assert_eq!(sample_sd(&[5.0]), 0.0);
@@ -281,12 +221,25 @@ mod tests {
     }
 
     #[test]
-    fn logmeanexp_with_se_value_matches_logmeanexp() {
-        // The point estimate must agree with `logmeanexp` for any input.
-        let xs = [-100.0, -98.0, -99.5];
+    fn logmeanexp_with_se_is_numerically_stable() {
+        // Naive exp of -1e6 underflows to 0; stable form must not.
+        // log((e^-1e6 + e^0)/2) = log(1/2) ≈ -0.6931 (the -1e6 term
+        // is negligible). Naive implementation would return -inf.
+        let (val, _) = logmeanexp_with_se(&[-1e6, 0.0]);
+        assert!((val - (-(2.0f64).ln())).abs() < 1e-9, "got {}", val);
+    }
+
+    #[test]
+    fn logmeanexp_with_se_matches_pf_bias_example() {
+        // Two PF reps ℓ = [-100, -98]. logmeanexp > arithmetic mean
+        // (Jensen): log((e^-100 + e^-98)/2) = -98 + log((e^-2+1)/2).
+        let xs = [-100.0, -98.0];
         let (val, _) = logmeanexp_with_se(&xs);
-        let direct = logmeanexp(&xs);
-        assert!((val - direct).abs() < 1e-12);
+        let arith = (xs[0] + xs[1]) / 2.0;
+        assert!(val > arith,
+            "logmeanexp {} should exceed arithmetic mean {}", val, arith);
+        let expected = -98.0 + ((1.0 + (-2f64).exp()) / 2.0).ln();
+        assert!((val - expected).abs() < 1e-9, "got {}, expected {}", val, expected);
     }
 
     #[test]

@@ -1,60 +1,59 @@
-//! Clean-evaluation re-scoring of IF2 candidate parameter points.
+//! Clean re-evaluation of IF2 final-iteration parameter means.
 //!
-//! Closes the ~40-nat extraction bias from argmax-selecting over noisy
-//! 500-particle in-run PF evaluations. After IF2 finishes, each chain
-//! contributes three candidate parameter points (final iteration mean,
-//! tail mean, best-in-run iteration), and each candidate is re-scored
-//! with M independent high-particle PF replicates combined via
-//! `logmeanexp`. The argmax over the combined scores names the winner.
+//! After IF2 finishes, each chain's final-iteration parameter means —
+//! the IF2 estimator coef(mif2_out) in pomp's terminology — is
+//! re-scored with `M` independent high-particle particle-filter
+//! replicates and combined via logmeanexp on the likelihood scale.
+//! The delta-method standard error of the combined estimator is
+//! reported alongside.
 //!
-//! See proposal §Proposal 1
-//! (`docs/dev/proposals/2026-04-24-if2-scout-findings-remediation.md`)
-//! and the Unit A handoff
-//! (`docs/dev/notes/2026-04-24-if2-unit-a-handoff.md`).
+//! This matches pomp's documented post-mif2 workflow (King, Ionides
+//! & Bretó; Ionides, Nguyen, Atchadé, Stoev & King 2015 PNAS,
+//! supplementary materials; pomp manual on `logmeanexp` and
+//! `pfilter`). The point estimate is the IF2 final-iteration mean;
+//! the loglik is reported by re-evaluating with high-particle clean
+//! PF replicates rather than reusing the noisy in-run PF logliks
+//! that drove the IF2 perturbation.
 //!
-//! This module is intentionally split into two layers:
+//! Why this is needed (and what it replaces). The IF2 algorithm
+//! uses few-particle in-run PFs (~500 particles) as its weighting
+//! target. Reporting the iteration-argmax of those noisy in-run
+//! logliks as "the MLE loglik" is selection-biased — argmax over a
+//! sample of noisy estimates is upward-biased relative to the
+//! population mean. Re-scoring at the final-iteration mean with
+//! high-particle replicates removes that bias while keeping the
+//! IF2 algorithm's theoretical anchor (Ionides et al. 2015 prove
+//! convergence to the MLE in the final-iter mean).
 //!
-//! - `build_candidates` is pure over `IF2Result` and trivially testable.
-//! - `run_clean_eval_with_scorer` is generic over the scoring closure so
-//!   tests can inject a deterministic synthetic scorer instead of paying
-//!   for real particle-filter calls. `run_clean_eval` is the production
-//!   entry point that wires in `runner::run_quick_pfilter`.
+//! Module split (kept from earlier design):
+//! - `run_clean_eval_with_scorer` is generic over the scorer
+//!   closure so tests can inject a deterministic synthetic scorer
+//!   without paying for real PF calls.
+//! - `run_clean_eval` is the production entry point that wires in
+//!   `runner::run_quick_pfilter_full`.
+//!
+//! See `docs/dev/notes/2026-04-27-clean-eval-strip.md` for the
+//! rationale behind stripping the prior 3-candidate construction
+//! (uncited; introduced selection bias on top of the bias it was
+//! meant to fix). The earlier proposal at
+//! `docs/dev/proposals/2026-04-24-if2-scout-findings-remediation.md`
+//! is preserved as the original design record but no longer
+//! reflects the implementation.
 
 use crate::evidence;
 use crate::fit::config_v2::{CleanEvalConfig, CombineMode};
 use crate::fit::runner::{self, FitRunConfig};
 use sim::inference::if2::IF2Result;
 
-/// Which heuristic produced a candidate parameter vector.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CandidateLabel {
-    /// `iterations.last().param_means` — the IF2 final-iteration mean.
-    FinalIter,
-    /// Mean of `param_means` over the last K iterations (K clamped to
-    /// `iterations.len()`). Smooths over per-iteration cooling jitter.
-    TailMeanLastK,
-    /// `param_means` at the iteration with the largest finite in-run
-    /// `loglik`. Falls back to the largest finite `if2_perturbed_loglik`
-    /// if no clean PF was run, then to `FinalIter` as a last resort.
-    BestInRunIter,
-}
-
-impl CandidateLabel {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            CandidateLabel::FinalIter      => "final_iter",
-            CandidateLabel::TailMeanLastK  => "tail_mean_last_k",
-            CandidateLabel::BestInRunIter  => "best_in_run_iter",
-        }
-    }
-}
+// ──────────────────────────────────────────────────────────────────────
+// Filter-health summary
+// ──────────────────────────────────────────────────────────────────────
 
 /// Filter-health summary from one PF run. Aggregates `ess_trace`
 /// (per-observation ESS) and `ll_increments` (per-observation
 /// log-likelihood increment) into the four numbers users care about
-/// for "is the filter healthy at this θ?". Phase 2 of the fit-summary
-/// proposal — replaces the previous behaviour where every clean-eval
-/// PF computed ESS as a side-effect of resampling and then dropped it.
+/// for "is the filter healthy at this θ?". Surfaces in
+/// `chain_evaluations.tsv` per chain.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct FilterStats {
     /// Mean ESS across all observation steps. NaN when no observations.
@@ -129,7 +128,7 @@ impl FilterStats {
     /// `FilterStats`. Mean of mean-ESS, min of min-ESS (worst case),
     /// step from the worst replicate's worst step. Sums neg-inf
     /// counts. Used by clean-eval to summarise across the M PF
-    /// replicates per candidate.
+    /// replicates per chain.
     pub fn aggregate(replicates: &[Self]) -> Self {
         if replicates.is_empty() { return Self::failed(); }
         let n = replicates.len() as f64;
@@ -153,109 +152,51 @@ impl FilterStats {
     }
 }
 
-/// One candidate's clean-PF score: combined log-likelihood, SE,
-/// θ̂, and filter-health stats over the M replicate PFs.
+// ──────────────────────────────────────────────────────────────────────
+// Per-chain clean-eval score
+// ──────────────────────────────────────────────────────────────────────
+
+/// One chain's clean-evaluation result. The chain's IF2
+/// final-iteration parameter means are scored with `M` independent
+/// high-particle PF replicates; `loglik` and `se` summarise the
+/// combined estimator across replicates, and `filter_stats`
+/// aggregates filter health across the same replicates.
 #[derive(Debug, Clone)]
-pub struct CandidateScore {
+pub struct ChainScore {
     pub chain_id: usize,
-    pub label: CandidateLabel,
+    /// IF2 final-iteration parameter means — the chain's MLE estimate
+    /// in the IF2 framework (Ionides et al. 2015).
     pub theta: Vec<f64>,
-    /// Combined score across the per-replicate logliks. `logmeanexp`
-    /// by default (unbiased on the likelihood scale); `mean` when
-    /// configured.
-    pub loglik_combined: f64,
-    /// Standard error of the combined score: `sample_sd(per_rep) / √M`.
+    /// Combined log-likelihood across the per-replicate logliks.
+    /// `logmeanexp` by default (unbiased on the likelihood scale,
+    /// matches pomp); `mean` (arithmetic mean of logs) when configured.
+    pub loglik: f64,
+    /// Standard error of the combined estimator. For `LogMeanExp`,
+    /// the delta-method SE on the log scale (`SD(L_i) / (L̄ √M)`,
+    /// matches pomp's `pfilter` reporting). For `Mean`, the standard
+    /// arithmetic-mean SE (`sd(per_rep) / √M`).
     pub se: f64,
     /// Filter-health summary aggregated over the M replicates.
-    /// Surfaced in `chain_evaluations.tsv` per (chain × candidate).
     pub filter_stats: FilterStats,
 }
 
-/// Best candidate within a single chain.
-#[derive(Debug, Clone)]
-pub struct ChainWinner {
-    pub chain_id: usize,
-    pub label: CandidateLabel,
-    pub theta: Vec<f64>,
-    pub loglik: f64,
-    pub se: f64,
-}
-
-/// Full output of clean evaluation: every (chain × candidate) score, a
-/// per-chain winner table, and the index into `per_chain_winners` of the
-/// overall maximum.
+/// Per-chain clean-evaluation results plus an index into `per_chain`
+/// naming the highest-loglik chain. Consumers wanting the overall
+/// winner read `per_chain[overall_winner_idx]`; consumers wanting
+/// per-chain detail (the gate's chain-spread leg) iterate `per_chain`.
 #[derive(Debug, Clone)]
 pub struct CleanEvalOutcome {
-    /// All 3 × n_chains candidate scores, in deterministic order:
-    /// chain-major, label-minor (FinalIter, TailMeanLastK, BestInRunIter).
-    pub all_scores: Vec<CandidateScore>,
-    pub per_chain_winners: Vec<ChainWinner>,
+    pub per_chain: Vec<ChainScore>,
     pub overall_winner_idx: usize,
 }
 
-/// Build the three candidate parameter vectors for one IF2 chain.
-///
-/// Returns the three `(label, theta)` pairs in the canonical order
-/// `[FinalIter, TailMeanLastK, BestInRunIter]`. Errors when
-/// `result.iterations` is empty — IF2 always produces at least one
-/// iteration, so this is a programmer error rather than a recoverable
-/// condition.
-pub fn build_candidates(
-    result: &IF2Result,
-    tail_k: usize,
-) -> Result<[(CandidateLabel, Vec<f64>); 3], String> {
-    if result.iterations.is_empty() {
-        return Err("build_candidates: IF2Result has no iterations".into());
-    }
+// ──────────────────────────────────────────────────────────────────────
+// Production entry point
+// ──────────────────────────────────────────────────────────────────────
 
-    let n_iter = result.iterations.len();
-    let last = result.iterations.last().unwrap();
-    let final_theta = last.param_means.clone();
-
-    // Tail mean: arithmetic mean of param_means over the last K iters.
-    // Clamp K to n_iter so a fresh chain (n_iter < K) just averages over
-    // everything available.
-    let k = tail_k.min(n_iter).max(1);
-    let n_params = last.param_means.len();
-    let mut tail_theta = vec![0.0f64; n_params];
-    for it in result.iterations.iter().rev().take(k) {
-        for (j, v) in it.param_means.iter().enumerate() {
-            tail_theta[j] += *v;
-        }
-    }
-    for v in &mut tail_theta {
-        *v /= k as f64;
-    }
-
-    // Best-in-run iteration: prefer iters with finite clean `loglik`;
-    // fall back to perturbed loglik; final fallback to `FinalIter`.
-    let best_theta = pick_best_in_run(&result.iterations).unwrap_or_else(|| final_theta.clone());
-
-    Ok([
-        (CandidateLabel::FinalIter,     final_theta),
-        (CandidateLabel::TailMeanLastK, tail_theta),
-        (CandidateLabel::BestInRunIter, best_theta),
-    ])
-}
-
-fn pick_best_in_run(iters: &[sim::inference::if2::IF2IterResult]) -> Option<Vec<f64>> {
-    // First pass: argmax over finite `loglik` (clean-PF evaluations).
-    let by_clean = iters.iter()
-        .filter(|it| it.loglik.is_finite())
-        .max_by(|a, b| a.loglik.partial_cmp(&b.loglik).unwrap());
-    if let Some(it) = by_clean {
-        return Some(it.param_means.clone());
-    }
-    // Fallback: perturbed loglik (always populated by IF2 engine).
-    iters.iter()
-        .filter(|it| it.if2_perturbed_loglik.is_finite())
-        .max_by(|a, b| a.if2_perturbed_loglik.partial_cmp(&b.if2_perturbed_loglik).unwrap())
-        .map(|it| it.param_means.clone())
-}
-
-/// Production entry point: clean-evaluate every (chain, candidate)
-/// using `runner::run_quick_pfilter_full` as the scorer (returns
-/// loglik + filter stats so phase 2 surfaces don't lose ESS).
+/// Production entry point: clean-evaluate every chain's IF2
+/// final-iteration mean using `runner::run_quick_pfilter_full` as the
+/// scorer (returns loglik + filter stats so we can surface ESS-at-θ̂).
 pub fn run_clean_eval(
     run_config: &FitRunConfig,
     results: &[(usize, IF2Result)],
@@ -273,10 +214,13 @@ pub fn run_clean_eval(
 }
 
 /// Test-friendly inner core. `scorer(theta, n_particles, seed) ->
-/// (ll, FilterStats)` is called `n_chains × 3 × n_replicates` times.
+/// (ll, FilterStats)` is called `n_chains × n_replicates` times.
 ///
-/// Seed scheme matches the handoff:
-/// `pf_seed = seed + chain_id*10_000 + cand_ix*1000 + rep_k`.
+/// Seed scheme: `pf_seed = seed + chain_id*10_000 + rep_k`. Replicate
+/// counts above ~10_000 would alias into the next chain's seed range;
+/// in practice `n_replicates` is a small constant (default M=8) and
+/// `chain_id` is single-digit, so collisions don't occur. If either
+/// scale changes, revisit the offsets.
 pub fn run_clean_eval_with_scorer<F>(
     results: &[(usize, IF2Result)],
     cfg: &CleanEvalConfig,
@@ -296,82 +240,68 @@ where
         return Err("run_clean_eval: n_particles must be ≥ 1".into());
     }
 
-    // Tail-K = 50 per the handoff. Clamped inside build_candidates.
-    const TAIL_K: usize = 50;
-
-    let mut all_scores: Vec<CandidateScore> = Vec::with_capacity(results.len() * 3);
-    let mut per_chain_winners: Vec<ChainWinner> = Vec::with_capacity(results.len());
+    let mut per_chain: Vec<ChainScore> = Vec::with_capacity(results.len());
 
     for (chain_id, if2) in results.iter() {
-        let cands = build_candidates(if2, TAIL_K)?;
-
-        let mut chain_best: Option<usize> = None; // index into all_scores
-        for (cand_ix, (label, theta)) in cands.iter().enumerate() {
-            let mut per_rep = Vec::with_capacity(cfg.n_replicates);
-            let mut per_rep_stats = Vec::with_capacity(cfg.n_replicates);
-            for k in 0..cfg.n_replicates {
-                let pf_seed = seed
-                    .wrapping_add((*chain_id as u64).wrapping_mul(10_000))
-                    .wrapping_add((cand_ix as u64).wrapping_mul(1000))
-                    .wrapping_add(k as u64);
-                let (ll, stats) = scorer(theta, cfg.n_particles, pf_seed);
-                per_rep.push(ll);
-                per_rep_stats.push(stats);
-            }
-            let combined = combine(&per_rep, cfg.combine);
-            let se = evidence::sample_sd(&per_rep) / (cfg.n_replicates as f64).sqrt();
-            let filter_stats = FilterStats::aggregate(&per_rep_stats);
-
-            let score = CandidateScore {
-                chain_id: *chain_id,
-                label: *label,
-                theta: theta.clone(),
-                loglik_combined: combined,
-                se,
-                filter_stats,
-            };
-
-            let this_idx = all_scores.len();
-            // Winner-of-chain: argmax over combined ll, NaN-safe (NaN
-            // never wins). Ties broken by first-seen (FinalIter wins
-            // over TailMean wins over BestInRun) — matches canonical
-            // candidate order and gives a stable, predictable choice.
-            chain_best = Some(match chain_best {
-                None => this_idx,
-                Some(prev) => {
-                    let prev_ll = all_scores[prev].loglik_combined;
-                    if score.loglik_combined > prev_ll { this_idx } else { prev }
-                }
-            });
-            all_scores.push(score);
+        if if2.iterations.is_empty() {
+            return Err(format!(
+                "run_clean_eval: chain {} has no IF2 iterations", chain_id));
         }
+        // The IF2 estimator: final-iteration parameter means.
+        // Matches pomp's coef(mif2_out).
+        let theta = if2.iterations.last().unwrap().param_means.clone();
 
-        let winner_idx = chain_best.expect("≥1 candidate per chain by construction");
-        let w = &all_scores[winner_idx];
-        per_chain_winners.push(ChainWinner {
-            chain_id: w.chain_id,
-            label: w.label,
-            theta: w.theta.clone(),
-            loglik: w.loglik_combined,
-            se: w.se,
+        let mut per_rep = Vec::with_capacity(cfg.n_replicates);
+        let mut per_rep_stats = Vec::with_capacity(cfg.n_replicates);
+        for k in 0..cfg.n_replicates {
+            let pf_seed = seed
+                .wrapping_add((*chain_id as u64).wrapping_mul(10_000))
+                .wrapping_add(k as u64);
+            let (ll, stats) = scorer(&theta, cfg.n_particles, pf_seed);
+            per_rep.push(ll);
+            per_rep_stats.push(stats);
+        }
+        let (loglik, se) = combine_with_se(&per_rep, cfg.combine);
+        let filter_stats = FilterStats::aggregate(&per_rep_stats);
+
+        per_chain.push(ChainScore {
+            chain_id: *chain_id,
+            theta,
+            loglik,
+            se,
+            filter_stats,
         });
     }
 
-    // Overall winner across chains. Same NaN-safe argmax.
-    let overall_winner_idx = per_chain_winners.iter().enumerate()
-        .fold(0usize, |best, (i, w)| {
-            if w.loglik > per_chain_winners[best].loglik { i } else { best }
-        });
+    // Overall winner: argmax of per-chain logliks. NaN-safe — NaN never
+    // wins; if every chain produced NaN, error explicitly rather than
+    // silently picking index 0.
+    let overall_winner_idx = per_chain.iter().enumerate()
+        .filter(|(_, s)| !s.loglik.is_nan())
+        .fold(None::<usize>, |best, (i, s)| match best {
+            None => Some(i),
+            Some(prev) if s.loglik > per_chain[prev].loglik => Some(i),
+            Some(prev) => Some(prev),
+        })
+        .ok_or_else(|| "run_clean_eval: every chain produced NaN loglik".to_string())?;
 
-    Ok(CleanEvalOutcome { all_scores, per_chain_winners, overall_winner_idx })
+    Ok(CleanEvalOutcome { per_chain, overall_winner_idx })
 }
 
-fn combine(xs: &[f64], mode: CombineMode) -> f64 {
+/// Combine `M` per-replicate logliks into a (combined, SE) pair. The
+/// SE formula matches the combine mode — `logmeanexp_with_se` for
+/// `LogMeanExp`, `sample_sd / √M` for `Mean` — so the reported SE is
+/// always the SE of the reported point estimate.
+fn combine_with_se(xs: &[f64], mode: CombineMode) -> (f64, f64) {
     match mode {
-        CombineMode::LogMeanExp => evidence::logmeanexp(xs),
+        CombineMode::LogMeanExp => evidence::logmeanexp_with_se(xs),
         CombineMode::Mean => {
-            if xs.is_empty() { f64::NEG_INFINITY }
-            else { xs.iter().sum::<f64>() / xs.len() as f64 }
+            if xs.is_empty() {
+                return (f64::NEG_INFINITY, f64::NAN);
+            }
+            let mean = xs.iter().sum::<f64>() / xs.len() as f64;
+            let se = evidence::sample_sd(xs) / (xs.len() as f64).sqrt();
+            (mean, se)
         }
     }
 }
@@ -405,117 +335,76 @@ mod tests {
     }
 
     #[test]
-    fn build_candidates_picks_final_tail_and_best_iter() {
-        // 5 iterations; iter 2 has the highest finite clean loglik.
-        let r = synthetic_result(vec![
-            iter(0, f64::NAN, -100.0, vec![0.0, 0.0]),
-            iter(1, -90.0,    -85.0, vec![1.0, 2.0]),
-            iter(2, -50.0,    -55.0, vec![5.0, 6.0]), // best clean
-            iter(3, -80.0,    -70.0, vec![3.0, 4.0]),
-            iter(4, -75.0,    -65.0, vec![4.0, 5.0]), // final
-        ]);
-        let cands = build_candidates(&r, 3).unwrap();
-
-        assert_eq!(cands[0].0, CandidateLabel::FinalIter);
-        assert_eq!(cands[0].1, vec![4.0, 5.0]);
-
-        assert_eq!(cands[1].0, CandidateLabel::TailMeanLastK);
-        // Mean of last 3 iters' params: (5+3+4)/3, (6+4+5)/3 = 4.0, 5.0.
-        assert!((cands[1].1[0] - 4.0).abs() < 1e-12);
-        assert!((cands[1].1[1] - 5.0).abs() < 1e-12);
-
-        assert_eq!(cands[2].0, CandidateLabel::BestInRunIter);
-        assert_eq!(cands[2].1, vec![5.0, 6.0]);
-    }
-
-    #[test]
-    fn build_candidates_falls_back_to_perturbed_when_clean_loglik_all_nan() {
-        // No clean loglik populated → fall back to perturbed-loglik argmax.
-        let r = synthetic_result(vec![
-            iter(0, f64::NAN, -100.0, vec![0.0]),
-            iter(1, f64::NAN,  -50.0, vec![7.0]), // best perturbed
-            iter(2, f64::NAN,  -75.0, vec![3.0]),
-        ]);
-        let cands = build_candidates(&r, 50).unwrap();
-        assert_eq!(cands[2].0, CandidateLabel::BestInRunIter);
-        assert_eq!(cands[2].1, vec![7.0]);
-    }
-
-    #[test]
-    fn build_candidates_clamps_tail_k_to_iter_count() {
+    fn run_clean_eval_uses_final_iteration_param_means() {
+        // The chain's reported θ̂ must come from iterations.last().
+        // Even if earlier iterations had different param_means, the
+        // final iter is the one re-scored — pomp convention.
         let r = synthetic_result(vec![
             iter(0, -10.0, -10.0, vec![1.0, 2.0]),
+            iter(1, -8.0,  -8.0,  vec![3.0, 4.0]),
+            iter(2, -5.0,  -5.0,  vec![5.0, 6.0]), // final
         ]);
-        let cands = build_candidates(&r, 100).unwrap();
-        // Tail mean over a single iter == that iter's params.
-        assert_eq!(cands[1].1, vec![1.0, 2.0]);
+        let results = vec![(0usize, r)];
+
+        // Scorer just records the theta it was called with.
+        let scorer = |theta: &[f64], _: usize, _: u64| {
+            // Return the sum of theta as the loglik so we can verify.
+            (theta.iter().sum::<f64>(), FilterStats::failed())
+        };
+        let cfg = CleanEvalConfig {
+            n_particles: 1, n_replicates: 1, combine: CombineMode::Mean,
+        };
+        let out = run_clean_eval_with_scorer(&results, &cfg, 0, scorer).unwrap();
+
+        assert_eq!(out.per_chain.len(), 1);
+        assert_eq!(out.per_chain[0].theta, vec![5.0, 6.0],
+            "theta must be iterations.last().param_means");
+        // Sum of [5.0, 6.0] = 11.0, returned by scorer.
+        assert!((out.per_chain[0].loglik - 11.0).abs() < 1e-12);
     }
 
     #[test]
-    fn build_candidates_errors_on_empty_iterations() {
-        let r = synthetic_result(vec![]);
-        assert!(build_candidates(&r, 50).is_err());
-    }
-
-    #[test]
-    fn run_clean_eval_argmax_picks_higher_combined_chain() {
-        // Two chains, identical IF2Result structure but a deterministic
-        // scorer that returns -10.0 for chain-0's thetas and -5.0 for
-        // chain-1's thetas. Expect chain-1 to win regardless of in-run
-        // numbers (which is the whole point of clean eval).
+    fn run_clean_eval_argmax_picks_higher_clean_loglik() {
+        // Two chains, identical IF2Result structure but the
+        // deterministic scorer prefers chain-1's thetas. Clean-eval
+        // picks chain 1 regardless of in-run numbers.
         let mk_chain = |a: f64| synthetic_result(vec![
-            iter(0, f64::NAN, -1000.0, vec![a, a + 1.0]),
-            iter(1, f64::NAN, -1000.0, vec![a + 2.0, a + 3.0]),
+            iter(0, -1000.0, -1000.0, vec![a, a + 1.0]),
         ]);
         let results = vec![
-            (0usize, mk_chain(0.0)),  // thetas around 0
-            (1usize, mk_chain(10.0)), // thetas around 10
+            (0usize, mk_chain(0.0)),  // small thetas
+            (1usize, mk_chain(10.0)), // large thetas
         ];
-
-        // Scorer: -10 for small thetas, -5 for large thetas (no noise).
-        let scorer = |theta: &[f64], _n: usize, _seed: u64| {
+        // Scorer: -10 for small thetas, -5 for large thetas.
+        let scorer = |theta: &[f64], _: usize, _: u64| {
             (if theta[0] < 5.0 { -10.0 } else { -5.0 }, FilterStats::failed())
         };
-
         let cfg = CleanEvalConfig {
-            n_particles: 1,
-            n_replicates: 4,
-            combine: CombineMode::LogMeanExp,
+            n_particles: 1, n_replicates: 4, combine: CombineMode::LogMeanExp,
         };
-
         let out = run_clean_eval_with_scorer(&results, &cfg, 42, scorer).unwrap();
 
-        // 2 chains × 3 candidates each = 6 scores, deterministic order.
-        assert_eq!(out.all_scores.len(), 6);
-        assert_eq!(out.per_chain_winners.len(), 2);
-
-        // Per-chain winners' loglik values reflect the scorer.
-        assert!((out.per_chain_winners[0].loglik - (-10.0)).abs() < 1e-12);
-        assert!((out.per_chain_winners[1].loglik - (-5.0)).abs() < 1e-12);
-
-        // SE is 0 because all replicates returned the same value.
-        for w in &out.per_chain_winners {
-            assert!(w.se.abs() < 1e-12);
+        assert_eq!(out.per_chain.len(), 2);
+        assert!((out.per_chain[0].loglik - (-10.0)).abs() < 1e-12);
+        assert!((out.per_chain[1].loglik - (-5.0)).abs() < 1e-12);
+        assert_eq!(out.overall_winner_idx, 1,
+            "overall winner is the chain with the higher clean loglik");
+        // Constant scorer → no per-rep spread → SE = 0.
+        for s in &out.per_chain {
+            assert!(s.se.abs() < 1e-12, "constant scorer should give SE = 0, got {}", s.se);
         }
-
-        // Overall winner is chain 1.
-        assert_eq!(out.overall_winner_idx, 1);
-        assert_eq!(out.per_chain_winners[out.overall_winner_idx].chain_id, 1);
     }
 
     #[test]
-    fn run_clean_eval_se_reflects_replicate_spread() {
-        // One chain, one candidate vector, scorer returns rep-dependent
-        // values so we can verify SE = sample_sd / √M.
+    fn run_clean_eval_se_for_mean_combine_matches_sd_over_sqrt_m() {
+        // Mean combine: SE = sample_sd / √M. Verify on a known input.
         let r = synthetic_result(vec![iter(0, -5.0, -5.0, vec![1.0])]);
         let results = vec![(7usize, r)];
 
-        // M = 4 replicates; values 1, 2, 3, 4 → sd ≈ 1.2909944487
-        // SE = 1.2909944.../√4 ≈ 0.6454972
-        let scorer = |_t: &[f64], _n: usize, seed: u64| {
-            // seed = 0 + 7*10_000 + cand_ix*1000 + rep_k.
-            // Map rep_k = seed mod 1000 from {0..3} to {1.0..4.0}.
-            let rep_k = (seed % 1000) as f64;
+        // M = 4 replicates; values 1, 2, 3, 4 (mapped from rep_k via
+        // the seed scheme: pf_seed = 0 + 7*10_000 + k → rep_k = seed % 10_000).
+        let scorer = |_t: &[f64], _: usize, seed: u64| {
+            let rep_k = (seed % 10_000) as f64;
             (rep_k + 1.0, FilterStats::failed())
         };
         let cfg = CleanEvalConfig {
@@ -523,15 +412,41 @@ mod tests {
         };
         let out = run_clean_eval_with_scorer(&results, &cfg, 0, scorer).unwrap();
 
-        // All 3 candidates have the same theta (only one iter), so all
-        // get the same per-rep values → same SE.
-        let sum: f64    = 1.0 + 2.0 + 3.0 + 4.0;
-        let sum_sq: f64 = 1.0 + 4.0 + 9.0 + 16.0;
-        let expected_se = ((sum_sq - sum.powi(2) / 4.0) / 3.0).sqrt() / 2.0;
-        for s in &out.all_scores {
-            assert!((s.se - expected_se).abs() < 1e-9,
-                "expected SE ≈ {}, got {}", expected_se, s.se);
-        }
+        // sd of [1, 2, 3, 4] = sqrt(((1+4+9+16) - 100/4) / 3) = sqrt(5/3)·...
+        // sample_sd uses N-1 denom: var = sum((x - mean)^2) / 3 = 1.25·...
+        // Actually let's compute: mean=2.5, sq devs = [2.25, 0.25, 0.25, 2.25]
+        // sum = 5, var = 5/3, sd = sqrt(5/3) ≈ 1.2910.
+        // SE = sd/√M = 1.2910 / 2 ≈ 0.6455.
+        let mean = (1.0 + 2.0 + 3.0 + 4.0) / 4.0;
+        let var = ((1.0_f64 - mean).powi(2) + (2.0_f64 - mean).powi(2)
+                 + (3.0_f64 - mean).powi(2) + (4.0_f64 - mean).powi(2)) / 3.0;
+        let expected_se = var.sqrt() / 2.0;
+        assert!((out.per_chain[0].se - expected_se).abs() < 1e-9,
+            "Mean-combine SE should match sd/√M; expected {}, got {}",
+            expected_se, out.per_chain[0].se);
+    }
+
+    #[test]
+    fn run_clean_eval_se_for_logmeanexp_combine_matches_delta_method() {
+        // LogMeanExp combine: SE = SD(L_i) / (L̄ √M). Matches the
+        // delta-method formula. Synthetic deterministic per-rep
+        // logliks make the answer analytical.
+        let r = synthetic_result(vec![iter(0, -5.0, -5.0, vec![1.0])]);
+        let results = vec![(0usize, r)];
+        // Two replicates: -100 and -98.
+        let scorer = |_t: &[f64], _: usize, seed: u64| {
+            let rep_k = (seed % 10_000) as i64;
+            ([-100.0_f64, -98.0_f64][rep_k as usize], FilterStats::failed())
+        };
+        let cfg = CleanEvalConfig {
+            n_particles: 1, n_replicates: 2, combine: CombineMode::LogMeanExp,
+        };
+        let out = run_clean_eval_with_scorer(&results, &cfg, 0, scorer).unwrap();
+
+        // Verify against evidence::logmeanexp_with_se directly.
+        let (expected_ll, expected_se) = evidence::logmeanexp_with_se(&[-100.0, -98.0]);
+        assert!((out.per_chain[0].loglik - expected_ll).abs() < 1e-9);
+        assert!((out.per_chain[0].se - expected_se).abs() < 1e-9);
     }
 
     #[test]
@@ -539,8 +454,8 @@ mod tests {
         // For non-degenerate replicates, mean(ℓ) < logmeanexp(ℓ).
         let r = synthetic_result(vec![iter(0, -5.0, -5.0, vec![0.0])]);
         let results = vec![(0usize, r)];
-        let scorer = |_t: &[f64], _n: usize, seed: u64| {
-            let rep_k = (seed % 1000) as f64;
+        let scorer = |_t: &[f64], _: usize, seed: u64| {
+            let rep_k = (seed % 10_000) as f64;
             (-10.0 + rep_k, FilterStats::failed())
         };
         let cfg_mean = CleanEvalConfig {
@@ -552,13 +467,35 @@ mod tests {
         let mean_out = run_clean_eval_with_scorer(&results, &cfg_mean, 0, scorer).unwrap();
         let lme_out  = run_clean_eval_with_scorer(&results, &cfg_lme,  0, scorer).unwrap();
         // Same theta selected; the scores differ in the expected direction.
-        assert!(lme_out.per_chain_winners[0].loglik > mean_out.per_chain_winners[0].loglik);
+        assert!(lme_out.per_chain[0].loglik > mean_out.per_chain[0].loglik);
     }
 
-    /// Phase 2: FilterStats::from_pfilter_result aggregates an ESS
-    /// trace + ll-increment series into the four numbers users care
-    /// about. Pure on its inputs, so we can pin the contract without a
-    /// real PF run.
+    #[test]
+    fn run_clean_eval_errors_on_empty_iterations() {
+        let r = synthetic_result(vec![]);
+        let results = vec![(0usize, r)];
+        let scorer = |_: &[f64], _: usize, _: u64| (0.0, FilterStats::failed());
+        let cfg = CleanEvalConfig {
+            n_particles: 1, n_replicates: 1, combine: CombineMode::Mean,
+        };
+        assert!(run_clean_eval_with_scorer(&results, &cfg, 0, scorer).is_err());
+    }
+
+    #[test]
+    fn run_clean_eval_errors_on_all_nan_chains() {
+        // If every chain's combined loglik is NaN, error rather than
+        // silently picking chain 0.
+        let mk = || synthetic_result(vec![iter(0, -5.0, -5.0, vec![1.0])]);
+        let results = vec![(0usize, mk()), (1usize, mk())];
+        let scorer = |_: &[f64], _: usize, _: u64| (f64::NAN, FilterStats::failed());
+        let cfg = CleanEvalConfig {
+            n_particles: 1, n_replicates: 2, combine: CombineMode::Mean,
+        };
+        let result = run_clean_eval_with_scorer(&results, &cfg, 0, scorer);
+        assert!(result.is_err(), "all-NaN chains must error explicitly");
+        assert!(result.unwrap_err().contains("NaN"));
+    }
+
     #[test]
     fn filter_stats_from_pfilter_result_basic() {
         let ess = vec![1000.0, 800.0, 200.0, 400.0, 950.0];
@@ -566,8 +503,7 @@ mod tests {
         let s = FilterStats::from_pfilter_result(&ess, &ll_incr);
         assert!((s.ess_mean - 670.0).abs() < 1e-9, "mean: {}", s.ess_mean);
         assert!((s.ess_min - 200.0).abs() < 1e-9, "min: {}", s.ess_min);
-        assert_eq!(s.ess_min_step, Some(2),
-            "argmin should be index 2 (the 200.0 entry)");
+        assert_eq!(s.ess_min_step, Some(2));
         assert_eq!(s.n_neg_inf_increments, 0);
         assert_eq!(s.neg_inf_first_step, None);
     }
@@ -592,11 +528,9 @@ mod tests {
             n_neg_inf_increments: 2, neg_inf_first_step: Some(7),
         };
         let agg = FilterStats::aggregate(&[r1, r2]);
-        // Worst-case min, summed neg_inf, mean-of-means.
         assert!((agg.ess_mean - 900.0).abs() < 1e-9);
         assert!((agg.ess_min - 100.0).abs() < 1e-9);
-        assert_eq!(agg.ess_min_step, Some(7),
-            "the rep with the worst min wins ess_min_step");
+        assert_eq!(agg.ess_min_step, Some(7));
         assert_eq!(agg.n_neg_inf_increments, 2);
         assert_eq!(agg.neg_inf_first_step, Some(7));
     }
