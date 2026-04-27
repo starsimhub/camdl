@@ -370,8 +370,16 @@ directly verified. This is a known gap; see TODO issue.
 - **Compound scout-convergence gate** (Â + decibans-spread,
   SE-aware floor). Project-specific composition of standard pieces;
   needs its own methods note. TODO `scout-gate.md`.
-- **Clean-eval pipeline** (3-candidate × M-replicate logmeanexp
-  scoring). Project-specific. TODO `clean-eval.md`.
+- **Clean re-evaluation of IF2 final-iter mean.** Post-IF2,
+  `coef(mif2_out)` is re-scored with `M` high-particle PF replicates
+  and combined via `logmeanexp` on the likelihood scale — pomp's
+  documented post-`mif2` workflow (King, Ionides & Bretó 2016 JSS;
+  Ionides et al. 2015 PNAS supplement). The delta-method SE
+  follows the same convention. **Not a separate methodological
+  contribution** — at most a paragraph inside a future `if2.md`.
+  See `docs/dev/notes/2026-04-27-clean-eval-strip.md` for the
+  strip rationale (the prior 3-candidate construction was
+  uncited and bias-on-top-of-bias-fix; stripped 2026-04-27).
 - **NUTS** for θ-updates inside PGAS. TODO `nuts.md`. Hoffman & Gelman
   (2014) JMLR 15:1593.
 
