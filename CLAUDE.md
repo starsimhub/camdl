@@ -283,3 +283,32 @@ This is unreleased software. Do not add backwards-compatibility shims, `alias`
 attributes, fallback deserialization paths, or deprecated field names. When a
 field is renamed, rename it everywhere atomically. When a format changes, update
 all golden files. Clean design beats legacy support.
+
+### Delete dead code on sight
+
+Same principle, enforcement mechanism. Unused functions, unused modules,
+"v1" paths kept around after a "v2" rewrite, prototype code kept around
+"in case we need it" — all delete-on-sight. There is no consumer to
+placate, no migration to stage, no contract to honour. Code that comes
+back can come back from `git log -S '<symbol>'`.
+
+- **`#[allow(dead_code)]` is a smell, not a fix.** At a definition site
+  it tells a future reader "I know this is dead but didn't delete it."
+  At a module level (`#![allow(dead_code)]` or
+  `#[allow(dead_code)] mod foo;`) it hides *which specific items* are
+  dead, blocking the compiler from reporting individual rot. Either
+  prove the item is reachable from a live entry point, or delete it.
+- **"v1" alongside "v2" is dead code.** When a rewrite lands, the old
+  path is deleted in the same commit. Carrying both is the
+  number-one source of context tax.
+- **Comments saying "kept in case X" are dead code with extra steps.**
+  If X happens, `git log` recovers the file in seconds. Carrying it in
+  the working tree forever costs every reader.
+- **Ruthlessness is collegial.** Smaller surface = humans review
+  faster, agents edit faster and read less context. The reader you're
+  helping most is the one six months from now (often you, often an
+  agent acting on your behalf) who has to load this code into a head.
+
+When you encounter dead code while doing other work, delete it in a
+separate commit before the substantive change — review is easier when
+each commit is one thing.
