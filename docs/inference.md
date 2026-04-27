@@ -765,11 +765,20 @@ three-stage workflow driven by a `fit.toml` configuration file:
 fit.toml + model.camdl + data.tsv
     │
     └── camdl fit run fit.toml
-            ├── scout/    fit_state.toml      (stage, starts_from = random)
-            ├── refine/   mle_params.toml     (stage, starts_from = scout)
-            ├── validate/ mle_params.toml     (stage, starts_from = refine)
-            └── pgas/     chain_N/trace.tsv   (stage, starts_from = refine)
+            <fit_dir>/real/fit_<seed>/
+              ├── scout/    fit_state.toml      (stage, starts_from = random)
+              ├── refine/   mle_params.toml     (stage, starts_from = scout)
+              ├── validate/ mle_params.toml     (stage, starts_from = refine)
+              └── pgas/     chain_N/trace.tsv   (stage, starts_from = refine)
 ```
+
+> **v2 layout note.** Stage directories live under
+> `<fit_dir>/real/fit_<seed>/<stage>/` (or
+> `<fit_dir>/synthetic/ds_NN/fit_<seed>/<stage>/` for SBC
+> replicates). The `real/fit_<seed>/` and `synthetic/...` wrappers
+> were introduced in commit `5f1e704` (2026-04-18) to support
+> start-sensitivity and synthetic-data replicate grids; pre-2026-04-18
+> diagrams that show stages directly under `<fit_dir>/` are stale.
 
 Each named block under `[stages.NAME]` in `fit.toml` chains via
 its `starts_from` field. The default set is scout → refine →
@@ -795,7 +804,7 @@ hashing that feeds directly into `camdl simulate` and `camdl batch run`.
 camdl fit run    fit.toml --seed 1
 
 # Re-run a single stage from a prior stage's output
-camdl fit run    fit.toml --stage refine --starts-from fit/he2010/scout/
+camdl fit run    fit.toml --stage refine --starts-from fit/he2010/real/fit_1/scout/
 camdl fit run    fit.toml --stage validate
 camdl fit status fit.toml
 ```
