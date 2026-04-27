@@ -16,8 +16,6 @@ use std::process::Command;
 pub struct BatchRun {
     pub output_tsv: PathBuf,
     pub exit_code: Option<i32>,
-    #[allow(dead_code)]
-    pub stdout_path: PathBuf,
     pub stderr_path: PathBuf,
 }
 
@@ -70,7 +68,6 @@ pub fn run_camdl_batch(
     Ok(BatchRun {
         output_tsv: out_path,
         exit_code: status.code(),
-        stdout_path,
         stderr_path,
     })
 }
@@ -80,8 +77,6 @@ pub struct CamdlRun {
     pub seed: u64,
     pub seed_dir: PathBuf,
     pub exit_code: Option<i32>,
-    #[allow(dead_code)]
-    pub stdout_path: PathBuf,
     pub stderr_path: PathBuf,
 }
 
@@ -144,7 +139,6 @@ pub fn run_camdl_seed(
         seed,
         seed_dir,
         exit_code: status.code(),
-        stdout_path,
         stderr_path,
     })
 }

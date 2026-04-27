@@ -16,13 +16,6 @@ pub fn sha256_file(path: &Path) -> anyhow::Result<String> {
     Ok(hex::encode(hasher.finalize()))
 }
 
-#[allow(dead_code)]
-pub fn sha256_bytes(bytes: &[u8]) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(bytes);
-    hex::encode(hasher.finalize())
-}
-
 /// Recursive hash of a directory. Entries are sorted by relative path so
 /// filesystem ordering doesn't affect the result. The hash incorporates
 /// both the relative path and the file contents so moving a file between

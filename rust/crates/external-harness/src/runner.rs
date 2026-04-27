@@ -27,11 +27,6 @@ pub enum Status {
     ToleranceFail,
 }
 
-impl CaseOutcome {
-    #[allow(dead_code)]
-    pub fn is_pass(&self) -> bool { self.status == Status::Pass }
-}
-
 /// Run a single case's fast-path. Returns without invoking reference
 /// scripts — staleness checks come first, then camdl runs, then compare.
 pub fn run_case(case_dir: &Path) -> anyhow::Result<CaseOutcome> {

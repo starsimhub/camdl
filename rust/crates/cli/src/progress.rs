@@ -69,7 +69,6 @@ pub fn draw_target() -> ProgressDrawTarget {
 pub fn is_plain() -> bool { resolved() == Resolved::Plain }
 
 /// True when no progress output of any kind should happen.
-#[allow(dead_code)]
 pub fn is_none() -> bool { resolved() == Resolved::None }
 
 /// Time-throttled emitter for plain-mode progress lines. One instance per
@@ -124,8 +123,4 @@ impl Throttle {
         }
     }
 
-    /// Force-emit on the next `ready()` regardless of elapsed time. Use at
-    /// the end of a loop to guarantee a final line.
-    #[allow(dead_code)]
-    pub fn force_next(&mut self) { self.last = None; }
 }

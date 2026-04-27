@@ -102,65 +102,6 @@ fn test_two_state_equilibrium() {
     );
 }
 
-// ── Birth-death stationary distribution ─────────────────────────────────
-
-#[allow(dead_code)]
-fn birth_death_model(birth_rate: f64, death_rate: f64) -> Model {
-    Model {
-        name: "birth_death_test".into(),
-        version: "0.3".into(),
-        time_unit: "days".into(),
-        description: None,
-        origin: None,
-        compartments: vec![
-            Compartment { name: "N".into(), kind: CompartmentKind::Integer },
-        ],
-        transitions: vec![
-            Transition {
-                name: "birth".into(),
-                stoichiometry: vec![StoichiometryEntry("N".into(), 1)],
-                rate: Expr::Param(ParamExpr { param: "lambda".into() }),
-                metadata: None,
-                draw_method: ir::transition::DrawMethod::Poisson, rate_grad: Default::default(),
-            },
-            Transition {
-                name: "death".into(),
-                stoichiometry: vec![StoichiometryEntry("N".into(), -1)],
-                rate: Expr::Param(ParamExpr { param: "mu_times_n".into() }),
-                metadata: None,
-                draw_method: ir::transition::DrawMethod::Poisson, rate_grad: Default::default(),
-            },
-        ],
-        ode_equations: vec![],
-        time_functions: vec![],
-        tables: vec![],
-        interventions: vec![],
-        observations: vec![],
-        parameters: vec![
-            Parameter { name: "lambda".into(), value: Some(birth_rate), bounds: None, prior: None, transform: None, initial_value: None, param_kind: None, param_dim: None, hierarchical: None },
-            Parameter { name: "mu_times_n".into(), value: Some(death_rate), bounds: None, prior: None, transform: None, initial_value: None, param_kind: None, param_dim: None, hierarchical: None },
-        ],
-        initial_conditions: InitialConditions::Explicit({
-            let mut m = HashMap::new(); m.insert("N".into(), 50.0); m
-        }),
-        output: OutputConfig {
-            times: OutputSchedule::AtTimes(vec![0.0, 200.0]),
-            format: "tsv".into(),
-            trajectory: true,
-            observations: false,
-        },
-        simulation: SimulationConfig {
-            t_start: 0.0,
-            t_end: 200.0,
-            time_semantics: "continuous".into(),
-            dt: None,
-            rng_seed: Some(42),
-        },
-        presets: vec![],
-        model_structure: None, balance: None,
-    }
-}
-
 /// Gillespie on immigration-death process: constant birth rate λ, per-capita death rate μ.
 /// Stationary distribution is Poisson(λ/μ).
 /// Here we use the pure_death golden model with birth added. But building state-dependent

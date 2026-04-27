@@ -123,20 +123,6 @@ fn matvec_lower_transpose(l: &[f64], x: &[f64], d: usize) -> Vec<f64> {
     y
 }
 
-/// Solve L x = b where L is lower triangular (forward substitution).
-#[allow(dead_code)]
-fn solve_lower_triangular(l: &[f64], b: &[f64], d: usize) -> Vec<f64> {
-    let mut x = vec![0.0; d];
-    for i in 0..d {
-        let mut sum = b[i];
-        for j in 0..i {
-            sum -= l[i * d + j] * x[j];
-        }
-        x[i] = sum / l[i * d + i];
-    }
-    x
-}
-
 /// Solve L^T x = b where L is lower triangular (back substitution on the transpose).
 fn solve_upper_triangular_from_lower(l: &[f64], b: &[f64], d: usize) -> Vec<f64> {
     let mut x = vec![0.0; d];

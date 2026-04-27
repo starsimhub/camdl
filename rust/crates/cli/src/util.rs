@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 use ir::table::TableSource;
 use ir::intervention::Intervention;
-use serde::Deserialize;
 use sim::{
     CompiledModel, GillespieSim, TauLeapSim, ChainBinomialSim, OdeSim,
     config::{GillespieConfig, TauLeapConfig, ChainBinomialConfig, OdeConfig, SimConfig},
@@ -20,62 +19,12 @@ pub const SEED_MIX_OBS: u64 = 0xa5a5a5a5a5a5;
 
 // ─── Small helpers shared across subcommands ────────────────────────────────
 
-/// Create `path` and any missing parents, returning a formatted error
-/// string on failure. Replaces ~10 copies of the same
-/// `create_dir_all(&p).map_err(|e| format!("cannot create {}: {}", p, e))`
-/// across `fit/*.rs`, `pfilter.rs`, etc.
-#[allow(dead_code)] // progressively replacing the inline pattern; not all call sites migrated
-pub fn ensure_dir(path: &str) -> Result<(), String> {
-    std::fs::create_dir_all(path)
-        .map_err(|e| format!("cannot create {}: {}", path, e))
-}
-
 /// Derive an independent RNG seed for chain `id` from a base seed.
 /// XOR with `id * 2^64 * φ` (golden-ratio fractional bits) decorrelates
 /// consecutive-chain streams cheaply. Canonical helper for PGAS/PMMH/IF2;
 /// previously duplicated at 4+ sites.
 pub fn derive_chain_seed(base: u64, id: usize) -> u64 {
     base ^ (id as u64).wrapping_mul(0x9e3779b97f4a7c15)
-}
-
-/// Error-and-exit shorthand. Replaces ~19 copies of
-/// `eprintln!("error: {}", e); std::process::exit(1);`.
-#[allow(dead_code)] // progressively replacing the inline pattern; not all call sites migrated
-pub fn die<E: std::fmt::Display>(e: E) -> ! {
-    eprintln!("error: {}", e);
-    std::process::exit(1);
-}
-
-// ─── Batch TOML parsing ─────────────────────────────────────────────────────
-
-/// Minimal batch-TOML view needed by `voi` — just the output_dir so
-/// voi can locate the previously-generated designs/*/outputs.tsv.
-#[allow(dead_code)] // used by voi (gated — not in alpha)
-pub struct BatchInfo {
-    pub output_dir: String,
-}
-
-/// Parse a batch TOML source string for `voi`. Returns an error string
-/// on parse failure.
-#[allow(dead_code)] // used by voi (gated — not in alpha)
-pub fn parse_batch_toml(src: &str) -> Result<BatchInfo, String> {
-    #[derive(Deserialize, Default)]
-    struct ConfigSection {
-        output_dir: Option<String>,
-    }
-    #[derive(Deserialize)]
-    struct BatchDoc {
-        #[serde(default)]
-        config: ConfigSection,
-    }
-
-    let doc: BatchDoc = toml::from_str(src)
-        .map_err(|e| format!("batch TOML parse error: {}", e))?;
-
-    Ok(BatchInfo {
-        output_dir: doc.config.output_dir.unwrap_or_else(
-            || crate::run_paths::DEFAULT_OUTPUT_ROOT.to_string()),
-    })
 }
 
 // ─── Compiler discovery ─────────────────────────────────────────────────────

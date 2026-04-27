@@ -34,18 +34,6 @@ pub fn has_cached_traj(run_dir: &Path) -> bool {
     run_dir.join("traj.tsv").exists()
 }
 
-/// Obs directory for a given (obs_hash, obs_seed) pair, relative to a run dir.
-pub fn obs_dir(run_dir: &Path, obs_hash: &str, obs_seed: u64) -> std::path::PathBuf {
-    run_dir.join("obs").join(format!("{}-{}", &obs_hash[..8], obs_seed))
-}
-
-/// Does this run have cached obs for the given (obs_hash, obs_seed)?
-/// Checks for the presence of `obs.json` as the marker (obs streams may
-/// or may not be present depending on the model).
-pub fn has_cached_obs(run_dir: &Path, obs_hash: &str, obs_seed: u64) -> bool {
-    obs_dir(run_dir, obs_hash, obs_seed).join("obs.json").exists()
-}
-
 // ─── Run buffer: accumulator for --cas trajectory bytes ────────────────────
 
 /// `Rc<RefCell<Vec<u8>>>`-backed `Write` target for --cas mode. The
@@ -74,17 +62,6 @@ impl std::io::Write for RunBuffer {
         Ok(buf.len())
     }
     fn flush(&mut self) -> std::io::Result<()> { Ok(()) }
-}
-
-// ─── Read/write helpers ──────────────────────────────────────────────────────
-
-pub fn write_traj(run_dir: &Path, content: &str) -> std::io::Result<()> {
-    std::fs::create_dir_all(run_dir)?;
-    std::fs::write(run_dir.join("traj.tsv"), content)
-}
-
-pub fn read_traj(run_dir: &Path) -> std::io::Result<String> {
-    std::fs::read_to_string(run_dir.join("traj.tsv"))
 }
 
 // ─── ISO-8601 timestamp helper ───────────────────────────────────────────────
@@ -159,10 +136,4 @@ mod tests {
         assert_eq!(iso8601_utc(t), "2024-02-29T12:34:56Z");
     }
 
-    #[test]
-    fn obs_dir_layout() {
-        let run = Path::new("/tmp/sims/abc/baseline-def/seed_1");
-        let od = obs_dir(run, "obsaaaa11111111000000000000000000000000000000000000000000000000", 99);
-        assert_eq!(od, Path::new("/tmp/sims/abc/baseline-def/seed_1/obs/obsaaaa1-99"));
-    }
 }

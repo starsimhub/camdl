@@ -74,14 +74,6 @@ pub fn sim_run_rel(
     format!("{}/{}-{}/seed_{}", head, slug(scenario), &scen_hash[..8.min(scen_hash.len())], seed)
 }
 
-/// Directory for obs draws derived from a simulate run. Obs is a
-/// simulate-specific concept (draws from the observation model on
-/// top of a trajectory) and doesn't apply to fits — lives under
-/// the per-run directory, not as a sibling.
-pub fn sim_obs_dir(run_dir: &Path, obs_hash: &str, obs_seed: u64) -> PathBuf {
-    run_dir.join("obs").join(format!("{}-{}", &obs_hash[..8.min(obs_hash.len())], obs_seed))
-}
-
 /// Top-level directory for a fit.
 ///
 /// With `fit_toml_stem = None`:       `<root>/fits/<fit_hash[:8]>/`
@@ -98,65 +90,6 @@ pub fn fit_run_dir(root: &Path, fit_toml_stem: Option<&str>, fit_hash: &str) -> 
         _ => hash_prefix.to_string(),
     };
     root.join("fits").join(dirname)
-}
-
-/// Where a fit's dataset sits. `Real` fits have a single dataset,
-/// `Synthetic` fits have N with 1-based indices. Mirrors the layout
-/// from the synthetic-fit-replicates proposal
-/// (docs/dev/proposals/2026-04-17-synthetic-fit-replicates.md):
-///
-/// ```text
-/// real/                    (single dataset — the user's data files)
-/// synthetic/ds_NN/         (one per sim_seed)
-/// ```
-#[derive(Debug, Clone, Copy)]
-pub enum FitSource {
-    Real,
-    Synthetic { dataset_idx: usize },
-}
-
-/// The per-fit subdirectory under [`fit_run_dir`]. Each fit cell
-/// (one (dataset, fit_seed) pair) owns its own tree of stage
-/// subdirectories inside this path.
-///
-/// ```text
-/// real/fit_<seed>/                              # real data fit
-/// synthetic/ds_NN/fit_<seed>/                   # SBC-style cell
-/// ```
-pub fn fit_cell_dir(root: &Path, fit_hash: &str, source: FitSource, fit_seed: u64) -> PathBuf {
-    let base = fit_run_dir(root, None, fit_hash);
-    match source {
-        FitSource::Real =>
-            base.join("real").join(format!("fit_{}", fit_seed)),
-        FitSource::Synthetic { dataset_idx } =>
-            base.join("synthetic")
-                .join(format_dataset_dir(dataset_idx))
-                .join(format!("fit_{}", fit_seed)),
-    }
-}
-
-/// Directory for one stage of a fit cell.
-///
-/// ```text
-/// real/fit_<seed>/<stage>/
-/// synthetic/ds_NN/fit_<seed>/<stage>/
-/// ```
-pub fn fit_stage_dir(
-    root: &Path,
-    fit_hash: &str,
-    source: FitSource,
-    fit_seed: u64,
-    stage: &str,
-) -> PathBuf {
-    fit_cell_dir(root, fit_hash, source, fit_seed).join(stage)
-}
-
-/// Format a synthetic-dataset index as `ds_01`, `ds_02`, … The single
-/// authoritative formatter, shared between path construction, summary
-/// table writers, and TSV filenames. Zero-padded to 2 digits; grids
-/// of > 99 datasets render as `ds_100`, `ds_101`, etc.
-pub fn format_dataset_dir(idx: usize) -> String {
-    format!("ds_{:02}", idx)
 }
 
 // ─── profile layout ──────────────────────────────────────────────────────────
@@ -262,13 +195,6 @@ mod tests {
     }
 
     #[test]
-    fn sim_obs_dir_nested_under_run() {
-        let run = Path::new("/out/sims/aaaa/base-bbbb/seed_1");
-        let p = sim_obs_dir(run, "ccccdddd", 99);
-        assert_eq!(p, run.join("obs").join("ccccdddd-99"));
-    }
-
-    #[test]
     fn fit_run_dir_hash_only() {
         let p = fit_run_dir(Path::new("/out"), None, "deadbeef00000000");
         assert_eq!(p, Path::new("/out/fits/deadbeef"));
@@ -296,30 +222,6 @@ mod tests {
         let a = sim_run_rel(Some("sir"), "aaaaaaaa0000", "baseline", "cccc", 1);
         let b = sim_run_rel(Some("sir"), "bbbbbbbb0000", "baseline", "cccc", 1);
         assert_ne!(a, b);
-    }
-
-    #[test]
-    fn fit_cell_dir_real_vs_synthetic() {
-        let r = fit_cell_dir(Path::new("/out"), "deadbeef00", FitSource::Real, 42);
-        assert_eq!(r, Path::new("/out/fits/deadbeef/real/fit_42"));
-        let s = fit_cell_dir(Path::new("/out"), "deadbeef00",
-            FitSource::Synthetic { dataset_idx: 3 }, 101);
-        assert_eq!(s, Path::new("/out/fits/deadbeef/synthetic/ds_03/fit_101"));
-    }
-
-    #[test]
-    fn fit_stage_dir_composes_cell_plus_stage() {
-        let p = fit_stage_dir(Path::new("/out"), "deadbeef00",
-            FitSource::Real, 42, "refine");
-        assert_eq!(p, Path::new("/out/fits/deadbeef/real/fit_42/refine"));
-    }
-
-    #[test]
-    fn dataset_dir_zero_pads_to_2_digits() {
-        assert_eq!(format_dataset_dir(1),   "ds_01");
-        assert_eq!(format_dataset_dir(9),   "ds_09");
-        assert_eq!(format_dataset_dir(10),  "ds_10");
-        assert_eq!(format_dataset_dir(100), "ds_100");
     }
 
     #[test]

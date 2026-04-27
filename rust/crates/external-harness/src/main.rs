@@ -53,7 +53,6 @@ enum Command {
         regen: bool,
     },
     /// List all cases in `tests/external/cases/`.
-    #[allow(dead_code)]
     List {
         #[arg(long, default_value = "tests/external/cases")]
         root: PathBuf,

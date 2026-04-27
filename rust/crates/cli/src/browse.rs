@@ -5,7 +5,6 @@
 //! unindexed — fast enough for thousands of runs. A persistent index
 //! can be added later if needed.
 
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
@@ -789,15 +788,12 @@ fn pathdiff_str(path: &Path, base: &Path) -> String {
     }
 }
 
-// HashMap is used via RunMeta::sweep_point.
-#[allow(dead_code)]
-type _Unused = HashMap<String, f64>;
-
 // ── Tests ────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashMap;
 
     #[test]
     fn parse_duration_ok() {

@@ -254,7 +254,7 @@ where D: serde::Deserializer<'de>,
 pub enum CacheStatus {
     /// Run directory exists and its stored hash matches the expected
     /// hash; caller can read results from `run_dir`.
-    Hit { stored_hash: String },
+    Hit,
     /// Directory exists but the stored hash differs from the expected
     /// one. Typically triggers a re-run with a warning.
     Stale { stored: String, current: String },
@@ -307,18 +307,13 @@ impl Run {
     pub fn check_cache(dir: &std::path::Path, expected_hash: &str) -> CacheStatus {
         match Self::read(dir) {
             Ok(run) if run.hash == expected_hash =>
-                CacheStatus::Hit { stored_hash: run.hash },
+                CacheStatus::Hit,
             Ok(run) => CacheStatus::Stale {
                 stored: run.hash,
                 current: expected_hash.to_string(),
             },
             Err(_) => CacheStatus::Miss,
         }
-    }
-
-    /// Short hash prefix used in filesystem paths. Always 8 chars.
-    pub fn hash_prefix(&self) -> &str {
-        &self.hash[..self.hash.len().min(8)]
     }
 }
 
@@ -482,10 +477,10 @@ mod tests {
         assert!(matches!(Run::check_cache(&empty, &stored_hash), CacheStatus::Miss));
 
         // Hit with matching hash.
-        match Run::check_cache(&tmp, &stored_hash) {
-            CacheStatus::Hit { stored_hash: h } => assert_eq!(h, stored_hash),
-            other => panic!("expected Hit, got {:?}", other),
-        }
+        assert!(matches!(
+            Run::check_cache(&tmp, &stored_hash),
+            CacheStatus::Hit
+        ));
 
         // Stale when hash differs.
         match Run::check_cache(&tmp, "different_hash") {
@@ -497,13 +492,6 @@ mod tests {
         }
 
         std::fs::remove_dir_all(&tmp).ok();
-    }
-
-    #[test]
-    fn hash_prefix_is_8_chars() {
-        let r = sample_simulate_run();
-        assert_eq!(r.hash_prefix().len(), 8);
-        assert_eq!(r.hash_prefix(), "abc12345");
     }
 
     #[test]

@@ -112,25 +112,6 @@ pub fn jeffreys_label(db: f64) -> &'static str {
 ///
 /// The `label` arg is the metric name (e.g. "Δlogℒ", "Δelpd", "Δpreq");
 /// returned string does not include leading/trailing whitespace. Caller
-/// handles framing / column layout.
-///
-/// Example (5.5 nats ≈ 23.9 dB, lands in the "decisive" tier):
-/// ```ignore
-/// # use cli::evidence::fmt_evidence;
-/// assert_eq!(fmt_evidence("Δlogℒ", 5.5),
-///            "Δlogℒ = +5.500 nats (+23.9 dB, decisive)");
-/// ```
-#[allow(dead_code)]  // used by Unit A compound gate (IF2 scout remediation), fit/diff output; landed here first so the API is stable
-pub fn fmt_evidence(label: &str, delta_nats: f64) -> String {
-    if !delta_nats.is_finite() {
-        return format!("{} = {} nats (non-finite, evidence undefined)",
-            label, delta_nats);
-    }
-    let db = delta_nats * NATS_TO_DB;
-    let tag = jeffreys_label(db);
-    format!("{} = {:+.3} nats ({:+.1} dB, {})", label, delta_nats, db, tag)
-}
-
 /// Compact two-column form for use inside tables or tight displays:
 /// returns `(nats_str, db_with_label_str)` for a Δlog-lik.
 ///
@@ -142,30 +123,6 @@ pub fn evidence_cells(delta_nats: f64) -> (String, String) {
     let db = delta_nats * NATS_TO_DB;
     let tag = jeffreys_label(db);
     (format!("{:+.3}", delta_nats), format!("{:+.1} dB, {}", db, tag))
-}
-
-/// Format a Δlog-likelihood with an associated Monte Carlo SE (nats),
-/// displaying the interval in both units. Used when the comparison has a
-/// known MC uncertainty (e.g., clean-eval SE from the IF2 scout remediation's
-/// compound gate, per proposal 2026-04-24-if2-scout-findings-remediation.md).
-///
-/// Example:
-/// ```ignore
-/// # use cli::evidence::fmt_evidence_with_se;
-/// assert_eq!(fmt_evidence_with_se("Δlogℒ", 5.5, 0.7),
-///            "Δlogℒ = +5.500 ± 0.700 nats (+23.9 ± 3.0 dB, decisive)");
-/// ```
-#[allow(dead_code)]  // used by Unit A compound gate when MC SE is available
-pub fn fmt_evidence_with_se(label: &str, delta_nats: f64, se_nats: f64) -> String {
-    if !delta_nats.is_finite() {
-        return format!("{} = {} nats (non-finite, evidence undefined)",
-            label, delta_nats);
-    }
-    let db = delta_nats * NATS_TO_DB;
-    let db_se = se_nats * NATS_TO_DB;
-    let tag = jeffreys_label(db);
-    format!("{} = {:+.3} ± {:.3} nats ({:+.1} ± {:.1} dB, {})",
-        label, delta_nats, se_nats, db, db_se, tag)
 }
 
 #[cfg(test)]
@@ -206,33 +163,6 @@ mod tests {
     }
 
     #[test]
-    fn fmt_evidence_formats_positive_and_negative() {
-        // 5.5 nats × 4.343 = 23.9 dB → "decisive" tier (20–40 dB).
-        assert_eq!(fmt_evidence("Δlogℒ", 5.5),
-            "Δlogℒ = +5.500 nats (+23.9 dB, decisive)");
-        // Negative Δ (alternative model is worse than baseline).
-        assert_eq!(fmt_evidence("Δlogℒ", -5.5),
-            "Δlogℒ = -5.500 nats (-23.9 dB, decisive)");
-        // Zero — indeterminate, within Turing's ~1 dB JND of evidence.
-        assert_eq!(fmt_evidence("Δlogℒ", 0.0),
-            "Δlogℒ = +0.000 nats (+0.0 dB, indeterminate)");
-        // Large Δ (a realistic epi scale — 25 nats ≈ 108 dB, overwhelming).
-        let s = fmt_evidence("Δlogℒ", 25.0);
-        assert!(s.contains("overwhelming"), "got {}", s);
-    }
-
-    #[test]
-    fn fmt_evidence_with_se_preserves_both_units() {
-        let s = fmt_evidence_with_se("Δlogℒ", 5.5, 0.7);
-        assert!(s.contains("5.500"));
-        assert!(s.contains("0.700"));
-        assert!(s.contains("23.9"));
-        // 0.7 nats × 4.343 dB/nat ≈ 3.0 dB
-        assert!(s.contains("3.0"));
-        assert!(s.contains("decisive"));
-    }
-
-    #[test]
     fn evidence_cells_compact_form() {
         let (nats, db_label) = evidence_cells(5.5);
         assert_eq!(nats, "+5.500");
@@ -240,14 +170,12 @@ mod tests {
     }
 
     #[test]
-    fn non_finite_handled_gracefully() {
-        // NaN / ±∞ → non-finite message, not a panic, not a spurious label.
-        let s = fmt_evidence("Δlogℒ", f64::NAN);
-        assert!(s.contains("non-finite"), "got {}", s);
-        let s = fmt_evidence("Δlogℒ", f64::INFINITY);
-        assert!(s.contains("non-finite"));
+    fn evidence_cells_handles_non_finite() {
+        // NaN / ±∞ → "—" in the dB column, not a panic.
         let (n, db) = evidence_cells(f64::NAN);
         assert!(n.contains("NaN"));
+        assert_eq!(db, "—");
+        let (_, db) = evidence_cells(f64::INFINITY);
         assert_eq!(db, "—");
     }
 

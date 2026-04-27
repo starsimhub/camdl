@@ -1,31 +1,22 @@
 mod args;
 mod util;
 mod hashing;
-#[allow(dead_code)] // write sites wire up in commit 4/6 of the unified-output-tree rollout
 mod run_meta;       // unified Run/RunKind ADT — see docs/dev/proposals/2026-04-19-unified-output-tree.md
-#[allow(dead_code)] // full migration of path-construction sites lands in commit 4/6
 mod run_paths;      // canonical output-path helpers
-#[allow(dead_code)] // some write/read helpers wired up by follow-up commits (obs caching)
 mod cas;
 mod browse;
 mod sampling;
-#[allow(dead_code)]
 mod batch;
-// mod serve; // not mature enough for alpha
 mod eval;
-#[allow(dead_code)]
-mod pfilter; // used internally by fit runner for data loading
+mod pfilter;        // used internally by fit runner for data loading
 mod data;
 mod fit;
 mod compare;
-pub mod version;
-
-// Modules kept for internal use but with no direct CLI entry points:
-// mod voi; // not mature enough for alpha
-#[allow(dead_code)] mod if2;
+mod if2;
 mod profile;
 mod progress;
 mod evidence;
+pub mod version;
 
 /// Terminal formatting helpers. Pure ANSI SGR codes, no dependencies.
 /// Respects NO_COLOR (https://no-color.org/) — when set, all formatting
@@ -37,14 +28,6 @@ mod term {
     }
     pub fn dim(s: &str) -> String { wrap("2", s) }
     pub fn bold(s: &str) -> String { wrap("1", s) }
-    #[allow(dead_code)]
-    pub fn green(s: &str) -> String { wrap("32", s) }
-    #[allow(dead_code)]
-    pub fn yellow(s: &str) -> String { wrap("33", s) }
-    #[allow(dead_code)]
-    pub fn red(s: &str) -> String { wrap("31", s) }
-    #[allow(dead_code)]
-    pub fn cyan(s: &str) -> String { wrap("36", s) }
 }
 
 use clap::{Parser, Subcommand};
@@ -557,7 +540,7 @@ fn run_simulate(a: &args::SimulateArgs) {
         let traj_present = cas::has_cached_traj(&ctx.run_dir);
         let meta_status = crate::run_meta::Run::check_cache(&ctx.run_dir, &ctx.run.hash);
         match (traj_present, &meta_status) {
-            (true, CacheStatus::Hit { .. }) => {
+            (true, CacheStatus::Hit) => {
                 let cached = std::fs::read(ctx.run_dir.join("traj.tsv"))
                     .unwrap_or_else(|e| {
                         eprintln!("error reading cached traj.tsv: {}", e);

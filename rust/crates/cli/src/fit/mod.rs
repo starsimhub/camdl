@@ -535,7 +535,7 @@ pub fn cmd_fit_run_v2(a: &crate::args::FitRunArgs) {
         });
         if !force {
             match crate::run_meta::Run::check_cache(&stage_dir, &config_hash) {
-                crate::run_meta::CacheStatus::Hit { .. } => {
+                crate::run_meta::CacheStatus::Hit => {
                     eprintln!("  \x1b[33mskipped — results already exist for these inputs.\x1b[0m");
                     eprintln!("  config_hash: {}", &config_hash[..16]);
                     eprintln!("  Use --force to re-run.");

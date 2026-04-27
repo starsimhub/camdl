@@ -90,34 +90,6 @@ impl PFRandomState {
     }
 }
 
-/// Transform a standard normal to a binomial draw via normal approximation
-/// (large np) or inverse CDF (small np).
-///
-/// For large np (>20): Binom(n,p) ≈ Normal(np, np(1-p)), so
-///   count = round(np + sqrt(np(1-p)) * z)
-/// Nearly continuous in z → excellent Crank-Nicolson correlation.
-///
-/// For small np: use Φ(z) as a uniform, then walk the binomial CDF.
-/// Step function in z → partial correlation, but these draws contribute
-/// negligible variance to the total log-likelihood.
-#[allow(dead_code)]
-fn correlated_binomial(z: f64, n: u64, p: f64) -> u64 {
-    if n == 0 || p <= 0.0 { return 0; }
-    if p >= 1.0 { return n; }
-    let np = n as f64 * p;
-    let nq = n as f64 * (1.0 - p);
-    if np > 20.0 && nq > 20.0 {
-        // Normal approximation (exact for large np)
-        let sd = (np * (1.0 - p)).sqrt();
-        let x = (np + sd * z).round().clamp(0.0, n as f64);
-        x as u64
-    } else {
-        // Small np: inverse CDF via uniform
-        let u = phi(z).clamp(1e-15, 1.0 - 1e-15);
-        binomial_quantile(n, p, u)
-    }
-}
-
 /// Inverse binomial CDF: find smallest k such that P(X <= k) >= u.
 pub fn binomial_quantile(n: u64, p: f64, u: f64) -> u64 {
     // Walk the CDF from 0. For small np this is fast (< 50 iterations).

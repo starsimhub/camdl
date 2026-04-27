@@ -58,7 +58,6 @@ pub struct EstimatedParam {
     /// Natural-scale upper bound (used for display and random-start sampling).
     pub upper: f64,
     /// Whether `rw_sd` was auto-computed from the data (for preflight reporting).
-    #[allow(dead_code)]
     pub rw_sd_auto: bool,
     /// If true, perturb only at t=0 (initial-value parameter: S₀, E₀, I₀ …).
     /// Matches pomp's `ivp()` in `rw.sd`.

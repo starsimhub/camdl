@@ -350,7 +350,6 @@ impl DiagnosticCollector {
             .any(|d| d.severity == Severity::Error)
     }
 
-    #[allow(dead_code)]
     pub fn has_warnings(&self) -> bool {
         self.diagnostics.lock().unwrap().iter()
             .any(|d| d.severity != Severity::Info)
