@@ -22,6 +22,10 @@ Current notes:
 - [`cooling.md`](cooling.md) — IF2 cooling schedule; pomp cf50
   convention; scout vs refine design intent; worked empirical
   iter-by-iter table on the he2010 model.
+- [`particle-methods.md`](particle-methods.md) — the four particle-
+  method implementations (bootstrap PF, IF2's parameter-augmented
+  loop, CSMC-AS for PGAS, correlated PF for correlated-MH PMMH);
+  algorithm equations, file:line, when-to-use-which, full citations.
 
 Add new notes by convention: create `docs/methods/<topic>.md`, add
 a line here pointing at it, commit both together.
