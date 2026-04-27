@@ -64,9 +64,9 @@ use std::collections::HashMap;
     disable_help_subcommand = true,
     arg_required_else_help = true,
 )]
-struct Cli {
+pub(crate) struct Cli {
     #[command(subcommand)]
-    command: Command,
+    pub command: Command,
 
     /// Log verbosity; overrides RUST_LOG (error/warn/info/debug/trace).
     /// When unset, defaults to `warn` unless `--progress plain` (or
@@ -90,7 +90,7 @@ struct Cli {
 }
 
 #[derive(Subcommand)]
-enum Command {
+pub(crate) enum Command {
     /// Run a forward simulation
     #[command(alias = "sim")]
     Simulate(args::SimulateArgs),
@@ -194,7 +194,7 @@ Examples:
 }
 
 #[derive(Subcommand)]
-enum BatchCmd {
+pub(crate) enum BatchCmd {
     /// Run a batch sweep from a TOML manifest
     Run(args::BatchArgs),
     /// Show status of a batch sweep
@@ -202,7 +202,7 @@ enum BatchCmd {
 }
 
 #[derive(Subcommand)]
-enum FitCmd {
+pub(crate) enum FitCmd {
     /// Run inference stages defined in a fit.toml
     Run(args::FitRunArgs),
     /// Show completion status for a fit
@@ -218,7 +218,7 @@ enum FitCmd {
 }
 
 #[derive(Subcommand)]
-enum DataCmd {
+pub(crate) enum DataCmd {
     /// Split a data TSV into train and holdout sets
     Split(args::DataSplitArgs),
 }

@@ -1,103 +1,15 @@
+// ── Args structs only ─────────────────────────────────────────────────────────
+//
+// The clap subcommand tree (Cli, Command, FitCmd, BatchCmd, DataCmd) lives
+// in main.rs — it's the canonical, dispatched parser. This module owns
+// only the per-command argument structs (FitRunArgs, SimulateArgs, etc.)
+// referenced by main.rs's tree.
+
 pub mod types;
 
 use std::path::PathBuf;
-use clap::{Parser, Subcommand, Args};
+use clap::Args;
 use types::{Backend, ListDuration, ParamOverride, ParamVecSpec, RwSd, SeedSpec, SweepSpec, TableSpec};
-
-// ─── Top-level ────────────────────────────────────────────────────────────────
-
-#[derive(Parser)]
-#[command(
-    name = "camdl",
-    about = "Stochastic compartmental model simulation and inference",
-    version,
-    disable_help_subcommand = true,
-)]
-pub struct Cli {
-    #[command(subcommand)]
-    pub command: Command,
-
-    /// Log verbosity (overrides RUST_LOG; CLI > env > default warn)
-    #[arg(long, global = true, default_value = "warn",
-          value_name = "LEVEL",
-          help_heading = "Global options")]
-    pub verbosity: log::LevelFilter,
-}
-
-#[derive(Subcommand)]
-pub enum Command {
-    /// Run a forward simulation
-    #[command(alias = "sim")]
-    Simulate(SimulateArgs),
-
-    /// Run a batch sweep from a TOML manifest
-    Batch(BatchArgs),
-
-    /// Inference pipeline (MLE, posterior sampling, evaluation)
-    #[command(subcommand)]
-    Fit(FitCommand),
-
-    /// Standalone bootstrap particle filter at fixed parameters
-    Pfilter(PfilterArgs),
-
-    /// Standalone iterated filtering (IF2/MIF2)
-    #[command(alias = "mif2")]
-    If2(If2Args),
-
-    /// Profile likelihood via parallel IF2 over a parameter grid
-    Profile(ProfileArgs),
-
-    /// Evaluate time-dependent expressions against a model
-    Eval(EvalArgs),
-
-    /// Data utilities
-    #[command(subcommand)]
-    Data(DataCommand),
-
-    /// Browse cached simulation runs as a table
-    List(ListArgs),
-
-    /// Show full metadata for a cached run
-    Show(ShowArgs),
-
-    /// Emit trajectory or observation output from a cached run
-    Cat(CatArgs),
-
-    /// Compile a .camdl model to IR JSON (delegates to camdlc)
-    Compile(DelegateArgs),
-
-    /// Parse and type-check a .camdl model (delegates to camdlc)
-    Check(DelegateArgs),
-
-    /// Print model structure (delegates to camdlc)
-    Inspect(DelegateArgs),
-}
-
-// ─── Fit subcommands ──────────────────────────────────────────────────────────
-
-#[derive(Subcommand)]
-pub enum FitCommand {
-    /// Run the inference pipeline from a fit.toml
-    Run(FitRunArgs),
-    /// Show completion status of a fit
-    Status(FitStatusArgs),
-    /// Render a single-fit interpretation summary (Â, gate verdict, MLE table)
-    Summary(FitSummaryArgs),
-    /// Compare two fit.toml configs
-    Diff(FitDiffArgs),
-    /// Derive a new fit.toml from an existing one
-    New(FitNewArgs),
-    /// Resolve and print the fit output directory path
-    Where(FitWhereArgs),
-}
-
-// ─── Data subcommands ─────────────────────────────────────────────────────────
-
-#[derive(Subcommand)]
-pub enum DataCommand {
-    /// Split a data TSV into train and holdout sets
-    Split(DataSplitArgs),
-}
 
 // ─── Shared flat arg groups ───────────────────────────────────────────────────
 
@@ -1016,27 +928,18 @@ pub struct CompareArgs {
     pub allow_mismatched_horizon: bool,
 }
 
-// ─── Delegated commands (compile / check / inspect → camdlc) ─────────────────
-
-/// All args are passed through verbatim to camdlc.
-/// Set CAMDLC_PATH to override the camdlc binary location.
-#[derive(Args)]
-pub struct DelegateArgs {
-    #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
-    pub args: Vec<String>,
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use clap::CommandFactory;
+    use clap::{CommandFactory, Parser};
+    use crate::{Cli, Command, FitCmd};
 
     fn try_parse_fit_run(args: &[&str]) -> Result<FitRunArgs, clap::Error> {
         let mut full: Vec<&str> = vec!["camdl", "fit", "run"];
         full.extend(args);
         let cli = Cli::try_parse_from(full)?;
         match cli.command {
-            Command::Fit(FitCommand::Run(a)) => Ok(a),
+            Command::Fit(FitCmd::Run(a)) => Ok(a),
             _ => unreachable!("expected fit run"),
         }
     }
