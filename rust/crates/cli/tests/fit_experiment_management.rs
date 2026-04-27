@@ -44,9 +44,11 @@ fn camdlc_bin() -> Option<PathBuf> {
 }
 
 fn repo_root() -> PathBuf {
+    // CARGO_MANIFEST_DIR for `cli` = `<workspace>/rust/crates/cli/`.
+    // Workspace root (where `docs/` lives) is three levels up.
     let manifest = std::env::var("CARGO_MANIFEST_DIR")
         .expect("CARGO_MANIFEST_DIR is set during cargo test");
-    PathBuf::from(manifest).join("../..")
+    PathBuf::from(manifest).join("../../..")
 }
 
 struct TempDir(PathBuf);
@@ -145,7 +147,7 @@ gamma = {{ bounds = [0.01, 1.0], start = 0.3 }}
 [fixed]
 N0 = 1000
 
-[stages.mle]
+[stages.scout]
 method     = "if2"
 chains     = 2
 particles  = 50
@@ -250,7 +252,7 @@ fn fit_summary_walks_real_fit_run_v2_output() {
     // runner promises. Locks the layout into the test surface so a
     // future runner change can't silently break the walker without
     // tripping this assertion.
-    let canonical = fit_dir.join("real").join("fit_1").join("mle");
+    let canonical = fit_dir.join("real").join("fit_1").join("scout");
     assert!(
         canonical.join("run.json").is_file(),
         "expected v2 stage_dir at {} but it is absent",
@@ -389,11 +391,23 @@ fn parse_layout_diagrams(text: &str) -> Vec<String> {
         };
         // Trim trailing comment text — TSV/diagram lines often have
         // an inline comment after the path. Heuristic: the path ends
-        // at the first whitespace, ` ` (typical) or `\t`.
-        let rel = rel
-            .split_whitespace()
-            .next()
-            .unwrap_or(rel)
+        // at the first whitespace **outside any brace-list**. Brace
+        // lists like `{fit_state.toml, mle_params.toml}` contain
+        // legitimate internal whitespace and must not be truncated.
+        let path_owned: String = {
+            let mut depth = 0i32;
+            let mut end = rel.len();
+            for (i, c) in rel.char_indices() {
+                match c {
+                    '{' => depth += 1,
+                    '}' => depth -= 1,
+                    ' ' | '\t' if depth == 0 => { end = i; break; }
+                    _ => {}
+                }
+            }
+            rel[..end].to_string()
+        };
+        let rel = path_owned
             .trim_end_matches(',')
             .trim_end_matches(':')
             .trim_end_matches('.');
