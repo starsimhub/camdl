@@ -13,6 +13,8 @@ pub mod config_v2;
 pub mod state;
 pub mod provenance;
 pub mod runner;
+pub mod fit_tree;
+pub mod method_result;
 pub mod grid_summary;
 pub mod fit_summary;
 pub use fit_summary::cmd_fit_summary;

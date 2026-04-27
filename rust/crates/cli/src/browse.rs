@@ -391,21 +391,31 @@ fn load_fit_entry(dir: &Path, cwd: &Path) -> Option<FitEntry> {
 /// Walk `root/fits/` one level deep — each immediate child is a fit
 /// directory (`<stem>-<hash[:8]>/`). Stage-level run.json records live
 /// deeper and are not surfaced by `camdl list`.
+///
+/// Implementation: delegates to `fit_tree::walk_fits_root` for
+/// canonical fit-dir discovery, then layers on the per-entry display
+/// metadata (`rel_path`, `created` mtime) browse needs that the
+/// canonical walker doesn't carry.
 fn discover_fits(root: &str) -> Result<Vec<FitEntry>, String> {
     let fits_dir = Path::new(root).join("fits");
-    if !fits_dir.exists() { return Ok(Vec::new()); }
-    let mut out = Vec::new();
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    let entries = std::fs::read_dir(&fits_dir)
+    let entries = crate::fit::fit_tree::walk_fits_root(&fits_dir)
         .map_err(|e| format!("cannot read {}: {}", fits_dir.display(), e))?;
-    for entry in entries.flatten() {
-        let p = entry.path();
-        if !p.is_dir() { continue; }
-        if let Some(fe) = load_fit_entry(&p, &cwd) {
-            out.push(fe);
-        }
-    }
-    Ok(out)
+    Ok(entries
+        .into_iter()
+        .map(|e| {
+            // `walk_fits_root` already parsed run.json; reuse its
+            // `run` rather than re-reading the file. `created` and
+            // `rel_path` are display-only and computed from the
+            // already-parsed `run.created_at` plus the dir path.
+            let created = parse_iso8601(&e.run.created_at)
+                .unwrap_or_else(|| std::fs::metadata(&e.fit_dir)
+                    .and_then(|m| m.modified())
+                    .unwrap_or(SystemTime::UNIX_EPOCH));
+            let rel_path = pathdiff_str(&e.fit_dir, &cwd);
+            FitEntry { run: e.run, meta: e.fit_meta, rel_path, created }
+        })
+        .collect())
 }
 
 /// Resolved by a user-supplied key: either a sim run or a fit.

@@ -28,10 +28,14 @@
 use crate::args::{FitSummaryArgs, FitSummaryFormat};
 use crate::evidence::NATS_TO_DB;
 use crate::fit::config_v2::{CleanEvalConfig, GateConfig};
+use crate::fit::fit_tree::{self, DataKind};
+use crate::fit::method_result::MethodResult;
 use crate::fit::state::FitState;
+use crate::run_meta::RunKind;
 use crate::version;
 use serde::Serialize;
-use std::path::Path;
+use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
 
 /// Versioned JSON schema. Bumped when fields are renamed / removed /
 /// retyped; field additions are non-breaking and keep version stable.
@@ -103,36 +107,37 @@ fn cmd_text(dir: &str, args: &FitSummaryArgs, stages: &[&str], strict: bool) {
 
     print!("{}", fmt.fit_header(dir));
 
-    let mut any_rendered = false;
+    let resolved = resolve_if2_stage_dirs(Path::new(dir), stages);
     let mut prev_loglik: Option<f64> = None;
-    let mut prev_stage_name: Option<&str> = None;
-    for stage in stages {
-        let stage_dir = format!("{}/{}", dir, stage);
-        if !Path::new(&stage_dir).join("fit_state.toml").exists() {
-            continue;
-        }
-        any_rendered = true;
-        let state = match FitState::load(&stage_dir) {
+    let mut prev_stage_name_owned: Option<String> = None;
+    for (stage_name, stage_path) in &resolved {
+        let stage_dir_str = stage_path.to_string_lossy().into_owned();
+        let state = match FitState::load(&stage_dir_str) {
             Ok(s) => s,
             Err(e) => {
-                eprintln!("warning: cannot load {}/fit_state.toml: {}",
-                    stage_dir, e);
+                eprintln!("warning: cannot load {}/fit_state.toml: {}", stage_dir_str, e);
                 continue;
             }
         };
-        let block = fmt.stage_block(stage, &stage_dir, &state, prev_loglik, prev_stage_name);
+        let prev_stage_name = prev_stage_name_owned.as_deref();
+        let block = fmt.stage_block(
+            stage_name,
+            &stage_dir_str,
+            &state,
+            prev_loglik,
+            prev_stage_name,
+        );
         if block.provenance_failed {
             had_provenance_failure = true;
         }
         print!("{}", block.text);
         prev_loglik = Some(state.best_loglik);
-        prev_stage_name = Some(*stage);
+        prev_stage_name_owned = Some(stage_name.clone());
     }
 
-    if !any_rendered {
-        println!("  (no MLE stages found in {})", dir);
-        println!("  expected one of: {}/{{{}}}",
-            dir, MLE_STAGES.join(","));
+    if resolved.is_empty() {
+        println!("  (no if2 stages found in {})", dir);
+        println!("  expected one of: {}/real/fit_<seed>/{{{}}}/", dir, stages.join(","));
     }
 
     if strict && had_provenance_failure {
@@ -140,6 +145,65 @@ fn cmd_text(dir: &str, args: &FitSummaryArgs, stages: &[&str], strict: bool) {
         eprintln!("error: provenance cross-checks failed (--strict).");
         std::process::exit(1);
     }
+}
+
+/// Walk `fit_dir` via [`fit_tree::walk_fit_dir`], filter to method
+/// `if2`, and resolve each requested stage name to its v2 stage
+/// directory. When the same stage name appears in multiple cells,
+/// prefer real-data over synthetic, then lower fit_seed, then
+/// lex-first stage_dir. The single-fit case (one cell) is
+/// unambiguous; the priority only matters when a fit has multiple
+/// cells and the user passes the top-level fit_dir without a
+/// per-cell qualifier.
+///
+/// Returns the resolution in `stage_names`-order (i.e. pipeline
+/// order). Stages not found are silently dropped — the caller
+/// detects "no stages found" via an empty result.
+///
+/// On a missing fit_dir, returns empty rather than erroring. Callers
+/// already checked the path existed at command entry.
+fn resolve_if2_stage_dirs(fit_dir: &Path, stage_names: &[&str]) -> Vec<(String, PathBuf)> {
+    let nodes = fit_tree::walk_fit_dir(fit_dir).unwrap_or_default();
+    // Per-stage best candidate, scored by (data_kind preference,
+    // fit_seed, stage_dir). `data_kind` rank: Real = 0, Synthetic = 1.
+    // Nodes whose path didn't fit the canonical layout (axes = None)
+    // sort last so they only win when nothing canonical exists.
+    type Rank = (u8, u64, PathBuf);
+    let mut best: BTreeMap<String, (Rank, PathBuf)> = BTreeMap::new();
+    for node in nodes {
+        let (stage, method) = match &node.run.kind {
+            RunKind::FitStage(m) => (m.stage.clone(), m.method.clone()),
+            _ => continue,
+        };
+        if method != "if2" {
+            continue;
+        }
+        if !stage_names.contains(&stage.as_str()) {
+            continue;
+        }
+        let rank: Rank = match &node.axes {
+            Some(axes) => {
+                let kind_rank = match axes.data_kind {
+                    DataKind::Real => 0,
+                    DataKind::Synthetic { .. } => 1,
+                };
+                (kind_rank, axes.fit_seed, node.stage_dir.clone())
+            }
+            None => (2, u64::MAX, node.stage_dir.clone()),
+        };
+        best.entry(stage)
+            .and_modify(|(cur, dir)| {
+                if rank < *cur {
+                    *cur = rank.clone();
+                    *dir = node.stage_dir.clone();
+                }
+            })
+            .or_insert_with(|| (rank, node.stage_dir.clone()));
+    }
+    stage_names
+        .iter()
+        .filter_map(|name| best.get(*name).map(|(_, d)| ((*name).to_string(), d.clone())))
+        .collect()
 }
 
 fn cmd_json(dir: &str, _args: &FitSummaryArgs, stages: &[&str], strict: bool) {
@@ -553,6 +617,16 @@ pub struct StageReport {
     pub parameters: Vec<ParameterReport>,
     pub chains: Vec<ChainReport>,
     pub provenance: ProvenanceReport,
+    /// Typed `MethodResult` reload — additive JSON field that lets
+    /// downstream consumers read the IF2 stage in its typed form
+    /// (gate verdict as enum, max_chain_agreement, ESS at MLE, etc.)
+    /// without re-deriving it from the existing scalar fields.
+    /// Step 5's full method-aware refactor will reorganise the
+    /// schema around this type; until then it ships alongside the
+    /// existing flat fields. `None` when MethodResult::load_from
+    /// errored (e.g. malformed run.json).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub method_result: Option<MethodResult>,
     /// Advisory fields whose strings may shift across camdl versions
     /// even at stable schema.version. Consumers keying off these must
     /// accept that they're heuristic.
@@ -634,20 +708,32 @@ pub fn build_summary_doc(dir: &str, stages: &[&str]) -> FitSummaryDoc {
         fit_dir: dir.to_string(),
         stages: Vec::new(),
     };
+    let resolved = resolve_if2_stage_dirs(Path::new(dir), stages);
     let mut prev_loglik: Option<f64> = None;
-    let mut prev_stage_name: Option<&str> = None;
-    for stage in stages {
-        let stage_dir = format!("{}/{}", dir, stage);
-        if !Path::new(&stage_dir).join("fit_state.toml").exists() {
-            continue;
-        }
-        let state = match FitState::load(&stage_dir) {
+    let mut prev_stage_name_owned: Option<String> = None;
+    for (stage_name, stage_path) in &resolved {
+        let stage_dir_str = stage_path.to_string_lossy().into_owned();
+        let state = match FitState::load(&stage_dir_str) {
             Ok(s) => s,
             Err(_) => continue,
         };
-        out.stages.push(stage_report(stage, &stage_dir, &state, prev_loglik, prev_stage_name));
+        // Typed cross-check: load the same stage via MethodResult and
+        // attach to the report. The IF2 path is the only consumer of
+        // MethodResult in the bin until step 5 wires it into `fit
+        // table`; surfacing it here keeps the loader exercised on
+        // every summary call rather than letting it bit-rot.
+        let typed = MethodResult::load_from(stage_path, "if2").ok();
+        let prev_stage_name = prev_stage_name_owned.as_deref();
+        out.stages.push(stage_report(
+            stage_name,
+            &stage_dir_str,
+            &state,
+            typed,
+            prev_loglik,
+            prev_stage_name,
+        ));
         prev_loglik = Some(state.best_loglik);
-        prev_stage_name = Some(*stage);
+        prev_stage_name_owned = Some(stage_name.clone());
     }
     out
 }
@@ -656,6 +742,7 @@ fn stage_report(
     stage: &str,
     stage_dir: &str,
     state: &FitState,
+    method_result: Option<MethodResult>,
     prev_loglik: Option<f64>,
     prev_stage_name: Option<&str>,
 ) -> StageReport {
@@ -801,6 +888,7 @@ fn stage_report(
         parameters,
         chains,
         provenance,
+        method_result,
         heuristic: HeuristicReport { overall_status, interpretation },
     }
 }
@@ -1000,31 +1088,47 @@ fn escape_latex(s: &str) -> String {
 /// when the requested stage doesn't exist or its `final_params.toml`
 /// is missing / malformed.
 pub fn dump_params_only(dir: &str, stage_filter: Option<&str>) -> Result<String, String> {
-    let target_stage: &str = match stage_filter {
+    let resolved = resolve_if2_stage_dirs(Path::new(dir), MLE_STAGES);
+    let (target_stage, stage_path): (String, PathBuf) = match stage_filter {
         Some(s) => {
             if !MLE_STAGES.contains(&s) {
                 return Err(format!(
-                    "unknown stage `{}`. Available: {}", s, MLE_STAGES.join(", ")));
+                    "unknown stage `{}`. Available: {}",
+                    s,
+                    MLE_STAGES.join(", ")
+                ));
             }
-            s
+            let entry = resolved
+                .iter()
+                .find(|(name, _)| name == s)
+                .ok_or_else(|| {
+                    format!("no completed `{}` stage found under {}", s, dir)
+                })?;
+            (entry.0.clone(), entry.1.clone())
         }
         None => {
             // Walk in reverse pipeline order so we land on the most
             // refined stage available.
-            let mut found = None;
-            for stage in MLE_STAGES.iter().rev() {
-                let p = format!("{}/{}/final_params.toml", dir, stage);
-                if Path::new(&p).exists() {
-                    found = Some(*stage);
-                    break;
-                }
-            }
-            found.ok_or_else(|| format!(
-                "no completed MLE stage found in {} (looked for {})",
-                dir, MLE_STAGES.join(", ")))?
+            let entry = MLE_STAGES
+                .iter()
+                .rev()
+                .find_map(|stage_name| {
+                    resolved
+                        .iter()
+                        .find(|(name, _)| name == *stage_name)
+                        .cloned()
+                })
+                .ok_or_else(|| {
+                    format!(
+                        "no completed MLE stage found in {} (looked for {})",
+                        dir,
+                        MLE_STAGES.join(", ")
+                    )
+                })?;
+            entry
         }
     };
-    let path = format!("{}/{}/final_params.toml", dir, target_stage);
+    let path = format!("{}/final_params.toml", stage_path.to_string_lossy());
     let params = crate::util::load_params_toml(&path)
         .map_err(|e| format!("cannot read {}: {}", path, e))?;
     let mut keys: Vec<&String> = params.keys().collect();
@@ -1196,9 +1300,11 @@ mod tests {
 
     // ── Phase 4 / 5 tests ─────────────────────────────────────────
 
-    /// Build a fit dir with one stage, return its top-level path.
-    /// Mirror of what `camdl fit run` writes minus the bits these
-    /// tests don't need.
+    /// Build a fit dir with one stage at the v2 layout
+    /// (`<dir>/real/fit_1/<stage>/`), and write the top-level + stage
+    /// `run.json` files so `fit_tree::walk_fit_dir` finds it. Mirror
+    /// of what `camdl fit run` produces, minus the bits these tests
+    /// don't need.
     fn make_fit_dir(stage: &str, state: &FitState, params: &[(&str, f64)])
         -> std::path::PathBuf
     {
@@ -1207,9 +1313,14 @@ mod tests {
             stage, std::process::id(),
             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos(),
         ));
-        let stage_dir = dir.join(stage);
+        std::fs::create_dir_all(&dir).unwrap();
+        let parent_hash: String = "deadbeef".repeat(8);
+        write_top_level_fit_run(&dir, &parent_hash);
+
+        let stage_dir = dir.join("real").join("fit_1").join(stage);
         std::fs::create_dir_all(&stage_dir).unwrap();
         state.save(&stage_dir.to_string_lossy()).unwrap();
+        write_stage_run(&stage_dir, &parent_hash, stage, "if2");
 
         // final_params.toml + mle_params.toml carrying matching values
         // so the provenance cross-check passes.
@@ -1220,6 +1331,63 @@ mod tests {
         std::fs::write(stage_dir.join("final_params.toml"), &body).unwrap();
         std::fs::write(stage_dir.join("mle_params.toml"), &body).unwrap();
         dir
+    }
+
+    fn write_top_level_fit_run(dir: &std::path::Path, parent_hash: &str) {
+        use crate::run_meta::{FitMeta, Run, RunKind};
+        let r = Run {
+            hash: parent_hash.into(),
+            version: "0.1.0+test".into(),
+            created_at: "2026-04-27T00:00:00Z".into(),
+            argv: vec!["camdl".into(), "fit".into(), "run".into()],
+            wall_time_seconds: 1.0,
+            kind: RunKind::Fit(FitMeta {
+                model: "sir.camdl".into(),
+                model_hash: "f00d".repeat(16),
+                fit_toml_path: "fit.toml".into(),
+                fit_toml_hash: "cafe".repeat(16),
+                data_hashes: HashMap::new(),
+                estimated: vec!["R0".into(), "sigma".into(), "gamma".into()],
+                fixed: HashMap::new(),
+                stages_declared: vec!["scout".into(), "refine".into(), "validate".into()],
+                ic_free: false,
+            }),
+        };
+        r.write(dir).unwrap();
+    }
+
+    fn write_stage_run(stage_dir: &std::path::Path, parent_hash: &str, stage: &str, method: &str) {
+        use crate::run_meta::{FitStageMeta, Run, RunKind};
+        let r = Run {
+            hash: format!("{}-{}", parent_hash, stage)
+                .chars()
+                .cycle()
+                .take(64)
+                .collect(),
+            version: "0.1.0+test".into(),
+            created_at: "2026-04-27T00:00:00Z".into(),
+            argv: vec!["camdl".into()],
+            wall_time_seconds: 1.0,
+            kind: RunKind::FitStage(FitStageMeta {
+                fit_hash: parent_hash.into(),
+                stage: stage.into(),
+                method: method.into(),
+                seed: 1,
+                n_chains: 8,
+                algorithm: serde_json::json!({
+                    "method": method,
+                    "iterations": 50,
+                }),
+                best_loglik: Some(-3804.9),
+                best_chain: Some(1),
+                starts_from: None,
+                derived_from: None,
+                parent_profile_hash: None,
+                profile_point_idx: None,
+                profile_start_idx: None,
+            }),
+        };
+        r.write(stage_dir).unwrap();
     }
 
     /// JSON output is parseable, schema.version is 1, stage report
@@ -1320,16 +1488,19 @@ mod tests {
 
     #[test]
     fn params_only_picks_terminal_stage_in_pipeline_order() {
-        // Build a fit dir with both scout and refine; --params-only
-        // without --stage should pick refine (most refined).
+        // Build a fit dir with both scout and refine at the v2
+        // layout; --params-only without --stage should pick refine
+        // (most refined).
         let state = synthetic_fit_state();
         let scout_params = [("R0", 56.0_f64)];
         let refine_params = [("R0", 56.5_f64)];
         let dir = make_fit_dir("scout", &state, &scout_params);
-        // Add a refine stage in the same dir.
-        let refine_dir = dir.join("refine");
+        // Add a refine stage at the v2 path real/fit_1/refine/.
+        let parent_hash: String = "deadbeef".repeat(8);
+        let refine_dir = dir.join("real").join("fit_1").join("refine");
         std::fs::create_dir_all(&refine_dir).unwrap();
         state.save(&refine_dir.to_string_lossy()).unwrap();
+        write_stage_run(&refine_dir, &parent_hash, "refine", "if2");
         let mut body = String::new();
         for (k, v) in refine_params { body.push_str(&format!("{} = {}\n", k, v)); }
         std::fs::write(refine_dir.join("final_params.toml"), &body).unwrap();
