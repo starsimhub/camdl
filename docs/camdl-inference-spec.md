@@ -676,30 +676,19 @@ chains start from random positions within bounds. Controlled by
 ```
 fit/{name}/scout/
   chain_{1..8}/parameter_traces.tsv
-  scout_best_params.toml     ← best chain's params (all estimated + fixed)
-  scout_summary.json
-  fit_state.toml
-  diagnostics.tsv
+  chain_{1..8}/final_params.toml    ← per-chain winner + [provenance]
+  fit_state.toml                    ← inter-stage handoff
+  mle_params.toml                   ← winner θ̂ + [provenance]
+  final_params.toml                 ← winner θ̂ + [provenance] (run-root)
+  chain_evaluations.tsv             ← full clean-eval score table
+  diagnostics.json                  ← structured warnings
+  run.json                          ← stage metadata (post-Phase-3)
 ```
 
-**scout_summary.json includes:**
-- `status`: "ok" | "warning" | "error"
-- `best_loglik`, `initial_loglik` (pfilter at starting params)
-- `ess_at_best`: mean and min ESS at best chain's parameters
-- Top-level `chain_agreement`: `{ <param>: Â }` map (per-parameter
-  IF2 chain-agreement statistic — Gelman–Rubin 1992 form applied to
-  IF2's per-iteration parameter-mean trajectory across chains; this
-  is **not** a posterior mixing statistic).
-- Per-parameter (`parameters[]`): `chain_agreement` (Â), `range`,
-  `recommended_rw_sd`, `boundary_fraction`.
-- Per-chain (`chains[]`): `chain_id` (1-based), `clean_loglik`,
-  `clean_se`, `winning_candidate_label` ∈ {`final_iter`,
-  `tail_mean_last_k`, `best_in_run_iter`}. The label records which
-  candidate heuristic produced this chain's clean-eval winner θ̂
-  (see §6.1.1 below).
-- `n_good_chains`: chains within 3×MAD of median (see §4.2)
-- `warnings`: list of diagnostic messages
-- `next_step`: "refine" | "fix_model" | "widen_bounds"
+For an interpretation surface — gate verdict, parameter table,
+filter health — read `camdl fit summary --format json` (§7.2.2).
+There is no separate `<stage>_summary.json` file written; that was
+a v1 artefact superseded by the summary command.
 
 #### 6.1.1 Clean-evaluation re-scoring and the compound gate
 
@@ -756,28 +745,9 @@ cooling_fraction=0.95 over 50 iterations.
 
 **Reads:** `scout/fit_state.toml` for start values and rw_sd.
 
-**Writes:**
-
-```
-fit/{name}/refine/
-  chain_{1..4}/
-    parameter_traces.tsv
-    final_params.toml
-  refine_summary.json
-  fit_state.toml
-  mle_params.toml           ← best chain MLE
-  diagnostics.tsv
-```
-
-**refine_summary.json includes:**
-- Top-level `chain_agreement`: `{ <param>: Â }` map (across chains,
-  last half of iterations).
-- `loglik_spread` across chains.
-- `converged`: true if all Â < 1.1 and spread < 10.
-- Per-parameter (`parameters[]`): `estimate`, `chain_agreement`,
-  `sd`, `cv`, `drift`.
-- Per-chain (`chains[]`): same shape as scout — `chain_id`,
-  `clean_loglik`, `clean_se`, `winning_candidate_label`.
+**Writes:** same shape as scout (above). Use
+`camdl fit summary --format json` for the interpretation surface
+(§7.2.2).
 
 ### 6.3 Validate
 
@@ -820,15 +790,17 @@ fit/{name}/validate/
     parameter_traces.tsv
     final_params.toml
   profiles/
-    {param}_profile.tsv       ← one per estimated parameter
-  validate_summary.json
+    {param}_profile.tsv       ← one per estimated parameter (when validate
+                                 runs profiles; not yet wired in v2)
   fit_state.toml
-  mle_params.toml           ← final MLE (provenance-hashed)
-  fit_record.json           ← self-contained provenance
-  fit_report.txt            ← human-readable summary
-  pfilter_loglik.txt        ← precise loglik at MLE
-  ess_at_mle.tsv            ← per-observation ESS trace at MLE
+  mle_params.toml             ← final MLE (provenance-hashed)
+  pfilter_loglik.txt          ← precise loglik at MLE
+  ess_at_mle.tsv              ← per-observation ESS trace at MLE
+  run.json                    ← stage metadata
 ```
+
+For an interpretation surface, `camdl fit summary --format json`
+(§7.2.2) covers all stages uniformly.
 
 ---
 
@@ -902,9 +874,8 @@ fit/he2010/
 camdl fit summary fit/he2010
 ```
 
-Reads each MLE stage's `fit_state.toml` + `<stage>_summary.json` +
-`final_params.toml` + `mle_params.toml` and renders a per-stage
-interpretation block:
+Reads each MLE stage's `fit_state.toml` + `final_params.toml` +
+`mle_params.toml` and renders a per-stage interpretation block:
 
 - compound scout-convergence gate verdict (Â + decibans-spread,
   rendered against the *resolved* gate config persisted in
