@@ -153,32 +153,25 @@ impl FilterStats {
     }
 }
 
-/// One candidate's clean-PF score: combined log-likelihood plus the
-/// per-replicate raw values (kept for diagnostics + downstream gating).
-///
-/// Fields beyond what `select_winner_summary` reads are written but not
-/// yet read — Step 7 (`chain_evaluations.tsv`) and Step 8 (compound
-/// gate) consume them.
-#[allow(dead_code)]
+/// One candidate's clean-PF score: combined log-likelihood, SE,
+/// θ̂, and filter-health stats over the M replicate PFs.
 #[derive(Debug, Clone)]
 pub struct CandidateScore {
     pub chain_id: usize,
     pub label: CandidateLabel,
     pub theta: Vec<f64>,
-    /// Combined score across `per_rep_logliks`. `logmeanexp` by default
-    /// (unbiased on the likelihood scale); `mean` when configured.
+    /// Combined score across the per-replicate logliks. `logmeanexp`
+    /// by default (unbiased on the likelihood scale); `mean` when
+    /// configured.
     pub loglik_combined: f64,
     /// Standard error of the combined score: `sample_sd(per_rep) / √M`.
     pub se: f64,
-    pub per_rep_logliks: Vec<f64>,
     /// Filter-health summary aggregated over the M replicates.
-    /// Phase 2 — surfaced in `chain_evaluations.tsv` and per-chain
-    /// `chains[]` of `<stage>_summary.json`.
+    /// Surfaced in `chain_evaluations.tsv` per (chain × candidate).
     pub filter_stats: FilterStats,
 }
 
 /// Best candidate within a single chain.
-#[allow(dead_code)]  // `theta` is consumed in Step 7 (final_params.toml writer).
 #[derive(Debug, Clone)]
 pub struct ChainWinner {
     pub chain_id: usize,
@@ -186,16 +179,11 @@ pub struct ChainWinner {
     pub theta: Vec<f64>,
     pub loglik: f64,
     pub se: f64,
-    /// Filter-health summary at the winning θ̂. Promoted to chain-level
-    /// for fast access — `summary` reads this directly without having
-    /// to scan `all_scores` for the winning row.
-    pub filter_stats: FilterStats,
 }
 
 /// Full output of clean evaluation: every (chain × candidate) score, a
 /// per-chain winner table, and the index into `per_chain_winners` of the
 /// overall maximum.
-#[allow(dead_code)]  // `all_scores` is consumed in Step 7 (chain_evaluations.tsv writer).
 #[derive(Debug, Clone)]
 pub struct CleanEvalOutcome {
     /// All 3 × n_chains candidate scores, in deterministic order:
@@ -340,7 +328,6 @@ where
                 theta: theta.clone(),
                 loglik_combined: combined,
                 se,
-                per_rep_logliks: per_rep,
                 filter_stats,
             };
 
@@ -367,7 +354,6 @@ where
             theta: w.theta.clone(),
             loglik: w.loglik_combined,
             se: w.se,
-            filter_stats: w.filter_stats,
         });
     }
 

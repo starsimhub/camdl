@@ -1548,7 +1548,6 @@ pub fn cmd_fit_new(a: &crate::args::FitNewArgs) {
     eprintln!("created {}", to);
 }
 
-#[allow(dead_code)]
 /// Accept either a directory path or a git-style short hash for
 /// `--starts-from`. The heuristic: contains `/` or `\\` → path
 /// (today's behavior); else → resolve as Run.hash prefix via

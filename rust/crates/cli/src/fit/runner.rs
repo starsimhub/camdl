@@ -78,19 +78,13 @@ pub struct FitRunConfig {
 /// `best_chain` / `best_loglik` are the clean-eval winner (Step 6:
 /// proposal §Proposal 1). They no longer reflect in-run noisy
 /// `IF2Result::final_loglik` argmax — that selection had a ~40-nat
-/// extraction bias. `winning_label` records which of the three
-/// candidate heuristics produced the winning θ̂ (final-iter mean,
-/// tail mean, or best-in-run iter); `best_se` is the clean-eval
-/// standard error of the combined log-likelihood; `clean_eval`
-/// preserves the full 3 × n_chains score table for downstream gating
-/// and TSV emission (Steps 7–9).
-#[allow(dead_code)]  // `best_se` / `winning_label` / `clean_eval` consumed in Steps 7–9.
+/// extraction bias. The full per-chain candidate table lives in
+/// `clean_eval`; consumers needing the winner's SE / candidate
+/// label / θ̂ read from `clean_eval.per_chain_winners[overall_winner_idx]`.
 pub struct ChainResults {
     pub results: Vec<(usize, IF2Result)>,
     pub best_chain: usize,
     pub best_loglik: f64,
-    pub best_se: f64,
-    pub winning_label: super::clean_eval::CandidateLabel,
     pub chain_agreement: HashMap<String, f64>,
     pub clean_eval: super::clean_eval::CleanEvalOutcome,
 }
@@ -371,7 +365,6 @@ fn build_if2_params(
             rw_sd,
             transform: est.transform.clone(),
             ivp: est.ivp,
-            start: est.start,
         }
     }).collect();
 
@@ -574,9 +567,6 @@ pub struct ParamSpec {
     /// None = auto from param_kind. Some("log") = override.
     pub transform: Option<String>,
     pub ivp: bool,
-    /// User-specified starting value. Used by scout for seeded chains.
-    #[allow(dead_code)]
-    pub start: Option<f64>,
 }
 
 /// Build EstimatedParam specs from caller-provided ParamSpecs.
@@ -834,7 +824,9 @@ pub fn run_chains_with_per_chain_params(
     let (best_chain, best_loglik, best_se, winning_label) =
         select_winner_summary(&clean_eval_outcome);
 
-    // Report
+    // Report. `best_se` and `winning_label` are derived locally; we
+    // log them here but don't store them on `ChainResults` — readers
+    // that need them go to `clean_eval.per_chain_winners[overall_winner_idx]`.
     eprintln!("\nbest chain: {} (loglik={:.2} ± {:.2}, candidate={})",
         best_chain + 1, best_loglik, best_se, winning_label.as_str());
     if config.n_chains > 1 {
@@ -875,8 +867,6 @@ pub fn run_chains_with_per_chain_params(
         results,
         best_chain,
         best_loglik,
-        best_se,
-        winning_label,
         chain_agreement,
         clean_eval: clean_eval_outcome,
     }
@@ -933,26 +923,6 @@ fn select_winner_summary(
 ) -> (usize, f64, f64, clean_eval::CandidateLabel) {
     let w = &outcome.per_chain_winners[outcome.overall_winner_idx];
     (w.chain_id, w.loglik, w.se, w.label)
-}
-
-/// Compute Gelman-Rubin 1992 R-hat across chains (last half of
-/// iterations). IM13 in 2026-04-19 inference review batch 3: this
-/// is the original 1992 formula, not Vehtari et al. 2021's
-/// split-chain + rank-normalized version. For IF2's per-iteration
-/// parameter-means trajectory (an EM-like smoothed sequence, not
-/// posterior samples) the 1992 formula is conservatively OK. Users
-/// coming from Stan/PyMC should interpret the returned R-hat
-/// accordingly.
-///
-/// Aliased as `gelman_rubin_1992` so consumers can name the
-/// intent.
-#[allow(dead_code)]
-pub fn gelman_rubin_1992(
-    results: &[(usize, IF2Result)],
-    if2_params: &[EstimatedParam],
-    n_iterations: usize,
-) -> HashMap<String, f64> {
-    compute_chain_agreement(results, if2_params, n_iterations)
 }
 
 /// Compute chain agreement (Â) across IF2 chains (last half of
@@ -1973,7 +1943,6 @@ mod tests {
         let mk_score = |chain: usize, label: CandidateLabel, theta: Vec<f64>, ll: f64| {
             CandidateScore {
                 chain_id: chain, label, theta, loglik_combined: ll, se: 0.5,
-                per_rep_logliks: vec![ll; 4],
                 filter_stats: crate::fit::clean_eval::FilterStats::failed(),
             }
         };
@@ -1988,9 +1957,9 @@ mod tests {
             ],
             per_chain_winners: vec![
                 ChainWinner { chain_id: 0, label: CandidateLabel::BestInRunIter,
-                    theta: vec![0.12, 0.22], loglik: -99.0, se: 0.5, filter_stats: crate::fit::clean_eval::FilterStats::failed() },
+                    theta: vec![0.12, 0.22], loglik: -99.0, se: 0.5},
                 ChainWinner { chain_id: 1, label: CandidateLabel::TailMeanLastK,
-                    theta: vec![0.31, 0.41], loglik: -49.0, se: 0.5, filter_stats: crate::fit::clean_eval::FilterStats::failed() },
+                    theta: vec![0.31, 0.41], loglik: -49.0, se: 0.5},
             ],
             overall_winner_idx: 1,
         };
@@ -2040,9 +2009,9 @@ mod tests {
             all_scores: vec![],
             per_chain_winners: vec![
                 ChainWinner { chain_id: 0, label: CandidateLabel::FinalIter,
-                    theta: vec![0.10], loglik: -100.0, se: 0.3, filter_stats: crate::fit::clean_eval::FilterStats::failed() },
+                    theta: vec![0.10], loglik: -100.0, se: 0.3},
                 ChainWinner { chain_id: 1, label: CandidateLabel::TailMeanLastK,
-                    theta: vec![0.42], loglik: -50.0, se: 0.2, filter_stats: crate::fit::clean_eval::FilterStats::failed() },
+                    theta: vec![0.42], loglik: -50.0, se: 0.2},
             ],
             overall_winner_idx: 1,
         };
@@ -2162,7 +2131,7 @@ mod tests {
             all_scores: vec![],
             per_chain_winners: vec![
                 ChainWinner { chain_id: 5, label: CandidateLabel::BestInRunIter,
-                    theta: vec![87.668938], loglik: -6235.11, se: 2.19, filter_stats: crate::fit::clean_eval::FilterStats::failed() },
+                    theta: vec![87.668938], loglik: -6235.11, se: 2.19},
             ],
             overall_winner_idx: 0,
         };
@@ -2274,17 +2243,15 @@ mod tests {
         let clean_eval = CleanEvalOutcome {
             all_scores: vec![
                 CandidateScore { chain_id: 0, label: CandidateLabel::FinalIter,
-                    theta: vec![0.10, 0.20], loglik_combined: -110.0, se: 0.5,
-                    per_rep_logliks: vec![-110.0; 4], filter_stats: crate::fit::clean_eval::FilterStats::failed() },
+                    theta: vec![0.10, 0.20], loglik_combined: -110.0, se: 0.5, filter_stats: crate::fit::clean_eval::FilterStats::failed()},
                 CandidateScore { chain_id: 1, label: CandidateLabel::TailMeanLastK,
-                    theta: vec![0.31, 0.41], loglik_combined: -49.0, se: 0.4,
-                    per_rep_logliks: vec![-49.0; 4], filter_stats: crate::fit::clean_eval::FilterStats::failed() },
+                    theta: vec![0.31, 0.41], loglik_combined: -49.0, se: 0.4, filter_stats: crate::fit::clean_eval::FilterStats::failed()},
             ],
             per_chain_winners: vec![
                 ChainWinner { chain_id: 0, label: CandidateLabel::FinalIter,
-                    theta: vec![0.10, 0.20], loglik: -110.0, se: 0.5, filter_stats: crate::fit::clean_eval::FilterStats::failed() },
+                    theta: vec![0.10, 0.20], loglik: -110.0, se: 0.5},
                 ChainWinner { chain_id: 1, label: CandidateLabel::TailMeanLastK,
-                    theta: vec![0.31, 0.41], loglik: -49.0, se: 0.4, filter_stats: crate::fit::clean_eval::FilterStats::failed() },
+                    theta: vec![0.31, 0.41], loglik: -49.0, se: 0.4},
             ],
             overall_winner_idx: 1,
         };
@@ -2296,8 +2263,6 @@ mod tests {
             results: vec![(0, if2_chain0), (1, if2_chain1)],
             best_chain: 1,
             best_loglik: -49.0,
-            best_se: 0.4,
-            winning_label: CandidateLabel::TailMeanLastK,
             chain_agreement,
             clean_eval,
         };

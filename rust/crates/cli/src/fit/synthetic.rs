@@ -29,16 +29,11 @@ use crate::util::{load_params_toml, SimRun, run_simulation};
 /// tables consume this to find each cell's data file; the runner
 /// dispatches a fit per entry.
 #[derive(Debug, Clone)]
-#[allow(dead_code)] // sim_seed / content_hash consumed by step 5 (summary).
 pub struct SyntheticDataset {
     /// 1-based dataset index (matches `ds_NN` in the output directory).
     pub idx: usize,
-    /// Simulation seed used for data generation.
-    pub sim_seed: u64,
     /// Wide-format TSV at `<fit_dir>/synthetic/data/ds_NN.tsv`.
     pub path: PathBuf,
-    /// Content hash of the generated file, for per-cell provenance.
-    pub content_hash: String,
 }
 
 /// Generate `len(sim_seeds)` synthetic datasets into
@@ -75,14 +70,13 @@ pub fn generate_synthetic_datasets(
     for (i, &sim_seed) in seeds.iter().enumerate() {
         let idx = i + 1;
         let path = data_dir.join(format!("{}.tsv", format_dataset_dir(idx)));
-        let hash = generate_one_dataset(
+        // Generate the dataset (returns a content hash but we don't persist
+        // it — the per-cell content_hash flow lived in the v1 grid summary
+        // path, which has been deleted).
+        let _ = generate_one_dataset(
             spec, model_path, sim_seed, &path, backend, dt,
         )?;
-        out.push(SyntheticDataset {
-            idx, sim_seed,
-            path,
-            content_hash: hash,
-        });
+        out.push(SyntheticDataset { idx, path });
     }
     Ok(out)
 }
@@ -347,7 +341,6 @@ simulate { from = 0 'days  to = 10 'days }
         assert_eq!(datasets.len(), 3);
         for (i, ds) in datasets.iter().enumerate() {
             assert_eq!(ds.idx, i + 1);
-            assert_eq!(ds.sim_seed, (i + 1) as u64);
             assert!(ds.path.exists(),
                 "ds_{:02}.tsv must exist at {}", i + 1, ds.path.display());
             let contents = std::fs::read_to_string(&ds.path).unwrap();
@@ -382,10 +375,9 @@ simulate { from = 0 'days  to = 10 'days }
             &tmp.path().join("run_b"), "chain_binomial", 1.0,
         ).unwrap();
 
-        assert_eq!(a[0].content_hash, b[0].content_hash,
-            "same seed + same truth must produce identical datasets");
         assert_eq!(std::fs::read(&a[0].path).unwrap(),
-                   std::fs::read(&b[0].path).unwrap());
+                   std::fs::read(&b[0].path).unwrap(),
+                   "same seed + same truth must produce identical datasets");
     }
 
     #[test]
@@ -403,8 +395,9 @@ simulate { from = 0 'days  to = 10 'days }
             &spec, ir_path.to_str().unwrap(),
             &tmp.path().join("fit"), "chain_binomial", 1.0,
         ).unwrap();
-        assert_ne!(ds[0].content_hash, ds[1].content_hash,
-            "different sim seeds must produce different data realizations");
+        assert_ne!(std::fs::read(&ds[0].path).unwrap(),
+                   std::fs::read(&ds[1].path).unwrap(),
+                   "different sim seeds must produce different data realizations");
     }
 
     #[test]

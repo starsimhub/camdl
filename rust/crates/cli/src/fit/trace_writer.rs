@@ -89,11 +89,4 @@ impl TraceWriter {
         }
     }
 
-    /// Force flush to disk.
-    #[allow(dead_code)]
-    pub fn flush(&self) {
-        if let Ok(mut f) = self.file.lock() {
-            f.flush().ok();
-        }
-    }
 }
