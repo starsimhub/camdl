@@ -90,6 +90,53 @@ pub fn sample_sd(xs: &[f64]) -> f64 {
     var.sqrt()
 }
 
+/// `logmeanexp` plus a delta-method standard error of the combined
+/// estimate. Returns `(log(mean(exp(xs))), SE)`.
+///
+/// Derivation: with `Y = log(M⁻¹ Σ exp(X_i))` and `L_i = exp(X_i)`,
+/// `Y = log(L̄)`. By the delta method (d/dL log L = 1/L),
+/// `Var(Y) ≈ Var(L̄) / L̄² = Var(L_i) / (M · L̄²)`, so
+/// `SE(Y) = SD(L_i) / (L̄ · √M)`. Numerically stable form (max-shift):
+/// the `exp(m)` factor cancels between SD and L̄.
+///
+/// This is the correct SE for log-mean-exp combining of replicate
+/// particle-filter log-likelihoods (matches pomp's `pfilter` output;
+/// see Ionides et al. 2015 PNAS supplement and the pomp manual on
+/// `logmeanexp`). The naïve `sd(xs)/√M` is only correct for the
+/// *arithmetic* mean of the logs, not for log-of-arithmetic-mean of
+/// likelihoods, and underestimates `Var(Y)` whenever per-replicate
+/// variance is non-trivial.
+///
+/// Returns:
+/// - `(NEG_INFINITY, NaN)` for empty input.
+/// - `(value, 0.0)` for a single-element input.
+/// - `(value, NaN)` if the input contains NaN.
+pub fn logmeanexp_with_se(xs: &[f64]) -> (f64, f64) {
+    if xs.is_empty() {
+        return (f64::NEG_INFINITY, f64::NAN);
+    }
+    if xs.len() == 1 {
+        return (xs[0], 0.0);
+    }
+    if xs.iter().any(|x| x.is_nan()) {
+        return (f64::NAN, f64::NAN);
+    }
+    let m = xs.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+    if !m.is_finite() {
+        // All -inf, or +inf in input: SE is undefined.
+        return (m, f64::NAN);
+    }
+    let shifted: Vec<f64> = xs.iter().map(|x| (x - m).exp()).collect();
+    let mean_shifted: f64 = shifted.iter().sum::<f64>() / xs.len() as f64;
+    let logmeanexp_val = m + mean_shifted.ln();
+    // Delta-method SE on the log scale: SD(L_i) / (L̄ · √M). The
+    // exp(m) factor cancels between SD and L̄, so we compute SD on
+    // the shifted values directly.
+    let sd_shifted = sample_sd(&shifted);
+    let se = sd_shifted / (mean_shifted * (xs.len() as f64).sqrt());
+    (logmeanexp_val, se)
+}
+
 /// Jeffreys qualitative label for an evidence magnitude in decibans. The
 /// input is the *signed* Δlog-lik in dB; the label describes the magnitude,
 /// and the caller decides whether to prefix with "for" / "against" based on
@@ -223,6 +270,98 @@ mod tests {
         // sd of [1, 2, 3, 4, 5] is sqrt(2.5) ≈ 1.5811 with N-1 denom.
         let got = sample_sd(&[1.0, 2.0, 3.0, 4.0, 5.0]);
         assert!((got - 2.5f64.sqrt()).abs() < 1e-9, "got {}", got);
+    }
+
+    #[test]
+    fn logmeanexp_with_se_constant_input_zero_se() {
+        // Identical replicates → SE = 0 (no per-rep spread).
+        let (val, se) = logmeanexp_with_se(&[-7.3, -7.3, -7.3, -7.3]);
+        assert!((val - (-7.3)).abs() < 1e-12);
+        assert!(se.abs() < 1e-12, "constant input should give SE = 0, got {}", se);
+    }
+
+    #[test]
+    fn logmeanexp_with_se_value_matches_logmeanexp() {
+        // The point estimate must agree with `logmeanexp` for any input.
+        let xs = [-100.0, -98.0, -99.5];
+        let (val, _) = logmeanexp_with_se(&xs);
+        let direct = logmeanexp(&xs);
+        assert!((val - direct).abs() < 1e-12);
+    }
+
+    #[test]
+    fn logmeanexp_with_se_known_two_replicate_case() {
+        // Two replicates ℓ = [-100, -98]. After max-shift (m = -98):
+        //   shifted = [exp(-2), 1] ≈ [0.13534, 1.0]
+        //   mean_shifted = 0.56767
+        //   logmeanexp = -98 + ln(0.56767) ≈ -98.5662
+        // SE = sd(shifted) / (mean_shifted * sqrt(M)).
+        let xs = [-100.0, -98.0];
+        let (val, se) = logmeanexp_with_se(&xs);
+        let expected_val = -98.0 + ((1.0 + (-2f64).exp()) / 2.0).ln();
+        assert!((val - expected_val).abs() < 1e-9);
+
+        let m = -98.0_f64;
+        let shifted = [(-100.0_f64 - m).exp(), (-98.0_f64 - m).exp()];
+        let mean_shifted: f64 = (shifted[0] + shifted[1]) / 2.0;
+        let sd_shifted = sample_sd(&shifted);
+        let expected_se = sd_shifted / (mean_shifted * 2f64.sqrt());
+        assert!((se - expected_se).abs() < 1e-9, "got {}, expected {}", se, expected_se);
+    }
+
+    #[test]
+    fn logmeanexp_with_se_matches_naive_in_small_variance_limit() {
+        // When per-rep variance is small (σ ≪ 1 nat), the delta-method
+        // SE of logmeanexp converges to sd(x)/√M to first order. This is
+        // the regime users typically have post-IF2 (per-rep PF noise of
+        // a fraction of a nat). The two SEs should agree closely.
+        let xs = [-100.0, -100.05, -99.95, -100.0, -100.0];
+        let (_, se) = logmeanexp_with_se(&xs);
+        let naive = sample_sd(&xs) / (xs.len() as f64).sqrt();
+        let rel_diff = (se - naive).abs() / naive;
+        assert!(rel_diff < 0.05,
+            "delta-method SE ({}) and naïve SE ({}) should agree within 5% \
+             in small-variance regime (rel diff {})",
+            se, naive, rel_diff);
+    }
+
+    #[test]
+    fn logmeanexp_with_se_diverges_from_naive_when_variance_large() {
+        // When per-rep variance is non-trivial (≥ 1 nat), the delta-
+        // method SE diverges from sd(x)/√M. Direction is regime-
+        // dependent (smaller for samples where a few replicates dominate
+        // L̄; larger in symmetric-lognormal regimes). The point is that
+        // the two formulas are NOT interchangeable — using sd(x)/√M as
+        // the SE of logmeanexp is wrong outside the small-variance
+        // limit. Just assert they disagree by > 5% so a future regression
+        // would catch a fall-back to the naive formula.
+        let xs = [-105.0, -100.0, -95.0];
+        let (_, se) = logmeanexp_with_se(&xs);
+        let naive = sample_sd(&xs) / (xs.len() as f64).sqrt();
+        let rel_diff = (se - naive).abs() / naive;
+        assert!(rel_diff > 0.05,
+            "delta-method SE ({}) and naïve SE ({}) should disagree noticeably \
+             outside the small-variance regime (rel diff {})",
+            se, naive, rel_diff);
+    }
+
+    #[test]
+    fn logmeanexp_with_se_edge_cases() {
+        // Empty input: value is -inf, SE is NaN.
+        let (v, s) = logmeanexp_with_se(&[]);
+        assert!(v.is_infinite() && v.is_sign_negative());
+        assert!(s.is_nan());
+        // Single-element input: SE is exactly 0.
+        let (v, s) = logmeanexp_with_se(&[5.0]);
+        assert!((v - 5.0).abs() < 1e-12);
+        assert!(s.abs() < 1e-12);
+        // NaN propagates to both fields.
+        let (v, s) = logmeanexp_with_se(&[f64::NAN, 0.0]);
+        assert!(v.is_nan() && s.is_nan());
+        // All -inf: value is -inf, SE is NaN (undefined).
+        let (v, s) = logmeanexp_with_se(&[f64::NEG_INFINITY, f64::NEG_INFINITY]);
+        assert!(v.is_infinite() && v.is_sign_negative());
+        assert!(s.is_nan());
     }
 
     #[test]
