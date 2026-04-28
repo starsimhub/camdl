@@ -112,11 +112,13 @@ let () =
     } in
     Inspect.run_inspect path opts
 
-  (* ── camdlc FILE.camdl [--set ...] (default: compile) ───────────── *)
+  (* ── camdlc FILE.camdl [--set ...] [-o FILE] (default: compile) ──── *)
   | _ ->
-    let usage  = "camdlc FILE.camdl [--set NAME=VALUE ...]" in
+    let usage  = "camdlc FILE.camdl [--set NAME=VALUE ...] [-o FILE]" in
     let files  = ref [] in
     let set_kvs = ref [] in
+    let output_path = ref "" in       (* "" → write to stdout *)
+    let set_output p = output_path := p in
     let spec = [
       ("--set", Arg.String (fun s ->
         match String.split_on_char '=' s with
@@ -129,6 +131,10 @@ let () =
       ("--no-dim-check", Arg.Unit (fun () ->
         Compiler.no_dim_check := true
        ), " disable dimensional analysis checking");
+      ("-o", Arg.String set_output,
+       "FILE  write IR JSON to FILE instead of stdout");
+      ("--output", Arg.String set_output,
+       "FILE  write IR JSON to FILE instead of stdout (long form of -o)");
     ] in
     Arg.parse_argv (Array.of_list ("camdlc" :: args))
       spec (fun f -> files := f :: !files) usage;
@@ -163,5 +169,17 @@ let () =
                ) m.Ir.parameters
            }
          in
-         print_string (Serde.model_to_string m);
-         print_newline ())
+         let json = Serde.model_to_string m in
+         if !output_path = "" then begin
+           (* Default: write to stdout, preserving trailing newline. *)
+           print_string json;
+           print_newline ()
+         end else begin
+           (* -o / --output FILE: write IR JSON to file. Includes the
+              trailing newline so file output is byte-identical to
+              `camdl compile model.camdl > FILE`. *)
+           let oc = open_out !output_path in
+           output_string oc json;
+           output_char oc '\n';
+           close_out oc
+         end)
