@@ -128,6 +128,37 @@ pub fn cmd_fit_table(args: &FitTableArgs) {
         FitTableFormat::Md => print!("{}", render_md(&rows)),
         FitTableFormat::Csv => print!("{}", render_csv(&rows)),
     }
+
+    // Unlabelled-fits nudge: if ≥ N rows have no label, print a
+    // single end-of-output stderr hint pointing at `camdl fit label`.
+    // Threshold via CAMDL_UNLABELED_THRESHOLD env var (default 5),
+    // not a CLI flag — it's a per-user preference, not per-invocation.
+    // Suppressed for non-text formats so JSON/CSV/md outputs remain
+    // shell-pipe-friendly.
+    if matches!(args.format, FitTableFormat::Text) {
+        emit_unlabelled_warning(rows.iter().filter(|r| r.label.is_none()).count());
+    }
+}
+
+/// Emit a one-line stderr hint when the count of unlabelled fits in
+/// the rendered output reaches the user's threshold. The threshold
+/// reads from `CAMDL_UNLABELED_THRESHOLD` (default 5). Setting the
+/// var to `0` disables the warning entirely; setting it to a value
+/// less than the actual count suppresses it for that invocation.
+pub(crate) fn emit_unlabelled_warning(unlabelled_count: usize) {
+    let threshold: usize = std::env::var("CAMDL_UNLABELED_THRESHOLD")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(5);
+    if threshold == 0 || unlabelled_count < threshold {
+        return;
+    }
+    eprintln!();
+    eprintln!("note: {} unlabelled fit{} in output. Add labels with:",
+        unlabelled_count, if unlabelled_count == 1 { "" } else { "s" });
+    eprintln!("        camdl fit run --label \"<short description>\" fit.toml");
+    eprintln!("        camdl fit label <hash> \"<short description>\"");
+    eprintln!("      Set CAMDL_UNLABELED_THRESHOLD=0 to disable this hint.");
 }
 
 /// Load the fit.toml archived inside `<fit_dir>/fit.toml.original`
@@ -175,13 +206,45 @@ fn matches_outer_filters(entry: &FitDirEntry, args: &FitTableArgs, now_unix: i64
             }
         }
     }
-    if let Some(_pat) = &args.label_pattern {
-        // Labels not yet populated (step 8). Today every label is
-        // None; --label-pattern always filters down to zero rows. Loud
-        // is better than silent — flag in stderr once and continue.
-        return false;
+    if let Some(pat) = &args.label_pattern {
+        let label = entry.fit_meta.label.as_deref().unwrap_or("");
+        if !glob_match(pat, label) {
+            return false;
+        }
     }
     true
+}
+
+/// Minimal glob matcher: `*` matches any (possibly empty) substring,
+/// `?` matches exactly one character, every other character matches
+/// itself. Sufficient for `--label-pattern "narrow R0*"` /
+/// `--label-pattern "*take 1"` / `--label-pattern "*"`. Iterative
+/// two-pointer scan; no regex dependency.
+fn glob_match(pattern: &str, text: &str) -> bool {
+    let p: Vec<char> = pattern.chars().collect();
+    let t: Vec<char> = text.chars().collect();
+    let (mut pi, mut ti) = (0usize, 0usize);
+    let (mut star_p, mut star_t): (Option<usize>, usize) = (None, 0);
+    while ti < t.len() {
+        if pi < p.len() && (p[pi] == '?' || p[pi] == t[ti]) {
+            pi += 1;
+            ti += 1;
+        } else if pi < p.len() && p[pi] == '*' {
+            star_p = Some(pi);
+            star_t = ti;
+            pi += 1;
+        } else if let Some(sp) = star_p {
+            pi = sp + 1;
+            star_t += 1;
+            ti = star_t;
+        } else {
+            return false;
+        }
+    }
+    while pi < p.len() && p[pi] == '*' {
+        pi += 1;
+    }
+    pi == p.len()
 }
 
 fn matches_row_filters(row: &TableRow, args: &FitTableArgs) -> bool {
@@ -457,6 +520,7 @@ mod tests {
                 fixed: HashMap::new(),
                 stages_declared: vec!["mle".into()],
                 ic_free: false,
+                label: None,
             }),
         };
         r.write(dir).unwrap();

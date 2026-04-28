@@ -291,12 +291,12 @@ pub struct FitRunArgs {
     #[arg(long)]
     pub allow_nonconverged_scout: bool,
 
-    /// Override [stages.<stage>.clean_eval] n_particles. Requires --stage so
-    /// scout and refine clean-eval settings can be overridden independently.
+    /// Override [stages.<stage>.loglik_eval] n_particles. Requires --stage
+    /// so scout and refine loglik-eval settings can be overridden independently.
     #[arg(long, value_name = "N", requires = "stage")]
     pub loglik_eval_particles: Option<usize>,
 
-    /// Override [stages.<stage>.clean_eval] n_replicates. Requires --stage.
+    /// Override [stages.<stage>.loglik_eval] n_replicates. Requires --stage.
     #[arg(long, value_name = "M", requires = "stage")]
     pub loglik_eval_reps: Option<usize>,
 
@@ -304,6 +304,15 @@ pub struct FitRunArgs {
     /// log-likelihood-spread floor, in decibans). Requires --stage.
     #[arg(long, value_name = "DB", requires = "stage")]
     pub decibans_thresh: Option<f64>,
+
+    /// User-supplied display label for this fit (1–64 chars after
+    /// trim; allowed: letters, digits, spaces, commas, dot,
+    /// underscore, hyphen). Surfaced in `camdl fit list` and
+    /// `camdl fit table` to disambiguate iterations of a model that
+    /// share the same fit-stem. Examples: --label "narrow R0, take 1",
+    /// --label "iota free", --label "log_normal R0 prior".
+    #[arg(long, value_name = "TEXT")]
+    pub label: Option<String>,
 }
 
 #[derive(Args)]
@@ -518,6 +527,38 @@ pub struct FitWhereArgs {
     /// Print per-seed cell directory instead of fit root
     #[arg(long)]
     pub seed: Option<u64>,
+}
+
+// ─── fit label ────────────────────────────────────────────────────────
+
+#[derive(Args)]
+#[command(after_help = "\
+Examples:
+  # Set a label on an already-completed fit
+  camdl fit label 04ab12cd \"narrow R0, take 1\"
+
+  # Update an existing label
+  camdl fit label 04ab12cd \"narrow R0, take 2 (better priors)\"
+
+Notes:
+  - Labels are 1–64 characters after trim, restricted to:
+    letters, digits, spaces, commas, dot, underscore, hyphen.
+  - The hash is matched as a prefix (8+ chars recommended).
+  - Errors if the fit is still running (wall_time_seconds unset).
+  - Concurrent invocations are last-write-wins.
+")]
+pub struct FitLabelArgs {
+    /// Hash prefix of the target fit (matches against
+    /// `results/fits/*-<hash>/run.json`'s `Run.hash`)
+    pub hash: String,
+
+    /// New label text. Validated against ^[a-zA-Z0-9 ,._-]{1,64}$
+    /// after trim. Empty / whitespace-only labels are rejected.
+    pub label: String,
+
+    /// Output root to search under (default: results/)
+    #[arg(long)]
+    pub root: Option<PathBuf>,
 }
 
 // ─── pfilter ──────────────────────────────────────────────────────────────────

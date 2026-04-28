@@ -1731,6 +1731,7 @@ mod tests {
                 fixed: HashMap::new(),
                 stages_declared: vec!["scout".into(), "refine".into(), "validate".into()],
                 ic_free: false,
+                label: None,
             }),
         };
         r.write(dir).unwrap();

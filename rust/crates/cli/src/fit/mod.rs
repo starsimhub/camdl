@@ -314,7 +314,19 @@ pub fn cmd_fit_run_v2(a: &crate::args::FitRunArgs) {
     // `FitStageMeta.fit_hash` — computing it once here avoids the O(stages
     // × full-I/O rehash) pattern.
     let fit_start = std::time::Instant::now();
-    let mut run_fit = build_fit_run(&config, &fit_path);
+    // Validate --label early so we fail before any I/O. The same
+    // validator is reused by `cmd_fit_label` (post-hoc relabel).
+    let validated_label = match a.label.as_deref() {
+        Some(raw) => match validate_label(raw) {
+            Ok(l) => Some(l),
+            Err(e) => {
+                eprintln!("error: invalid --label: {}", e);
+                std::process::exit(1);
+            }
+        },
+        None => None,
+    };
+    let mut run_fit = build_fit_run(&config, &fit_path, validated_label);
     let parent_fit_hash = run_fit.hash.clone();
     if let Err(e) = run_fit.write(&fit_dir) {
         eprintln!("warning: cannot write {}/run.json: {}", fit_dir.display(), e);
@@ -1324,7 +1336,11 @@ fn archive_fit_toml(fit_path: &str, fit_dir: &std::path::Path)
 /// end-of-fit by the caller. Silent fallbacks (empty strings / empty
 /// maps) cover the read-error case so a partially-written fit still
 /// produces something `camdl list` can display.
-fn build_fit_run(config: &config_v2::FitConfigV2, fit_path: &str) -> crate::run_meta::Run {
+fn build_fit_run(
+    config: &config_v2::FitConfigV2,
+    fit_path: &str,
+    label: Option<String>,
+) -> crate::run_meta::Run {
     let fit_hash = config.fit_content_hash(fit_path).unwrap_or_else(|e| {
         eprintln!("error: {}", e);
         std::process::exit(1);
@@ -1365,6 +1381,7 @@ fn build_fit_run(config: &config_v2::FitConfigV2, fit_path: &str) -> crate::run_
             fixed,
             stages_declared,
             ic_free: config.ic_free.unwrap_or(false),
+            label,
         }),
     }
 }
@@ -1615,6 +1632,166 @@ pub fn cmd_fit_new(a: &crate::args::FitNewArgs) {
 /// `browse::resolve_stage_by_hash` against the default output
 /// root. Errors on zero or multiple matches.
 ///
+// ─── Labels (proposal §5) ─────────────────────────────────────────────
+
+/// Validate a user-supplied label string against the proposal's
+/// rule: 1–64 characters after trim, restricted to letters, digits,
+/// spaces, commas, dot, underscore, hyphen. Returns the trimmed
+/// label on success, or a descriptive Err message.
+///
+/// Why a custom regex check rather than a clap value parser: we
+/// want the same validator on both the `--label` flag at fit-run
+/// time and the `camdl fit label` subcommand at relabel time, with
+/// identical error messages. A function call from each entry point
+/// is the simplest way to keep them aligned.
+pub fn validate_label(raw: &str) -> Result<String, String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Err("label is empty after trim — \
+                    pass at least one printable character".into());
+    }
+    let n = trimmed.chars().count();
+    if n > 64 {
+        return Err(format!(
+            "label is {} characters; max is 64 after trim", n));
+    }
+    for (i, c) in trimmed.chars().enumerate() {
+        let ok = c.is_ascii_alphanumeric()
+            || c == ' ' || c == ',' || c == '.' || c == '_' || c == '-';
+        if !ok {
+            return Err(format!(
+                "label contains invalid character `{}` at position {} — \
+                 allowed: letters, digits, spaces, commas, dot, underscore, hyphen",
+                c, i + 1));
+        }
+    }
+    Ok(trimmed.to_string())
+}
+
+/// Set or update the user-display label on a completed fit.
+///
+/// Resolves the hash prefix to a fit_dir under `<root>/fits/`
+/// (default `results/fits/`), reads the top-level run.json, errors
+/// if the fit is still running (wall_time_seconds == 0.0 — only
+/// populated on end-of-fit rewrite), validates the label, mutates
+/// `FitMeta.label`, and writes the run.json back atomically.
+///
+/// Concurrent invocations are last-write-wins; we don't lock the
+/// file. For single-user workflows this is fine; if cross-process
+/// label edits ever become a concern, a flock on run.json is the
+/// minimal extension.
+///
+/// See proposal §5 (`docs/dev/proposals/2026-04-28-fit-experiment-management.md`).
+pub fn cmd_fit_label(args: &crate::args::FitLabelArgs) {
+    let new_label = match validate_label(&args.label) {
+        Ok(l) => l,
+        Err(e) => {
+            eprintln!("error: invalid label: {}", e);
+            std::process::exit(1);
+        }
+    };
+
+    let root = args.root.clone().unwrap_or_else(||
+        std::path::PathBuf::from(crate::run_paths::DEFAULT_OUTPUT_ROOT));
+    let fits_root = root.join("fits");
+    if !fits_root.exists() {
+        eprintln!("error: no fits directory at {} \
+                   (no fits to label?)", fits_root.display());
+        std::process::exit(1);
+    }
+
+    // Find the fit_dir whose run.json has Run.hash starting with the
+    // given prefix. We walk fits/* directly rather than using
+    // fit_tree::walk_fits_root so we can give a precise error on
+    // ambiguous prefix.
+    let mut matches: Vec<std::path::PathBuf> = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(&fits_root) {
+        for entry in entries.flatten() {
+            let p = entry.path();
+            if !p.is_dir() { continue; }
+            let run_json = p.join("run.json");
+            if !run_json.is_file() { continue; }
+            let txt = match std::fs::read_to_string(&run_json) {
+                Ok(t) => t,
+                Err(_) => continue,
+            };
+            let v: serde_json::Value = match serde_json::from_str(&txt) {
+                Ok(v) => v,
+                Err(_) => continue,
+            };
+            let hash = v.get("hash").and_then(|h| h.as_str()).unwrap_or("");
+            if hash.starts_with(&args.hash) {
+                matches.push(p);
+            }
+        }
+    }
+
+    let fit_dir = match matches.len() {
+        0 => {
+            eprintln!("error: no fit found with hash prefix `{}` under {}",
+                args.hash, fits_root.display());
+            std::process::exit(1);
+        }
+        1 => matches.into_iter().next().unwrap(),
+        n => {
+            eprintln!("error: hash prefix `{}` matches {} fits — \
+                       use a longer prefix", args.hash, n);
+            std::process::exit(1);
+        }
+    };
+
+    // Atomic mutation: read, validate state, mutate, write-then-rename.
+    let run_json_path = fit_dir.join("run.json");
+    let mut run = match crate::run_meta::Run::read(&fit_dir) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("error: cannot read {}: {}", run_json_path.display(), e);
+            std::process::exit(1);
+        }
+    };
+
+    // Atomicity: refuse to relabel a still-running fit. The runner
+    // sets wall_time_seconds at end-of-fit; mid-run it stays at the
+    // initial 0.0 sentinel. (See cmd_fit_run_v2: `wall_time_seconds:
+    // 0.0` at first write, patched on the post-run rewrite.) A
+    // running fit will overwrite our label change when it finishes.
+    if run.wall_time_seconds == 0.0 {
+        eprintln!(
+            "error: fit at {} is still running (wall_time_seconds is the \
+             pre-completion sentinel value 0.0). Wait for the fit to \
+             finish, or pass --label at fit-run time.",
+            fit_dir.display());
+        std::process::exit(1);
+    }
+
+    match &mut run.kind {
+        crate::run_meta::RunKind::Fit(meta) => {
+            let prior = meta.label.clone();
+            meta.label = Some(new_label.clone());
+            // Atomic write: Run::write writes to .tmp then renames.
+            if let Err(e) = run.write(&fit_dir) {
+                eprintln!("error: cannot write {}: {}", run_json_path.display(), e);
+                std::process::exit(1);
+            }
+            match prior {
+                Some(p) if p != new_label =>
+                    eprintln!("ok: label updated from \"{}\" to \"{}\" on {}",
+                        p, new_label, fit_dir.display()),
+                Some(_) =>
+                    eprintln!("ok: label unchanged (\"{}\") on {}",
+                        new_label, fit_dir.display()),
+                None =>
+                    eprintln!("ok: label set to \"{}\" on {}",
+                        new_label, fit_dir.display()),
+            }
+        }
+        _ => {
+            eprintln!("error: {} is not a fit run.json", run_json_path.display());
+            std::process::exit(1);
+        }
+    }
+}
+
 /// Hardening proposal ship-now #9.
 fn resolve_starts_from_arg(raw: &str) -> String {
     if raw.contains('/') || raw.contains('\\') || raw == "." || raw == ".." {
@@ -1724,6 +1901,74 @@ mod tests {
              with the divergent current fit.toml)");
 
         std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    // ── validate_label ────────────────────────────────────────────
+
+    #[test]
+    fn validate_label_accepts_canonical_examples() {
+        // The `--label` documentation lists these as the expected
+        // shapes; assert each one is accepted with the trimmed value
+        // returned verbatim.
+        for ok in [
+            "narrow R0, take 1",
+            "iota free",
+            "log_normal R0 prior",
+            "take 1, attempt 2",
+            "a",                    // single char (min length)
+            "a-b_c.d 0,1",          // every allowed punctuation
+        ] {
+            let out = validate_label(ok)
+                .unwrap_or_else(|e| panic!("`{}` should validate; got error: {}", ok, e));
+            assert_eq!(out, ok);
+        }
+    }
+
+    #[test]
+    fn validate_label_trims_surrounding_whitespace() {
+        let out = validate_label("   narrow R0   ").unwrap();
+        assert_eq!(out, "narrow R0");
+    }
+
+    #[test]
+    fn validate_label_rejects_empty_after_trim() {
+        for empty in ["", "   ", "\t \n"] {
+            let err = validate_label(empty).expect_err("empty must reject");
+            assert!(err.contains("empty"), "err should mention empty: {}", err);
+        }
+    }
+
+    #[test]
+    fn validate_label_rejects_over_64_chars() {
+        let too_long: String = "a".repeat(65);
+        let err = validate_label(&too_long).expect_err("65-char label must reject");
+        assert!(err.contains("64"), "err should mention max length: {}", err);
+    }
+
+    #[test]
+    fn validate_label_accepts_64_chars_exactly() {
+        let just_right: String = "a".repeat(64);
+        validate_label(&just_right).expect("64-char label should validate");
+    }
+
+    #[test]
+    fn validate_label_rejects_disallowed_characters() {
+        // Each of these contains exactly one disallowed char; the
+        // error message should call it out by character + position.
+        for (raw, bad_char) in [
+            ("R0/2",      "/"),
+            ("alpha=2",   "="),
+            ("name:tag",  ":"),
+            ("a;b",       ";"),
+            ("a*b",       "*"),
+            ("emoji 🎯",   "🎯"),
+        ] {
+            let err = validate_label(raw)
+                .expect_err(&format!("`{}` should reject", raw));
+            assert!(err.contains(bad_char),
+                "err for `{}` should call out `{}` by character; got: {}",
+                raw, bad_char, err);
+        }
     }
 }
 

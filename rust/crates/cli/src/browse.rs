@@ -671,11 +671,13 @@ fn print_fits_table(fits: &[FitEntry], now: SystemTime) {
         .set_content_arrangement(ContentArrangement::Dynamic)
         .set_header(vec![
             Cell::new("CREATED").add_attribute(comfy_table::Attribute::Bold),
+            Cell::new("LABEL").add_attribute(comfy_table::Attribute::Bold),
             Cell::new("MODEL").add_attribute(comfy_table::Attribute::Bold),
             Cell::new("ESTIMATE").add_attribute(comfy_table::Attribute::Bold),
             Cell::new("STAGES").add_attribute(comfy_table::Attribute::Bold),
             Cell::new("PATH").add_attribute(comfy_table::Attribute::Bold),
         ]);
+    let mut unlabelled = 0usize;
     for f in fits {
         let rel_time = fmt_relative_time(f.created, now);
         let model    = model_display_name(&f.meta.model);
@@ -686,8 +688,16 @@ fn print_fits_table(fits: &[FitEntry], now: SystemTime) {
             } else { joined }
         };
         let stages = f.meta.stages_declared.join(",");
+        let label_cell = match &f.meta.label {
+            Some(l) => Cell::new(l),
+            None => {
+                unlabelled += 1;
+                Cell::new("<unlabelled>").add_attribute(comfy_table::Attribute::Dim)
+            }
+        };
         table.add_row(vec![
             Cell::new(rel_time).fg(comfy_table::Color::Yellow),
+            label_cell,
             Cell::new(model),
             Cell::new(estimate).add_attribute(comfy_table::Attribute::Dim),
             Cell::new(stages).fg(comfy_table::Color::Green),
@@ -695,6 +705,7 @@ fn print_fits_table(fits: &[FitEntry], now: SystemTime) {
         ]);
     }
     println!("{table}");
+    crate::fit::fit_table::emit_unlabelled_warning(unlabelled);
 }
 
 /// Compact one-line summary of the run's sweep point (if any).

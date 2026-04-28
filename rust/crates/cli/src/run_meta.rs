@@ -118,6 +118,17 @@ pub struct FitMeta {
     /// IC-free inference flag (see 2026-04-18 proposal).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub ic_free: bool,
+    /// User-supplied display label for this fit. Optional — validated
+    /// against `^[a-zA-Z0-9 ,._-]{1,64}$` after trim. Set at fit-run
+    /// time via `--label` or post-hoc via `camdl fit label <hash>
+    /// "<new label>"`. Surfaced in `camdl fit list` and
+    /// `camdl fit table` to help scientists distinguish iterations
+    /// of a model that share the same stem (e.g. multiple
+    /// `fit_he2010-XXXXXXXX` directories with different bounds /
+    /// fixed-vs-estimate splits / priors).
+    /// See proposal §5 (`docs/dev/proposals/2026-04-28-fit-experiment-management.md`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -368,6 +379,7 @@ mod tests {
                 },
                 stages_declared: vec!["scout".into(), "refine".into()],
                 ic_free: false,
+                label: None,
             }),
         }
     }

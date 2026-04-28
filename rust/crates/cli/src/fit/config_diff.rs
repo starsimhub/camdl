@@ -424,6 +424,7 @@ mod tests {
             fixed: HashMap::new(),
             stages_declared: Vec::new(),
             ic_free: false,
+            label: None,
         }
     }
 
