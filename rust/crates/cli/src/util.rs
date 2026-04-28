@@ -196,6 +196,34 @@ pub(crate) fn run_camdlc(camdl_path: &str) -> Result<String, String> {
 
 // ─── IR path resolver ────────────────────────────────────────────────────────
 
+/// Resolve a path that appears inside a config file (fit.toml, batch.toml,
+/// etc.) against the config's directory — matching the convention used by
+/// Cargo, pyproject.toml, package.json, and most other tooling. Absolute
+/// input paths pass through unchanged. Closes a class of footguns where
+/// running `camdl fit run subdir/fit.toml` and `camdl fit run fit.toml`
+/// (after `cd subdir`) gave different behavior despite using the same
+/// toml file (GH #22).
+///
+/// The helper is intentionally generic: the "anchor" arg is the path to
+/// the *config file itself*, not its directory, because every caller
+/// that has the config path also has its directory one `.parent()` away
+/// — passing the file is more honest about what the resolution is
+/// relative to and saves one `parent()` call at every site.
+///
+/// Returns the resolved path as a `String` (matching the storage type
+/// used in `FitConfigV2.model.camdl` and `FitConfigV2.data.observations`).
+/// Lossy conversion is acceptable here because the inputs are
+/// user-supplied strings already; if a non-UTF8 path made it into the
+/// toml the parser would have rejected it.
+pub fn resolve_relative_to_toml(toml_path: &std::path::Path, path: &str) -> String {
+    let p = std::path::Path::new(path);
+    if p.is_absolute() {
+        return path.to_string();
+    }
+    let anchor = toml_path.parent().unwrap_or(std::path::Path::new("."));
+    anchor.join(p).to_string_lossy().into_owned()
+}
+
 /// If path ends with `.camdl`, compile it via camdlc and write to a temp file.
 /// Returns (resolved_path, Some(tmpfile)) or (path, None) for plain .ir.json.
 pub fn resolve_ir_path(path: &str) -> Result<(String, Option<std::path::PathBuf>), String> {
@@ -943,6 +971,46 @@ pub fn fmt_relative_time(from: std::time::SystemTime, now: std::time::SystemTime
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── resolve_relative_to_toml ─────────────────────────────────────────────
+
+    #[test]
+    fn resolve_relative_to_toml_anchors_at_toml_dir() {
+        let toml = std::path::Path::new("/proj/fits/he2010.fit.toml");
+        // Relative paths anchor to the toml's parent directory.
+        assert_eq!(
+            resolve_relative_to_toml(toml, "../models/he2010.camdl"),
+            "/proj/fits/../models/he2010.camdl");
+        assert_eq!(
+            resolve_relative_to_toml(toml, "data/cases.tsv"),
+            "/proj/fits/data/cases.tsv");
+    }
+
+    #[test]
+    fn resolve_relative_to_toml_passes_absolute_through() {
+        let toml = std::path::Path::new("/proj/fits/he2010.fit.toml");
+        // Absolute input → unchanged. Even when the toml is in a
+        // different tree, an absolute path's intent is "this exact
+        // location, regardless of context."
+        assert_eq!(
+            resolve_relative_to_toml(toml, "/abs/path/model.camdl"),
+            "/abs/path/model.camdl");
+    }
+
+    #[test]
+    fn resolve_relative_to_toml_handles_toml_in_cwd_root() {
+        // When the toml is just "fit.toml" (no directory component),
+        // `Path::parent()` returns Some("") — empty anchor — and
+        // joining it with the relative path is a no-op. The returned
+        // string is "data/cases.tsv" (CWD-relative), which resolves
+        // the same way as the user's input would have pre-fix. This
+        // is the trivial case where toml-dir-relative and CWD-relative
+        // coincide; the fix is a no-op there.
+        let toml = std::path::Path::new("fit.toml");
+        assert_eq!(
+            resolve_relative_to_toml(toml, "data/cases.tsv"),
+            "data/cases.tsv");
+    }
 
     // ── camdlc version check ─────────────────────────────────────────────────
 

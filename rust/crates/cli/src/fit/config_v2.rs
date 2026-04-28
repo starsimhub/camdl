@@ -754,8 +754,31 @@ impl FitConfigV2 {
     pub fn load(path: &str) -> Result<Self, String> {
         let contents = std::fs::read_to_string(path)
             .map_err(|e| format!("cannot read {}: {}", path, e))?;
-        let config: FitConfigV2 = toml::from_str(&contents)
+        let mut config: FitConfigV2 = toml::from_str(&contents)
             .map_err(|e| format!("parse error in {}: {}", path, e))?;
+
+        // Resolve toml-relative paths against the toml's directory
+        // (Cargo / pyproject convention). Closes GH #22: pre-fix, paths
+        // inside the toml were resolved against the user's CWD, which
+        // broke any invocation pattern other than "always cd into the
+        // toml's directory before camdl fit run". Post-fix, every
+        // downstream consumer (fit_content_hash, to_legacy_toml, the
+        // runner's data loaders) sees absolute paths regardless of
+        // where the binary was invoked from. Absolute paths in the
+        // toml pass through unchanged.
+        let toml_path = std::path::Path::new(path);
+        config.model.camdl = crate::util::resolve_relative_to_toml(
+            toml_path, &config.model.camdl);
+        if let Some(data) = &mut config.data {
+            for v in data.observations.values_mut() {
+                *v = crate::util::resolve_relative_to_toml(toml_path, v);
+            }
+            if let Some(holdout) = &mut data.holdout {
+                for v in holdout.values_mut() {
+                    *v = crate::util::resolve_relative_to_toml(toml_path, v);
+                }
+            }
+        }
 
         Ok(config)
     }

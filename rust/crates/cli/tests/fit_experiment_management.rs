@@ -765,3 +765,101 @@ fn fit_label_rejects_empty_label_at_cli() {
             "stderr should mention empty: {}", stderr);
     }
 }
+
+// ── Issue #22: toml-relative path resolution ──────────────────────
+
+/// `camdl fit run` must resolve relative `[model]` and
+/// `[data.observations]` paths against the toml's directory, not
+/// the user's CWD. Pre-fix, invoking the binary from a different
+/// CWD than the toml's directory broke file lookup; post-fix, the
+/// invocation is location-independent (Cargo / pyproject convention).
+///
+/// Test setup creates a directory tree like:
+/// ```
+/// <tmp>/proj/
+///   fits/he2010.fit.toml      # uses relative paths "../models/..." etc.
+///   models/sir.ir.json
+///   data/cases.tsv
+/// ```
+/// then invokes `camdl fit run fits/he2010.fit.toml` from `<tmp>/proj/`
+/// (i.e. NOT from inside `fits/`). The fit must succeed — pre-fix it
+/// would have failed with "cannot read model at '../models/sir.ir.json'".
+#[test]
+fn fit_run_resolves_toml_relative_paths_from_any_cwd() {
+    let Some(camdl) = camdl_bin() else { return };
+    let Some(camdlc) = camdlc_bin() else { return };
+
+    let tmp = tempdir("xpt_relpath");
+    let proj = tmp.path().join("proj");
+    let fits_dir = proj.join("fits");
+    let models_dir = proj.join("models");
+    let data_dir = proj.join("data");
+    std::fs::create_dir_all(&fits_dir).unwrap();
+    std::fs::create_dir_all(&models_dir).unwrap();
+    std::fs::create_dir_all(&data_dir).unwrap();
+
+    // Compile the model into models/, write the data into data/.
+    let (ir_in_tmp, data_in_tmp) = build_fixture(&camdlc, tmp.path());
+    let ir_target = models_dir.join("sir.ir.json");
+    let data_target = data_dir.join("cases.tsv");
+    std::fs::rename(&ir_in_tmp, &ir_target).unwrap();
+    std::fs::rename(&data_in_tmp, &data_target).unwrap();
+
+    // Write a fit.toml in proj/fits/ that references the model and
+    // data via toml-relative paths (../models/..., ../data/...).
+    let output_dir = proj.join("results");
+    let fit_toml = fits_dir.join("he2010.fit.toml");
+    let body = format!(
+        r#"
+output_dir = "{out}"
+
+[model]
+camdl = "../models/sir.ir.json"
+
+[data.observations]
+cases = "../data/cases.tsv"
+
+[estimate]
+beta  = {{ bounds = [0.01, 5.0], start = 1.0 }}
+gamma = {{ bounds = [0.01, 1.0], start = 0.3 }}
+
+[fixed]
+N0 = 1000
+
+[stages.scout]
+method     = "if2"
+chains     = 2
+particles  = 50
+iterations = 5
+cooling    = 0.7
+"#,
+        out = output_dir.display(),
+    );
+    std::fs::write(&fit_toml, body).unwrap();
+
+    // Invoke from `proj/` — NOT from `proj/fits/`. Pre-fix this would
+    // have failed because `../models/sir.ir.json` resolved against
+    // `proj/` (CWD) and pointed to `models/sir.ir.json` in `proj`'s
+    // *parent*. Post-fix, it resolves against `proj/fits/` (the toml's
+    // dir) and correctly lands in `proj/models/sir.ir.json`.
+    let out = std::process::Command::new(&camdl)
+        .current_dir(&proj)
+        .arg("fit").arg("run")
+        .arg("fits/he2010.fit.toml")
+        .output()
+        .expect("camdl fit run must invoke");
+    assert!(
+        out.status.success(),
+        "camdl fit run failed when invoked outside the toml's directory.\n  \
+         stderr: {}\n  \
+         stdout: {}",
+        String::from_utf8_lossy(&out.stderr),
+        String::from_utf8_lossy(&out.stdout)
+    );
+    // Sanity: a fit_dir was produced under the configured output_dir.
+    let fits_root = output_dir.join("fits");
+    let entries: Vec<_> = std::fs::read_dir(&fits_root).unwrap()
+        .flatten().map(|e| e.path()).collect();
+    assert_eq!(entries.len(), 1,
+        "expected one fit dir under {}; got {:?}", fits_root.display(), entries);
+}
