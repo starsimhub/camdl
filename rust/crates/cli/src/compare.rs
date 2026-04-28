@@ -220,8 +220,34 @@ fn render_table(rows: &[Row], base_idx: usize, metrics: &[String], t_mismatch: b
     if want_pit  { header.push("PIT_cov90".into()); }
 
     let base = &rows[base_idx].trace;
+    // Render order: ascending Δelpd (worst → best). Baseline drops in
+    // at its natural Δelpd = 0 slot. Best candidate lands at the
+    // bottom — reader's eye sees the recommended model last. When
+    // T_score mismatches block per-row deltas, we can't sort
+    // meaningfully, so leave the input order alone in that path.
+    let order: Vec<usize> = if t_mismatch {
+        (0..rows.len()).collect()
+    } else {
+        let mut idx: Vec<usize> = (0..rows.len()).collect();
+        idx.sort_by(|&a, &b| {
+            let da = if a == base_idx { 0.0 }
+                else { paired_delta(&rows[a].trace, base, Field::LogScore).0 };
+            let db = if b == base_idx { 0.0 }
+                else { paired_delta(&rows[b].trace, base, Field::LogScore).0 };
+            // NaN delta → place row at the top (worst-case ranking).
+            match (da.is_nan(), db.is_nan()) {
+                (true, true)  => std::cmp::Ordering::Equal,
+                (true, false) => std::cmp::Ordering::Less,
+                (false, true) => std::cmp::Ordering::Greater,
+                (false, false) => da.partial_cmp(&db)
+                    .unwrap_or(std::cmp::Ordering::Equal),
+            }
+        });
+        idx
+    };
     let mut body: Vec<Vec<String>> = Vec::with_capacity(rows.len());
-    for (i, r) in rows.iter().enumerate() {
+    for &i in &order {
+        let r = &rows[i];
         let elpd = r.trace.elpd();
         let mut row = vec![
             r.name.clone(),
@@ -282,6 +308,9 @@ fn render_table(rows: &[Row], base_idx: usize, metrics: &[String], t_mismatch: b
     println!();
     println!("Scored steps: {} (t0={}).  Baseline: {}.",
         base.n_scored(), base.t0, rows[base_idx].name);
+    if !t_mismatch {
+        println!("Sorted by Δelpd ascending — best-supported model at the bottom.");
+    }
     if t_mismatch {
         println!("⚠ T_score differs across models — Δ columns suppressed \
             (--allow-mismatched-horizon was set).");
@@ -330,7 +359,30 @@ fn render_md(rows: &[Row], base_idx: usize, metrics: &[String], t_mismatch: bool
     println!("|{}|", header.iter().map(|_| "---").collect::<Vec<_>>().join("|"));
 
     let base = &rows[base_idx].trace;
-    for (i, r) in rows.iter().enumerate() {
+    // Same render order as the table renderer: ascending Δelpd
+    // (best-supported last). When T_score mismatches block per-row
+    // deltas, leave input order alone.
+    let order: Vec<usize> = if t_mismatch {
+        (0..rows.len()).collect()
+    } else {
+        let mut idx: Vec<usize> = (0..rows.len()).collect();
+        idx.sort_by(|&a, &b| {
+            let da = if a == base_idx { 0.0 }
+                else { paired_delta(&rows[a].trace, base, Field::LogScore).0 };
+            let db = if b == base_idx { 0.0 }
+                else { paired_delta(&rows[b].trace, base, Field::LogScore).0 };
+            match (da.is_nan(), db.is_nan()) {
+                (true, true)  => std::cmp::Ordering::Equal,
+                (true, false) => std::cmp::Ordering::Less,
+                (false, true) => std::cmp::Ordering::Greater,
+                (false, false) => da.partial_cmp(&db)
+                    .unwrap_or(std::cmp::Ordering::Equal),
+            }
+        });
+        idx
+    };
+    for &i in &order {
+        let r = &rows[i];
         let mut cells: Vec<String> = vec![
             r.name.clone(),
             format!("{}", r.trace.n_scored()),
@@ -361,6 +413,10 @@ fn render_md(rows: &[Row], base_idx: usize, metrics: &[String], t_mismatch: bool
         }
         if want_pit { cells.push(format!("{:.2}", r.trace.pit_coverage(0.90))); }
         println!("| {} |", cells.join(" | "));
+    }
+    if !t_mismatch {
+        println!();
+        println!("_Sorted by Δelpd ascending — best-supported model at the bottom._");
     }
 }
 

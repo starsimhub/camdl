@@ -128,25 +128,39 @@ pub fn jeffreys_label(db: f64) -> &'static str {
     else             { "overwhelming"   }
 }
 
-/// Format a Δlog-likelihood (nats) as a single-line string with nats,
-/// decibans, and the Jeffreys qualitative label. Intended for human-readable
-/// output in `camdl compare`, fit-stage summaries, external-harness failure
-/// messages, and any other context where a scale-free log-lik difference
-/// carries evidential meaning.
-///
-/// The `label` arg is the metric name (e.g. "Δlogℒ", "Δelpd", "Δpreq");
-/// returned string does not include leading/trailing whitespace. Caller
 /// Compact two-column form for use inside tables or tight displays:
-/// returns `(nats_str, db_with_label_str)` for a Δlog-lik.
+/// returns `(nats_str, db_with_label_str)` for a Δlog-lik (nats).
 ///
-/// Example: `("+27.300", "+118.6 dB, decisive")`.
+/// The `db_with_label_str` cell carries direction explicitly via a
+/// `for` / `against` suffix on every non-indeterminate tier. This
+/// closes a real readability bug — pre-fix, `-32.3 dB, decisive`
+/// could be misread as "decisive evidence supporting this model"
+/// when the negative sign actually means decisive evidence
+/// *against* it (the baseline outscored it). Below ±5 dB the
+/// "indeterminate" tier carries no direction and the suffix is
+/// suppressed (the whole point of that tier is "we can't commit").
+///
+/// Examples:
+/// - `evidence_cells(+27.3)` → `("+27.300", "+118.6 dB, decisive for")`
+/// - `evidence_cells(-7.45)` → `("-7.450", "-32.4 dB, decisive against")`
+/// - `evidence_cells(+0.5)`  → `("+0.500", "+2.2 dB, indeterminate")`
 pub fn evidence_cells(delta_nats: f64) -> (String, String) {
     if !delta_nats.is_finite() {
         return (format!("{}", delta_nats), "—".into());
     }
     let db = delta_nats * NATS_TO_DB;
     let tag = jeffreys_label(db);
-    (format!("{:+.3}", delta_nats), format!("{:+.1} dB, {}", db, tag))
+    let labeled = if tag == "indeterminate" {
+        // Below the substantial-evidence threshold the data don't
+        // pick a side, so adding "for"/"against" would dress up
+        // noise as a direction.
+        tag.to_string()
+    } else if db > 0.0 {
+        format!("{} for", tag)
+    } else {
+        format!("{} against", tag)
+    };
+    (format!("{:+.3}", delta_nats), format!("{:+.1} dB, {}", db, labeled))
 }
 
 #[cfg(test)]
@@ -187,10 +201,42 @@ mod tests {
     }
 
     #[test]
-    fn evidence_cells_compact_form() {
+    fn evidence_cells_positive_carries_for() {
+        // Positive Δ → candidate model beats the baseline → "for".
         let (nats, db_label) = evidence_cells(5.5);
         assert_eq!(nats, "+5.500");
-        assert_eq!(db_label, "+23.9 dB, decisive");
+        assert_eq!(db_label, "+23.9 dB, decisive for");
+    }
+
+    #[test]
+    fn evidence_cells_negative_carries_against() {
+        // Negative Δ → baseline beats the candidate → "against".
+        // The motivating bug: pre-fix this read "−32.3 dB, decisive"
+        // and a reader could miss the sign and conclude the model
+        // was preferred.
+        let (nats, db_label) = evidence_cells(-7.45);
+        assert_eq!(nats, "-7.450");
+        // -7.45 nats × 4.342944819 ≈ -32.35 dB → rounds to -32.4.
+        assert!(db_label.starts_with("-32.4 dB"),
+            "expected -32.4 dB prefix, got {}", db_label);
+        assert!(db_label.ends_with("decisive against"),
+            "expected `decisive against` suffix, got {}", db_label);
+    }
+
+    #[test]
+    fn evidence_cells_indeterminate_carries_no_direction() {
+        // Below |5 dB|, the tier is "indeterminate" — we explicitly
+        // refuse to commit to a direction, so adding for/against
+        // would dress up noise as a finding.
+        let (_, db_label) = evidence_cells(0.5);  // ≈ 2.2 dB
+        assert!(db_label.contains("indeterminate"));
+        assert!(!db_label.contains("for"));
+        assert!(!db_label.contains("against"));
+        // Same for negative-but-still-indeterminate.
+        let (_, db_label) = evidence_cells(-0.5);
+        assert!(db_label.contains("indeterminate"));
+        assert!(!db_label.contains("for"));
+        assert!(!db_label.contains("against"));
     }
 
     #[test]
