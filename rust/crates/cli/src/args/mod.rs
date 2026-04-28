@@ -190,7 +190,7 @@ pub struct SimulateArgs {
     pub cas: bool,
 
     /// Root directory for --cas output
-    #[arg(long, default_value = "./output", env = "CAMDL_OUTPUT_DIR")]
+    #[arg(long, default_value = "./results", env = "CAMDL_OUTPUT_DIR")]
     pub output_dir: PathBuf,
 
     /// Concurrent simulation runs
@@ -883,8 +883,8 @@ Examples:
   camdl list --format json
 ")]
 pub struct ListArgs {
-    /// Root directory to scan (default: ./output)
-    #[arg(default_value = "./output", env = "CAMDL_OUTPUT_DIR")]
+    /// Root directory to scan (default: ./results)
+    #[arg(default_value = "./results", env = "CAMDL_OUTPUT_DIR")]
     pub root: PathBuf,
 
     /// Filter by model path substring
@@ -938,8 +938,8 @@ pub struct ShowArgs {
     /// Short hash prefix or path to run directory
     pub target: String,
 
-    /// Root output directory to search (default: ./output)
-    #[arg(long, default_value = "./output", env = "CAMDL_OUTPUT_DIR")]
+    /// Root output directory to search (default: ./results)
+    #[arg(long, default_value = "./results", env = "CAMDL_OUTPUT_DIR")]
     pub root: PathBuf,
 
     /// Output format: human (default) or json
@@ -960,8 +960,8 @@ pub struct CatArgs {
     /// Short hash prefix or path to run directory
     pub target: String,
 
-    /// Root output directory to search (default: ./output)
-    #[arg(long, default_value = "./output", env = "CAMDL_OUTPUT_DIR")]
+    /// Root output directory to search (default: ./results)
+    #[arg(long, default_value = "./results", env = "CAMDL_OUTPUT_DIR")]
     pub root: PathBuf,
 
     /// Observation stream name (when run has multiple streams)
@@ -1111,5 +1111,69 @@ mod tests {
         // Smoke test — guards against malformed clap derives that would
         // panic at runtime instead of producing a parse error.
         let _ = Cli::command();
+    }
+
+    /// Regression: writer-side `DEFAULT_OUTPUT_ROOT` ("results") must
+    /// match every reader-side CLI default. Drift here is what
+    /// produced the 2026-04-19 → 2026-04-27 wart where `batch run`
+    /// wrote to `./results/` but `list / show / cat` defaulted to
+    /// `./output/`, forcing book chapters to pass `--root results`
+    /// to every read command. Keep them in lockstep.
+    #[test]
+    fn reader_cli_defaults_match_default_output_root() {
+        use crate::run_paths::DEFAULT_OUTPUT_ROOT;
+        // Don't read CAMDL_OUTPUT_DIR from the test environment; it
+        // would mask the default we're trying to assert.
+        std::env::remove_var("CAMDL_OUTPUT_DIR");
+
+        let expected = format!("./{}", DEFAULT_OUTPUT_ROOT);
+
+        let parse_simulate = |args: &[&str]| -> SimulateArgs {
+            let mut full: Vec<&str> = vec!["camdl", "simulate"];
+            full.extend(args);
+            match Cli::try_parse_from(full).unwrap().command {
+                Command::Simulate(a) => a,
+                _ => unreachable!(),
+            }
+        };
+        let parse_list = || -> ListArgs {
+            match Cli::try_parse_from(["camdl", "list"]).unwrap().command {
+                Command::List(a) => a,
+                _ => unreachable!(),
+            }
+        };
+        let parse_show = |hash: &str| -> ShowArgs {
+            match Cli::try_parse_from(["camdl", "show", hash]).unwrap().command {
+                Command::Show(a) => a,
+                _ => unreachable!(),
+            }
+        };
+        let parse_cat = |hash: &str| -> CatArgs {
+            match Cli::try_parse_from(["camdl", "cat", hash]).unwrap().command {
+                Command::Cat(a) => a,
+                _ => unreachable!(),
+            }
+        };
+
+        // simulate --output_dir
+        let s = parse_simulate(&["model.camdl"]);
+        assert_eq!(s.output_dir.to_string_lossy(), expected,
+            "SimulateArgs.output_dir must default to ./{}",
+            DEFAULT_OUTPUT_ROOT);
+
+        // list
+        let l = parse_list();
+        assert_eq!(l.root.to_string_lossy(), expected,
+            "ListArgs.root must match DEFAULT_OUTPUT_ROOT");
+
+        // show
+        let sh = parse_show("abc12345");
+        assert_eq!(sh.root.to_string_lossy(), expected,
+            "ShowArgs.root must match DEFAULT_OUTPUT_ROOT");
+
+        // cat
+        let c = parse_cat("abc12345");
+        assert_eq!(c.root.to_string_lossy(), expected,
+            "CatArgs.root must match DEFAULT_OUTPUT_ROOT");
     }
 }
