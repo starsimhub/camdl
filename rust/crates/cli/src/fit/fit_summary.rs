@@ -21,7 +21,7 @@
 use crate::args::{FitSummaryArgs, FitSummaryFormat};
 use crate::evidence::NATS_TO_DB;
 use crate::fit::config_diff::ConfigDiff;
-use crate::fit::config_v2::{CleanEvalConfig, GateConfig};
+use crate::fit::config_v2::{LoglikEvalConfig, GateConfig};
 use crate::fit::fit_tree::{self, DataKind};
 use crate::fit::method_result::{
     If2StageResult, MethodResult, PgasStageResult, PmmhStageResult,
@@ -340,7 +340,7 @@ impl Formatter {
 
         // Headline
         s.push_str(&format!("  best loglik:  {:.1}", state.best_loglik));
-        if !state.chain_clean_logliks.is_empty() {
+        if !state.chain_eval_logliks.is_empty() {
             s.push_str("  (clean-eval winner)");
         }
         s.push('\n');
@@ -369,7 +369,7 @@ impl Formatter {
         s.push_str(&self.parameter_table(state));
 
         // Per-chain clean-eval table
-        if !state.chain_clean_logliks.is_empty() {
+        if !state.chain_eval_logliks.is_empty() {
             s.push_str(&self.chain_clean_eval_table(state));
         }
 
@@ -426,15 +426,15 @@ impl Formatter {
             max_a, max_a_param, a_glyph, gate.a_thresh));
 
         // Decibans leg
-        if state.chain_clean_logliks.len() >= 2
-            && state.chain_clean_ses.len() == state.chain_clean_logliks.len()
+        if state.chain_eval_logliks.len() >= 2
+            && state.chain_eval_ses.len() == state.chain_eval_logliks.len()
         {
-            let hi = state.chain_clean_logliks.iter().cloned()
+            let hi = state.chain_eval_logliks.iter().cloned()
                 .fold(f64::NEG_INFINITY, f64::max);
-            let lo = state.chain_clean_logliks.iter().cloned()
+            let lo = state.chain_eval_logliks.iter().cloned()
                 .fold(f64::INFINITY, f64::min);
             let delta_db = (hi - lo) * NATS_TO_DB;
-            let sigma_max = state.chain_clean_ses.iter().cloned()
+            let sigma_max = state.chain_eval_ses.iter().cloned()
                 .fold(0.0_f64, f64::max);
             let se_floor_db = 8.0 * sigma_max * NATS_TO_DB;
             let threshold_db = gate.decibans_thresh.max(se_floor_db);
@@ -516,10 +516,10 @@ impl Formatter {
 
     fn chain_clean_eval_table(&self, state: &FitState) -> String {
         let mut s = String::new();
-        let n = state.chain_clean_logliks.len();
+        let n = state.chain_eval_logliks.len();
         s.push_str(&format!("  {}\n",
             self.bold(&format!("per-chain clean-eval ({} chains)", n))));
-        let best_idx = state.chain_clean_logliks.iter().enumerate()
+        let best_idx = state.chain_eval_logliks.iter().enumerate()
             .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
             .map(|(i, _)| i);
         // ESS columns added in Phase 2. Today fit_state.toml only
@@ -531,8 +531,8 @@ impl Formatter {
         // here so a future reader doesn't think it was forgotten.
         s.push_str(&format!("    {:6} {:>12}   {:>6}\n", "chain", "clean_ll", "± se"));
         for i in 0..n {
-            let ll = state.chain_clean_logliks[i];
-            let se = state.chain_clean_ses.get(i).copied().unwrap_or(f64::NAN);
+            let ll = state.chain_eval_logliks[i];
+            let se = state.chain_eval_ses.get(i).copied().unwrap_or(f64::NAN);
             let marker = if Some(i) == best_idx {
                 format!("  {}", self.ok("← winner"))
             } else {
@@ -842,7 +842,7 @@ pub struct GateReport {
     /// `GateConfig::default()`. Critical signal for downstream readers.
     pub threshold_source: String,
     pub resolved_gate: Option<GateConfig>,
-    pub resolved_clean_eval: Option<CleanEvalConfig>,
+    pub resolved_loglik_eval: Option<LoglikEvalConfig>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1060,15 +1060,15 @@ fn if2_stage_report(
     let a_passes = max_a < gate_cfg.a_thresh;
 
     let (delta_db, threshold_db, sigma_max, db_passes) =
-        if state.chain_clean_logliks.len() >= 2
-            && state.chain_clean_ses.len() == state.chain_clean_logliks.len()
+        if state.chain_eval_logliks.len() >= 2
+            && state.chain_eval_ses.len() == state.chain_eval_logliks.len()
         {
-            let hi = state.chain_clean_logliks.iter().cloned()
+            let hi = state.chain_eval_logliks.iter().cloned()
                 .fold(f64::NEG_INFINITY, f64::max);
-            let lo = state.chain_clean_logliks.iter().cloned()
+            let lo = state.chain_eval_logliks.iter().cloned()
                 .fold(f64::INFINITY, f64::min);
             let dd = (hi - lo) * NATS_TO_DB;
-            let sm = state.chain_clean_ses.iter().cloned()
+            let sm = state.chain_eval_ses.iter().cloned()
                 .fold(0.0_f64, f64::max);
             let se_floor_db = 8.0 * sm * NATS_TO_DB;
             let td = gate_cfg.decibans_thresh.max(se_floor_db);
@@ -1086,7 +1086,7 @@ fn if2_stage_report(
         delta_db, threshold_db, sigma_max, db_passes, overall_pass,
         threshold_source,
         resolved_gate: state.resolved_gate.clone(),
-        resolved_clean_eval: state.resolved_clean_eval.clone(),
+        resolved_loglik_eval: state.resolved_loglik_eval.clone(),
     };
 
     // Parameters
@@ -1108,14 +1108,14 @@ fn if2_stage_report(
     }).collect();
 
     // Chains
-    let n = state.chain_clean_logliks.len();
-    let best_idx = state.chain_clean_logliks.iter().enumerate()
+    let n = state.chain_eval_logliks.len();
+    let best_idx = state.chain_eval_logliks.iter().enumerate()
         .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
         .map(|(i, _)| i);
     let chains: Vec<ChainReport> = (0..n).map(|i| ChainReport {
         chain_id: i + 1,
-        clean_loglik: state.chain_clean_logliks[i],
-        clean_se: state.chain_clean_ses.get(i).copied().unwrap_or(f64::NAN),
+        clean_loglik: state.chain_eval_logliks[i],
+        clean_se: state.chain_eval_ses.get(i).copied().unwrap_or(f64::NAN),
         is_winner: Some(i) == best_idx,
     }).collect();
 
@@ -1529,7 +1529,7 @@ fn dump_params_only(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fit::config_v2::{CleanEvalConfig, GateConfig};
+    use crate::fit::config_v2::{LoglikEvalConfig, GateConfig};
     use std::collections::HashMap;
 
     fn synthetic_fit_state() -> FitState {
@@ -1559,13 +1559,13 @@ mod tests {
             tail_chain_agreement: agreement,
             ivp_params: vec!["I0".into()],
             chain_logliks: vec![-3810.0; 8],
-            chain_clean_logliks: vec![
+            chain_eval_logliks: vec![
                 -3810.5, -3805.1, -3812.0, -3808.7,
                 -3804.9, -3811.2, -3809.0, -3807.6,
             ],
-            chain_clean_ses: vec![1.5, 1.2, 1.8, 1.4, 1.1, 1.6, 1.3, 1.5],
+            chain_eval_ses: vec![1.5, 1.2, 1.8, 1.4, 1.1, 1.6, 1.3, 1.5],
             resolved_gate: Some(GateConfig::default()),
-            resolved_clean_eval: Some(CleanEvalConfig::default()),
+            resolved_loglik_eval: Some(LoglikEvalConfig::default()),
         }
     }
 

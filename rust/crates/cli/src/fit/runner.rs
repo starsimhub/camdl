@@ -4,7 +4,7 @@
 //! obs_loglik construction from IR observation model, chain execution,
 //! chain-agreement (Â) computation, and MAD-based auto rw_sd calibration.
 
-use crate::fit::clean_eval;
+use crate::fit::loglik_eval;
 use crate::fit::config::FitToml;
 use crate::fit::state::FitState;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
@@ -66,9 +66,9 @@ pub struct FitRunConfig {
     /// Set per stage at the `camdl fit run` dispatch site (CLI overrides
     /// over stage TOML); legacy `camdl fit scout`/`fit refine` use the
     /// `Default` (4000 × 8, logmeanexp). Consumed by Step 5.
-    pub clean_eval: super::config_v2::CleanEvalConfig,
+    pub loglik_eval: super::config_v2::LoglikEvalConfig,
     /// Compound scout-convergence gate config (Step 4 plumbing for
-    /// §Proposal 3). Same per-stage override semantics as `clean_eval`.
+    /// §Proposal 3). Same per-stage override semantics as `loglik_eval`.
     /// Consumed by Step 8.
     pub gate: super::config_v2::GateConfig,
 }
@@ -82,15 +82,15 @@ pub struct FitRunConfig {
 /// al. 2015 PNAS). They no longer reflect in-run noisy
 /// `IF2Result::final_loglik` argmax — that selection was upward-biased
 /// from argmaxing over noisy in-run PF estimates. The full per-chain
-/// table lives in `clean_eval.per_chain`; consumers needing the
+/// table lives in `loglik_eval.per_chain`; consumers needing the
 /// winner's θ̂ / SE read from
-/// `clean_eval.per_chain[overall_winner_idx]`.
+/// `loglik_eval.per_chain[overall_winner_idx]`.
 pub struct ChainResults {
     pub results: Vec<(usize, IF2Result)>,
     pub best_chain: usize,
     pub best_loglik: f64,
     pub chain_agreement: HashMap<String, f64>,
-    pub clean_eval: super::clean_eval::CleanEvalOutcome,
+    pub loglik_eval: super::loglik_eval::LoglikEvalOutcome,
 }
 
 impl FitRunConfig {
@@ -309,7 +309,7 @@ impl FitRunConfig {
             n_chains,
             seed,
             ic_free,
-            clean_eval: super::config_v2::CleanEvalConfig::default(),
+            loglik_eval: super::config_v2::LoglikEvalConfig::default(),
             gate: super::config_v2::GateConfig::default(),
         })
     }
@@ -422,7 +422,7 @@ pub fn run_quick_pfilter_full(
     params: &[f64],
     n_particles: usize,
     seed: u64,
-) -> (f64, super::clean_eval::FilterStats) {
+) -> (f64, super::loglik_eval::FilterStats) {
     let process = config.build_process();
     let obs_model = config.build_obs_model();
     let smc_config = sim::inference::traits::SMCConfig {
@@ -432,11 +432,11 @@ pub fn run_quick_pfilter_full(
 
     match sim::inference::bootstrap_filter(&process, &obs_model, params, &smc_config, seed) {
         Ok(result) => {
-            let stats = super::clean_eval::FilterStats::from_pfilter_result(
+            let stats = super::loglik_eval::FilterStats::from_pfilter_result(
                 &result.ess_trace, &result.ll_increments);
             (result.log_likelihood, stats)
         }
-        Err(_) => (f64::NEG_INFINITY, super::clean_eval::FilterStats::failed()),
+        Err(_) => (f64::NEG_INFINITY, super::loglik_eval::FilterStats::failed()),
     }
 }
 
@@ -818,24 +818,24 @@ pub fn run_chains_with_per_chain_params(
     // extraction bias on production runs. The in-run trace above is
     // preserved for diagnostics (Unit B territory).
     eprintln!("\nclean-eval: re-scoring final-iter θ̂ ({} chains × {} replicates @ {} particles)...",
-        results.len(), config.clean_eval.n_replicates, config.clean_eval.n_particles);
-    let clean_eval_outcome = clean_eval::run_clean_eval(
-        config, &results, &config.clean_eval, config.seed,
+        results.len(), config.loglik_eval.n_replicates, config.loglik_eval.n_particles);
+    let loglik_eval_outcome = loglik_eval::run_loglik_eval(
+        config, &results, &config.loglik_eval, config.seed,
     ).unwrap_or_else(|e| {
         eprintln!("error: clean-eval failed: {}", e);
         std::process::exit(1);
     });
 
     let (best_chain, best_loglik, best_se) =
-        select_winner_summary(&clean_eval_outcome);
+        select_winner_summary(&loglik_eval_outcome);
 
     // Report. `best_se` is derived locally; we log it here but don't
     // store it on `ChainResults` — readers that need it go to
-    // `clean_eval.per_chain[overall_winner_idx]`.
+    // `loglik_eval.per_chain[overall_winner_idx]`.
     eprintln!("\nbest chain: {} (loglik={:.2} ± {:.2})",
         best_chain + 1, best_loglik, best_se);
     if config.n_chains > 1 {
-        let logliks: Vec<f64> = clean_eval_outcome.per_chain.iter()
+        let logliks: Vec<f64> = loglik_eval_outcome.per_chain.iter()
             .map(|s| s.loglik).collect();
         eprintln!("chain clean logliks: [{}]",
             logliks.iter().map(|l| format!("{:.1}", l)).collect::<Vec<_>>().join(", "));
@@ -873,25 +873,25 @@ pub fn run_chains_with_per_chain_params(
         best_chain,
         best_loglik,
         chain_agreement,
-        clean_eval: clean_eval_outcome,
+        loglik_eval: loglik_eval_outcome,
     }
 }
 
 impl ChainResults {
     /// Per-chain clean-eval log-likelihoods in chain-id order. Used by
-    /// scout/refine/validate to populate `FitState.chain_clean_logliks`
+    /// scout/refine/validate to populate `FitState.chain_eval_logliks`
     /// for the compound scout-convergence gate.
-    pub fn chain_clean_logliks(&self) -> Vec<f64> {
-        let mut v: Vec<(usize, f64)> = self.clean_eval.per_chain.iter()
+    pub fn chain_eval_logliks(&self) -> Vec<f64> {
+        let mut v: Vec<(usize, f64)> = self.loglik_eval.per_chain.iter()
             .map(|s| (s.chain_id, s.loglik)).collect();
         v.sort_by_key(|(id, _)| *id);
         v.into_iter().map(|(_, ll)| ll).collect()
     }
 
     /// Per-chain clean-eval standard errors in chain-id order, parallel
-    /// to `chain_clean_logliks`.
-    pub fn chain_clean_ses(&self) -> Vec<f64> {
-        let mut v: Vec<(usize, f64)> = self.clean_eval.per_chain.iter()
+    /// to `chain_eval_logliks`.
+    pub fn chain_eval_ses(&self) -> Vec<f64> {
+        let mut v: Vec<(usize, f64)> = self.loglik_eval.per_chain.iter()
             .map(|s| (s.chain_id, s.se)).collect();
         v.sort_by_key(|(id, _)| *id);
         v.into_iter().map(|(_, se)| se).collect()
@@ -911,17 +911,17 @@ impl ChainResults {
     /// the clean re-eval changes is the *loglik* attached to that θ̂,
     /// and the cross-chain selection of which chain's θ̂ to report.
     pub fn winner_theta(&self) -> &[f64] {
-        &self.clean_eval.per_chain[self.clean_eval.overall_winner_idx].theta
+        &self.loglik_eval.per_chain[self.loglik_eval.overall_winner_idx].theta
     }
 
 }
 
 /// Pure helper: extract the (chain_id, ll, se) summary from a
-/// `CleanEvalOutcome`. Factored out so the wiring change in
+/// `LoglikEvalOutcome`. Factored out so the wiring change in
 /// `run_chains_with_per_chain_params` is unit-testable without paying
 /// for a real IF2 + PF run. Tested in `tests::winner_summary_*`.
 fn select_winner_summary(
-    outcome: &clean_eval::CleanEvalOutcome,
+    outcome: &loglik_eval::LoglikEvalOutcome,
 ) -> (usize, f64, f64) {
     let s = &outcome.per_chain[outcome.overall_winner_idx];
     (s.chain_id, s.loglik, s.se)
@@ -1167,7 +1167,7 @@ fn mad(v: &[f64], center: f64) -> f64 {
 /// Write per-chain output files: `parameter_traces.tsv` and
 /// `final_params.toml` under `<dir>/chain_<N>/`.
 ///
-/// When `clean_eval` is `Some`, each chain's `final_params.toml` also
+/// When `loglik_eval` is `Some`, each chain's `final_params.toml` also
 /// records the clean-eval winning candidate label and SE for that chain
 /// (Step 7, proposal §Proposal 1). PMMH and other consumers that don't
 /// run clean-eval pass `None`. The winning θ̂ written into the TOML is
@@ -1181,7 +1181,7 @@ pub fn write_chain_outputs(
     all_param_names: &[String],
     base_params: &[f64],
     compiled: &CompiledModel,
-    clean_eval: Option<&clean_eval::CleanEvalOutcome>,
+    loglik_eval: Option<&loglik_eval::LoglikEvalOutcome>,
 ) -> Result<(), String> {
     use std::io::Write;
 
@@ -1206,10 +1206,10 @@ pub fn write_chain_outputs(
         }
 
         // Resolve this chain's clean-eval score (if any). Falls back to
-        // `result.mle` when no clean_eval was run (PMMH path). Note: the
+        // `result.mle` when no loglik_eval was run (PMMH path). Note: the
         // chain's θ̂ is the IF2 final-iteration mean either way; what
         // clean-eval changes is the *loglik* attached to that θ̂.
-        let chain_score = clean_eval.and_then(|ce|
+        let chain_score = loglik_eval.and_then(|ce|
             ce.per_chain.iter().find(|s| s.chain_id == *chain_id));
 
         // Final params TOML (all params, not just estimated).
@@ -1275,7 +1275,7 @@ pub fn write_chain_outputs(
 /// consumption, and book vignettes that report ESS-at-θ̂ diagnostics.
 pub fn write_clean_eval_tsv(
     dir: &str,
-    outcome: &clean_eval::CleanEvalOutcome,
+    outcome: &loglik_eval::LoglikEvalOutcome,
     if2_params: &[EstimatedParam],
 ) -> Result<(), String> {
     use std::io::Write;
@@ -1306,7 +1306,7 @@ pub fn write_clean_eval_tsv(
 /// TOML schema but identifies which chain produced it.
 pub fn write_run_root_final_params(
     dir: &str,
-    outcome: &clean_eval::CleanEvalOutcome,
+    outcome: &loglik_eval::LoglikEvalOutcome,
     if2_params: &[EstimatedParam],
     all_param_names: &[String],
     base_params: &[f64],
@@ -1758,14 +1758,14 @@ mod tests {
     /// higher-clean-ll chain even when the other has higher in-run
     /// final_loglik"). Since `run_chains_with_per_chain_params`
     /// requires a real PF, we test the post-IF2 selection helper
-    /// (`select_winner_summary`) on a `CleanEvalOutcome` constructed
-    /// via `run_clean_eval_with_scorer`. The synthetic IF2Results
+    /// (`select_winner_summary`) on a `LoglikEvalOutcome` constructed
+    /// via `run_loglik_eval_with_scorer`. The synthetic IF2Results
     /// carry deliberately misleading `final_loglik` values; the
     /// helper must ignore them.
     #[test]
     fn winner_summary_follows_clean_eval_not_in_run_loglik() {
-        use crate::fit::clean_eval::run_clean_eval_with_scorer;
-        use crate::fit::config_v2::{CleanEvalConfig, CombineMode};
+        use crate::fit::loglik_eval::run_loglik_eval_with_scorer;
+        use crate::fit::config_v2::{LoglikEvalConfig, CombineMode};
         use sim::inference::if2::{IF2IterResult, IF2Result};
 
         // Two chains. Chain 0 has *higher* in-run final_loglik (the
@@ -1791,12 +1791,12 @@ mod tests {
         let scorer = |theta: &[f64], _: usize, _: u64| {
             // Clean PF prefers theta around 50.
             let ll = if theta[0] < 10.0 { -100.0 } else { -50.0 };
-            (ll, crate::fit::clean_eval::FilterStats::failed())
+            (ll, crate::fit::loglik_eval::FilterStats::failed())
         };
-        let cfg = CleanEvalConfig {
+        let cfg = LoglikEvalConfig {
             n_particles: 1, n_replicates: 4, combine: CombineMode::LogMeanExp,
         };
-        let outcome = run_clean_eval_with_scorer(&results, &cfg, 0, scorer).unwrap();
+        let outcome = run_loglik_eval_with_scorer(&results, &cfg, 0, scorer).unwrap();
 
         let (best_chain, best_ll, best_se) = select_winner_summary(&outcome);
         assert_eq!(best_chain, 1,
@@ -1933,9 +1933,9 @@ mod tests {
     /// `FilterStats::failed()` (NaN ess_mean/min, -1 step).
     #[test]
     fn clean_eval_tsv_schema_and_rows() {
-        use crate::fit::clean_eval::{ChainScore, CleanEvalOutcome, FilterStats};
+        use crate::fit::loglik_eval::{ChainScore, LoglikEvalOutcome, FilterStats};
 
-        let outcome = CleanEvalOutcome {
+        let outcome = LoglikEvalOutcome {
             per_chain: vec![
                 ChainScore {
                     chain_id: 0,
@@ -1989,9 +1989,9 @@ mod tests {
     /// params (here: chain 1's TailMean theta, NOT chain 0's MLE).
     #[test]
     fn run_root_final_params_uses_overall_winner() {
-        use crate::fit::clean_eval::{ChainScore, CleanEvalOutcome, FilterStats};
+        use crate::fit::loglik_eval::{ChainScore, LoglikEvalOutcome, FilterStats};
 
-        let outcome = CleanEvalOutcome {
+        let outcome = LoglikEvalOutcome {
             per_chain: vec![
                 ChainScore { chain_id: 0, theta: vec![0.10], loglik: -100.0, se: 0.3,
                     filter_stats: FilterStats::failed() },
@@ -2103,14 +2103,14 @@ mod tests {
     /// workflows to function.
     #[test]
     fn final_params_toml_is_loadable_by_params_loader() {
-        use crate::fit::clean_eval::{ChainScore, CleanEvalOutcome, FilterStats};
+        use crate::fit::loglik_eval::{ChainScore, LoglikEvalOutcome, FilterStats};
         use ir::{
             model::{Compartment, CompartmentKind, InitialConditions, OutputConfig,
                     OutputSchedule, SimulationConfig},
             parameter::Parameter,
         };
 
-        let outcome = CleanEvalOutcome {
+        let outcome = LoglikEvalOutcome {
             per_chain: vec![
                 ChainScore { chain_id: 5, theta: vec![87.668938],
                     loglik: -6235.11, se: 2.19,
@@ -2197,7 +2197,7 @@ mod tests {
     /// `final_params.toml` (GH #16).
     #[test]
     fn winner_theta_picks_clean_eval_winner_not_if2_argmax() {
-        use crate::fit::clean_eval::{ChainScore, CleanEvalOutcome, FilterStats};
+        use crate::fit::loglik_eval::{ChainScore, LoglikEvalOutcome, FilterStats};
 
         // IF2 results: .mle represents what pre-fix code would have
         // selected (the chain's IF2 argmax over perturbed loglik). The
@@ -2220,7 +2220,7 @@ mod tests {
         // Clean-eval reports each chain's final-iter mean as θ̂. Chain
         // 1's clean-eval θ̂ ([0.31, 0.41]) differs from its IF2 .mle
         // ([0.30, 0.40]) — that divergence is what the test discriminates.
-        let clean_eval = CleanEvalOutcome {
+        let loglik_eval = LoglikEvalOutcome {
             per_chain: vec![
                 ChainScore { chain_id: 0, theta: vec![0.10, 0.20],
                     loglik: -110.0, se: 0.5, filter_stats: FilterStats::failed() },
@@ -2238,7 +2238,7 @@ mod tests {
             best_chain: 1,
             best_loglik: -49.0,
             chain_agreement,
-            clean_eval,
+            loglik_eval,
         };
 
         let theta = cr.winner_theta();
@@ -2427,10 +2427,10 @@ cooling = 0.5
             tail_chain_agreement: HashMap::new(),
             ivp_params: Vec::new(),
             chain_logliks: Vec::new(),
-            chain_clean_logliks: Vec::new(),
-            chain_clean_ses: Vec::new(),
+            chain_eval_logliks: Vec::new(),
+            chain_eval_ses: Vec::new(),
             resolved_gate: None,
-            resolved_clean_eval: None,
+            resolved_loglik_eval: None,
         };
 
         let config = FitRunConfig::build(

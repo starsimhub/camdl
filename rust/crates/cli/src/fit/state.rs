@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-use crate::fit::config_v2::{CleanEvalConfig, GateConfig};
+use crate::fit::config_v2::{LoglikEvalConfig, GateConfig};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct FitState {
@@ -57,19 +57,19 @@ pub struct FitState {
     /// Per-chain CLEAN-EVAL log-likelihoods — the de-biased combined
     /// score for each chain's winning candidate, in chain-id order. New
     /// in proposal §Proposal 1 (Step 8); the compound scout-convergence
-    /// gate uses these together with `chain_clean_ses` to compute an
+    /// gate uses these together with `chain_eval_ses` to compute an
     /// SE-aware decibans-spread threshold. Absent in pre-§Proposal 1
     /// fit_state files; the gate falls back to the chain-agreement-only
     /// check when this is empty.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub chain_clean_logliks: Vec<f64>,
+    pub chain_eval_logliks: Vec<f64>,
 
     /// Per-chain clean-eval standard errors, parallel to
-    /// `chain_clean_logliks`. `max(SE)` drives the SE-aware decibans
+    /// `chain_eval_logliks`. `max(SE)` drives the SE-aware decibans
     /// floor: noisier chains get proportionally more tolerance before
     /// the spread gate fires. New in §Proposal 1 (Step 8).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub chain_clean_ses: Vec<f64>,
+    pub chain_eval_ses: Vec<f64>,
 
     /// Resolved compound-gate configuration as it was applied at the
     /// end of this stage. "Resolved" = the value that was actually in
@@ -95,11 +95,11 @@ pub struct FitState {
     /// Resolved clean-eval configuration as it was applied at the end
     /// of this stage. Same priority chain and persistence rationale as
     /// `resolved_gate` — what particle count and replicate count were
-    /// actually used to compute the per-chain `chain_clean_logliks`
-    /// and `chain_clean_ses` above. Without this, a reader can't
+    /// actually used to compute the per-chain `chain_eval_logliks`
+    /// and `chain_eval_ses` above. Without this, a reader can't
     /// reproduce the clean-eval exactly. See proposal §Phase 3.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub resolved_clean_eval: Option<CleanEvalConfig>,
+    pub resolved_loglik_eval: Option<LoglikEvalConfig>,
 }
 
 impl FitState {
@@ -147,10 +147,10 @@ mod tests {
             tail_chain_agreement,
             ivp_params: vec!["s0".into()],
             chain_logliks: vec![-130.0, -123.45],
-            chain_clean_logliks: vec![-128.7, -123.1],
-            chain_clean_ses: vec![1.5, 0.8],
+            chain_eval_logliks: vec![-128.7, -123.1],
+            chain_eval_ses: vec![1.5, 0.8],
             resolved_gate: Some(GateConfig::default()),
-            resolved_clean_eval: Some(CleanEvalConfig::default()),
+            resolved_loglik_eval: Some(LoglikEvalConfig::default()),
         }
     }
 
@@ -172,8 +172,8 @@ mod tests {
         s.save(&dir_str).unwrap();
         let loaded = FitState::load(&dir_str).unwrap();
 
-        assert_eq!(loaded.chain_clean_logliks, vec![-128.7, -123.1]);
-        assert_eq!(loaded.chain_clean_ses, vec![1.5, 0.8]);
+        assert_eq!(loaded.chain_eval_logliks, vec![-128.7, -123.1]);
+        assert_eq!(loaded.chain_eval_ses, vec![1.5, 0.8]);
         assert_eq!(loaded.chain_logliks, vec![-130.0, -123.45]);
         assert_eq!(loaded.tail_chain_agreement.get("beta").copied(), Some(1.02));
         assert_eq!(loaded.ivp_params, vec!["s0".to_string()]);
@@ -184,8 +184,8 @@ mod tests {
         let gate = loaded.resolved_gate.as_ref().expect("resolved_gate persisted");
         assert!((gate.a_thresh - 1.01).abs() < 1e-12);
         assert!((gate.decibans_thresh - 30.0).abs() < 1e-12);
-        let ce = loaded.resolved_clean_eval.as_ref()
-            .expect("resolved_clean_eval persisted");
+        let ce = loaded.resolved_loglik_eval.as_ref()
+            .expect("resolved_loglik_eval persisted");
         assert_eq!(ce.n_particles, 4000);
         assert_eq!(ce.n_replicates, 8);
 
@@ -193,7 +193,7 @@ mod tests {
     }
 
     /// Legacy fit_state.toml files written before Phase 3 lacked
-    /// `resolved_gate` and `resolved_clean_eval`. Loading must succeed
+    /// `resolved_gate` and `resolved_loglik_eval`. Loading must succeed
     /// and surface them as `None`, so summary can render with a
     /// "(thresholds unknown)" caveat instead of silently substituting
     /// defaults. This is the contract the proposal's "honest
@@ -209,7 +209,7 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("fit_state.toml");
         // Legacy contents — fields that existed before Phase 3 (no
-        // resolved_gate / resolved_clean_eval block). Mirrors what a
+        // resolved_gate / resolved_loglik_eval block). Mirrors what a
         // pre-2026-04-25 fit_state.toml looked like.
         std::fs::write(&path, r#"
 stage = "scout"
@@ -228,8 +228,8 @@ beta = 0.8
         let loaded = FitState::load(dir.to_str().unwrap()).unwrap();
         assert!(loaded.resolved_gate.is_none(),
             "legacy file must surface resolved_gate as None, not silently default");
-        assert!(loaded.resolved_clean_eval.is_none(),
-            "legacy file must surface resolved_clean_eval as None");
+        assert!(loaded.resolved_loglik_eval.is_none(),
+            "legacy file must surface resolved_loglik_eval as None");
         std::fs::remove_dir_all(&dir).ok();
     }
 }

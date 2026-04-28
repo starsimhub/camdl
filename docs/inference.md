@@ -483,7 +483,7 @@ across basins rather than quenching onto the first local optimum. Over
 the 30-iter stage the perturbation SD shrinks only from 1.0× to 0.49×
 initial. Use this first to find problems: Is the surface multimodal?
 Which parameters are identifiable? Is the observation model appropriate?
-The cross-chain Â at the end of scout, combined with the clean-eval
+The cross-chain Â at the end of scout, combined with the loglik-eval
 decibans-spread gate (see camdl-inference-spec §6.1.1), is the
 multi-modality diagnostic.
 

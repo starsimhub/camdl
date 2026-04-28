@@ -161,10 +161,10 @@ Per `cmd_fit_run_v2` in `fit/mod.rs:189` (verified line-by-line):
 |---|---|---|
 | `fits/<stem>-<hash>/run.json` | top-level `Run { kind: Fit }` with `FitMeta` (model_hash, fit_toml_path, fit_toml_hash, data_hashes, estimated, fixed, stages_declared, ic_free) | line 270 |
 | `fits/<stem>-<hash>/<sub>/<stage>/run.json` | per-stage `Run { kind: FitStage }` with `FitStageMeta` (method, seed, n_chains, algorithm, best_loglik, best_chain, starts_from, parent_profile_hash) | line 1133 |
-| `<stage>/fit_state.toml` | inter-stage handoff: best_loglik, best_chain, start_values, rw_sd, tail_chain_agreement, chain_clean_logliks, chain_clean_ses, ivp_params, resolved_gate, resolved_clean_eval | line 825 |
+| `<stage>/fit_state.toml` | inter-stage handoff: best_loglik, best_chain, start_values, rw_sd, tail_chain_agreement, chain_eval_logliks, chain_eval_ses, ivp_params, resolved_gate, resolved_loglik_eval | line 825 |
 | `<stage>/mle_params.toml` | winner θ̂ + extensive `[provenance]` (input_hash, model_hash, data_hashes, backend, dt, loglik, n_particles, ess_at_mle, timestamp) | line 845 |
-| `<stage>/final_params.toml` | clean-eval winner θ̂ + `[provenance]` (chain, loglik, se) — post-strip; `winning_candidate_label` was dropped in `20d48fe` ([clean-eval strip](2026-04-27-clean-eval-strip.md)) | runner.rs |
-| `<stage>/chain_evaluations.tsv` | M-replicate clean-eval score table, one row per chain (post-strip; the prior 3-row-per-chain layout with a `candidate` column was dropped in `20d48fe`) | runner.rs |
+| `<stage>/final_params.toml` | loglik-eval winner θ̂ + `[provenance]` (chain, loglik, se) — post-strip; `winning_candidate_label` was dropped in `20d48fe` ([loglik-eval strip](2026-04-27-clean-eval-strip.md)) | runner.rs |
+| `<stage>/chain_evaluations.tsv` | M-replicate loglik-eval score table, one row per chain (post-strip; the prior 3-row-per-chain layout with a `candidate` column was dropped in `20d48fe`) | runner.rs |
 | `<stage>/diagnostics.json` | structured warning list | line 875 |
 | `<stage>/chain_<n>/parameter_traces.tsv` | per-iteration param means (one file per chain) | runner.rs |
 | `<stage>/chain_<n>/final_params.toml` | per-chain winner θ̂ | runner.rs |
@@ -251,7 +251,7 @@ const MLE_STAGES: &[&str] = &["scout", "refine", "validate"];
 - Hard-codes the stage names. PGAS / PMMH stages are silently skipped.
   User-named stages (e.g. `deep_scout`) are silently skipped.
 - One fit_dir at a time. No cross-fit aggregation.
-- Renders gate verdict, parameter table, per-chain clean-eval table,
+- Renders gate verdict, parameter table, per-chain loglik-eval table,
   provenance cross-checks.
 - `--format text|json|md|latex`, `--params-only`, `--strict`, `--stage`,
   `--no-color`.
@@ -466,13 +466,13 @@ pub enum GateVerdict {
 pub struct If2StageResult {
     pub best_loglik: f64,
     pub best_chain: usize,
-    pub theta_hat: BTreeMap<String, f64>,    // winner θ̂ (clean-eval)
+    pub theta_hat: BTreeMap<String, f64>,    // winner θ̂ (loglik-eval)
     pub max_chain_agreement: f64,             // Â
     pub gate_verdict: GateVerdict,
     pub ess_at_mle: Option<EssSummary>,       // ess_min / ess_mean / ess_min_step
     pub n_chains: usize,
     pub n_iter: usize,
-    pub clean_eval: CleanEvalSummary,         // per-chain (loglik, se) post-strip
+    pub loglik_eval: LoglikEvalSummary,         // per-chain (loglik, se) post-strip
                                               // — no candidate label, see
                                               // docs/dev/notes/2026-04-27-clean-eval-strip.md
 }

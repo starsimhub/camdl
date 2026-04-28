@@ -1351,7 +1351,7 @@ pub enum CoolingSpec {
     /// Higher values (closer to 1) = **gentler cooling**, SD stays large,
     /// chains keep exploring. Used for **scout** (code default 0.70 →
     /// final SD = 49% of initial; the cross-chain Â (chain-agreement)
-    /// diagnostic at the end, combined with the clean-eval
+    /// diagnostic at the end, combined with the loglik-eval
     /// decibans-spread gate, is what identifies basins).
     ///
     /// Lower values (closer to 0) = **aggressive cooling**, SD collapses,

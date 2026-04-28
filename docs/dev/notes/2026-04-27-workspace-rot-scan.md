@@ -70,7 +70,7 @@ the `#[allow(dead_code)]` is stale.
 
 | location                                 | item                       | actually live? |
 |------------------------------------------|----------------------------|----------------|
-| `fit/clean_eval.rs:162,181,198`          | CandidateScore, ChainWinner, CleanEvalOutcome | yes — written + read everywhere |
+| `fit/loglik_eval.rs:162,181,198`          | CandidateScore, ChainWinner, LoglikEvalOutcome | yes — written + read everywhere |
 | `fit/runner.rs:87,578,954`               | ChainResults marker, helpers | yes |
 | `fit/synthetic.rs:32`                    | sim_seed / content_hash    | grep needed   |
 | `cli/src/evidence.rs:123,158`            | "used by Unit A compound gate" | Unit A shipped — yes |

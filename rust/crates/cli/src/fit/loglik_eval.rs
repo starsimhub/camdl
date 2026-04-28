@@ -26,10 +26,10 @@
 //! convergence to the MLE in the final-iter mean).
 //!
 //! Module split (kept from earlier design):
-//! - `run_clean_eval_with_scorer` is generic over the scorer
+//! - `run_loglik_eval_with_scorer` is generic over the scorer
 //!   closure so tests can inject a deterministic synthetic scorer
 //!   without paying for real PF calls.
-//! - `run_clean_eval` is the production entry point that wires in
+//! - `run_loglik_eval` is the production entry point that wires in
 //!   `runner::run_quick_pfilter_full`.
 //!
 //! See `docs/dev/notes/2026-04-27-clean-eval-strip.md` for the
@@ -41,7 +41,7 @@
 //! reflects the implementation.
 
 use crate::evidence;
-use crate::fit::config_v2::{CleanEvalConfig, CombineMode};
+use crate::fit::config_v2::{LoglikEvalConfig, CombineMode};
 use crate::fit::runner::{self, FitRunConfig};
 use sim::inference::if2::IF2Result;
 
@@ -185,7 +185,7 @@ pub struct ChainScore {
 /// winner read `per_chain[overall_winner_idx]`; consumers wanting
 /// per-chain detail (the gate's chain-spread leg) iterate `per_chain`.
 #[derive(Debug, Clone)]
-pub struct CleanEvalOutcome {
+pub struct LoglikEvalOutcome {
     pub per_chain: Vec<ChainScore>,
     pub overall_winner_idx: usize,
 }
@@ -197,13 +197,13 @@ pub struct CleanEvalOutcome {
 /// Production entry point: clean-evaluate every chain's IF2
 /// final-iteration mean using `runner::run_quick_pfilter_full` as the
 /// scorer (returns loglik + filter stats so we can surface ESS-at-θ̂).
-pub fn run_clean_eval(
+pub fn run_loglik_eval(
     run_config: &FitRunConfig,
     results: &[(usize, IF2Result)],
-    cfg: &CleanEvalConfig,
+    cfg: &LoglikEvalConfig,
     seed: u64,
-) -> Result<CleanEvalOutcome, String> {
-    run_clean_eval_with_scorer(
+) -> Result<LoglikEvalOutcome, String> {
+    run_loglik_eval_with_scorer(
         results,
         cfg,
         seed,
@@ -221,23 +221,23 @@ pub fn run_clean_eval(
 /// in practice `n_replicates` is a small constant (default M=8) and
 /// `chain_id` is single-digit, so collisions don't occur. If either
 /// scale changes, revisit the offsets.
-pub fn run_clean_eval_with_scorer<F>(
+pub fn run_loglik_eval_with_scorer<F>(
     results: &[(usize, IF2Result)],
-    cfg: &CleanEvalConfig,
+    cfg: &LoglikEvalConfig,
     seed: u64,
     scorer: F,
-) -> Result<CleanEvalOutcome, String>
+) -> Result<LoglikEvalOutcome, String>
 where
     F: Fn(&[f64], usize, u64) -> (f64, FilterStats),
 {
     if results.is_empty() {
-        return Err("run_clean_eval: no chain results to score".into());
+        return Err("run_loglik_eval: no chain results to score".into());
     }
     if cfg.n_replicates == 0 {
-        return Err("run_clean_eval: n_replicates must be ≥ 1".into());
+        return Err("run_loglik_eval: n_replicates must be ≥ 1".into());
     }
     if cfg.n_particles == 0 {
-        return Err("run_clean_eval: n_particles must be ≥ 1".into());
+        return Err("run_loglik_eval: n_particles must be ≥ 1".into());
     }
 
     let mut per_chain: Vec<ChainScore> = Vec::with_capacity(results.len());
@@ -245,7 +245,7 @@ where
     for (chain_id, if2) in results.iter() {
         if if2.iterations.is_empty() {
             return Err(format!(
-                "run_clean_eval: chain {} has no IF2 iterations", chain_id));
+                "run_loglik_eval: chain {} has no IF2 iterations", chain_id));
         }
         // The IF2 estimator: final-iteration parameter means.
         // Matches pomp's coef(mif2_out).
@@ -283,9 +283,9 @@ where
             Some(prev) if s.loglik > per_chain[prev].loglik => Some(i),
             Some(prev) => Some(prev),
         })
-        .ok_or_else(|| "run_clean_eval: every chain produced NaN loglik".to_string())?;
+        .ok_or_else(|| "run_loglik_eval: every chain produced NaN loglik".to_string())?;
 
-    Ok(CleanEvalOutcome { per_chain, overall_winner_idx })
+    Ok(LoglikEvalOutcome { per_chain, overall_winner_idx })
 }
 
 /// Combine `M` per-replicate logliks into a (combined, SE) pair. The
@@ -335,7 +335,7 @@ mod tests {
     }
 
     #[test]
-    fn run_clean_eval_uses_final_iteration_param_means() {
+    fn run_loglik_eval_uses_final_iteration_param_means() {
         // The chain's reported θ̂ must come from iterations.last().
         // Even if earlier iterations had different param_means, the
         // final iter is the one re-scored — pomp convention.
@@ -351,10 +351,10 @@ mod tests {
             // Return the sum of theta as the loglik so we can verify.
             (theta.iter().sum::<f64>(), FilterStats::failed())
         };
-        let cfg = CleanEvalConfig {
+        let cfg = LoglikEvalConfig {
             n_particles: 1, n_replicates: 1, combine: CombineMode::Mean,
         };
-        let out = run_clean_eval_with_scorer(&results, &cfg, 0, scorer).unwrap();
+        let out = run_loglik_eval_with_scorer(&results, &cfg, 0, scorer).unwrap();
 
         assert_eq!(out.per_chain.len(), 1);
         assert_eq!(out.per_chain[0].theta, vec![5.0, 6.0],
@@ -364,7 +364,7 @@ mod tests {
     }
 
     #[test]
-    fn run_clean_eval_argmax_picks_higher_clean_loglik() {
+    fn run_loglik_eval_argmax_picks_higher_clean_loglik() {
         // Two chains, identical IF2Result structure but the
         // deterministic scorer prefers chain-1's thetas. Clean-eval
         // picks chain 1 regardless of in-run numbers.
@@ -379,10 +379,10 @@ mod tests {
         let scorer = |theta: &[f64], _: usize, _: u64| {
             (if theta[0] < 5.0 { -10.0 } else { -5.0 }, FilterStats::failed())
         };
-        let cfg = CleanEvalConfig {
+        let cfg = LoglikEvalConfig {
             n_particles: 1, n_replicates: 4, combine: CombineMode::LogMeanExp,
         };
-        let out = run_clean_eval_with_scorer(&results, &cfg, 42, scorer).unwrap();
+        let out = run_loglik_eval_with_scorer(&results, &cfg, 42, scorer).unwrap();
 
         assert_eq!(out.per_chain.len(), 2);
         assert!((out.per_chain[0].loglik - (-10.0)).abs() < 1e-12);
@@ -396,7 +396,7 @@ mod tests {
     }
 
     #[test]
-    fn run_clean_eval_se_for_mean_combine_matches_sd_over_sqrt_m() {
+    fn run_loglik_eval_se_for_mean_combine_matches_sd_over_sqrt_m() {
         // Mean combine: SE = sample_sd / √M. Verify on a known input.
         let r = synthetic_result(vec![iter(0, -5.0, -5.0, vec![1.0])]);
         let results = vec![(7usize, r)];
@@ -407,10 +407,10 @@ mod tests {
             let rep_k = (seed % 10_000) as f64;
             (rep_k + 1.0, FilterStats::failed())
         };
-        let cfg = CleanEvalConfig {
+        let cfg = LoglikEvalConfig {
             n_particles: 1, n_replicates: 4, combine: CombineMode::Mean,
         };
-        let out = run_clean_eval_with_scorer(&results, &cfg, 0, scorer).unwrap();
+        let out = run_loglik_eval_with_scorer(&results, &cfg, 0, scorer).unwrap();
 
         // sd of [1, 2, 3, 4] = sqrt(((1+4+9+16) - 100/4) / 3) = sqrt(5/3)·...
         // sample_sd uses N-1 denom: var = sum((x - mean)^2) / 3 = 1.25·...
@@ -427,7 +427,7 @@ mod tests {
     }
 
     #[test]
-    fn run_clean_eval_se_for_logmeanexp_combine_matches_delta_method() {
+    fn run_loglik_eval_se_for_logmeanexp_combine_matches_delta_method() {
         // LogMeanExp combine: SE = SD(L_i) / (L̄ √M). Matches the
         // delta-method formula. Synthetic deterministic per-rep
         // logliks make the answer analytical.
@@ -438,10 +438,10 @@ mod tests {
             let rep_k = (seed % 10_000) as i64;
             ([-100.0_f64, -98.0_f64][rep_k as usize], FilterStats::failed())
         };
-        let cfg = CleanEvalConfig {
+        let cfg = LoglikEvalConfig {
             n_particles: 1, n_replicates: 2, combine: CombineMode::LogMeanExp,
         };
-        let out = run_clean_eval_with_scorer(&results, &cfg, 0, scorer).unwrap();
+        let out = run_loglik_eval_with_scorer(&results, &cfg, 0, scorer).unwrap();
 
         // Verify against evidence::logmeanexp_with_se directly.
         let (expected_ll, expected_se) = evidence::logmeanexp_with_se(&[-100.0, -98.0]);
@@ -450,7 +450,7 @@ mod tests {
     }
 
     #[test]
-    fn run_clean_eval_combine_mean_vs_logmeanexp_differ() {
+    fn run_loglik_eval_combine_mean_vs_logmeanexp_differ() {
         // For non-degenerate replicates, mean(ℓ) < logmeanexp(ℓ).
         let r = synthetic_result(vec![iter(0, -5.0, -5.0, vec![0.0])]);
         let results = vec![(0usize, r)];
@@ -458,40 +458,40 @@ mod tests {
             let rep_k = (seed % 10_000) as f64;
             (-10.0 + rep_k, FilterStats::failed())
         };
-        let cfg_mean = CleanEvalConfig {
+        let cfg_mean = LoglikEvalConfig {
             n_particles: 1, n_replicates: 4, combine: CombineMode::Mean,
         };
-        let cfg_lme = CleanEvalConfig {
+        let cfg_lme = LoglikEvalConfig {
             n_particles: 1, n_replicates: 4, combine: CombineMode::LogMeanExp,
         };
-        let mean_out = run_clean_eval_with_scorer(&results, &cfg_mean, 0, scorer).unwrap();
-        let lme_out  = run_clean_eval_with_scorer(&results, &cfg_lme,  0, scorer).unwrap();
+        let mean_out = run_loglik_eval_with_scorer(&results, &cfg_mean, 0, scorer).unwrap();
+        let lme_out  = run_loglik_eval_with_scorer(&results, &cfg_lme,  0, scorer).unwrap();
         // Same theta selected; the scores differ in the expected direction.
         assert!(lme_out.per_chain[0].loglik > mean_out.per_chain[0].loglik);
     }
 
     #[test]
-    fn run_clean_eval_errors_on_empty_iterations() {
+    fn run_loglik_eval_errors_on_empty_iterations() {
         let r = synthetic_result(vec![]);
         let results = vec![(0usize, r)];
         let scorer = |_: &[f64], _: usize, _: u64| (0.0, FilterStats::failed());
-        let cfg = CleanEvalConfig {
+        let cfg = LoglikEvalConfig {
             n_particles: 1, n_replicates: 1, combine: CombineMode::Mean,
         };
-        assert!(run_clean_eval_with_scorer(&results, &cfg, 0, scorer).is_err());
+        assert!(run_loglik_eval_with_scorer(&results, &cfg, 0, scorer).is_err());
     }
 
     #[test]
-    fn run_clean_eval_errors_on_all_nan_chains() {
+    fn run_loglik_eval_errors_on_all_nan_chains() {
         // If every chain's combined loglik is NaN, error rather than
         // silently picking chain 0.
         let mk = || synthetic_result(vec![iter(0, -5.0, -5.0, vec![1.0])]);
         let results = vec![(0usize, mk()), (1usize, mk())];
         let scorer = |_: &[f64], _: usize, _: u64| (f64::NAN, FilterStats::failed());
-        let cfg = CleanEvalConfig {
+        let cfg = LoglikEvalConfig {
             n_particles: 1, n_replicates: 2, combine: CombineMode::Mean,
         };
-        let result = run_clean_eval_with_scorer(&results, &cfg, 0, scorer);
+        let result = run_loglik_eval_with_scorer(&results, &cfg, 0, scorer);
         assert!(result.is_err(), "all-NaN chains must error explicitly");
         assert!(result.unwrap_err().contains("NaN"));
     }
@@ -549,7 +549,7 @@ mod tests {
         // synthetic scorers don't read it.
         let r = synthetic_result(vec![iter(0, TRUE_LL, TRUE_LL, vec![1.0])]);
         let results = vec![(0usize, r)];
-        let cfg = CleanEvalConfig {
+        let cfg = LoglikEvalConfig {
             n_particles: 1,
             n_replicates: 8,
             combine: CombineMode::LogMeanExp,
@@ -569,7 +569,7 @@ mod tests {
                 let mut rng = StatefulRng::new(seed);
                 (pf_sample(&mut rng, SIGMA_CLEAN), FilterStats::failed())
             };
-            let outcome = run_clean_eval_with_scorer(
+            let outcome = run_loglik_eval_with_scorer(
                 &results, &cfg, trial_seed, clean_scorer,
             ).unwrap();
             let clean_est = outcome.per_chain[0].loglik;

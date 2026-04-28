@@ -27,7 +27,7 @@ pub mod pgas;
 pub mod trace_writer;
 pub mod synthetic;
 pub mod gating;
-pub mod clean_eval;
+pub mod loglik_eval;
 
 use config::FitToml;
 
@@ -204,8 +204,8 @@ pub fn cmd_fit_run_v2(a: &crate::args::FitRunArgs) {
     // CLI overrides for clean_eval / gate. clap enforces requires=stage so
     // these only fire when a single stage is selected, keeping scout and
     // refine independently overridable.
-    let cli_clean_eval_particles = a.clean_eval_particles;
-    let cli_clean_eval_reps      = a.clean_eval_reps;
+    let cli_loglik_eval_particles = a.loglik_eval_particles;
+    let cli_loglik_eval_reps      = a.loglik_eval_reps;
     let cli_decibans_thresh      = a.decibans_thresh;
     let sweep_specs: Vec<(String, Vec<f64>)> = a.sweep.iter()
         .map(|s| (s.name.clone(), s.values.clone()))
@@ -595,16 +595,16 @@ pub fn cmd_fit_run_v2(a: &crate::args::FitRunArgs) {
         let mut stage_best_chain: Option<usize> = None;
 
         match stage {
-            Stage::IF2 { chains, particles, iterations, cooling, clean_eval, gate, .. } => {
+            Stage::IF2 { chains, particles, iterations, cooling, loglik_eval, gate, .. } => {
                 // Resolve effective clean_eval / gate: stage TOML, then CLI
                 // override (per Step 4 — overrides are stage-scoped because
                 // clap requires --stage). CLI flags pass `requires = "stage"`
                 // so they cannot be set when running multiple stages, which
                 // would otherwise apply the same value to scout and refine
                 // and defeat independent tuning.
-                let mut effective_clean_eval = clean_eval.clone();
-                if let Some(n) = cli_clean_eval_particles { effective_clean_eval.n_particles = n; }
-                if let Some(m) = cli_clean_eval_reps      { effective_clean_eval.n_replicates = m; }
+                let mut effective_loglik_eval = loglik_eval.clone();
+                if let Some(n) = cli_loglik_eval_particles { effective_loglik_eval.n_particles = n; }
+                if let Some(m) = cli_loglik_eval_reps      { effective_loglik_eval.n_replicates = m; }
                 let mut effective_gate = gate.clone();
                 if let Some(db) = cli_decibans_thresh     { effective_gate.decibans_thresh = db; }
                 let prior_state = effective_starts.as_ref().and_then(|dir| {
@@ -698,7 +698,7 @@ pub fn cmd_fit_run_v2(a: &crate::args::FitRunArgs) {
                     eprintln!("error building run config: {}", e);
                     std::process::exit(1);
                 });
-                run_config.clean_eval = effective_clean_eval.clone();
+                run_config.loglik_eval = effective_loglik_eval.clone();
                 run_config.gate = effective_gate.clone();
 
                 std::fs::create_dir_all(&stage_dir).unwrap_or_else(|e| {
@@ -761,15 +761,15 @@ pub fn cmd_fit_run_v2(a: &crate::args::FitRunArgs) {
                     &stage_dir.to_string_lossy(), &chain_results.results,
                     &run_config.estimated_params, &param_names,
                     &run_config.base_params, &run_config.compiled,
-                    Some(&chain_results.clean_eval),
+                    Some(&chain_results.loglik_eval),
                 ).unwrap_or_else(|e| eprintln!("warning: {}", e));
                 runner::write_clean_eval_tsv(
                     &stage_dir.to_string_lossy(),
-                    &chain_results.clean_eval, &run_config.estimated_params,
+                    &chain_results.loglik_eval, &run_config.estimated_params,
                 ).unwrap_or_else(|e| eprintln!("warning: {}", e));
                 runner::write_run_root_final_params(
                     &stage_dir.to_string_lossy(),
-                    &chain_results.clean_eval, &run_config.estimated_params,
+                    &chain_results.loglik_eval, &run_config.estimated_params,
                     &param_names, &run_config.base_params, &run_config.compiled,
                 ).unwrap_or_else(|e| eprintln!("warning: {}", e));
                 // Pre-filter starts — records whatever per-chain
@@ -820,18 +820,18 @@ pub fn cmd_fit_run_v2(a: &crate::args::FitRunArgs) {
                         .filter(|p| p.ivp).map(|p| p.name.clone()).collect(),
                     chain_logliks: chain_results.results.iter()
                         .map(|(_, r)| r.final_loglik).collect(),
-                    chain_clean_logliks: chain_results.chain_clean_logliks(),
-                    chain_clean_ses: chain_results.chain_clean_ses(),
+                    chain_eval_logliks: chain_results.chain_eval_logliks(),
+                    chain_eval_ses: chain_results.chain_eval_ses(),
                     // Persist the gate / clean-eval config that was
                     // *actually in force* — `effective_gate` and
-                    // `effective_clean_eval` above already collapsed the
+                    // `effective_loglik_eval` above already collapsed the
                     // priority chain (CLI flag > stage TOML > defaults).
                     // `summary` reads these so its verdict line reports
                     // against the threshold the run was judged by, not
                     // whatever `fit.toml` says at summary-time.
                     // See proposal §Phase 3.
                     resolved_gate: Some(effective_gate.clone()),
-                    resolved_clean_eval: Some(effective_clean_eval.clone()),
+                    resolved_loglik_eval: Some(effective_loglik_eval.clone()),
                 };
                 fit_state.save(&stage_dir.to_string_lossy()).unwrap_or_else(|e| {
                     eprintln!("warning: could not save fit_state: {}", e);

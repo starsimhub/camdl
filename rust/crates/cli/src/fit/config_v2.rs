@@ -403,7 +403,7 @@ pub enum Stage {
         /// IF2 finishes. See proposal §Proposal 1. Defaults give 4000
         /// particles × 8 replicates combined via logmeanexp.
         #[serde(default)]
-        clean_eval: CleanEvalConfig,
+        loglik_eval: LoglikEvalConfig,
         /// Compound gate thresholds for chain agreement (Â) and
         /// inter-chain log-likelihood spread (decibans). See proposal
         /// §Proposal 3.
@@ -502,26 +502,26 @@ impl Default for CombineMode {
 /// winner. Closes the ~40-nat extraction bias from argmax over noisy
 /// 500-particle in-run evaluations. See proposal §Proposal 1.
 #[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct CleanEvalConfig {
+pub struct LoglikEvalConfig {
     /// Particle count per clean PF replicate. Must be ≫ in-run scout
     /// particle count to bring SE under control.
-    #[serde(default = "default_clean_eval_particles")]
+    #[serde(default = "default_loglik_eval_particles")]
     pub n_particles: usize,
     /// Independent PF replicates per candidate. Combined via `combine`.
-    #[serde(default = "default_clean_eval_replicates")]
+    #[serde(default = "default_loglik_eval_replicates")]
     pub n_replicates: usize,
     #[serde(default)]
     pub combine: CombineMode,
 }
 
-fn default_clean_eval_particles() -> usize { 4000 }
-fn default_clean_eval_replicates() -> usize { 8 }
+fn default_loglik_eval_particles() -> usize { 4000 }
+fn default_loglik_eval_replicates() -> usize { 8 }
 
-impl Default for CleanEvalConfig {
+impl Default for LoglikEvalConfig {
     fn default() -> Self {
         Self {
-            n_particles: default_clean_eval_particles(),
-            n_replicates: default_clean_eval_replicates(),
+            n_particles: default_loglik_eval_particles(),
+            n_replicates: default_loglik_eval_replicates(),
             combine: CombineMode::default(),
         }
     }
@@ -2096,7 +2096,7 @@ cooling = 0.7
     }
 
     #[test]
-    fn if2_stage_clean_eval_and_gate_default_when_omitted() {
+    fn if2_stage_loglik_eval_and_gate_default_when_omitted() {
         let cfg = parse(r#"
 [model]
 camdl = "models/sir.camdl"
@@ -2119,10 +2119,10 @@ cooling = 0.9
         "#).unwrap();
 
         match &cfg.stages["scout"] {
-            Stage::IF2 { clean_eval, gate, .. } => {
-                assert_eq!(clean_eval.n_particles, 4000);
-                assert_eq!(clean_eval.n_replicates, 8);
-                assert_eq!(clean_eval.combine, CombineMode::LogMeanExp);
+            Stage::IF2 { loglik_eval, gate, .. } => {
+                assert_eq!(loglik_eval.n_particles, 4000);
+                assert_eq!(loglik_eval.n_replicates, 8);
+                assert_eq!(loglik_eval.combine, CombineMode::LogMeanExp);
                 assert!((gate.a_thresh - 1.01).abs() < 1e-12);
                 assert!((gate.decibans_thresh - 30.0).abs() < 1e-12);
             }
@@ -2131,7 +2131,7 @@ cooling = 0.9
     }
 
     #[test]
-    fn if2_stage_clean_eval_and_gate_parse_overrides() {
+    fn if2_stage_loglik_eval_and_gate_parse_overrides() {
         let cfg = parse(r#"
 [model]
 camdl = "models/sir.camdl"
@@ -2151,7 +2151,7 @@ chains = 4
 particles = 500
 iterations = 30
 cooling = 0.9
-clean_eval = { n_particles = 8000, n_replicates = 16, combine = "mean" }
+loglik_eval = { n_particles = 8000, n_replicates = 16, combine = "mean" }
 gate = { a_thresh = 1.05, decibans_thresh = 60.0 }
 
 [stages.refine]
@@ -2161,7 +2161,7 @@ particles = 1000
 iterations = 60
 cooling = 0.95
 
-[stages.refine.clean_eval]
+[stages.refine.loglik_eval]
 n_particles = 12000
 
 [stages.refine.gate]
@@ -2169,10 +2169,10 @@ decibans_thresh = 100.0
         "#).unwrap();
 
         match &cfg.stages["scout"] {
-            Stage::IF2 { clean_eval, gate, .. } => {
-                assert_eq!(clean_eval.n_particles, 8000);
-                assert_eq!(clean_eval.n_replicates, 16);
-                assert_eq!(clean_eval.combine, CombineMode::Mean);
+            Stage::IF2 { loglik_eval, gate, .. } => {
+                assert_eq!(loglik_eval.n_particles, 8000);
+                assert_eq!(loglik_eval.n_replicates, 16);
+                assert_eq!(loglik_eval.combine, CombineMode::Mean);
                 assert!((gate.a_thresh - 1.05).abs() < 1e-12);
                 assert!((gate.decibans_thresh - 60.0).abs() < 1e-12);
             }
@@ -2181,10 +2181,10 @@ decibans_thresh = 100.0
 
         // refine: partial overrides — unset fields take defaults
         match &cfg.stages["refine"] {
-            Stage::IF2 { clean_eval, gate, .. } => {
-                assert_eq!(clean_eval.n_particles, 12000);
-                assert_eq!(clean_eval.n_replicates, 8);            // default
-                assert_eq!(clean_eval.combine, CombineMode::LogMeanExp); // default
+            Stage::IF2 { loglik_eval, gate, .. } => {
+                assert_eq!(loglik_eval.n_particles, 12000);
+                assert_eq!(loglik_eval.n_replicates, 8);            // default
+                assert_eq!(loglik_eval.combine, CombineMode::LogMeanExp); // default
                 assert!((gate.a_thresh - 1.01).abs() < 1e-12);     // default
                 assert!((gate.decibans_thresh - 100.0).abs() < 1e-12);
             }

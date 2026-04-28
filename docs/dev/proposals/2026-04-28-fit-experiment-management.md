@@ -191,7 +191,7 @@ pub struct If2StageResult {
     pub ess_at_mle: Option<EssSummary>,     // ess_min / ess_mean / ess_min_step
     pub n_chains: usize,
     pub n_iter: usize,
-    pub clean_eval: CleanEvalSummary,
+    pub loglik_eval: LoglikEvalSummary,
 }
 
 pub struct PgasStageResult {
@@ -342,7 +342,7 @@ size of the posterior chain — a different quantity entirely
 schema test enforces that no future field rename merges them.
 
 **`params` carries the full estimated parameter set**, not a
-headline subset. For IF2: the clean-eval winner θ̂. For PGAS / PMMH:
+headline subset. For IF2: the loglik-eval winner θ̂. For PGAS / PMMH:
 the posterior mean of every estimated parameter. Renderers are
 responsible for column truncation (text view defaults to a
 configurable cap; `--params <list>` selects explicitly). The JSON

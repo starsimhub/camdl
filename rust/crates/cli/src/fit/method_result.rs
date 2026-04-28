@@ -272,7 +272,7 @@ impl If2StageResult {
 /// typed verdict instead of a rendered block. Falls back to
 /// `GateConfig::default()` when `state.resolved_gate` is absent
 /// (legacy file pre-Phase-3) — that mirrors the existing summary's
-/// fallback. The `clean_eval` data drives the decibans leg; absent →
+/// fallback. The `loglik_eval` data drives the decibans leg; absent →
 /// the leg is inconclusive and we judge on Â alone.
 fn compute_if2_gate_verdict(state: &FitState) -> GateVerdict {
     use crate::evidence::NATS_TO_DB;
@@ -290,21 +290,21 @@ fn compute_if2_gate_verdict(state: &FitState) -> GateVerdict {
         .fold(0.0_f64, f64::max);
     let a_passes = max_a < gate.a_thresh;
 
-    let db_passes = if state.chain_clean_logliks.len() >= 2
-        && state.chain_clean_ses.len() == state.chain_clean_logliks.len()
+    let db_passes = if state.chain_eval_logliks.len() >= 2
+        && state.chain_eval_ses.len() == state.chain_eval_logliks.len()
     {
         let hi = state
-            .chain_clean_logliks
+            .chain_eval_logliks
             .iter()
             .copied()
             .fold(f64::NEG_INFINITY, f64::max);
         let lo = state
-            .chain_clean_logliks
+            .chain_eval_logliks
             .iter()
             .copied()
             .fold(f64::INFINITY, f64::min);
         let delta_db = (hi - lo) * NATS_TO_DB;
-        let sigma_max = state.chain_clean_ses.iter().copied().fold(0.0_f64, f64::max);
+        let sigma_max = state.chain_eval_ses.iter().copied().fold(0.0_f64, f64::max);
         let se_floor_db = 8.0 * sigma_max * NATS_TO_DB;
         let threshold_db = gate.decibans_thresh.max(se_floor_db);
         Some(delta_db < threshold_db)
@@ -634,7 +634,7 @@ fn posterior_summaries(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fit::config_v2::{CleanEvalConfig, GateConfig};
+    use crate::fit::config_v2::{LoglikEvalConfig, GateConfig};
     use crate::run_meta::{FitStageMeta, RunKind};
     use std::collections::HashMap;
 
@@ -716,10 +716,10 @@ mod tests {
             tail_chain_agreement: agreement,
             ivp_params: vec![],
             chain_logliks: vec![-3810.0, -3805.0, -3812.0, -3804.9],
-            chain_clean_logliks: vec![-3810.0, -3805.0, -3812.0, -3804.9],
-            chain_clean_ses: vec![1.0, 1.0, 1.0, 1.0],
+            chain_eval_logliks: vec![-3810.0, -3805.0, -3812.0, -3804.9],
+            chain_eval_ses: vec![1.0, 1.0, 1.0, 1.0],
             resolved_gate: Some(GateConfig::default()),
-            resolved_clean_eval: Some(CleanEvalConfig::default()),
+            resolved_loglik_eval: Some(LoglikEvalConfig::default()),
         }
     }
 

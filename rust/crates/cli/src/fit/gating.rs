@@ -82,7 +82,7 @@ pub enum ScoutGateVerdict {
 ///
 /// 1. Chain-agreement Â on every non-IVP param must be `< gate.a_thresh`.
 ///    Failure → `Hard`. Â in `[A_SOFT, gate.a_thresh)` → `SoftWarn`.
-/// 2. If both `chain_clean_logliks` and `chain_clean_ses` are populated
+/// 2. If both `chain_eval_logliks` and `chain_eval_ses` are populated
 ///    (≥ 2 entries), the inter-chain decibans-spread of clean-eval
 ///    log-likelihoods must be below
 ///    `max(gate.decibans_thresh, 8 · max(SE) · NATS_TO_DB)`. The
@@ -148,16 +148,16 @@ pub fn check_scout_convergence(scout: &FitState, gate: &GateConfig) -> ScoutGate
 
     // Step 2 — decibans-spread check on clean-eval logliks. Skipped
     // when the scout is pre-§Proposal 1 and didn't write the new fields.
-    if scout.chain_clean_logliks.len() >= 2
-        && scout.chain_clean_ses.len() == scout.chain_clean_logliks.len()
+    if scout.chain_eval_logliks.len() >= 2
+        && scout.chain_eval_ses.len() == scout.chain_eval_logliks.len()
     {
-        let hi = scout.chain_clean_logliks.iter().cloned()
+        let hi = scout.chain_eval_logliks.iter().cloned()
             .fold(f64::NEG_INFINITY, f64::max);
-        let lo = scout.chain_clean_logliks.iter().cloned()
+        let lo = scout.chain_eval_logliks.iter().cloned()
             .fold(f64::INFINITY, f64::min);
         let delta_db = (hi - lo) * NATS_TO_DB;
 
-        let sigma_max = scout.chain_clean_ses.iter().cloned()
+        let sigma_max = scout.chain_eval_ses.iter().cloned()
             .fold(0.0_f64, f64::max);
         let se_floor_db = 8.0 * sigma_max * NATS_TO_DB;
         let threshold_db = gate.decibans_thresh.max(se_floor_db);
@@ -167,7 +167,7 @@ pub fn check_scout_convergence(scout: &FitState, gate: &GateConfig) -> ScoutGate
                 delta_db,
                 threshold_db,
                 sigma_max,
-                chain_logliks: scout.chain_clean_logliks.clone(),
+                chain_logliks: scout.chain_eval_logliks.clone(),
             };
         }
     }
@@ -350,10 +350,10 @@ mod tests {
                 .map(|(k, v)| (k.to_string(), *v)).collect(),
             ivp_params: ivp_params.iter().map(|s| s.to_string()).collect(),
             chain_logliks: chain_logliks.to_vec(),
-            chain_clean_logliks: vec![],
-            chain_clean_ses: vec![],
+            chain_eval_logliks: vec![],
+            chain_eval_ses: vec![],
             resolved_gate: None,
-            resolved_clean_eval: None,
+            resolved_loglik_eval: None,
         }
     }
 
@@ -475,8 +475,8 @@ mod tests {
             &[-60.0, -60.0],   // legacy chain_logliks unused by gate 2
             -60.0,
         );
-        s.chain_clean_logliks = vec![-60.0, -60.0 - 100.0 / NATS_TO_DB];
-        s.chain_clean_ses = vec![0.5, 0.5];   // 8·0.5·NATS_TO_DB ≈ 17.4 dB < 30 dB
+        s.chain_eval_logliks = vec![-60.0, -60.0 - 100.0 / NATS_TO_DB];
+        s.chain_eval_ses = vec![0.5, 0.5];   // 8·0.5·NATS_TO_DB ≈ 17.4 dB < 30 dB
 
         let gate = GateConfig { a_thresh: 1.10, decibans_thresh: 30.0 };
         match check_scout_convergence(&s, &gate) {
@@ -506,8 +506,8 @@ mod tests {
             &[-60.0, -60.0],
             -60.0,
         );
-        s.chain_clean_logliks = vec![-60.0, -60.0 - 100.0 / NATS_TO_DB];
-        s.chain_clean_ses = vec![5.0, 5.0];   // 8·5·NATS_TO_DB ≈ 173.7 dB
+        s.chain_eval_logliks = vec![-60.0, -60.0 - 100.0 / NATS_TO_DB];
+        s.chain_eval_ses = vec![5.0, 5.0];   // 8·5·NATS_TO_DB ≈ 173.7 dB
 
         let gate = GateConfig { a_thresh: 1.10, decibans_thresh: 30.0 };
         match check_scout_convergence(&s, &gate) {

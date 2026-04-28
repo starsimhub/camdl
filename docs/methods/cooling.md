@@ -108,7 +108,7 @@ collapse onto a single point. This is deliberate:
 - The **cross-chain chain-agreement Â** diagnoses whether the chains
   agreed on a single basin (converged, low Â) or scattered across
   multiple (not converged, high Â — flags multi-modality). The
-  compound scout-convergence gate combines Â with a clean-eval
+  compound scout-convergence gate combines Â with a loglik-eval
   decibans-spread check; see `docs/camdl-inference-spec.md` §6.1.1.
 
 Scout's job is not to produce a single tight MLE estimate; it is to

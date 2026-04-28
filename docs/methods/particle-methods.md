@@ -347,7 +347,7 @@ directly verified. This is a known gap; see TODO issue.
 
 | if you want to... | use | implemented as | typical caller |
 |---|---|---|---|
-| evaluate $\log p(y_{1:T} \mid \theta)$ at a fixed θ | bootstrap PF | `bootstrap_filter` | `camdl pfilter`; clean-eval / gate checks via `run_quick_pfilter` |
+| evaluate $\log p(y_{1:T} \mid \theta)$ at a fixed θ | bootstrap PF | `bootstrap_filter` | `camdl pfilter`; loglik-eval / gate checks via `run_quick_pfilter` |
 | find the MLE $\hat\theta$ | IF2 | `run_if2` (its own loop) | `camdl fit run` MLE stages (scout / refine / validate) |
 | sample from the posterior $p(\theta, x_{1:T} \mid y_{1:T})$ | Particle Gibbs with CSMC-AS for X-update + NUTS for θ-update | `csmc_as` inside `run_pgas` | `camdl fit run`'s `[stages.pgas]` |
 | sample posterior with classical PMMH (Andrieu-Doucet-Holenstein) | PMMH on top of bootstrap PF | `run_pmmh` calling `bootstrap_filter` | `camdl fit run`'s `[stages.pmmh]` (rho unset; default) |
@@ -364,7 +364,7 @@ directly verified. This is a known gap; see TODO issue.
 - **Cooling schedule.** IF2-specific. See [`cooling.md`](cooling.md).
 - **ESS thresholds and what they mean.** TODO `ess.md` (covers
   Liu-Chen 1995, the $N/2$ threshold convention, ESS-at-MLE
-  reporting in clean-eval).
+  reporting in loglik-eval).
 - **Chain agreement Â** (between-chain MLE-optimizer convergence
   diagnostic — **not** Gelman-Rubin). TODO `chain-agreement.md`.
 - **Compound scout-convergence gate** (Â + decibans-spread,

@@ -53,7 +53,7 @@ he2010 synthetic recovery vignette:
 
 **Proposed fix, three units:**
 
-- **Unit A (ship first):** Proposal 1 (clean-eval selection in scout
+- **Unit A (ship first):** Proposal 1 (loglik-eval selection in scout
   AND refine, multi-candidate per chain) + Proposal 3 (compound gate
   with $\widehat{A}$ + decibans-spread, with the Rhat → $\widehat{A}$
   rename). Target file: `rust/crates/cli/src/fit/runner.rs`. Days of
@@ -86,7 +86,7 @@ ritual" lesson reproducible with a `--resume --warm-restart` demo.
   (Rhat-only gate) with the compound $\widehat{A}$ + decibans gate.
 
 **Plan:** Review Unit A's proposed `fit.toml` schema additions
-(`clean_eval`, `gate`, `trace` blocks) and CLI flags before any
+(`loglik_eval`, `gate`, `trace` blocks) and CLI flags before any
 implementation lands. Then ship Unit A as one PR and Unit B as a
 second (or bundled). Unit C files as its own issue with the shared-
 resume-codepath question flagged explicitly.
@@ -225,7 +225,7 @@ he2010 rerun together.
    (`cli/src/evidence.rs`) is the single source of truth — Unit A's
    compound gate reuses it for cross-chain spread formatting.
 
-2. **IF2 scout remediation, Unit A** — Proposal 1 (clean-eval
+2. **IF2 scout remediation, Unit A** — Proposal 1 (loglik-eval
    selection) + Proposal 3 (compound gate with $\widehat{A}$ +
    decibans-spread, rename `rhat` → `chain_agreement`). Days of
    work; this is the load-bearing fix for the he2010 analysis. After

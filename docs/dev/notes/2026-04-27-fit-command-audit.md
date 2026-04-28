@@ -247,7 +247,7 @@ Different methods have different load-bearing diagnostics. Sketch:
 **IF2** (current):
 - compound scout-convergence gate (Â + decibans-spread)
 - per-parameter Â table
-- per-chain clean-eval winner ll/se
+- per-chain loglik-eval winner ll/se
 - provenance cross-check (final ↔ mle ↔ fit_state)
 
 **PGAS** (Bayesian, MCMC):

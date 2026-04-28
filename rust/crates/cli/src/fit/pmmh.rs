@@ -497,11 +497,11 @@ pub fn run_pmmh_cli(
         tail_chain_agreement: HashMap::new(),
         ivp_params: Vec::new(),
         chain_logliks: Vec::new(),
-        chain_clean_logliks: Vec::new(),
-        chain_clean_ses: Vec::new(),
+        chain_eval_logliks: Vec::new(),
+        chain_eval_ses: Vec::new(),
         // Bayesian path — compound gate doesn't apply to PMMH.
         resolved_gate: None,
-        resolved_clean_eval: None,
+        resolved_loglik_eval: None,
     };
     state.save(&stage_dir)?;
 

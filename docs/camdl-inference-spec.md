@@ -445,12 +445,12 @@ sigma = 1.01
 gamma = 1.07
 
 # Per-chain CLEAN-EVAL log-likelihoods + standard errors (in
-# chain-id order), produced by the Step-7 clean-eval re-scoring.
+# chain-id order), produced by the Step-7 loglik-eval re-scoring.
 # The compound scout-convergence gate combines these with
 # tail_chain_agreement to compute an SE-aware decibans-spread
 # threshold (see §6.1.1).
-chain_clean_logliks = [-3893.4, -3891.2, -3897.8, -3895.1, -3892.0, -3899.4, -3895.7, -3894.8]
-chain_clean_ses     = [   0.5,    0.4,    0.6,    0.5,    0.4,    0.7,    0.5,    0.5]
+chain_eval_logliks = [-3893.4, -3891.2, -3897.8, -3895.1, -3892.0, -3899.4, -3895.7, -3894.8]
+chain_eval_ses     = [   0.5,    0.4,    0.6,    0.5,    0.4,    0.7,    0.5,    0.5]
 
 ivp_params = ["S0", "E0", "I0"]
 
@@ -466,7 +466,7 @@ ivp_params = ["S0", "E0", "I0"]
 a_thresh = 1.01
 decibans_thresh = 30.0
 
-[resolved_clean_eval]
+[resolved_loglik_eval]
 n_particles = 4000
 n_replicates = 8
 combine = "log_mean_exp"
@@ -688,7 +688,7 @@ chains start from random positions within bounds. Controlled by
   fit_state.toml                    ← inter-stage handoff
   mle_params.toml                   ← winner θ̂ + [provenance]
   final_params.toml                 ← winner θ̂ + [provenance] (run-root)
-  chain_evaluations.tsv             ← full clean-eval score table
+  chain_evaluations.tsv             ← full loglik-eval score table
   diagnostics.json                  ← structured warnings
   run.json                          ← stage metadata (post-Phase-3)
 ```
@@ -709,7 +709,7 @@ Picking the winning chain by argmax over IF2's in-run 500-particle
 PF log-likelihood is biased by ~tens of nats (Monte Carlo noise gets
 selected on, not just signal), and "all Â small" alone fails to
 catch chains that agree per-parameter while sitting in different
-likelihood basins. After IF2 finishes, scout runs a clean-evaluation
+likelihood basins. After IF2 finishes, scout runs a loglik-evaluation
 pass:
 
 1. **Candidate.** Each chain contributes one candidate θ̂: the
@@ -729,7 +729,7 @@ pass:
    approximation on the log scale via
    `evidence::logmeanexp_with_se`. Defaults: `n_particles = 4000`,
    `n_replicates = 8`, `combine = LogMeanExp`. Override per-stage
-   with `--clean-eval-particles N` / `--clean-eval-reps M`.
+   with `--loglik-eval-particles N` / `--loglik-eval-reps M`.
 3. **Cross-chain selection.** The maximum across per-chain clean
    logliks names the overall winner (the chain whose θ̂ is reported
    as the MLE). NaN chains are explicitly skipped; an
@@ -739,17 +739,17 @@ The compound scout-convergence gate (read by `camdl fit refine`)
 passes iff:
 
 - `max(Â) < a_thresh` over per-parameter chain-agreement, **and**
-- `Δ_dB < threshold_dB` over the per-chain clean-eval logliks,
+- `Δ_dB < threshold_dB` over the per-chain loglik-eval logliks,
 
 where `Δ_dB = (max − min) · NATS_TO_DB` is the decibans spread,
 and `threshold_dB = max(decibans_thresh, 8 · σ_max · NATS_TO_DB)`
-with `σ_max = max(chain_clean_ses)`. The SE-aware floor prevents
+with `σ_max = max(chain_eval_ses)`. The SE-aware floor prevents
 the gate from firing on noisy chains whose spread is statistically
 indistinguishable from zero. Defaults: `a_thresh = 1.01`,
 `decibans_thresh = 30.0`. Override per-stage with `--decibans-thresh X`.
 
 Status surfaces the verdict as
-`clean-eval Δ = X dB / threshold Y dB (σ_max=Z) ✓/✗` under scout and
+`loglik-eval Δ = X dB / threshold Y dB (σ_max=Z) ✓/✗` under scout and
 refine. The full per-(chain × candidate) score table is written to
 `<stage>/chain_evaluations.tsv` (header: `chain  candidate  loglik
 se  <param₁>  …`) and the run-root winner to `<stage>/final_params.toml`.
@@ -881,7 +881,7 @@ fit/he2010/ — He et al. 2010 London measles
           --params <fit_dir>/real/fit_<seed>/validate/mle_params.toml
 ```
 
-A stage that ran IF2 + clean-eval but failed the compound gate
+A stage that ran IF2 + loglik-eval but failed the compound gate
 (no `run.json`) is reported with a one-line pointer:
 
 ```
@@ -905,7 +905,7 @@ Reads each MLE stage's `fit_state.toml` + `final_params.toml` +
   `fit_state.toml` — i.e. the threshold the run was actually
   judged by, not whatever `fit.toml` says at summary-time)
 - parameter table: estimated params with Â glyph, IVP marker
-- per-chain clean-eval table with winner row marked
+- per-chain loglik-eval table with winner row marked
 - provenance cross-check —
   `final_params.toml ↔ mle_params.toml` and
   `fit_state.toml ↔ final_params.toml`. The `final ↔ mle`
@@ -948,7 +948,7 @@ Top-level shape:
         "overall_pass": false,
         "threshold_source": "resolved",
         "resolved_gate": {"a_thresh": 1.01, "decibans_thresh": 30.0},
-        "resolved_clean_eval": {"n_particles": 4000, "n_replicates": 8, "combine": "log_mean_exp"}
+        "resolved_loglik_eval": {"n_particles": 4000, "n_replicates": 8, "combine": "log_mean_exp"}
       },
       "stage_progression": null,
       "parameters": [
