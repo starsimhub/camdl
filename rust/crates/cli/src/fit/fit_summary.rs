@@ -3,7 +3,7 @@
 //! Reads a fit dir produced by `camdl fit run` and renders an
 //! interpretation block per stage. The block content is method-aware:
 //! IF2 stages render the compound-gate verdict, Â-keyed parameter
-//! table, per-chain clean-eval table, and filter-health provenance
+//! table, per-chain loglik-eval table, and filter-health provenance
 //! cross-check; PGAS / PMMH stages render the posterior summary
 //! (mean, R̂, ESS, acceptance) instead. Stage names come from the
 //! walker (`fit_tree::walk_fit_dir`) — there is no hard-coded stage
@@ -206,7 +206,7 @@ fn cmd_text(dir: &str, args: &FitSummaryArgs, stages: &[ResolvedStage], strict: 
         match &typed {
             MethodResult::If2(if2) => {
                 // IF2 keeps the rich FitState rendering — gate, params
-                // table, per-chain clean-eval, provenance — because it
+                // table, per-chain loglik-eval, provenance — because it
                 // surfaces information the typed `If2StageResult`
                 // doesn't (e.g. ivp markers, per-chain SE, raw
                 // start_values). The typed payload is the source of
@@ -341,7 +341,11 @@ impl Formatter {
         // Headline
         s.push_str(&format!("  best loglik:  {:.1}", state.best_loglik));
         if !state.chain_eval_logliks.is_empty() {
-            s.push_str("  (clean-eval winner)");
+            // The headline loglik is the cross-chain max of the
+            // re-scored per-chain values (loglik-eval — see
+            // crates/cli/src/fit/loglik_eval.rs for the pipeline,
+            // and the per-chain table below for breakdown).
+            s.push_str("  (loglik-eval, max across chains)");
         }
         s.push('\n');
         s.push_str(&format!("  chains:       {}\n", state.n_chains));
@@ -368,9 +372,9 @@ impl Formatter {
         // Per-parameter table
         s.push_str(&self.parameter_table(state));
 
-        // Per-chain clean-eval table
+        // Per-chain loglik-eval table
         if !state.chain_eval_logliks.is_empty() {
-            s.push_str(&self.chain_clean_eval_table(state));
+            s.push_str(&self.chain_loglik_eval_table(state));
         }
 
         // ESS-at-MLE — surfaced from the typed payload only, not from
@@ -452,7 +456,7 @@ impl Formatter {
             };
             s.push_str(&format!("    overall:         {}\n", overall));
         } else {
-            s.push_str(&format!("    decibans leg:    {} (clean-eval data not present)\n",
+            s.push_str(&format!("    decibans leg:    {} (loglik-eval data not present)\n",
                 self.dim("—")));
         }
 
@@ -471,7 +475,7 @@ impl Formatter {
 
     fn parameter_table(&self, state: &FitState) -> String {
         let mut s = String::new();
-        s.push_str(&format!("  {}\n", self.bold("parameter estimates (clean-eval winner θ̂)")));
+        s.push_str(&format!("  {}\n", self.bold("parameter estimates (loglik-eval, selected chain θ̂)")));
         if state.start_values.is_empty() {
             s.push_str(&format!("    {}\n", self.dim("(no start_values in fit_state.toml)")));
             s.push('\n');
@@ -514,11 +518,11 @@ impl Formatter {
         s
     }
 
-    fn chain_clean_eval_table(&self, state: &FitState) -> String {
+    fn chain_loglik_eval_table(&self, state: &FitState) -> String {
         let mut s = String::new();
         let n = state.chain_eval_logliks.len();
         s.push_str(&format!("  {}\n",
-            self.bold(&format!("per-chain clean-eval ({} chains)", n))));
+            self.bold(&format!("per-chain loglik-eval ({} chains)", n))));
         let best_idx = state.chain_eval_logliks.iter().enumerate()
             .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
             .map(|(i, _)| i);
@@ -529,12 +533,17 @@ impl Formatter {
         // fit_state.toml; ESS surfacing in this table waits for a
         // Phase 4 follow-up that loads <stage>_summary.json. Note
         // here so a future reader doesn't think it was forgotten.
-        s.push_str(&format!("    {:6} {:>12}   {:>6}\n", "chain", "clean_ll", "± se"));
+        s.push_str(&format!("    {:6} {:>12}   {:>6}\n", "chain", "loglik", "± se"));
         for i in 0..n {
             let ll = state.chain_eval_logliks[i];
             let se = state.chain_eval_ses.get(i).copied().unwrap_or(f64::NAN);
+            // Marker for the chain whose θ̂ is reported as the MLE
+            // (cross-chain argmax of clean re-scored loglik).
+            // "selected" rather than "winner" — neutral, no competition
+            // framing; describes the operation (the cross-chain argmax
+            // selected this chain's θ̂ as the reported MLE).
             let marker = if Some(i) == best_idx {
-                format!("  {}", self.ok("← winner"))
+                format!("  {}", self.ok("← selected"))
             } else {
                 String::new()
             };
@@ -724,9 +733,19 @@ fn ci_env_set() -> bool {
     matches!(std::env::var("CI").as_deref(), Ok("true") | Ok("1"))
 }
 
+/// Resolve color preference with the standard Unix precedence:
+/// `--no-color` flag > `NO_COLOR` env (forces off; see no-color.org)
+/// > `CLICOLOR_FORCE` env (forces on regardless of TTY; common
+/// convention used by ls / grep / git when piped through `less -R`)
+/// > TTY auto-detect.
+///
+/// Default behavior (no flag, no env): colored when stdout is a TTY,
+/// plain text otherwise. Pipe to `less -R` with `CLICOLOR_FORCE=1`
+/// to keep colors in a pager.
 fn should_use_color(no_color_flag: bool) -> bool {
     if no_color_flag { return false; }
     if std::env::var("NO_COLOR").is_ok() { return false; }
+    if std::env::var("CLICOLOR_FORCE").is_ok() { return true; }
     is_stdout_tty()
 }
 
@@ -799,7 +818,7 @@ pub struct StageReport {
     /// Inference method: `"if2"`, `"pgas"`, or `"pmmh"`.
     pub method: String,
     pub n_chains: usize,
-    /// IF2: best clean-eval loglik. PMMH: `map_loglik`. PGAS: `None`
+    /// IF2: best loglik-eval result. PMMH: `map_loglik`. PGAS: `None`
     /// (no point estimate).
     pub best_loglik: Option<f64>,
     pub initial_loglik: Option<f64>,
@@ -811,7 +830,7 @@ pub struct StageReport {
     /// IF2 estimated parameters with Â. Empty for Bayesian stages
     /// (consult `method_result` for posterior_mean / ess).
     pub parameters: Vec<ParameterReport>,
-    /// IF2 per-chain clean-eval table. Empty for Bayesian.
+    /// IF2 per-chain loglik-eval table. Empty for Bayesian.
     pub chains: Vec<ChainReport>,
     /// IF2 provenance cross-check (final_params ↔ mle_params, etc.).
     /// `None` for Bayesian.
@@ -1247,7 +1266,7 @@ fn render_md_stage(stage: &StageReport) -> String {
             s.push_str(&format!("| decibans-spread | {:.1} dB | {:.1} dB | {} |\n",
                 dd, td, glyph(p)));
         } else {
-            s.push_str("| decibans-spread | _(no clean-eval data)_ | — | — |\n");
+            s.push_str("| decibans-spread | _(no loglik-eval data)_ | — | — |\n");
         }
         s.push_str(&format!("\n**overall:** {}\n", match gate.overall_pass {
             Some(true)  => "✓ PASS",
@@ -1286,7 +1305,7 @@ fn render_md_stage(stage: &StageReport) -> String {
 
     // IF2 parameter table.
     if !stage.parameters.is_empty() {
-        s.push_str("### Parameter estimates (clean-eval winner θ̂)\n\n");
+        s.push_str("### Parameter estimates (loglik-eval, selected chain θ̂)\n\n");
         s.push_str("| name | estimate | Â | flags |\n|---|---|---|---|\n");
         for p in &stage.parameters {
             let a_str = p.chain_agreement
@@ -1299,9 +1318,9 @@ fn render_md_stage(stage: &StageReport) -> String {
         s.push('\n');
     }
 
-    // IF2 per-chain clean-eval.
+    // IF2 per-chain loglik-eval.
     if !stage.chains.is_empty() {
-        s.push_str(&format!("### Per-chain clean-eval ({} chains)\n\n", stage.chains.len()));
+        s.push_str(&format!("### Per-chain loglik-eval ({} chains)\n\n", stage.chains.len()));
         s.push_str("| chain | clean_ll | ± se | winner |\n|---|---|---|---|\n");
         for c in &stage.chains {
             let mark = if c.is_winner { "★" } else { "" };
@@ -1332,7 +1351,7 @@ fn render_md_stage(stage: &StageReport) -> String {
 
 /// Render a `FitSummaryDoc` as LaTeX `tabular` blocks per stage.
 /// One section per stage with three tables: gate verdict, parameters,
-/// per-chain clean-eval. No preamble — the caller should embed inside
+/// per-chain loglik-eval. No preamble — the caller should embed inside
 /// an existing document.
 pub fn render_latex(doc: &FitSummaryDoc) -> String {
     let mut s = String::new();
@@ -1818,7 +1837,7 @@ mod tests {
         assert!(md.contains("| Â (max over params"));
         assert!(md.contains("### Parameter estimates"));
         assert!(md.contains("`R0`"));
-        assert!(md.contains("### Per-chain clean-eval"));
+        assert!(md.contains("### Per-chain loglik-eval"));
         assert!(md.contains("### Provenance"));
 
         std::fs::remove_dir_all(&dir).ok();
