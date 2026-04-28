@@ -2090,14 +2090,17 @@ mod tests {
     }
 
     /// Regression for GH #17: `final_params.toml` (run-root) must be
-    /// loadable by the standard params loader. Pre-fix the writer
-    /// emitted `winning_candidate_label = "best_in_run_iter"` at the
-    /// top level, which `load_params_toml` rejected with
-    /// `expected a number or table section, got String("…")`. The
-    /// post-fix writer keeps the metadata under a `[provenance]`
-    /// table, which the loader skips. This test asserts loadability
-    /// + correct parameter values, both of which are required for
-    /// "rerun pfilter at the reported MLE" workflows to function.
+    /// loadable by the standard params loader. The bug pre-fix emitted
+    /// a string-typed metadata key at the top level, which
+    /// `load_params_toml` rejected with `expected a number or table
+    /// section, got String("…")`. The post-fix writer keeps all
+    /// metadata under a `[provenance]` table, which the loader skips.
+    /// (The original key, `winning_candidate_label`, was itself
+    /// dropped in commit `20d48fe`'s clean-eval strip — the
+    /// loadability invariant is what this test now guards.) This
+    /// asserts loadability + correct parameter values, both of which
+    /// are required for "rerun pfilter at the reported MLE"
+    /// workflows to function.
     #[test]
     fn final_params_toml_is_loadable_by_params_loader() {
         use crate::fit::clean_eval::{ChainScore, CleanEvalOutcome, FilterStats};

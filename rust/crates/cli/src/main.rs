@@ -194,6 +194,8 @@ pub(crate) enum FitCmd {
     Summary(args::FitSummaryArgs),
     /// Compare two fit.toml configs
     Diff(args::FitDiffArgs),
+    /// Cross-fit aggregator: walk results/fits/, render one row per fit
+    Table(args::FitTableArgs),
     /// Derive a new fit.toml from an existing one
     New(args::FitNewArgs),
     /// Print the output directory path for a fit.toml
@@ -258,6 +260,7 @@ fn main() {
         Command::Fit(FitCmd::Status(a)) => fit::cmd_fit_status(&a),
         Command::Fit(FitCmd::Summary(a))=> fit::cmd_fit_summary(&a),
         Command::Fit(FitCmd::Diff(a))   => fit::cmd_fit_diff(&a),
+        Command::Fit(FitCmd::Table(a))  => fit::cmd_fit_table(&a),
         Command::Fit(FitCmd::New(a))    => fit::cmd_fit_new(&a),
         Command::Fit(FitCmd::Where(a))  => fit::cmd_fit_where(&a),
         Command::Pfilter(a)             => pfilter::cmd_pfilter(&a),

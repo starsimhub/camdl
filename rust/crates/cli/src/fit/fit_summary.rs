@@ -1,37 +1,34 @@
 //! `camdl fit summary` — single-fit interpretation surface.
 //!
 //! Reads a fit dir produced by `camdl fit run` and renders an
-//! interpretation block per stage: compound-gate verdict, parameter
-//! estimates with Â, per-chain clean-eval table, filter health,
-//! provenance cross-checks. Phase 1 ships `text` (with ANSI colour);
-//! Phase 4 adds `json` (versioned schema), `md`, and `latex`; Phase 5
-//! adds `--params-only` for piping into `camdl pfilter --params`.
+//! interpretation block per stage. The block content is method-aware:
+//! IF2 stages render the compound-gate verdict, Â-keyed parameter
+//! table, per-chain clean-eval table, and filter-health provenance
+//! cross-check; PGAS / PMMH stages render the posterior summary
+//! (mean, R̂, ESS, acceptance) instead. Stage names come from the
+//! walker (`fit_tree::walk_fit_dir`) — there is no hard-coded stage
+//! list.
 //!
 //! Boundary rule: `status` answers "what's the state of my filesystem
 //! / pipeline?", `summary` answers "what does this fit say?",
 //! `compare` answers "which of these models predicts better?". Three
 //! commands, three orthogonal jobs.
 //!
-//! See `docs/dev/proposals/2026-04-25-fit-summary-command.md`.
-//!
-//! ## Layout
-//!
-//! ```text
-//! fit/<name>/
-//!   scout/      ← FitState + summary JSON + final/mle params
-//!   refine/     ← (optional)
-//!   validate/   ← (optional)
-//!   pgas/       ← (optional, posterior; out of scope here)
-//!   pmmh/       ← (optional, posterior; out of scope here)
-//! ```
+//! See `docs/dev/proposals/2026-04-28-fit-experiment-management.md` §8
+//! for the step-5 walker-consumer refactor; this file's prior shape
+//! is preserved in git history at commit `d45c932` for context.
 
 use crate::args::{FitSummaryArgs, FitSummaryFormat};
 use crate::evidence::NATS_TO_DB;
+use crate::fit::config_diff::ConfigDiff;
 use crate::fit::config_v2::{CleanEvalConfig, GateConfig};
 use crate::fit::fit_tree::{self, DataKind};
-use crate::fit::method_result::MethodResult;
+use crate::fit::method_result::{
+    If2StageResult, MethodResult, PgasStageResult, PmmhStageResult,
+};
 use crate::fit::state::FitState;
-use crate::run_meta::RunKind;
+use crate::fit::table_row::{self, TableRow};
+use crate::run_meta::{Run, RunKind};
 use crate::version;
 use serde::Serialize;
 use std::collections::BTreeMap;
@@ -41,17 +38,11 @@ use std::path::{Path, PathBuf};
 /// retyped; field additions are non-breaking and keep version stable.
 const SCHEMA_VERSION: u32 = 1;
 
-/// Stages we render in pipeline order. Bayesian stages (pgas, pmmh)
-/// are deliberately out of scope here — their interpretation surface
-/// is different (posterior summaries, ESS at posterior mean, etc.)
-/// and would dilute the MLE-pipeline focus.
-const MLE_STAGES: &[&str] = &["scout", "refine", "validate"];
-
-/// Top-level entry point. Reads `args.fit_dir`, walks MLE stages in
-/// pipeline order, dispatches to the right formatter based on
-/// `--format` and `--params-only`. Exits with code 1 if directory is
-/// missing or empty; with code 1 in `--strict` mode if any stage's
-/// provenance cross-check fails.
+/// Top-level entry point. Reads `args.fit_dir`, walks every
+/// completed fit-stage run, dispatches to the right formatter based
+/// on `--format` and `--params-only`. Exits with code 1 if directory
+/// is missing or empty; with code 1 in `--strict` mode if any IF2
+/// stage's provenance cross-check fails.
 pub fn cmd_fit_summary(args: &FitSummaryArgs) {
     let dir = args.fit_dir.to_string_lossy().into_owned();
     if !Path::new(&dir).exists() {
@@ -61,11 +52,13 @@ pub fn cmd_fit_summary(args: &FitSummaryArgs) {
 
     let strict = args.strict || ci_env_set();
 
-    // Phase 5: --params-only. Walk stages, find the terminal stage's
-    // winner θ̂, dump params as a flat TOML pipeable into `pfilter
-    // --params`. No metadata, no headers — composability is the point.
+    // The full set of completed stages, walker-discovered, in fit.toml
+    // declaration order (see `discover_stages`). Validate `--stage`
+    // against this set rather than a hard-coded constant.
+    let discovered = discover_stages(Path::new(&dir));
+
     if args.params_only {
-        match dump_params_only(&dir, args.stage.as_deref()) {
+        match dump_params_only(&dir, args.stage.as_deref(), &discovered) {
             Ok(s) => {
                 print!("{}", s);
                 return;
@@ -77,110 +70,72 @@ pub fn cmd_fit_summary(args: &FitSummaryArgs) {
         }
     }
 
-    // Validate --stage early before formatter dispatch.
-    let selected_stages: Vec<&str> = match &args.stage {
+    let selected: Vec<ResolvedStage> = match &args.stage {
         Some(name) => {
-            if !MLE_STAGES.contains(&name.as_str()) {
-                eprintln!("error: unknown stage `{}`. Available: {}",
-                    name, MLE_STAGES.join(", "));
+            let valid: Vec<&str> = discovered.iter().map(|r| r.stage.as_str()).collect();
+            if !valid.contains(&name.as_str()) {
+                eprintln!(
+                    "error: unknown stage `{}`. Available: {}",
+                    name,
+                    if valid.is_empty() { "(none)".to_string() } else { valid.join(", ") }
+                );
                 std::process::exit(1);
             }
-            vec![name.as_str()]
+            discovered.iter().filter(|r| r.stage == *name).cloned().collect()
         }
-        None => MLE_STAGES.to_vec(),
+        None => discovered.clone(),
     };
 
     match args.format {
-        FitSummaryFormat::Text => {
-            cmd_text(&dir, args, &selected_stages, strict);
-        }
-        FitSummaryFormat::Json => cmd_json(&dir, args, &selected_stages, strict),
-        FitSummaryFormat::Md => cmd_md(&dir, args, &selected_stages, strict),
-        FitSummaryFormat::Latex => cmd_latex(&dir, args, &selected_stages, strict),
+        FitSummaryFormat::Text => cmd_text(&dir, args, &selected, strict),
+        FitSummaryFormat::Json => cmd_json(&dir, args, &selected, strict),
+        FitSummaryFormat::Md => cmd_md(&dir, args, &selected, strict),
+        FitSummaryFormat::Latex => cmd_latex(&dir, args, &selected, strict),
     }
 }
 
-fn cmd_text(dir: &str, args: &FitSummaryArgs, stages: &[&str], strict: bool) {
-    let use_color = should_use_color(args.no_color);
-    let fmt = Formatter { use_color };
-    let mut had_provenance_failure = false;
-
-    print!("{}", fmt.fit_header(dir));
-
-    let resolved = resolve_if2_stage_dirs(Path::new(dir), stages);
-    let mut prev_loglik: Option<f64> = None;
-    let mut prev_stage_name_owned: Option<String> = None;
-    for (stage_name, stage_path) in &resolved {
-        let stage_dir_str = stage_path.to_string_lossy().into_owned();
-        let state = match FitState::load(&stage_dir_str) {
-            Ok(s) => s,
-            Err(e) => {
-                eprintln!("warning: cannot load {}/fit_state.toml: {}", stage_dir_str, e);
-                continue;
-            }
-        };
-        let prev_stage_name = prev_stage_name_owned.as_deref();
-        let block = fmt.stage_block(
-            stage_name,
-            &stage_dir_str,
-            &state,
-            prev_loglik,
-            prev_stage_name,
-        );
-        if block.provenance_failed {
-            had_provenance_failure = true;
-        }
-        print!("{}", block.text);
-        prev_loglik = Some(state.best_loglik);
-        prev_stage_name_owned = Some(stage_name.clone());
-    }
-
-    if resolved.is_empty() {
-        println!("  (no if2 stages found in {})", dir);
-        println!("  expected one of: {}/real/fit_<seed>/{{{}}}/", dir, stages.join(","));
-    }
-
-    if strict && had_provenance_failure {
-        eprintln!();
-        eprintln!("error: provenance cross-checks failed (--strict).");
-        std::process::exit(1);
-    }
+/// One resolved fit-stage to render: stage name, on-disk directory,
+/// and method (so consumers can pattern-match on `MethodResult` once
+/// the typed payload is loaded).
+#[derive(Debug, Clone)]
+struct ResolvedStage {
+    stage: String,
+    method: String,
+    stage_dir: PathBuf,
 }
 
-/// Walk `fit_dir` via [`fit_tree::walk_fit_dir`], filter to method
-/// `if2`, and resolve each requested stage name to its v2 stage
-/// directory. When the same stage name appears in multiple cells,
-/// prefer real-data over synthetic, then lower fit_seed, then
-/// lex-first stage_dir. The single-fit case (one cell) is
-/// unambiguous; the priority only matters when a fit has multiple
-/// cells and the user passes the top-level fit_dir without a
-/// per-cell qualifier.
+/// Walk the fit_dir and return one `ResolvedStage` per completed
+/// stage. Order matches `FitMeta.stages_declared` (the canonical
+/// pipeline order from fit.toml); stages that didn't complete are
+/// dropped; stages that completed but aren't in `stages_declared`
+/// (shouldn't happen in v2 layouts, but the walker is permissive)
+/// are appended at the end in walker order so they're still visible.
 ///
-/// Returns the resolution in `stage_names`-order (i.e. pipeline
-/// order). Stages not found are silently dropped — the caller
-/// detects "no stages found" via an empty result.
-///
-/// On a missing fit_dir, returns empty rather than erroring. Callers
-/// already checked the path existed at command entry.
-fn resolve_if2_stage_dirs(fit_dir: &Path, stage_names: &[&str]) -> Vec<(String, PathBuf)> {
+/// When the same stage name appears in multiple cells (synthetic
+/// replicates, sweep cells), prefers Real over Synthetic, lowest
+/// `fit_seed`, then lex-first stage_dir — same priority as
+/// [`crate::fit::table_row::build_row`]'s terminal-stage picker.
+fn discover_stages(fit_dir: &Path) -> Vec<ResolvedStage> {
+    // Read the top-level run.json for `stages_declared`; if missing,
+    // fall back to walker-order (covers user-built non-canonical fits).
+    let stages_declared: Vec<String> = match Run::read(fit_dir) {
+        Ok(r) => match r.kind {
+            RunKind::Fit(m) => m.stages_declared,
+            _ => Vec::new(),
+        },
+        Err(_) => Vec::new(),
+    };
     let nodes = fit_tree::walk_fit_dir(fit_dir).unwrap_or_default();
-    // Per-stage best candidate, scored by (data_kind preference,
-    // fit_seed, stage_dir). `data_kind` rank: Real = 0, Synthetic = 1.
-    // Nodes whose path didn't fit the canonical layout (axes = None)
-    // sort last so they only win when nothing canonical exists.
+
+    // Best (stage_name, method, dir) per stage name, by (data_kind,
+    // fit_seed, stage_dir) priority.
     type Rank = (u8, u64, PathBuf);
-    let mut best: BTreeMap<String, (Rank, PathBuf)> = BTreeMap::new();
-    for node in nodes {
+    let mut best: BTreeMap<String, (String, Rank, PathBuf)> = BTreeMap::new();
+    for node in &nodes {
         let (stage, method) = match &node.run.kind {
             RunKind::FitStage(m) => (m.stage.clone(), m.method.clone()),
             _ => continue,
         };
-        if method != "if2" {
-            continue;
-        }
-        if !stage_names.contains(&stage.as_str()) {
-            continue;
-        }
         let rank: Rank = match &node.axes {
             Some(axes) => {
                 let kind_rank = match axes.data_kind {
@@ -192,25 +147,131 @@ fn resolve_if2_stage_dirs(fit_dir: &Path, stage_names: &[&str]) -> Vec<(String, 
             None => (2, u64::MAX, node.stage_dir.clone()),
         };
         best.entry(stage)
-            .and_modify(|(cur, dir)| {
+            .and_modify(|(meth, cur, dir)| {
                 if rank < *cur {
+                    *meth = method.clone();
                     *cur = rank.clone();
                     *dir = node.stage_dir.clone();
                 }
             })
-            .or_insert_with(|| (rank, node.stage_dir.clone()));
+            .or_insert_with(|| (method.clone(), rank, node.stage_dir.clone()));
     }
-    stage_names
-        .iter()
-        .filter_map(|name| best.get(*name).map(|(_, d)| ((*name).to_string(), d.clone())))
-        .collect()
+
+    let mut out: Vec<ResolvedStage> = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for name in &stages_declared {
+        if let Some((method, _, dir)) = best.get(name) {
+            out.push(ResolvedStage {
+                stage: name.clone(),
+                method: method.clone(),
+                stage_dir: dir.clone(),
+            });
+            seen.insert(name.clone());
+        }
+    }
+    for (name, (method, _, dir)) in best {
+        if !seen.contains(&name) {
+            out.push(ResolvedStage {
+                stage: name,
+                method,
+                stage_dir: dir,
+            });
+        }
+    }
+    out
 }
 
-fn cmd_json(dir: &str, _args: &FitSummaryArgs, stages: &[&str], strict: bool) {
+fn cmd_text(dir: &str, args: &FitSummaryArgs, stages: &[ResolvedStage], strict: bool) {
+    let use_color = should_use_color(args.no_color);
+    let fmt = Formatter { use_color };
+    let mut had_provenance_failure = false;
+
+    print!("{}", fmt.fit_header(dir));
+
+    let mut prev_loglik: Option<f64> = None;
+    let mut prev_stage_name: Option<String> = None;
+    for resolved in stages {
+        let stage_dir_str = resolved.stage_dir.to_string_lossy().into_owned();
+        let typed = match MethodResult::load_from(&resolved.stage_dir, &resolved.method) {
+            Ok(r) => r,
+            Err(e) => {
+                eprintln!(
+                    "warning: cannot load {} ({}): {}",
+                    stage_dir_str, resolved.method, e
+                );
+                continue;
+            }
+        };
+
+        match &typed {
+            MethodResult::If2(if2) => {
+                // IF2 keeps the rich FitState rendering — gate, params
+                // table, per-chain clean-eval, provenance — because it
+                // surfaces information the typed `If2StageResult`
+                // doesn't (e.g. ivp markers, per-chain SE, raw
+                // start_values). The typed payload is the source of
+                // truth for headline scalars; FitState is the source
+                // for the rendered tables.
+                let state = match FitState::load(&stage_dir_str) {
+                    Ok(s) => s,
+                    Err(e) => {
+                        eprintln!(
+                            "warning: cannot load {}/fit_state.toml: {}",
+                            stage_dir_str, e
+                        );
+                        continue;
+                    }
+                };
+                let block = fmt.stage_block(
+                    &resolved.stage,
+                    &stage_dir_str,
+                    &state,
+                    Some(if2),
+                    prev_loglik,
+                    prev_stage_name.as_deref(),
+                );
+                if block.provenance_failed {
+                    had_provenance_failure = true;
+                }
+                print!("{}", block.text);
+                prev_loglik = Some(state.best_loglik);
+                prev_stage_name = Some(resolved.stage.clone());
+            }
+            MethodResult::Pgas(pgas) => {
+                print!(
+                    "{}",
+                    fmt.bayesian_block(&resolved.stage, "pgas", BayesianView::Pgas(pgas))
+                );
+                prev_stage_name = Some(resolved.stage.clone());
+                // Bayesian rows have no scalar best_loglik to chain
+                // through; `prev_loglik` stays where it was.
+            }
+            MethodResult::Pmmh(pmmh) => {
+                print!(
+                    "{}",
+                    fmt.bayesian_block(&resolved.stage, "pmmh", BayesianView::Pmmh(pmmh))
+                );
+                prev_loglik = Some(pmmh.map_loglik);
+                prev_stage_name = Some(resolved.stage.clone());
+            }
+        }
+    }
+
+    if stages.is_empty() {
+        println!("  (no completed stages found in {})", dir);
+    }
+
+    if strict && had_provenance_failure {
+        eprintln!();
+        eprintln!("error: provenance cross-checks failed (--strict).");
+        std::process::exit(1);
+    }
+}
+
+fn cmd_json(dir: &str, _args: &FitSummaryArgs, stages: &[ResolvedStage], strict: bool) {
     let doc = build_summary_doc(dir, stages);
-    let any_failed = doc.stages.iter().any(|s| s.provenance.any_failed());
-    let s = serde_json::to_string_pretty(&doc)
-        .expect("FitSummaryDoc must serialize");
+    let any_failed = doc.stages.iter().any(|s| s.provenance_failed());
+    let s = serde_json::to_string_pretty(&doc).expect("FitSummaryDoc must serialize");
     println!("{}", s);
     if strict && any_failed {
         eprintln!("error: provenance cross-checks failed (--strict).");
@@ -218,9 +279,9 @@ fn cmd_json(dir: &str, _args: &FitSummaryArgs, stages: &[&str], strict: bool) {
     }
 }
 
-fn cmd_md(dir: &str, _args: &FitSummaryArgs, stages: &[&str], strict: bool) {
+fn cmd_md(dir: &str, _args: &FitSummaryArgs, stages: &[ResolvedStage], strict: bool) {
     let doc = build_summary_doc(dir, stages);
-    let any_failed = doc.stages.iter().any(|s| s.provenance.any_failed());
+    let any_failed = doc.stages.iter().any(|s| s.provenance_failed());
     print!("{}", render_markdown(&doc));
     if strict && any_failed {
         eprintln!("error: provenance cross-checks failed (--strict).");
@@ -228,14 +289,19 @@ fn cmd_md(dir: &str, _args: &FitSummaryArgs, stages: &[&str], strict: bool) {
     }
 }
 
-fn cmd_latex(dir: &str, _args: &FitSummaryArgs, stages: &[&str], strict: bool) {
+fn cmd_latex(dir: &str, _args: &FitSummaryArgs, stages: &[ResolvedStage], strict: bool) {
     let doc = build_summary_doc(dir, stages);
-    let any_failed = doc.stages.iter().any(|s| s.provenance.any_failed());
+    let any_failed = doc.stages.iter().any(|s| s.provenance_failed());
     print!("{}", render_latex(&doc));
     if strict && any_failed {
         eprintln!("error: provenance cross-checks failed (--strict).");
         std::process::exit(1);
     }
+}
+
+enum BayesianView<'a> {
+    Pgas(&'a PgasStageResult),
+    Pmmh(&'a PmmhStageResult),
 }
 
 // ── Formatting layer ────────────────────────────────────────────────
@@ -262,6 +328,7 @@ impl Formatter {
         stage: &str,
         stage_dir: &str,
         state: &FitState,
+        typed: Option<&If2StageResult>,
         prev_loglik: Option<f64>,
         prev_stage_name: Option<&str>,
     ) -> StageBlock {
@@ -304,6 +371,25 @@ impl Formatter {
         // Per-chain clean-eval table
         if !state.chain_clean_logliks.is_empty() {
             s.push_str(&self.chain_clean_eval_table(state));
+        }
+
+        // ESS-at-MLE — surfaced from the typed payload only, not from
+        // FitState (FitState doesn't carry it; the loader extracts it
+        // from chain_evaluations.tsv).
+        if let Some(if2) = typed {
+            if let Some(ess) = &if2.ess_at_mle {
+                s.push_str(&format!("  {}\n", self.bold("ESS at θ̂")));
+                s.push_str(&format!(
+                    "    min  = {:>8.0}{}    mean = {:>8.0}\n",
+                    ess.ess_min,
+                    match ess.ess_min_step {
+                        Some(step) => format!("  (at obs step {})", step),
+                        None => String::new(),
+                    },
+                    ess.ess_mean,
+                ));
+                s.push('\n');
+            }
         }
 
         // Provenance cross-check (#16 fixture, every read)
@@ -459,6 +545,94 @@ impl Formatter {
         s
     }
 
+    /// Bayesian (PGAS / PMMH) stage block. The interpretation surface
+    /// is different from IF2: posterior mean per parameter,
+    /// Gelman-Rubin R̂, ESS, and (for PMMH only) a scalar acceptance
+    /// rate. The IF2 compound gate doesn't apply; convergence keys on
+    /// `max R̂ < 1.05`.
+    fn bayesian_block(&self, stage: &str, method: &str, view: BayesianView<'_>) -> String {
+        let mut s = String::new();
+        s.push_str(&format!(
+            "══ {} {} {}\n",
+            self.bold(stage),
+            self.dim(&format!("[{}]", method)),
+            "═".repeat(74_usize.saturating_sub(stage.len() + method.len() + 3))
+        ));
+
+        let (n_chains, n_samples, posterior_mean, ess, max_rhat, acceptance_summary, map_loglik) =
+            match view {
+                BayesianView::Pgas(r) => (
+                    r.n_chains,
+                    r.n_samples,
+                    &r.posterior_mean,
+                    &r.ess_per_param,
+                    r.max_rhat,
+                    None::<f64>,
+                    None::<f64>,
+                ),
+                BayesianView::Pmmh(r) => (
+                    r.n_chains,
+                    r.n_samples,
+                    &r.posterior_mean,
+                    &r.ess,
+                    r.max_rhat,
+                    Some(r.acceptance_rate),
+                    Some(r.map_loglik),
+                ),
+            };
+
+        s.push_str(&format!("  chains:       {}\n", n_chains));
+        s.push_str(&format!("  samples:      {}\n", n_samples));
+        if let Some(ll) = map_loglik {
+            s.push_str(&format!("  MAP loglik:   {:.1}\n", ll));
+        }
+        s.push('\n');
+
+        // Convergence: Gelman-Rubin R̂ (NOT IF2's Â — see
+        // method_result.rs §`max_chain_agreement` vs §`max_rhat`).
+        s.push_str(&format!("  {}\n", self.bold("posterior convergence")));
+        let r_glyph = if max_rhat < 1.05 {
+            self.ok("✓")
+        } else {
+            self.err("✗")
+        };
+        s.push_str(&format!(
+            "    max R̂ = {:.3}  {}  (threshold 1.05)\n",
+            max_rhat, r_glyph
+        ));
+        if let Some(acc) = acceptance_summary {
+            s.push_str(&format!("    acceptance = {:.3} (mean across chains)\n", acc));
+        }
+        s.push('\n');
+
+        // Posterior parameter table.
+        s.push_str(&format!("  {}\n", self.bold("posterior summary")));
+        if posterior_mean.is_empty() {
+            s.push_str(&format!("    {}\n", self.dim("(no posterior parameters)")));
+        } else {
+            s.push_str(&format!(
+                "    {:14} {:>14} {:>10} {:>8}\n",
+                "param", "mean", "ESS", "R̂?"
+            ));
+            for (name, mean) in posterior_mean.iter() {
+                let ess_v = ess.get(name).copied();
+                let ess_str = match ess_v {
+                    Some(v) => format!("{:>10.0}", v),
+                    None => format!("{:>10}", "—"),
+                };
+                s.push_str(&format!(
+                    "    {:14} {:>14.6} {} {:>8}\n",
+                    name,
+                    mean,
+                    ess_str,
+                    "" // per-param R̂ not surfaced in this view
+                ));
+            }
+        }
+        s.push('\n');
+        s
+    }
+
     fn provenance_block(&self, stage_dir: &str, state: &FitState)
         -> ProvenanceBlock
     {
@@ -592,10 +766,19 @@ fn params_agree(
 /// Structured fit-interpretation document. Serialized as `--format
 /// json`; consumed by md / latex renderers. Stable schema versioned
 /// via `schema.version`.
+///
+/// The top-level `table_row` field carries the cross-fit row schema
+/// (`name = "table_row"`, `version = 1`) embedded verbatim — the
+/// `summary ⊆ table` invariant in proposal §3 / Deliverable C asserts
+/// it is byte-equal to a `fit table --hash <h> --format json` row.
 #[derive(Debug, Clone, Serialize)]
 pub struct FitSummaryDoc {
     pub schema: SchemaInfo,
     pub fit_dir: String,
+    /// Embedded `table_row` block. The single source of truth for the
+    /// cross-fit schema: any field added here must also appear in
+    /// `fit table`'s row output, enforced by Deliverable C.
+    pub table_row: TableRow,
     pub stages: Vec<StageReport>,
 }
 
@@ -605,33 +788,42 @@ pub struct SchemaInfo {
     pub camdl_version: String,
 }
 
+/// Per-stage report. Method-aware: IF2 stages populate the
+/// `gate` / `parameters` / `chains` / `provenance` / `heuristic` blocks;
+/// PGAS / PMMH stages set them all to `None` and lean on the typed
+/// `method_result` payload, which carries posterior summaries / R̂ /
+/// ESS for Bayesian methods.
 #[derive(Debug, Clone, Serialize)]
 pub struct StageReport {
     pub name: String,
+    /// Inference method: `"if2"`, `"pgas"`, or `"pmmh"`.
+    pub method: String,
     pub n_chains: usize,
-    pub best_loglik: f64,
+    /// IF2: best clean-eval loglik. PMMH: `map_loglik`. PGAS: `None`
+    /// (no point estimate).
+    pub best_loglik: Option<f64>,
     pub initial_loglik: Option<f64>,
     pub camdl_version: Option<String>,
-    pub gate: GateReport,
+    /// Compound IF2 gate. `None` for Bayesian stages (the gate
+    /// doesn't apply).
+    pub gate: Option<GateReport>,
     pub stage_progression: Option<StageProgression>,
+    /// IF2 estimated parameters with Â. Empty for Bayesian stages
+    /// (consult `method_result` for posterior_mean / ess).
     pub parameters: Vec<ParameterReport>,
+    /// IF2 per-chain clean-eval table. Empty for Bayesian.
     pub chains: Vec<ChainReport>,
-    pub provenance: ProvenanceReport,
-    /// Typed `MethodResult` reload — additive JSON field that lets
-    /// downstream consumers read the IF2 stage in its typed form
-    /// (gate verdict as enum, max_chain_agreement, ESS at MLE, etc.)
-    /// without re-deriving it from the existing scalar fields.
-    /// Step 5's full method-aware refactor will reorganise the
-    /// schema around this type; until then it ships alongside the
-    /// existing flat fields. `None` when MethodResult::load_from
-    /// errored (e.g. malformed run.json).
+    /// IF2 provenance cross-check (final_params ↔ mle_params, etc.).
+    /// `None` for Bayesian.
+    pub provenance: Option<ProvenanceReport>,
+    /// Typed `MethodResult` payload — pattern-match for headline
+    /// scalars. Always populated for stages that loaded successfully.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub method_result: Option<MethodResult>,
-    /// Advisory fields whose strings may shift across camdl versions
-    /// even at stable schema.version. Consumers keying off these must
-    /// accept that they're heuristic.
+    /// Advisory IF2 interpretation block. `None` for Bayesian
+    /// stages.
     #[serde(rename = "_heuristic")]
-    pub heuristic: HeuristicReport,
+    pub heuristic: Option<HeuristicReport>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -690,6 +882,18 @@ impl ProvenanceReport {
     }
 }
 
+impl StageReport {
+    /// Helper for `--strict`: returns whether this stage's provenance
+    /// cross-check (when applicable) reported any failure. Bayesian
+    /// stages always return false (no provenance check applies).
+    fn provenance_failed(&self) -> bool {
+        self.provenance
+            .as_ref()
+            .map(|p| p.any_failed())
+            .unwrap_or(false)
+    }
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct HeuristicReport {
     pub overall_status: String,
@@ -699,46 +903,142 @@ pub struct HeuristicReport {
 /// Walk the stage dirs and build a `FitSummaryDoc`. Used by JSON, MD,
 /// and LaTeX formatters. Pure on its inputs (file system + the args
 /// it was called with).
-pub fn build_summary_doc(dir: &str, stages: &[&str]) -> FitSummaryDoc {
-    let mut out = FitSummaryDoc {
+fn build_summary_doc(dir: &str, stages: &[ResolvedStage]) -> FitSummaryDoc {
+    let mut stage_reports: Vec<StageReport> = Vec::new();
+    let mut prev_loglik: Option<f64> = None;
+    let mut prev_stage_name_owned: Option<String> = None;
+    for resolved in stages {
+        let stage_dir_str = resolved.stage_dir.to_string_lossy().into_owned();
+        let typed = MethodResult::load_from(&resolved.stage_dir, &resolved.method).ok();
+        let prev_name = prev_stage_name_owned.as_deref();
+        let report = match (&typed, resolved.method.as_str()) {
+            (Some(MethodResult::If2(_)), _) => {
+                let state = match FitState::load(&stage_dir_str) {
+                    Ok(s) => s,
+                    Err(_) => continue,
+                };
+                let r = if2_stage_report(
+                    &resolved.stage,
+                    &stage_dir_str,
+                    &state,
+                    typed.clone(),
+                    prev_loglik,
+                    prev_name,
+                );
+                prev_loglik = Some(state.best_loglik);
+                r
+            }
+            (Some(MethodResult::Pgas(_)), _) | (Some(MethodResult::Pmmh(_)), _) => {
+                let r = bayesian_stage_report(
+                    &resolved.stage,
+                    &resolved.method,
+                    typed.clone(),
+                );
+                if let Some(MethodResult::Pmmh(p)) = &typed {
+                    prev_loglik = Some(p.map_loglik);
+                }
+                r
+            }
+            _ => continue,
+        };
+        stage_reports.push(report);
+        prev_stage_name_owned = Some(resolved.stage.clone());
+    }
+
+    // Build the table_row block. For single-fit summary the row is
+    // alone in scope, so config_diff is the identity diff (empty
+    // diff vs self) and `delta_ll_vs_best` is 0.0.
+    let now_unix = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    let table_row = build_summary_table_row(Path::new(dir), now_unix);
+
+    FitSummaryDoc {
         schema: SchemaInfo {
             version: SCHEMA_VERSION,
             camdl_version: version::VERSION_SHORT.to_string(),
         },
         fit_dir: dir.to_string(),
-        stages: Vec::new(),
-    };
-    let resolved = resolve_if2_stage_dirs(Path::new(dir), stages);
-    let mut prev_loglik: Option<f64> = None;
-    let mut prev_stage_name_owned: Option<String> = None;
-    for (stage_name, stage_path) in &resolved {
-        let stage_dir_str = stage_path.to_string_lossy().into_owned();
-        let state = match FitState::load(&stage_dir_str) {
-            Ok(s) => s,
-            Err(_) => continue,
-        };
-        // Typed cross-check: load the same stage via MethodResult and
-        // attach to the report. The IF2 path is the only consumer of
-        // MethodResult in the bin until step 5 wires it into `fit
-        // table`; surfacing it here keeps the loader exercised on
-        // every summary call rather than letting it bit-rot.
-        let typed = MethodResult::load_from(stage_path, "if2").ok();
-        let prev_stage_name = prev_stage_name_owned.as_deref();
-        out.stages.push(stage_report(
-            stage_name,
-            &stage_dir_str,
-            &state,
-            typed,
-            prev_loglik,
-            prev_stage_name,
-        ));
-        prev_loglik = Some(state.best_loglik);
-        prev_stage_name_owned = Some(stage_name.clone());
+        table_row,
+        stages: stage_reports,
     }
-    out
 }
 
-fn stage_report(
+/// Project the fit_dir to a `TableRow`, using the identity diff and
+/// `delta_ll_vs_best = 0.0` (single-fit scope). On error,
+/// substitutes a placeholder row whose `fit_id` reflects the failure
+/// so JSON consumers see something rather than a crash.
+fn build_summary_table_row(fit_dir: &Path, now_unix: i64) -> TableRow {
+    let run_hash = Run::read(fit_dir).map(|r| r.hash).unwrap_or_default();
+    let diff = ConfigDiff::identity(&run_hash);
+    match table_row::build_row(fit_dir, diff, 0.0, now_unix) {
+        Ok(r) => r,
+        Err(e) => {
+            // Placeholder so the JSON shape stays stable on errors. The
+            // schema discriminator is correct; everything else is
+            // empty/zero. Loud-via-stderr so tests don't silently
+            // pass on a broken fit.
+            eprintln!("warning: cannot build table_row for {}: {}", fit_dir.display(), e);
+            TableRow {
+                schema: table_row::TableRowSchema::current(),
+                fit_id: String::new(),
+                fit_hash: String::new(),
+                label: None,
+                stem: String::new(),
+                model_hash: String::new(),
+                stages: Vec::new(),
+                method: String::new(),
+                config_diff_from_baseline: ConfigDiff::identity(""),
+                converged: false,
+                gate_verdict: "n/a".into(),
+                best_loglik: None,
+                max_chain_agreement: None,
+                max_rhat: None,
+                acceptance_rate: None,
+                ess_at_mle: None,
+                ess_posterior: None,
+                params: BTreeMap::new(),
+                delta_ll_vs_best: 0.0,
+                age_seconds: 0,
+                created_at: String::new(),
+                stale: false,
+                stale_reason: None,
+            }
+        }
+    }
+}
+
+/// Bayesian stage report: only `method_result` carries content.
+/// IF2-specific subfields default to None / empty.
+fn bayesian_stage_report(
+    stage: &str,
+    method: &str,
+    method_result: Option<MethodResult>,
+) -> StageReport {
+    let (n_chains, best_loglik) = match &method_result {
+        Some(MethodResult::Pgas(r)) => (r.n_chains, None),
+        Some(MethodResult::Pmmh(r)) => (r.n_chains, Some(r.map_loglik)),
+        _ => (0, None),
+    };
+    StageReport {
+        name: stage.to_string(),
+        method: method.to_string(),
+        n_chains,
+        best_loglik,
+        initial_loglik: None,
+        camdl_version: Some(version::VERSION_SHORT.to_string()),
+        gate: None,
+        stage_progression: None,
+        parameters: Vec::new(),
+        chains: Vec::new(),
+        provenance: None,
+        method_result,
+        heuristic: None,
+    }
+}
+
+fn if2_stage_report(
     stage: &str,
     stage_dir: &str,
     state: &FitState,
@@ -877,19 +1177,20 @@ fn stage_report(
 
     StageReport {
         name: stage.to_string(),
+        method: "if2".into(),
         n_chains: state.n_chains,
-        best_loglik: state.best_loglik,
+        best_loglik: Some(state.best_loglik),
         initial_loglik: if state.initial_loglik.is_finite() {
             Some(state.initial_loglik)
         } else { None },
         camdl_version: state.camdl_version.clone(),
-        gate,
+        gate: Some(gate),
         stage_progression,
         parameters,
         chains,
-        provenance,
+        provenance: Some(provenance),
         method_result,
-        heuristic: HeuristicReport { overall_status, interpretation },
+        heuristic: Some(HeuristicReport { overall_status, interpretation }),
     }
 }
 
@@ -913,8 +1214,10 @@ pub fn render_markdown(doc: &FitSummaryDoc) -> String {
 
 fn render_md_stage(stage: &StageReport) -> String {
     let mut s = String::new();
-    s.push_str(&format!("## `{}`\n\n", stage.name));
-    s.push_str(&format!("- best loglik: **{:.2}**\n", stage.best_loglik));
+    s.push_str(&format!("## `{}` ({})\n\n", stage.name, stage.method));
+    if let Some(ll) = stage.best_loglik {
+        s.push_str(&format!("- best loglik: **{:.2}**\n", ll));
+    }
     s.push_str(&format!("- chains: {}\n", stage.n_chains));
     if let Some(init) = stage.initial_loglik {
         s.push_str(&format!("- initial loglik: {:.2}\n", init));
@@ -923,37 +1226,65 @@ fn render_md_stage(stage: &StageReport) -> String {
         s.push_str(&format!("- vs `{}`: Δ = {:+.2} nats\n",
             prog.previous_stage, prog.delta_nats));
     }
-    if let Some(stale) = &stage.provenance.stale_camdl_version {
-        s.push_str(&format!("- ⚠ stale: produced by camdl `{}`, current is `{}`\n",
-            stale, version::VERSION_SHORT));
+    if let Some(prov) = &stage.provenance {
+        if let Some(stale) = &prov.stale_camdl_version {
+            s.push_str(&format!("- ⚠ stale: produced by camdl `{}`, current is `{}`\n",
+                stale, version::VERSION_SHORT));
+        }
     }
     s.push('\n');
 
-    // Gate verdict
-    s.push_str("### Compound scout-convergence gate\n\n");
-    s.push_str(&format!("| leg | value | threshold | pass? |\n|---|---|---|---|\n"));
-    let glyph = |b| if b { "✓" } else { "✗" };
-    s.push_str(&format!("| Â (max over params{}) | {:.3} | {:.2} | {} |\n",
-        stage.gate.max_a_param.as_deref().map(|p| format!(", `{}`", p)).unwrap_or_default(),
-        stage.gate.max_a_hat, stage.gate.a_thresh,
-        glyph(stage.gate.a_passes)));
-    if let (Some(dd), Some(td), Some(p)) = (stage.gate.delta_db, stage.gate.threshold_db, stage.gate.db_passes) {
-        s.push_str(&format!("| decibans-spread | {:.1} dB | {:.1} dB | {} |\n",
-            dd, td, glyph(p)));
-    } else {
-        s.push_str("| decibans-spread | _(no clean-eval data)_ | — | — |\n");
+    // IF2 gate verdict (only when populated).
+    if let Some(gate) = &stage.gate {
+        s.push_str("### Compound scout-convergence gate\n\n");
+        s.push_str("| leg | value | threshold | pass? |\n|---|---|---|---|\n");
+        let glyph = |b| if b { "✓" } else { "✗" };
+        s.push_str(&format!("| Â (max over params{}) | {:.3} | {:.2} | {} |\n",
+            gate.max_a_param.as_deref().map(|p| format!(", `{}`", p)).unwrap_or_default(),
+            gate.max_a_hat, gate.a_thresh,
+            glyph(gate.a_passes)));
+        if let (Some(dd), Some(td), Some(p)) = (gate.delta_db, gate.threshold_db, gate.db_passes) {
+            s.push_str(&format!("| decibans-spread | {:.1} dB | {:.1} dB | {} |\n",
+                dd, td, glyph(p)));
+        } else {
+            s.push_str("| decibans-spread | _(no clean-eval data)_ | — | — |\n");
+        }
+        s.push_str(&format!("\n**overall:** {}\n", match gate.overall_pass {
+            Some(true)  => "✓ PASS",
+            Some(false) => "✗ FAIL",
+            None        => "(indeterminate)",
+        }));
+        if gate.threshold_source == "default_fallback" {
+            s.push_str("\n> ⚠ thresholds unknown — fit_state.toml predates Phase 3; showing `GateConfig::default()`.\n");
+        }
+        s.push('\n');
     }
-    s.push_str(&format!("\n**overall:** {}\n", match stage.gate.overall_pass {
-        Some(true)  => "✓ PASS",
-        Some(false) => "✗ FAIL",
-        None        => "(indeterminate)",
-    }));
-    if stage.gate.threshold_source == "default_fallback" {
-        s.push_str("\n> ⚠ thresholds unknown — fit_state.toml predates Phase 3; showing `GateConfig::default()`.\n");
-    }
-    s.push('\n');
 
-    // Params
+    // Method-specific posterior block.
+    if let Some(MethodResult::Pgas(p)) = &stage.method_result {
+        s.push_str(&format!("### Posterior summary (PGAS, max R̂ = {:.3})\n\n", p.max_rhat));
+        s.push_str("| param | mean | q025 | q975 | ESS |\n|---|---|---|---|---|\n");
+        for (name, mean) in &p.posterior_mean {
+            let q025 = p.posterior_q025.get(name).copied().map(|v| format!("{:.4}", v)).unwrap_or_else(|| "—".into());
+            let q975 = p.posterior_q975.get(name).copied().map(|v| format!("{:.4}", v)).unwrap_or_else(|| "—".into());
+            let ess = p.ess_per_param.get(name).copied().map(|v| format!("{:.0}", v)).unwrap_or_else(|| "—".into());
+            s.push_str(&format!("| `{}` | {:.6} | {} | {} | {} |\n", name, mean, q025, q975, ess));
+        }
+        s.push('\n');
+    } else if let Some(MethodResult::Pmmh(p)) = &stage.method_result {
+        s.push_str(&format!(
+            "### Posterior summary (PMMH, max R̂ = {:.3}, acceptance = {:.3})\n\n",
+            p.max_rhat, p.acceptance_rate
+        ));
+        s.push_str("| param | mean | ESS |\n|---|---|---|\n");
+        for (name, mean) in &p.posterior_mean {
+            let ess = p.ess.get(name).copied().map(|v| format!("{:.0}", v)).unwrap_or_else(|| "—".into());
+            s.push_str(&format!("| `{}` | {:.6} | {} |\n", name, mean, ess));
+        }
+        s.push('\n');
+    }
+
+    // IF2 parameter table.
     if !stage.parameters.is_empty() {
         s.push_str("### Parameter estimates (clean-eval winner θ̂)\n\n");
         s.push_str("| name | estimate | Â | flags |\n|---|---|---|---|\n");
@@ -968,7 +1299,7 @@ fn render_md_stage(stage: &StageReport) -> String {
         s.push('\n');
     }
 
-    // Chains
+    // IF2 per-chain clean-eval.
     if !stage.chains.is_empty() {
         s.push_str(&format!("### Per-chain clean-eval ({} chains)\n\n", stage.chains.len()));
         s.push_str("| chain | clean_ll | ± se | winner |\n|---|---|---|---|\n");
@@ -980,20 +1311,22 @@ fn render_md_stage(stage: &StageReport) -> String {
         s.push('\n');
     }
 
-    // Provenance
-    s.push_str("### Provenance\n\n");
-    let prov_row = |label: &str, val: Option<bool>| {
-        match val {
-            Some(true)  => format!("- {}: ✓\n", label),
-            Some(false) => format!("- {}: ✗ **DISAGREE**\n", label),
-            None        => format!("- {}: _(absent)_\n", label),
-        }
-    };
-    s.push_str(&prov_row("final_params.toml ↔ mle_params.toml",
-        stage.provenance.final_params_matches_mle_params));
-    s.push_str(&prov_row("fit_state.toml ↔ final_params.toml",
-        stage.provenance.fit_state_winner_matches_final_params));
-    s.push('\n');
+    // IF2 provenance.
+    if let Some(prov) = &stage.provenance {
+        s.push_str("### Provenance\n\n");
+        let prov_row = |label: &str, val: Option<bool>| {
+            match val {
+                Some(true)  => format!("- {}: ✓\n", label),
+                Some(false) => format!("- {}: ✗ **DISAGREE**\n", label),
+                None        => format!("- {}: _(absent)_\n", label),
+            }
+        };
+        s.push_str(&prov_row("final_params.toml ↔ mle_params.toml",
+            prov.final_params_matches_mle_params));
+        s.push_str(&prov_row("fit_state.toml ↔ final_params.toml",
+            prov.fit_state_winner_matches_final_params));
+        s.push('\n');
+    }
     s
 }
 
@@ -1014,35 +1347,56 @@ pub fn render_latex(doc: &FitSummaryDoc) -> String {
 
 fn render_latex_stage(stage: &StageReport) -> String {
     let mut s = String::new();
-    s.push_str(&format!("\\subsection*{{Stage: \\texttt{{{}}}}}\n\n",
-        escape_latex(&stage.name)));
+    s.push_str(&format!(
+        "\\subsection*{{Stage: \\texttt{{{}}} ({})}}\n\n",
+        escape_latex(&stage.name),
+        stage.method
+    ));
 
-    s.push_str(&format!("Best log-likelihood: \\textbf{{{:.2}}}; chains: {}\n\n",
-        stage.best_loglik, stage.n_chains));
-
-    s.push_str("\\begin{tabular}{lrrl}\n");
-    s.push_str("\\toprule\n");
-    s.push_str("Leg & Value & Threshold & Pass? \\\\\n");
-    s.push_str("\\midrule\n");
-    let glyph = |b| if b { "$\\checkmark$" } else { "$\\times$" };
-    s.push_str(&format!("$\\hat A$ (max) & {:.3} & {:.2} & {} \\\\\n",
-        stage.gate.max_a_hat, stage.gate.a_thresh, glyph(stage.gate.a_passes)));
-    if let (Some(dd), Some(td), Some(p)) = (stage.gate.delta_db, stage.gate.threshold_db, stage.gate.db_passes) {
-        s.push_str(&format!("Decibans-spread & {:.1} dB & {:.1} dB & {} \\\\\n",
-            dd, td, glyph(p)));
+    if let Some(ll) = stage.best_loglik {
+        s.push_str(&format!(
+            "Best log-likelihood: \\textbf{{{:.2}}}; chains: {}\n\n",
+            ll, stage.n_chains
+        ));
+    } else {
+        s.push_str(&format!("chains: {}\n\n", stage.n_chains));
     }
-    s.push_str("\\bottomrule\n\\end{tabular}\n\n");
+
+    if let Some(gate) = &stage.gate {
+        s.push_str("\\begin{tabular}{lrrl}\n");
+        s.push_str("\\toprule\n");
+        s.push_str("Leg & Value & Threshold & Pass? \\\\\n");
+        s.push_str("\\midrule\n");
+        let glyph = |b| if b { "$\\checkmark$" } else { "$\\times$" };
+        s.push_str(&format!(
+            "$\\hat A$ (max) & {:.3} & {:.2} & {} \\\\\n",
+            gate.max_a_hat, gate.a_thresh, glyph(gate.a_passes)
+        ));
+        if let (Some(dd), Some(td), Some(p)) = (gate.delta_db, gate.threshold_db, gate.db_passes) {
+            s.push_str(&format!(
+                "Decibans-spread & {:.1} dB & {:.1} dB & {} \\\\\n",
+                dd, td, glyph(p)
+            ));
+        }
+        s.push_str("\\bottomrule\n\\end{tabular}\n\n");
+    }
 
     if !stage.parameters.is_empty() {
         s.push_str("\\begin{tabular}{lrrl}\n\\toprule\n");
         s.push_str("Parameter & Estimate & $\\hat A$ & Flags \\\\\n\\midrule\n");
         for p in &stage.parameters {
-            let a_str = p.chain_agreement
+            let a_str = p
+                .chain_agreement
                 .map(|r| format!("{:.3}", r))
                 .unwrap_or_else(|| "---".into());
             let flag = if p.ivp { "ivp" } else { "" };
-            s.push_str(&format!("\\texttt{{{}}} & {:.6} & {} & {} \\\\\n",
-                escape_latex(&p.name), p.estimate, a_str, flag));
+            s.push_str(&format!(
+                "\\texttt{{{}}} & {:.6} & {} & {} \\\\\n",
+                escape_latex(&p.name),
+                p.estimate,
+                a_str,
+                flag
+            ));
         }
         s.push_str("\\bottomrule\n\\end{tabular}\n\n");
     }
@@ -1052,11 +1406,49 @@ fn render_latex_stage(stage: &StageReport) -> String {
         s.push_str("Chain & clean\\_ll & $\\pm$ se & Winner \\\\\n\\midrule\n");
         for c in &stage.chains {
             let mark = if c.is_winner { "$\\star$" } else { "" };
-            s.push_str(&format!("{} & {:.2} & {:.2} & {} \\\\\n",
-                c.chain_id, c.clean_loglik, c.clean_se, mark));
+            s.push_str(&format!(
+                "{} & {:.2} & {:.2} & {} \\\\\n",
+                c.chain_id, c.clean_loglik, c.clean_se, mark
+            ));
         }
         s.push_str("\\bottomrule\n\\end{tabular}\n\n");
     }
+
+    // PGAS / PMMH posterior block.
+    if let Some(MethodResult::Pgas(p)) = &stage.method_result {
+        s.push_str(&format!(
+            "Posterior summary (max $\\hat R$ = {:.3}):\n\n",
+            p.max_rhat
+        ));
+        s.push_str("\\begin{tabular}{lrrrr}\n\\toprule\n");
+        s.push_str("Parameter & Mean & $q_{0.025}$ & $q_{0.975}$ & ESS \\\\\n\\midrule\n");
+        for (name, mean) in &p.posterior_mean {
+            let q025 = p.posterior_q025.get(name).copied().map(|v| format!("{:.4}", v)).unwrap_or_else(|| "---".into());
+            let q975 = p.posterior_q975.get(name).copied().map(|v| format!("{:.4}", v)).unwrap_or_else(|| "---".into());
+            let ess = p.ess_per_param.get(name).copied().map(|v| format!("{:.0}", v)).unwrap_or_else(|| "---".into());
+            s.push_str(&format!(
+                "\\texttt{{{}}} & {:.6} & {} & {} & {} \\\\\n",
+                escape_latex(name), mean, q025, q975, ess,
+            ));
+        }
+        s.push_str("\\bottomrule\n\\end{tabular}\n\n");
+    } else if let Some(MethodResult::Pmmh(p)) = &stage.method_result {
+        s.push_str(&format!(
+            "Posterior summary (max $\\hat R$ = {:.3}; acceptance = {:.3}):\n\n",
+            p.max_rhat, p.acceptance_rate
+        ));
+        s.push_str("\\begin{tabular}{lrr}\n\\toprule\n");
+        s.push_str("Parameter & Mean & ESS \\\\\n\\midrule\n");
+        for (name, mean) in &p.posterior_mean {
+            let ess = p.ess.get(name).copied().map(|v| format!("{:.0}", v)).unwrap_or_else(|| "---".into());
+            s.push_str(&format!(
+                "\\texttt{{{}}} & {:.6} & {} \\\\\n",
+                escape_latex(name), mean, ess,
+            ));
+        }
+        s.push_str("\\bottomrule\n\\end{tabular}\n\n");
+    }
+
     s
 }
 
@@ -1077,57 +1469,45 @@ fn escape_latex(s: &str) -> String {
     }).collect()
 }
 
-/// Phase 5: dump the winner's parameter TOML for one stage. No
-/// header, no metadata, no provenance — just `name = value` lines
-/// that the standard params loader will accept. Composable via
-/// process substitution: `camdl pfilter --params <(camdl fit
-/// summary --params-only --stage validate fit/he2010) ...`.
+/// Dump the chosen stage's winner params as a flat TOML, pipeable
+/// into `camdl pfilter --params`. No header, no metadata, no
+/// provenance — just `name = value` lines the standard params loader
+/// will accept.
 ///
-/// When `stage_filter` is `None`, picks the *terminal* stage
-/// available in pipeline order (validate → refine → scout). Errors
-/// when the requested stage doesn't exist or its `final_params.toml`
-/// is missing / malformed.
-pub fn dump_params_only(dir: &str, stage_filter: Option<&str>) -> Result<String, String> {
-    let resolved = resolve_if2_stage_dirs(Path::new(dir), MLE_STAGES);
-    let (target_stage, stage_path): (String, PathBuf) = match stage_filter {
-        Some(s) => {
-            if !MLE_STAGES.contains(&s) {
-                return Err(format!(
-                    "unknown stage `{}`. Available: {}",
-                    s,
-                    MLE_STAGES.join(", ")
-                ));
-            }
-            let entry = resolved
-                .iter()
-                .find(|(name, _)| name == s)
-                .ok_or_else(|| {
-                    format!("no completed `{}` stage found under {}", s, dir)
-                })?;
-            (entry.0.clone(), entry.1.clone())
-        }
-        None => {
-            // Walk in reverse pipeline order so we land on the most
-            // refined stage available.
-            let entry = MLE_STAGES
-                .iter()
-                .rev()
-                .find_map(|stage_name| {
-                    resolved
-                        .iter()
-                        .find(|(name, _)| name == *stage_name)
-                        .cloned()
-                })
-                .ok_or_else(|| {
-                    format!(
-                        "no completed MLE stage found in {} (looked for {})",
-                        dir,
-                        MLE_STAGES.join(", ")
-                    )
-                })?;
-            entry
-        }
+/// `stage_filter` selects an explicit stage (must be present in
+/// `discovered`); when `None`, picks the *terminal* stage in
+/// declaration order (`FitMeta.stages_declared` walked in reverse).
+fn dump_params_only(
+    dir: &str,
+    stage_filter: Option<&str>,
+    discovered: &[ResolvedStage],
+) -> Result<String, String> {
+    let target = match stage_filter {
+        Some(name) => discovered
+            .iter()
+            .find(|r| r.stage == name)
+            .cloned()
+            .ok_or_else(|| {
+                let avail: Vec<&str> = discovered.iter().map(|r| r.stage.as_str()).collect();
+                format!(
+                    "no completed `{}` stage found under {}. Available: {}",
+                    name,
+                    dir,
+                    if avail.is_empty() {
+                        "(none)".to_string()
+                    } else {
+                        avail.join(", ")
+                    }
+                )
+            })?,
+        None => discovered
+            .iter()
+            .next_back()
+            .cloned()
+            .ok_or_else(|| format!("no completed fit-stage runs found in {}", dir))?,
     };
+    let target_stage = target.stage.clone();
+    let stage_path = target.stage_dir.clone();
     let path = format!("{}/final_params.toml", stage_path.to_string_lossy());
     let params = crate::util::load_params_toml(&path)
         .map_err(|e| format!("cannot read {}: {}", path, e))?;
@@ -1400,7 +1780,8 @@ mod tests {
         let params = [("R0", 56.0_f64), ("sigma", 0.08), ("gamma", 0.08)];
         let dir = make_fit_dir("scout", &state, &params);
 
-        let doc = build_summary_doc(&dir.to_string_lossy(), &["scout"]);
+        let stages = discover_stages(&dir);
+        let doc = build_summary_doc(&dir.to_string_lossy(), &stages);
         let json = serde_json::to_string_pretty(&doc).unwrap();
         assert!(json.contains("\"version\": 1"),
             "schema.version must be present and = 1: {}", json);
@@ -1427,7 +1808,8 @@ mod tests {
         let params = [("R0", 56.0_f64), ("sigma", 0.08), ("gamma", 0.08)];
         let dir = make_fit_dir("scout", &state, &params);
 
-        let doc = build_summary_doc(&dir.to_string_lossy(), &["scout"]);
+        let stages = discover_stages(&dir);
+        let doc = build_summary_doc(&dir.to_string_lossy(), &stages);
         let md = render_markdown(&doc);
         assert!(md.contains("# Fit summary:"));
         assert!(md.contains("## `scout`"));
@@ -1447,7 +1829,8 @@ mod tests {
         let params = [("R0", 56.0_f64), ("sigma", 0.08), ("gamma", 0.08)];
         let dir = make_fit_dir("scout", &state, &params);
 
-        let doc = build_summary_doc(&dir.to_string_lossy(), &["scout"]);
+        let stages = discover_stages(&dir);
+        let doc = build_summary_doc(&dir.to_string_lossy(), &stages);
         let tex = render_latex(&doc);
         // No preamble, but tabular blocks per stage.
         assert!(tex.contains("\\subsection*{Stage:"));
@@ -1470,7 +1853,8 @@ mod tests {
         let params = [("R0", 56.0_f64), ("sigma", 0.08), ("gamma", 0.08)];
         let dir = make_fit_dir("scout", &state, &params);
 
-        let s = dump_params_only(&dir.to_string_lossy(), Some("scout")).unwrap();
+        let stages = discover_stages(&dir);
+        let s = dump_params_only(&dir.to_string_lossy(), Some("scout"), &stages).unwrap();
         // No metadata leaks at top level (the existing loader skips
         // `[provenance]`, but --params-only doesn't even emit it).
         assert!(!s.contains("[provenance]"),
@@ -1506,7 +1890,8 @@ mod tests {
         std::fs::write(refine_dir.join("final_params.toml"), &body).unwrap();
         std::fs::write(refine_dir.join("mle_params.toml"), &body).unwrap();
 
-        let s = dump_params_only(&dir.to_string_lossy(), None).unwrap();
+        let stages = discover_stages(&dir);
+        let s = dump_params_only(&dir.to_string_lossy(), None, &stages).unwrap();
         assert!(s.contains("--stage refine"),
             "no --stage filter must pick refine over scout: {}", s);
         assert!(s.contains("R0 = 56.5"),
@@ -1523,8 +1908,9 @@ mod tests {
             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos(),
         ));
         std::fs::create_dir_all(&dir).unwrap();
-        let err = dump_params_only(&dir.to_string_lossy(), None).unwrap_err();
-        assert!(err.contains("no completed MLE stage"));
+        let stages = discover_stages(&dir);
+        let err = dump_params_only(&dir.to_string_lossy(), None, &stages).unwrap_err();
+        assert!(err.contains("no completed fit-stage runs"));
         std::fs::remove_dir_all(&dir).ok();
     }
 }

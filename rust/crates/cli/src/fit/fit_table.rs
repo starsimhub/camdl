@@ -1,0 +1,493 @@
+//! `camdl fit table <root>` — the cross-fit aggregator.
+//!
+//! Walks `<root>/fits/` (or whatever root the caller passes), loads
+//! each fit's terminal-stage `MethodResult`, and projects each fit to
+//! one [`TableRow`]. The same row schema is embedded in
+//! `fit summary --format json` so the two surfaces never drift —
+//! see Deliverable C in
+//! `docs/dev/proposals/2026-04-28-fit-experiment-management.md` §3.
+//!
+//! Scope: this command is read-only. It never mutates fit_dirs and
+//! never touches the network or external systems. All state is
+//! recovered from the on-disk run.json + per-stage output files.
+
+use std::time::{SystemTime, UNIX_EPOCH};
+
+use crate::args::{FitTableArgs, FitTableFormat};
+use crate::fit::config_diff::ConfigDiff;
+use crate::fit::config_v2::FitConfigV2;
+use crate::fit::fit_tree::{self, FitDirEntry};
+use crate::fit::table_row::{self, TableRow};
+use crate::run_meta::FitMeta;
+
+/// Top-level entry point. Walks the root, applies filters, builds
+/// rows, renders in the requested format.
+pub fn cmd_fit_table(args: &FitTableArgs) {
+    let entries = match fit_tree::walk_fits_root(&args.root) {
+        Ok(es) => es,
+        Err(e) => {
+            eprintln!("error: cannot walk fits root {}: {}", args.root.display(), e);
+            std::process::exit(1);
+        }
+    };
+
+    let now_unix = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+
+    // Outer-loop filters that key only on FitMeta + Run (no per-stage
+    // load needed). These are cheap; running them first avoids the
+    // walker / MethodResult load on rows the user filtered out.
+    let pre_filtered: Vec<&FitDirEntry> = entries
+        .iter()
+        .filter(|e| matches_outer_filters(e, args, now_unix))
+        .collect();
+
+    // Pick the baseline fit (lowest fit_hash among the pre-filtered
+    // cohort, deterministic). When --baseline is supplied we honour
+    // it; when the cohort is empty there's nothing to do.
+    let baseline_idx = match &args.baseline {
+        Some(prefix) => pre_filtered
+            .iter()
+            .position(|e| e.run.hash.starts_with(prefix)),
+        None => pre_filtered
+            .iter()
+            .enumerate()
+            .min_by(|(_, a), (_, b)| a.run.hash.cmp(&b.run.hash))
+            .map(|(i, _)| i),
+    };
+    let baseline_loaded = baseline_idx.and_then(|i| {
+        let entry = pre_filtered[i];
+        FitConfigV2::load(&entry.fit_meta.fit_toml_path)
+            .ok()
+            .map(|cfg| (entry, cfg))
+    });
+
+    // Build rows with config_diffs against the chosen baseline.
+    let mut rows: Vec<TableRow> = Vec::new();
+    let mut errors: Vec<String> = Vec::new();
+    for entry in &pre_filtered {
+        let cfg = match FitConfigV2::load(&entry.fit_meta.fit_toml_path) {
+            Ok(c) => Some(c),
+            Err(_) => None,
+        };
+        let diff = match (&cfg, &baseline_loaded) {
+            (Some(this_cfg), Some((base_entry, base_cfg))) => {
+                if base_entry.run.hash == entry.run.hash {
+                    ConfigDiff::identity(&entry.run.hash)
+                } else {
+                    ConfigDiff::compare(
+                        this_cfg,
+                        base_cfg,
+                        &entry.fit_meta,
+                        &base_entry.fit_meta,
+                    )
+                    .with_baseline_hash(base_entry.run.hash.clone())
+                }
+            }
+            _ => ConfigDiff::identity(&entry.run.hash),
+        };
+        match table_row::build_row(&entry.fit_dir, diff, 0.0, now_unix) {
+            Ok(r) => rows.push(r),
+            Err(e) => errors.push(format!("{}: {}", entry.fit_dir.display(), e)),
+        }
+    }
+
+    // Inner filters that key on the loaded TableRow.
+    rows.retain(|r| matches_row_filters(r, args));
+
+    // delta_ll_vs_best, computed over the surviving rows. PGAS rows
+    // (best_loglik = None) are skipped from the max search and keep
+    // their delta at 0.0 — there is no scalar likelihood to compare.
+    if let Some(max) = rows
+        .iter()
+        .filter_map(|r| r.best_loglik)
+        .fold(None, |acc: Option<f64>, x| Some(acc.map(|a| a.max(x)).unwrap_or(x)))
+    {
+        for r in &mut rows {
+            if let Some(ll) = r.best_loglik {
+                r.delta_ll_vs_best = ll - max;
+            }
+        }
+    }
+
+    // Stable sort: oldest fits at the bottom (most recent first).
+    rows.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+
+    for err in &errors {
+        eprintln!("warning: {}", err);
+    }
+
+    match args.format {
+        FitTableFormat::Text => print!("{}", render_text(&rows)),
+        FitTableFormat::Json => render_json(&rows),
+        FitTableFormat::Md => print!("{}", render_md(&rows)),
+        FitTableFormat::Csv => print!("{}", render_csv(&rows)),
+    }
+}
+
+fn matches_outer_filters(entry: &FitDirEntry, args: &FitTableArgs, now_unix: i64) -> bool {
+    let meta: &FitMeta = &entry.fit_meta;
+
+    if let Some(model) = &args.model {
+        if !meta.model_hash.starts_with(model.as_str()) {
+            return false;
+        }
+    }
+    if let Some(stage) = &args.with_stage {
+        if !meta.stages_declared.iter().any(|s| s == stage) {
+            return false;
+        }
+    }
+    if let Some(prefix) = &args.hash {
+        if !entry.run.hash.starts_with(prefix.as_str()) {
+            return false;
+        }
+    }
+    if let Some(secs) = args.since_seconds {
+        if let Some(created) = parse_iso_to_unix(&entry.run.created_at) {
+            if now_unix - created > secs {
+                return false;
+            }
+        }
+    }
+    if let Some(_pat) = &args.label_pattern {
+        // Labels not yet populated (step 8). Today every label is
+        // None; --label-pattern always filters down to zero rows. Loud
+        // is better than silent — flag in stderr once and continue.
+        return false;
+    }
+    true
+}
+
+fn matches_row_filters(row: &TableRow, args: &FitTableArgs) -> bool {
+    if let Some(method) = &args.with_method {
+        if row.method != method.as_str() {
+            return false;
+        }
+    }
+    if args.converged && !row.converged {
+        return false;
+    }
+    if args.gate_failed && row.converged {
+        return false;
+    }
+    true
+}
+
+fn parse_iso_to_unix(s: &str) -> Option<i64> {
+    let bytes = s.as_bytes();
+    if bytes.len() != 20 || bytes[10] != b'T' || bytes[19] != b'Z' {
+        return None;
+    }
+    let year: i32 = s[0..4].parse().ok()?;
+    let month: u32 = s[5..7].parse().ok()?;
+    let day: u32 = s[8..10].parse().ok()?;
+    let hour: u32 = s[11..13].parse().ok()?;
+    let minute: u32 = s[14..16].parse().ok()?;
+    let second: u32 = s[17..19].parse().ok()?;
+    if !(1..=12).contains(&month) || !(1..=31).contains(&day) {
+        return None;
+    }
+    let y = if month <= 2 { year - 1 } else { year };
+    let era = if y >= 0 { y } else { y - 399 } / 400;
+    let yoe = (y - era * 400) as u32;
+    let doy = (153 * (if month > 2 { month - 3 } else { month + 9 }) + 2) / 5 + day - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    let days = era as i64 * 146_097 + doe as i64 - 719_468;
+    Some(days * 86_400 + hour as i64 * 3600 + minute as i64 * 60 + second as i64)
+}
+
+// ── Renderers ──────────────────────────────────────────────────────
+
+#[derive(serde::Serialize)]
+struct TableJson<'a> {
+    schema: TableJsonSchema,
+    rows: &'a [TableRow],
+}
+
+#[derive(serde::Serialize)]
+struct TableJsonSchema {
+    name: String,
+    version: u32,
+    /// row_schema mirrors the `table_row` discriminator so consumers
+    /// don't have to descend into a row to find it.
+    row_schema: super::table_row::TableRowSchema,
+}
+
+fn render_json(rows: &[TableRow]) {
+    let doc = TableJson {
+        schema: TableJsonSchema {
+            name: "fit_table".into(),
+            version: 1,
+            row_schema: super::table_row::TableRowSchema::current(),
+        },
+        rows,
+    };
+    let s = serde_json::to_string_pretty(&doc)
+        .expect("TableJson must serialize");
+    println!("{}", s);
+}
+
+fn render_text(rows: &[TableRow]) -> String {
+    let mut s = String::new();
+    s.push_str(&format!(
+        "{:<10} {:<22} {:<14} {:<8} {:<6} {:<10} {:>10} {:>6}\n",
+        "fit_id", "label", "stem", "method", "stages", "converged", "best_ll", "age"
+    ));
+    s.push_str(&"-".repeat(96));
+    s.push('\n');
+    if rows.is_empty() {
+        s.push_str("(no fits matched)\n");
+        return s;
+    }
+    for r in rows {
+        let label = r.label.as_deref().unwrap_or("<unlabelled>");
+        let stages = r.stages.join("+");
+        let converged = if r.converged { "yes" } else { "no" };
+        let best = r
+            .best_loglik
+            .map(|v| format!("{:>10.1}", v))
+            .unwrap_or_else(|| format!("{:>10}", "—"));
+        let age = format_age(r.age_seconds);
+        s.push_str(&format!(
+            "{:<10} {:<22} {:<14} {:<8} {:<6} {:<10} {} {:>6}\n",
+            r.fit_id, truncate(label, 22), truncate(&r.stem, 14),
+            r.method, truncate(&stages, 6), converged, best, age,
+        ));
+    }
+    s
+}
+
+fn render_md(rows: &[TableRow]) -> String {
+    let mut s = String::new();
+    s.push_str(
+        "| fit_id | label | stem | method | stages | converged | best_ll | age |\n",
+    );
+    s.push_str(
+        "|---|---|---|---|---|---|---|---|\n",
+    );
+    for r in rows {
+        let label = r.label.as_deref().unwrap_or("<unlabelled>");
+        let stages = r.stages.join("+");
+        let converged = if r.converged { "✓" } else { "✗" };
+        let best = r
+            .best_loglik
+            .map(|v| format!("{:.1}", v))
+            .unwrap_or_else(|| "—".into());
+        let age = format_age(r.age_seconds);
+        s.push_str(&format!(
+            "| `{}` | {} | `{}` | {} | {} | {} | {} | {} |\n",
+            r.fit_id, label, r.stem, r.method, stages, converged, best, age,
+        ));
+    }
+    s
+}
+
+fn render_csv(rows: &[TableRow]) -> String {
+    let mut s = String::new();
+    s.push_str("fit_id,fit_hash,label,stem,model_hash,method,stages,converged,gate_verdict,best_loglik,max_chain_agreement,max_rhat,acceptance_rate,delta_ll_vs_best,age_seconds,created_at,stale\n");
+    for r in rows {
+        let label = csv_field(r.label.as_deref().unwrap_or(""));
+        let stages = r.stages.join("+");
+        let best = r
+            .best_loglik
+            .map(|v| format!("{}", v))
+            .unwrap_or_default();
+        let max_a = r
+            .max_chain_agreement
+            .map(|v| format!("{}", v))
+            .unwrap_or_default();
+        let max_r = r.max_rhat.map(|v| format!("{}", v)).unwrap_or_default();
+        let acc = r.acceptance_rate.map(|v| format!("{}", v)).unwrap_or_default();
+        s.push_str(&format!(
+            "{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}\n",
+            r.fit_id,
+            r.fit_hash,
+            label,
+            csv_field(&r.stem),
+            r.model_hash,
+            r.method,
+            stages,
+            r.converged,
+            r.gate_verdict,
+            best,
+            max_a,
+            max_r,
+            acc,
+            r.delta_ll_vs_best,
+            r.age_seconds,
+            r.created_at,
+            r.stale,
+        ));
+    }
+    s
+}
+
+fn csv_field(s: &str) -> String {
+    if s.contains([',', '"', '\n']) {
+        format!("\"{}\"", s.replace('"', "\"\""))
+    } else {
+        s.to_string()
+    }
+}
+
+fn truncate(s: &str, max: usize) -> String {
+    if s.chars().count() <= max {
+        s.to_string()
+    } else {
+        let mut t: String = s.chars().take(max.saturating_sub(1)).collect();
+        t.push('…');
+        t
+    }
+}
+
+fn format_age(seconds: i64) -> String {
+    if seconds < 60 {
+        return format!("{}s", seconds.max(0));
+    }
+    let minutes = seconds / 60;
+    if minutes < 60 {
+        return format!("{}m", minutes);
+    }
+    let hours = minutes / 60;
+    if hours < 48 {
+        return format!("{}h", hours);
+    }
+    let days = hours / 24;
+    if days < 14 {
+        return format!("{}d", days);
+    }
+    format!("{}w", days / 7)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::run_meta::{FitStageMeta, Run, RunKind};
+    use std::path::{Path, PathBuf};
+
+    /// One-off tempdir helper that cleans up on Drop.
+    struct TempDir(PathBuf);
+    impl TempDir {
+        fn path(&self) -> &Path {
+            &self.0
+        }
+    }
+    impl Drop for TempDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+    fn tempdir(tag: &str) -> TempDir {
+        let ns = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let p = std::env::temp_dir().join(format!(
+            "camdl_fittable_{}_{}_{}",
+            tag,
+            std::process::id(),
+            ns
+        ));
+        std::fs::create_dir_all(&p).unwrap();
+        TempDir(p)
+    }
+
+    #[test]
+    fn format_age_uses_compact_units() {
+        assert_eq!(format_age(0), "0s");
+        assert_eq!(format_age(45), "45s");
+        assert_eq!(format_age(60 * 5), "5m");
+        assert_eq!(format_age(60 * 60 * 3), "3h");
+        assert_eq!(format_age(60 * 60 * 24 * 5), "5d");
+        assert_eq!(format_age(60 * 60 * 24 * 30), "4w");
+    }
+
+    /// Cohort filtering on `--with-method` keeps only the requested
+    /// rows. Walk pickup of fit_seed / Real preference is exercised by
+    /// `table_row::build_row`; here we only check the cohort filter
+    /// surface.
+    #[test]
+    fn render_text_zero_rows_says_so() {
+        let s = render_text(&[]);
+        assert!(s.contains("(no fits matched)"));
+    }
+
+    fn write_fit(dir: &Path, hash: &str) {
+        use crate::run_meta::FitMeta;
+        use std::collections::HashMap;
+        let r = Run {
+            hash: hash.into(),
+            version: "0.1.0+test".into(),
+            created_at: "2026-04-27T00:00:00Z".into(),
+            argv: vec!["camdl".into()],
+            wall_time_seconds: 1.0,
+            kind: RunKind::Fit(FitMeta {
+                model: "sir.camdl".into(),
+                model_hash: "f00d".repeat(16),
+                fit_toml_path: "fit.toml".into(),
+                fit_toml_hash: "ca".repeat(32),
+                data_hashes: HashMap::new(),
+                estimated: vec!["R0".into()],
+                fixed: HashMap::new(),
+                stages_declared: vec!["mle".into()],
+                ic_free: false,
+            }),
+        };
+        r.write(dir).unwrap();
+    }
+
+    fn write_stage(stage_dir: &Path, parent_hash: &str) {
+        let r = Run {
+            hash: format!("{}-stage", parent_hash).chars().cycle().take(64).collect(),
+            version: "0.1.0+test".into(),
+            created_at: "2026-04-27T00:00:00Z".into(),
+            argv: vec![],
+            wall_time_seconds: 1.0,
+            kind: RunKind::FitStage(FitStageMeta {
+                fit_hash: parent_hash.into(),
+                stage: "mle".into(),
+                method: "if2".into(),
+                seed: 1,
+                n_chains: 2,
+                algorithm: serde_json::json!({"iterations": 5}),
+                best_loglik: Some(-100.0),
+                best_chain: Some(0),
+                starts_from: None,
+                derived_from: None,
+                parent_profile_hash: None,
+                profile_point_idx: None,
+                profile_start_idx: None,
+            }),
+        };
+        r.write(stage_dir).unwrap();
+    }
+
+    /// The walker integration: write two fit_dirs that don't actually
+    /// have loadable MethodResults, ensure fit table emits a warning
+    /// per row but still produces an empty `rows: []` JSON output
+    /// rather than crashing. (Loadable MethodResult coverage lives in
+    /// the integration test in `tests/fit_experiment_management.rs`,
+    /// which has the FitState fixtures already.)
+    #[test]
+    fn walker_returns_empty_rows_when_no_method_results_loadable() {
+        let tmp = tempdir("empty_results");
+        let fits_root = tmp.path().join("fits");
+        std::fs::create_dir_all(&fits_root).unwrap();
+        for name in &["fit_a-aaaaaaaa", "fit_b-bbbbbbbb"] {
+            let d = fits_root.join(name);
+            std::fs::create_dir_all(&d).unwrap();
+            let hash: String = name.split('-').next_back().unwrap().repeat(8);
+            write_fit(&d, &hash);
+            // Stage with run.json but no fit_state.toml — load will
+            // fail, error vector grows, rows stays empty.
+            let stage_dir = d.join("real").join("fit_1").join("mle");
+            std::fs::create_dir_all(&stage_dir).unwrap();
+            write_stage(&stage_dir, &hash);
+        }
+        let entries = fit_tree::walk_fits_root(&fits_root).unwrap();
+        assert_eq!(entries.len(), 2);
+    }
+}

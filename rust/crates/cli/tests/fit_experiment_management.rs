@@ -1,6 +1,6 @@
 //! Integration tests for the experiment-management foundation.
 //!
-//! Covers Deliverables A and B from
+//! Covers Deliverables A, B, and C from
 //! `docs/dev/proposals/2026-04-28-fit-experiment-management.md`:
 //!
 //! - **A — end-to-end summary walks a real `cmd_fit_run_v2` output.**
@@ -15,6 +15,12 @@
 //!   the spec drifts (introduces a placeholder convention the
 //!   parser doesn't understand, or documents a path the runner
 //!   doesn't produce), the test fails immediately.
+//!
+//! - **C — `summary ⊆ table` byte-equality.** Asserts that
+//!   `summary_json["table_row"]` is byte-equal to
+//!   `table_json["rows"][0]` for the same fit. The two surfaces
+//!   share one schema; any field added to one without the other
+//!   makes this fail.
 //!
 //! Both tests shell out to the built `camdl` and `camdlc.exe`
 //! binaries; skipped silently when either is absent so the suite
@@ -360,6 +366,105 @@ fn spec_layout_diagrams_match_fit_run_v2_output() {
         !checked_prefixes.is_empty(),
         "no real-data layout prefixes derived from the spec — spec may have been \
          flipped to synthetic-only diagrams without the runner being updated"
+    );
+}
+
+// ── Deliverable C — `summary ⊆ table` byte-equality ────────────────
+
+/// Force `fit summary --format json`'s `table_row` block to be
+/// byte-equal to a `fit table --hash <h> --format json` row for the
+/// same fit. Lands live (no `#[ignore]`) per proposal §3 + Tests/CI
+/// commitments.
+///
+/// Map fields (`params`, `ess_posterior`, etc.) on `TableRow` use
+/// `BTreeMap` end-to-end so `serde_json` produces lex-ordered keys.
+/// If a `HashMap` ever lands in the serialization graph this test
+/// will go flaky — that flakiness is the alarm.
+#[test]
+fn summary_table_row_equals_table_first_row() {
+    let Some(camdl) = camdl_bin() else { return };
+    let Some(camdlc) = camdlc_bin() else { return };
+
+    let tmp = tempdir("xpt_c");
+    let (ir, data) = build_fixture(&camdlc, tmp.path());
+    let output_dir = tmp.path().join("out");
+    let fit_toml = write_fit_toml(tmp.path(), &ir, &data, &output_dir);
+
+    let fit_dir = exec_fit_run_v2(&camdl, &fit_toml, &output_dir);
+
+    // Read `Run.hash` to pick the prefix `--hash` filter for `fit
+    // table`. Eight characters is the proposal's documented short
+    // form.
+    let run_json: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(fit_dir.join("run.json"))
+            .expect("fit_dir/run.json must exist after fit run"),
+    )
+    .expect("run.json must parse");
+    let full_hash = run_json
+        .get("hash")
+        .and_then(|v| v.as_str())
+        .expect("Run.hash is required");
+    let hash_prefix: String = full_hash.chars().take(8).collect();
+
+    let summary_json = exec_fit_summary_json(&camdl, &fit_dir);
+    let summary_row = summary_json
+        .get("table_row")
+        .cloned()
+        .unwrap_or_else(|| panic!("summary JSON missing `table_row`: {}", summary_json));
+
+    // Run `fit table` against the parent of fit_dir (results/fits/),
+    // filtered to a single row by --hash.
+    let fits_root = output_dir.join("fits");
+    let output = std::process::Command::new(&camdl)
+        .arg("fit")
+        .arg("table")
+        .arg(&fits_root)
+        .arg("--hash")
+        .arg(&hash_prefix)
+        .arg("--format")
+        .arg("json")
+        .output()
+        .expect("camdl fit table must invoke");
+    assert!(
+        output.status.success(),
+        "camdl fit table failed: stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let table_doc: serde_json::Value = serde_json::from_slice(&output.stdout)
+        .unwrap_or_else(|e| {
+            panic!(
+                "camdl fit table --format json did not emit valid JSON: {}\nstdout={}",
+                e,
+                String::from_utf8_lossy(&output.stdout),
+            )
+        });
+    let rows = table_doc
+        .get("rows")
+        .and_then(|r| r.as_array())
+        .unwrap_or_else(|| panic!("table JSON missing `rows` array: {}", table_doc));
+    assert_eq!(
+        rows.len(),
+        1,
+        "expected one row matching --hash {}; got {} rows. Doc: {}",
+        hash_prefix,
+        rows.len(),
+        table_doc,
+    );
+    let table_row = &rows[0];
+
+    // Byte-equality: serialize both to canonical JSON and compare.
+    // serde_json::Value::eq is structural (not order-sensitive on
+    // objects), but we still want byte-level identity for the
+    // `summary ⊆ table` invariant — re-serialize via to_string
+    // (which keeps BTreeMap order on Maps) and compare.
+    let summary_bytes = serde_json::to_string(&summary_row).unwrap();
+    let table_bytes = serde_json::to_string(table_row).unwrap();
+    assert_eq!(
+        summary_bytes, table_bytes,
+        "summary[\"table_row\"] is not byte-equal to table[\"rows\"][0].\n\
+         summary: {}\n\
+         table:   {}",
+        summary_bytes, table_bytes
     );
 }
 

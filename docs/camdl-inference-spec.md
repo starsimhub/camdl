@@ -712,21 +712,28 @@ catch chains that agree per-parameter while sitting in different
 likelihood basins. After IF2 finishes, scout runs a clean-evaluation
 pass:
 
-1. **Candidate construction.** Each chain contributes three candidate
-   parameter vectors θ̂: the final-iteration mean (`final_iter`), the
-   arithmetic mean of param-means over the last K iterations (`tail_mean_last_k`,
-   K clamped to chain length), and the parameter vector at the
-   iteration with the largest finite in-run loglik (`best_in_run_iter`).
+1. **Candidate.** Each chain contributes one candidate θ̂: the
+   IF2 final-iteration parameter mean
+   (`iterations.last().param_means`). This is the pomp-canonical
+   estimator for IF2 (King, Ionides, Bretó 2016 JSS; Ionides et al.
+   2015 PNAS supplementary materials). Within-chain candidate
+   selection (e.g. argmax over a finite candidate pool) was
+   stripped in commit `20d48fe` because it introduced
+   selection-bias-on-top-of-bias-fix; see
+   `docs/dev/notes/2026-04-27-clean-eval-strip.md` for the
+   audit trail.
 2. **Independent re-scoring.** Each candidate is scored with M
    independent high-particle PF replicates. Per-replicate logliks
    are combined via `logmeanexp` (unbiased on the likelihood scale)
-   to a single combined score; the standard error is
-   `sample_sd(per_rep) / √M`. Defaults: `n_particles = 4000`,
+   to a single combined score; the SE is the delta-method
+   approximation on the log scale via
+   `evidence::logmeanexp_with_se`. Defaults: `n_particles = 4000`,
    `n_replicates = 8`, `combine = LogMeanExp`. Override per-stage
    with `--clean-eval-particles N` / `--clean-eval-reps M`.
-3. **Per-chain winner.** Argmax over the three candidates names
-   that chain's winning θ̂, label, and SE. The maximum across
-   chains names the overall winner.
+3. **Cross-chain selection.** The maximum across per-chain clean
+   logliks names the overall winner (the chain whose θ̂ is reported
+   as the MLE). NaN chains are explicitly skipped; an
+   all-NaN cohort errors rather than silently picking chain 0.
 
 The compound scout-convergence gate (read by `camdl fit refine`)
 passes iff:

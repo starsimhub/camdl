@@ -163,8 +163,8 @@ Per `cmd_fit_run_v2` in `fit/mod.rs:189` (verified line-by-line):
 | `fits/<stem>-<hash>/<sub>/<stage>/run.json` | per-stage `Run { kind: FitStage }` with `FitStageMeta` (method, seed, n_chains, algorithm, best_loglik, best_chain, starts_from, parent_profile_hash) | line 1133 |
 | `<stage>/fit_state.toml` | inter-stage handoff: best_loglik, best_chain, start_values, rw_sd, tail_chain_agreement, chain_clean_logliks, chain_clean_ses, ivp_params, resolved_gate, resolved_clean_eval | line 825 |
 | `<stage>/mle_params.toml` | winner θ̂ + extensive `[provenance]` (input_hash, model_hash, data_hashes, backend, dt, loglik, n_particles, ess_at_mle, timestamp) | line 845 |
-| `<stage>/final_params.toml` | clean-eval winner θ̂ + `[provenance]` (chain, loglik, se) | runner.rs |
-| `<stage>/chain_evaluations.tsv` | per-chain clean-eval score table, one row per chain with ESS columns. Post-clean-eval-strip (2026-04-27); pre-strip the table had one row per (chain × candidate) and a `winning_candidate_label` field in `final_params.toml`'s `[provenance]`. See `docs/dev/notes/2026-04-27-clean-eval-strip.md`. | runner.rs |
+| `<stage>/final_params.toml` | clean-eval winner θ̂ + `[provenance]` (chain, loglik, se) — post-strip; `winning_candidate_label` was dropped in `20d48fe` ([clean-eval strip](2026-04-27-clean-eval-strip.md)) | runner.rs |
+| `<stage>/chain_evaluations.tsv` | M-replicate clean-eval score table, one row per chain (post-strip; the prior 3-row-per-chain layout with a `candidate` column was dropped in `20d48fe`) | runner.rs |
 | `<stage>/diagnostics.json` | structured warning list | line 875 |
 | `<stage>/chain_<n>/parameter_traces.tsv` | per-iteration param means (one file per chain) | runner.rs |
 | `<stage>/chain_<n>/final_params.toml` | per-chain winner θ̂ | runner.rs |

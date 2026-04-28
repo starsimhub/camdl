@@ -408,6 +408,88 @@ pub struct FitDiffArgs {
     pub b: PathBuf,
 }
 
+/// Output format for `camdl fit table`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, clap::ValueEnum)]
+pub enum FitTableFormat {
+    Text,
+    Json,
+    Md,
+    Csv,
+}
+
+#[derive(Args)]
+#[command(after_help = "\
+Examples:
+  # Show every fit under results/fits/, default text view
+  camdl fit table results/fits
+
+  # Just the converged ones
+  camdl fit table results/fits --converged
+
+  # Project to one row in JSON for downstream tooling
+  camdl fit table results/fits --hash 04ab12cd --format json
+
+  # Filter by method
+  camdl fit table results/fits --with-method pgas
+")]
+pub struct FitTableArgs {
+    /// Path to the fits root (`results/fits/` or wherever the project
+    /// stores them). Walks every `<root>/<dir>/run.json` of kind
+    /// `Fit`.
+    pub root: PathBuf,
+
+    /// Show only converged rows (IF2: gate Pass; PGAS / PMMH: max R̂ < 1.05).
+    #[arg(long)]
+    pub converged: bool,
+
+    /// Show only rows whose convergence boolean is false.
+    #[arg(long)]
+    pub gate_failed: bool,
+
+    /// Filter to fits whose declared stages include the named stage.
+    #[arg(long, value_name = "STAGE")]
+    pub with_stage: Option<String>,
+
+    /// Filter to fits whose terminal-stage method matches.
+    #[arg(long, value_name = "METHOD",
+          value_parser = clap::builder::PossibleValuesParser::new(["if2", "pgas", "pmmh"]))]
+    pub with_method: Option<String>,
+
+    /// Filter to fits with this model_hash (prefix match).
+    #[arg(long, value_name = "HASH_PREFIX")]
+    pub model: Option<String>,
+
+    /// Filter to fits whose `fit_hash` (Run.hash) starts with the
+    /// given prefix. Useful for projecting to one row in JSON without
+    /// piping through `jq`. The `summary ⊆ table` Deliverable C test
+    /// uses this.
+    #[arg(long, value_name = "HASH_PREFIX")]
+    pub hash: Option<String>,
+
+    /// Filter to fits younger than the given duration in seconds.
+    /// Future work may accept human strings (`7d`, `24h`); today it's
+    /// just seconds, which the test harness can produce trivially.
+    #[arg(long, value_name = "SECONDS")]
+    pub since_seconds: Option<i64>,
+
+    /// Filter to fits whose label matches a glob (step 8 will
+    /// populate labels; pre-step-8 this filter always excludes
+    /// everything).
+    #[arg(long, value_name = "GLOB")]
+    pub label_pattern: Option<String>,
+
+    /// Pick a specific fit as the diff baseline (prefix match on
+    /// `fit_hash`). Default: lowest hash among the surviving cohort.
+    #[arg(long, value_name = "HASH_PREFIX")]
+    pub baseline: Option<String>,
+
+    /// Output format. `text` (default) is a fixed-width terminal
+    /// view; `json` is the schema-pinned cross-fit document; `md`
+    /// renders a GitHub-flavoured table; `csv` is downstream-friendly.
+    #[arg(long, value_enum, default_value_t = FitTableFormat::Text)]
+    pub format: FitTableFormat,
+}
+
 #[derive(Args)]
 #[command(after_help = "\
 Examples:

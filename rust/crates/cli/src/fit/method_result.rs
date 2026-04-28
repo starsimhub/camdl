@@ -87,7 +87,7 @@ pub struct If2StageResult {
 
 /// PF ESS summary at the IF2 winner θ̂. Three numbers; renderers can
 /// pick whichever the table needs.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct EssSummary {
     pub ess_min: f64,
     pub ess_mean: f64,
