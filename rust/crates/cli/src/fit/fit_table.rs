@@ -59,7 +59,7 @@ pub fn cmd_fit_table(args: &FitTableArgs) {
     };
     let baseline_loaded = baseline_idx.and_then(|i| {
         let entry = pre_filtered[i];
-        FitConfigV2::load(&entry.fit_meta.fit_toml_path)
+        load_archived_fit_toml(&entry.fit_dir)
             .ok()
             .map(|cfg| (entry, cfg))
     });
@@ -68,9 +68,12 @@ pub fn cmd_fit_table(args: &FitTableArgs) {
     let mut rows: Vec<TableRow> = Vec::new();
     let mut errors: Vec<String> = Vec::new();
     for entry in &pre_filtered {
-        let cfg = match FitConfigV2::load(&entry.fit_meta.fit_toml_path) {
+        let cfg = match load_archived_fit_toml(&entry.fit_dir) {
             Ok(c) => Some(c),
-            Err(_) => None,
+            Err(e) => {
+                errors.push(format!("{}: {}", entry.fit_dir.display(), e));
+                None
+            }
         };
         let diff = match (&cfg, &baseline_loaded) {
             (Some(this_cfg), Some((base_entry, base_cfg))) => {
@@ -125,6 +128,26 @@ pub fn cmd_fit_table(args: &FitTableArgs) {
         FitTableFormat::Md => print!("{}", render_md(&rows)),
         FitTableFormat::Csv => print!("{}", render_csv(&rows)),
     }
+}
+
+/// Load the fit.toml archived inside `<fit_dir>/fit.toml.original`
+/// (step 6 of the experiment-management proposal). Hard-cut on
+/// missing archive: legacy fit_dirs created before step 6 do not
+/// have it, and per the back-compat-is-a-non-goal posture the
+/// reader errors with an actionable message rather than silently
+/// falling back to `FitMeta.fit_toml_path` (which can move/change).
+fn load_archived_fit_toml(fit_dir: &std::path::Path) -> Result<FitConfigV2, String> {
+    let archive = fit_dir.join("fit.toml.original");
+    if !archive.exists() {
+        return Err(format!(
+            "no fit.toml.original at {} (predates step 6 of the \
+             experiment-management proposal, 2026-04-28). Re-run the \
+             fit (the content hash is stable, so the re-run lands in \
+             the same fit_dir and writes the missing artifact) or \
+             remove the directory.",
+            archive.display()));
+    }
+    FitConfigV2::load(&archive.to_string_lossy())
 }
 
 fn matches_outer_filters(entry: &FitDirEntry, args: &FitTableArgs, now_unix: i64) -> bool {

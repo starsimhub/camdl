@@ -320,6 +320,19 @@ pub fn cmd_fit_run_v2(a: &crate::args::FitRunArgs) {
         eprintln!("warning: cannot write {}/run.json: {}", fit_dir.display(), e);
     }
 
+    // Archive the fit.toml verbatim under <fit_dir>/fit.toml.original.
+    // Step 6 of the experiment-management proposal: `fit table`'s
+    // config_diff reader consumes this archive (not FitMeta.fit_toml_path,
+    // which can move/change after the run). Write-once-on-first-run;
+    // on cached re-entry into the same content-hashed fit_dir, verify
+    // the current fit.toml is byte-identical to the archive (it must
+    // be, by content-hash construction — a divergence here is a hash
+    // collision or a bug, surfaced loudly).
+    if let Err(e) = archive_fit_toml(&fit_path, &fit_dir) {
+        eprintln!("warning: cannot archive fit.toml.original at {}: {}",
+            fit_dir.display(), e);
+    }
+
     eprintln!("fit: {} ({} stage{})",
         fit_path,
         stages_to_run.len(),
@@ -1263,6 +1276,48 @@ fn read_ir_json_or_empty(model_path: &str) -> String {
     }
 }
 
+/// Archive the fit.toml verbatim under `<fit_dir>/fit.toml.original`.
+/// Step 6 of the experiment-management proposal.
+///
+/// The fit_dir is content-hashed on (model_hash, fit.toml bytes,
+/// data hashes), so any two runs landing in the same fit_dir
+/// necessarily had byte-identical fit.toml content at hash time. The
+/// archive captures that fit.toml so `fit table`'s config_diff
+/// reader can compare fits without depending on `FitMeta.fit_toml_path`
+/// — the user's original file path, which can move or change after
+/// the run.
+///
+/// Policy:
+/// - **Write once.** If `<fit_dir>/fit.toml.original` does not exist,
+///   copy the current fit.toml there.
+/// - **Verify on cached hit.** If it already exists, read both the
+///   archive and the current fit.toml; warn loudly if they differ.
+///   (They must not — a divergence indicates a hash collision or a
+///   bug in fit_content_hash. The warning is the alarm; the archive
+///   is preserved as the canonical version.)
+///
+/// Returns Err on filesystem errors; the caller's responsibility to
+/// surface the failure mode (the runner logs it as a warning rather
+/// than aborting, since fit-state writes happen later anyway).
+fn archive_fit_toml(fit_path: &str, fit_dir: &std::path::Path)
+    -> std::io::Result<()>
+{
+    let archive_path = fit_dir.join("fit.toml.original");
+    let current = std::fs::read(fit_path)?;
+    if archive_path.exists() {
+        let archived = std::fs::read(&archive_path)?;
+        if archived != current {
+            eprintln!(
+                "warning: fit.toml.original at {} differs from current {}; \
+                 this should be impossible (content-hash mismatch). \
+                 Archive preserved.",
+                archive_path.display(), fit_path);
+        }
+        return Ok(());
+    }
+    std::fs::write(&archive_path, &current)
+}
+
 /// Build the top-level `Run::Fit` record for a fit.toml. Fields that
 /// require I/O (model IR, data files, fit.toml bytes) are read here
 /// and hashed; `wall_time_seconds` is initialised to 0 and patched at
@@ -1577,6 +1632,98 @@ fn resolve_starts_from_arg(raw: &str) -> String {
             eprintln!("  or a longer hash prefix.");
             std::process::exit(1);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn unique_tmp(tag: &str) -> std::path::PathBuf {
+        let ns = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        let p = std::env::temp_dir().join(
+            format!("camdl_archive_{}_{}_{}", tag, std::process::id(), ns));
+        std::fs::create_dir_all(&p).unwrap();
+        p
+    }
+
+    /// First-run path: archive does not exist, so `archive_fit_toml`
+    /// writes a verbatim copy of the source fit.toml.
+    #[test]
+    fn archive_fit_toml_writes_on_first_run() {
+        let tmp = unique_tmp("first_run");
+        let fit_path = tmp.join("fit.toml");
+        let body = "# fit.toml\n[fit]\nmodel = \"sir.camdl\"\n";
+        std::fs::write(&fit_path, body).unwrap();
+        let fit_dir = tmp.join("fit_dir");
+        std::fs::create_dir_all(&fit_dir).unwrap();
+
+        archive_fit_toml(&fit_path.to_string_lossy(), &fit_dir).unwrap();
+
+        let archived = std::fs::read_to_string(fit_dir.join("fit.toml.original")).unwrap();
+        assert_eq!(archived, body, "archive must be byte-identical to source");
+
+        std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    /// Cached-hit path: archive already exists with matching content
+    /// (the canonical case under content-hash routing). `archive_fit_toml`
+    /// verifies bytes and is a no-op — does not re-write, does not
+    /// emit any warning.
+    #[test]
+    fn archive_fit_toml_no_op_on_matching_archive() {
+        let tmp = unique_tmp("matching");
+        let body = "# matching\n";
+        let fit_path = tmp.join("fit.toml");
+        std::fs::write(&fit_path, body).unwrap();
+        let fit_dir = tmp.join("fit_dir");
+        std::fs::create_dir_all(&fit_dir).unwrap();
+        let archive = fit_dir.join("fit.toml.original");
+        std::fs::write(&archive, body).unwrap();
+        // Capture mtime of existing archive so we can verify no rewrite.
+        let mtime_before = std::fs::metadata(&archive).unwrap().modified().unwrap();
+
+        archive_fit_toml(&fit_path.to_string_lossy(), &fit_dir).unwrap();
+
+        // File should not have been rewritten — same content, same mtime.
+        let mtime_after = std::fs::metadata(&archive).unwrap().modified().unwrap();
+        assert_eq!(mtime_before, mtime_after,
+            "archive must not be rewritten when content matches");
+        let archived = std::fs::read_to_string(&archive).unwrap();
+        assert_eq!(archived, body);
+
+        std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    /// Cached-hit path with mismatched archive: indicates a hash
+    /// collision or a runner bug. `archive_fit_toml` returns Ok (the
+    /// runner does not abort), preserves the existing archive (does
+    /// not overwrite), and emits a loud stderr warning. The test
+    /// verifies the preserve-existing semantic; the stderr warning is
+    /// observed in the `cargo test --nocapture` mode and is not
+    /// asserted-on here.
+    #[test]
+    fn archive_fit_toml_preserves_archive_on_mismatch() {
+        let tmp = unique_tmp("mismatch");
+        let archived_body = "# archived (canonical)\n";
+        let current_body  = "# divergent (this should not happen)\n";
+        let fit_path = tmp.join("fit.toml");
+        std::fs::write(&fit_path, current_body).unwrap();
+        let fit_dir = tmp.join("fit_dir");
+        std::fs::create_dir_all(&fit_dir).unwrap();
+        let archive = fit_dir.join("fit.toml.original");
+        std::fs::write(&archive, archived_body).unwrap();
+
+        archive_fit_toml(&fit_path.to_string_lossy(), &fit_dir).unwrap();
+
+        // Existing archive preserved, NOT overwritten with current.
+        let archived = std::fs::read_to_string(&archive).unwrap();
+        assert_eq!(archived, archived_body,
+            "on mismatch, the archive must be preserved (not overwritten \
+             with the divergent current fit.toml)");
+
+        std::fs::remove_dir_all(&tmp).ok();
     }
 }
 
