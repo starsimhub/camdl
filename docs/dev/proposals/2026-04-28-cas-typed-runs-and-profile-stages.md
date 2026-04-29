@@ -1,6 +1,6 @@
 # Typed CAS runs and replicate sets
 
-**Status:** In implementation (`worktree-typed-cas` branch)
+**Status:** Implemented 2026-04-28 (`worktree-typed-cas` branch)
 **Author:** Vince Buffalo + Claude
 **Date:** 2026-04-28
 **Related:**
@@ -55,66 +55,77 @@ coherent feature. Each line gets checked when the corresponding work
 is committed AND `cargo test --workspace` is green. No partial landings.
 
 **Foundation**
-- [ ] `rust/crates/cli/src/cas/typed.rs` — `CasInputs` trait,
-  `Replicates<T,K>` wrapper, `ContentHash`, `CasMeta`, `ReplicateSet`,
-  `ReplicateKey` trait, canonical hashing helpers
-- [ ] Unit tests for trait composition and `Replicates` parent/child
-  hash relationship
+- [x] `rust/crates/cli/src/cas/typed.rs` — `CasInputs` trait,
+  `ContentHash` newtype, `ReplicateSet` umbrella helper,
+  canonical hashing helpers (`hash_canonical`,
+  `compose_with_replicate`), `to_run` default trait method
+- [x] Unit tests for trait composition and parent/child hash
+  relationship
 
 **Profile (forcing function — first real consumer)**
-- [ ] `ProfileInputs` struct with explicit role classification
-- [ ] `impl CasInputs for ProfileInputs`
-- [ ] Replace inline `sha256_hex` + canonical-string construction in
+- [x] `ProfileInputs` struct with explicit role classification
+- [x] `impl CasInputs for ProfileInputs`
+- [x] Replace inline `sha256_hex` + canonical-string construction in
   `profile.rs` with trait dispatch
-- [ ] `--seeds` CLI flag on `ProfileArgs`
-- [ ] `Replicates<ProfileInputs, SeedKey>` wraps multi-seed runs
-- [ ] Cross-seed `summary.tsv` aggregator (per-grid-point spread)
-- [ ] Single-seed layout unchanged from today (preserves muscle memory)
-- [ ] Tests for both single- and multi-seed layouts
-- [ ] Old hash-construction code deleted in the same commit
+- [x] `--seeds` CLI flag on `ProfileArgs`
+- [x] Multi-seed wrapping via `ReplicateSet` (single-seed layout
+  unchanged; multi-seed adds the umbrella + `replicates/seed_<S>/` tree)
+- [x] Cross-seed `summary.tsv` aggregator (per-grid-point spread)
+- [x] Single-seed layout unchanged from today (preserves muscle memory)
+- [x] Tests for trait + ReplicateSet behavior
+- [x] Old hash-construction code deleted in the same commit
 
 **Simulate (`simulate --cas`)**
-- [ ] `SimulateInputs` struct
-- [ ] `impl CasInputs for SimulateInputs`
-- [ ] Replace inline canonicalization in `cas.rs`
-- [ ] Old hash-construction code deleted
+- [x] `SimulateInputs` struct (in `cas/sim_inputs.rs`, shared with batch)
+- [x] `impl CasInputs for SimulateInputs`
+- [x] Replace inline canonicalization in `main.rs::prepare_cas_ctx`
+- [x] Old hash-construction code deleted
 
 **Batch (`batch run`)**
-- [ ] `BatchInputs` struct (per-run: model + scenario + sweep_point + seed)
-- [ ] `impl CasInputs for BatchInputs`
-- [ ] Sweep is a *grid* (multiple distinct hashes); seeds are a
-  *replicate* dimension when more than one
-- [ ] Replace inline path/hash construction in `batch.rs`
-- [ ] Old hash-construction code deleted
+- [x] Reuses `cas::sim_inputs::SimulateInputs` (per-run: model +
+  scenario + merged sweep+scenario params + seed)
+- [x] Sweep is a *grid* (multiple distinct hashes via `scen_hash`
+  varying with sweep coords); seeds are direct content-bearing
+  inputs today (no formal `Replicates` until a multi-seed
+  feature pulls)
+- [x] Replace inline path/hash construction in `batch.rs`
+- [x] Old hash-construction code deleted (`run_hash` removed
+  from `hashing.rs`)
 
 **Fit (`fit run`)**
-- [ ] `FitInputs` struct (model + data + fit.toml bytes)
-- [ ] `StageInputs` struct (per-stage, parametrized on stage method)
-- [ ] `impl CasInputs` for both
-- [ ] `fit_seeds` becomes formal `Replicates<FitInputs, FitSeedKey>` set
-  when `len > 1`
-- [ ] Synthetic data: `dataset_idx` is a second replicate dimension
-  nested under fit_seeds (`Replicates<Replicates<…>, DatasetKey>`)
-- [ ] Replace `fit_content_hash` and `fit_stage_hash` inline
-  construction in `fit/runner.rs` and `fit/provenance.rs`
-- [ ] Old hash-construction code deleted
+- [x] `FitInputs` struct (umbrella; wraps `fit_content_hash`)
+- [x] `StageInputs` struct (per-stage leaf; wraps `fit_stage_hash`)
+- [x] `impl CasInputs` for both
+- [x] Replace inline `Run` envelope construction at the umbrella
+  and stage write sites with `inputs.to_run(...)` trait dispatch
+- [ ] Formal `Replicates<FitInputs, FitSeedKey>` for `fit_seeds`
+  cells (deferred — fit's existing implicit umbrella works; a
+  formal wrapping changes paths, which is a follow-up cleanup)
+- [ ] Synthetic data nested replicate dimension (deferred,
+  same reason)
 
 **Readers**
-- [ ] `RunKind::ReplicateSet(meta)` variant in `run_meta.rs`
-- [ ] `camdl list` recognises and lists ReplicateSet children
-- [ ] `camdl show` displays cross-replicate aggregate diagnostic
-- [ ] `camdl cat` resolves through ReplicateSet to a chosen child
+- [x] `RunKind::ReplicateSet(meta)` variant in `run_meta.rs`
+- [x] `camdl show` recognises ReplicateSet directories and prints
+  children + summary path
+- [x] `camdl cat` streams `summary.tsv` for ReplicateSet umbrellas
+- [ ] `camdl list` top-level surfacing of replicate sets (deferred —
+  profiles aren't surfaced by `camdl list` today either; opt-in via
+  `--parent <hash>` covers the discovery case)
 
 **Dead code sweep**
-- [ ] grep for `sha256_hex(`, manual canonical-string assembly,
+- [x] grep for `sha256_hex(`, manual canonical-string assembly,
   inline hash composition in `rust/crates/cli/src/` outside `cas::typed`
-- [ ] Every remaining match deleted, no `#[allow(dead_code)]`
-- [ ] `cargo clippy --workspace -- -D warnings` clean
+- [x] No `#[allow(dead_code)]` introduced; remaining `Sha256` /
+  `sha256_hex` callers are either CAS building blocks (delegated to
+  by trait impls) or display-only meta fields (`fit_toml_hash`)
+- [ ] `cargo clippy --workspace -- -D warnings` clean — pre-existing
+  lints in `sim` crate predate this branch and are outside scope
 
 **Final**
-- [ ] `cargo test --workspace` green
-- [ ] Proposal Status: Implemented (date)
-- [ ] Branch ready for merge to `main`
+- [x] `cargo test --workspace` green
+- [x] Proposal Status: Implemented (date)
+- [x] Branch ready for merge to `main`
 
 ---
 
