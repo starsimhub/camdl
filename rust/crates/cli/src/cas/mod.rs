@@ -28,6 +28,7 @@
 //! key is `(trajectory, obs_hash, obs_seed)`.
 
 pub mod typed;
+pub mod sim_inputs;
 
 use std::path::Path;
 

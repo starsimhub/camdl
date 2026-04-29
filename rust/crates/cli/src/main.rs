@@ -940,82 +940,6 @@ struct CasCtx {
     run: run_meta::Run,
 }
 
-/// Typed CAS inputs for one `simulate --cas` invocation. Single
-/// realization (one seed); multi-seed simulate isn't a feature today
-/// but the trait shape is uniform with profile and fit so it'd slot
-/// in via `Replicates<SimulateInputs, SeedKey>` if added later.
-///
-/// The path layout decomposes the content hash into `sim_hash` and
-/// `scen_hash` components for readable browsing
-/// (`<root>/sims/<sim>/<scen>-<scen_hash>/seed_N/`); the trait's
-/// `content_hash()` is the authoritative cache key.
-struct SimulateInputs {
-    // Display-only (path / metadata).
-    model_path:           String,
-    model_stem:           Option<String>,
-    scenario:             String,
-    // Content-bearing.
-    model_hash:           String,
-    base_params_canonical: String,
-    backend:              String,
-    dt:                   f64,
-    enable:               Vec<String>,
-    disable:              Vec<String>,
-    scen_params:          HashMap<String, f64>,
-    seed:                 u64,
-    // Lineage.
-    from_fit_hash:        Option<String>,
-}
-
-impl SimulateInputs {
-    /// Sim-side hash decomposition (model + base params + backend + dt),
-    /// embedded in the path as the first directory component.
-    fn sim_hash_str(&self) -> String {
-        hashing::sim_hash(
-            &self.model_hash, &self.base_params_canonical,
-            &self.backend, self.dt,
-        )
-    }
-    /// Scenario-side hash decomposition (enable + disable + overrides).
-    fn scen_hash_str(&self) -> String {
-        hashing::scen_hash(&self.enable, &self.disable, &self.scen_params)
-    }
-}
-
-impl cas::typed::CasInputs for SimulateInputs {
-    fn content_hash(&self) -> cas::typed::ContentHash {
-        // Inner: everything except seed. Composed via the standard
-        // replicate path so a future multi-seed simulate plugs into
-        // the same content_hash function without re-derivation.
-        let inner = cas::typed::hash_canonical(&[
-            ("sim",  &self.sim_hash_str()),
-            ("scen", &self.scen_hash_str()),
-        ]);
-        cas::typed::compose_with_replicate(&inner, "seed", &self.seed.to_string())
-    }
-    fn cas_path(&self, root: &std::path::Path) -> std::path::PathBuf {
-        run_paths::sim_run_dir(
-            root, self.model_stem.as_deref(),
-            &self.sim_hash_str(), &self.scenario,
-            &self.scen_hash_str(), self.seed,
-        )
-    }
-    fn run_kind(&self) -> run_meta::RunKind {
-        run_meta::RunKind::Simulate(run_meta::SimulateMeta {
-            model:        self.model_path.clone(),
-            model_hash:   self.model_hash.clone(),
-            scenario:     self.scenario.clone(),
-            sim_hash:     self.sim_hash_str(),
-            scen_hash:    self.scen_hash_str(),
-            seed:         self.seed,
-            backend:      self.backend.clone(),
-            dt:           self.dt,
-            sweep_point:  HashMap::new(),
-            from_fit_hash: self.from_fit_hash.clone(),
-        })
-    }
-}
-
 /// Resolve the CAS run directory and build a `RunMeta` template for a
 /// single (model, scenario, seed) triple. Mirrors the relevant bits of
 /// `util::run_simulation`'s model-load + scenario-resolve pipeline so
@@ -1064,7 +988,7 @@ fn prepare_cas_ctx(
         (run.adhoc_enable.clone(), run.adhoc_disable.clone(), HashMap::new())
     };
 
-    let inputs = SimulateInputs {
+    let inputs = cas::sim_inputs::SimulateInputs {
         model_path:           run.ir_path.clone(),
         model_stem:           hashing::path_stem_slug(&run.ir_path),
         scenario:             scenario_name.clone().unwrap_or_else(|| "baseline".to_string()),
@@ -1075,6 +999,7 @@ fn prepare_cas_ctx(
         enable, disable, scen_params,
         seed,
         from_fit_hash,
+        sweep_point:          HashMap::new(),  // single --cas: no sweep
     };
 
     use cas::typed::CasInputs;

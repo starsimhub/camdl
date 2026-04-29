@@ -586,29 +586,34 @@ pub fn cmd_batch_run(a: &crate::args::BatchArgs) {
                     }
                     let mut merged_params = plan.sweep_overrides.clone();
                     merged_params.extend(sc.params.iter().map(|(k, v)| (k.clone(), *v)));
-                    let sh = scen_hash(&sc.enable, &sc.disable, &merged_params);
-                    let run_h = crate::hashing::run_hash(&shash, &sh, plan.seed);
+                    // Build typed CAS inputs and let the trait dispatch
+                    // handle hash + run_kind composition. Batch never
+                    // launches from a fit MLE (it reads experiment
+                    // configs, not mle_params.toml), so from_fit_hash
+                    // stays None.
+                    let inputs = crate::cas::sim_inputs::SimulateInputs {
+                        model_path:           ir_path_resolved.clone(),
+                        model_stem:           crate::hashing::path_stem_slug(&ir_path_resolved),
+                        scenario:             plan.scenario.clone(),
+                        model_hash:           mhash.clone(),
+                        base_params_canonical: canonical_params(&base_params),
+                        backend:              backend.clone(),
+                        dt,
+                        enable:               sc.enable.clone(),
+                        disable:              sc.disable.clone(),
+                        scen_params:          merged_params,
+                        seed:                 plan.seed,
+                        from_fit_hash:        None,
+                        sweep_point:          plan.sweep_overrides.clone(),
+                    };
+                    use crate::cas::typed::CasInputs;
                     let run_rec = crate::run_meta::Run {
-                        hash: run_h,
-                        version: version::VERSION_SHORT.to_string(),
-                        created_at: cas::iso8601_utc(std::time::SystemTime::now()),
-                        argv: std::env::args().collect(),
+                        hash:              inputs.content_hash().full().to_string(),
+                        version:           version::VERSION_SHORT.to_string(),
+                        created_at:        cas::iso8601_utc(std::time::SystemTime::now()),
+                        argv:              std::env::args().collect(),
                         wall_time_seconds: run_t0.elapsed().as_secs_f64(),
-                        kind: crate::run_meta::RunKind::Simulate(crate::run_meta::SimulateMeta {
-                            model: ir_path_resolved.clone(),
-                            model_hash: mhash.clone(),
-                            scenario: plan.scenario.clone(),
-                            sim_hash: shash.clone(),
-                            scen_hash: sh,
-                            seed: plan.seed,
-                            backend: backend.clone(),
-                            dt,
-                            sweep_point: plan.sweep_overrides.clone(),
-                            // Batch sweeps never launch from a fit MLE —
-                            // they read from an experiment config, not
-                            // from mle_params.toml. Leave as None.
-                            from_fit_hash: None,
-                        }),
+                        kind:              inputs.run_kind(),
                     };
                     run_rec.write(std::path::Path::new(&plan.run_dir))
                         .map_err(|e| format!("cannot write run.json in {}: {}", plan.run_dir, e))?;

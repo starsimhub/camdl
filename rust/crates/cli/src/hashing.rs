@@ -49,23 +49,6 @@ pub fn sim_hash(model_hash: &str, params_canonical: &str, backend: &str, dt: f64
     hex::encode(h.finalize())
 }
 
-/// Content hash for a single simulate run. Covers the full identity of
-/// what produced `traj.tsv`: the simulation config (`sim_hash`), the
-/// scenario delta (`scen_hash`), and the seed. Stored in `run.json`
-/// as `Run.hash` for cache-staleness checks that are independent of
-/// the directory layout (so we can rename the tree without invalidating
-/// the cache).
-pub fn run_hash(sim_hash: &str, scen_hash: &str, seed: u64) -> String {
-    let mut h = Sha256::new();
-    h.update(b"run\x00");
-    h.update(sim_hash.as_bytes());
-    h.update(b"\x00");
-    h.update(scen_hash.as_bytes());
-    h.update(b"\x00");
-    h.update(seed.to_le_bytes());
-    hex::encode(h.finalize())
-}
-
 /// Hash of a scenario's per-scenario delta: enable/disable lists and param overrides.
 /// Does NOT include the scenario name — the name appears in the directory slug for navigation,
 /// but two identically-specified scenarios (same enables/disables/params, different names)
@@ -376,51 +359,12 @@ mod tests {
         assert_eq!(h, "3d19534d546efd26118d6983fcd8a58a559c9791477db4316d3edfc357dadc78");
     }
 
-    // ── run_hash ─────────────────────────────────────────────────────────────
-
-    #[test]
-    fn run_hash_stable() {
-        let a = run_hash("aaa", "bbb", 42);
-        let b = run_hash("aaa", "bbb", 42);
-        assert_eq!(a, b);
-        assert_eq!(a.len(), 64, "run_hash returns full SHA-256 hex (64 chars)");
-    }
-
-    #[test]
-    fn run_hash_known_bytes() {
-        // Regression guard: if anyone changes the domain separator or
-        // field order in `run_hash`, existing caches become invisible.
-        // The known value locks the current function to its current
-        // output. Updating this test is a conscious break.
-        let h = run_hash("sim123", "scen456", 7);
-        assert_eq!(h, "74559eaeb35e55fe88042fb428009a47df00be22b1627d87d4171b9688b77443");
-    }
-
-    #[test]
-    fn run_hash_seed_invalidates() {
-        assert_ne!(run_hash("aaa", "bbb", 1), run_hash("aaa", "bbb", 2));
-    }
-
-    #[test]
-    fn run_hash_sim_invalidates() {
-        assert_ne!(run_hash("aaa", "bbb", 1), run_hash("ccc", "bbb", 1));
-    }
-
-    #[test]
-    fn run_hash_scen_invalidates() {
-        assert_ne!(run_hash("aaa", "bbb", 1), run_hash("aaa", "ddd", 1));
-    }
-
-    #[test]
-    fn run_hash_domain_separator_disambiguates() {
-        // "aa" + "bb" + 0  must differ from "aab" + "b" + 0  even
-        // though the concatenated bytes are similar. Domain separators
-        // and length-delimited field framing guard against that
-        // ambiguity. Guards against the domain-separator being dropped
-        // during a refactor.
-        assert_ne!(run_hash("aa", "bb", 0), run_hash("aab", "b", 0));
-        assert_ne!(run_hash("aa", "bb", 0), run_hash("a", "abb", 0));
-    }
+    // The legacy `run_hash(sim, scen, seed)` content hash is gone:
+    // the typed-CAS migration replaced it with
+    // `cas::sim_inputs::SimulateInputs.content_hash()`, which composes
+    // via the unified `compose_with_replicate(inner, "seed", seed)`
+    // form (see `cas::typed`). Tests for the new content_hash live
+    // alongside the trait at `cas/typed.rs::tests`.
 
     // ── scen_hash ────────────────────────────────────────────────────────────
 
