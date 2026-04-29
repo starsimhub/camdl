@@ -26,7 +26,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::run_meta::RunKind;
+use crate::run_meta::{Run, RunKind};
 
 // ─── ContentHash ─────────────────────────────────────────────────────────────
 
@@ -41,6 +41,15 @@ impl ContentHash {
     /// ContentHash from canonicalized input.
     pub fn from_bytes(bytes: &[u8]) -> Self {
         Self(hex_of(&Sha256::digest(bytes)))
+    }
+
+    /// Wrap an already-hex-encoded hash. The caller is asserting
+    /// "this string is a sha256 hex digest." Used by command-specific
+    /// `CasInputs` impls that delegate to legacy hashing helpers
+    /// (e.g. fit's `fit_content_hash`/`fit_stage_hash`) and need to
+    /// surface their output as a `ContentHash`.
+    pub fn from_hex(hex: impl Into<String>) -> Self {
+        Self(hex.into())
     }
 
     /// Full 64-char hex digest.
@@ -96,6 +105,21 @@ pub trait CasInputs {
     /// `RunKind` payload for `run.json`. Includes the kind
     /// discriminant and human-readable provenance fields.
     fn run_kind(&self) -> RunKind;
+
+    /// Convenience: assemble a `Run` envelope from this inputs's hash
+    /// + run_kind plus execution metadata (version, argv, wall time).
+    /// Default impl matches what every command's write site does by
+    /// hand; commands call it instead of inlining Run construction.
+    fn to_run(&self, version: String, argv: Vec<String>, wall_time_seconds: f64) -> Run {
+        Run {
+            hash:              self.content_hash().full().to_string(),
+            version,
+            created_at:        super::iso8601_utc(std::time::SystemTime::now()),
+            argv,
+            wall_time_seconds,
+            kind:              self.run_kind(),
+        }
+    }
 }
 
 // ─── Canonical hashing ───────────────────────────────────────────────────────

@@ -1147,13 +1147,10 @@ pub fn cmd_fit_run_v2(a: &crate::args::FitRunArgs) {
             Stage::PMMH { chains, .. } => *chains,
             Stage::PFilter { .. }      => 1,
         };
-        let stage_run = crate::run_meta::Run {
-            hash: config_hash.clone(),
-            version: crate::version::VERSION_SHORT.to_string(),
-            created_at: crate::cas::iso8601_utc(std::time::SystemTime::now()),
-            argv: std::env::args().collect(),
-            wall_time_seconds: stage_elapsed.as_secs_f64(),
-            kind: crate::run_meta::RunKind::FitStage(crate::run_meta::FitStageMeta {
+        let stage_inputs = crate::cas::fit_inputs::StageInputs {
+            fit_stage_hash: config_hash.clone(),
+            stage_dir: stage_dir.clone(),
+            meta: crate::run_meta::FitStageMeta {
                 fit_hash: parent_fit_hash.clone(),
                 stage: stage_name.to_string(),
                 method: stage.method_name().to_string(),
@@ -1168,8 +1165,14 @@ pub fn cmd_fit_run_v2(a: &crate::args::FitRunArgs) {
                 parent_profile_hash: None,
                 profile_point_idx: None,
                 profile_start_idx: None,
-            }),
+            },
         };
+        use crate::cas::typed::CasInputs;
+        let stage_run = stage_inputs.to_run(
+            crate::version::VERSION_SHORT.to_string(),
+            std::env::args().collect(),
+            stage_elapsed.as_secs_f64(),
+        );
         if let Err(e) = stage_run.write(&stage_dir) {
             eprintln!("warning: could not write {}/run.json: {}", stage_dir.display(), e);
         }
@@ -1365,13 +1368,10 @@ fn build_fit_run(
     let fixed: std::collections::HashMap<String, f64> = config.fixed
         .resolve().unwrap_or_default().into_iter().collect();
     let stages_declared: Vec<String> = config.stages.keys().cloned().collect();
-    crate::run_meta::Run {
-        hash: fit_hash,
-        version: crate::version::VERSION_SHORT.to_string(),
-        created_at: crate::cas::iso8601_utc(std::time::SystemTime::now()),
-        argv: std::env::args().collect(),
-        wall_time_seconds: 0.0,
-        kind: crate::run_meta::RunKind::Fit(crate::run_meta::FitMeta {
+    let inputs = crate::cas::fit_inputs::FitInputs {
+        fit_content_hash: fit_hash,
+        stem: crate::hashing::path_stem_slug(fit_path),
+        meta: crate::run_meta::FitMeta {
             model: config.model.camdl.clone(),
             model_hash,
             fit_toml_path: fit_path.to_string(),
@@ -1382,8 +1382,14 @@ fn build_fit_run(
             stages_declared,
             ic_free: config.ic_free.unwrap_or(false),
             label,
-        }),
-    }
+        },
+    };
+    use crate::cas::typed::CasInputs;
+    inputs.to_run(
+        crate::version::VERSION_SHORT.to_string(),
+        std::env::args().collect(),
+        0.0,
+    )
 }
 
 fn format_prior(p: &Option<config_v2::PriorSpec>) -> String {

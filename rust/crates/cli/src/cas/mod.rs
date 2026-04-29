@@ -29,6 +29,7 @@
 
 pub mod typed;
 pub mod sim_inputs;
+pub mod fit_inputs;
 
 use std::path::Path;
 
