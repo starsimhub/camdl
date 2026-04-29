@@ -335,6 +335,10 @@ pub enum PriorSpec {
     Uniform,
     #[serde(rename = "half_normal")]
     HalfNormal { sigma: f64 },
+    #[serde(rename = "gamma")]
+    Gamma { shape: f64, rate: f64 },
+    #[serde(rename = "exponential")]
+    Exponential { rate: f64 },
 }
 
 // ─── Fixed ──────────────────────────────────────────────────────────────────
@@ -625,6 +629,8 @@ impl FitConfigV2 {
                     PriorSpec::Beta { alpha, beta } => format!("beta({}, {})", alpha, beta),
                     PriorSpec::Uniform => "uniform".to_string(),
                     PriorSpec::HalfNormal { sigma } => format!("halfnormal({})", sigma),
+                    PriorSpec::Gamma { shape, rate } => format!("gamma({}, {})", shape, rate),
+                    PriorSpec::Exponential { rate } => format!("exponential({})", rate),
                 });
                 (name.clone(), EstimateSpec {
                     rw_sd: spec.rw_sd,

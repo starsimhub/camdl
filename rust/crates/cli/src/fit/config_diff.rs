@@ -238,6 +238,10 @@ pub fn format_prior(p: &PriorSpec) -> String {
         PriorSpec::Uniform => "uniform".to_string(),
         PriorSpec::HalfNormal { sigma } =>
             format!("half_normal(sigma={})", sigma),
+        PriorSpec::Gamma { shape, rate } =>
+            format!("gamma(shape={}, rate={})", shape, rate),
+        PriorSpec::Exponential { rate } =>
+            format!("exponential(rate={})", rate),
     }
 }
 

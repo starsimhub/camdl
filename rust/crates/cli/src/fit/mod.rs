@@ -1412,6 +1412,8 @@ fn format_prior(p: &Option<config_v2::PriorSpec>) -> String {
         Some(config_v2::PriorSpec::Beta { alpha, beta }) => format!("beta(alpha={}, beta={})", alpha, beta),
         Some(config_v2::PriorSpec::Uniform) => "uniform".to_string(),
         Some(config_v2::PriorSpec::HalfNormal { sigma }) => format!("half_normal(sigma={})", sigma),
+        Some(config_v2::PriorSpec::Gamma { shape, rate }) => format!("gamma(shape={}, rate={})", shape, rate),
+        Some(config_v2::PriorSpec::Exponential { rate }) => format!("exponential(rate={})", rate),
     }
 }
 

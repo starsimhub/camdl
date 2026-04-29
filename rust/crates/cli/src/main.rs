@@ -1293,6 +1293,16 @@ fn generate_prior_draws(
                 PriorSpec::HalfNormal { sigma } => {
                     (sigma * rng.normal()).abs()
                 }
+                PriorSpec::Gamma { shape, rate } => {
+                    use rand::prelude::Distribution;
+                    rand_distr::Gamma::new(*shape, 1.0 / *rate).unwrap()
+                        .sample(rng.inner_mut())
+                }
+                PriorSpec::Exponential { rate } => {
+                    use rand::prelude::Distribution;
+                    rand_distr::Exp::new(*rate).unwrap()
+                        .sample(rng.inner_mut())
+                }
             };
             let clamped = value.clamp(spec.bounds.0, spec.bounds.1);
             row.insert(name.clone(), clamped);
