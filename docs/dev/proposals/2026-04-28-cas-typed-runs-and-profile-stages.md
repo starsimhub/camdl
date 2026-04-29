@@ -109,9 +109,8 @@ is committed AND `cargo test --workspace` is green. No partial landings.
 - [x] `camdl show` recognises ReplicateSet directories and prints
   children + summary path
 - [x] `camdl cat` streams `summary.tsv` for ReplicateSet umbrellas
-- [ ] `camdl list` top-level surfacing of replicate sets (deferred —
-  profiles aren't surfaced by `camdl list` today either; opt-in via
-  `--parent <hash>` covers the discovery case)
+- [x] `camdl list` top-level surfacing of profiles + replicate-set
+  umbrellas (`--kind=profile` filter + dedicated table)
 
 **Dead code sweep**
 - [x] grep for `sha256_hex(`, manual canonical-string assembly,
