@@ -783,6 +783,15 @@ pub struct ProfileArgs {
     /// Profile TSV output (default: stdout)
     #[arg(short, long)]
     pub output: Option<PathBuf>,
+
+    /// Multi-seed sensitivity: run the entire profile grid at each
+    /// seed in this list. Surfaces stochastic IF2 instability per
+    /// grid point (high spread across seeds → that cell's MLE is not
+    /// trustworthy from a single chain). When omitted, falls back to
+    /// `--seed` for a single-seed run. Accepts comma list `1,2,3` or
+    /// inclusive range `1:5`.
+    #[arg(long, value_name = "SPEC")]
+    pub seeds: Option<SeedSpec>,
 }
 
 // ─── eval ─────────────────────────────────────────────────────────────────────

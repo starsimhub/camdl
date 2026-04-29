@@ -27,6 +27,8 @@
 //! the trajectory cache key is `(sim_hash, scen_hash, seed)`; the obs cache
 //! key is `(trajectory, obs_hash, obs_seed)`.
 
+pub mod typed;
+
 use std::path::Path;
 
 /// Does this run have a cached trajectory?

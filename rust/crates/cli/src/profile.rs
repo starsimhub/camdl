@@ -46,14 +46,135 @@ use sim::{
     },
 };
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use crate::hashing::sha256_hex;
+use crate::cas::typed::{
+    self, CasInputs, ContentHash, ReplicateSet, hash_canonical,
+};
 use crate::run_meta::{FitStageMeta, GridAxis, ProfileMeta, Run, RunKind};
 use crate::run_paths::{
-    output_root, profile_point_dir, profile_point_start_dir, profile_run_dir,
+    output_root, profile_point_dir, profile_point_start_dir,
 };
+
+// ─── ProfileInputs ───────────────────────────────────────────────────────────
+
+/// Typed CAS inputs for a single-realization profile run. The struct
+/// carries every content-bearing input (model, base params, focal
+/// grid, fixed list, IF2 hyperparams, starts_from lineage, seed) plus
+/// presentation hints (model_path, stem). Ephemeral inputs (parallel,
+/// progress, output mirror) live on `ProfileArgs` and don't appear here.
+///
+/// `inner_hash` excludes seed and is the umbrella hash for a multi-seed
+/// `ReplicateSet`. `content_hash` (the trait method) includes seed via
+/// `compose_with_replicate(inner_hash, "seed", seed)` — so a standalone
+/// `--seed N` invocation and one child of a `--seeds 1,N,...` set hit
+/// the same cache key.
+#[derive(Clone, Debug)]
+pub struct ProfileInputs {
+    /// Display-only model path. Recorded in `ProfileMeta.model`.
+    pub model_path: String,
+    /// Slugified stem from the model path; used as the `<stem>-<hash>`
+    /// directory prefix.
+    pub stem: Option<String>,
+    /// Full SHA-256 of the IR JSON.
+    pub model_hash: String,
+    /// Canonical-form hash of the base parameter vector.
+    pub base_params_hash: String,
+    /// Focal grid (one axis per `--sweep` flag).
+    pub focal_grid: Vec<GridAxis>,
+    /// Fixed parameters (`--fixed`): excluded from IF2 estimation. Order
+    /// doesn't matter; sorted before hashing.
+    pub fixed: Vec<String>,
+    /// IF2 hyperparameter set.
+    pub if2_config: ProfileIf2Config,
+    /// Hash of an upstream stage's content this profile starts from.
+    /// `None` for standalone profile invocations.
+    pub starts_from_lineage: Option<String>,
+    /// Per-seed: the actual seed value. `inner_hash` excludes this;
+    /// `content_hash` (trait method) includes it.
+    pub seed: u64,
+}
+
+#[derive(Clone, Debug)]
+pub struct ProfileIf2Config {
+    pub n_particles:  usize,
+    pub n_iterations: usize,
+    pub cooling:      f64,
+    pub dt:           f64,
+    pub n_starts:     usize,
+}
+
+impl ProfileInputs {
+    /// Hash of all content fields *except* seed. Used as the
+    /// inner_hash of a `ReplicateSet` umbrella when running multi-seed.
+    pub fn inner_hash(&self) -> ContentHash {
+        let grid_canonical = serde_json::to_string(&self.focal_grid).unwrap_or_default();
+        let mut fixed_sorted = self.fixed.clone();
+        fixed_sorted.sort();
+        let if2 = format!(
+            "particles={};iterations={};cooling={};dt={};starts={}",
+            self.if2_config.n_particles, self.if2_config.n_iterations,
+            self.if2_config.cooling, self.if2_config.dt, self.if2_config.n_starts,
+        );
+        hash_canonical(&[
+            ("model",       &self.model_hash),
+            ("base_params", &self.base_params_hash),
+            ("focal_grid",  &grid_canonical),
+            ("fixed",       &fixed_sorted.join(",")),
+            ("if2",         &if2),
+            ("starts_from", self.starts_from_lineage.as_deref().unwrap_or("")),
+        ])
+    }
+}
+
+impl CasInputs for ProfileInputs {
+    fn content_hash(&self) -> ContentHash {
+        // Per-seed leaf hash. Composes with `seed` so the same value
+        // is obtained whether the run was invoked standalone or as
+        // one child of a multi-seed ReplicateSet.
+        typed::compose_with_replicate(
+            &self.inner_hash(), "seed", &self.seed.to_string(),
+        )
+    }
+
+    fn cas_path(&self, root: &Path) -> PathBuf {
+        let h = self.content_hash();
+        let dirname = match &self.stem {
+            Some(s) if !s.is_empty() => format!("{}-{}", s, h.short()),
+            _ => h.short().to_string(),
+        };
+        root.join("profiles").join(dirname)
+    }
+
+    fn run_kind(&self) -> RunKind {
+        let total_jobs = self.focal_grid.iter()
+            .map(|g| g.values.len()).product::<usize>()
+            * self.if2_config.n_starts;
+        // The if2_config_hash and base_params_hash fields on
+        // ProfileMeta are diagnostic; ProfileInputs.content_hash() is
+        // the authoritative cache key. Keeping the meta fields for
+        // human inspection in `camdl show`.
+        let if2_canonical = format!(
+            "particles={};iterations={};cooling={};dt={};starts={}",
+            self.if2_config.n_particles, self.if2_config.n_iterations,
+            self.if2_config.cooling, self.if2_config.dt, self.if2_config.n_starts,
+        );
+        let if2_config_hash = ContentHash::from_bytes(if2_canonical.as_bytes())
+            .full().to_string();
+        RunKind::Profile(ProfileMeta {
+            model:            self.model_path.clone(),
+            model_hash:       self.model_hash.clone(),
+            focal_params:     self.focal_grid.iter().map(|g| g.param.clone()).collect(),
+            grid:             self.focal_grid.clone(),
+            n_starts:         self.if2_config.n_starts,
+            if2_config_hash,
+            base_params_hash: self.base_params_hash.clone(),
+            seed_base:        self.seed,
+            total_jobs,
+        })
+    }
+}
 
 pub fn cmd_profile(a: &crate::args::ProfileArgs) {
     let ir_path = a.model.to_string_lossy().into_owned();
@@ -206,113 +327,151 @@ pub fn cmd_profile(a: &crate::args::ProfileArgs) {
         }
         grid_points = expanded;
     }
-    let total_jobs = grid_points.len() * n_starts;
 
-    // ── CAS setup ──────────────────────────────────────────────────────
+    // ── Build typed CAS inputs ─────────────────────────────────────────
     //
-    // Hash inputs:
-    //   - model_hash:         structural hash of the compiled IR
-    //   - base_params_hash:   canonical serialization of base_params
-    //   - focal_params + grid:embedded as JSON for a stable hash
-    //   - if2_config_hash:    (iterations, particles, cooling, dt, starts)
-    //   - seed_base
-    //
-    // Profile-level hash = sha256 over all of the above. Any change to
-    // any input ⇒ different profile_hash ⇒ different output directory
-    // ⇒ fresh run (no false cache hits from stale results). This is
-    // exactly the cache-miss semantics `camdl simulate --cas` uses.
+    // ProfileInputs encapsulates every content-bearing input. inner_hash
+    // (seed-free) drives the multi-seed umbrella; per-seed content_hash
+    // = compose_with_replicate(inner, "seed", seed) — same as a
+    // standalone --seed N invocation, so cache lookup is uniform.
     let model_hash = crate::hashing::model_hash(&model_json);
-    let base_params_canonical = {
-        // Canonical serialization: name=value lines sorted by name.
+    let base_params_hash = {
         let mut lines: Vec<String> = model.parameters.iter()
             .map(|p| format!("{}={}", p.name,
                 p.value.unwrap_or(base_params[compiled.param_index[p.name.as_str()]])))
             .collect();
         lines.sort();
-        lines.join("\n")
+        ContentHash::from_bytes(lines.join("\n").as_bytes()).full().to_string()
     };
-    let base_params_hash = sha256_hex(base_params_canonical.as_bytes());
-
-    let if2_config_canonical = format!(
-        "iterations={}\nparticles={}\ncooling={}\ndt={}\nstarts={}",
-        n_iterations, n_particles, cooling, dt, n_starts,
-    );
-    let if2_config_hash = sha256_hex(if2_config_canonical.as_bytes());
-
     let grid_spec: Vec<GridAxis> = focal_grids.iter().map(|fg| GridAxis {
         param: fg.name.clone(),
         values: fg.values.clone(),
     }).collect();
-    let grid_canonical = serde_json::to_string(&grid_spec).unwrap_or_default();
 
-    let profile_canonical = format!(
-        "{}\n{}\n{}\n{}\n{}\n{}",
-        model_hash, base_params_hash,
-        focal_names.join(","),
-        grid_canonical, if2_config_hash, seed_base,
-    );
-    let profile_hash = sha256_hex(profile_canonical.as_bytes());
-
-    let root = output_root(None, None);  // respects env vars / config if wired upstream
-    let stem = crate::hashing::path_stem_slug(&ir_path);
-    let profile_dir = profile_run_dir(&root, stem.as_deref(), &profile_hash);
-    if let Err(e) = std::fs::create_dir_all(&profile_dir) {
-        eprintln!("error: cannot create {}: {}", profile_dir.display(), e);
+    // Resolve seeds. --seeds wins; default is the single --seed.
+    let seeds: Vec<u64> = match &a.seeds {
+        Some(spec) => spec.expand(),
+        None => vec![seed_base],
+    };
+    if seeds.is_empty() {
+        eprintln!("error: --seeds expanded to empty list");
         std::process::exit(1);
     }
-    eprintln!("profile tree: {}", profile_dir.display());
 
-    // Write profile-level run.json up front (wall_time_seconds = 0 for
-    // now; overwritten at the end with the actual total).
     let argv: Vec<String> = std::env::args().collect();
-    let profile_meta = ProfileMeta {
-        model: ir_path.clone(),
+    let root = output_root(None, None);
+    let stem = crate::hashing::path_stem_slug(&ir_path);
+
+    let template_inputs = ProfileInputs {
+        model_path: ir_path.clone(),
+        stem: stem.clone(),
         model_hash: model_hash.clone(),
-        focal_params: focal_names.clone(),
-        grid: grid_spec,
-        n_starts,
-        if2_config_hash: if2_config_hash.clone(),
-        base_params_hash: base_params_hash.clone(),
-        seed_base,
-        total_jobs,
+        base_params_hash,
+        focal_grid: grid_spec,
+        fixed: a.fixed.clone(),
+        if2_config: ProfileIf2Config {
+            n_particles, n_iterations, cooling, dt, n_starts,
+        },
+        starts_from_lineage: None,
+        seed: seeds[0],   // overwritten per-seed below
     };
-    let profile_run = Run {
-        hash: profile_hash.clone(),
-        version: crate::version::VERSION_SHORT.to_string(),
-        created_at: crate::cas::iso8601_utc(std::time::SystemTime::now()),
-        argv: argv.clone(),
-        wall_time_seconds: 0.0,
-        kind: RunKind::Profile(profile_meta),
+
+    // ── Layout: single seed flat, multi-seed under replicates/ ────────
+    let multi_seed = seeds.len() > 1;
+    let replicate_set: Option<ReplicateSet> = if multi_seed {
+        Some(ReplicateSet {
+            inner_hash: template_inputs.inner_hash(),
+            dim_name:   "seed".to_string(),
+            keys:       seeds.iter().map(|s| format!("seed_{}", s)).collect(),
+            child_kind: "profile".to_string(),
+        })
+    } else {
+        None
     };
-    if let Err(e) = profile_run.write(&profile_dir) {
-        eprintln!("warning: could not write profile run.json: {}", e);
+    let umbrella_dir: Option<PathBuf> = if let Some(rset) = &replicate_set {
+        let parent_hash = rset.parent_hash();
+        let dirname = match &stem {
+            Some(s) if !s.is_empty() => format!("{}-{}", s, parent_hash.short()),
+            _ => parent_hash.short().to_string(),
+        };
+        let dir = root.join("profiles").join(dirname);
+        if let Err(e) = std::fs::create_dir_all(&dir) {
+            eprintln!("error: cannot create {}: {}", dir.display(), e);
+            std::process::exit(1);
+        }
+        let umbrella_run = Run {
+            hash:              parent_hash.full().to_string(),
+            version:           crate::version::VERSION_SHORT.to_string(),
+            created_at:        crate::cas::iso8601_utc(std::time::SystemTime::now()),
+            argv:              argv.clone(),
+            wall_time_seconds: 0.0,
+            kind:              rset.run_kind(),
+        };
+        if let Err(e) = umbrella_run.write(&dir) {
+            eprintln!("warning: could not write umbrella run.json: {}", e);
+        }
+        eprintln!("profile (multi-seed, {} replicates): {}", seeds.len(), dir.display());
+        Some(dir)
+    } else {
+        None
+    };
+
+    // Per-seed directories + content hashes (the latter populates
+    // FitStageMeta.parent_profile_hash on each leaf start_run.json).
+    let mut seed_dirs: Vec<PathBuf> = Vec::with_capacity(seeds.len());
+    let mut per_seed_hashes: Vec<String> = Vec::with_capacity(seeds.len());
+    for &seed in &seeds {
+        let inputs_seed = ProfileInputs { seed, ..template_inputs.clone() };
+        let dir = match (&replicate_set, &umbrella_dir) {
+            (Some(rset), Some(parent)) => rset.child_dir(parent, &format!("seed_{}", seed)),
+            _ => inputs_seed.cas_path(&root),
+        };
+        if let Err(e) = std::fs::create_dir_all(&dir) {
+            eprintln!("error: cannot create {}: {}", dir.display(), e);
+            std::process::exit(1);
+        }
+        if !multi_seed {
+            eprintln!("profile tree: {}", dir.display());
+        }
+        let profile_run = Run {
+            hash:              inputs_seed.content_hash().full().to_string(),
+            version:           crate::version::VERSION_SHORT.to_string(),
+            created_at:        crate::cas::iso8601_utc(std::time::SystemTime::now()),
+            argv:              argv.clone(),
+            wall_time_seconds: 0.0,
+            kind:              inputs_seed.run_kind(),
+        };
+        if let Err(e) = profile_run.write(&dir) {
+            eprintln!("warning: could not write profile run.json: {}", e);
+        }
+        // focal.toml per grid point inside this seed's tree.
+        for (gi, point) in grid_points.iter().enumerate() {
+            let point_dir = profile_point_dir(&dir, gi);
+            if let Err(e) = std::fs::create_dir_all(&point_dir) {
+                eprintln!("warning: cannot create {}: {}", point_dir.display(), e);
+                continue;
+            }
+            let focal_toml_path = point_dir.join("focal.toml");
+            if focal_toml_path.exists() { continue; }
+            let mut body = String::from("# Pinned focal parameter values for this grid point.\n\n");
+            for (fg, &(_, val)) in focal_grids.iter().zip(point.iter()) {
+                body.push_str(&format!("{} = {}\n", fg.name, val));
+            }
+            let _ = std::fs::write(&focal_toml_path, body);
+        }
+        per_seed_hashes.push(inputs_seed.content_hash().full().to_string());
+        seed_dirs.push(dir);
     }
 
-    // Write one focal.toml per grid point so consumers can answer
-    // "which coordinate is point 00042" without parsing the index back
-    // into axis values. Written once up front; unchanging over the run.
-    for (gi, point) in grid_points.iter().enumerate() {
-        let point_dir = profile_point_dir(&profile_dir, gi);
-        if let Err(e) = std::fs::create_dir_all(&point_dir) {
-            eprintln!("warning: cannot create {}: {}", point_dir.display(), e);
-            continue;
-        }
-        let focal_toml_path = point_dir.join("focal.toml");
-        if focal_toml_path.exists() { continue; }
-        let mut body = String::from("# Pinned focal parameter values for this grid point.\n\n");
-        for (fg, &(_, val)) in focal_grids.iter().zip(point.iter()) {
-            body.push_str(&format!("{} = {}\n", fg.name, val));
-        }
-        let _ = std::fs::write(&focal_toml_path, body);
-    }
-
+    let total_jobs = grid_points.len() * n_starts * seeds.len();
     let dim_str = focal_grids.iter()
         .map(|fg| format!("{}={}", fg.name, fg.values.len()))
         .collect::<Vec<_>>().join(" × ");
-    eprintln!("profile: {} grid ({}) × {} starts = {} IF2 runs ({} particles × {} iter each)",
-        grid_points.len(), dim_str, n_starts, total_jobs, n_particles, n_iterations);
+    eprintln!("profile: {} grid ({}) × {} starts × {} seeds = {} IF2 runs ({} particles × {} iter each)",
+        grid_points.len(), dim_str, n_starts, seeds.len(), total_jobs,
+        n_particles, n_iterations);
 
-    // ── Progress display ────────────────────────────────────────────────
+    // ── Progress + cache scan ─────────────────────────────────────────
     let mp = MultiProgress::with_draw_target(crate::progress::draw_target());
     let overall_style = ProgressStyle::with_template(
         "  {prefix:>12} {bar:40.cyan/dim} {pos:>3}/{len:3} {msg}"
@@ -323,27 +482,25 @@ pub fn cmd_profile(a: &crate::args::ProfileArgs) {
     let plain = crate::progress::is_plain();
     let progress_throttle = Mutex::new(crate::progress::Throttle::default());
     if plain {
-        log::info!("profile: {} grid points × {} starts = {} jobs",
-            grid_points.len(), n_starts, total_jobs);
+        log::info!("profile: {} grid points × {} starts × {} seeds = {} jobs",
+            grid_points.len(), n_starts, seeds.len(), total_jobs);
     }
 
-    // ── Cache-hit scan ─────────────────────────────────────────────────
-    //
-    // A start is considered complete iff its start_dir contains a
-    // parseable run.json. Pre-scan to count cache hits (for the
-    // progress display) and skip them from the job list.
-    let jobs: Vec<(usize, usize)> = (0..grid_points.len())
-        .flat_map(|gi| (0..n_starts).map(move |si| (gi, si)))
+    // Job tuple: (seed_idx, grid_idx, start_idx). Cache hit if the
+    // start_dir under this seed's profile tree has a parseable run.json.
+    let jobs: Vec<(usize, usize, usize)> = (0..seeds.len())
+        .flat_map(|seed_idx| (0..grid_points.len())
+            .flat_map(move |gi| (0..n_starts).map(move |si| (seed_idx, gi, si))))
         .collect();
 
-    let mut cached: Vec<(usize, usize)> = Vec::new();
-    let mut remaining: Vec<(usize, usize)> = Vec::new();
-    for &(gi, si) in &jobs {
-        let start_dir = profile_point_start_dir(&profile_dir, gi, si);
+    let mut cached: Vec<(usize, usize, usize)> = Vec::new();
+    let mut remaining: Vec<(usize, usize, usize)> = Vec::new();
+    for &(seed_idx, gi, si) in &jobs {
+        let start_dir = profile_point_start_dir(&seed_dirs[seed_idx], gi, si);
         if Run::read(&start_dir).is_ok() {
-            cached.push((gi, si));
+            cached.push((seed_idx, gi, si));
         } else {
-            remaining.push((gi, si));
+            remaining.push((seed_idx, gi, si));
         }
     }
     if !cached.is_empty() {
@@ -358,29 +515,25 @@ pub fn cmd_profile(a: &crate::args::ProfileArgs) {
             .build_global();
     }
 
-    // Shared throttle for rollup rewrites. Not a hard requirement for
-    // v1 (a rollup rewrite is <1s at realistic grid sizes), but at
-    // very small grids with very fast IF2 runs we could rewrite every
-    // few ms and burn I/O unnecessarily. Throttle to at most once per
-    // second across all threads; last-completion-wins guarantees the
-    // final state is always correct regardless of coalesced writes.
+    // Throttled rollup rewrites: per-seed profile.tsv (1s throttle) and
+    // (multi-seed only) the cross-seed summary.tsv (2s throttle, since
+    // it reads N seeds' rollups). Last-completion-wins.
     let rollup_throttle = Mutex::new(std::time::Instant::now()
+        - std::time::Duration::from_secs(10));
+    let summary_throttle = Mutex::new(std::time::Instant::now()
         - std::time::Duration::from_secs(10));
     let start_time = std::time::Instant::now();
 
-    // ── Run the remaining jobs in parallel, writing each completion
-    //    atomically to its own start_{k}/ directory. ────────────────────
-    // Focal-axis names in declared order (shared with rewrite_rollup
-    // for column ordering). Own the strings so the closure + final
-    // rewrite can borrow without lifetime gymnastics.
     let focal_names_ordered: Vec<String> =
         focal_grids.iter().map(|fg| fg.name.clone()).collect();
 
-    remaining.par_iter().for_each(|&(grid_idx, start_idx)| {
+    // ── Run remaining jobs in parallel ──────────────────────────────
+    remaining.par_iter().for_each(|&(seed_idx, grid_idx, start_idx)| {
         let process = Arc::clone(&process);
         let obs_model_obj = Arc::clone(&obs_model_obj);
         let if2_params = Arc::clone(&if2_params);
         let focal_values: Vec<f64> = grid_points[grid_idx].iter().map(|&(_, v)| v).collect();
+        let seed = seeds[seed_idx];
 
         // Pin focal parameters
         let mut params = base_params.clone();
@@ -395,7 +548,10 @@ pub fn cmd_profile(a: &crate::args::ProfileArgs) {
             simplex_groups: vec![],
             skip_first_obs_from_loglik: false,
         };
-        let job_seed = seed_base ^ (grid_idx as u64 * 1000 + start_idx as u64);
+        // job_seed derives from this REPLICATE's seed, not a global
+        // seed_base — different seeds in --seeds drive distinct IF2
+        // noise (the whole point of multi-seed sensitivity).
+        let job_seed = seed ^ (grid_idx as u64 * 1000 + start_idx as u64);
         let job_t0 = std::time::Instant::now();
 
         let result = run_if2(
@@ -403,12 +559,8 @@ pub fn cmd_profile(a: &crate::args::ProfileArgs) {
         );
         let elapsed = job_t0.elapsed().as_secs_f64();
 
-        // Write the start's artifacts atomically: mle.toml first, then
-        // run.json via Run::write (which is tmp-then-rename). If the
-        // process dies between the two, the next invocation sees no
-        // run.json and reruns — mle.toml alone is not enough to mark
-        // the start complete.
-        let start_dir = profile_point_start_dir(&profile_dir, grid_idx, start_idx);
+        let seed_dir = &seed_dirs[seed_idx];
+        let start_dir = profile_point_start_dir(seed_dir, grid_idx, start_idx);
         if let Err(e) = std::fs::create_dir_all(&start_dir) {
             eprintln!("warning: cannot create {}: {}", start_dir.display(), e);
             return;
@@ -419,19 +571,22 @@ pub fn cmd_profile(a: &crate::args::ProfileArgs) {
             Err(_) => (f64::NEG_INFINITY, params.clone()),
         };
 
-        // Per-start mle.toml: pretty-printed MLE for human inspection
-        // and for the rollup reducer to read back.
         let mle_toml = render_mle_toml(&if2_params, &focal_values,
             &focal_grids.iter().map(|fg| fg.name.as_str()).collect::<Vec<_>>(),
             &mle_params, final_loglik);
         let _ = std::fs::write(start_dir.join("mle.toml"), mle_toml);
 
-        // Per-start run.json: RunKind::FitStage with profile backref.
+        // Per-start run.json. parent_profile_hash references THIS
+        // seed's profile content hash (not the umbrella's), so leaves
+        // walk back to their per-seed parent regardless of single- vs
+        // multi-seed layout.
+        let parent_profile_hash = &per_seed_hashes[seed_idx];
         let start_hash_input = format!(
             "{}|point={}|start={}|seed={}",
-            profile_hash, grid_idx, start_idx, job_seed,
+            parent_profile_hash, grid_idx, start_idx, job_seed,
         );
-        let start_hash = sha256_hex(start_hash_input.as_bytes());
+        let start_hash = ContentHash::from_bytes(start_hash_input.as_bytes())
+            .full().to_string();
         let start_run = Run {
             hash: start_hash,
             version: crate::version::VERSION_SHORT.to_string(),
@@ -454,7 +609,7 @@ pub fn cmd_profile(a: &crate::args::ProfileArgs) {
                 best_chain:  Some(0),
                 starts_from: None,
                 derived_from: None,
-                parent_profile_hash: Some(profile_hash.clone()),
+                parent_profile_hash: Some(parent_profile_hash.clone()),
                 profile_point_idx:   Some(grid_idx),
                 profile_start_idx:   Some(start_idx),
             }),
@@ -475,10 +630,7 @@ pub fn cmd_profile(a: &crate::args::ProfileArgs) {
             }
         }
 
-        // Rollup rewrite — throttled to once per second across threads.
-        // Last-completion-wins; if three threads finish within the
-        // same second, only one rewrite fires but it reflects all
-        // three because rewrite reads the whole tree fresh.
+        // Per-seed rollup (throttled).
         let should_rewrite = {
             let mut last = rollup_throttle.lock().unwrap();
             let now = std::time::Instant::now();
@@ -488,41 +640,89 @@ pub fn cmd_profile(a: &crate::args::ProfileArgs) {
             } else { false }
         };
         if should_rewrite {
-            if let Err(e) = rewrite_rollup(&profile_dir, &focal_names_ordered,
+            if let Err(e) = rewrite_rollup(seed_dir, &focal_names_ordered,
                 &if2_params, grid_points.len()) {
                 eprintln!("warning: rollup rewrite failed: {}", e);
+            }
+        }
+
+        // Cross-seed summary (throttled, multi-seed only).
+        if multi_seed {
+            let should_summary = {
+                let mut last = summary_throttle.lock().unwrap();
+                let now = std::time::Instant::now();
+                if now.duration_since(*last) >= std::time::Duration::from_secs(2) {
+                    *last = now;
+                    true
+                } else { false }
+            };
+            if should_summary {
+                if let Some(parent) = &umbrella_dir {
+                    if let Err(e) = write_cross_seed_summary(
+                        parent, &seed_dirs, &focal_names_ordered, &if2_params)
+                    {
+                        eprintln!("warning: summary rewrite failed: {}", e);
+                    }
+                }
             }
         }
     });
 
     overall_pb.finish_with_message("done");
 
-    // Final rollup rewrite (unthrottled) — guarantees the committed
-    // profile.tsv reflects every completed start, not just the ones
-    // that won the throttle race.
-    if let Err(e) = rewrite_rollup(&profile_dir, &focal_names_ordered,
-        &if2_params, grid_points.len()) {
-        eprintln!("warning: final rollup rewrite failed: {}", e);
+    // Final per-seed rollup rewrites + cross-seed summary (unthrottled).
+    for seed_dir in &seed_dirs {
+        if let Err(e) = rewrite_rollup(seed_dir, &focal_names_ordered,
+            &if2_params, grid_points.len())
+        {
+            eprintln!("warning: final rollup rewrite failed: {}", e);
+        }
     }
-
-    // Patch the profile-level run.json with total wall time now that
-    // the run is complete.
-    if let Ok(mut pr) = Run::read(&profile_dir) {
-        pr.wall_time_seconds = start_time.elapsed().as_secs_f64();
-        let _ = pr.write(&profile_dir);
-    }
-
-    // Optional: mirror profile.tsv to the user's --output path.
-    if let Some(ref path) = output_tsv_path {
-        let src = profile_dir.join("profile.tsv");
-        if src.exists() {
-            match std::fs::copy(&src, path) {
-                Ok(_) => eprintln!("profile written to {}", path),
-                Err(e) => eprintln!("warning: could not copy profile.tsv to {}: {}", path, e),
+    if multi_seed {
+        if let Some(parent) = &umbrella_dir {
+            if let Err(e) = write_cross_seed_summary(
+                parent, &seed_dirs, &focal_names_ordered, &if2_params)
+            {
+                eprintln!("warning: final summary rewrite failed: {}", e);
             }
         }
+    }
+
+    // Patch each per-seed (and umbrella) run.json with total wall time.
+    let total_wall = start_time.elapsed().as_secs_f64();
+    for seed_dir in &seed_dirs {
+        if let Ok(mut pr) = Run::read(seed_dir) {
+            pr.wall_time_seconds = total_wall;
+            let _ = pr.write(seed_dir);
+        }
+    }
+    if let Some(parent) = &umbrella_dir {
+        if let Ok(mut pr) = Run::read(parent) {
+            pr.wall_time_seconds = total_wall;
+            let _ = pr.write(parent);
+        }
+    }
+
+    // Mirror the user-facing TSV. Multi-seed → cross-seed summary
+    // (the artifact you asked for when you ran with --seeds);
+    // single-seed → per-seed profile.tsv (legacy behavior).
+    let mirror_src: Option<PathBuf> = if multi_seed {
+        umbrella_dir.as_ref().map(|d| d.join("summary.tsv"))
     } else {
-        eprintln!("profile.tsv: {}", profile_dir.join("profile.tsv").display());
+        Some(seed_dirs[0].join("profile.tsv"))
+    };
+    if let Some(ref path) = output_tsv_path {
+        if let Some(src) = mirror_src.as_ref() {
+            if src.exists() {
+                match std::fs::copy(src, path) {
+                    Ok(_) => eprintln!("written to {}", path),
+                    Err(e) => eprintln!("warning: could not copy {} to {}: {}",
+                        src.display(), path, e),
+                }
+            }
+        }
+    } else if let Some(src) = mirror_src.as_ref() {
+        eprintln!("output: {}", src.display());
     }
 }
 
@@ -691,5 +891,115 @@ fn toml_as_f64(v: &toml::Value) -> Option<f64> {
         toml::Value::Integer(i) => Some(*i as f64),
         _ => None,
     }
+}
+
+/// Cross-seed aggregator. Reads each per-seed `profile.tsv` and emits
+/// `summary.tsv` at the umbrella directory: one row per grid point
+/// with mean / sd / min / max of `best_loglik` across seeds plus
+/// per-MLE-column mean/sd. High `sd_loglik` at a grid point flags
+/// stochastic IF2 instability — that cell's MLE is not trustworthy
+/// from a single chain.
+///
+/// Atomic write (tmp-then-rename) so concurrent throttled rewrites
+/// from the rayon pool can't expose a half-written summary.
+fn write_cross_seed_summary(
+    umbrella_dir: &Path,
+    seed_dirs: &[PathBuf],
+    focal_names: &[String],
+    if2_params: &[sim::inference::if2::EstimatedParam],
+) -> std::io::Result<()> {
+    use std::collections::BTreeMap;
+
+    // Map: focal-values key (as the canonical TSV-column strings, so
+    // grid points with identical floats group together regardless of
+    // formatting) → list of (best_loglik, mle_vec) per seed.
+    let mut by_grid: BTreeMap<Vec<String>, Vec<(f64, Vec<f64>)>> = BTreeMap::new();
+    let mle_len = if2_params.iter().map(|s| s.index).max().unwrap_or(0) + 1;
+
+    for seed_dir in seed_dirs {
+        let path = seed_dir.join("profile.tsv");
+        let Ok(text) = std::fs::read_to_string(&path) else { continue; };
+        for line in text.lines() {
+            if line.starts_with('#') { continue; }
+            let cols: Vec<&str> = line.split('\t').collect();
+            // Header row uses literal column names; skip it.
+            if cols.get(focal_names.len()).map(|s| *s) == Some("best_loglik") {
+                continue;
+            }
+            // Layout: focal_1 ... focal_N | best_loglik | best_start_idx |
+            //         wall_time_seconds | mle_param_1 ... mle_param_M
+            if cols.len() < focal_names.len() + 3 + if2_params.len() { continue; }
+
+            let focal_key: Vec<String> = cols[..focal_names.len()]
+                .iter().map(|s| s.trim().to_string()).collect();
+            let Ok(best_loglik) = cols[focal_names.len()].parse::<f64>() else { continue; };
+
+            let mle_start = focal_names.len() + 3;
+            let mut mle = vec![f64::NAN; mle_len];
+            for (i, spec) in if2_params.iter().enumerate() {
+                if let Some(s) = cols.get(mle_start + i) {
+                    if let Ok(v) = s.parse::<f64>() {
+                        if spec.index < mle.len() {
+                            mle[spec.index] = v;
+                        }
+                    }
+                }
+            }
+            by_grid.entry(focal_key).or_default().push((best_loglik, mle));
+        }
+    }
+
+    let mut body = String::new();
+    body.push_str(&format!("# {} cross-seed summary across {} seeds\n",
+        crate::version::VERSION, seed_dirs.len()));
+    body.push_str(&format!("# n_grid_points={} n_seeds={}\n",
+        by_grid.len(), seed_dirs.len()));
+    for name in focal_names { body.push_str(&format!("{}\t", name)); }
+    body.push_str("n_seeds\tmean_loglik\tsd_loglik\tmin_loglik\tmax_loglik");
+    for spec in if2_params.iter() {
+        body.push_str(&format!("\t{}_mean\t{}_sd", spec.name, spec.name));
+    }
+    body.push('\n');
+
+    for (focal_key, samples) in &by_grid {
+        for v in focal_key { body.push_str(&format!("{}\t", v)); }
+        let n = samples.len();
+        let logliks: Vec<f64> = samples.iter().map(|(ll, _)| *ll)
+            .filter(|x| x.is_finite()).collect();
+        let n_finite = logliks.len();
+        let (mean_ll, sd_ll, min_ll, max_ll) = summary_stats(&logliks);
+        body.push_str(&format!("{}\t{:.4}\t{:.4}\t{:.4}\t{:.4}",
+            n_finite.max(n), mean_ll, sd_ll, min_ll, max_ll));
+        for spec in if2_params.iter() {
+            let vals: Vec<f64> = samples.iter()
+                .filter_map(|(_, mle)| mle.get(spec.index).copied())
+                .filter(|x| x.is_finite()).collect();
+            let (m, s, _, _) = summary_stats(&vals);
+            body.push_str(&format!("\t{:.6}\t{:.6}", m, s));
+        }
+        body.push('\n');
+    }
+
+    let final_path = umbrella_dir.join("summary.tsv");
+    let tmp_path = umbrella_dir.join("summary.tsv.tmp");
+    std::fs::write(&tmp_path, body)?;
+    std::fs::rename(&tmp_path, &final_path)?;
+    Ok(())
+}
+
+/// (mean, sd, min, max) of a slice. Empty input returns NaN/0/inf/-inf;
+/// callers should treat NaN as "no data" not "zero data."
+fn summary_stats(xs: &[f64]) -> (f64, f64, f64, f64) {
+    if xs.is_empty() {
+        return (f64::NAN, 0.0, f64::INFINITY, f64::NEG_INFINITY);
+    }
+    let n = xs.len() as f64;
+    let mean = xs.iter().sum::<f64>() / n;
+    let sd = if xs.len() > 1 {
+        (xs.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / (n - 1.0)).sqrt()
+    } else { 0.0 };
+    let min = xs.iter().cloned().fold(f64::INFINITY, f64::min);
+    let max = xs.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+    (mean, sd, min, max)
 }
 
