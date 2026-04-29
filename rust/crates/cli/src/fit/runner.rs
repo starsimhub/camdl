@@ -817,12 +817,12 @@ pub fn run_chains_with_per_chain_params(
     // driven by 500-particle in-run PF noise and exhibited a ~40-nat
     // extraction bias on production runs. The in-run trace above is
     // preserved for diagnostics (Unit B territory).
-    eprintln!("\nclean-eval: re-scoring final-iter θ̂ ({} chains × {} replicates @ {} particles)...",
+    eprintln!("\nloglik-eval: re-scoring final-iter θ̂ ({} chains × {} replicates @ {} particles)...",
         results.len(), config.loglik_eval.n_replicates, config.loglik_eval.n_particles);
     let loglik_eval_outcome = loglik_eval::run_loglik_eval(
         config, &results, &config.loglik_eval, config.seed,
     ).unwrap_or_else(|e| {
-        eprintln!("error: clean-eval failed: {}", e);
+        eprintln!("error: loglik-eval failed: {}", e);
         std::process::exit(1);
     });
 

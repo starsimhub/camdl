@@ -1321,7 +1321,11 @@ fn render_md_stage(stage: &StageReport) -> String {
     // IF2 per-chain loglik-eval.
     if !stage.chains.is_empty() {
         s.push_str(&format!("### Per-chain loglik-eval ({} chains)\n\n", stage.chains.len()));
-        s.push_str("| chain | clean_ll | ± se | winner |\n|---|---|---|---|\n");
+        // Column / marker naming matches the text emitter and CLAUDE.md:
+        // "loglik" / "selected", not "clean_ll" / "winner". The
+        // ChainSummary.is_winner field name on the data side stays
+        // (it's the data model); only the display label changed.
+        s.push_str("| chain | loglik | ± se | selected |\n|---|---|---|---|\n");
         for c in &stage.chains {
             let mark = if c.is_winner { "★" } else { "" };
             s.push_str(&format!("| {} | {:.2} | {:.2} | {} |\n",
@@ -1421,8 +1425,10 @@ fn render_latex_stage(stage: &StageReport) -> String {
     }
 
     if !stage.chains.is_empty() {
+        // Column / marker naming matches the text + md emitters: "loglik"
+        // / "Selected", not "clean_ll" / "Winner".
         s.push_str("\\begin{tabular}{rrrc}\n\\toprule\n");
-        s.push_str("Chain & clean\\_ll & $\\pm$ se & Winner \\\\\n\\midrule\n");
+        s.push_str("Chain & loglik & $\\pm$ se & Selected \\\\\n\\midrule\n");
         for c in &stage.chains {
             let mark = if c.is_winner { "$\\star$" } else { "" };
             s.push_str(&format!(

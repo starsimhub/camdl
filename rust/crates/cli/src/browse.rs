@@ -197,6 +197,38 @@ fn list_profile_children(
         return;
     }
 
+    // Pass 1: find any ReplicateSet umbrellas whose `parent_hash` (the
+    // umbrella's own Run.hash) or `inner_content_hash` (the seed-free
+    // hash shared across replicate children) matches the prefix.
+    // Multi-seed profile umbrellas store each per-seed child's profile
+    // content hash as a `parent_profile_hash` on the deeper FitStage
+    // leaves, so we need to expand the user-supplied umbrella prefix
+    // into the set of per-seed hashes before the leaf walk.
+    let mut expanded_prefixes: Vec<String> = vec![parent_hash_prefix.to_string()];
+    for dir in walkdir_all(&profiles_root) {
+        let rj = dir.join("run.json");
+        if !rj.exists() { continue; }
+        let Ok(text) = std::fs::read_to_string(&rj) else { continue; };
+        let Ok(run) = serde_json::from_str::<Run>(&text) else { continue; };
+        if let RunKind::ReplicateSet(ref m) = run.kind {
+            let umbrella_matches =
+                run.hash.starts_with(parent_hash_prefix)
+                || m.inner_content_hash.starts_with(parent_hash_prefix);
+            if !umbrella_matches { continue; }
+            // For each child, peek at its run.json to get the per-seed
+            // profile content hash and add it to the expanded set.
+            for key in &m.keys {
+                let child_dir = dir.join("replicates").join(key);
+                let crj = child_dir.join("run.json");
+                let Ok(ctext) = std::fs::read_to_string(&crj) else { continue; };
+                let Ok(crun) = serde_json::from_str::<Run>(&ctext) else { continue; };
+                if matches!(crun.kind, RunKind::Profile(_)) {
+                    expanded_prefixes.push(crun.hash);
+                }
+            }
+        }
+    }
+
     let mut matches: Vec<(std::path::PathBuf, Run)> = Vec::new();
     for dir in walkdir_all(&profiles_root) {
         let rj = dir.join("run.json");
@@ -204,9 +236,10 @@ fn list_profile_children(
         let Ok(text) = std::fs::read_to_string(&rj) else { continue; };
         let Ok(run) = serde_json::from_str::<Run>(&text) else { continue; };
         if let RunKind::FitStage(ref m) = run.kind {
-            if m.parent_profile_hash.as_deref()
-                .is_some_and(|h| h.starts_with(parent_hash_prefix))
-            {
+            let parent = m.parent_profile_hash.as_deref();
+            if parent.is_some_and(|h| {
+                expanded_prefixes.iter().any(|p| h.starts_with(p))
+            }) {
                 matches.push((dir, run));
             }
         }
