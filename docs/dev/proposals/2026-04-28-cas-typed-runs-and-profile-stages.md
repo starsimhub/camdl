@@ -1,6 +1,6 @@
-# Typed CAS runs, replicate sets, and profile-as-stage
+# Typed CAS runs and replicate sets
 
-**Status:** Proposed (Phase 1 ready to ship; Phase 2 design only)
+**Status:** In implementation (`worktree-typed-cas` branch)
 **Author:** Vince Buffalo + Claude
 **Date:** 2026-04-28
 **Related:**
@@ -29,16 +29,92 @@ This document does two things:
    metadata all flow from this decomposition.** Articulates this as a
    `CasInputs` trait that every CAS-emitting command implements.
 
-2. Uses that abstraction to fold profile into the fit-stage workflow
-   *and* to ship multi-seed sensitivity for profile in a way that survives
-   the eventual stage-integration without re-layout.
+2. Uses that abstraction to ship multi-seed sensitivity for profile (the
+   forcing function for getting the trait right) and migrates all four
+   CAS-emitting subcommands (`profile`, `simulate --cas`, `batch run`,
+   `fit run`) onto the unified trait in a single push. Old ad-hoc CAS
+   hashing is deleted as each command lands; no parallel paths, no
+   `#[allow(dead_code)]`, no migration shims.
 
-The change ships in two phases. Phase 1 (this proposal's first
-deliverable) introduces the typed-CAS trait *and* multi-seed profile,
-because those are the two changes that interact and the seed slice is
-the forcing function for getting the trait right. Phase 2 (deferred)
-folds profile into `fit.toml` as a stage method, enabling
-refine→profile chaining and synthetic-data profiling.
+Profile-as-stage in `fit.toml` (a separate workflow-composition feature
+that would let refine→profile chain inside one fit invocation) is
+out of scope here and tracked as future work in Appendix C; the trait
+is designed so that work can land later without re-layout.
+
+camdl is unreleased software. Back-compat is a non-goal: existing
+`<root>/profiles/`, `<root>/sims/`, etc. trees may have stale hashes
+after this change and will be recomputed on first run. No migration
+tool ships.
+
+---
+
+## Implementation checklist
+
+The work lands on `worktree-typed-cas` and merges to `main` as one
+coherent feature. Each line gets checked when the corresponding work
+is committed AND `cargo test --workspace` is green. No partial landings.
+
+**Foundation**
+- [ ] `rust/crates/cli/src/cas/typed.rs` — `CasInputs` trait,
+  `Replicates<T,K>` wrapper, `ContentHash`, `CasMeta`, `ReplicateSet`,
+  `ReplicateKey` trait, canonical hashing helpers
+- [ ] Unit tests for trait composition and `Replicates` parent/child
+  hash relationship
+
+**Profile (forcing function — first real consumer)**
+- [ ] `ProfileInputs` struct with explicit role classification
+- [ ] `impl CasInputs for ProfileInputs`
+- [ ] Replace inline `sha256_hex` + canonical-string construction in
+  `profile.rs` with trait dispatch
+- [ ] `--seeds` CLI flag on `ProfileArgs`
+- [ ] `Replicates<ProfileInputs, SeedKey>` wraps multi-seed runs
+- [ ] Cross-seed `summary.tsv` aggregator (per-grid-point spread)
+- [ ] Single-seed layout unchanged from today (preserves muscle memory)
+- [ ] Tests for both single- and multi-seed layouts
+- [ ] Old hash-construction code deleted in the same commit
+
+**Simulate (`simulate --cas`)**
+- [ ] `SimulateInputs` struct
+- [ ] `impl CasInputs for SimulateInputs`
+- [ ] Replace inline canonicalization in `cas.rs`
+- [ ] Old hash-construction code deleted
+
+**Batch (`batch run`)**
+- [ ] `BatchInputs` struct (per-run: model + scenario + sweep_point + seed)
+- [ ] `impl CasInputs for BatchInputs`
+- [ ] Sweep is a *grid* (multiple distinct hashes); seeds are a
+  *replicate* dimension when more than one
+- [ ] Replace inline path/hash construction in `batch.rs`
+- [ ] Old hash-construction code deleted
+
+**Fit (`fit run`)**
+- [ ] `FitInputs` struct (model + data + fit.toml bytes)
+- [ ] `StageInputs` struct (per-stage, parametrized on stage method)
+- [ ] `impl CasInputs` for both
+- [ ] `fit_seeds` becomes formal `Replicates<FitInputs, FitSeedKey>` set
+  when `len > 1`
+- [ ] Synthetic data: `dataset_idx` is a second replicate dimension
+  nested under fit_seeds (`Replicates<Replicates<…>, DatasetKey>`)
+- [ ] Replace `fit_content_hash` and `fit_stage_hash` inline
+  construction in `fit/runner.rs` and `fit/provenance.rs`
+- [ ] Old hash-construction code deleted
+
+**Readers**
+- [ ] `RunKind::ReplicateSet(meta)` variant in `run_meta.rs`
+- [ ] `camdl list` recognises and lists ReplicateSet children
+- [ ] `camdl show` displays cross-replicate aggregate diagnostic
+- [ ] `camdl cat` resolves through ReplicateSet to a chosen child
+
+**Dead code sweep**
+- [ ] grep for `sha256_hex(`, manual canonical-string assembly,
+  inline hash composition in `rust/crates/cli/src/` outside `cas::typed`
+- [ ] Every remaining match deleted, no `#[allow(dead_code)]`
+- [ ] `cargo clippy --workspace -- -D warnings` clean
+
+**Final**
+- [ ] `cargo test --workspace` green
+- [ ] Proposal Status: Implemented (date)
+- [ ] Branch ready for merge to `main`
 
 ---
 
@@ -347,21 +423,24 @@ absent today (profile) and formalizes them where they're implicit (fit).
 
 ---
 
-## Phase 1 deliverable: `CasInputs` trait + multi-seed profile
+## Implementation: trait + four-command migration + multi-seed profile
 
-The minimum slice that pays for itself. Ships together because designing
-the trait without one real consumer produces a vacuous trait.
+All four CAS-emitting subcommands migrate to the `CasInputs` trait in
+this push. Profile is the first consumer (forcing function for the
+trait shape), then simulate, batch, and fit. Every command's old
+ad-hoc hashing is deleted in the same commit that introduces its
+typed-input replacement — no parallel paths.
 
 ### What ships
 
 1. **`CasInputs` trait + `Replicates<T, K>` wrapper** in a new `cas::typed`
    module. Trait alone, no derive macro yet.
-2. **Profile reimpl**: `ProfileInputs` struct with explicit `#[role = ...]`
-   markers (just doc, no proc-macro reading them yet); impl `CasInputs`
-   by hand. Existing per-start CAS body unchanged.
-3. **Multi-seed profile**: the `--seeds` CLI flag (and `seeds = [...]`
-   when fit-stage integration ships in Phase 2). `ProfileInputs` exposes
-   the seeds list; the runner wraps it in `Replicates`.
+2. **Profile reimpl**: `ProfileInputs` struct with explicit role
+   classification per field; impl `CasInputs` by hand. Existing per-start
+   CAS body unchanged.
+3. **Multi-seed profile**: the `--seeds` CLI flag. `ProfileInputs`
+   exposes the seeds list; the runner wraps it in `Replicates` when
+   `len > 1`.
 4. **Cross-seed aggregator**: writes `<profile>/summary.tsv` with per-grid-point
    `mean / sd / min / max / n_seeds_finished` for `loglik` and each MLE
    column. Throttled the same way the existing `profile.tsv` is.
@@ -369,6 +448,15 @@ the trait without one real consumer produces a vacuous trait.
    from today (preserves muscle memory for the standalone profile CLI).
    When `seeds.len() > 1`, the path is `<profile>/replicates/seed_<S>/...`
    per replicate, with the cross-seed `summary.tsv` at the profile root.
+6. **Simulate / batch / fit migrations**: each command grows its own
+   `*Inputs` struct, implements `CasInputs`, and deletes its inline
+   hashing code. Layouts preserved where they were already coherent;
+   `fit_seeds` is formalized as a `Replicates<FitInputs, FitSeedKey>`
+   set; synthetic-data fits compose two replicate dimensions
+   (`fit_seeds` × `dataset_idx`) by nesting `Replicates`.
+7. **Readers** (`camdl list / show / cat`): handle the new
+   `RunKind::ReplicateSet` variant by walking children and surfacing
+   the aggregate diagnostic.
 
 ### CLI
 
@@ -431,13 +519,12 @@ per_start_hash          = sha256(per_seed_content_hash | point_idx | start_idx |
 ```
 
 The shift from "seed in `profile_hash`" to "seed in `per_seed_content_hash`"
-is a content-hash change for existing single-seed profiles. **This breaks
-existing cache: every profile directory under `<root>/profiles/` will be
-recomputed on first run after the upgrade.** This is intentional — the
-old hash was wrong by the new rule. Mitigation: a one-shot migration tool
-(`camdl cas migrate`) that re-hashes existing run.json and renames
-directories. Could ship in the same release or as a follow-up; the
-proposal recommends shipping it concurrently to avoid silent leaks.
+is a content-hash change for existing single-seed profiles. Existing
+`<root>/profiles/<old-hash>/` directories become orphaned and are
+recomputed on first run after the upgrade. Back-compat is a non-goal
+(camdl is unreleased software); users who care can `rm -rf` the old
+trees, otherwise they sit idle and `camdl list` filters them out via
+hash mismatch.
 
 ### Sensitivity diagnostic
 
@@ -456,33 +543,43 @@ signal. A natural threshold (analogous to the chain-Â gate at IF2 fit
 time) is "sd_loglik below X dB at every grid point" — TBD with empirical
 calibration on the boarding-school cases that motivated this proposal.
 
-### Upstream changes (Phase 1 only)
+### Upstream changes
 
 1. New module `rust/crates/cli/src/cas/typed.rs`: `CasInputs` trait,
    `Replicates<T, K>` wrapper, `ContentHash`/`CasMeta` types, canonical
    hashing helpers.
 2. `rust/crates/cli/src/profile.rs`: factor out `ProfileInputs` struct;
    impl `CasInputs`; replace inline hash construction.
-3. `rust/crates/cli/src/run_meta.rs`: `RunKind::ReplicateSet` variant
+3. `rust/crates/cli/src/cas.rs`: `SimulateInputs` struct; impl
+   `CasInputs`; replace inline canonicalization.
+4. `rust/crates/cli/src/batch.rs`: `BatchInputs` struct (per-run);
+   impl `CasInputs`; replace inline path/hash construction.
+5. `rust/crates/cli/src/fit/{runner,provenance}.rs`: `FitInputs` and
+   `StageInputs` structs; impl `CasInputs`; `Replicates<…>` wrapping
+   for `fit_seeds` and synthetic-data `dataset_idx`; replace
+   `fit_content_hash` and `fit_stage_hash` inline construction.
+6. `rust/crates/cli/src/run_meta.rs`: `RunKind::ReplicateSet` variant
    carrying the replicate dimension's name, key list, and inner-kind
-   discriminant. (Existing `RunKind::Profile` etc. unchanged.)
-4. `rust/crates/cli/src/run_paths.rs`: add `replicate_set_dir(parent, key)`
+   discriminant. (Existing `RunKind::Profile`/`Fit`/`Simulate`
+   unchanged.)
+7. `rust/crates/cli/src/run_paths.rs`: add `replicate_set_dir(parent, key)`
    helper.
-5. `rust/crates/cli/src/args/mod.rs`: `--seeds` flag on `ProfileArgs`,
+8. `rust/crates/cli/src/args/mod.rs`: `--seeds` flag on `ProfileArgs`,
    parsed via existing `SeedSpec` shape.
-6. `rust/crates/cli/src/cas/migrate.rs`: one-shot directory renamer
-   that re-hashes legacy profile dirs and moves them into the new
-   layout.
-7. `camdl list / show` updates: handle `RunKind::ReplicateSet` by
-   listing children with the aggregate diagnostic.
+9. `camdl list / show / cat` updates: handle `RunKind::ReplicateSet`
+   by listing children with the aggregate diagnostic.
+10. Dead-code sweep across all of the above — every ad-hoc canonical
+    string + sha256 invocation outside `cas::typed` deleted.
 
 ---
 
-## Phase 2 deliverable (deferred): profile-as-stage
+## Appendix C: Future work — profile-as-stage in `fit.toml`
 
 Implements profile inside `fit.toml` so it composes with synthetic data
-and stage chaining. Specified now so Phase 1's trait doesn't paint us
-into a corner; not built yet.
+and stage chaining. Out of scope for this proposal; specified here so
+the trait shape doesn't paint us into a corner. To be picked up as a
+separate proposal when refine→profile chaining or
+profile-of-synthetic-data shows up as a real workflow need.
 
 ### What it adds
 
@@ -494,7 +591,7 @@ into a corner; not built yet.
    `RunKind::Profile` with stage-level lineage fields.
 4. Stage runner dispatch in `fit/mod.rs`: at execute time, build a
    `ProfileInputs` rooted at the stage's directory under the cell, run
-   it through the same Phase 1 machinery.
+   it through the same `CasInputs` machinery shipped here.
 5. `starts_from` resolution for profile stages: a downstream stage's
    `starts_from = "profile_stage_name"` resolves to the profile's
    argmax (best loglik across all points × seeds × starts). Picking
@@ -552,21 +649,19 @@ This produces:
 
 ### Why deferred
 
-The Phase 2 work is real: new `StageConfig` variant, new `RunKind`,
-`starts_from = "profile@best"` resolution, cross-cell aggregator, fit-flow
-integration tests. None of it is hard, but it doesn't pay until you
-have a workflow that needs profile-of-synthetic-data or refine→profile
-chaining. The seed slice surfaces the IF2 sensitivity issue
-*without* needing any of this. Phase 2 is on the shelf with a clear
-contract; ship it when a real downstream user pulls.
+The work is real: new `StageConfig` variant, new `RunKind`,
+`starts_from = "profile@best"` resolution, cross-cell aggregator,
+fit-flow integration tests. None of it is hard, but it doesn't pay
+until a workflow needs profile-of-synthetic-data or refine→profile
+chaining. The seed slice surfaces the IF2 sensitivity issue *without*
+needing any of this.
 
-The Phase 1 trait was designed so Phase 2 *cannot* require a re-layout
-of Phase 1 outputs. A profile run that lived under `<root>/profiles/`
-(Phase 1) and the same profile run that lives under
-`<fit>/real/fit_<seed>/beta_profile/` (Phase 2) have the *same*
-`profile_content_hash` and the *same* internal layout. Only the parent
-changes. Migration from Phase 1 to Phase 2 (if ever needed) is a
-content-preserving move.
+The trait shape is designed so this future work *cannot* require a
+re-layout of typed-CAS outputs. A profile run that lives under
+`<root>/profiles/` today and the same profile run that lives under
+`<fit>/real/fit_<seed>/beta_profile/` after future work would have
+the *same* `profile_content_hash` and the *same* internal layout.
+Only the parent changes — content-preserving move.
 
 ---
 
@@ -601,81 +696,49 @@ Profile, fit, simulate, batch all obey them via their `CasInputs` impls.
 
 ## Open design questions
 
-1. **Derive macro for `CasInputs`.** Phase 1 ships the trait with
-   hand-written impls. After Phase 1 + simulate migration (likely
-   Phase 1.5), three impls exist; if their bodies are 80% identical, a
-   `#[derive(CasInputs)]` proc-macro is cheap. If they differ in
-   interesting ways (and they might — profile's grid dimension is
-   genuinely different from sim's scenario), the macro fights the
-   structure. Decision deferred until empirical duplication is visible.
+1. **Derive macro for `CasInputs`.** Trait ships with hand-written
+   impls. Once all four commands have implemented it, if the bodies
+   are 80% identical, a `#[derive(CasInputs)]` proc-macro is cheap.
+   If they differ in interesting ways (and they might — profile's
+   grid dimension is genuinely different from sim's scenario), the
+   macro fights the structure. Decision deferred until empirical
+   duplication is visible post-migration.
 
-2. **`starts_from = "profile@best"` selector syntax.** Phase 2 binds
-   downstream stages to a profile's argmax loglik point. A future
-   syntax `starts_from = "beta_profile@point_05"` (or `@beta=2.0`)
-   would let a user pin a specific cell. Out of scope here; flagged so
-   we don't accidentally close the door.
+2. **Cross-replicate aggregator pluggability.** Profile's per-grid-point
+   summary aggregator lives in `profile.rs`. Fit's replicate-set
+   aggregator (per-stage chain-Â across cells) will be different in
+   substance. The cleanest extension is a `ReplicateAggregator` trait
+   that each kind implements. Each command writes its own aggregator
+   inline for now; if a third consumer wants one, hoist to a trait.
 
-3. **Cross-replicate aggregator pluggability.** Phase 1 hardcodes the
-   per-grid-point summary aggregator inside profile.rs. If `fit run`
-   gains formal replicate sets (Phase 1.5), it'll want its own
-   aggregator (per-stage chain-Â across cells, not per-grid-point
-   spread). The cleanest extension is a `ReplicateAggregator` trait
-   that each kind implements. Defer until two consumers exist.
-
-4. **Migration tool's failure mode.** Re-hashing legacy profile dirs
-   to the new content hash is a non-trivial migration: the old hash
-   included seed, the new doesn't. We can deterministically reconstruct
-   the new hash from the old `run.json` *only if* the old run.json
-   carries enough provenance fields. Spot-check on existing
-   `<root>/profiles/` trees in the project before committing to a
-   silent migration; if any tree predates the necessary provenance, the
-   migration must be invoke-on-demand (with explicit user opt-in) not
-   automatic.
-
-5. **`Replicates<T, K>` over multiple dimensions simultaneously.**
-   E.g., `fit_seeds × dataset_idx` is two replicate dimensions.
-   Today's fit handles this with nested directories
-   (`synthetic/ds_NN/fit_<seed>/`). The Phase 1 trait specifies *one*
-   replicate dimension per wrapper; multi-dim is composed via nesting
-   (`Replicates<Replicates<T, K1>, K2>`). Whether the path layout
-   should reflect this nesting verbatim or flatten to
-   `replicates/seed=1,dataset=2/` is a presentation question; current
-   nested form (`synthetic/ds_01/fit_1/...`) is more navigable. Recommend
-   keeping nested form but having the trait expose both as
-   compositions of `Replicates`.
-
-6. **Where the migration tool lives.** Could be `camdl cas migrate`
-   (subcommand of a future `cas` umbrella), `camdl migrate cas`
-   (verb-first), or a one-shot script in `tools/`. Subcommand under
-   `cas` reads cleanest if we expect more CAS maintenance verbs (`gc`,
-   `verify`, `prune`). Verb-first reads better for a one-shot.
+3. **`Replicates<T, K>` over multiple dimensions simultaneously.**
+   Synthetic-data fit has two replicate dimensions
+   (`fit_seeds × dataset_idx`). The trait specifies *one* replicate
+   dimension per wrapper; multi-dim is composed via nesting
+   (`Replicates<Replicates<T, K1>, K2>`). The path layout reflects the
+   nesting verbatim — current nested form
+   (`synthetic/ds_01/fit_1/…`) is more navigable than a flattened
+   `replicates/seed=1,dataset=2/`.
 
 ---
 
 ## Risks
 
-1. **Migration of existing profile directories.** Real risk; mitigated
-   by the migration tool. The risk is that a researcher with a long-
-   running 12h profile in flight upgrades and finds their cache
-   invalidated mid-resume. Mitigation: ship the migration tool first,
-   document the upgrade path in the release notes, set
-   `RUST_LOG=camdl_cas=info` to log every re-hashed directory.
-
-2. **Trait misuse: a content field marked ephemeral.** A bug in a
+1. **Trait misuse: a content field marked ephemeral.** A bug in a
    `CasInputs` impl could hide a content-bearing input from the hash,
    producing silent cache hits on stale results. Mitigation: a
-   compile-time test that hashes every field of every typed-input
-   struct and panics if the impl's `content_hash` doesn't include them
-   all. (Possible via `derive`-able trait; weaker via runtime
-   reflection. Punt to Phase 1.5.)
+   compile-time test that exercises every typed-input struct's
+   `content_hash` against a snapshot, so any change to fields without
+   a corresponding hash-input update fails the build. (A future
+   derive macro would enforce this structurally.)
 
-3. **Replicate set semantics drift between commands.** Profile and fit
-   adopt the schema; simulate and batch don't (yet). Until all four
-   migrate, the unification is partial. Mitigation: a CHANGELOG entry
-   per command's migration; the proposal explicitly allows partial
-   migration (each command's CAS is independent).
+2. **Replicate set semantics drift between commands.** All four
+   commands migrate in this push, so drift can't accrete. Each
+   command's `*Inputs` struct goes through the same trait; the same
+   `Replicates<T, K>` composition handles seed (for simulate / batch /
+   fit / profile) and `dataset_idx` (for synthetic-data fit).
 
-4. **`summary.tsv` aggregator races.** Phase 1's aggregator is
+3. **`summary.tsv` aggregator races.** The aggregator is
    throttled-rewrite, last-completion-wins (same pattern as today's
    `profile.tsv`). The race is benign at the per-replicate level, but
    if a per-replicate child writes its `profile.tsv` and the aggregate
@@ -690,23 +753,26 @@ Profile, fit, simulate, batch all obey them via their `CasInputs` impls.
 
 - Doesn't introduce a derive macro. Trait first; macro if and when
   duplication justifies it.
-- Doesn't migrate `simulate`, `fit run`, or `batch run` to the trait.
-  Phase 1 only migrates profile (the forcing function); other commands
-  migrate opportunistically.
+- Doesn't ship a migration tool or back-compat shims. camdl is
+  unreleased software; old `<root>/profiles/` and similar trees may
+  hold orphan directories after the upgrade and users can `rm -rf`
+  them.
+- Doesn't fold profile into `fit.toml` as a stage method. That's a
+  separate workflow-composition feature tracked in Appendix C.
 - Doesn't add a `cas` umbrella subcommand or `cas gc` / `cas verify` /
   etc. Those are downstream work that the trait makes possible but
   doesn't require.
 - Doesn't define a cross-version `run.json` schema migration policy.
-  The existing version-string check in `Run::read` is deemed sufficient
-  for Phase 1; harder questions (long-term storage compatibility) are
-  out of scope.
+  The existing version-string check in `Run::read` is deemed
+  sufficient; long-term storage compatibility is out of scope.
 
 ---
 
 ## Appendix A: Current state inventory
 
-For posterity and to make the migration tractable, every CAS-emitting
-code path's current hash inputs and path layout.
+For posterity, every CAS-emitting code path's *pre-migration* hash
+inputs and path layout. After this proposal lands, every reference
+here points at deleted code.
 
 ### `simulate --cas` (cas.rs, run_paths.rs:64)
 
@@ -748,11 +814,11 @@ The four are *almost* consistent. The misalignment is:
 - Fit has an implicit umbrella (`fit_content_hash`) but no formal name.
 - Simulate and batch don't have an umbrella concept at all.
 
-Phase 1's contribution: name the umbrella as `Replicates<T, K>`, fix
-profile to use it (seed-out-of-umbrella, replicate-set wrapping),
-formalize fit's implicit umbrella in Phase 1.5 (deferred), and leave
-simulate/batch unchanged unless/until they grow a multi-seed feature
-that wants the same diagnostic surface.
+This proposal's contribution: name the umbrella as `Replicates<T, K>`,
+fix profile to use it (seed-out-of-umbrella, replicate-set wrapping),
+formalize fit's implicit umbrella, and prepare simulate/batch for
+multi-seed by giving them the same trait — they ship single-seed
+today but the abstraction is in place when a feature needs it.
 
 ---
 
@@ -778,8 +844,12 @@ that wants the same diagnostic surface.
 
 ## Decision
 
-Recommend Phase 1 as written: trait + multi-seed profile, ship together
-because the trait without one real consumer is vacuous and multi-seed
-profile without the trait would lock in another inconsistent layout.
-Phase 2 (profile-as-stage in fit.toml) on the shelf with a clear
-contract; pull when a downstream workflow asks for it.
+Approved: trait + four-command migration + multi-seed profile, all in
+one push on `worktree-typed-cas`. Old ad-hoc CAS hashing deleted as
+each command lands. No back-compat shims, no migration tool. Branch
+merges to `main` when the implementation checklist is fully checked
+and `cargo test --workspace` is green.
+
+Profile-as-stage in `fit.toml` (Appendix C) tracked as future work;
+the trait is shaped so it can land later without any layout changes
+to the artifacts produced by this proposal.
