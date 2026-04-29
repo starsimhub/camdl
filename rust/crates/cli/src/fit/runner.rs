@@ -5,7 +5,6 @@
 //! chain-agreement (Â) computation, and MAD-based auto rw_sd calibration.
 
 use crate::fit::loglik_eval;
-use crate::fit::config::FitToml;
 use crate::fit::state::FitState;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use rayon::prelude::*;
@@ -58,7 +57,7 @@ pub struct FitRunConfig {
     /// IC-free inference flag. When true, the PF/IF2/PGAS log-likelihood
     /// accumulation skips the first observation (y₁ is still used to
     /// weight and resample — that's how the initial state gets pinned).
-    /// Mirrors `FitToml::fit.ic_free` (and thus FitConfigV2::ic_free).
+    /// Mirrors `FitConfigV2::ic_free`.
     /// Flows into `SMCConfig.skip_first_obs_from_loglik`. See
     /// docs/dev/proposals/2026-04-18-ic-free-inference.md.
     pub ic_free: bool,
@@ -94,9 +93,9 @@ pub struct ChainResults {
 }
 
 impl FitRunConfig {
-    /// Build from fit.toml, optionally overriding from a prior fit_state.
+    /// Build from a v2 fit.toml, optionally overriding from a prior fit_state.
     pub fn build(
-        fit: &FitToml,
+        fit: &super::config_v2::FitConfigV2,
         prior_state: Option<&FitState>,
         n_chains: usize,
         n_particles: usize,
@@ -106,7 +105,7 @@ impl FitRunConfig {
         random_starts: bool,
     ) -> Result<Self, String> {
         // Load model
-        let model_path = &fit.fit.model;
+        let model_path = &fit.model.camdl;
         let (mut model, model_ir_json) = crate::util::load_model(model_path)?;
         // Keep a copy of the unfiltered model so the startup diagnostic
         // can show what was declared vs what's active. Cheap clone — the
@@ -119,13 +118,13 @@ impl FitRunConfig {
         // scenario nor enable/disable are set in fit.toml, interventions
         // are cleared (spec default). Shared helper with simulate/pfilter
         // so the three entry points cannot drift.
-        if fit.fit.scenario.is_some()
-            && (!fit.fit.enable.is_empty() || !fit.fit.disable.is_empty())
+        if fit.scenario.is_some()
+            && (!fit.enable.is_empty() || !fit.disable.is_empty())
         {
-            return Err("fit.toml [fit]: `scenario` is mutually exclusive \
+            return Err("fit.toml: `scenario` is mutually exclusive \
                 with `enable`/`disable`. Use one approach.".into());
         }
-        let (enable_list, disable_list) = if let Some(ref name) = fit.fit.scenario {
+        let (enable_list, disable_list) = if let Some(ref name) = fit.scenario {
             let preset = model.presets.iter().find(|p| p.name == *name).cloned()
                 .ok_or_else(|| {
                     let avail: Vec<&str> = model.presets.iter()
@@ -141,9 +140,14 @@ impl FitRunConfig {
             }
             (preset.enable, preset.disable)
         } else {
-            (fit.fit.enable.clone(), fit.fit.disable.clone())
+            (fit.enable.clone(), fit.disable.clone())
         };
         crate::util::apply_scenario_filter(&mut model, &enable_list, &disable_list)?;
+
+        // Resolve fixed up-front (file load + inline overlay). v2's
+        // FixedParams.resolve() can fail (file-not-found / parse), so
+        // propagate the Result rather than swallowing.
+        let fixed_resolved = fit.fixed.resolve()?;
 
         // Apply parameter values from fit.toml BEFORE compiling, so that
         // parameters without model defaults get values.
@@ -155,11 +159,9 @@ impl FitRunConfig {
                 }
             }
         }
-        for (name, val) in &fit.fixed {
-            if let Some(v) = val.as_float().or_else(|| val.as_integer().map(|i| i as f64)) {
-                if let Some(p) = model.parameters.iter_mut().find(|p| p.name == *name) {
-                    if p.value.is_none() { p.value = Some(v); }
-                }
+        for (name, &v) in &fixed_resolved {
+            if let Some(p) = model.parameters.iter_mut().find(|p| p.name == *name) {
+                if p.value.is_none() { p.value = Some(v); }
             }
         }
 
@@ -186,11 +188,9 @@ impl FitRunConfig {
             }
         }
         // 2. Apply fixed numeric values (override model defaults).
-        for (name, val) in &fit.fixed {
-            if let Some(v) = val.as_float().or_else(|| val.as_integer().map(|i| i as f64)) {
-                if let Some(&idx) = compiled.param_index.get(name.as_str()) {
-                    base_params[idx] = v;
-                }
+        for (name, &v) in &fixed_resolved {
+            if let Some(&idx) = compiled.param_index.get(name.as_str()) {
+                base_params[idx] = v;
             }
         }
         // 3. Apply prior_state last so it wins over config start/fixed.
@@ -206,20 +206,25 @@ impl FitRunConfig {
 
         // Build EstimatedParam specs
         let if2_params = build_if2_params(
-            fit, prior_state, &model, &compiled, &base_params, random_starts, seed,
+            &fit.estimate, prior_state, &model, &compiled, &base_params, random_starts, seed,
         )?;
 
-        // Load data — one or more observation streams
+        // Load data — one or more observation streams (real-data only;
+        // synthetic-data fits route through a generator before this path).
         let dt = fit.config.dt;
-        if fit.data.is_empty() {
-            return Err("fit.toml [data] section is empty".into());
+        let data_spec = fit.data_spec()?;
+        if data_spec.observations.is_empty() {
+            return Err("fit.toml [data.observations] is empty".into());
         }
 
         let mut streams = Vec::new();
         let mut canonical_times: Option<Vec<f64>> = None;
 
-        // Sort by name for deterministic ordering
-        let mut data_entries: Vec<_> = fit.data.iter().collect();
+        // Sort by name for deterministic ordering. (IndexMap preserves
+        // insertion order — we pin a sort here so two fits with the
+        // same observations but different toml ordering still hash
+        // identically downstream.)
+        let mut data_entries: Vec<_> = data_spec.observations.iter().collect();
         data_entries.sort_by_key(|(k, _)| k.as_str());
 
         for (stream_name, data_path) in &data_entries {
@@ -268,7 +273,7 @@ impl FitRunConfig {
                 streams.iter().map(|s| s.name.as_str()).collect::<Vec<_>>().join(", "));
         }
 
-        let ic_free = fit.fit.ic_free;
+        let ic_free = fit.ic_free.unwrap_or(false);
         let config = IF2Config {
             n_particles,
             n_iterations,
@@ -345,11 +350,11 @@ impl FitRunConfig {
 
 // load_model is now in util.rs
 
-/// Build EstimatedParam specs from fit.toml [estimate] + optional prior state overrides.
+/// Build EstimatedParam specs from v2 [estimate] + optional prior state overrides.
 /// Uses the shared build_if2_params_from_specs for core logic, then applies
 /// fit-specific overrides (prior state rw_sd, start values, random starts).
 fn build_if2_params(
-    fit: &FitToml,
+    estimate: &indexmap::IndexMap<String, super::config_v2::EstimateSpecV2>,
     prior_state: Option<&FitState>,
     model: &ir::Model,
     compiled: &CompiledModel,
@@ -357,8 +362,8 @@ fn build_if2_params(
     random_starts: bool,
     seed: u64,
 ) -> Result<Vec<EstimatedParam>, String> {
-    // Build ParamSpecs from fit.toml [estimate]
-    let specs: Vec<ParamSpec> = fit.estimate.iter().map(|(name, est)| {
+    // Build ParamSpecs from v2 [estimate]
+    let specs: Vec<ParamSpec> = estimate.iter().map(|(name, est)| {
         // rw_sd priority: prior state > fit.toml explicit > None (auto)
         let rw_sd = prior_state
             .and_then(|s| s.rw_sd.get(name))
@@ -367,17 +372,17 @@ fn build_if2_params(
         ParamSpec {
             name: name.clone(),
             rw_sd,
-            transform: est.transform.clone(),
+            transform: est.transform.as_ref().map(|t| t.as_str().to_string()),
             ivp: est.ivp,
         }
     }).collect();
 
     let mut params = build_if2_params_from_specs(model, compiled, base_params, &specs)?;
 
-    // Sort by name for deterministic ordering. HashMap iteration is
-    // non-deterministic, so without this sort the parameter order in
-    // if2_params can differ between runs — causing z-value mismatches
-    // on --resume.
+    // Sort by name for deterministic ordering. IndexMap preserves
+    // insertion order, but to keep param order stable across configs
+    // that list the same params in different orders (and so resume's
+    // z-value mapping survives) we sort by name.
     params.sort_by(|a, b| a.name.cmp(&b.name));
 
     // Fit-specific: apply start values and random starts
@@ -393,7 +398,7 @@ fn build_if2_params(
             if let Some(&v) = state.start_values.get(&p.name) {
                 p.initial = v;
             }
-        } else if let Some(est) = fit.estimate.get(&p.name) {
+        } else if let Some(est) = estimate.get(&p.name) {
             if let Some(start) = est.start {
                 p.initial = start;
             }
@@ -2310,9 +2315,10 @@ mod tests {
     #[test]
     fn fit_state_overrides_config_start_in_base_params() {
         use crate::fit::state::FitState;
+        use crate::fit::config_v2::FitConfigV2;
         use std::collections::HashMap;
 
-        // Tiny fit.toml referencing the sir_priors golden. We set
+        // Tiny v2 fit.toml referencing the seir golden. We set
         // beta's `start = 1.5`; prior_state will supply 9.9. The
         // bug has `start` winning; the fix has `prior_state` winning.
         let manifest = std::env::var("CARGO_MANIFEST_DIR").unwrap();
@@ -2326,16 +2332,23 @@ mod tests {
         std::fs::write(&data_path,
             "time\tweekly_cases\n7\t1\n14\t2\n21\t3\n28\t4\n35\t5\n").unwrap();
 
+        // The v2 fit.toml. We use `start = 1.5` on beta and a [stages.scout]
+        // section so the config validates; build() doesn't actually consume
+        // the stage block (chains/particles come from its own args).
+        let fit_toml_path = data_dir.join("fit.toml");
         let toml = format!(r#"
-[fit]
-model = "{}"
 output_dir = "{}"
-seed = 1
-[config]
-backend = "gillespie"
-dt = 1.0
-[data]
+
+[model]
+camdl = "{}"
+
+[data.observations]
 weekly_cases = "{}"
+
+[estimate.beta]
+bounds = [0.01, 20.0]
+start  = 1.5
+
 [fixed]
 sigma    = 0.25
 gamma    = 0.3
@@ -2344,15 +2357,21 @@ k        = 10.0
 p_detect = 0.5
 N0       = 1000
 I0       = 1
-[estimate]
-beta = {{ start = 1.5 }}
-[scout]
-chains = 1
-particles = 100
+
+[stages.scout]
+method     = "if2"
+chains     = 1
+particles  = 100
 iterations = 1
-cooling = 0.5
-"#, ir_path, data_dir.display(), data_path.display());
-        let fit: FitToml = toml::from_str(&toml).unwrap();
+cooling    = 0.5
+
+[config]
+backend = "gillespie"
+dt = 1.0
+"#, data_dir.display(), ir_path, data_path.display());
+        std::fs::write(&fit_toml_path, &toml).unwrap();
+        let fit = FitConfigV2::load(&fit_toml_path.to_string_lossy())
+            .expect("v2 fit.toml parse");
 
         // Scout produced a very different "best" — a clearly
         // distinguishable value so a win/loss is unambiguous.
@@ -2396,9 +2415,9 @@ cooling = 0.5
     // ── IC-free inference: config validation ────────────────────────────
 
     fn ic_free_fixture(dir: &std::path::Path, ic_free: bool, ivp: bool)
-        -> FitToml
+        -> super::super::config_v2::FitConfigV2
     {
-        // Minimal fit.toml against the seir_observations golden IR.
+        // Minimal v2 fit.toml against the seir_observations golden IR.
         // Toggles ic_free and whether I0 is ivp-flagged independently
         // so all four combinations can be built.
         let manifest = std::env::var("CARGO_MANIFEST_DIR").unwrap();
@@ -2408,17 +2427,21 @@ cooling = 0.5
         std::fs::write(&data_path,
             "time\tweekly_cases\n7\t1\n14\t2\n21\t3\n28\t4\n35\t5\n").unwrap();
         let ivp_clause = if ivp { ", ivp = true" } else { "" };
+        let fit_toml_path = dir.join("fit.toml");
         let toml_src = format!(r#"
-[fit]
-model = "{}"
 output_dir = "{}"
-seed = 1
 ic_free = {}
-[config]
-backend = "gillespie"
-dt = 1.0
-[data]
+
+[model]
+camdl = "{}"
+
+[data.observations]
 weekly_cases = "{}"
+
+[estimate.I0]
+bounds = [1, 1000]
+start  = 5{}
+
 [fixed]
 sigma    = 0.25
 gamma    = 0.3
@@ -2427,15 +2450,22 @@ k        = 10.0
 p_detect = 0.5
 N0       = 1000
 beta     = 1.5
-[estimate]
-I0 = {{ start = 5{} }}
-[scout]
-chains = 1
-particles = 100
+
+[stages.scout]
+method     = "if2"
+chains     = 1
+particles  = 100
 iterations = 1
-cooling = 0.5
-"#, ir_path, dir.display(), ic_free, data_path.display(), ivp_clause);
-        toml::from_str(&toml_src).expect("fit.toml parse")
+cooling    = 0.5
+
+[config]
+backend = "gillespie"
+dt = 1.0
+"#, dir.display(), ic_free, ir_path, data_path.display(), ivp_clause);
+        std::fs::write(&fit_toml_path, toml_src).unwrap();
+        super::super::config_v2::FitConfigV2::load(
+            &fit_toml_path.to_string_lossy())
+            .expect("v2 fit.toml parse")
     }
 
     fn ic_free_test_dir(tag: &str) -> std::path::PathBuf {

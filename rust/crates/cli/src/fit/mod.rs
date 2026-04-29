@@ -714,7 +714,7 @@ pub fn cmd_fit_run_v2(a: &crate::args::FitRunArgs) {
                 };
 
                 let mut run_config = runner::FitRunConfig::build(
-                    &sweep_legacy,
+                    &sweep_config,
                     prior_state.as_ref(),
                     *chains, *particles, *iterations,
                     *cooling, seed, effective_starts.is_none(),
@@ -929,6 +929,7 @@ pub fn cmd_fit_run_v2(a: &crate::args::FitRunArgs) {
 
                 pgas::run_pgas_cli(
                     &legacy_with_pgas,
+                    &sweep_config,
                     &sweep_config.estimate,
                     effective_starts.as_deref(),
                     seed, force, true, true, false,
@@ -989,6 +990,7 @@ pub fn cmd_fit_run_v2(a: &crate::args::FitRunArgs) {
 
                 pmmh::run_pmmh_cli(
                     &legacy_with_pmmh,
+                    &sweep_config,
                     &sweep_config.estimate,
                     effective_starts.as_deref(),
                     seed, force, false, false,
@@ -1023,7 +1025,7 @@ pub fn cmd_fit_run_v2(a: &crate::args::FitRunArgs) {
 
                 // Build run config (reuse IF2 builder with 1 chain, N particles)
                 let run_config = runner::FitRunConfig::build(
-                    &sweep_legacy,
+                    &sweep_config,
                     prior_state.as_ref(),
                     1, *particles, 1, 1.0, seed, false,
                 ).unwrap_or_else(|e| {

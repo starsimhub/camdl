@@ -26,6 +26,7 @@ const DEFAULT_ADAPT_START: usize = 500;
 
 pub fn run_pmmh_cli(
     fit: &FitToml,
+    fit_v2: &super::config_v2::FitConfigV2,
     estimate: &indexmap::IndexMap<String, super::config_v2::EstimateSpecV2>,
     starts_from: Option<&str>,
     seed: u64,
@@ -57,7 +58,7 @@ pub fn run_pmmh_cli(
 
     // Build FitRunConfig (reuse existing builder)
     let config = FitRunConfig::build(
-        fit, prior_state.as_ref(),
+        fit_v2, prior_state.as_ref(),
         n_chains, n_particles, 1, // iterations=1 unused for PMMH
         1.0, // cooling unused
         seed, false,
