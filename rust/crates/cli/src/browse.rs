@@ -233,6 +233,7 @@ pub fn cmd_show(a: &crate::args::ShowArgs) {
     let root = a.root.to_string_lossy();
     let entry = match resolve_any(&root, &a.target) {
         Ok(Resolved::Fit(f)) => { show_fit(&f); return; }
+        Ok(Resolved::ReplicateSet(r)) => { show_replicate_set(&r); return; }
         Ok(Resolved::Sim(s)) => s,
         Err(e) => { eprintln!("error: {}", e); std::process::exit(1); }
     };
@@ -283,6 +284,39 @@ fn show_fit(entry: &FitEntry) {
     println!("  {}", entry.run.argv.join(" "));
 }
 
+fn show_replicate_set(entry: &ReplicateSetEntry) {
+    println!("{}", "path".bright_black()); println!("  {}", entry.rel_path.cyan());
+    println!("{}", "kind".bright_black());
+    println!("  replicate-set ({} of {})",
+        entry.meta.child_kind, entry.meta.dim_name);
+    println!("{}", "children".bright_black());
+    for k in &entry.meta.keys {
+        let child_dir = entry.abs_path.join("replicates").join(k);
+        let exists_marker = if child_dir.join("run.json").exists() { "✓" } else { "·" };
+        println!("  {} {}", exists_marker, k);
+    }
+    let summary = entry.abs_path.join("summary.tsv");
+    if summary.exists() {
+        let bytes = std::fs::metadata(&summary).map(|m| m.len()).unwrap_or(0);
+        println!("{}", "summary".bright_black());
+        println!("  {} ({} bytes)", summary.display(), bytes);
+    } else {
+        println!("{}", "summary".bright_black());
+        println!("  {} (not yet written)", "summary.tsv".dimmed());
+    }
+    println!("{}", "hashes".bright_black());
+    println!("  parent {}", entry.run.hash.dimmed());
+    println!("  inner  {}", entry.meta.inner_content_hash.dimmed());
+    println!("{}", "created".bright_black());
+    println!("  {}  ({})", entry.run.created_at,
+        fmt_relative_time(entry.created, SystemTime::now()));
+    println!("{}", "version".bright_black()); println!("  {}", entry.run.version);
+    println!("{}", "wall time".bright_black());
+    println!("  {:.1}s", entry.run.wall_time_seconds);
+    println!("{}", "argv".bright_black());
+    println!("  {}", entry.run.argv.join(" "));
+}
+
 // ── cmd_cat ──────────────────────────────────────────────────────────────────
 
 pub fn cmd_cat(a: &crate::args::CatArgs) {
@@ -293,6 +327,22 @@ pub fn cmd_cat(a: &crate::args::CatArgs) {
                        {} is a fit directory. For stage output, pass the stage\n  \
                        path directly, e.g. `camdl cat {}/real/fit_<seed>/<stage>/mle_params.toml`.",
                       f.rel_path, f.rel_path);
+            std::process::exit(1);
+        }
+        Ok(Resolved::ReplicateSet(r)) => {
+            let summary = r.abs_path.join("summary.tsv");
+            if summary.exists() {
+                let bytes = std::fs::read(&summary).unwrap_or_else(|e| {
+                    eprintln!("error reading {}: {}", summary.display(), e);
+                    std::process::exit(1);
+                });
+                use std::io::Write as _;
+                let _ = std::io::stdout().write_all(&bytes);
+                return;
+            }
+            eprintln!("error: 'camdl cat' on a replicate-set umbrella expects \
+                summary.tsv, which has not been written yet for {}.",
+                r.rel_path);
             std::process::exit(1);
         }
         Ok(Resolved::Sim(_)) | Err(_) => {}
@@ -418,11 +468,41 @@ fn discover_fits(root: &str) -> Result<Vec<FitEntry>, String> {
         .collect())
 }
 
-/// Resolved by a user-supplied key: either a sim run or a fit.
+/// Resolved by a user-supplied key: a sim run, a fit, or a
+/// replicate-set umbrella (e.g. multi-seed profile).
 #[derive(Debug, Clone)]
 enum Resolved {
     Sim(RunEntry),
     Fit(FitEntry),
+    ReplicateSet(ReplicateSetEntry),
+}
+
+/// A discovered replicate-set umbrella (the parent of N seeded /
+/// dataset-indexed children). Currently produced by multi-seed
+/// `camdl profile` runs (`<root>/profiles/<stem>-<parent_hash>/`).
+#[derive(Debug, Clone)]
+struct ReplicateSetEntry {
+    run: Run,
+    meta: crate::cas::typed::ReplicateSetMeta,
+    rel_path: String,
+    abs_path: PathBuf,
+    created: SystemTime,
+}
+
+/// Try to load a replicate-set umbrella from a directory. Returns
+/// `None` when the directory's `run.json` is missing, malformed, or
+/// not of kind `ReplicateSet`.
+fn load_replicate_set_entry(dir: &Path, cwd: &Path) -> Option<ReplicateSetEntry> {
+    let (run, created, rel_path) = load_run_common(dir, cwd)?;
+    let meta = match &run.kind {
+        RunKind::ReplicateSet(m) => m.clone(),
+        _ => return None,
+    };
+    Some(ReplicateSetEntry {
+        run, meta, rel_path,
+        abs_path: dir.to_path_buf(),
+        created,
+    })
 }
 
 /// Resolve a user-supplied key to either a sim run or a fit. Accepts:
@@ -437,6 +517,9 @@ fn resolve_any(root: &str, key: &str) -> Result<Resolved, String> {
     let as_path = Path::new(key);
     if as_path.is_dir() && as_path.join("run.json").exists() {
         let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        if let Some(r) = load_replicate_set_entry(as_path, &cwd) {
+            return Ok(Resolved::ReplicateSet(r));
+        }
         if let Some(f) = load_fit_entry(as_path, &cwd) { return Ok(Resolved::Fit(f)); }
         if let Some(s) = load_sim_entry(as_path, &cwd) { return Ok(Resolved::Sim(s)); }
         return Err(format!("run.json at {} has an unrecognised kind", as_path.display()));
