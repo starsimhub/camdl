@@ -4,7 +4,6 @@
 //! updates (θ | X) with conditional SMC trajectory updates (X | θ, y).
 //! Outputs per-chain trace files, convergence diagnostics, and summary.
 
-use crate::fit::config::FitToml;
 use crate::fit::state::FitState;
 use crate::fit::runner::FitRunConfig;
 use crate::cas::iso8601_utc;
@@ -15,56 +14,91 @@ use sim::inference::{
     diagnostic::{DiagnosticCollector, DiagnosticKind},
 };
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 
-const DEFAULT_CHAINS: usize = 4;
-const DEFAULT_SWEEPS: usize = 10_000;
-const DEFAULT_PARTICLES: usize = 100;
+/// Per-stage knobs extracted from a `Stage::PGAS { ... }` variant by the
+/// `camdl fit run` dispatcher and passed verbatim into `run_stage`.
+///
+/// Defaults for fields not represented in v2 (`tempering`,
+/// `max_treedepth`, `trajectory_warmup`, `csmc_sweeps_per_nuts`,
+/// `n_trajectories`) match the v1 defaults so behaviour is unchanged.
+/// Adding these knobs to v2's Stage::PGAS schema is out of scope for
+/// the v1-cleanup pass.
+pub struct PgasStageOpts {
+    pub n_chains: usize,
+    pub n_particles: usize,
+    pub n_sweeps: usize,
+    pub burn_in: usize,
+    pub thin: usize,
+}
+
 const DEFAULT_BURN_IN: usize = 2000;
 const DEFAULT_THIN: usize = 5;
+const DEFAULT_N_TRAJECTORIES: usize = 200;
 
-pub fn run_pgas_cli(
-    fit: &FitToml,
-    fit_v2: &super::config_v2::FitConfigV2,
-    estimate: &indexmap::IndexMap<String, super::config_v2::EstimateSpecV2>,
-    starts_from: Option<&str>,
+impl PgasStageOpts {
+    /// Build from a `Stage::PGAS { ... }` variant. Errors if `stage` is
+    /// not the PGAS variant — caller's responsibility to dispatch.
+    pub fn from_stage(stage: &super::config_v2::Stage) -> Result<Self, String> {
+        match stage {
+            super::config_v2::Stage::PGAS {
+                chains, particles, sweeps, burn_in, thin, ..
+            } => Ok(PgasStageOpts {
+                n_chains: *chains,
+                n_particles: *particles,
+                n_sweeps: *sweeps,
+                burn_in: burn_in.unwrap_or(DEFAULT_BURN_IN),
+                thin: thin.unwrap_or(DEFAULT_THIN),
+            }),
+            other => Err(format!(
+                "PgasStageOpts::from_stage: expected Stage::PGAS, got {}",
+                other.method_name())),
+        }
+    }
+}
+
+pub fn run_stage(
+    fit: &super::config_v2::FitConfigV2,
+    stage_name: &str,
+    stage: &super::config_v2::Stage,
+    stage_dir: &Path,
+    pgas_opts: PgasStageOpts,
     seed: u64,
     force: bool,
     use_nuts: bool,
     dense_mass: bool,
     resume: bool,
+    starts_from: Option<&str>,
 ) -> Result<(), String> {
-    let stage_dir = format!("{}/pgas", fit.fit.output_dir);
-    let sc = fit.pgas.as_ref();
-
-    let n_chains = sc.and_then(|s| s.chains).unwrap_or(DEFAULT_CHAINS);
-    let n_sweeps = sc.and_then(|s| s.sweeps).unwrap_or(DEFAULT_SWEEPS);
-    let n_particles = sc.and_then(|s| s.particles).unwrap_or(DEFAULT_PARTICLES);
-    let burn_in = sc.and_then(|s| s.burn_in).unwrap_or(DEFAULT_BURN_IN);
-    let thin = sc.and_then(|s| s.thin).unwrap_or(DEFAULT_THIN);
-    let n_trajectories = sc.and_then(|s| s.n_trajectories).unwrap_or(200);
+    let estimate = &fit.estimate;
+    let n_chains = pgas_opts.n_chains;
+    let n_sweeps = pgas_opts.n_sweeps;
+    let n_particles = pgas_opts.n_particles;
+    let burn_in = pgas_opts.burn_in;
+    let thin = pgas_opts.thin;
+    let n_trajectories = DEFAULT_N_TRAJECTORIES;
 
     if !force && !resume {
-        let state_path = format!("{}/fit_state.toml", stage_dir);
-        if std::path::Path::new(&state_path).exists() {
-            eprintln!("\x1b[33mpgas results already exist in {}. Use --force to re-run or --resume to continue.\x1b[0m", stage_dir);
+        let state_path = stage_dir.join("fit_state.toml");
+        if state_path.exists() {
+            eprintln!("\x1b[33mpgas results already exist in {}. Use --force to re-run or --resume to continue.\x1b[0m",
+                stage_dir.display());
             return Ok(());
         }
     }
 
-    std::fs::create_dir_all(&stage_dir)
-        .map_err(|e| format!("cannot create {}: {}", stage_dir, e))?;
+    std::fs::create_dir_all(stage_dir)
+        .map_err(|e| format!("cannot create {}: {}", stage_dir.display(), e))?;
 
     let collector = DiagnosticCollector::new("pgas");
 
     // Load prior state if --starts-from provided
-    let starts_from = starts_from
-        .map(String::from)
-        .or_else(|| sc.and_then(|s| s.starts_from.clone()));
+    let starts_from = starts_from.map(String::from);
     let prior_state = starts_from.as_deref().map(FitState::load).transpose()?;
 
     // Build FitRunConfig (reuse existing builder)
     let config = FitRunConfig::build(
-        fit_v2, prior_state.as_ref(),
+        fit, prior_state.as_ref(),
         n_chains, n_particles, 1,
         1.0, seed, false,
     )?;
@@ -129,14 +163,23 @@ pub fn run_pgas_cli(
 
     // Compute config hash — identifies the statistical problem.
     // Changes to model/data/priors/bounds/particles/dt invalidate resume state.
-    let config_hash = super::runner::compute_config_hash(fit, &config);
+    // Uses provenance::fit_stage_hash, the same hash the v2 dispatch
+    // site uses for cache-hit / staleness checks (model + observations
+    // + estimate + fixed + stage_name + Stage variant + seed).
+    let fixed_resolved = fit.fixed.resolve()?;
+    let data_spec = fit.data_spec()?;
+    let config_hash = super::provenance::fit_stage_hash(
+        &config.model_ir_json, &data_spec.observations,
+        &fit.estimate, &fixed_resolved, stage_name, stage, seed,
+    )?;
 
     // Load resume states if --resume
     let resume_states: Vec<Option<ChainResumeState>> = if resume {
         let mut states = Vec::with_capacity(n_chains);
         let mut any_failed = false;
         for chain_id in 0..n_chains {
-            let path = format!("{}/chain_{}/resume_state.bin", stage_dir, chain_id + 1);
+            let path: PathBuf = stage_dir.join(format!("chain_{}", chain_id + 1))
+                .join("resume_state.bin");
             match std::fs::read(&path) {
                 Ok(data) => match bincode::deserialize::<ChainResumeState>(&data) {
                     Ok(state) => {
@@ -158,7 +201,8 @@ pub fn run_pgas_cli(
                     }
                 }
                 Err(_) => {
-                    eprintln!("error: no resume state file for chain {} ({})", chain_id + 1, path);
+                    eprintln!("error: no resume state file for chain {} ({})",
+                        chain_id + 1, path.display());
                     any_failed = true;
                     states.push(None);
                 }
@@ -220,9 +264,9 @@ pub fn run_pgas_cli(
 
     // Pre-create chain directories (must happen before parallel spawn)
     for chain_id in 0..n_chains {
-        let chain_dir = format!("{}/chain_{}", stage_dir, chain_id + 1);
+        let chain_dir = stage_dir.join(format!("chain_{}", chain_id + 1));
         std::fs::create_dir_all(&chain_dir)
-            .map_err(|e| format!("cannot create {}: {}", chain_dir, e))?;
+            .map_err(|e| format!("cannot create {}: {}", chain_dir.display(), e))?;
     }
 
     let t0 = std::time::Instant::now();
@@ -235,10 +279,14 @@ pub fn run_pgas_cli(
         .into_par_iter()
         .map(|chain_id| {
             let chain_seed = crate::util::derive_chain_seed(seed, chain_id);
-            let chain_dir = format!("{}/chain_{}", stage_dir, chain_id + 1);
+            let chain_dir = stage_dir.join(format!("chain_{}", chain_id + 1));
 
-            let tempering = sc.and_then(|s| s.tempering.clone())
-                .unwrap_or_else(|| vec![1.0]);
+            // v1's [pgas] section carried tempering / max_treedepth /
+            // trajectory_warmup / csmc_sweeps_per_nuts knobs; v2's
+            // Stage::PGAS doesn't surface these yet, so we use the v1
+            // defaults (single-rung tempering, depth=10, no warmup,
+            // 1 CSMC sweep per NUTS step). Adding them to v2's schema
+            // is out of scope for this cleanup.
             let pgas_config = PGASConfig {
                 n_particles,
                 n_sweeps,
@@ -247,10 +295,10 @@ pub fn run_pgas_cli(
                 dt,
                 use_nuts,
                 dense_mass, // --diagonal-mass to disable
-                tempering,
-                max_tree_depth: sc.and_then(|s| s.max_treedepth).unwrap_or(10),
-                trajectory_warmup: sc.and_then(|s| s.trajectory_warmup).unwrap_or(0),
-                csmc_sweeps_per_nuts: sc.and_then(|s| s.csmc_sweeps_per_nuts).unwrap_or(1),
+                tempering: vec![1.0],
+                max_tree_depth: 10,
+                trajectory_warmup: 0,
+                csmc_sweeps_per_nuts: 1,
             };
 
             // Build multi-stream observation model (evaluates with params at call time)
@@ -265,12 +313,13 @@ pub fn run_pgas_cli(
                     .collect();
 
             // Streaming trace file — append when resuming, create when fresh
-            let trace_path = format!("{}/trace.tsv", chain_dir);
+            let trace_path = chain_dir.join("trace.tsv");
+            let trace_path_str = trace_path.to_string_lossy().into_owned();
             let is_resuming = resume_states[chain_id].is_some();
             let param_names: Vec<String> = config.estimated_params.iter()
                 .map(|s| s.name.clone()).collect();
             let trace_writer = super::trace_writer::TraceWriter::new(
-                &trace_path, "sweep", &["trajectory_renewal", "transition_ll", "obs_ll"],
+                &trace_path_str, "sweep", &["trajectory_renewal", "transition_ll", "obs_ll"],
                 &param_names, is_resuming,
             );
 
@@ -283,7 +332,7 @@ pub fn run_pgas_cli(
             } else {
                 usize::MAX // disabled
             };
-            let traj_dir = format!("{}/trajectories", chain_dir);
+            let traj_dir = chain_dir.join("trajectories");
             if n_trajectories > 0 {
                 let _ = std::fs::create_dir_all(&traj_dir);
             }
@@ -319,7 +368,7 @@ pub fn run_pgas_cli(
                 // Save posterior trajectory sample
                 if sweep >= burn_in && (sweep - burn_in).is_multiple_of(traj_stride) {
                     use std::io::Write;
-                    let path = format!("{}/trajectory_{:06}.tsv", traj_dir, sweep);
+                    let path = traj_dir.join(format!("trajectory_{:06}.tsv", sweep));
                     if let Ok(mut f) = std::fs::File::create(&path) {
                         // Header
                         write!(f, "t").unwrap();
@@ -365,7 +414,7 @@ pub fn run_pgas_cli(
             ).map_err(|e| format!("pgas chain {} error: {}", chain_id + 1, e))?;
 
             // Save resume state for future --resume
-            let resume_path = format!("{}/resume_state.bin", chain_dir);
+            let resume_path = chain_dir.join("resume_state.bin");
             if let Ok(encoded) = bincode::serialize(&result.resume_state) {
                 let _ = std::fs::write(&resume_path, encoded);
             }
@@ -431,7 +480,7 @@ pub fn run_pgas_cli(
     }
 
     // Write summary JSON
-    write_summary(&stage_dir, &all_results, &config, &diagnostics)?;
+    write_summary(stage_dir, &all_results, &config, &diagnostics)?;
 
     // Write fit_state.toml with best params
     let best_chain = all_results.iter()
@@ -461,7 +510,7 @@ pub fn run_pgas_cli(
     }
 
     let state = FitState {
-        stage: "pgas".into(),
+        stage: stage_name.to_string(),
         seed,
         timestamp: iso8601_utc(std::time::SystemTime::now()),
         input_hash: None,
@@ -487,16 +536,16 @@ pub fn run_pgas_cli(
         resolved_gate: None,
         resolved_loglik_eval: None,
     };
-    state.save(&stage_dir)?;
+    state.save(&stage_dir.to_string_lossy())?;
 
     // Write draws.tsv: complete-M posterior draws (all params, estimated + fixed)
     // Post-burn-in, thinned draws from all chains combined.
     {
         use std::io::Write;
-        let draws_path = format!("{}/draws.tsv", stage_dir);
+        let draws_path = stage_dir.join("draws.tsv");
         let mut f = std::io::BufWriter::new(
             std::fs::File::create(&draws_path)
-                .map_err(|e| format!("cannot create {}: {}", draws_path, e))?
+                .map_err(|e| format!("cannot create {}: {}", draws_path.display(), e))?
         );
 
         // Header: all model parameter names (estimated first, then fixed)
@@ -535,10 +584,11 @@ pub fn run_pgas_cli(
 
     // Render and persist diagnostics
     collector.render_to_stderr();
-    let _ = collector.write_json(&format!("{}/diagnostics.json", stage_dir));
+    let diag_path = stage_dir.join("diagnostics.json");
+    let _ = collector.write_json(&diag_path.to_string_lossy());
 
     let wall_secs = elapsed.as_secs_f64();
-    eprintln!("\npgas complete in {:.1}s: {}/", wall_secs, stage_dir);
+    eprintln!("\npgas complete in {:.1}s: {}/", wall_secs, stage_dir.display());
     eprintln!("  best complete-data ll: {:.1} (chain {})",
         best_sweep.log_complete_data_ll, best_chain.0 + 1);
 
@@ -575,7 +625,7 @@ fn compute_diagnostics(
 }
 
 fn write_summary(
-    dir: &str,
+    dir: &Path,
     results: &[(usize, Vec<PGASSweep>, Vec<f64>)],
     _config: &FitRunConfig,
     diagnostics: &Diagnostics,
@@ -592,11 +642,9 @@ fn write_summary(
         "ess": diagnostics.ess,
     });
 
-    let path = format!("{}/pgas_summary.json", dir);
+    let path = dir.join("pgas_summary.json");
     let contents = serde_json::to_string_pretty(&summary)
         .map_err(|e| format!("json error: {}", e))?;
     std::fs::write(&path, contents)
-        .map_err(|e| format!("cannot write {}: {}", path, e))
+        .map_err(|e| format!("cannot write {}: {}", path.display(), e))
 }
-
-// compute_config_hash moved to runner.rs (shared by PGAS and PMMH)

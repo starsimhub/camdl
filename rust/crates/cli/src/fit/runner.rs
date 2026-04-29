@@ -1644,71 +1644,6 @@ pub fn validate_prior_transform_compat(
     Ok(())
 }
 
-/// Compute a config hash identifying the statistical problem.
-/// Changes to model/data/priors/bounds/particles/dt invalidate resume state.
-/// Fields NOT included (safe to change on resume): sweeps/steps, burn_in,
-/// thin, n_trajectories, use_nuts, dense_mass.
-pub fn compute_config_hash(fit: &super::config::FitToml, config: &FitRunConfig) -> String {
-    use sha2::{Sha256, Digest};
-
-    let mut h = Sha256::new();
-    h.update(config.model_ir_json.as_bytes());
-
-    let mut data_entries: Vec<_> = fit.data.iter().collect();
-    data_entries.sort_by_key(|(k, _)| k.as_str());
-    for (name, path) in &data_entries {
-        h.update(name.as_bytes());
-        h.update(b"\x00");
-        if let Ok(contents) = std::fs::read(path) {
-            h.update(&contents);
-        }
-        h.update(b"\x00");
-    }
-
-    let mut est_entries: Vec<_> = fit.estimate.iter().collect();
-    est_entries.sort_by_key(|(k, _)| k.as_str());
-    for (name, spec) in &est_entries {
-        h.update(name.as_bytes());
-        h.update(format!("{:?}{:?}{:?}{:?}",
-            spec.bounds, spec.prior, spec.transform, spec.ivp).as_bytes());
-    }
-
-    let mut fixed_entries: Vec<_> = fit.fixed.iter().collect();
-    fixed_entries.sort_by_key(|(k, _)| k.as_str());
-    for (name, val) in &fixed_entries {
-        h.update(format!("{}={}", name, val).as_bytes());
-    }
-
-    h.update(config.if2_config.n_particles.to_le_bytes());
-    h.update(config.if2_config.dt.to_bits().to_le_bytes());
-
-    // IM10 in 2026-04-19 inference review batch 3: hash
-    // `starts_from` across every stage config. Without this, a
-    // resumed fit pointed at a different prior stage's output
-    // hashes the same — the `config hash mismatch` check in PGAS
-    // / PMMH passes, and the chain silently continues from a wrong
-    // initial point. starts_from is effectively part of the
-    // statistical problem definition.
-    h.update(b"\x00starts_from\x00");
-    if let Some(s) = fit.pgas.as_ref().and_then(|p| p.starts_from.as_ref()) {
-        h.update(b"pgas=");
-        h.update(s.as_bytes());
-    }
-    if let Some(s) = fit.pmmh.as_ref().and_then(|p| p.proposal_from.as_ref()) {
-        h.update(b"\x00pmmh_proposal_from=");
-        h.update(s.as_bytes());
-    }
-
-    // Pin the runtime version. Without this, a code change that alters
-    // inference semantics but leaves the config bytes identical would
-    // silently reuse stale cached state. Matches compute_config_hash_v2
-    // and compute_input_hash, which were already version-aware.
-    h.update(b"\x00");
-    h.update(crate::version::VERSION_SHORT.as_bytes());
-
-    hex::encode(h.finalize())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2426,7 +2361,7 @@ dt = 1.0
         let data_path = dir.join("obs.tsv");
         std::fs::write(&data_path,
             "time\tweekly_cases\n7\t1\n14\t2\n21\t3\n28\t4\n35\t5\n").unwrap();
-        let ivp_clause = if ivp { ", ivp = true" } else { "" };
+        let ivp_line = if ivp { "ivp    = true\n" } else { "" };
         let fit_toml_path = dir.join("fit.toml");
         let toml_src = format!(r#"
 output_dir = "{}"
@@ -2440,8 +2375,8 @@ weekly_cases = "{}"
 
 [estimate.I0]
 bounds = [1, 1000]
-start  = 5{}
-
+start  = 5
+{}
 [fixed]
 sigma    = 0.25
 gamma    = 0.3
@@ -2461,7 +2396,7 @@ cooling    = 0.5
 [config]
 backend = "gillespie"
 dt = 1.0
-"#, dir.display(), ic_free, ir_path, data_path.display(), ivp_clause);
+"#, dir.display(), ic_free, ir_path, data_path.display(), ivp_line);
         std::fs::write(&fit_toml_path, toml_src).unwrap();
         super::super::config_v2::FitConfigV2::load(
             &fit_toml_path.to_string_lossy())

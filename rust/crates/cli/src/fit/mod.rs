@@ -520,12 +520,6 @@ pub fn cmd_fit_run_v2(a: &crate::args::FitRunArgs) {
             sweep_config.fixed.values.insert(name.clone(), *val);
         }
 
-        // Recalculate the legacy bridge with swept values
-        let sweep_legacy = sweep_config.to_legacy_toml().unwrap_or_else(|e| {
-            eprintln!("error: {}", e);
-            std::process::exit(1);
-        });
-
         // IC4 in 2026-04-19 inference review batch 3: reject
         // prior × transform combinations that silently produce a
         // different prior than the user wrote (log_normal on
@@ -914,101 +908,49 @@ pub fn cmd_fit_run_v2(a: &crate::args::FitRunArgs) {
                 eprintln!("\n{} complete in {:.1}s: {}/", stage_name, elapsed.as_secs_f64(), stage_dir.display());
                 eprintln!("  best loglik: {:.1} (chain {})", chain_results.best_loglik, chain_results.best_chain + 1);
             }
-            Stage::PGAS { chains, particles, sweeps, burn_in, thin, .. } => {
-                // Override legacy PGAS config with v2 stage values
-                let mut legacy_pgas = sweep_legacy.pgas.clone().unwrap_or_default();
-                legacy_pgas.chains = Some(*chains);
-                legacy_pgas.particles = Some(*particles);
-                legacy_pgas.sweeps = Some(*sweeps);
-                if let Some(b) = burn_in { legacy_pgas.burn_in = Some(*b); }
-                if let Some(t) = thin { legacy_pgas.thin = Some(*t); }
-                legacy_pgas.starts_from = effective_starts.clone();
-                let mut legacy_with_pgas = sweep_legacy.clone();
-                legacy_with_pgas.pgas = Some(legacy_pgas);
-                legacy_with_pgas.fit.output_dir = sweep_fit_dir.to_string_lossy().to_string();
+            Stage::PGAS { .. } => {
+                let pgas_opts = pgas::PgasStageOpts::from_stage(stage)
+                    .unwrap_or_else(|e| { eprintln!("error: {}", e); std::process::exit(1); });
 
-                pgas::run_pgas_cli(
-                    &legacy_with_pgas,
+                pgas::run_stage(
                     &sweep_config,
-                    &sweep_config.estimate,
+                    stage_name,
+                    stage,
+                    &stage_dir,
+                    pgas_opts,
+                    seed, force,
+                    /* use_nuts */ true,
+                    /* dense_mass */ true,
+                    /* resume */ false,
                     effective_starts.as_deref(),
-                    seed, force, true, true, false,
                 ).unwrap_or_else(|e| {
                     eprintln!("error running pgas stage '{}': {}", stage_name, e);
                     std::process::exit(1);
                 });
-
-                // Rename pgas/ → {stage_name}/ if they differ.
-                // PGAS runner writes to {output_dir}/pgas/. If our stage has a
-                // different name, move the output to the correct stage directory.
-                //
-                // Collision handling: previously this did a silent
-                // `remove_dir_all` on the target. Under concurrent fits
-                // against the same fit_dir, or mid-edit iteration, that
-                // silently clobbered an existing stage's results. Now
-                // we error unless `--force` is explicitly given.
-                // cleanup-proposal §ship-now/#4.
-                let pgas_dir = sweep_fit_dir.join("pgas");
-                if stage_name != &"pgas" && pgas_dir.exists() {
-                    if stage_dir.exists() {
-                        if !force {
-                            eprintln!("error: {} already exists. Refusing to \
-                                      overwrite a previous stage's results.",
-                                stage_dir.display());
-                            eprintln!("  Pass --force to re-run this stage, \
-                                      or remove the directory manually.");
-                            std::process::exit(1);
-                        }
-                        eprintln!("warning: --force — removing existing {}", stage_dir.display());
-                        if let Err(e) = std::fs::remove_dir_all(&stage_dir) {
-                            eprintln!("error: could not remove {}: {}",
-                                stage_dir.display(), e);
-                            std::process::exit(1);
-                        }
-                    }
-                    std::fs::rename(&pgas_dir, &stage_dir).unwrap_or_else(|e| {
-                        eprintln!("error: could not rename pgas/ to {}: {}", stage_name, e);
-                        std::process::exit(1);
-                    });
-                }
                 // Bubble loglik from fit_state.toml written by PGAS runner
                 if let Ok(fs) = state::FitState::load(&stage_dir.to_string_lossy()) {
                     stage_best_loglik = Some(fs.best_loglik);
                     stage_best_chain = Some(fs.best_chain);
                 }
             }
-            Stage::PMMH { chains, particles, iterations, burn_in, thin, .. } => {
-                let mut legacy_pmmh = sweep_legacy.pmmh.clone().unwrap_or_default();
-                legacy_pmmh.chains = Some(*chains);
-                legacy_pmmh.particles = Some(*particles);
-                legacy_pmmh.steps = Some(*iterations);
-                if let Some(b) = burn_in { legacy_pmmh.burn_in = Some(*b); }
-                if let Some(t) = thin { legacy_pmmh.thin = Some(*t); }
-                let mut legacy_with_pmmh = sweep_legacy.clone();
-                legacy_with_pmmh.pmmh = Some(legacy_pmmh);
-                legacy_with_pmmh.fit.output_dir = sweep_fit_dir.to_string_lossy().to_string();
+            Stage::PMMH { .. } => {
+                let pmmh_opts = pmmh::PmmhStageOpts::from_stage(stage)
+                    .unwrap_or_else(|e| { eprintln!("error: {}", e); std::process::exit(1); });
 
-                pmmh::run_pmmh_cli(
-                    &legacy_with_pmmh,
+                pmmh::run_stage(
                     &sweep_config,
-                    &sweep_config.estimate,
+                    stage_name,
+                    stage,
+                    &stage_dir,
+                    pmmh_opts,
+                    seed, force,
+                    /* check_variance */ false,
+                    /* resume */ false,
                     effective_starts.as_deref(),
-                    seed, force, false, false,
                 ).unwrap_or_else(|e| {
                     eprintln!("error running pmmh stage '{}': {}", stage_name, e);
                     std::process::exit(1);
                 });
-
-                let pmmh_dir = sweep_fit_dir.join("pmmh");
-                if stage_name != &"pmmh" && pmmh_dir.exists() {
-                    if stage_dir.exists() {
-                        let _ = std::fs::remove_dir_all(&stage_dir);
-                    }
-                    std::fs::rename(&pmmh_dir, &stage_dir).unwrap_or_else(|e| {
-                        eprintln!("error: could not rename pmmh/ to {}: {}", stage_name, e);
-                        std::process::exit(1);
-                    });
-                }
                 if let Ok(fs) = state::FitState::load(&stage_dir.to_string_lossy()) {
                     stage_best_loglik = Some(fs.best_loglik);
                     stage_best_chain = Some(fs.best_chain);

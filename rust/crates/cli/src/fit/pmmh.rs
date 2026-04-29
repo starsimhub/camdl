@@ -4,7 +4,6 @@
 //! filter as an unbiased likelihood estimator. Outputs per-chain trace files,
 //! convergence diagnostics (R̂, ESS), and a summary JSON.
 
-use crate::fit::config::FitToml;
 use crate::fit::state::FitState;
 use crate::fit::runner::{self, FitRunConfig};
 use crate::cas::iso8601_utc;
@@ -15,24 +14,60 @@ use sim::inference::{
     diagnostic::{DiagnosticCollector, DiagnosticKind},
 };
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-const DEFAULT_CHAINS: usize = 4;
-const DEFAULT_STEPS: usize = 50_000;
-const DEFAULT_PARTICLES: usize = 2000;
+/// Per-stage knobs extracted from a `Stage::PMMH { ... }` variant by the
+/// `camdl fit run` dispatcher and passed verbatim into `run_stage`.
+///
+/// Defaults for fields not represented in v2 (`adapt`, `adapt_start`,
+/// `rho`, `proposal_from`) match the v1 defaults so behaviour is
+/// unchanged. v1 calls iterations `steps`; v2 calls them `iterations`.
+pub struct PmmhStageOpts {
+    pub n_chains: usize,
+    pub n_particles: usize,
+    pub n_steps: usize,
+    pub burn_in: usize,
+    pub thin: usize,
+}
+
 const DEFAULT_BURN_IN: usize = 5000;
 const DEFAULT_THIN: usize = 10;
 const DEFAULT_ADAPT_START: usize = 500;
+const DEFAULT_ADAPT: bool = true;
 
-pub fn run_pmmh_cli(
-    fit: &FitToml,
-    fit_v2: &super::config_v2::FitConfigV2,
-    estimate: &indexmap::IndexMap<String, super::config_v2::EstimateSpecV2>,
-    starts_from: Option<&str>,
+impl PmmhStageOpts {
+    /// Build from a `Stage::PMMH { ... }` variant. Errors if `stage` is
+    /// not the PMMH variant — caller's responsibility to dispatch.
+    pub fn from_stage(stage: &super::config_v2::Stage) -> Result<Self, String> {
+        match stage {
+            super::config_v2::Stage::PMMH {
+                chains, particles, iterations, burn_in, thin, ..
+            } => Ok(PmmhStageOpts {
+                n_chains: *chains,
+                n_particles: *particles,
+                n_steps: *iterations,
+                burn_in: burn_in.unwrap_or(DEFAULT_BURN_IN),
+                thin: thin.unwrap_or(DEFAULT_THIN),
+            }),
+            other => Err(format!(
+                "PmmhStageOpts::from_stage: expected Stage::PMMH, got {}",
+                other.method_name())),
+        }
+    }
+}
+
+pub fn run_stage(
+    fit: &super::config_v2::FitConfigV2,
+    stage_name: &str,
+    stage: &super::config_v2::Stage,
+    stage_dir: &Path,
+    pmmh_opts: PmmhStageOpts,
     seed: u64,
     force: bool,
     check_variance: bool,
     resume: bool,
+    starts_from: Option<&str>,
 ) -> Result<(), String> {
     eprintln!("\x1b[33m⚠ PMMH is experimental. For models with T > 500 observations,\x1b[0m");
     eprintln!("\x1b[33m  acceptance rates may be too low for reliable posterior sampling.\x1b[0m");
@@ -41,24 +76,25 @@ pub fn run_pmmh_cli(
     eprintln!();
 
     let collector = DiagnosticCollector::new("pmmh");
+    let estimate = &fit.estimate;
 
-    let stage_dir = format!("{}/pmmh", fit.fit.output_dir);
-    let sc = fit.pmmh.as_ref();
-
-    let n_chains = sc.and_then(|s| s.chains).unwrap_or(DEFAULT_CHAINS);
-    let n_steps = sc.and_then(|s| s.steps).unwrap_or(DEFAULT_STEPS);
-    let n_particles = sc.and_then(|s| s.particles).unwrap_or(DEFAULT_PARTICLES);
-    let burn_in = sc.and_then(|s| s.burn_in).unwrap_or(DEFAULT_BURN_IN);
-    let thin = sc.and_then(|s| s.thin).unwrap_or(DEFAULT_THIN);
-    let adapt = sc.and_then(|s| s.adapt).unwrap_or(true);
-    let adapt_start = sc.and_then(|s| s.adapt_start).unwrap_or(DEFAULT_ADAPT_START);
+    let n_chains = pmmh_opts.n_chains;
+    let n_steps = pmmh_opts.n_steps;
+    let n_particles = pmmh_opts.n_particles;
+    let burn_in = pmmh_opts.burn_in;
+    let thin = pmmh_opts.thin;
+    // v1 [pmmh] carried adapt / adapt_start / rho / proposal_from knobs;
+    // v2's Stage::PMMH doesn't surface these. v1 defaults preserved.
+    let adapt = DEFAULT_ADAPT;
+    let adapt_start = DEFAULT_ADAPT_START;
+    let rho: Option<f64> = None;
 
     // Load prior state if --starts-from provided
     let prior_state = starts_from.map(FitState::load).transpose()?;
 
     // Build FitRunConfig (reuse existing builder)
     let config = FitRunConfig::build(
-        fit_v2, prior_state.as_ref(),
+        fit, prior_state.as_ref(),
         n_chains, n_particles, 1, // iterations=1 unused for PMMH
         1.0, // cooling unused
         seed, false,
@@ -67,7 +103,7 @@ pub fn run_pmmh_cli(
     let dt = config.if2_config.dt;
 
     // Build proposal SDs
-    let proposal_sd = build_proposal_sd(&config, sc, starts_from)?;
+    let proposal_sd = build_proposal_sd(&config, starts_from)?;
 
     // Preflight: PF variance check
     eprintln!("\npfilter variance check ({} particles, 20 replicates)...", n_particles);
@@ -101,7 +137,7 @@ pub fn run_pmmh_cli(
 
     if check_variance {
         // Also run correlation check if rho is set
-        if let Some(rho) = sc.and_then(|c| c.rho) {
+        if let Some(rho) = rho {
             eprintln!("\nCPM correlation check (rho={}, 50 correlated pairs)...", rho);
             let n_source_groups = config.compiled.source_groups.len();
             let n_obs = config.observations.len();
@@ -169,15 +205,16 @@ pub fn run_pmmh_cli(
     }
 
     if !force && !resume {
-        let state_path = format!("{}/fit_state.toml", stage_dir);
-        if std::path::Path::new(&state_path).exists() {
-            eprintln!("\x1b[33mpmmh results already exist in {}. Use --force to re-run or --resume to continue.\x1b[0m", stage_dir);
+        let state_path = stage_dir.join("fit_state.toml");
+        if state_path.exists() {
+            eprintln!("\x1b[33mpmmh results already exist in {}. Use --force to re-run or --resume to continue.\x1b[0m",
+                stage_dir.display());
             return Ok(());
         }
     }
 
-    std::fs::create_dir_all(&stage_dir)
-        .map_err(|e| format!("cannot create {}: {}", stage_dir, e))?;
+    std::fs::create_dir_all(stage_dir)
+        .map_err(|e| format!("cannot create {}: {}", stage_dir.display(), e))?;
 
     // Resolve priors: fit.toml override → model IR → Flat
     let priors: Vec<Prior> = config.estimated_params.iter()
@@ -191,14 +228,24 @@ pub fn run_pmmh_cli(
     let dt = config.if2_config.dt;
 
     // Compute config hash — identifies the statistical problem.
-    let config_hash = super::runner::compute_config_hash(fit, &config);
+    // Uses the same provenance::fit_stage_hash that the v2 dispatch
+    // site uses for cache-hit checks; resume only succeeds when the
+    // (model + observations + estimate + fixed + stage_name + Stage
+    // variant + seed) tuple is unchanged.
+    let fixed_resolved = fit.fixed.resolve()?;
+    let data_spec = fit.data_spec()?;
+    let config_hash = super::provenance::fit_stage_hash(
+        &config.model_ir_json, &data_spec.observations,
+        &fit.estimate, &fixed_resolved, stage_name, stage, seed,
+    )?;
 
     // Load resume states if --resume
     let resume_states: Vec<Option<PMMHResumeState>> = if resume {
         let mut states = Vec::with_capacity(n_chains);
         let mut any_failed = false;
         for chain_id in 0..n_chains {
-            let path = format!("{}/chain_{}/resume_state.bin", stage_dir, chain_id + 1);
+            let path: PathBuf = stage_dir.join(format!("chain_{}", chain_id + 1))
+                .join("resume_state.bin");
             match std::fs::read(&path) {
                 Ok(data) => match bincode::deserialize::<PMMHResumeState>(&data) {
                     Ok(state) => {
@@ -220,7 +267,8 @@ pub fn run_pmmh_cli(
                     }
                 }
                 Err(_) => {
-                    eprintln!("error: no resume state file for chain {} ({})", chain_id + 1, path);
+                    eprintln!("error: no resume state file for chain {} ({})",
+                        chain_id + 1, path.display());
                     any_failed = true;
                     states.push(None);
                 }
@@ -259,9 +307,9 @@ pub fn run_pmmh_cli(
 
     // Pre-create chain directories
     for chain_id in 0..n_chains {
-        let chain_dir = format!("{}/chain_{}", stage_dir, chain_id + 1);
+        let chain_dir = stage_dir.join(format!("chain_{}", chain_id + 1));
         std::fs::create_dir_all(&chain_dir)
-            .map_err(|e| format!("cannot create {}: {}", chain_dir, e))?;
+            .map_err(|e| format!("cannot create {}: {}", chain_dir.display(), e))?;
     }
 
     let t0 = std::time::Instant::now();
@@ -281,7 +329,7 @@ pub fn run_pmmh_cli(
                 adapt_start,
                 thin,
                 burn_in,
-                rho: sc.and_then(|c| c.rho),
+                rho,
                 n_source_groups: config.compiled.source_groups.len(),
             };
 
@@ -323,14 +371,15 @@ pub fn run_pmmh_cli(
             let no_progress = crate::progress::is_none();
 
             // Streaming trace: use TraceWriter with append mode when resuming
-            let chain_dir = format!("{}/pmmh/chain_{}", fit.fit.output_dir, chain_id + 1);
+            let chain_dir = stage_dir.join(format!("chain_{}", chain_id + 1));
             let _ = std::fs::create_dir_all(&chain_dir);
-            let trace_path = format!("{}/trace.tsv", chain_dir);
+            let trace_path = chain_dir.join("trace.tsv");
+            let trace_path_str = trace_path.to_string_lossy().into_owned();
             let is_resuming = resume_states[chain_id].is_some();
             let param_names: Vec<String> = config.estimated_params.iter()
                 .map(|s| s.name.clone()).collect();
             let trace_writer = super::trace_writer::TraceWriter::new(
-                &trace_path, "step", &["accepted"],
+                &trace_path_str, "step", &["accepted"],
                 &param_names, is_resuming,
             );
 
@@ -407,7 +456,7 @@ pub fn run_pmmh_cli(
             }
 
             // Save resume state for future --resume
-            let resume_path = format!("{}/resume_state.bin", chain_dir);
+            let resume_path = chain_dir.join("resume_state.bin");
             if let Ok(encoded) = bincode::serialize(&result.resume_state) {
                 let _ = std::fs::write(&resume_path, encoded);
             }
@@ -463,7 +512,7 @@ pub fn run_pmmh_cli(
         .unwrap();
 
     // Write summary JSON
-    write_summary(&stage_dir, &results, &config, &diagnostics)?;
+    write_summary(stage_dir, &results, &config, &diagnostics)?;
 
     // Write fit_state.toml
     let mut start_values = HashMap::new();
@@ -480,7 +529,7 @@ pub fn run_pmmh_cli(
     }
 
     let state = FitState {
-        stage: "pmmh".into(),
+        stage: stage_name.to_string(),
         seed,
         timestamp: iso8601_utc(std::time::SystemTime::now()),
         input_hash: None,
@@ -505,17 +554,17 @@ pub fn run_pmmh_cli(
         resolved_gate: None,
         resolved_loglik_eval: None,
     };
-    state.save(&stage_dir)?;
+    state.save(&stage_dir.to_string_lossy())?;
 
     // Write draws.tsv: complete-M posterior draws (all params, estimated + fixed)
     // Reads the per-chain trace.tsv files (already burn-in/thin filtered) and
     // adds fixed parameter columns.
     {
         use std::io::Write;
-        let draws_path = format!("{}/draws.tsv", stage_dir);
+        let draws_path = stage_dir.join("draws.tsv");
         let mut f = std::io::BufWriter::new(
             std::fs::File::create(&draws_path)
-                .map_err(|e| format!("cannot create {}: {}", draws_path, e))?
+                .map_err(|e| format!("cannot create {}: {}", draws_path.display(), e))?
         );
 
         // Header: estimated params + fixed params
@@ -538,7 +587,8 @@ pub fn run_pmmh_cli(
         // Read each chain's trace.tsv and extract param columns
         let mut n_draws = 0usize;
         for chain_id in 0..n_chains {
-            let trace_path = format!("{}/chain_{}/trace.tsv", stage_dir, chain_id + 1);
+            let trace_path = stage_dir.join(format!("chain_{}", chain_id + 1))
+                .join("trace.tsv");
             if let Ok(content) = std::fs::read_to_string(&trace_path) {
                 let mut lines = content.lines();
                 let header = lines.next().unwrap_or("");
@@ -571,28 +621,32 @@ pub fn run_pmmh_cli(
 
     // Render and persist diagnostics
     collector.render_to_stderr();
-    let _ = collector.write_json(&format!("{}/diagnostics.json", stage_dir));
+    let diag_path = stage_dir.join("diagnostics.json");
+    let _ = collector.write_json(&diag_path.to_string_lossy());
 
     let wall_secs = elapsed.as_secs_f64();
     let total_pf_calls = n_chains * n_steps;
     eprintln!("\npmmh complete in {:.1}s ({} PF evaluations, {:.1}ms/eval): {}/",
         wall_secs, total_pf_calls,
         wall_secs * 1000.0 / total_pf_calls as f64 * n_chains as f64,
-        stage_dir);
+        stage_dir.display());
     eprintln!("  MAP loglik: {:.1} (chain {})", map_result.map_loglik, map_chain + 1);
 
     Ok(())
 }
 
 /// Build proposal SDs on the transformed scale.
+///
+/// v1's [pmmh] section let users point at a separate `proposal_from`
+/// directory (independent from `starts_from`); v2's Stage::PMMH carries
+/// only `starts_from`. So we use `starts_from` for both — if the user
+/// wants empirical covariance from scout, they wire that via
+/// `starts_from = "scout"` on the PMMH stage.
 fn build_proposal_sd(
     config: &FitRunConfig,
-    sc: Option<&crate::fit::config::PMMHSampleConfig>,
     starts_from: Option<&str>,
 ) -> Result<Vec<f64>, String> {
-    // Try to load scout chain endpoints for empirical covariance
-    let proposal_dir = sc.and_then(|s| s.proposal_from.as_deref()).or(starts_from);
-    if let Some(dir) = proposal_dir {
+    if let Some(dir) = starts_from {
         if let Ok(sds) = load_scout_proposal_sd(dir, &config.estimated_params) {
             eprintln!("  proposal_sd seeded from chain spread in {}/", dir);
             return Ok(sds);
@@ -687,7 +741,7 @@ fn compute_diagnostics(
 // with correct log_posterior and burn-in/thin filtering.
 
 fn write_summary(
-    dir: &str,
+    dir: &Path,
     results: &[(usize, PMMHResult)],
     config: &FitRunConfig,
     diagnostics: &Diagnostics,
@@ -714,9 +768,9 @@ fn write_summary(
         "map_params": map_params,
     });
 
-    let path = format!("{}/pmmh_summary.json", dir);
+    let path = dir.join("pmmh_summary.json");
     let contents = serde_json::to_string_pretty(&summary)
         .map_err(|e| format!("json error: {}", e))?;
     std::fs::write(&path, contents)
-        .map_err(|e| format!("cannot write {}: {}", path, e))
+        .map_err(|e| format!("cannot write {}: {}", path.display(), e))
 }
