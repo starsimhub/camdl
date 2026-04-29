@@ -1,14 +1,10 @@
 //! `camdl fit` — structured inference workflow.
 //!
-//! Usage:
-//!   camdl fit scout    fit.toml [--seed N] [--force]
-//!   camdl fit refine   fit.toml --starts-from scout/ [--seed N] [--force]
-//!   camdl fit validate fit.toml --starts-from refine/ [--seed N] [--force]
-//!   camdl fit pmmh     fit.toml [--starts-from validate/] [--seed N] [--force] [--resume] [--check-variance]
-//!   camdl fit pgas     fit.toml [--starts-from validate/] [--seed N] [--force]
-//!   camdl fit status   fit.toml
+//! Single entry point: `camdl fit run FIT.toml [--seed N] [--stage NAME]
+//! [--label "..."] [--force]`. The fit.toml v2 schema declares stages
+//! inline; the runner walks them in order. See
+//! `docs/dev/proposals/2026-04-15-fit-run-spec-v0.4.md`.
 
-pub mod config;
 pub mod config_v2;
 pub mod state;
 pub mod provenance;
@@ -29,8 +25,6 @@ pub mod synthetic;
 pub mod gating;
 pub mod loglik_eval;
 
-use config::FitToml;
-
 pub fn cmd_fit_status(a: &crate::args::FitStatusArgs) {
     let path_str = match &a.path {
         Some(p) => p.to_string_lossy().into_owned(),
@@ -45,47 +39,26 @@ pub fn cmd_fit_status(a: &crate::args::FitStatusArgs) {
         run_status_v2_dir(&path_str);
         return;
     }
-    // Try v2 config format
-    match config_v2::FitConfigV2::load(&path_str) {
-        Ok(config) => {
-            match config.fit_dir(&path_str) {
-                Ok(fit_dir) if fit_dir.exists() => {
-                    run_status_v2_dir(&fit_dir.to_string_lossy());
-                }
-                Ok(fit_dir) => {
-                    eprintln!("no results found at {}", fit_dir.display());
-                }
-                Err(e) => {
-                    eprintln!("error computing fit directory: {}", e);
-                    std::process::exit(1);
-                }
-            }
-            return;
+    // Treat the path as a v2 fit.toml. v1 schema is gone — any fit
+    // config written before the v2-only cleanup landed will fail to
+    // parse here; users on stale toml files get a typed parse error
+    // pointing at the offending key, which is the right signal.
+    let config = config_v2::FitConfigV2::load(&path_str).unwrap_or_else(|e| {
+        eprintln!("error parsing fit.toml: {}", e);
+        std::process::exit(1);
+    });
+    match config.fit_dir(&path_str) {
+        Ok(fit_dir) if fit_dir.exists() => {
+            run_status_v2_dir(&fit_dir.to_string_lossy());
+        }
+        Ok(fit_dir) => {
+            eprintln!("no results found at {}", fit_dir.display());
         }
         Err(e) => {
-            // Check if it has [stages] (v2 marker) — if so, the error is real
-            if let Ok(contents) = std::fs::read_to_string(&path_str) {
-                if contents.contains("[stages.") || contents.contains("[stages]") {
-                    eprintln!("error parsing v2 fit.toml: {}", e);
-                    std::process::exit(1);
-                }
-            }
-            // Otherwise fall through to v1
+            eprintln!("error computing fit directory: {}", e);
+            std::process::exit(1);
         }
     }
-    // Fall back to v1 (legacy): use fit.toml's own seed field if present.
-    let fit = FitToml::load(&path_str).unwrap_or_else(|e| {
-        eprintln!("error: {}", e); std::process::exit(1);
-    });
-    let seed = fit.fit.seed.unwrap_or(1);
-    let cell = fit.cell_dir(&path_str, seed).unwrap_or_else(|e| {
-        eprintln!("error: {}", e); std::process::exit(1);
-    });
-    if !cell.exists() {
-        eprintln!("no results at {}", cell.display());
-        return;
-    }
-    run_status_v2_dir(&cell.to_string_lossy());
 }
 
 /// Walk a results directory and report status of all stages found.
@@ -1380,35 +1353,18 @@ pub fn cmd_fit_where(a: &crate::args::FitWhereArgs) {
     let fit_path = a.config.to_string_lossy().into_owned();
     let seed     = a.seed;
 
-    // Try v2 first (the common path); fall through to v1 on parse
-    // failure. Mirrors the detection logic in cmd_fit_status.
-    let v2 = config_v2::FitConfigV2::load(&fit_path);
-    let dir = match v2 {
-        Ok(config) => {
-            let root = config.fit_dir(&fit_path).unwrap_or_else(|e| {
-                eprintln!("error: {}", e);
-                std::process::exit(1);
-            });
-            match seed {
-                None => root,
-                Some(s) => root.join("real").join(format!("fit_{}", s)),
-            }
-        }
-        Err(v2_err) => {
-            let fit = FitToml::load(&fit_path).unwrap_or_else(|_| {
-                eprintln!("error: {} is neither a v1 nor v2 fit.toml", fit_path);
-                eprintln!("  v2 parse error: {}", v2_err);
-                std::process::exit(1);
-            });
-            match seed {
-                None => fit.fit_root(&fit_path).unwrap_or_else(|e| {
-                    eprintln!("error: {}", e); std::process::exit(1);
-                }),
-                Some(s) => fit.cell_dir(&fit_path, s).unwrap_or_else(|e| {
-                    eprintln!("error: {}", e); std::process::exit(1);
-                }),
-            }
-        }
+    // v2 fit.toml only — v1 schema deleted in the v1-cleanup pass.
+    let config = config_v2::FitConfigV2::load(&fit_path).unwrap_or_else(|e| {
+        eprintln!("error parsing fit.toml: {}", e);
+        std::process::exit(1);
+    });
+    let root = config.fit_dir(&fit_path).unwrap_or_else(|e| {
+        eprintln!("error: {}", e);
+        std::process::exit(1);
+    });
+    let dir = match seed {
+        None => root,
+        Some(s) => root.join("real").join(format!("fit_{}", s)),
     };
     println!("{}", dir.display());
 }

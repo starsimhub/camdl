@@ -141,7 +141,7 @@ pub fn file_hash(path: &str) -> Option<String> {
 /// produce a better error than "can't canonicalise your hash input."
 /// We prefer to still produce a hash (for cache-staleness detection)
 /// rather than refuse, since the caller handles real errors on the
-/// primary `FitToml::load` path.
+/// primary `FitConfigV2::load` path.
 fn canonicalise_toml(raw: &[u8]) -> Vec<u8> {
     let s = match std::str::from_utf8(raw) {
         Ok(s) => s,

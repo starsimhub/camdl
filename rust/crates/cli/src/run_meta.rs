@@ -113,8 +113,8 @@ pub struct FitMeta {
     pub model_hash: String,
     /// Path to the fit.toml that produced this fit.
     pub fit_toml_path: String,
-    /// Hash of the fit.toml bytes. (Equals `fit_input_hash`'s fit-toml
-    /// component for v1 FitToml, or a canonical-form hash for v2.)
+    /// Hash of the fit.toml bytes — canonical-form hash from
+    /// `FitConfigV2::fit_content_hash`.
     pub fit_toml_hash: String,
     /// Per-stream data file hashes.
     pub data_hashes: HashMap<String, String>,

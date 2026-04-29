@@ -1,7 +1,9 @@
-//! New fit.toml types (run-spec v0.4).
+//! Fit.toml schema types (run-spec v0.4).
 //!
-//! Coexists with config.rs (FitToml) during migration. The old `camdl fit scout`
-//! etc. commands use FitToml; the new `camdl fit run` uses FitConfigV2.
+//! The single fit-config schema. The legacy v1 `FitToml` and the
+//! `to_legacy_toml()` bridge were deleted in the v1-cleanup pass —
+//! `camdl fit run` (the only remaining entry point) consumes
+//! `FitConfigV2` directly.
 
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
