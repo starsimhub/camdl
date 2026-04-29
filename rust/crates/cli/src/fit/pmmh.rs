@@ -57,6 +57,8 @@ impl PmmhStageOpts {
     }
 }
 
+// See pgas::run_stage for the comment on this allow.
+#[allow(clippy::too_many_arguments)]
 pub fn run_stage(
     fit: &super::config_v2::FitConfigV2,
     stage_name: &str,

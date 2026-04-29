@@ -57,6 +57,12 @@ impl PgasStageOpts {
     }
 }
 
+// Per-stage entry point for PGAS — wide because every flag is
+// independent at the dispatch site (stage_dir, opts struct, RNG seed,
+// per-flag CLI overrides, --resume / --starts-from). Same pattern as
+// `batch::run_one_scenario` and `main::run_simulate`, both of which
+// also carry this allow.
+#[allow(clippy::too_many_arguments)]
 pub fn run_stage(
     fit: &super::config_v2::FitConfigV2,
     stage_name: &str,
