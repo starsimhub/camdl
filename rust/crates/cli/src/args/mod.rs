@@ -283,8 +283,9 @@ pub struct FitRunArgs {
     #[arg(long, requires = "stage")]
     pub starts_from: Option<String>,
 
-    /// Cartesian sweep over a fixed parameter: --sweep NAME=V1,V2,...  (may repeat)
-    #[arg(long, value_name = "NAME=V1,V2,...")]
+    /// Cartesian sweep over a fixed parameter (may repeat).
+    /// SPEC is `V1,V2,...` | `lin(min,max,n)` | `log10(min,max,n)`.
+    #[arg(long, value_name = "NAME=SPEC")]
     pub sweep: Vec<SweepSpec>,
 
     /// Proceed even if prior scout stage failed convergence gate
@@ -754,8 +755,9 @@ pub struct ProfileArgs {
     #[arg(long)]
     pub data: PathBuf,
 
-    /// Profile grid: --sweep NAME=V1,V2,...  (repeat for 2D+)
-    #[arg(long, value_name = "NAME=V1,V2,...", required = true)]
+    /// Profile grid (repeat for 2D+).
+    /// SPEC is `V1,V2,...` | `lin(min,max,n)` | `log10(min,max,n)`.
+    #[arg(long, value_name = "NAME=SPEC", required = true)]
     pub sweep: Vec<SweepSpec>,
 
     /// IF2 iterations per grid point

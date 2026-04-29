@@ -127,7 +127,7 @@ pub fn cmd_profile(a: &crate::args::ProfileArgs) {
             });
         focal_grids.push(FocalGrid {
             name: sw.name.clone(),
-            values: sw.values.clone(),
+            values: sw.grid.expand(),
             param_idx: idx,
         });
     }

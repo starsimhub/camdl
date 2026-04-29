@@ -208,7 +208,7 @@ pub fn cmd_fit_run_v2(a: &crate::args::FitRunArgs) {
     let cli_loglik_eval_reps      = a.loglik_eval_reps;
     let cli_decibans_thresh      = a.decibans_thresh;
     let sweep_specs: Vec<(String, Vec<f64>)> = a.sweep.iter()
-        .map(|s| (s.name.clone(), s.values.clone()))
+        .map(|s| (s.name.clone(), s.grid.expand()))
         .collect();
 
     // Load v2 config
