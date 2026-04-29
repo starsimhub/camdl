@@ -386,6 +386,18 @@ pub fn cmd_fit_run_v2(a: &crate::args::FitRunArgs) {
     // For synthetic modes the datasets are generated once up front and the
     // per-cell DataSpec is materialised from their on-disk paths. See
     // docs/dev/proposals/2026-04-17-synthetic-fit-replicates.md.
+    //
+    // TODO(typed-cas): formalize fit_seeds as `cas::typed::ReplicateSet`.
+    // Today this loop produces a sibling-cells layout that's *semantically*
+    // a replicate set (one fit_content_hash umbrella, N seed-distinct
+    // cells) but isn't wrapped in the formal ReplicateSet machinery —
+    // no RunKind::ReplicateSet umbrella, no `replicates/seed_<S>/` path
+    // convention, no cross-cell aggregator. Pull when (a) someone wants
+    // a per-stage chain-Â diagnostic across fit_seeds, or (b) a uniform
+    // path layout matters more than the breaking change to existing fit
+    // trees. Same applies to dataset_idx as a nested replicate dimension.
+    // See docs/dev/proposals/2026-04-28-cas-typed-runs-and-profile-stages.md
+    // (Implementation checklist → "Fit run" deferred items).
     let fit_seeds: Vec<u64> = match &config.fit_seeds {
         Some(list) => list.clone(),
         None       => vec![base_seed],

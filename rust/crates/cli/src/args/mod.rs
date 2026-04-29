@@ -910,8 +910,8 @@ pub struct ListArgs {
     #[arg(long)]
     pub since: Option<ListDuration>,
 
-    /// Filter by run kind: sim, fit, profile, or both (sim+fit)
-    #[arg(long, default_value = "both")]
+    /// Filter by run kind: sim, fit, profile, or all (default).
+    #[arg(long, default_value = "all")]
     pub kind: String,
 
     /// Filter by parent run hash (e.g. the grid-point × start children

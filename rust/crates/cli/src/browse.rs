@@ -71,9 +71,16 @@ fn load_sim_entry(dir: &Path, cwd: &Path) -> Option<RunEntry> {
 
 // ── cmd_list ─────────────────────────────────────────────────────────────────
 
-/// `--kind` filter: which of sims / fits / both to surface.
+/// `--kind` filter: which of sims / fits / profiles to surface.
+/// `All` is the default and includes all three.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum KindFilter { Sim, Fit, Both }
+enum KindFilter { Sim, Fit, Profile, All }
+
+impl KindFilter {
+    fn includes_sims(self)     -> bool { matches!(self, Self::Sim     | Self::All) }
+    fn includes_fits(self)     -> bool { matches!(self, Self::Fit     | Self::All) }
+    fn includes_profiles(self) -> bool { matches!(self, Self::Profile | Self::All) }
+}
 
 pub fn cmd_list(a: &crate::args::ListArgs) {
     // --parent=HASH: enumerate the grid-point × start runs of one
@@ -88,21 +95,27 @@ pub fn cmd_list(a: &crate::args::ListArgs) {
     let root = a.root.to_string_lossy();
     let filter_since: Option<std::time::Duration> = a.since.as_ref().map(|d| d.0);
     let filter_kind = match a.kind.as_str() {
-        "sim" | "simulate" => KindFilter::Sim,
-        "fit"              => KindFilter::Fit,
-        _                  => KindFilter::Both,
+        "sim" | "simulate"      => KindFilter::Sim,
+        "fit"                   => KindFilter::Fit,
+        "profile" | "profiles"  => KindFilter::Profile,
+        _                       => KindFilter::All,
     };
     let format_json = a.format.as_deref() == Some("json");
 
-    let runs = if filter_kind == KindFilter::Fit {
+    let runs = if !filter_kind.includes_sims() {
         Vec::new()
     } else {
         discover_runs(&root).unwrap_or_else(|e| { eprintln!("error: {}", e); std::process::exit(1); })
     };
-    let fits = if filter_kind == KindFilter::Sim {
+    let fits = if !filter_kind.includes_fits() {
         Vec::new()
     } else {
         discover_fits(&root).unwrap_or_else(|e| { eprintln!("error: {}", e); std::process::exit(1); })
+    };
+    let profiles = if !filter_kind.includes_profiles() {
+        Vec::new()
+    } else {
+        discover_profiles(&root).unwrap_or_else(|e| { eprintln!("error: {}", e); std::process::exit(1); })
     };
 
     let now = SystemTime::now();
@@ -126,22 +139,40 @@ pub fn cmd_list(a: &crate::args::ListArgs) {
         .collect();
     filtered_fits.sort_by(|x, y| y.created.cmp(&x.created));
 
+    let mut filtered_profiles: Vec<ProfileEntry> = profiles.into_iter()
+        .filter(|p| a.model.as_deref().is_none_or(|m| p.model.contains(m)))
+        .filter(|_| a.scenario.is_none())
+        .filter(|p| match filter_since {
+            Some(dur) => now.duration_since(p.created).is_ok_and(|d| d <= dur),
+            None => true,
+        })
+        .collect();
+    filtered_profiles.sort_by(|x, y| y.created.cmp(&x.created));
+
     if !a.all {
         filtered_runs.truncate(a.limit);
         filtered_fits.truncate(a.limit);
+        filtered_profiles.truncate(a.limit);
     }
 
     if format_json {
         print_json(&filtered_runs);
         print_fits_json(&filtered_fits);
+        print_profiles_json(&filtered_profiles);
     } else {
+        let any_other = !filtered_fits.is_empty() || !filtered_profiles.is_empty();
         if !filtered_fits.is_empty() {
             eprintln!("{}", "fits".bold());
             print_fits_table(&filtered_fits, now);
             eprintln!();
         }
-        if !filtered_runs.is_empty() || filtered_fits.is_empty() {
-            if !filtered_fits.is_empty() { eprintln!("{}", "sims".bold()); }
+        if !filtered_profiles.is_empty() {
+            eprintln!("{}", "profiles".bold());
+            print_profiles_table(&filtered_profiles, now);
+            eprintln!();
+        }
+        if !filtered_runs.is_empty() || !any_other {
+            if any_other { eprintln!("{}", "sims".bold()); }
             print_table(&filtered_runs, now);
         }
     }
@@ -436,6 +467,99 @@ fn load_fit_entry(dir: &Path, cwd: &Path) -> Option<FitEntry> {
         _ => return None,
     };
     Some(FitEntry { run, meta, rel_path, created })
+}
+
+// ── Profile listings ─────────────────────────────────────────────────────────
+
+/// A discovered profile run, single- or multi-seed. Profiles live at
+/// `<root>/profiles/<stem>-<hash[:8]>/` with a `run.json` of kind
+/// `Profile` (single-seed) or `ReplicateSet` (multi-seed umbrella).
+/// Both shapes carry the same display fields needed by `camdl list`.
+#[derive(Debug, Clone)]
+struct ProfileEntry {
+    run: Run,
+    rel_path: String,
+    created: SystemTime,
+    /// Display-only model path. From ProfileMeta for single-seed; from
+    /// the first child's run.json for replicate-set umbrellas.
+    model: String,
+    /// Comma-separated focal param names (e.g. "beta,gamma").
+    focal: String,
+    /// Grid shape (e.g. "11×9 starts=4"). For replicate-set umbrellas
+    /// the grid is shared across children.
+    shape: String,
+    /// Number of seed replicates. 1 for single-seed; N for multi-seed.
+    n_seeds: usize,
+}
+
+/// Walk `<root>/profiles/` one level deep. Each immediate child is a
+/// profile directory (`<stem>-<hash[:8]>/`). Per-child `run.json`
+/// determines whether it's a single-seed Profile or a multi-seed
+/// ReplicateSet umbrella; both yield a uniform `ProfileEntry`.
+fn discover_profiles(root: &str) -> Result<Vec<ProfileEntry>, String> {
+    let profiles_root = Path::new(root).join("profiles");
+    if !profiles_root.exists() { return Ok(Vec::new()); }
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let entries = std::fs::read_dir(&profiles_root)
+        .map_err(|e| format!("cannot read {}: {}", profiles_root.display(), e))?;
+    let mut out = Vec::new();
+    for entry in entries.flatten() {
+        let dir = entry.path();
+        if !dir.is_dir() { continue; }
+        let Some((run, created, rel_path)) = load_run_common(&dir, &cwd) else { continue; };
+        let pe = match &run.kind {
+            RunKind::Profile(m) => ProfileEntry {
+                model:   m.model.clone(),
+                focal:   m.focal_params.join(","),
+                shape:   format_grid_shape(&m.grid, m.n_starts),
+                n_seeds: 1,
+                run, rel_path, created,
+            },
+            RunKind::ReplicateSet(m) if m.child_kind == "profile" => {
+                // For multi-seed profile umbrellas, peek at the first
+                // child's run.json to surface the model/focal/shape
+                // (those are shared across replicates by construction).
+                let child_dir = dir.join("replicates").join(m.keys.first().cloned().unwrap_or_default());
+                let (model, focal, shape) = std::fs::read_to_string(child_dir.join("run.json"))
+                    .ok()
+                    .and_then(|s| serde_json::from_str::<Run>(&s).ok())
+                    .and_then(|child| match child.kind {
+                        RunKind::Profile(cm) => Some((
+                            cm.model,
+                            cm.focal_params.join(","),
+                            format_grid_shape(&cm.grid, cm.n_starts),
+                        )),
+                        _ => None,
+                    })
+                    .unwrap_or_else(|| (
+                        "?".to_string(),
+                        "?".to_string(),
+                        "?".to_string(),
+                    ));
+                ProfileEntry {
+                    model, focal, shape,
+                    n_seeds: m.keys.len(),
+                    run, rel_path, created,
+                }
+            }
+            _ => continue,  // unrelated kind sitting under profiles/
+        };
+        out.push(pe);
+    }
+    Ok(out)
+}
+
+/// Format a profile grid shape for the listing column. e.g.
+/// 11×9 grid with 4 starts → "11×9 starts=4".
+fn format_grid_shape(
+    grid: &[crate::run_meta::GridAxis],
+    n_starts: usize,
+) -> String {
+    if grid.is_empty() {
+        return format!("(empty) starts={}", n_starts);
+    }
+    let dims: Vec<String> = grid.iter().map(|g| g.values.len().to_string()).collect();
+    format!("{} starts={}", dims.join("×"), n_starts)
 }
 
 /// Walk `root/fits/` one level deep — each immediate child is a fit
@@ -789,6 +913,51 @@ fn print_fits_table(fits: &[FitEntry], now: SystemTime) {
     }
     println!("{table}");
     crate::fit::fit_table::emit_unlabelled_warning(unlabelled);
+}
+
+fn print_profiles_json(profiles: &[ProfileEntry]) {
+    for p in profiles {
+        let json = serde_json::to_string(&p.run).unwrap_or_default();
+        println!("{}", json);
+    }
+}
+
+fn print_profiles_table(profiles: &[ProfileEntry], now: SystemTime) {
+    use comfy_table::{Table, Cell, ContentArrangement, presets::NOTHING};
+    let mut table = Table::new();
+    table
+        .load_preset(NOTHING)
+        .set_content_arrangement(ContentArrangement::Dynamic)
+        .set_header(vec![
+            Cell::new("CREATED").add_attribute(comfy_table::Attribute::Bold),
+            Cell::new("MODEL").add_attribute(comfy_table::Attribute::Bold),
+            Cell::new("FOCAL").add_attribute(comfy_table::Attribute::Bold),
+            Cell::new("SHAPE").add_attribute(comfy_table::Attribute::Bold),
+            Cell::new("SEEDS").add_attribute(comfy_table::Attribute::Bold),
+            Cell::new("PATH").add_attribute(comfy_table::Attribute::Bold),
+        ]);
+    for p in profiles {
+        let rel_time = fmt_relative_time(p.created, now);
+        let model    = model_display_name(&p.model);
+        let seeds_cell = if p.n_seeds == 1 {
+            Cell::new("1")
+        } else {
+            // Multi-seed profile: highlight so the sensitivity-spread
+            // surface is easy to spot in long listings.
+            Cell::new(p.n_seeds.to_string())
+                .fg(comfy_table::Color::Green)
+                .add_attribute(comfy_table::Attribute::Bold)
+        };
+        table.add_row(vec![
+            Cell::new(rel_time).fg(comfy_table::Color::Yellow),
+            Cell::new(model),
+            Cell::new(&p.focal).fg(comfy_table::Color::Magenta),
+            Cell::new(&p.shape).add_attribute(comfy_table::Attribute::Dim),
+            seeds_cell,
+            Cell::new(&p.rel_path).fg(comfy_table::Color::Cyan),
+        ]);
+    }
+    println!("{table}");
 }
 
 /// Compact one-line summary of the run's sweep point (if any).
