@@ -940,6 +940,82 @@ struct CasCtx {
     run: run_meta::Run,
 }
 
+/// Typed CAS inputs for one `simulate --cas` invocation. Single
+/// realization (one seed); multi-seed simulate isn't a feature today
+/// but the trait shape is uniform with profile and fit so it'd slot
+/// in via `Replicates<SimulateInputs, SeedKey>` if added later.
+///
+/// The path layout decomposes the content hash into `sim_hash` and
+/// `scen_hash` components for readable browsing
+/// (`<root>/sims/<sim>/<scen>-<scen_hash>/seed_N/`); the trait's
+/// `content_hash()` is the authoritative cache key.
+struct SimulateInputs {
+    // Display-only (path / metadata).
+    model_path:           String,
+    model_stem:           Option<String>,
+    scenario:             String,
+    // Content-bearing.
+    model_hash:           String,
+    base_params_canonical: String,
+    backend:              String,
+    dt:                   f64,
+    enable:               Vec<String>,
+    disable:              Vec<String>,
+    scen_params:          HashMap<String, f64>,
+    seed:                 u64,
+    // Lineage.
+    from_fit_hash:        Option<String>,
+}
+
+impl SimulateInputs {
+    /// Sim-side hash decomposition (model + base params + backend + dt),
+    /// embedded in the path as the first directory component.
+    fn sim_hash_str(&self) -> String {
+        hashing::sim_hash(
+            &self.model_hash, &self.base_params_canonical,
+            &self.backend, self.dt,
+        )
+    }
+    /// Scenario-side hash decomposition (enable + disable + overrides).
+    fn scen_hash_str(&self) -> String {
+        hashing::scen_hash(&self.enable, &self.disable, &self.scen_params)
+    }
+}
+
+impl cas::typed::CasInputs for SimulateInputs {
+    fn content_hash(&self) -> cas::typed::ContentHash {
+        // Inner: everything except seed. Composed via the standard
+        // replicate path so a future multi-seed simulate plugs into
+        // the same content_hash function without re-derivation.
+        let inner = cas::typed::hash_canonical(&[
+            ("sim",  &self.sim_hash_str()),
+            ("scen", &self.scen_hash_str()),
+        ]);
+        cas::typed::compose_with_replicate(&inner, "seed", &self.seed.to_string())
+    }
+    fn cas_path(&self, root: &std::path::Path) -> std::path::PathBuf {
+        run_paths::sim_run_dir(
+            root, self.model_stem.as_deref(),
+            &self.sim_hash_str(), &self.scenario,
+            &self.scen_hash_str(), self.seed,
+        )
+    }
+    fn run_kind(&self) -> run_meta::RunKind {
+        run_meta::RunKind::Simulate(run_meta::SimulateMeta {
+            model:        self.model_path.clone(),
+            model_hash:   self.model_hash.clone(),
+            scenario:     self.scenario.clone(),
+            sim_hash:     self.sim_hash_str(),
+            scen_hash:    self.scen_hash_str(),
+            seed:         self.seed,
+            backend:      self.backend.clone(),
+            dt:           self.dt,
+            sweep_point:  HashMap::new(),
+            from_fit_hash: self.from_fit_hash.clone(),
+        })
+    }
+}
+
 /// Resolve the CAS run directory and build a `RunMeta` template for a
 /// single (model, scenario, seed) triple. Mirrors the relevant bits of
 /// `util::run_simulation`'s model-load + scenario-resolve pipeline so
@@ -988,43 +1064,35 @@ fn prepare_cas_ctx(
         (run.adhoc_enable.clone(), run.adhoc_disable.clone(), HashMap::new())
     };
 
-    let model_h = hashing::model_hash(&src);
-    let sim_h = hashing::sim_hash(
-        &model_h,
-        &hashing::canonical_params(&base_params),
-        &run.backend,
-        run.dt,
-    );
-    let scen_h = hashing::scen_hash(&enable, &disable, &scen_params);
-    let scenario_display = scenario_name.clone().unwrap_or_else(|| "baseline".to_string());
-    let model_stem = hashing::path_stem_slug(&run.ir_path);
-    let relative = run_paths::sim_run_rel(
-        model_stem.as_deref(), &sim_h, &scenario_display, &scen_h, seed,
-    );
-    let run_dir = run_paths::sim_run_dir(
-        std::path::Path::new(cas_root), model_stem.as_deref(),
-        &sim_h, &scenario_display, &scen_h, seed,
-    );
+    let inputs = SimulateInputs {
+        model_path:           run.ir_path.clone(),
+        model_stem:           hashing::path_stem_slug(&run.ir_path),
+        scenario:             scenario_name.clone().unwrap_or_else(|| "baseline".to_string()),
+        model_hash:           hashing::model_hash(&src),
+        base_params_canonical: hashing::canonical_params(&base_params),
+        backend:              run.backend.clone(),
+        dt:                   run.dt,
+        enable, disable, scen_params,
+        seed,
+        from_fit_hash,
+    };
 
-    let run_h = hashing::run_hash(&sim_h, &scen_h, seed);
+    use cas::typed::CasInputs;
+    let run_dir = inputs.cas_path(std::path::Path::new(cas_root));
+    let relative = run_paths::sim_run_rel(
+        inputs.model_stem.as_deref(),
+        &inputs.sim_hash_str(),
+        &inputs.scenario,
+        &inputs.scen_hash_str(),
+        seed,
+    );
     let run_record = run_meta::Run {
-        hash: run_h,
-        version: version::VERSION_SHORT.to_string(),
-        created_at: cas::iso8601_utc(std::time::SystemTime::now()),
-        argv: std::env::args().collect(),
-        wall_time_seconds: 0.0, // filled in by caller after sim completes
-        kind: run_meta::RunKind::Simulate(run_meta::SimulateMeta {
-            model: run.ir_path.clone(),
-            model_hash: model_h,
-            scenario: scenario_display,
-            sim_hash: sim_h,
-            scen_hash: scen_h,
-            seed,
-            backend: run.backend.clone(),
-            dt: run.dt,
-            sweep_point: HashMap::new(), // --cas is single-run; no sweep
-            from_fit_hash,
-        }),
+        hash:              inputs.content_hash().full().to_string(),
+        version:           version::VERSION_SHORT.to_string(),
+        created_at:        cas::iso8601_utc(std::time::SystemTime::now()),
+        argv:              std::env::args().collect(),
+        wall_time_seconds: 0.0,
+        kind:              inputs.run_kind(),
     };
 
     Ok(CasCtx { relative, run_dir, run: run_record })
