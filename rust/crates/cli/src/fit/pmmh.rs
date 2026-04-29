@@ -26,6 +26,7 @@ const DEFAULT_ADAPT_START: usize = 500;
 
 pub fn run_pmmh_cli(
     fit: &FitToml,
+    estimate: &indexmap::IndexMap<String, super::config_v2::EstimateSpecV2>,
     starts_from: Option<&str>,
     seed: u64,
     force: bool,
@@ -179,7 +180,7 @@ pub fn run_pmmh_cli(
 
     // Resolve priors: fit.toml override → model IR → Flat
     let priors: Vec<Prior> = config.estimated_params.iter()
-        .map(|spec| super::runner::resolve_prior(&spec.name, fit, &config.model).0)
+        .map(|spec| super::runner::resolve_prior(&spec.name, estimate, &config.model).0)
         .collect();
 
     // Active interventions + events — see same block in pgas.rs.

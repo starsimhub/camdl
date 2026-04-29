@@ -1474,82 +1474,52 @@ pub fn collect_all_params(
     params
 }
 
-/// Parse a prior specification string from fit.toml.
+/// Convert a v2 `PriorSpec` (typed enum from fit.toml) to the runtime
+/// `sim::inference::Prior` used by PGAS/PMMH/IF2 log-density evaluators.
 ///
-/// Mirrors the seven distributions supported in DSL `~` syntax. Args are
-/// positional here (fit.toml strings) but named in the DSL. Both the DSL
-/// name (`log_normal`, `half_normal`) and the legacy compact form
-/// (`lognormal`, `halfnormal`) are accepted.
-///
-/// | fit.toml string                  | Prior variant                            |
-/// |----------------------------------|------------------------------------------|
-/// | `flat`                           | `Flat`                                   |
-/// | `uniform(lower, upper)`          | `Uniform { lower, upper }`               |
-/// | `normal(mu, sigma)`              | `Normal { mean: mu, sd: sigma }`         |
-/// | `log_normal(mu, sigma)`          | `TransformedNormal { mean: mu, sd: sigma }` |
-/// | `half_normal(sigma)`             | `HalfNormal { sigma }`                   |
-/// | `beta(alpha, beta)`              | `Beta { alpha, beta }`                   |
-/// | `gamma(shape, rate)`             | `Gamma { shape, rate }`                  |
-/// | `exponential(rate)`              | `Exponential { rate }`                   |
-///
-/// Examples:
-///   "log_normal(log(50), 0.4)"   → LogNormal with median 50
-///   "log_normal(3.912, 0.4)"     → same (log(50) ≈ 3.912)
-///   "normal(0.08, 0.02)"         → Normal(0.08, 0.02) on natural scale
-pub fn parse_prior(s: &str) -> Option<Prior> {
-    let s = s.trim();
-    if s == "flat" { return Some(Prior::Flat); }
-
-    // Match "name(arg1, arg2, ...)"
-    let open = s.find('(')?;
-    let close = s.rfind(')')?;
-    let name = s[..open].trim();
-    let args_str = &s[open + 1..close];
-    let args: Vec<f64> = args_str.split(',')
-        .map(|a| eval_prior_arg(a.trim()))
-        .collect::<Option<Vec<_>>>()?;
-
-    // Accept both DSL names (log_normal, half_normal) and legacy compact
-    // names (lognormal) for fit.toml backward compatibility.
-    match (name, args.len()) {
-        ("lognormal", 2) | ("log_normal", 2) =>
-            Some(Prior::TransformedNormal { mean: args[0], sd: args[1] }),
-        ("normal", 2) =>
-            Some(Prior::Normal { mean: args[0], sd: args[1] }),
-        ("beta", 2) =>
-            Some(Prior::Beta { alpha: args[0], beta: args[1] }),
-        ("half_normal", 1) | ("halfnormal", 1) =>
-            Some(Prior::HalfNormal { sigma: args[0] }),
-        ("gamma", 2) =>
-            Some(Prior::Gamma { shape: args[0], rate: args[1] }),
-        ("exponential", 1) =>
-            Some(Prior::Exponential { rate: args[0] }),
-        ("uniform", 2) =>
-            Some(Prior::Uniform { lower: args[0], upper: args[1] }),
-        _ => None,
+/// Field-name conversion notes (see `CLEANUP-prior-types.md`):
+/// - `LogNormal { mu, sigma }` → `TransformedNormal { mean: mu, sd: sigma }`
+///   (log-normal in user terms = Normal on the log-transformed scale at
+///   inference time).
+/// - `Uniform` (no bounds in v2) → `Prior::Flat` (improper uniform).
+///   v2 doesn't carry explicit bounds because `EstimateSpecV2.bounds`
+///   already provides them at the parameter level.
+pub fn prior_spec_to_prior(spec: &super::config_v2::PriorSpec) -> Prior {
+    use super::config_v2::PriorSpec;
+    match spec {
+        PriorSpec::LogNormal { mu, sigma } =>
+            Prior::TransformedNormal { mean: *mu, sd: *sigma },
+        PriorSpec::Normal { mu, sigma } =>
+            Prior::Normal { mean: *mu, sd: *sigma },
+        PriorSpec::Beta { alpha, beta } =>
+            Prior::Beta { alpha: *alpha, beta: *beta },
+        PriorSpec::Uniform => Prior::Flat,
+        PriorSpec::HalfNormal { sigma } =>
+            Prior::HalfNormal { sigma: *sigma },
+        PriorSpec::Gamma { shape, rate } =>
+            Prior::Gamma { shape: *shape, rate: *rate },
+        PriorSpec::Exponential { rate } =>
+            Prior::Exponential { rate: *rate },
     }
 }
 
 /// Resolve the prior for a parameter using the precedence chain:
 ///
-///   1. fit.toml [estimate] prior string (override, for sensitivity analysis)
+///   1. fit.toml `[estimate.<name>.prior]` (typed PriorSpec; override
+///      for sensitivity analysis)
 ///   2. model IR parameter.prior (from `~` syntax in .camdl)
 ///   3. Prior::Flat (improper uniform, default for inference)
 ///
 /// Returns the prior and a string describing the source (for logging).
 pub fn resolve_prior(
     name: &str,
-    fit: &super::config::FitToml,
+    estimate: &indexmap::IndexMap<String, super::config_v2::EstimateSpecV2>,
     model: &ir::Model,
 ) -> (Prior, &'static str) {
-    // 1. fit.toml override
-    if let Some(est) = fit.estimate.get(name) {
-        if let Some(ref s) = est.prior {
-            if let Some(p) = parse_prior(s) {
-                return (p, "fit.toml");
-            } else {
-                eprintln!("warning: cannot parse prior '{}' for {} in fit.toml, falling through", s, name);
-            }
+    // 1. fit.toml override (typed PriorSpec — no string parsing).
+    if let Some(est) = estimate.get(name) {
+        if let Some(ref spec) = est.prior {
+            return (prior_spec_to_prior(spec), "fit.toml");
         }
     }
     // 2. model IR
@@ -1585,19 +1555,20 @@ pub fn resolve_prior(
 /// params so the user sees a clean error, not a miscalibrated
 /// posterior.
 pub fn validate_prior_transform_compat(
-    fit: &super::config::FitToml,
+    estimate: &indexmap::IndexMap<String, super::config_v2::EstimateSpecV2>,
     model: &ir::Model,
 ) -> Result<(), String> {
-    for name in fit.estimate.keys() {
+    for name in estimate.keys() {
         // Build the same Transform the engine will use.
         let ir_param = match model.parameters.iter().find(|p| p.name == *name) {
             Some(p) => p,
             None => continue, // validate_partition catches unknown params.
         };
-        let transform_override = fit.estimate.get(name)
-            .and_then(|e| e.transform.as_deref());
+        let transform_override = estimate.get(name)
+            .and_then(|e| e.transform.as_ref())
+            .map(|t| t.as_str());
         let transform = derive_transform(ir_param, transform_override);
-        let (prior, source) = resolve_prior(name, fit, model);
+        let (prior, source) = resolve_prior(name, estimate, model);
 
         let is_log   = matches!(transform, Transform::Log { .. });
         let is_logit = matches!(transform, Transform::Logit { .. });
@@ -1666,20 +1637,6 @@ pub fn validate_prior_transform_compat(
         }
     }
     Ok(())
-}
-
-/// Evaluate a prior argument — supports bare numbers and log(x).
-fn eval_prior_arg(s: &str) -> Option<f64> {
-    if let Ok(v) = s.parse::<f64>() {
-        return Some(v);
-    }
-    // Handle log(x)
-    if s.starts_with("log(") && s.ends_with(')') {
-        let inner = &s[4..s.len() - 1];
-        let v: f64 = inner.parse().ok()?;
-        return Some(v.ln());
-    }
-    None
 }
 
 /// Compute a config hash identifying the statistical problem.
@@ -2264,10 +2221,8 @@ mod tests {
     #[test]
     fn resolve_prior_precedence_chain() {
         use ir::parameter::{Parameter, PriorDist, LogNormalPrior};
-
-        fn fit_from(toml_src: &str) -> FitToml {
-            toml::from_str(toml_src).expect("fit.toml parse")
-        }
+        use crate::fit::config_v2::{EstimateSpecV2, PriorSpec};
+        use indexmap::IndexMap;
 
         let beta_with_ir_prior = Parameter {
             name: "beta".into(), value: None, bounds: Some((0.01, 2.0)),
@@ -2296,20 +2251,19 @@ mod tests {
             presets: vec![], model_structure: None, balance: None,
         };
 
+        let est_with_normal = |name: &str, mu: f64, sigma: f64| {
+            let mut m: IndexMap<String, EstimateSpecV2> = IndexMap::new();
+            m.insert(name.to_string(), EstimateSpecV2 {
+                bounds: (0.01, 2.0), transform: None,
+                prior: Some(PriorSpec::Normal { mu, sigma }),
+                ivp: false, rw_sd: None, start: None,
+            });
+            m
+        };
+
         // (1) fit.toml override beats IR prior
-        let fit_override = fit_from(r#"
-            [fit]
-            model = "unused"
-            output_dir = "unused"
-            [config]
-            backend = "gillespie"
-            dt = 1.0
-            [data]
-            [fixed]
-            [estimate.beta]
-            prior = "normal(0.3, 0.1)"
-        "#);
-        let (p, src) = resolve_prior("beta", &fit_override, &model);
+        let estimate_override = est_with_normal("beta", 0.3, 0.1);
+        let (p, src) = resolve_prior("beta", &estimate_override, &model);
         assert_eq!(src, "fit.toml", "fit.toml override should take precedence");
         match p {
             Prior::Normal { mean, sd } => {
@@ -2320,18 +2274,8 @@ mod tests {
         }
 
         // (2) IR prior used when fit.toml has no override
-        let fit_empty = fit_from(r#"
-            [fit]
-            model = "unused"
-            output_dir = "unused"
-            [config]
-            backend = "gillespie"
-            dt = 1.0
-            [data]
-            [fixed]
-            [estimate]
-        "#);
-        let (p, src) = resolve_prior("beta", &fit_empty, &model);
+        let estimate_empty: IndexMap<String, EstimateSpecV2> = IndexMap::new();
+        let (p, src) = resolve_prior("beta", &estimate_empty, &model);
         assert_eq!(src, "model", "model IR prior should apply when fit.toml is silent");
         match p {
             Prior::TransformedNormal { mean, sd } => {
@@ -2343,7 +2287,7 @@ mod tests {
         }
 
         // (3) Flat fallback when neither fit.toml nor IR provide a prior
-        let (p, src) = resolve_prior("gamma", &fit_empty, &model);
+        let (p, src) = resolve_prior("gamma", &estimate_empty, &model);
         assert_eq!(src, "flat (default)");
         assert!(matches!(p, Prior::Flat));
     }
@@ -2558,26 +2502,16 @@ cooling = 0.5
     fn resolve_prior_end_to_end_from_golden_ir() {
         // sir_priors golden has: beta~LogNormal, gamma~HalfNormal,
         // rho~Beta, N0~LogNormal, I0~Exponential.
+        use crate::fit::config_v2::EstimateSpecV2;
+        use indexmap::IndexMap;
         let manifest = std::env::var("CARGO_MANIFEST_DIR").unwrap();
         let ir_path = format!("{}/../../../ocaml/golden/sir_priors.ir.json", manifest);
         let (model, _) = crate::util::load_model(&ir_path).expect("load golden");
 
-        fn empty_fit() -> FitToml {
-            toml::from_str(r#"
-                [fit]
-                model = "unused"
-                output_dir = "unused"
-                [config]
-                backend = "gillespie"
-                dt = 1.0
-                [data]
-                [fixed]
-                [estimate]
-            "#).unwrap()
-        }
+        let empty: IndexMap<String, EstimateSpecV2> = IndexMap::new();
 
         // beta: LogNormal in IR → TransformedNormal at the Prior layer.
-        let (p, src) = resolve_prior("beta", &empty_fit(), &model);
+        let (p, src) = resolve_prior("beta", &empty, &model);
         assert_eq!(src, "model", "beta's IR prior should be picked up");
         match p {
             Prior::TransformedNormal { mean, sd } => {
@@ -2588,12 +2522,12 @@ cooling = 0.5
         }
 
         // gamma: HalfNormal round-trip
-        let (p, src) = resolve_prior("gamma", &empty_fit(), &model);
+        let (p, src) = resolve_prior("gamma", &empty, &model);
         assert_eq!(src, "model");
         assert!(matches!(p, Prior::HalfNormal { .. }), "gamma: {:?}", p);
 
         // rho: Beta round-trip
-        let (p, src) = resolve_prior("rho", &empty_fit(), &model);
+        let (p, src) = resolve_prior("rho", &empty, &model);
         assert_eq!(src, "model");
         match p {
             Prior::Beta { alpha, beta } => {
@@ -2604,7 +2538,7 @@ cooling = 0.5
         }
 
         // I0: Exponential round-trip
-        let (p, src) = resolve_prior("I0", &empty_fit(), &model);
+        let (p, src) = resolve_prior("I0", &empty, &model);
         assert_eq!(src, "model");
         assert!(matches!(p, Prior::Exponential { .. }), "I0: {:?}", p);
     }
@@ -2614,25 +2548,21 @@ cooling = 0.5
     /// for beta — the override must win over what's in the .camdl.
     #[test]
     fn fit_toml_override_beats_golden_ir_prior() {
+        use crate::fit::config_v2::{EstimateSpecV2, PriorSpec};
+        use indexmap::IndexMap;
         let manifest = std::env::var("CARGO_MANIFEST_DIR").unwrap();
         let ir_path = format!("{}/../../../ocaml/golden/sir_priors.ir.json", manifest);
         let (model, _) = crate::util::load_model(&ir_path).expect("load golden");
 
         // Override beta with a much narrower normal prior; leave gamma alone.
-        let fit: FitToml = toml::from_str(r#"
-            [fit]
-            model = "unused"
-            output_dir = "unused"
-            [config]
-            backend = "gillespie"
-            dt = 1.0
-            [data]
-            [fixed]
-            [estimate.beta]
-            prior = "normal(0.25, 0.05)"
-        "#).unwrap();
+        let mut estimate: IndexMap<String, EstimateSpecV2> = IndexMap::new();
+        estimate.insert("beta".to_string(), EstimateSpecV2 {
+            bounds: (0.01, 5.0), transform: None,
+            prior: Some(PriorSpec::Normal { mu: 0.25, sigma: 0.05 }),
+            ivp: false, rw_sd: None, start: None,
+        });
 
-        let (p, src) = resolve_prior("beta", &fit, &model);
+        let (p, src) = resolve_prior("beta", &estimate, &model);
         assert_eq!(src, "fit.toml", "override should take precedence");
         match p {
             Prior::Normal { mean, sd } => {
@@ -2642,85 +2572,53 @@ cooling = 0.5
         }
 
         // gamma is not overridden → still uses the IR's HalfNormal.
-        let (p, src) = resolve_prior("gamma", &fit, &model);
+        let (p, src) = resolve_prior("gamma", &estimate, &model);
         assert_eq!(src, "model");
         assert!(matches!(p, Prior::HalfNormal { .. }));
     }
 
+    /// Replaces the v1-era `parse_prior_covers_all_distributions` +
+    /// `parse_prior_rejects_invalid_input` tests. v2 carries `prior`
+    /// as a typed `PriorSpec` enum, so there's no string parsing left
+    /// to test — the only conversion is `prior_spec_to_prior`, which
+    /// each variant of must map onto the correct runtime `Prior`.
     #[test]
-    fn parse_prior_covers_all_distributions() {
-        // Flat — no args
-        assert!(matches!(parse_prior("flat"), Some(Prior::Flat)));
-
-        // Two-arg distributions
-        match parse_prior("uniform(0.1, 2.0)") {
-            Some(Prior::Uniform { lower, upper }) => {
-                assert_eq!(lower, 0.1); assert_eq!(upper, 2.0);
+    fn prior_spec_to_prior_maps_each_variant() {
+        use crate::fit::config_v2::PriorSpec;
+        match prior_spec_to_prior(&PriorSpec::LogNormal { mu: 1.5, sigma: 0.4 }) {
+            Prior::TransformedNormal { mean, sd } => {
+                assert_eq!(mean, 1.5); assert_eq!(sd, 0.4);
             }
-            other => panic!("uniform: {:?}", other),
+            other => panic!("LogNormal: {:?}", other),
         }
-        match parse_prior("normal(0.3, 0.1)") {
-            Some(Prior::Normal { mean, sd }) => {
+        match prior_spec_to_prior(&PriorSpec::Normal { mu: 0.3, sigma: 0.1 }) {
+            Prior::Normal { mean, sd } => {
                 assert_eq!(mean, 0.3); assert_eq!(sd, 0.1);
             }
-            other => panic!("normal: {:?}", other),
+            other => panic!("Normal: {:?}", other),
         }
-        // Both legacy compact and DSL names resolve to TransformedNormal.
-        for name in ["lognormal", "log_normal"] {
-            let s = format!("{}(-1.0, 0.5)", name);
-            match parse_prior(&s) {
-                Some(Prior::TransformedNormal { mean, sd }) => {
-                    assert_eq!(mean, -1.0); assert_eq!(sd, 0.5);
-                }
-                other => panic!("{}: {:?}", name, other),
-            }
-        }
-        match parse_prior("beta(2.0, 5.0)") {
-            Some(Prior::Beta { alpha, beta }) => {
+        match prior_spec_to_prior(&PriorSpec::Beta { alpha: 2.0, beta: 5.0 }) {
+            Prior::Beta { alpha, beta } => {
                 assert_eq!(alpha, 2.0); assert_eq!(beta, 5.0);
             }
-            other => panic!("beta: {:?}", other),
+            other => panic!("Beta: {:?}", other),
         }
-        match parse_prior("gamma(3.0, 0.5)") {
-            Some(Prior::Gamma { shape, rate }) => {
+        // Uniform (no bounds) → Flat (improper). v2 puts bounds on
+        // EstimateSpecV2.bounds at the parameter level, not the prior.
+        assert!(matches!(prior_spec_to_prior(&PriorSpec::Uniform), Prior::Flat));
+        match prior_spec_to_prior(&PriorSpec::HalfNormal { sigma: 0.3 }) {
+            Prior::HalfNormal { sigma } => assert_eq!(sigma, 0.3),
+            other => panic!("HalfNormal: {:?}", other),
+        }
+        match prior_spec_to_prior(&PriorSpec::Gamma { shape: 3.0, rate: 0.5 }) {
+            Prior::Gamma { shape, rate } => {
                 assert_eq!(shape, 3.0); assert_eq!(rate, 0.5);
             }
-            other => panic!("gamma: {:?}", other),
+            other => panic!("Gamma: {:?}", other),
         }
-
-        // One-arg distributions
-        for name in ["half_normal", "halfnormal"] {
-            let s = format!("{}(0.3)", name);
-            match parse_prior(&s) {
-                Some(Prior::HalfNormal { sigma }) => assert_eq!(sigma, 0.3),
-                other => panic!("{}: {:?}", name, other),
-            }
+        match prior_spec_to_prior(&PriorSpec::Exponential { rate: 2.5 }) {
+            Prior::Exponential { rate } => assert_eq!(rate, 2.5),
+            other => panic!("Exponential: {:?}", other),
         }
-        match parse_prior("exponential(2.5)") {
-            Some(Prior::Exponential { rate }) => assert_eq!(rate, 2.5),
-            other => panic!("exponential: {:?}", other),
-        }
-
-        // log(x) eval in argument — documented in the docstring.
-        match parse_prior("log_normal(log(50), 0.4)") {
-            Some(Prior::TransformedNormal { mean, sd }) => {
-                assert!((mean - 50f64.ln()).abs() < 1e-12);
-                assert_eq!(sd, 0.4);
-            }
-            other => panic!("log_normal with log(): {:?}", other),
-        }
-    }
-
-    #[test]
-    fn parse_prior_rejects_invalid_input() {
-        // Wrong arg count
-        assert!(parse_prior("normal(0.3)").is_none(), "normal needs 2 args");
-        assert!(parse_prior("half_normal(0.3, 1.0)").is_none(), "half_normal takes 1 arg");
-        assert!(parse_prior("exponential()").is_none(), "exponential needs 1 arg");
-        // Unknown distribution
-        assert!(parse_prior("weibull(2.0, 1.0)").is_none());
-        // Malformed syntax
-        assert!(parse_prior("normal 0.3, 0.1").is_none(), "missing parens");
-        assert!(parse_prior("normal(abc, 0.1)").is_none(), "non-numeric arg");
     }
 }

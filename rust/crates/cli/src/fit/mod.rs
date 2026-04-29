@@ -535,7 +535,7 @@ pub fn cmd_fit_run_v2(a: &crate::args::FitRunArgs) {
         // binding itself is fixed across sweep points — this is
         // equivalent to a one-shot check at config load, but
         // putting it here means every cell sees its own validation.
-        if let Err(e) = runner::validate_prior_transform_compat(&sweep_legacy, &model) {
+        if let Err(e) = runner::validate_prior_transform_compat(&sweep_config.estimate, &model) {
             eprintln!("error: {}", e);
             std::process::exit(1);
         }
@@ -929,6 +929,7 @@ pub fn cmd_fit_run_v2(a: &crate::args::FitRunArgs) {
 
                 pgas::run_pgas_cli(
                     &legacy_with_pgas,
+                    &sweep_config.estimate,
                     effective_starts.as_deref(),
                     seed, force, true, true, false,
                 ).unwrap_or_else(|e| {
@@ -988,6 +989,7 @@ pub fn cmd_fit_run_v2(a: &crate::args::FitRunArgs) {
 
                 pmmh::run_pmmh_cli(
                     &legacy_with_pmmh,
+                    &sweep_config.estimate,
                     effective_starts.as_deref(),
                     seed, force, false, false,
                 ).unwrap_or_else(|e| {

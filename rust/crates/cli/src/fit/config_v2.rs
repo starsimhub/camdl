@@ -322,6 +322,20 @@ pub enum Transform {
     Identity,
 }
 
+impl Transform {
+    /// String form expected by `runner::derive_transform`'s
+    /// `transform_override` argument. The runner still threads
+    /// transforms as `Option<&str>` internally; this is the
+    /// thin v2-typed → str adapter so callers don't allocate.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Transform::Log => "log",
+            Transform::Logit => "logit",
+            Transform::Identity => "identity",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(tag = "dist")]
 pub enum PriorSpec {
