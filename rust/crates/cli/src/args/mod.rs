@@ -537,27 +537,29 @@ pub struct FitWhereArgs {
     pub seed: Option<u64>,
 }
 
-// ─── fit label ────────────────────────────────────────────────────────
+// ─── label ────────────────────────────────────────────────────────────
 
 #[derive(Args)]
 #[command(after_help = "\
 Examples:
-  # Set a label on an already-completed fit
-  camdl fit label 04ab12cd \"narrow R0, take 1\"
-
-  # Update an existing label
-  camdl fit label 04ab12cd \"narrow R0, take 2 (better priors)\"
+  # Label any run kind by its short hash
+  camdl label 04ab12cd \"narrow R0, take 1\"
+  camdl label 9c5d11f0 \"baseline sim, daily reporting\"
+  camdl label 7e2a5d4b \"R0 vs gamma profile, take 2\"
 
 Notes:
   - Labels are 1–64 characters after trim, restricted to:
     letters, digits, spaces, commas, dot, underscore, hyphen.
-  - The hash is matched as a prefix (8+ chars recommended).
-  - Errors if the fit is still running (wall_time_seconds unset).
+  - The hash is matched as a prefix (8+ chars recommended) across
+    every kind under <root>/ (sims, fits, profiles, replicate-sets).
+  - Errors on ambiguous or unmatched prefix.
+  - Errors on a still-running fit (wall_time_seconds == 0.0); the
+    runner would otherwise overwrite the label at completion.
   - Concurrent invocations are last-write-wins.
 ")]
-pub struct FitLabelArgs {
-    /// Hash prefix of the target fit (matches against
-    /// `results/fits/*-<hash>/run.json`'s `Run.hash`)
+pub struct LabelArgs {
+    /// Hash prefix of the target run (matches against
+    /// `<root>/{sims,fits,profiles}/**/run.json`'s `Run.hash`)
     pub hash: String,
 
     /// New label text. Validated against ^[a-zA-Z0-9 ,._-]{1,64}$

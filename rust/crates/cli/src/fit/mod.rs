@@ -288,7 +288,7 @@ pub fn cmd_fit_run_v2(a: &crate::args::FitRunArgs) {
     // × full-I/O rehash) pattern.
     let fit_start = std::time::Instant::now();
     // Validate --label early so we fail before any I/O. The same
-    // validator is reused by `cmd_fit_label` (post-hoc relabel).
+    // validator is reused by `cmd_label` (post-hoc relabel).
     let validated_label = match a.label.as_deref() {
         Some(raw) => match validate_label(raw) {
             Ok(l) => Some(l),
@@ -1563,10 +1563,10 @@ pub fn cmd_fit_new(a: &crate::args::FitNewArgs) {
 /// label on success, or a descriptive Err message.
 ///
 /// Why a custom regex check rather than a clap value parser: we
-/// want the same validator on both the `--label` flag at fit-run
-/// time and the `camdl fit label` subcommand at relabel time, with
-/// identical error messages. A function call from each entry point
-/// is the simplest way to keep them aligned.
+/// want the same validator on every `--label` flag (fit, simulate,
+/// profile, …) and on `camdl label` at relabel time, with identical
+/// error messages. A function call from each entry point is the
+/// simplest way to keep them aligned.
 pub fn validate_label(raw: &str) -> Result<String, String> {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
@@ -1591,21 +1591,20 @@ pub fn validate_label(raw: &str) -> Result<String, String> {
     Ok(trimmed.to_string())
 }
 
-/// Set or update the user-display label on a completed fit.
+/// Set or update the user-display label on any run kind (sim, fit,
+/// profile, replicate-set, fit-stage).
 ///
-/// Resolves the hash prefix to a fit_dir under `<root>/fits/`
-/// (default `results/fits/`), reads the top-level run.json, errors
-/// if the fit is still running (wall_time_seconds == 0.0 — only
-/// populated on end-of-fit rewrite), validates the label, mutates
-/// `FitMeta.label`, and writes the run.json back atomically.
+/// Resolves the hash prefix by walking `<root>/{sims,fits,profiles}/**`
+/// for `run.json` files whose `Run.hash` starts with the prefix. The
+/// label is validated, written to `Run.label`, and the run.json is
+/// rewritten atomically. Refuses to relabel a still-running fit
+/// (wall_time_seconds == 0.0).
 ///
 /// Concurrent invocations are last-write-wins; we don't lock the
 /// file. For single-user workflows this is fine; if cross-process
 /// label edits ever become a concern, a flock on run.json is the
 /// minimal extension.
-///
-/// See proposal §5 (`docs/dev/proposals/2026-04-28-fit-experiment-management.md`).
-pub fn cmd_fit_label(args: &crate::args::FitLabelArgs) {
+pub fn cmd_label(args: &crate::args::LabelArgs) {
     let new_label = match validate_label(&args.label) {
         Ok(l) => l,
         Err(e) => {
@@ -1616,56 +1615,39 @@ pub fn cmd_fit_label(args: &crate::args::FitLabelArgs) {
 
     let root = args.root.clone().unwrap_or_else(||
         std::path::PathBuf::from(crate::run_paths::DEFAULT_OUTPUT_ROOT));
-    let fits_root = root.join("fits");
-    if !fits_root.exists() {
-        eprintln!("error: no fits directory at {} \
-                   (no fits to label?)", fits_root.display());
+    if !root.exists() {
+        eprintln!("error: no results root at {}", root.display());
         std::process::exit(1);
     }
 
-    // Find the fit_dir whose run.json has Run.hash starting with the
-    // given prefix. We walk fits/* directly rather than using
-    // fit_tree::walk_fits_root so we can give a precise error on
-    // ambiguous prefix.
+    // Walk every `run.json` under <root>/{sims,fits,profiles}/**.
+    // Match by Run.hash prefix; collect ambiguous results for diagnostics.
     let mut matches: Vec<std::path::PathBuf> = Vec::new();
-    if let Ok(entries) = std::fs::read_dir(&fits_root) {
-        for entry in entries.flatten() {
-            let p = entry.path();
-            if !p.is_dir() { continue; }
-            let run_json = p.join("run.json");
-            if !run_json.is_file() { continue; }
-            let txt = match std::fs::read_to_string(&run_json) {
-                Ok(t) => t,
-                Err(_) => continue,
-            };
-            let v: serde_json::Value = match serde_json::from_str(&txt) {
-                Ok(v) => v,
-                Err(_) => continue,
-            };
-            let hash = v.get("hash").and_then(|h| h.as_str()).unwrap_or("");
-            if hash.starts_with(&args.hash) {
-                matches.push(p);
-            }
-        }
+    for top in ["sims", "fits", "profiles"] {
+        let subroot = root.join(top);
+        if !subroot.exists() { continue; }
+        find_runs_with_prefix(&subroot, &args.hash, &mut matches);
     }
 
-    let fit_dir = match matches.len() {
+    let run_dir = match matches.len() {
         0 => {
-            eprintln!("error: no fit found with hash prefix `{}` under {}",
-                args.hash, fits_root.display());
+            eprintln!("error: no run found with hash prefix `{}` under {}",
+                args.hash, root.display());
             std::process::exit(1);
         }
         1 => matches.into_iter().next().unwrap(),
         n => {
-            eprintln!("error: hash prefix `{}` matches {} fits — \
+            eprintln!("error: hash prefix `{}` matches {} runs — \
                        use a longer prefix", args.hash, n);
+            for p in &matches[..n.min(8)] {
+                eprintln!("  {}", p.display());
+            }
             std::process::exit(1);
         }
     };
 
-    // Atomic mutation: read, validate state, mutate, write-then-rename.
-    let run_json_path = fit_dir.join("run.json");
-    let mut run = match crate::run_meta::Run::read(&fit_dir) {
+    let run_json_path = run_dir.join("run.json");
+    let mut run = match crate::run_meta::Run::read(&run_dir) {
         Ok(r) => r,
         Err(e) => {
             eprintln!("error: cannot read {}: {}", run_json_path.display(), e);
@@ -1675,34 +1657,71 @@ pub fn cmd_fit_label(args: &crate::args::FitLabelArgs) {
 
     // Atomicity: refuse to relabel a still-running fit. The runner
     // sets wall_time_seconds at end-of-fit; mid-run it stays at the
-    // initial 0.0 sentinel. (See cmd_fit_run_v2: `wall_time_seconds:
-    // 0.0` at first write, patched on the post-run rewrite.) A
-    // running fit will overwrite our label change when it finishes.
-    if run.wall_time_seconds == 0.0 {
+    // initial 0.0 sentinel. A running fit will overwrite our label
+    // change when it finishes. Sim/profile/replicate-set writes set
+    // wall_time at write time, so the gate only fires for fits.
+    let is_fit_kind = matches!(
+        &run.kind,
+        crate::run_meta::RunKind::Fit(_) | crate::run_meta::RunKind::FitStage(_)
+    );
+    if is_fit_kind && run.wall_time_seconds == 0.0 {
         eprintln!(
-            "error: fit at {} is still running (wall_time_seconds is the \
-             pre-completion sentinel value 0.0). Wait for the fit to \
-             finish, or pass --label at fit-run time.",
-            fit_dir.display());
+            "error: run at {} is still in progress (wall_time_seconds is \
+             the pre-completion sentinel value 0.0). Wait for it to \
+             finish, or pass --label at run time.",
+            run_dir.display());
         std::process::exit(1);
     }
 
     let prior = run.label.clone();
     run.label = Some(new_label.clone());
-    if let Err(e) = run.write(&fit_dir) {
+    if let Err(e) = run.write(&run_dir) {
         eprintln!("error: cannot write {}: {}", run_json_path.display(), e);
         std::process::exit(1);
     }
     match prior {
         Some(p) if p != new_label =>
             eprintln!("ok: label updated from \"{}\" to \"{}\" on {}",
-                p, new_label, fit_dir.display()),
+                p, new_label, run_dir.display()),
         Some(_) =>
             eprintln!("ok: label unchanged (\"{}\") on {}",
-                new_label, fit_dir.display()),
+                new_label, run_dir.display()),
         None =>
             eprintln!("ok: label set to \"{}\" on {}",
-                new_label, fit_dir.display()),
+                new_label, run_dir.display()),
+    }
+}
+
+/// Recursively find directories under `root` whose `run.json` has a
+/// `Run.hash` starting with `prefix`. Reads the JSON shallowly via
+/// `serde_json::Value` to avoid deserializing every kind variant just
+/// to check the hash. Bounded depth comes for free from the on-disk
+/// layout (sims: 3 levels, fits: up to 5, profiles: up to 5), so a
+/// plain recursive walk is fine without a max-depth guard.
+fn find_runs_with_prefix(
+    root: &std::path::Path,
+    prefix: &str,
+    out: &mut Vec<std::path::PathBuf>,
+) {
+    let entries = match std::fs::read_dir(root) {
+        Ok(e) => e,
+        Err(_) => return,
+    };
+    for entry in entries.flatten() {
+        let p = entry.path();
+        if !p.is_dir() { continue; }
+        let run_json = p.join("run.json");
+        if run_json.is_file() {
+            if let Ok(txt) = std::fs::read_to_string(&run_json) {
+                if let Ok(v) = serde_json::from_str::<serde_json::Value>(&txt) {
+                    let hash = v.get("hash").and_then(|h| h.as_str()).unwrap_or("");
+                    if hash.starts_with(prefix) {
+                        out.push(p.clone());
+                    }
+                }
+            }
+        }
+        find_runs_with_prefix(&p, prefix, out);
     }
 }
 

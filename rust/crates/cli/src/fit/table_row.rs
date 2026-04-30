@@ -60,7 +60,7 @@ pub struct TableRow {
     /// Full 64-char `Run.hash`.
     pub fit_hash: String,
     /// User-supplied display label, set at fit-run time via
-    /// `--label "..."` or post-hoc via `camdl fit label <hash>
+    /// `--label "..."` or post-hoc via `camdl label <hash>
     /// "<text>"`. None when the user hasn't labelled the fit.
     pub label: Option<String>,
     /// fit.toml stem — the basename of `FitMeta.fit_toml_path` minus

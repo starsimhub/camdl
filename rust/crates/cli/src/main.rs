@@ -115,6 +115,9 @@ pub(crate) enum Command {
     /// Compare fits by prequential scores (elpd, CRPS, PIT)
     Compare(args::CompareArgs),
 
+    /// Set or update the user-display label on any run (sim, fit, profile, …)
+    Label(args::LabelArgs),
+
     /// Compile a .camdl model to IR JSON (delegates to camdlc)
     #[command(after_help = "\
 This subcommand forwards all arguments verbatim to the OCaml compiler
@@ -200,8 +203,6 @@ pub(crate) enum FitCmd {
     New(args::FitNewArgs),
     /// Print the output directory path for a fit.toml
     Where(args::FitWhereArgs),
-    /// Set or update the user-display label on a completed fit
-    Label(args::FitLabelArgs),
 }
 
 #[derive(Subcommand)]
@@ -265,7 +266,7 @@ fn main() {
         Command::Fit(FitCmd::Table(a))  => fit::cmd_fit_table(&a),
         Command::Fit(FitCmd::New(a))    => fit::cmd_fit_new(&a),
         Command::Fit(FitCmd::Where(a))  => fit::cmd_fit_where(&a),
-        Command::Fit(FitCmd::Label(a))  => fit::cmd_fit_label(&a),
+        Command::Label(a)               => fit::cmd_label(&a),
         Command::Pfilter(a)             => pfilter::cmd_pfilter(&a),
         Command::If2(a)                 => if2::cmd_if2(&a),
         Command::Profile(a)             => profile::cmd_profile(&a),

@@ -682,15 +682,15 @@ fn fit_label_workflow_persists_and_surfaces_in_table() {
     let full_hash = run_json["hash"].as_str().unwrap().to_string();
     let hash_prefix: String = full_hash.chars().take(8).collect();
 
-    // Step 2: --label flag persisted into FitMeta.label.
-    // RunKind uses #[serde(tag = "kind", rename_all = "kebab-case")],
-    // so the FitMeta fields are flattened under run_json["kind"] with
-    // a sibling "kind": "fit" discriminator.
+    // Step 2: --label flag persisted on the top-level Run. The label
+    // moved from FitMeta.label to Run.label so it applies uniformly
+    // across run kinds; the kind discriminator still tags the
+    // RunKind::Fit payload under run_json["kind"].
     assert_eq!(run_json["kind"]["kind"].as_str(), Some("fit"),
         "expected kind discriminator");
-    let persisted = run_json["kind"]["label"].as_str();
+    let persisted = run_json["label"].as_str();
     assert_eq!(persisted, Some(initial_label),
-        "--label must persist into FitMeta.label; got {:?}", persisted);
+        "--label must persist into Run.label; got {:?}", persisted);
 
     // Step 3: fit table surfaces the label.
     let table_out = std::process::Command::new(&camdl)
@@ -702,24 +702,24 @@ fn fit_label_workflow_persists_and_surfaces_in_table() {
     let table: serde_json::Value = serde_json::from_slice(&table_out.stdout).unwrap();
     let row_label = table["rows"][0]["label"].as_str();
     assert_eq!(row_label, Some(initial_label),
-        "table_row.label must reflect FitMeta.label; got {:?}", row_label);
+        "table_row.label must reflect Run.label; got {:?}", row_label);
 
-    // Step 4: fit label <hash> "<new>" rewrites.
+    // Step 4: `camdl label <hash> "<new>"` rewrites.
     let new_label = "narrow R0, take 2";
     let label_status = std::process::Command::new(&camdl)
-        .arg("fit").arg("label")
+        .arg("label")
         .arg(&hash_prefix)
         .arg(new_label)
         .arg("--root").arg(&output_dir)
-        .status().expect("camdl fit label must invoke");
-    assert!(label_status.success(), "camdl fit label failed");
+        .status().expect("camdl label must invoke");
+    assert!(label_status.success(), "camdl label failed");
 
     let run_json2: serde_json::Value = serde_json::from_str(
         &std::fs::read_to_string(fit_dir.join("run.json")).unwrap()).unwrap();
-    assert_eq!(run_json2["kind"]["label"].as_str(), Some(new_label),
-        "fit label must update FitMeta.label");
+    assert_eq!(run_json2["label"].as_str(), Some(new_label),
+        "label must live on Run, not on FitMeta");
     assert_eq!(run_json2["hash"].as_str().unwrap(), full_hash,
-        "fit label must not change Run.hash");
+        "label must not change Run.hash");
 
     let table_out2 = std::process::Command::new(&camdl)
         .arg("fit").arg("table").arg(&fits)
@@ -753,11 +753,11 @@ fn fit_label_rejects_empty_label_at_cli() {
 
     for empty in ["", "   "] {
         let out = std::process::Command::new(&camdl)
-            .arg("fit").arg("label")
+            .arg("label")
             .arg(&hash_prefix)
             .arg(empty)
             .arg("--root").arg(&output_dir)
-            .output().expect("camdl fit label must invoke");
+            .output().expect("camdl label must invoke");
         assert!(!out.status.success(),
             "empty label {:?} must be rejected", empty);
         let stderr = String::from_utf8_lossy(&out.stderr);

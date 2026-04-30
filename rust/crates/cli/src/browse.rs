@@ -849,6 +849,8 @@ fn print_table(runs: &[RunEntry], now: SystemTime) {
         .set_content_arrangement(ContentArrangement::Dynamic)
         .set_header(vec![
             Cell::new("CREATED").add_attribute(comfy_table::Attribute::Bold),
+            Cell::new("HASH").add_attribute(comfy_table::Attribute::Bold),
+            Cell::new("LABEL").add_attribute(comfy_table::Attribute::Bold),
             Cell::new("MODEL").add_attribute(comfy_table::Attribute::Bold),
             Cell::new("SCENARIO").add_attribute(comfy_table::Attribute::Bold),
             Cell::new("SEED").add_attribute(comfy_table::Attribute::Bold),
@@ -862,8 +864,12 @@ fn print_table(runs: &[RunEntry], now: SystemTime) {
         let model       = model_display_name(&r.meta.model);
         let params      = format_params_summary(&r.meta, 40);
         let size        = format_size(r.traj_bytes);
+        let hash_short  = short_hash_cell(&r.run.hash);
+        let label_cell  = label_cell(&r.run.label);
         table.add_row(vec![
             Cell::new(rel_time).fg(comfy_table::Color::Yellow),
+            hash_short,
+            label_cell,
             Cell::new(model),
             Cell::new(&r.meta.scenario).fg(comfy_table::Color::Green),
             Cell::new(r.meta.seed),
@@ -911,6 +917,7 @@ fn print_fits_table(fits: &[FitEntry], now: SystemTime) {
         .set_content_arrangement(ContentArrangement::Dynamic)
         .set_header(vec![
             Cell::new("CREATED").add_attribute(comfy_table::Attribute::Bold),
+            Cell::new("HASH").add_attribute(comfy_table::Attribute::Bold),
             Cell::new("LABEL").add_attribute(comfy_table::Attribute::Bold),
             Cell::new("MODEL").add_attribute(comfy_table::Attribute::Bold),
             Cell::new("ESTIMATE").add_attribute(comfy_table::Attribute::Bold),
@@ -928,15 +935,12 @@ fn print_fits_table(fits: &[FitEntry], now: SystemTime) {
             } else { joined }
         };
         let stages = f.meta.stages_declared.join(",");
-        let label_cell = match &f.run.label {
-            Some(l) => Cell::new(l),
-            None => {
-                unlabelled += 1;
-                Cell::new("<unlabelled>").add_attribute(comfy_table::Attribute::Dim)
-            }
-        };
+        if f.run.label.is_none() { unlabelled += 1; }
+        let hash_short = short_hash_cell(&f.run.hash);
+        let label_cell = label_cell(&f.run.label);
         table.add_row(vec![
             Cell::new(rel_time).fg(comfy_table::Color::Yellow),
+            hash_short,
             label_cell,
             Cell::new(model),
             Cell::new(estimate).add_attribute(comfy_table::Attribute::Dim),
@@ -963,6 +967,8 @@ fn print_profiles_table(profiles: &[ProfileEntry], now: SystemTime) {
         .set_content_arrangement(ContentArrangement::Dynamic)
         .set_header(vec![
             Cell::new("CREATED").add_attribute(comfy_table::Attribute::Bold),
+            Cell::new("HASH").add_attribute(comfy_table::Attribute::Bold),
+            Cell::new("LABEL").add_attribute(comfy_table::Attribute::Bold),
             Cell::new("MODEL").add_attribute(comfy_table::Attribute::Bold),
             Cell::new("FOCAL").add_attribute(comfy_table::Attribute::Bold),
             Cell::new("SHAPE").add_attribute(comfy_table::Attribute::Bold),
@@ -981,8 +987,12 @@ fn print_profiles_table(profiles: &[ProfileEntry], now: SystemTime) {
                 .fg(comfy_table::Color::Green)
                 .add_attribute(comfy_table::Attribute::Bold)
         };
+        let hash_short = short_hash_cell(&p.run.hash);
+        let label_cell = label_cell(&p.run.label);
         table.add_row(vec![
             Cell::new(rel_time).fg(comfy_table::Color::Yellow),
+            hash_short,
+            label_cell,
             Cell::new(model),
             Cell::new(&p.focal).fg(comfy_table::Color::Magenta),
             Cell::new(&p.shape).add_attribute(comfy_table::Attribute::Dim),
@@ -991,6 +1001,23 @@ fn print_profiles_table(profiles: &[ProfileEntry], now: SystemTime) {
         ]);
     }
     println!("{table}");
+}
+
+/// 8-char hash prefix cell — what `camdl show <hash>` and
+/// `camdl label <hash>` accept.
+fn short_hash_cell(hash: &str) -> comfy_table::Cell {
+    let n = hash.len().min(8);
+    comfy_table::Cell::new(&hash[..n]).add_attribute(comfy_table::Attribute::Dim)
+}
+
+/// Render the LABEL cell uniformly across kinds: the trimmed label or
+/// a dim "<unlabelled>" placeholder.
+fn label_cell(label: &Option<String>) -> comfy_table::Cell {
+    match label {
+        Some(l) => comfy_table::Cell::new(l),
+        None => comfy_table::Cell::new("<unlabelled>")
+            .add_attribute(comfy_table::Attribute::Dim),
+    }
 }
 
 /// Compact one-line summary of the run's sweep point (if any).
