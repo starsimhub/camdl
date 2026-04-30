@@ -503,6 +503,17 @@ pub fn run_stage(
     // Write summary JSON
     write_summary(stage_dir, &all_results, &config, &diagnostics)?;
 
+    // No-op resume: every chain already reached the target sweep count
+    // before this invocation. There are no new sweeps to aggregate
+    // and the on-disk fit_state.toml from the prior invocation is
+    // still authoritative. Exit cleanly without re-aggregating.
+    let any_new_sweeps = all_results.iter().any(|(_, sweeps, _)| !sweeps.is_empty());
+    if !any_new_sweeps {
+        eprintln!("\npgas: --resume found all chains at the target sweep \
+            count. Nothing to do.");
+        return Ok(());
+    }
+
     // Write fit_state.toml with best params
     let best_chain = all_results.iter()
         .max_by(|a, b| {
@@ -512,11 +523,11 @@ pub fn run_stage(
                 .fold(f64::NEG_INFINITY, f64::max);
             best_ll_a.total_cmp(&best_ll_b)
         })
-        .unwrap();
+        .expect("any_new_sweeps guard ensures non-empty");
 
     let best_sweep = best_chain.1.iter()
         .max_by(|a, b| a.log_complete_data_ll.total_cmp(&b.log_complete_data_ll))
-        .unwrap();
+        .expect("any_new_sweeps guard ensures non-empty");
 
     let mut start_values = HashMap::new();
     for spec in &config.estimated_params {

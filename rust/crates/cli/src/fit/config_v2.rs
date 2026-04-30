@@ -790,8 +790,7 @@ impl Default for GateConfig {
 /// Deserialized from a string. If the string contains `/` or `\`, it's a
 /// directory path; if it equals "random", it's random starts; otherwise
 /// it's a stage name reference.
-#[derive(Debug, Clone, Serialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, Default)]
 pub enum StartsFrom {
     /// Name of a previous stage in this fit.toml (e.g., "mle").
     Stage(String),
@@ -802,6 +801,24 @@ pub enum StartsFrom {
     Random,
 }
 
+impl serde::Serialize for StartsFrom {
+    /// Serializes as a bare string, mirroring the deserializer's
+    /// expectations:
+    /// - `Stage(name)` → `"name"`
+    /// - `Directory(path)` → `"path"` (display form)
+    /// - `Random` → `"random"`
+    ///
+    /// This is the same string form a user would write in fit.toml,
+    /// so identity_payload bytes match a hand-written equivalent.
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where S: serde::Serializer {
+        match self {
+            StartsFrom::Stage(s)     => serializer.serialize_str(s),
+            StartsFrom::Directory(p) => serializer.serialize_str(&p.to_string_lossy()),
+            StartsFrom::Random       => serializer.serialize_str("random"),
+        }
+    }
+}
 
 impl<'de> serde::Deserialize<'de> for StartsFrom {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
@@ -810,9 +827,10 @@ impl<'de> serde::Deserialize<'de> for StartsFrom {
         // Contains path separator → directory path
         if s.contains('/') || s.contains('\\') {
             Ok(StartsFrom::Directory(PathBuf::from(s)))
+        } else if s == "random" {
+            Ok(StartsFrom::Random)
         } else {
-            // Bare name → stage reference (never interpreted as Random;
-            // Random is only the Default when starts_from is omitted)
+            // Bare name → stage reference
             Ok(StartsFrom::Stage(s))
         }
     }
@@ -1932,6 +1950,183 @@ params = ["S0_y", "S0_a", "S0_e"]
     }
 
     #[test]
+    fn validate_data_synthetic_mutex() {
+        // Both [data] and [synthetic] supplied — must reject.
+        let config = parse(r#"
+[model]
+camdl = "models/sir.camdl"
+
+[data.observations]
+weekly_cases = "data/cases.tsv"
+
+[synthetic]
+true_params = "true.toml"
+sim_seeds = [1, 2, 3]
+
+[config]
+backend = "chain_binomial"
+dt = 1.0
+
+[estimate]
+beta = { bounds = [0.01, 2.0] }
+
+[fixed]
+N0 = 1000000
+
+[stages.mle]
+method = "if2"
+chains = 4
+particles = 100
+iterations = 50
+cooling = 0.7
+        "#).unwrap();
+        let model_params = vec!["beta".into(), "N0".into()];
+        let err = config.validate(&model_params).unwrap_err();
+        assert!(err.contains("mutually exclusive"),
+            "expected mutex error: got {}", err);
+        assert!(err.contains("[data]") && err.contains("[synthetic]"),
+            "expected both section names: got {}", err);
+    }
+
+    #[test]
+    fn validate_neither_data_nor_synthetic_rejects() {
+        // Both omitted — must reject.
+        let config = parse(r#"
+[model]
+camdl = "models/sir.camdl"
+
+[config]
+backend = "chain_binomial"
+dt = 1.0
+
+[estimate]
+beta = { bounds = [0.01, 2.0] }
+
+[fixed]
+N0 = 1000000
+
+[stages.mle]
+method = "if2"
+chains = 4
+particles = 100
+iterations = 50
+cooling = 0.7
+        "#).unwrap();
+        let model_params = vec!["beta".into(), "N0".into()];
+        let err = config.validate(&model_params).unwrap_err();
+        assert!(err.contains("neither"),
+            "expected 'neither data nor synthetic' error: got {}", err);
+    }
+
+    #[test]
+    fn validate_scenario_enable_disable_mutex() {
+        // scenario + enable list — must reject.
+        let config = parse(r#"
+scenario = "winter"
+enable = ["intervention_a"]
+
+[model]
+camdl = "models/sir.camdl"
+
+[data.observations]
+weekly_cases = "data/cases.tsv"
+
+[config]
+backend = "chain_binomial"
+dt = 1.0
+
+[estimate]
+beta = { bounds = [0.01, 2.0] }
+
+[fixed]
+N0 = 1000000
+
+[stages.mle]
+method = "if2"
+chains = 4
+particles = 100
+iterations = 50
+cooling = 0.7
+        "#).unwrap();
+        let model_params = vec!["beta".into(), "N0".into()];
+        let err = config.validate(&model_params).unwrap_err();
+        assert!(err.contains("mutually exclusive"),
+            "expected mutex error: got {}", err);
+        assert!(err.contains("scenario"),
+            "expected scenario name: got {}", err);
+    }
+
+    #[test]
+    fn validate_empty_fit_seeds_rejects() {
+        let config = parse(r#"
+fit_seeds = []
+
+[model]
+camdl = "models/sir.camdl"
+
+[data.observations]
+weekly_cases = "data/cases.tsv"
+
+[config]
+backend = "chain_binomial"
+dt = 1.0
+
+[estimate]
+beta = { bounds = [0.01, 2.0] }
+
+[fixed]
+N0 = 1000000
+
+[stages.mle]
+method = "if2"
+chains = 4
+particles = 100
+iterations = 50
+cooling = 0.7
+        "#).unwrap();
+        let model_params = vec!["beta".into(), "N0".into()];
+        let err = config.validate(&model_params).unwrap_err();
+        assert!(err.contains("empty"),
+            "expected empty-list error: got {}", err);
+    }
+
+    #[test]
+    fn validate_duplicate_fit_seeds_rejects() {
+        let config = parse(r#"
+fit_seeds = [1, 2, 3, 2]
+
+[model]
+camdl = "models/sir.camdl"
+
+[data.observations]
+weekly_cases = "data/cases.tsv"
+
+[config]
+backend = "chain_binomial"
+dt = 1.0
+
+[estimate]
+beta = { bounds = [0.01, 2.0] }
+
+[fixed]
+N0 = 1000000
+
+[stages.mle]
+method = "if2"
+chains = 4
+particles = 100
+iterations = 50
+cooling = 0.7
+        "#).unwrap();
+        let model_params = vec!["beta".into(), "N0".into()];
+        let err = config.validate(&model_params).unwrap_err();
+        assert!(err.contains("duplicate"),
+            "expected duplicate-seed error: got {}", err);
+        assert!(err.contains("2"),
+            "expected duplicate value in error: got {}", err);
+    }
+
+    #[test]
     fn validate_holdout_mutual_exclusivity() {
         let err = parse(r#"
 [model]
@@ -2676,6 +2871,41 @@ decibans_thresh = 100.0
         let s_short = make_pmmh_stage(1000);
         let s_long = make_pmmh_stage(8000);
         assert_eq!(s_short.identity_payload(), s_long.identity_payload());
+    }
+
+    #[test]
+    fn identity_payload_is_byte_stable_against_recompiles() {
+        // Golden bytes for a fixed PGAS stage. Locks the
+        // serialization order so a recompile that silently changes
+        // serde_json's key ordering would invalidate every
+        // resume_state.bin in the wild — we'd rather fail this test
+        // than have users discover the breakage later.
+        //
+        // serde_json::to_vec on serde_json::json!{} preserves the
+        // declaration order of keys in the Value tree (BTreeMap-
+        // like behavior is opt-in via `preserve_order` feature, off
+        // by default; default Map sorts lexically). Either way the
+        // result is deterministic, so a golden constant catches drift.
+        let stage = make_pgas_stage(1000);
+        let payload_bytes = serde_json::to_vec(&stage.identity_payload()).unwrap();
+        let payload_str = String::from_utf8(payload_bytes).unwrap();
+        let expected = r#"{"burn_in":200,"chains":4,"csmc_sweeps_per_nuts":1,"dense_mass":true,"max_tree_depth":10,"method":"pgas","particles":100,"starts_from":"random","tempering":[1.0],"thin":2,"trajectory_warmup":0,"use_nuts":true}"#;
+        assert_eq!(payload_str, expected,
+            "identity_payload byte format drifted — every existing \
+             resume_state.bin would be invalidated. If this change is \
+             intentional, update the golden constant AND ship a note \
+             to users that --resume against pre-change chains will \
+             reject.");
+    }
+
+    #[test]
+    fn pmmh_identity_payload_byte_stable() {
+        let stage = make_pmmh_stage(1000);
+        let payload_str = serde_json::to_string(&stage.identity_payload()).unwrap();
+        let expected = r#"{"adapt":true,"adapt_start":300,"burn_in":200,"chains":4,"method":"pmmh","particles":100,"rho":null,"starts_from":"random","thin":2}"#;
+        assert_eq!(payload_str, expected,
+            "PMMH identity_payload byte format drifted — see \
+             pgas_identity_payload_byte_stable for context.");
     }
 
     #[test]

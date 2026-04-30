@@ -1342,4 +1342,82 @@ mod tests {
             other => panic!("expected RunKind::Simulate, got {:?}", other),
         }
     }
+
+    #[test]
+    fn resolve_any_ambiguous_prefix_lists_candidates() {
+        // Two sims that share the same 4-char `sim_hash` prefix and
+        // 64-char `Run.hash`. `resolve_any("abc1")` must reject with
+        // an error that lists both candidates with their kind labels.
+        // Guards the rendering path users see when a short prefix
+        // accidentally collides — "ambiguous" is the right error,
+        // "no run matches" would be silently wrong.
+        let tmp = tempfile::tempdir().unwrap();
+        let common_sim_hash = "abc12345aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
+        // Run A: full hash starts with "abc1...1111"
+        let dir_a = tmp.path().join("sims/abc12345-A/baseline-def00001/seed_1");
+        std::fs::create_dir_all(&dir_a).unwrap();
+        let run_a = Run {
+            hash:    "abc11111".repeat(8),
+            version: "0.1".into(),
+            created_at: "2026-04-30T00:00:00Z".into(),
+            argv: vec![],
+            status: RunStatus::Completed { wall_time_seconds: 1.0 },
+            label: None,
+            kind: RunKind::Simulate(SimulateMeta {
+                model: "sir.camdl".into(),
+                model_hash: "m".repeat(64),
+                scenario: "baseline".into(),
+                sim_hash: common_sim_hash.into(),
+                scen_hash: "d".repeat(64),
+                seed: 1,
+                backend: crate::args::types::Backend::Gillespie,
+                dt: 1.0,
+                sweep_point: HashMap::new(),
+                from_fit_hash: None,
+            }),
+        };
+        run_a.write(&dir_a).unwrap();
+
+        // Run B: full hash starts with "abc1...2222"
+        let dir_b = tmp.path().join("sims/abc12345-B/baseline-def00002/seed_2");
+        std::fs::create_dir_all(&dir_b).unwrap();
+        let run_b = Run {
+            hash:    "abc12222".repeat(8),
+            version: "0.1".into(),
+            created_at: "2026-04-30T00:00:00Z".into(),
+            argv: vec![],
+            status: RunStatus::Completed { wall_time_seconds: 1.0 },
+            label: None,
+            kind: RunKind::Simulate(SimulateMeta {
+                model: "sir.camdl".into(),
+                model_hash: "m".repeat(64),
+                scenario: "baseline".into(),
+                sim_hash: common_sim_hash.into(),
+                scen_hash: "d".repeat(64),
+                seed: 2,
+                backend: crate::args::types::Backend::Gillespie,
+                dt: 1.0,
+                sweep_point: HashMap::new(),
+                from_fit_hash: None,
+            }),
+        };
+        run_b.write(&dir_b).unwrap();
+
+        let root = tmp.path().to_str().unwrap();
+        // Prefix "abc1" matches both (via Run.hash AND sim_hash).
+        let err = resolve_any(root, "abc1").expect_err(
+            "ambiguous prefix must reject");
+        assert!(err.contains("ambiguous"), "got: {}", err);
+        assert!(err.contains("matches 2"), "got: {}", err);
+        assert!(err.contains("sim"),
+            "expected kind label in disambiguation: got {}", err);
+
+        // Narrowing to a unique prefix resolves cleanly.
+        let resolved = resolve_any(root, "abc11111").unwrap();
+        match &resolved.run.kind {
+            RunKind::Simulate(m) => assert_eq!(m.seed, 1),
+            _ => panic!("expected sim"),
+        }
+    }
 }
