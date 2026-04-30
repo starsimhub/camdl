@@ -94,11 +94,13 @@ pub fn run_stage(
     // Load prior state if --starts-from provided
     let prior_state = starts_from.map(FitState::load).transpose()?;
 
-    // Build FitRunConfig (reuse existing builder)
+    // Build FitRunConfig (reuse existing builder). iterations,
+    // cooling, cooling_target_iters are IF2-specific and never read
+    // by PMMH — pass harmless values.
     let config = FitRunConfig::build(
         fit, prior_state.as_ref(),
-        n_chains, n_particles, 1, // iterations=1 unused for PMMH
-        1.0, // cooling unused
+        n_chains, n_particles, 1,
+        1.0, 1,
         seed, false,
     )?;
 
@@ -238,7 +240,8 @@ pub fn run_stage(
     let data_spec = fit.data_spec()?;
     let config_hash = super::provenance::fit_stage_hash(
         &config.model_ir_json, &data_spec.observations,
-        &fit.estimate, &fixed_resolved, stage_name, stage, seed,
+        &fit.estimate, &fixed_resolved, &fit.simplex_groups,
+        stage_name, stage, seed,
     )?;
 
     // Load resume states if --resume

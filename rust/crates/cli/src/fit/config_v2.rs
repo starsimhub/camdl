@@ -37,6 +37,25 @@ pub struct FitConfigV2 {
     #[serde(default)]
     pub fit_seeds: Option<Vec<u64>>,
 
+    /// Simplex constraints between estimated parameters. Each group's
+    /// members must appear in `[estimate]`, be non-negative, and form
+    /// a probability simplex (sum = 1). This is a *parameter-space
+    /// property*, not an algorithm knob — algorithms read it.
+    ///
+    /// IF2 perturbs members jointly via barycentric (log-ratio + softmax)
+    /// transform; a member's `rw_sd` is interpreted on the log-ratio
+    /// scale. PGAS / PMMH / PFilter currently treat members as
+    /// independent and rely on the model to enforce sum = 1 indirectly
+    /// — `validate()` warns when a non-IF2 stage runs against a fit
+    /// that declares simplex groups.
+    ///
+    /// Forward-compat note: the natural prior on a simplex is Dirichlet,
+    /// which lives at the *group* level (one prior over k correlated
+    /// quantities). The schema accommodates a future `prior` field on
+    /// `SimplexGroup` without breaking changes.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub simplex_groups: Vec<SimplexGroup>,
+
     /// How the initial parameter point is chosen for each fit. Default
     /// matches today's behaviour (`model_default` — start from the
     /// model's declared values). `"prior"` draws from declared priors.
@@ -135,6 +154,29 @@ pub struct DataSpec {
 }
 
 // ─── Synthetic data ──────────────────────────────────────────────────────────
+
+// ─── Simplex groups ─────────────────────────────────────────────────────────
+
+/// A group of estimated parameters that must form a probability simplex
+/// (non-negative, summing to 1). See `FitConfigV2.simplex_groups` for
+/// the full design.
+///
+/// CLI-side type: members are listed by name. At fit-config build time
+/// names are resolved to model param indices, and `rw_sd` is read from
+/// each member's `EstimateSpecV2.rw_sd` (or auto-derived) — the runtime
+/// `sim::inference::if2::SimplexGroup` carries indices + rw_sds on the
+/// log-ratio scale.
+///
+/// Schema is forward-compatible with a future `prior:
+/// MultivariatePriorSpec` field for Dirichlet support.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct SimplexGroup {
+    /// Parameter names that form a probability simplex (sum = 1).
+    /// Each must appear in `[estimate]`. Order is preserved for
+    /// reproducible barycentric encoding (the perturbation result
+    /// depends on member order via the log-ratio's reference index).
+    pub params: Vec<String>,
+}
 
 /// Synthetic-data generation spec. Mutually exclusive with `[data]`:
 /// when present, the runner generates `len(sim_seeds)` datasets from
@@ -414,9 +456,18 @@ pub enum Stage {
         chains: usize,
         particles: usize,
         iterations: usize,
-        /// Fraction of initial perturbation magnitude remaining at the final
-        /// iteration. 0.70 = perturbations shrink to 70% over the full run.
+        /// Fraction of initial perturbation magnitude remaining at
+        /// `cooling_target_iters` iterations.
+        /// Matches pomp's `cooling.fraction.50` semantics:
+        /// `cooling = 0.7` and `cooling_target_iters = 50` means
+        /// perturbation SD reaches 70% of initial after 50 iterations,
+        /// continuing to cool past that.
         cooling: f64,
+        /// Iterations over which `cooling` is reached. Default 50 (pomp's
+        /// default; not `iterations`). Decoupling target from total length
+        /// lets you cool fast then continue at the noise floor.
+        #[serde(default = "default_cooling_target_iters")]
+        cooling_target_iters: usize,
         #[serde(default)]
         starts_from: StartsFrom,
         /// Clean-evaluation re-scoring of candidate parameter points after
@@ -579,6 +630,9 @@ pub struct LoglikEvalConfig {
 
 fn default_loglik_eval_particles() -> usize { 4000 }
 fn default_loglik_eval_replicates() -> usize { 8 }
+/// Pomp's `cooling.fraction.50` default: cooling fraction is reached
+/// at iteration 50, then continues at the noise floor.
+fn default_cooling_target_iters() -> usize { 50 }
 
 impl Default for LoglikEvalConfig {
     fn default() -> Self {
@@ -930,6 +984,82 @@ impl FitConfigV2 {
                     name, lo, hi
                 ));
             }
+        }
+
+        // Validate simplex groups
+        self.validate_simplex_groups()?;
+
+        Ok(())
+    }
+
+    /// Validate `[[simplex_groups]]` entries against `[estimate]`.
+    /// Rules:
+    ///  - `params.len() >= 2` (single-member simplex is degenerate)
+    ///  - Every member appears in `[estimate]`
+    ///  - No member appears in more than one simplex group
+    ///  - No member is `ivp = true` (the simplex transform owns the
+    ///    initial perturbation; ivp would conflict)
+    ///  - Each member's bounds lower must be ≥ 0 (members are non-negative)
+    ///  - (Algorithm-aware) If any non-IF2 stage exists alongside
+    ///    simplex groups, emit a warning to stderr — non-IF2 methods
+    ///    don't currently honour the constraint.
+    fn validate_simplex_groups(&self) -> Result<(), String> {
+        if self.simplex_groups.is_empty() {
+            return Ok(());
+        }
+
+        let mut seen: BTreeSet<&str> = BTreeSet::new();
+        for (gi, group) in self.simplex_groups.iter().enumerate() {
+            if group.params.len() < 2 {
+                return Err(format!(
+                    "simplex_groups[{}]: must have at least 2 members \
+                     (got {}). A 1-member simplex is degenerate (the \
+                     constraint forces value = 1).",
+                    gi, group.params.len()));
+            }
+            for name in &group.params {
+                let spec = self.estimate.get(name).ok_or_else(|| format!(
+                    "simplex_groups[{}]: member '{}' not in [estimate]. \
+                     Simplex members must be free parameters.", gi, name))?;
+                if !seen.insert(name.as_str()) {
+                    return Err(format!(
+                        "simplex_groups[{}]: parameter '{}' already \
+                         appears in another simplex group. Each parameter \
+                         can belong to at most one simplex.", gi, name));
+                }
+                if spec.ivp {
+                    return Err(format!(
+                        "simplex_groups[{}]: member '{}' has ivp = true. \
+                         The simplex transform owns the initial \
+                         perturbation; ivp would conflict. Drop ivp on \
+                         simplex members and rely on the simplex's \
+                         barycentric perturbation for spread.",
+                        gi, name));
+                }
+                let (lo, _hi) = spec.bounds;
+                if lo < 0.0 {
+                    return Err(format!(
+                        "simplex_groups[{}]: member '{}' has bounds \
+                         lower {} < 0. Simplex members must be \
+                         non-negative.", gi, name, lo));
+                }
+            }
+        }
+
+        // Algorithm-aware warning: non-IF2 stages don't honour simplex.
+        let non_if2_stages: Vec<(&str, &str)> = self.stages.iter()
+            .filter(|(_, s)| !matches!(s, Stage::IF2 { .. }))
+            .map(|(name, s)| (name.as_str(), s.method_name()))
+            .collect();
+        if !non_if2_stages.is_empty() {
+            let names = non_if2_stages.iter()
+                .map(|(n, m)| format!("'{}' ({})", n, m))
+                .collect::<Vec<_>>().join(", ");
+            eprintln!("\x1b[33mwarning:\x1b[0m fit declares simplex_groups, \
+                but non-IF2 stage(s) {} do not currently honour the \
+                simplex constraint — members will be perturbed \
+                independently and rely on the model to enforce sum = 1 \
+                indirectly.", names);
         }
 
         Ok(())
@@ -1495,6 +1625,200 @@ cooling = 0.70
         let err = config.validate(&model_params).unwrap_err();
         assert!(err.contains("unknown backend"));
         assert!(err.contains("gilelspie"));
+    }
+
+    #[test]
+    fn validate_simplex_group_rejects_singleton() {
+        let config = parse(r#"
+[model]
+camdl = "models/sir.camdl"
+[data.observations]
+weekly_cases = "data/cases.tsv"
+[config]
+backend = "chain_binomial"
+dt = 1.0
+[estimate]
+S0_y = { bounds = [0, 1] }
+beta = { bounds = [0.01, 2.0] }
+[fixed]
+N0 = 1000000
+[stages.mle]
+method = "if2"
+chains = 4
+particles = 100
+iterations = 50
+cooling = 0.7
+[[simplex_groups]]
+params = ["S0_y"]
+        "#).unwrap();
+        let model_params = vec!["S0_y".into(), "beta".into(), "N0".into()];
+        let err = config.validate(&model_params).unwrap_err();
+        assert!(err.contains("at least 2"), "expected size error: {}", err);
+    }
+
+    #[test]
+    fn validate_simplex_member_must_be_in_estimate() {
+        let config = parse(r#"
+[model]
+camdl = "models/sir.camdl"
+[data.observations]
+weekly_cases = "data/cases.tsv"
+[config]
+backend = "chain_binomial"
+dt = 1.0
+[estimate]
+S0_y = { bounds = [0, 1] }
+S0_a = { bounds = [0, 1] }
+beta = { bounds = [0.01, 2.0] }
+[fixed]
+N0 = 1000000
+S0_e = 0.2
+[stages.mle]
+method = "if2"
+chains = 4
+particles = 100
+iterations = 50
+cooling = 0.7
+[[simplex_groups]]
+params = ["S0_y", "S0_a", "S0_e"]
+        "#).unwrap();
+        // S0_e is in [fixed], not [estimate] — must reject
+        let model_params = vec!["S0_y".into(), "S0_a".into(), "S0_e".into(),
+                                "beta".into(), "N0".into()];
+        let err = config.validate(&model_params).unwrap_err();
+        assert!(err.contains("not in [estimate]"), "got: {}", err);
+        assert!(err.contains("S0_e"), "got: {}", err);
+    }
+
+    #[test]
+    fn validate_simplex_member_in_two_groups_rejects() {
+        let config = parse(r#"
+[model]
+camdl = "models/sir.camdl"
+[data.observations]
+weekly_cases = "data/cases.tsv"
+[config]
+backend = "chain_binomial"
+dt = 1.0
+[estimate]
+S0_y = { bounds = [0, 1] }
+S0_a = { bounds = [0, 1] }
+S0_e = { bounds = [0, 1] }
+beta = { bounds = [0.01, 2.0] }
+[fixed]
+N0 = 1000000
+[stages.mle]
+method = "if2"
+chains = 4
+particles = 100
+iterations = 50
+cooling = 0.7
+[[simplex_groups]]
+params = ["S0_y", "S0_a"]
+[[simplex_groups]]
+params = ["S0_a", "S0_e"]
+        "#).unwrap();
+        let model_params = vec!["S0_y".into(), "S0_a".into(), "S0_e".into(),
+                                "beta".into(), "N0".into()];
+        let err = config.validate(&model_params).unwrap_err();
+        assert!(err.contains("already appears in another simplex group"),
+            "got: {}", err);
+    }
+
+    #[test]
+    fn validate_simplex_member_with_ivp_rejects() {
+        let config = parse(r#"
+[model]
+camdl = "models/sir.camdl"
+[data.observations]
+weekly_cases = "data/cases.tsv"
+[config]
+backend = "chain_binomial"
+dt = 1.0
+[estimate]
+S0_y = { bounds = [0, 1], ivp = true }
+S0_a = { bounds = [0, 1] }
+S0_e = { bounds = [0, 1] }
+beta = { bounds = [0.01, 2.0] }
+[fixed]
+N0 = 1000000
+[stages.mle]
+method = "if2"
+chains = 4
+particles = 100
+iterations = 50
+cooling = 0.7
+[[simplex_groups]]
+params = ["S0_y", "S0_a", "S0_e"]
+        "#).unwrap();
+        let model_params = vec!["S0_y".into(), "S0_a".into(), "S0_e".into(),
+                                "beta".into(), "N0".into()];
+        let err = config.validate(&model_params).unwrap_err();
+        assert!(err.contains("ivp = true"), "got: {}", err);
+        assert!(err.contains("S0_y"), "got: {}", err);
+    }
+
+    #[test]
+    fn validate_simplex_member_with_negative_bounds_rejects() {
+        let config = parse(r#"
+[model]
+camdl = "models/sir.camdl"
+[data.observations]
+weekly_cases = "data/cases.tsv"
+[config]
+backend = "chain_binomial"
+dt = 1.0
+[estimate]
+S0_y = { bounds = [-0.5, 1] }
+S0_a = { bounds = [0, 1] }
+beta = { bounds = [0.01, 2.0] }
+[fixed]
+N0 = 1000000
+S0_e = 0.2
+[stages.mle]
+method = "if2"
+chains = 4
+particles = 100
+iterations = 50
+cooling = 0.7
+[[simplex_groups]]
+params = ["S0_y", "S0_a"]
+        "#).unwrap();
+        let model_params = vec!["S0_y".into(), "S0_a".into(), "S0_e".into(),
+                                "beta".into(), "N0".into()];
+        let err = config.validate(&model_params).unwrap_err();
+        assert!(err.contains("non-negative"), "got: {}", err);
+    }
+
+    #[test]
+    fn validate_simplex_groups_well_formed_passes() {
+        let config = parse(r#"
+[model]
+camdl = "models/sir.camdl"
+[data.observations]
+weekly_cases = "data/cases.tsv"
+[config]
+backend = "chain_binomial"
+dt = 1.0
+[estimate]
+S0_y = { bounds = [0, 1] }
+S0_a = { bounds = [0, 1] }
+S0_e = { bounds = [0, 1] }
+beta = { bounds = [0.01, 2.0] }
+[fixed]
+N0 = 1000000
+[stages.mle]
+method = "if2"
+chains = 4
+particles = 100
+iterations = 50
+cooling = 0.7
+[[simplex_groups]]
+params = ["S0_y", "S0_a", "S0_e"]
+        "#).unwrap();
+        let model_params = vec!["S0_y".into(), "S0_a".into(), "S0_e".into(),
+                                "beta".into(), "N0".into()];
+        config.validate(&model_params).expect("well-formed simplex must validate");
     }
 
     #[test]
@@ -2198,12 +2522,14 @@ decibans_thresh = 100.0
         // moving `iterations` out of identity.
         let s50 = Stage::IF2 {
             chains: 4, particles: 100, iterations: 50, cooling: 0.95,
+            cooling_target_iters: 50,
             starts_from: StartsFrom::default(),
             loglik_eval: LoglikEvalConfig::default(),
             gate: GateConfig::default(),
         };
         let s100 = Stage::IF2 {
             chains: 4, particles: 100, iterations: 100, cooling: 0.95,
+            cooling_target_iters: 50,
             starts_from: StartsFrom::default(),
             loglik_eval: LoglikEvalConfig::default(),
             gate: GateConfig::default(),
@@ -2212,10 +2538,22 @@ decibans_thresh = 100.0
 
         let s_diff_cooling = Stage::IF2 {
             chains: 4, particles: 100, iterations: 50, cooling: 0.70,
+            cooling_target_iters: 50,
             starts_from: StartsFrom::default(),
             loglik_eval: LoglikEvalConfig::default(),
             gate: GateConfig::default(),
         };
         assert_ne!(s50.identity_payload(), s_diff_cooling.identity_payload());
+
+        // cooling_target_iters is identity-defining (different schedule
+        // → different chain dynamics).
+        let s_diff_target = Stage::IF2 {
+            chains: 4, particles: 100, iterations: 50, cooling: 0.95,
+            cooling_target_iters: 100,
+            starts_from: StartsFrom::default(),
+            loglik_eval: LoglikEvalConfig::default(),
+            gate: GateConfig::default(),
+        };
+        assert_ne!(s50.identity_payload(), s_diff_target.identity_payload());
     }
 }

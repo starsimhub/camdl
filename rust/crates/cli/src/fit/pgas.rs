@@ -102,11 +102,12 @@ pub fn run_stage(
     let starts_from = starts_from.map(String::from);
     let prior_state = starts_from.as_deref().map(FitState::load).transpose()?;
 
-    // Build FitRunConfig (reuse existing builder)
+    // Build FitRunConfig (reuse existing builder). cooling_target_iters
+    // is IF2-specific and never read by PGAS — pass 1 as a harmless value.
     let config = FitRunConfig::build(
         fit, prior_state.as_ref(),
         n_chains, n_particles, 1,
-        1.0, seed, false,
+        1.0, 1, seed, false,
     )?;
 
     let dt = config.if2_config.dt;
@@ -176,7 +177,8 @@ pub fn run_stage(
     let data_spec = fit.data_spec()?;
     let config_hash = super::provenance::fit_stage_hash(
         &config.model_ir_json, &data_spec.observations,
-        &fit.estimate, &fixed_resolved, stage_name, stage, seed,
+        &fit.estimate, &fixed_resolved, &fit.simplex_groups,
+        stage_name, stage, seed,
     )?;
 
     // Load resume states if --resume

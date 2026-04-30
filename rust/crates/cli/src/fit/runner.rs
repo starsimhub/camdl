@@ -94,6 +94,12 @@ pub struct ChainResults {
 
 impl FitRunConfig {
     /// Build from a v2 fit.toml, optionally overriding from a prior fit_state.
+    ///
+    /// `cooling_target_iters` is IF2-specific — for non-IF2 stages
+    /// (PGAS / PMMH / PFilter), passing `n_iterations` matches the
+    /// pre-2026-04-30 behavior. The IF2 dispatch site reads it from
+    /// `Stage::IF2.cooling_target_iters` (default 50).
+    #[allow(clippy::too_many_arguments)]
     pub fn build(
         fit: &super::config_v2::FitConfigV2,
         prior_state: Option<&FitState>,
@@ -101,6 +107,7 @@ impl FitRunConfig {
         n_particles: usize,
         n_iterations: usize,
         cooling: f64,
+        cooling_target_iters: usize,
         seed: u64,
         random_starts: bool,
     ) -> Result<Self, String> {
@@ -274,11 +281,22 @@ impl FitRunConfig {
         }
 
         let ic_free = fit.ic_free.unwrap_or(false);
+
+        // Resolve top-level fit.simplex_groups into sim::SimplexGroup
+        // (param names → indices, rw_sds from EstimateSpecV2.rw_sd).
+        // Only IF2 currently honours these; PGAS/PMMH/PFilter consume
+        // the same FitRunConfig but ignore simplex_groups (validation
+        // emits a warning when a non-IF2 stage runs against a fit
+        // with simplex groups declared).
+        let resolved_simplex_groups = resolve_simplex_groups(
+            &fit.simplex_groups, &fit.estimate, &compiled.param_index, &if2_params)?;
+
         let config = IF2Config {
             n_particles,
             n_iterations,
             cooling_fraction: cooling,
-            cooling_target_iters: n_iterations, simplex_groups: vec![],
+            cooling_target_iters,
+            simplex_groups: resolved_simplex_groups,
             dt,
             t_start: compiled.model.simulation.t_start,
             skip_first_obs_from_loglik: ic_free,
@@ -349,6 +367,57 @@ impl FitRunConfig {
 }
 
 // load_model is now in util.rs
+
+/// Resolve top-level fit.toml `[[simplex_groups]]` entries (param
+/// names) into runtime `sim::inference::if2::SimplexGroup` (indices
+/// into the model param vector + rw_sds on the log-ratio scale).
+///
+/// Validation enforced here:
+/// - Each member must appear in `[estimate]` (validated upstream by
+///   `FitConfigV2::validate`, but defended again here).
+/// - Each member must resolve to a model param index.
+/// - rw_sd is read from the corresponding `EstimatedParam.rw_sd` (which
+///   already encodes auto-derivation when `EstimateSpecV2.rw_sd` is None).
+///
+/// rw_sd semantics: the IF2 simplex transform perturbs members on the
+/// log-ratio scale. The user's `EstimateSpecV2.rw_sd` for a simplex
+/// member is taken as-is on that scale (matches pomp's
+/// `parameter_trans(barycentric = ...)` + `rw.sd` semantics).
+fn resolve_simplex_groups(
+    cli_groups: &[super::config_v2::SimplexGroup],
+    estimate: &indexmap::IndexMap<String, super::config_v2::EstimateSpecV2>,
+    param_index: &HashMap<String, usize>,
+    if2_params: &[EstimatedParam],
+) -> Result<Vec<sim::inference::if2::SimplexGroup>, String> {
+    let mut out = Vec::with_capacity(cli_groups.len());
+    for (group_idx, group) in cli_groups.iter().enumerate() {
+        let mut indices = Vec::with_capacity(group.params.len());
+        let mut rw_sds = Vec::with_capacity(group.params.len());
+        for name in &group.params {
+            if !estimate.contains_key(name) {
+                return Err(format!(
+                    "simplex_groups[{}]: member '{}' not in [estimate]. \
+                     Members must be free parameters.",
+                    group_idx, name));
+            }
+            let &model_idx = param_index.get(name).ok_or_else(|| format!(
+                "simplex_groups[{}]: member '{}' has no model param index \
+                 (model load + estimate parity drift?)",
+                group_idx, name))?;
+            let if2_rw_sd = if2_params.iter()
+                .find(|p| p.name == *name)
+                .ok_or_else(|| format!(
+                    "simplex_groups[{}]: member '{}' missing from \
+                     resolved EstimatedParam list (build_if2_params drift?)",
+                    group_idx, name))?
+                .rw_sd;
+            indices.push(model_idx);
+            rw_sds.push(if2_rw_sd);
+        }
+        out.push(sim::inference::if2::SimplexGroup { indices, rw_sds });
+    }
+    Ok(out)
+}
 
 /// Build EstimatedParam specs from v2 [estimate] + optional prior state overrides.
 /// Uses the shared build_if2_params_from_specs for core logic, then applies
@@ -2333,7 +2402,7 @@ dt = 1.0
 
         let config = FitRunConfig::build(
             &fit, Some(&prior_state),
-            1, 100, 1, 0.5, 1, false,
+            1, 100, 1, 0.5, 50, 1, false,
         ).expect("build must succeed");
 
         let beta_idx = config.compiled.param_index.get("beta").copied()
@@ -2417,7 +2486,7 @@ dt = 1.0
     fn ic_free_true_requires_ivp() {
         let dir = ic_free_test_dir("requires_ivp");
         let fit = ic_free_fixture(&dir, true, false);
-        let err = match FitRunConfig::build(&fit, None, 1, 100, 1, 0.5, 1, false) {
+        let err = match FitRunConfig::build(&fit, None, 1, 100, 1, 0.5, 50, 1, false) {
             Ok(_)  => panic!("ic_free=true + no ivp must error"),
             Err(e) => e,
         };
@@ -2434,7 +2503,7 @@ dt = 1.0
     fn ic_free_true_with_ivp_succeeds() {
         let dir = ic_free_test_dir("with_ivp");
         let fit = ic_free_fixture(&dir, true, true);
-        let config = FitRunConfig::build(&fit, None, 1, 100, 1, 0.5, 1, false)
+        let config = FitRunConfig::build(&fit, None, 1, 100, 1, 0.5, 50, 1, false)
             .expect("ic_free=true + ivp must build");
         assert!(config.ic_free, "FitRunConfig.ic_free must be true");
         // The SMCConfig view also carries the flag — that's what reaches
@@ -2452,7 +2521,7 @@ dt = 1.0
     fn ic_free_default_off_does_not_require_ivp() {
         let dir = ic_free_test_dir("default_off");
         let fit = ic_free_fixture(&dir, false, false);
-        let config = FitRunConfig::build(&fit, None, 1, 100, 1, 0.5, 1, false)
+        let config = FitRunConfig::build(&fit, None, 1, 100, 1, 0.5, 50, 1, false)
             .expect("ic_free=false + no ivp must build");
         assert!(!config.ic_free);
         assert!(!config.smc_config().skip_first_obs_from_loglik);

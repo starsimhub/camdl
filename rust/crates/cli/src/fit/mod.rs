@@ -556,7 +556,8 @@ pub fn cmd_fit_run_v2(a: &crate::args::FitRunArgs) {
         });
         let config_hash = provenance::fit_stage_hash(
             &model_json, &data_spec.observations, &sweep_config.estimate,
-            &fixed_resolved, stage_name, stage, seed,
+            &fixed_resolved, &sweep_config.simplex_groups,
+            stage_name, stage, seed,
         ).unwrap_or_else(|e| {
             eprintln!("error: {}", e);
             std::process::exit(1);
@@ -604,7 +605,7 @@ pub fn cmd_fit_run_v2(a: &crate::args::FitRunArgs) {
         let mut stage_best_chain: Option<usize> = None;
 
         match stage {
-            Stage::IF2 { chains, particles, iterations, cooling, loglik_eval, gate, .. } => {
+            Stage::IF2 { chains, particles, iterations, cooling, cooling_target_iters, loglik_eval, gate, .. } => {
                 // Resolve effective clean_eval / gate: stage TOML, then CLI
                 // override (per Step 4 — overrides are stage-scoped because
                 // clap requires --stage). CLI flags pass `requires = "stage"`
@@ -702,7 +703,8 @@ pub fn cmd_fit_run_v2(a: &crate::args::FitRunArgs) {
                     &sweep_config,
                     prior_state.as_ref(),
                     *chains, *particles, *iterations,
-                    *cooling, seed, effective_starts.is_none(),
+                    *cooling, *cooling_target_iters,
+                    seed, effective_starts.is_none(),
                 ).unwrap_or_else(|e| {
                     eprintln!("error building run config: {}", e);
                     std::process::exit(1);
@@ -956,11 +958,13 @@ pub fn cmd_fit_run_v2(a: &crate::args::FitRunArgs) {
                     eprintln!("warning: could not load fit_state from starts_from");
                 }
 
-                // Build run config (reuse IF2 builder with 1 chain, N particles)
+                // Build run config (reuse IF2 builder with 1 chain, N particles).
+                // cooling_target_iters=1 here is harmless: PFilter doesn't
+                // cool, so the IF2-shaped config field is never read.
                 let run_config = runner::FitRunConfig::build(
                     &sweep_config,
                     prior_state.as_ref(),
-                    1, *particles, 1, 1.0, seed, false,
+                    1, *particles, 1, 1.0, 1, seed, false,
                 ).unwrap_or_else(|e| {
                     eprintln!("error building pfilter config: {}", e);
                     std::process::exit(1);

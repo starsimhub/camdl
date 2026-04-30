@@ -296,11 +296,13 @@ pub enum ContentVerification {
 /// invert the dep graph (`hashing → fit::config_v2`). Keeping it
 /// here keeps `hashing` fit-agnostic. The cost is a one-directory
 /// split on the hash vocabulary; the benefit is a cleaner boundary.
+#[allow(clippy::too_many_arguments)]
 pub fn fit_stage_hash(
     model_ir_json: &str,
     observations: &indexmap::IndexMap<String, String>,
     estimate: &indexmap::IndexMap<String, super::config_v2::EstimateSpecV2>,
     fixed_resolved: &indexmap::IndexMap<String, f64>,
+    simplex_groups: &[super::config_v2::SimplexGroup],
     stage_name: &str,
     stage: &super::config_v2::Stage,
     seed: u64,
@@ -343,6 +345,15 @@ pub fn fit_stage_hash(
         h.update(name.as_bytes());
         h.update(b"=");
         h.update(val.to_le_bytes());
+        h.update(b"\x00");
+    }
+
+    // Simplex groups (preserve order — group identity depends on member
+    // order via the log-ratio reference index, so a reorder produces
+    // different IF2 dynamics).
+    h.update(b"\x00simplex\x00");
+    for grp in simplex_groups {
+        h.update(serde_json::to_vec(grp).unwrap_or_default());
         h.update(b"\x00");
     }
 
@@ -401,12 +412,13 @@ mod tests {
         let stage = super::super::config_v2::Stage::IF2 {
             chains: 4, particles: 1000, iterations: 50,
             cooling: 0.7,
+            cooling_target_iters: 50,
             starts_from: super::super::config_v2::StartsFrom::Random,
             loglik_eval: Default::default(),
             gate: Default::default(),
         };
-        let h1 = fit_stage_hash("model", &obs, &est, &fixed, "mle", &stage, 1).unwrap();
-        let h2 = fit_stage_hash("model", &obs, &est, &fixed, "mle", &stage, 1).unwrap();
+        let h1 = fit_stage_hash("model", &obs, &est, &fixed, &[], "mle", &stage, 1).unwrap();
+        let h2 = fit_stage_hash("model", &obs, &est, &fixed, &[], "mle", &stage, 1).unwrap();
         assert_eq!(h1, h2);
         assert_eq!(h1.len(), 64, "config hash is 64 hex chars");
     }
@@ -420,12 +432,13 @@ mod tests {
         let stage = super::super::config_v2::Stage::IF2 {
             chains: 4, particles: 1000, iterations: 50,
             cooling: 0.7,
+            cooling_target_iters: 50,
             starts_from: super::super::config_v2::StartsFrom::Random,
             loglik_eval: Default::default(),
             gate: Default::default(),
         };
-        let h1 = fit_stage_hash("model_a", &obs, &est, &fixed, "mle", &stage, 1).unwrap();
-        let h2 = fit_stage_hash("model_b", &obs, &est, &fixed, "mle", &stage, 1).unwrap();
+        let h1 = fit_stage_hash("model_a", &obs, &est, &fixed, &[], "mle", &stage, 1).unwrap();
+        let h2 = fit_stage_hash("model_b", &obs, &est, &fixed, &[], "mle", &stage, 1).unwrap();
         assert_ne!(h1, h2, "different model must produce different hash");
     }
 
@@ -438,12 +451,13 @@ mod tests {
         let stage = super::super::config_v2::Stage::IF2 {
             chains: 4, particles: 1000, iterations: 50,
             cooling: 0.7,
+            cooling_target_iters: 50,
             starts_from: super::super::config_v2::StartsFrom::Random,
             loglik_eval: Default::default(),
             gate: Default::default(),
         };
-        let h1 = fit_stage_hash("model", &obs, &est, &fixed, "mle", &stage, 1).unwrap();
-        let h2 = fit_stage_hash("model", &obs, &est, &fixed, "mle", &stage, 2).unwrap();
+        let h1 = fit_stage_hash("model", &obs, &est, &fixed, &[], "mle", &stage, 1).unwrap();
+        let h2 = fit_stage_hash("model", &obs, &est, &fixed, &[], "mle", &stage, 2).unwrap();
         assert_ne!(h1, h2, "different seed must produce different hash");
     }
 
@@ -456,6 +470,7 @@ mod tests {
         let stage1 = super::super::config_v2::Stage::IF2 {
             chains: 4, particles: 1000, iterations: 50,
             cooling: 0.7,
+            cooling_target_iters: 50,
             starts_from: super::super::config_v2::StartsFrom::Random,
             loglik_eval: Default::default(),
             gate: Default::default(),
@@ -463,13 +478,55 @@ mod tests {
         let stage2 = super::super::config_v2::Stage::IF2 {
             chains: 8, particles: 1000, iterations: 50,
             cooling: 0.7,
+            cooling_target_iters: 50,
             starts_from: super::super::config_v2::StartsFrom::Random,
             loglik_eval: Default::default(),
             gate: Default::default(),
         };
-        let h1 = fit_stage_hash("model", &obs, &est, &fixed, "mle", &stage1, 1).unwrap();
-        let h2 = fit_stage_hash("model", &obs, &est, &fixed, "mle", &stage2, 1).unwrap();
+        let h1 = fit_stage_hash("model", &obs, &est, &fixed, &[], "mle", &stage1, 1).unwrap();
+        let h2 = fit_stage_hash("model", &obs, &est, &fixed, &[], "mle", &stage2, 1).unwrap();
         assert_ne!(h1, h2, "different stage settings must produce different hash");
     }
 
+    #[test]
+    fn config_hash_v2_changes_on_simplex_groups() {
+        // Adding a simplex constraint changes IF2 dynamics (joint
+        // barycentric perturbation vs independent), so it MUST
+        // invalidate the stage hash. Otherwise a fit run with
+        // simplex_groups=[] and one with simplex_groups=[A,B,C] would
+        // collide on cache key.
+        use indexmap::IndexMap;
+        let obs: IndexMap<String, String> = IndexMap::new();
+        let est: IndexMap<String, super::super::config_v2::EstimateSpecV2> = IndexMap::new();
+        let fixed: IndexMap<String, f64> = IndexMap::new();
+        let stage = super::super::config_v2::Stage::IF2 {
+            chains: 4, particles: 1000, iterations: 50,
+            cooling: 0.7,
+            cooling_target_iters: 50,
+            starts_from: super::super::config_v2::StartsFrom::Random,
+            loglik_eval: Default::default(),
+            gate: Default::default(),
+        };
+        let no_groups: Vec<super::super::config_v2::SimplexGroup> = vec![];
+        let with_group = vec![super::super::config_v2::SimplexGroup {
+            params: vec!["S0_y".into(), "S0_a".into(), "S0_e".into()],
+        }];
+        let h1 = fit_stage_hash("model", &obs, &est, &fixed,
+            &no_groups, "mle", &stage, 1).unwrap();
+        let h2 = fit_stage_hash("model", &obs, &est, &fixed,
+            &with_group, "mle", &stage, 1).unwrap();
+        assert_ne!(h1, h2,
+            "adding a simplex_group must invalidate the stage hash");
+
+        // Reordering members within a group must also invalidate —
+        // log-ratio encoding depends on member order via the reference
+        // index.
+        let with_group_reordered = vec![super::super::config_v2::SimplexGroup {
+            params: vec!["S0_e".into(), "S0_a".into(), "S0_y".into()],
+        }];
+        let h3 = fit_stage_hash("model", &obs, &est, &fixed,
+            &with_group_reordered, "mle", &stage, 1).unwrap();
+        assert_ne!(h2, h3,
+            "reordering simplex members must invalidate the stage hash");
+    }
 }

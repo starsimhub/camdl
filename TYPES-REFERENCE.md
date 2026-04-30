@@ -1,1341 +1,859 @@
-# camdl CLI types & metadata reference
+# camdl types reference & flow guide
 
-> **TODO: delete this file after review.** Throwaway working memo,
-> untracked. ~125 public types in `rust/crates/cli/src/`; this document
-> covers the load-bearing ones organised by layer + responsibility,
-> plus pointers to the rest.
->
-> **Update 2026-04-28:** the v1 fit-config cleanup
-> (`feat/v1-fit-cleanup`, branch tip `3f3b3e4`) landed. This document
-> reflects the post-cleanup state: the legacy `FitToml` schema and
-> `FitConfigV2::to_legacy_toml()` bridge are gone; `FitConfigV2` is
-> the single fit-config schema across the runner, the dispatcher, and
-> on-disk. Sections that previously called out the v1 ↔ v2 split have
-> been edited to reflect the simpler post-cleanup picture.
+Working memo. Covers the type model across `ir`, `sim`, and `cli`,
+and — more importantly — *how data flows through the boxes* from a
+user's CLI invocation to disk artefacts. This is the way Vince
+thinks about code: the type catalogue answers "what exists," the
+flow narrative answers "what moves," and most code smells live at
+the seams where one shape crosses into another.
 
-Purpose: enough type-level visibility to identify refactor / dedup /
-re-architecture opportunities. Covers the data model that backs
-`run.json`, the CAS abstraction, per-command typed inputs, fit config
-schema, fit runtime state, fit summary types, browse/list/show
-plumbing, CLI arg structs, and filesystem layout helpers.
+State of the world: `feat/v1-fit-cleanup` and the four post-cleanup
+refactors are merged. `Run.label` lives at the top level. `camdl
+label` is top-level. Profile is always a `RunKind::ReplicateSet`
+umbrella (N=1 trivially). Show coverage is uniform via a single
+`ResolvedRun + match on kind` dispatch. `--resume` is wired for
+PGAS/PMMH with an identity-vs-extension hash split. `FitConfigV2`
+is the only fit-config schema.
 
 ---
 
 ## Table of contents
 
-1. [Core data model — what's in `run.json`](#1-core-data-model)
-2. [CAS abstraction — typed inputs](#2-cas-abstraction)
-3. [Per-command typed inputs (CasInputs impls)](#3-per-command-typed-inputs)
-4. [Fit config schema (fit.toml v2)](#4-fit-config-schema)
-5. [Fit runtime state](#5-fit-runtime-state)
-6. [Fit method results](#6-fit-method-results)
-7. [Fit summary documents](#7-fit-summary-documents)
-8. [Browse / list / show pipeline](#8-browse--list--show-pipeline)
-9. [CLI argument types](#9-cli-argument-types)
-10. [Filesystem layout & hashing helpers](#10-filesystem-layout--hashing)
-11. [Other / cross-cutting](#11-other--cross-cutting)
-12. [Refactor opportunities surfaced by this audit](#12-refactor-opportunities)
+1. [Layered architecture, at a glance](#1-layered-architecture)
+2. [Crate-by-crate type catalogue](#2-crate-by-crate-type-catalogue)
+3. [The CAS abstraction — `CasInputs` + `Run`](#3-the-cas-abstraction)
+4. [Flow narrative: per-command type pipelines](#4-flow-narrative)
+5. [Cross-crate seams and conversions](#5-cross-crate-seams)
+6. [Type-flow smells flagged on this pass](#6-type-flow-smells)
 
 ---
 
-## 1. Core data model
+## 1. Layered architecture
 
-Defined in `rust/crates/cli/src/run_meta.rs`. This is what every
-`run.json` deserialises into — the universal envelope plus a tagged
-union over five kinds.
+The codebase is three concentric layers connected by two narrow
+seams:
 
-### `Run` — universal envelope
+```
+                  ┌──────────────────────────────────────┐
+USER input ─────▶ │  cli   (argv → typed args → orchestra)│
+                  │   args/, fit/, profile.rs, batch.rs  │
+                  │   browse.rs, main.rs, util.rs        │
+                  └──────┬─────────────────────────────┬─┘
+                         │ (CLI→sim seam)              │ (CLI→ir seam)
+                         ▼                             ▼
+                  ┌─────────────────┐         ┌──────────────────┐
+                  │  sim            │ ◀──── │  ir              │
+                  │  inference/, … │ uses    │  Model + IR types│
+                  └─────────────────┘         └──────────────────┘
 
-```rust
-pub struct Run {
-    pub hash: String,                  // 64-char content hash
-    pub version: String,               // camdl version at write time
-    pub created_at: String,            // ISO-8601 UTC
-    pub argv: Vec<String>,             // for reproducibility
-    pub wall_time_seconds: f64,
-    pub kind: RunKind,                 // discriminator + payload
-}
+                  ╠═══ FILE-BACKED ARTEFACTS ═══╣
+                  run.json, traj.tsv, profile.tsv, summary.tsv,
+                  fit_state.toml, mle_params.toml, draws.tsv, …
 ```
 
-Every `run.json` has these six fields. `kind` decides what's inside.
+**`ir`** is the structural truth: a `Model` is a flat, fully-expanded
+declarative description of compartments, transitions, observations,
+interventions, parameters. No randomness, no simulation logic.
 
-Methods: `Run::write(&self, dir)` (atomic tmp-then-rename),
-`Run::read(dir)`, `Run::check_cache(dir, expected_hash) -> CacheStatus`.
+**`sim`** consumes a `Model`, compiles it into `CompiledModel`, and
+executes — Gillespie / tau-leap / chain-binomial / ODE, plus
+inference (IF2, PGAS, PMMH, particle filter). All randomness lives
+here; all compute time lives here.
 
-### `RunKind` — five payloads (tagged union)
+**`cli`** orchestrates: parses argv, loads files, drives `sim`,
+emits artefacts. Owns three pieces that don't fit anywhere else:
+the **CAS abstraction** (content-addressable on-disk layout), the
+**fit.toml v2 schema** (a higher-level user-facing config that
+compiles to `sim` types), and the **browse pipeline** (`list` /
+`show` / `cat` / `label`). Everything in `cli/src/` is glue between
+the user and the sim.
 
-```rust
-#[serde(tag = "kind", rename_all = "kebab-case")]
-pub enum RunKind {
-    Simulate(SimulateMeta),         // one trajectory: model × scenario × seed
-    Fit(FitMeta),                   // a complete fit (umbrella)
-    FitStage(FitStageMeta),         // one stage of a fit (scout, refine, etc.)
-    Profile(ProfileMeta),           // a profile-likelihood scan (single seed)
-    ReplicateSet(ReplicateSetMeta), // umbrella over N seed-distinct children
-}
-```
+The two seams are where most design risk concentrates:
 
-JSON output uses `"kind": "fit"` (etc.) as a tag, with the meta's
-fields flattened beside it inside the outer `kind` object.
-
-### Meta payloads
-
-#### `SimulateMeta`
-
-```rust
-pub struct SimulateMeta {
-    pub model: String,                       // display only
-    pub model_hash: String,                  // 64-char IR hash
-    pub scenario: String,                    // name or "baseline"
-    pub sim_hash: String,                    // model + base params + backend + dt
-    pub scen_hash: String,                   // enable/disable/overrides
-    pub seed: u64,
-    pub backend: String,
-    pub dt: f64,
-    pub sweep_point: HashMap<String, f64>,   // empty for plain --cas
-    pub from_fit_hash: Option<String>,       // sim → fit lineage (when --params is an mle)
-}
-```
-
-#### `FitMeta`
-
-```rust
-pub struct FitMeta {
-    pub model: String,
-    pub model_hash: String,
-    pub fit_toml_path: String,
-    pub fit_toml_hash: String,
-    pub data_hashes: HashMap<String, String>,
-    pub estimated: Vec<String>,              // names from [estimate]
-    pub fixed: HashMap<String, f64>,         // resolved fixed params
-    pub stages_declared: Vec<String>,
-    pub ic_free: bool,
-    pub label: Option<String>,               // ← issue #24 wants this on Run
-}
-```
-
-#### `FitStageMeta`
-
-```rust
-pub struct FitStageMeta {
-    pub fit_hash: String,                    // backref to parent fit
-    pub stage: String,                       // "scout", "refine", etc.
-    pub method: String,                      // "if2", "pgas", "pmmh", "pfilter"
-    pub seed: u64,
-    pub n_chains: usize,
-    pub algorithm: serde_json::Value,        // method-specific knobs (untyped)
-    pub best_loglik: Option<f64>,
-    pub best_chain: Option<usize>,
-    pub starts_from: Option<StartsFromRef>,  // refine ← scout
-    pub derived_from: Option<String>,        // `camdl fit derive` workflows
-    pub parent_profile_hash: Option<String>, // when this is a profile-grid leaf
-    pub profile_point_idx: Option<usize>,    //   ↳
-    pub profile_start_idx: Option<usize>,    //   ↳
-}
-```
-
-#### `ProfileMeta`
-
-```rust
-pub struct ProfileMeta {
-    pub model: String,
-    pub model_hash: String,
-    pub focal_params: Vec<String>,
-    pub grid: Vec<GridAxis>,                 // value list per focal
-    pub n_starts: usize,                     // IF2 starts per grid cell
-    pub if2_config_hash: String,             // diagnostic
-    pub base_params_hash: String,            // diagnostic
-    pub seed_base: u64,                      // (per-seed in current code; legacy name)
-    pub total_jobs: usize,
-}
-```
-
-#### `ReplicateSetMeta`
-
-```rust
-pub struct ReplicateSetMeta {
-    pub dim_name: String,                    // "seed", "dataset_idx"
-    pub keys: Vec<String>,                   // ["seed_1", "seed_2", "seed_3"]
-    pub child_kind: String,                  // "profile", "fit", "simulate"
-    pub inner_content_hash: String,          // seed-free hash all children share
-}
-```
-
-### Supporting types
-
-```rust
-pub struct GridAxis {
-    pub param: String,
-    pub values: Vec<f64>,
-}
-
-pub struct StartsFromRef {
-    pub stage: String,
-    pub stage_hash: Option<String>,           // None for legacy ""
-}
-
-pub enum CacheStatus {
-    Hit,
-    Stale { stored: String, current: String },
-    Miss,
-}
-```
+- **CLI → sim**: e.g., `fit::config_v2::PriorSpec` → `sim::Prior`,
+  `FitConfigV2` → `FitRunConfig` → `IF2Config`. Each conversion is a
+  place where the user's mental model meets the algorithm's needs.
+- **CLI → ir**: e.g., `Model` reads (load + scenario filter +
+  parameter overlay), `ir::ObservationModel` ↔ `ObsStream`. Mostly
+  one-way: the IR is treated as immutable input.
 
 ---
 
-## 2. CAS abstraction
+## 2. Crate-by-crate type catalogue
 
-Defined in `rust/crates/cli/src/cas/typed.rs`. The trait + helpers
-that every CAS-emitting command goes through.
+This section is dense by design — when refactoring, you want one
+place that names every type so you can see what's near what.
 
-### `ContentHash` — newtype
+### 2.1 `ir` crate
 
-```rust
-pub struct ContentHash(String);   // 64-char hex SHA-256
+The IR is what the OCaml compiler emits and what `sim` consumes. It
+has no methods that do work — every type is either pure data or a
+`validate()` helper.
 
-impl ContentHash {
-    pub fn from_bytes(bytes: &[u8]) -> Self;
-    pub fn from_hex(hex: impl Into<String>) -> Self;
-    pub fn full(&self) -> &str;   // 64 chars
-    pub fn short(&self) -> &str;  // first 8
-}
-```
+| File | Type | Role |
+|---|---|---|
+| `model.rs` | **`Model`** | Top-level. Owns parameters, structure (compartments, transitions, observations, interventions), initial conditions, simulation config, presets. The single public re-export from `ir`. |
+| `model.rs` | `Compartment`, `CompartmentKind` | Compartment + Integer/Real flag. |
+| `model.rs` | `InitialConditions` | `Explicit | Parameterized | FromDistribution` |
+| `model.rs` | `Preset` | A scenario: name + `enable`/`disable`/`scale`/param-overrides. |
+| `model.rs` | `OutputSchedule`, `RegularOutputSchedule` | Trajectory output time grid. |
+| `model.rs` | `SimulationConfig` | t_start / t_end / dt / seed / time_semantics. |
+| `model.rs` | `BalanceSpec`, `Dimension`, `ModelStructure` | Structural sub-types. |
+| `parameter.rs` | **`Parameter`** | Name, bounds, prior, transform, kind, value. |
+| `parameter.rs` | `PriorDist` | 8-variant enum: Uniform, Normal, LogNormal, HalfNormal, Beta, Gamma, Exponential + their fields. |
+| `parameter.rs` | `HierarchicalPrior` | Expression-based prior referencing other parameters. |
+| `parameter.rs` | `Transform` | `Log | Logit | Identity` (IR's flavor). |
+| `transition.rs` | **`Transition`** | Reactants, products, rate (`Expr`), stoichiometry. |
+| `observation.rs` | **`ObservationModel`** | Projection + schedule + likelihood. |
+| `observation.rs` | `Projection` | Compartment / incidence / expression. |
+| `observation.rs` | `Likelihood` | 6-variant: Poisson, NegBinomial, Normal, Binomial, BetaBinomial, Bernoulli. |
+| `observation.rs` | `ObservationSchedule`, `RegularSchedule` | Time grid for observations. |
+| `intervention.rs` | **`Intervention`** | Schedule + actions (transfers, adds, sets). |
+| `expr.rs` | **`Expr`** | Total-first-order AST: `Const | Param | Pop | PopSum | Time | BinOp | UnOp | Cond | TimeFunc | TableLookup`. No recursion. |
+| `table.rs` | `Table`, `TableSource`, `OobPolicy` | Compact lookup tables (contact matrices, age-specific rates). |
+| `time_func.rs` | `TimeFunction` | Named time-only functions (sinusoidal, piecewise, interpolated, periodic). |
+| `ode_equation.rs` | `OdeEquation` | RHS expression for a continuous compartment. |
+| `validate.rs` | `ValidationError` | Returned by `Model::validate()` on contract violations. |
 
-### `CasInputs` trait
+### 2.2 `sim` crate
 
-```rust
-pub trait CasInputs {
-    fn content_hash(&self) -> ContentHash;
-    fn cas_path(&self, root: &Path) -> PathBuf;
-    fn run_kind(&self) -> RunKind;
+#### Core
 
-    fn to_run(&self, version: String, argv: Vec<String>, wall_time_seconds: f64) -> Run {
-        Run {
-            hash: self.content_hash().full().to_string(),
-            version,
-            created_at: super::iso8601_utc(std::time::SystemTime::now()),
-            argv,
-            wall_time_seconds,
-            kind: self.run_kind(),
-        }
-    }
-}
-```
+| File | Type | Role |
+|---|---|---|
+| `lib.rs` | **`Capabilities`** (bitflags) | `OVERDISPERSION`, `REAL_COMPARTMENTS`. Backends declare what they support; models declare what they need; mismatch errors at dispatch. |
+| `compiled_model.rs` | **`CompiledModel`** | Pre-compiled `ir::Model`: flattened param index, time-funcs, tables, transitions, default params. The unit of work for every backend. |
+| `state.rs` | `Trajectory`, `Snapshot`, `IntState`, `RealState`, `FlowVec` | The output of one simulation. |
+| `lib.rs` | `Simulate` (trait) | The backend interface: `simulate(model, config, seed) -> Trajectory`. |
+| Multiple | `GillespieSim`, `TauLeapSim`, `ChainBinomialSim`, `OdeSim` | The four backends. |
+| `config.rs` | `SimConfig`, `GillespieConfig`, `TauLeapConfig`, `ChainBinomialConfig`, `OdeConfig` | Backend hyperparams. |
+| `error.rs` | `SimError` | Backend errors. |
 
-Four implementors today: `SimulateInputs`, `ProfileInputs`,
-`FitInputs`, `StageInputs`.
+#### Inference (`sim/src/inference/`)
 
-### `ReplicateSet` — umbrella helper (NOT a CasInputs)
+The inference module is the largest single subsystem in the workspace.
 
-```rust
-pub struct ReplicateSet {
-    pub inner_hash: ContentHash,             // seed-free content
-    pub dim_name: String,                    // "seed", "dataset_idx"
-    pub keys: Vec<String>,                   // ["seed_1", "seed_2"]
-    pub child_kind: String,                  // "profile", "fit"
-}
+| File | Type | Role |
+|---|---|---|
+| `types.rs` | **`EstimatedParam`** | The narrow CLI→sim contract for "this parameter is being inferred": name, index in param vector, initial, rw_sd, transform, lower, upper, ivp, rw_sd_auto. |
+| `types.rs` | **`Transform`** | `None | Log{lo,hi} | Logit{lo,hi}`. The bound-aware version, distinct from `ir::parameter::Transform` (which is unbounded). |
+| `types.rs` | `ParticleState`, `ParticleSwarm` | Particle filter substrate. |
+| `prior.rs` | **`Prior`** | 9-variant runtime prior: `Flat`, `Uniform`, `Normal`, `TransformedNormal`, `HalfNormal`, `Beta`, `Gamma`, `Exponential`, `Hierarchical(ir::HierarchicalPrior)`. Carries `Prior::from_ir(ir::PriorDist)`. |
+| `prior.rs` | `Scale` | `Natural | Transformed` — log-density evaluation contract. |
+| `traits.rs` | `ProcessModel`, `DensityProcess`, `ObservationModel<S>`, `Resettable` | The four inference traits. Bootstrap PF needs `ProcessModel + ObservationModel`; PGAS/PMMH need `DensityProcess`. |
+| `traits.rs` | `SMCConfig` | `n_particles`, `resampling_threshold`, `skip_first_obs_from_loglik` (ic-free). |
+| `chain_binomial_process.rs` | `ChainBinomialProcess` | The discrete-time process driver wired into PF/IF2/PGAS. |
+| `multi_stream_obs.rs` | **`MultiStreamObsModel`**, `StreamSpec`, `StreamProjection` | Multi-likelihood evaluator (one PF, many observation streams). |
+| `if2.rs` | **`IF2Config`**, `IF2Result`, `IF2IterResult`, `ParamIterDiag`, `Observation`, `SimplexGroup` | Iterated filtering (Ionides 2015). |
+| `pgas.rs` | **`PGASConfig`**, `PGASResult`, `PGASSweep`, `PGASTrajectory`, `SubstepRecord`, `IVPMapping`, `CSMCDiagnostics`, `LogLikComponents`, **`ChainResumeState`** | Particle Gibbs with Ancestor Sampling — production Bayesian. |
+| `pmmh.rs` | **`PMMHConfig`**, `PMMHResult`, `PMMHStep`, `PMMHResumeState`, `AdaptiveProposal` | Particle Marginal MH (experimental). |
+| `nuts.rs` | `NUTSConfig`, `MassMatrix`, `NUTSStepResult`, `DualAveraging` | Used by PGAS for the θ\|X update. |
+| `particle_filter.rs` | `Observation`, `PFilterResult`, `PredictionDiag`, `PrequentialRecorded` | Bootstrap PF. |
+| `prequential.rs` | `PrequentialStep`, `PrequentialTrace`, `PrequentialWarning`, `Provenance` | Prequential model-comparison support. |
+| `dmeasure.rs`, `obs_loglik.rs` | Helpers | Observation log-PMFs + analytical gradients (digamma etc.). |
+| `pgas_grad.rs` | `Grad` types | Gradient evaluation for PGAS (uses compiler-emitted `rate_grad`). |
+| `hierarchical.rs` | `ParamEnv` (trait), `NamedParams<'a>` | Plugged into `Prior::Hierarchical` for evaluating expression-based priors. |
+| `diagnostic.rs` | `DiagnosticCollector`, `Diagnostic`, `DiagnosticKind`, `Severity` | Cross-stage diagnostic log; rendered to stderr + persisted to `diagnostics.json`. |
+| `ancestor_trace.rs` | `AncestorTrace`, `SampledPath` | PGAS trajectory bookkeeping. |
+| `correlated_pf.rs` | `PFRandomState` | Experimental correlated PF (out-of-scope per file comment). |
 
-impl ReplicateSet {
-    pub fn parent_hash(&self) -> ContentHash;
-    pub fn child_dir(&self, parent_dir: &Path, key: &str) -> PathBuf;
-    pub fn run_kind(&self) -> RunKind;       // RunKind::ReplicateSet(...)
-}
-```
+### 2.3 `cli` crate
 
-### Hash helpers
+The largest crate by surface area (~129 public types, ~13k LOC). I'm
+listing the load-bearing ones; the rest are local glue.
 
-```rust
-pub fn hash_canonical(fields: &[(&str, &str)]) -> ContentHash;
-pub fn compose_with_replicate(
-    inner: &ContentHash, dim_name: &str, key: &str,
-) -> ContentHash;
-```
+#### 2.3.1 Run metadata (`cli/src/run_meta.rs`)
 
----
+The universal envelope every `run.json` deserializes into.
 
-## 3. Per-command typed inputs
+| Type | Role |
+|---|---|
+| **`Run`** | Universal envelope: `hash, version, created_at, argv, wall_time_seconds, label, kind`. |
+| **`RunKind`** | Tagged union of 5 payloads (`#[serde(tag="kind")]`): `Simulate, Fit, FitStage, Profile, ReplicateSet`. |
+| `SimulateMeta` | model, model_hash, scenario, sim_hash, scen_hash, seed, backend, dt, sweep_point, from_fit_hash. |
+| `FitMeta` | model_hash, fit_toml_path/hash, data_hashes, estimated, fixed, stages_declared, ic_free. |
+| `FitStageMeta` | fit_hash, stage, method, seed, n_chains, algorithm (json), best_loglik/chain, starts_from, derived_from, parent_profile_hash + indices. |
+| `ProfileMeta` | model, focal_params, grid (`Vec<GridAxis>`), n_starts, if2_config_hash, base_params_hash, seed_base, total_jobs. |
+| `GridAxis` | One profile axis: param + values list. |
+| `StartsFromRef` | `(stage, stage_hash)` for stage lineage. |
+| `CacheStatus` | `Hit | StaleHash | Missing` — return type of `Run::check_cache`. |
 
-The four `CasInputs` impls. Each lives in its own module under
-`cas/` (except `ProfileInputs` which lives in `profile.rs`).
+`Run::write` is atomic (tmp-then-rename). `Run::read` parses
+run.json. `Run::check_cache(dir, expected_hash)` checks the stored
+hash against an expected value (used by simulate's cache-hit short-
+circuit).
 
-### `SimulateInputs` (`cas/sim_inputs.rs`)
+#### 2.3.2 CAS abstraction (`cli/src/cas/`)
 
-Used by both `simulate --cas` and `batch run`'s per-run write site.
+| File | Type | Role |
+|---|---|---|
+| `typed.rs` | **`CasInputs`** (trait) | Every CAS-emitting command implements this for its single-realization input set. |
+| `typed.rs` | **`ContentHash`** | 64-char hex newtype. `from_bytes`, `from_hex`, `full()`, `short()` (8 chars for path prefix). |
+| `typed.rs` | `hash_canonical(&[(field, value)])` | Helper: sorted-key sha256. |
+| `typed.rs` | `compose_with_replicate(inner, dim, key)` | Helper: composes a child hash from `inner_hash + dim_name + key`. |
+| `typed.rs` | **`ReplicateSet`** | Layout helper for an umbrella over N children. Holds `inner_hash, dim_name, keys, child_kind`. Computes parent_hash, child_dir paths. |
+| `typed.rs` | `ReplicateSetMeta` | The `RunKind::ReplicateSet` payload (serialized form). |
+| `sim_inputs.rs` | **`SimulateInputs`** | One simulate run's typed inputs. Implements `CasInputs`. |
+| `fit_inputs.rs` | **`FitInputs`**, **`StageInputs`** | The fit umbrella + per-stage leaves. Each implements `CasInputs`. |
+| `mod.rs` | `iso8601_utc(t)`, `RunBuffer` | Misc helpers. |
 
-```rust
-pub struct SimulateInputs {
-    pub model_path: String,                  // display only
-    pub model_stem: Option<String>,          // path prefix
-    pub scenario: String,
-    pub model_hash: String,
-    pub base_params_canonical: String,       // for sim_hash
-    pub backend: String,
-    pub dt: f64,
-    pub enable: Vec<String>,
-    pub disable: Vec<String>,
-    pub scen_params: HashMap<String, f64>,   // merged scenario + sweep
-    pub seed: u64,
-    pub from_fit_hash: Option<String>,
-    pub sweep_point: HashMap<String, f64>,   // display, recorded in SimulateMeta
-}
-```
+`ProfileInputs` (defined in `profile.rs`) is the fourth `CasInputs`
+impl. Living next to the command it serves rather than under `cas/`
+is intentional — its `if2_config_hash` and `base_params_hash` are
+profile-specific.
 
-`content_hash` = compose_with_replicate(h(sim_hash, scen_hash), "seed", seed).
+#### 2.3.3 Fit config schema (`cli/src/fit/config_v2.rs`)
 
-### `ProfileInputs` + `ProfileIf2Config` (`profile.rs`)
+The user-facing fit.toml schema. Everything here is on the *user*
+side of the seam — algorithm-agnostic, declarative, validated.
 
-```rust
-pub struct ProfileInputs {
-    pub model_path: String,
-    pub stem: Option<String>,
-    pub model_hash: String,
-    pub base_params_hash: String,
-    pub focal_grid: Vec<GridAxis>,
-    pub fixed: Vec<String>,                  // names of fixed params
-    pub if2_config: ProfileIf2Config,
-    pub starts_from_lineage: Option<String>,
-    pub seed: u64,
-}
+| Type | Role |
+|---|---|
+| **`FitConfigV2`** | Top of the fit.toml schema. Holds `model, data, scenario/enable/disable, ic_free, config (backend+dt), estimate (IndexMap), fixed, stages (IndexMap)`. |
+| `EstimateSpecV2` | Per-parameter inference spec: `bounds, transform, prior, start, ivp, rw_sd`. |
+| **`PriorSpec`** | 7-variant enum (tagged on `dist` field): `LogNormal, Normal, Beta, Uniform, HalfNormal, Gamma, Exponential`. |
+| **`Transform`** | CLI's flavor: `Log | Logit | Identity`. |
+| `FixedParams` | Either inline values or a TOML file path (resolved at runtime). |
+| `DataSpec` | `observations: IndexMap<stream_name, file_path>`. |
+| `BackendConfig` | `backend, dt`. |
+| **`Stage`** | Tagged union (tag = method): `IF2 {chains, particles, iterations, cooling, starts_from, loglik_eval, gate}`, `PGAS {chains, particles, sweeps, ...}`, `PMMH {chains, particles, iterations, ...}`, `PFilter {particles, replicates, starts_from}`. |
+| `StartsFrom` | `Default | StageName(String)` — references an earlier stage by name. |
+| `LoglikEvalConfig` | Clean-eval re-scoring config (n_particles, n_replicates). |
+| `GateConfig` | Compound scout-convergence gate (Â floor + decibans spread). |
+| `SyntheticConfig` | Synthetic-data fitting (true_params, n_datasets). |
 
-pub struct ProfileIf2Config {
-    pub n_particles: usize,
-    pub n_iterations: usize,
-    pub cooling: f64,
-    pub dt: f64,
-    pub n_starts: usize,
-}
-```
+Key methods on `Stage`:
+- `method_name() -> &str`
+- `requires_priors() -> bool` (PGAS / PMMH only)
+- `chains() -> usize`
+- **`identity_payload() -> serde_json::Value`** — hashable subset
+  *omitting* the extension dimension (PGAS `sweeps`, PMMH `iterations`).
+  Drives `provenance::fit_stage_hash` so `--resume` can extend a
+  chain without invalidating its identity.
 
-`inner_hash()` excludes seed (used as ReplicateSet umbrella).
-`content_hash()` = compose_with_replicate(inner, "seed", seed).
+#### 2.3.4 Fit runtime state (`cli/src/fit/`)
 
-### `FitInputs` + `StageInputs` (`cas/fit_inputs.rs`)
+The internal types between fit.toml and on-disk artefacts.
 
-```rust
-pub struct FitInputs {
-    pub fit_content_hash: String,            // pre-computed, seed-free
-    pub stem: Option<String>,
-    pub meta: FitMeta,                       // payload for run.json
-}
+| File | Type | Role |
+|---|---|---|
+| `runner.rs` | **`FitRunConfig`** | Built from `FitConfigV2 + prior_state`. Holds `compiled` (Arc), `model`, `model_ir_json`, `base_params`, `param_names`, `estimated_params`, `observations`, `streams`, `if2_config`, `n_chains`, `seed`, `ic_free`, `loglik_eval`, `gate`. The runtime-side counterpart of `FitConfigV2`. |
+| `runner.rs` | `ObsStream` | Per-stream wrapper: name, projection (sim::StreamProjection), obs_model_ir, data. |
+| `runner.rs` | `ChainResults` | Output of N parallel IF2 chains: `results, best_chain, best_loglik, chain_agreement, loglik_eval`. |
+| `state.rs` | **`FitState`** | Persisted per-stage state in `fit_state.toml`: stage, seed, timestamp, params, best_loglik/chain, hashes, gate verdict, resolved configs. |
+| `loglik_eval.rs` | `LoglikEvalOutcome`, `PerChain`, `OverallWinner` | Output of clean-eval re-scoring: per-chain θ̂ and SE, the winner. |
+| `pgas.rs` | `PgasStageOpts` | Subset of `Stage::PGAS` actually consumed by the runner. |
+| `pmmh.rs` | `PmmhStageOpts` | Same for PMMH. |
+| `provenance.rs` | `fit_stage_hash` (fn) | sha256 over (model + data + estimate + fixed + stage_name + identity_payload + seed + version). |
+| `provenance.rs` | `mle_params_tamper_hash` (fn) | 8-char hash on `mle_params.toml` payloads (drift detection). |
+| `fit_summary.rs` | `FitSummaryDoc`, `StageSummary`, `MlePostProcessSummary`, `MleTableRow`, … | Render-side types for `camdl fit summary`. Targets text/JSON/MD/LaTeX. |
+| `fit_table.rs` | `FitTableEntry`, `Format` | Cross-fit aggregate for `camdl fit table`. |
+| `table_row.rs` | `TableRow`, `TableRowSchema`, `TableRowError` | One row of a fit table. |
+| `config_diff.rs` | `ConfigDiff` | Diff between two fit configs (identity / equivalent / different). |
+| `method_result.rs` | `MethodResult`, `MethodView` | Adapter that abstracts IF2/PGAS/PMMH/PFilter result shape behind one shape for table/summary. |
+| `fit_tree.rs` | `FitNode`, `walk_fits_root`, `walk_fit_dir` | Filesystem walker over fit trees. |
 
-pub struct StageInputs {
-    pub fit_stage_hash: String,              // pre-computed, seed-inclusive
-    pub stage_dir: PathBuf,                  // pre-computed by runner
-    pub meta: FitStageMeta,
-}
-```
+#### 2.3.5 Browse / list / show / cat (`cli/src/browse.rs`)
 
-Both wrap legacy hashing (`fit_content_hash`, `fit_stage_hash`);
-the trait surface is the consumer-facing API.
+| Type | Role |
+|---|---|
+| `RunEntry` | Cached `Simulate` listing entry: run, meta, rel_path, created, traj_bytes. |
+| `FitEntry` | Cached `Fit` listing entry: run, meta, rel_path, created. |
+| `ProfileEntry` | Cached profile-umbrella listing entry: run, model/focal/shape display fields, n_seeds. |
+| **`ResolvedRun`** | Single resolved run, kind-agnostic: `run, abs_path, rel_path, created`. The output of `resolve_any`; consumed by `cmd_show` and `cmd_cat` via one match-on-kind dispatch. |
+| `KindFilter` | `Sim | Fit | Profile | All` for `camdl list --kind`. |
 
----
+Renderers (one per kind, dispatched by `show()`): `show_simulate`,
+`show_fit`, `show_fit_stage`, `show_profile_leaf`, `show_replicate_set`.
 
-## 4. Fit config schema
+#### 2.3.6 CLI args (`cli/src/args/mod.rs`)
 
-Defined in `rust/crates/cli/src/fit/config_v2.rs`. Parses `fit.toml`.
+| Type | Wires to |
+|---|---|
+| `SimulateArgs` | `run_simulate` |
+| `BatchArgs`, `BatchStatusArgs` | `cmd_batch_run`, `cmd_batch_status` |
+| `FitRunArgs`, `FitStatusArgs`, `FitSummaryArgs`, `FitDiffArgs`, `FitTableArgs`, `FitNewArgs`, `FitWhereArgs` | The seven `cmd_fit_*` entry points |
+| **`LabelArgs`** | `cmd_label` (top-level) |
+| `PfilterArgs` | `cmd_pfilter` |
+| `If2Args` | `cmd_if2` |
+| `ProfileArgs` | `cmd_profile` |
+| `EvalArgs` | `cmd_eval` |
+| `DataSplitArgs` | `cmd_data_split` |
+| `ListArgs`, `ShowArgs`, `CatArgs` | `cmd_list`, `cmd_show`, `cmd_cat` |
+| `CompareArgs` | `cmd_compare` |
 
-### Top-level
+Sub-arg structs (composed via `#[command(flatten)]`): `ModelOverrides`
+(`--param`, `--params`, `--table`), `ScenarioArgs` (`--scenario`),
+`InferenceCore` (`--particles`, `--dt`, `--seed`, `--parallel`),
+`SimBackend` (`--backend`, `--dt`), `FlowProjection` (`--flow`).
 
-```rust
-pub struct FitConfigV2 {
-    pub model: ModelRef,
-    pub data: Option<DataSpec>,              // mutually exclusive with synthetic
-    pub synthetic: Option<SyntheticSpec>,    //   ↳
-    pub fit_seeds: Option<Vec<u64>>,
-    pub fit_starts: Option<FitStarts>,
-    pub output_dir: Option<String>,
-    pub estimate: IndexMap<String, EstimateSpecV2>,  // ordered
-    pub fixed: FixedParams,
-    pub stages: IndexMap<String, Stage>,             // ordered
-    pub config: FitBackendConfig,
-    pub scenario: Option<String>,
-    pub enable: Vec<String>,
-    pub disable: Vec<String>,
-    pub ic_free: Option<bool>,
-    pub provenance: Option<FitProvenance>,
-}
-```
+Type helpers in `args/types.rs`: `ParamKv` (`NAME=VALUE`), `RwSd`
+(`auto | NAME=N,...`), `SeedSpec` (`1,2,3` or `1:5`), `Grid`
+(`V1,V2,...` or `lin(min,max,n)` or `log10(min,max,n)`), `SweepSpec`
+(`NAME=Grid`), `ProgressMode` (`auto | pretty | plain | none`).
 
-### Sub-types
+#### 2.3.7 Other / cross-cutting
 
-```rust
-pub struct ModelRef { pub camdl: String }
-
-pub struct FitBackendConfig {
-    pub backend: String,                     // default "chain_binomial"
-    pub dt: f64,                             // default 1.0
-}
-
-pub struct DataSpec {
-    pub observations: IndexMap<String, String>,
-    pub holdout_after: Option<f64>,
-    pub holdout: Option<IndexMap<String, String>>,
-}
-
-pub struct SyntheticSpec {
-    pub true_params: String,                 // ground-truth file
-    pub sim_seeds: SeedsSpec,
-    pub datasets: Option<usize>,
-    pub scenario: Option<String>,
-}
-
-#[serde(untagged)]
-pub enum SeedsSpec {
-    List(Vec<u64>),
-    Range(String),                           // "1:20"
-}
-
-pub enum FitStarts { ModelDefault, Prior }
-
-pub struct EstimateSpecV2 {
-    pub bounds: (f64, f64),
-    pub transform: Option<Transform>,
-    pub prior: Option<PriorSpec>,
-    pub ivp: bool,
-    pub rw_sd: Option<f64>,
-    pub start: Option<f64>,
-}
-
-pub enum Transform { Log, Logit, Identity }
-
-#[serde(tag = "dist")]
-pub enum PriorSpec {
-    LogNormal { mu: f64, sigma: f64 },
-    Normal { mu: f64, sigma: f64 },
-    Beta { alpha: f64, beta: f64 },
-    Uniform,
-    HalfNormal { sigma: f64 },
-}
-
-pub struct FixedParams {
-    pub from_file: Option<String>,
-    pub values: IndexMap<String, f64>,
-}
-```
-
-### Stages — tagged by method
-
-```rust
-#[serde(tag = "method")]
-pub enum Stage {
-    IF2 {
-        chains: usize, particles: usize, iterations: usize, cooling: f64,
-        starts_from: StartsFrom,
-        loglik_eval: LoglikEvalConfig,
-        gate: GateConfig,
-    },
-    PGAS {
-        chains: usize, particles: usize, sweeps: usize,
-        starts_from: StartsFrom,
-        burn_in: Option<usize>, thin: Option<usize>,
-    },
-    PMMH {
-        chains: usize, particles: usize, iterations: usize,
-        starts_from: StartsFrom,
-        burn_in: Option<usize>, thin: Option<usize>,
-    },
-    PFilter {
-        particles: usize,
-        replicates: Option<usize>,
-        starts_from: StartsFrom,
-    },
-}
-
-pub enum StartsFrom {
-    Stage(String),                           // "scout"
-    Directory(PathBuf),                      // /path/to/external/fit
-    Random,
-}
-
-pub struct LoglikEvalConfig {
-    pub n_particles: usize,                  // default 4000
-    pub n_replicates: usize,                 // default 8
-    pub combine: CombineMode,                // default LogMeanExp
-}
-
-pub enum CombineMode { LogMeanExp, Mean }
-
-pub struct GateConfig {
-    pub a_thresh: f64,                       // default 1.01
-    pub decibans_thresh: f64,                // default 30.0 (with SE-aware floor)
-}
-
-pub struct FitProvenance {
-    pub derived_from: Option<String>,
-    pub reason: Option<String>,
-}
-```
+| File | Role |
+|---|---|
+| `hashing.rs` | sha256 helpers — `model_hash`, `sim_hash`, `scen_hash`, `file_hash`, `path_stem_slug`, `canonical_params`. The shared low-level building block for the CAS impls. |
+| `run_paths.rs` | `output_root`, `sim_run_dir`, `fit_run_dir`, `profile_point_dir`, `profile_point_start_dir`. The single source of truth for the on-disk layout. |
+| `sampling.rs` | Space-filling sample helpers: `PriorSpec` (batch's flavour), `DesignParam`, `DesignPoints`, Sobol/LHS/random generators. Used by `batch run`. |
+| `progress.rs` | Indicatif vs plain-log progress mode. |
+| `version.rs` | `VERSION_SHORT` (e.g. `"0.1.0+5f18aea"`). |
+| `util.rs` | `SimRun`, `apply_scenario_filter`, `load_model`, `apply_params_file`, `derive_chain_seed`, `write_traj_tsv`, … the shared infrastructure used by every command. |
 
 ---
 
-## 5. Fit runtime state
+## 3. The CAS abstraction
 
-### `FitState` (`fit/state.rs`)
+The single most important type-design decision in the CLI. Every
+content-addressable subcommand goes through this:
 
-`fit_state.toml` — inter-stage handoff file written at each stage's
-end. Picked up by downstream stages (refine reads scout's fit_state).
-
-```rust
-pub struct FitState {
-    pub stage: String,
-    pub seed: u64,
-    pub timestamp: String,
-    pub input_hash: Option<String>,
-    pub camdl_version: Option<String>,
-    pub best_loglik: f64,
-    pub initial_loglik: f64,
-    pub best_chain: usize,
-    pub n_chains: usize,
-    pub n_good_chains: Option<usize>,
-    pub start_values: HashMap<String, f64>,
-    pub rw_sd: HashMap<String, f64>,
-    pub loglik_type: Option<String>,         // "marginal" / "complete_data" / "if2"
-    pub acceptance_rate: Option<f64>,        // PGAS/PMMH only
-    pub tail_chain_agreement: HashMap<String, f64>,  // per-param Â
-    pub ivp_params: Vec<String>,
-    pub chain_logliks: Vec<f64>,             // per-chain final
-    pub chain_eval_logliks: Vec<f64>,        // per-chain clean-eval
-    pub chain_eval_ses: Vec<f64>,            // SE on clean-eval
-    pub resolved_loglik_eval: Option<LoglikEvalConfig>,
-    pub resolved_gate: Option<GateConfig>,
-    // (more fields — gate verdict, ESS, etc.)
-}
+```text
+        ┌────────────────────────────┐
+        │  per-command typed inputs  │
+        │  (SimulateInputs,          │
+        │   FitInputs, StageInputs,  │
+        │   ProfileInputs)           │
+        └────────────┬───────────────┘
+                     │ impl CasInputs
+                     ▼
+        ┌──────────────────────────────────┐
+        │  CasInputs trait                 │
+        │    content_hash() -> ContentHash │
+        │    cas_path(root) -> PathBuf     │
+        │    run_kind() -> RunKind         │
+        │    to_run() -> Run        (default)│
+        └────────────┬─────────────────────┘
+                     │
+       ┌─────────────┼─────────────┐
+       ▼             ▼             ▼
+   run.json       on disk     hash for
+   (RunKind     <root>/...    cache check
+   payload)
 ```
 
-### Runner config (`fit/runner.rs`)
+**Four roles every input plays** (from `cas/typed.rs` doc):
 
-```rust
-pub struct FitRunConfig {
-    // Bundles the whole runner-side config: model, observations,
-    // estimated/fixed param specs, IF2/PGAS hyperparams, etc.
-    // ~30 fields. The runner's working struct, distinct from
-    // FitConfigV2 (which is the on-disk schema).
-    //
-    // Build entry point: `FitRunConfig::build(&FitConfigV2, ...)`.
-    // No FitToml shim — the v1 fit-config types were deleted in the
-    // v1-cleanup pass; the runner consumes v2 directly.
-}
+- **Content** → in hash. Determines validity. Model IR bytes, data
+  bytes, algorithm hyperparams, `seed` for stochastic methods,
+  `starts_from` upstream lineage.
+- **Path** → in path. Determines readability. The 8-char hash
+  prefix plus a human stem.
+- **Replicate** → parent-child relationship. Inputs that *vary* an
+  otherwise-identical run for sensitivity analysis.
+- **Ephemeral** → nowhere. `--parallel`, progress mode, output
+  mirror paths. Recorded in `argv` for forensics, not in any hash.
 
-pub struct ChainResults {
-    // Per-chain raw IF2 outputs before clean-eval.
-}
-
-pub struct ParamSpec {
-    pub name: String,
-    pub rw_sd: Option<f64>,
-    pub transform: Option<String>,    // "log" | "logit" | "identity"
-    pub ivp: bool,
-}
-
-pub struct ObsStream {
-    // One observation stream's data + projection metadata.
-}
-```
-
-### Per-stage opts (`fit/pgas.rs`, `fit/pmmh.rs`)
-
-```rust
-pub struct PgasStageOpts {            // pgas::run_stage(...)
-    pub n_chains: usize,
-    pub n_particles: usize,
-    pub n_sweeps: usize,
-    pub burn_in: usize,
-    pub thin: usize,
-}
-pub struct PmmhStageOpts {            // pmmh::run_stage(...)
-    pub n_chains: usize,
-    pub n_particles: usize,
-    pub n_steps: usize,
-    pub burn_in: usize,
-    pub thin: usize,
-}
-```
-
-Each is built from a `Stage::PGAS { ... }` / `Stage::PMMH { ... }`
-variant via `from_stage(&Stage)` and passed verbatim into the
-respective `run_stage` entry point. Carries only the per-stage
-knobs that v2 exposes; v1-only knobs (`tempering`, `max_treedepth`,
-`adapt`, `proposal_from`, `rho`, `n_trajectories`, ...) default to
-the v1 values inside the runner.
-
-### Loglik-eval (`fit/loglik_eval.rs`)
-
-```rust
-pub struct ChainScore {
-    pub chain_id: usize,
-    pub loglik: f64,
-    pub se: f64,
-    pub theta_hat: HashMap<String, f64>,
-    // ...
-}
-
-pub struct LoglikEvalOutcome {
-    pub per_chain: Vec<ChainScore>,
-    // ...
-}
-
-pub struct FilterStats {
-    // PF ESS / acceptance summaries
-}
-```
-
-### Provenance (`fit/provenance.rs`)
-
-`mle_params.toml` provenance block — written into the TOML as a
-[provenance] section; readable by `simulate --params <mle>` for
-back-tracking.
-
-```rust
-pub struct MleProvenance {
-    pub fit_hash: String,
-    pub stage: String,
-    pub seed: u64,
-    pub backend: String,
-    pub dt: f64,
-    // ... + content_hash, log_likelihood, n_particles, etc.
-}
-
-pub struct MleMetadata {
-    pub data: Vec<DataEntry>,
-    pub model: ModelEntry,
-    pub fit: FitEntry,
-}
-
-pub struct DataEntry { pub stream: String, pub path: String, pub hash: String }
-
-pub enum ContentVerification {
-    Match, Stale { stored: String, current: String }, Missing,
-}
-```
-
-### Synthetic (`fit/synthetic.rs`)
-
-```rust
-pub struct SyntheticDataset {
-    pub idx: usize,                          // 1-based for path: ds_01
-    pub seed: u64,
-    pub data_path: PathBuf,
-    pub true_params: HashMap<String, f64>,
-}
-```
-
-### Gating (`fit/gating.rs`)
-
-```rust
-pub enum ScoutGateVerdict {
-    Pass,
-    FailA { max_a_hat: f64, threshold: f64, /* ... */ },
-    FailDb { spread_db: f64, threshold: f64, /* ... */ },
-    FailBoth { /* ... */ },
-}
-```
+**ReplicateSet umbrella.** Multi-realization runs (multi-seed
+profile, multi-dataset synthetic fit) get an umbrella with N
+children, where `parent_hash = h(inner_hash, dim, sorted_keys,
+child_kind)` and each child's hash = `compose_with_replicate(
+inner_hash, dim, key)`. As of the post-collapse refactor, profile
+*always* uses this shape — N=1 is the trivial case.
 
 ---
 
-## 6. Fit method results
+## 4. Flow narrative
 
-`fit/method_result.rs`. Typed view of a completed fit-stage's
-output. Mirrors `RunKind` for *outputs* (whereas `RunKind` describes
-the *kind of artifact*).
+Each subsection traces a command's path from argv to disk.
+Boxes-and-arrows view; the goal is to surface the natural seams.
 
-```rust
-#[serde(tag = "method", rename_all = "lowercase")]
-pub enum MethodResult {
-    If2(If2StageResult),
-    Pgas(PgasStageResult),
-    Pmmh(PmmhStageResult),
-    // PFilter is excluded — it's never a fit-stage today.
-}
+### 4.1 `camdl simulate` (one trajectory)
 
-pub enum GateVerdict { Pass, FailA, FailDb, FailBoth }
-
-pub struct If2StageResult {
-    pub best_loglik: f64,
-    pub best_chain: usize,
-    pub theta_hat: BTreeMap<String, f64>,    // estimated params only
-    pub max_chain_agreement: f64,            // Â (NOT Gelman R̂)
-    pub gate_verdict: GateVerdict,
-    pub ess_at_mle: Option<EssSummary>,
-    pub n_chains: usize,
-    pub n_iter: usize,
-}
-
-pub struct EssSummary {
-    pub ess_min: f64,
-    pub ess_mean: f64,
-    pub ess_min_step: Option<usize>,
-}
-
-pub struct PgasStageResult {
-    pub n_samples: usize,
-    pub posterior_mean: BTreeMap<String, f64>,
-    pub posterior_q025: BTreeMap<String, f64>,
-    pub posterior_q975: BTreeMap<String, f64>,
-    pub ess_per_param: BTreeMap<String, f64>,
-    pub max_rhat: f64,                       // Gelman R̂ (NOT IF2 Â)
-    pub acceptance_per_param: BTreeMap<String, f64>,
-    pub n_chains: usize,
-}
-
-pub struct PmmhStageResult {
-    pub n_samples: usize,
-    pub posterior_mean: BTreeMap<String, f64>,
-    pub ess: BTreeMap<String, f64>,
-    pub max_rhat: f64,
-    pub acceptance_rate: f64,                // scalar (PMMH: full-vector proposals)
-    pub map_loglik: f64,
-    pub n_chains: usize,
-}
-
-pub enum MethodResultError {
-    UnknownMethod { method: String, stage_dir: PathBuf },
-    Io { stage_dir: PathBuf, message: String },
-}
+```text
+argv ──▶ SimulateArgs ──┐
+                        │ build SimRun (util.rs)
+                        ▼
+                   util::SimRun ─────────────────────┐
+                        │ load_model(ir_path)        │
+                        │ apply_scenario_filter      │
+                        │ apply_params_files +       │
+                        │   --param overrides        │
+                        ▼                            │
+                   ir::Model ──▶ CompiledModel       │
+                        │                            │
+                        │ build SimulateInputs       │
+                        ▼                            │
+                   SimulateInputs ──┬─ content_hash()│
+                                    ├─ cas_path()    │
+                                    └─ run_kind() ──▶ RunKind::Simulate
+                                                     │
+                   Run::check_cache(dir, hash) ◀─────┘
+                       │
+                       ├ Hit → read traj.tsv, return
+                       └ Miss/Stale → run backend
+                                       │
+                                       ▼
+                                   sim::Simulate ──▶ Trajectory
+                                       │
+                                       ├ write_traj_tsv → traj.tsv
+                                       ├ obs sampling   → obs/<...>/
+                                       └ Run::write     → run.json
 ```
 
-> **Note the `Â` vs `R̂` distinction.** They're computed differently
-> (Â is per-param IF2-trace tail-agreement; R̂ is Gelman-Rubin MCMC
-> convergence). Field comments + table renderers must not merge them.
+Key files: `main.rs:312` (`run_simulate`), `main.rs:945`
+(`prepare_cas_ctx`), `cas/sim_inputs.rs`, `util.rs`. The `--params
+mle.toml` lineage is captured via `from_fit_hash` (read from the
+mle.toml's `parent_fit_hash` provenance, written into
+`SimulateMeta`).
+
+### 4.2 `camdl batch run` (sweep grid of simulates)
+
+```text
+argv ──▶ BatchArgs
+            │ load batch.toml
+            ▼
+        BatchExp ──▶ explode to grid of BatchRunSpec
+                          │
+                          │ par_iter (rayon)
+                          ▼
+                    For each (scenario × sweep_point × seed):
+                       └── delegates to simulate path (4.1)
+                           with `sweep_point` populated
+```
+
+The novel bit is `manifest.json` at the batch root — a list of all
+grid-point hashes for downstream tooling. Also a sampling design
+hook (`sampling::DesignPoints` for Sobol/LHS/random) used when the
+batch.toml declares one.
+
+### 4.3 `camdl fit run` (the heaviest command)
+
+```text
+argv ──▶ FitRunArgs (incl. --resume, --stage, --label, --sweep, --seed)
+            │
+            │ FitConfigV2::load(fit.toml)
+            ▼
+       FitConfigV2 ──┬── validate(model_params)
+                     ├── fit_content_hash() ──▶ FitInputs ──▶ Run::Fit (umbrella)
+                     ▼
+                 Per stage in stages_to_run, per cell (synthetic ds_NN × seed):
+                     │
+                     │ fit_stage_hash(model, data, estimate, fixed,
+                     │                stage_name, stage.identity_payload(),
+                     │                seed, version)
+                     ▼
+                 StageInputs ──▶ Run::FitStage (per-stage leaf)
+                     │
+                     │ FitRunConfig::build(fit, prior_state, n_chains, ...)
+                     ▼
+                 FitRunConfig ──┬── compiled : Arc<CompiledModel>
+                                ├── estimated_params : Vec<EstimatedParam>
+                                ├── streams : Vec<ObsStream>
+                                ├── if2_config : IF2Config
+                                └── ...
+                     │
+                     │ dispatch on Stage variant:
+                     ▼
+       ┌─────────────────────────────────────────────────────────┐
+       │ IF2     → run_if2_with_progress * n_chains              │
+       │            → IF2Result per chain                        │
+       │            → loglik_eval re-scoring (clean θ̂, SE)       │
+       │            → ChainResults (best_chain, gate verdict)    │
+       │ PGAS    → pgas::run_stage(fit, name, stage, dir, opts,  │
+       │            seed, force, use_nuts, dense_mass, resume,   │
+       │            starts_from)                                 │
+       │            → resume_state.bin (per chain)               │
+       │            → trace.tsv, draws.tsv                       │
+       │ PMMH    → pmmh::run_stage(...)                          │
+       │            → similar                                    │
+       │ PFilter → bootstrap PF at fixed θ                       │
+       │            → loglik.tsv, optional traces                │
+       └─────────────────────────────────────────────────────────┘
+                     │
+                     ▼
+                 FitState (toml) + mle_params.toml +
+                 Run::FitStage write + (PGAS/PMMH only)
+                 chain_<n>/{trace.tsv, resume_state.bin,
+                            trajectories/}
+```
+
+Key files: `fit/mod.rs:168` (`cmd_fit_run_v2`), `fit/runner.rs:97`
+(`FitRunConfig::build`), `fit/pgas.rs`, `fit/pmmh.rs`,
+`fit/loglik_eval.rs`, `fit/provenance.rs:299` (`fit_stage_hash`).
+
+The **identity-vs-extension split** lives at the
+`stage.identity_payload()` call inside `fit_stage_hash`: PGAS's
+`sweeps` and PMMH's `iterations` are *not* in the hash, so resume
+can extend a chain by changing only that field.
+
+### 4.4 `camdl profile` (always a ReplicateSet)
+
+```text
+argv ──▶ ProfileArgs (incl. --seeds, --label)
+            │
+            │ build ProfileInputs (template, seed-overwritten per child)
+            ▼
+       ProfileInputs.inner_hash() (seed-free)
+            │
+            │ ReplicateSet { inner_hash, "seed", keys=["seed_X", ...], "profile" }
+            ▼
+       parent_hash = ReplicateSet.parent_hash()
+            │
+            │ write umbrella Run::ReplicateSet at <root>/profiles/<stem>-<short>/
+            ▼
+       For each seed:
+           ├─ child_dir = umbrella/replicates/seed_<n>/
+           ├─ ProfileInputs { seed }.run_kind() ──▶ Run::Profile (per-seed leaf)
+           └─ For each (grid_point, start):
+                  ├─ <seed_dir>/points/{idx:05d}/start_{k}/
+                  ├─ Run if2 ──▶ Run::FitStage with parent_profile_hash
+                  └─ profile.tsv rollup at the seed level
+       │
+       ▼
+       summary.tsv at the umbrella (cross-seed aggregate; 1 row at N=1)
+```
+
+Key file: `profile.rs:179` (`cmd_profile`).
+
+### 4.5 `camdl label` (top-level, kind-agnostic)
+
+```text
+argv ──▶ LabelArgs { hash, label, root }
+            │
+            │ validate_label (regex)
+            │ walk <root>/{sims,fits,profiles}/** for run.json
+            │ match Run.hash by prefix (across kinds)
+            ▼
+       Run ──▶ run.label = Some(...)
+            │ atomic write (tmp-then-rename)
+            ▼
+       run.json updated
+```
+
+Key file: `fit/mod.rs:1608` (`cmd_label`). Refuses to relabel a
+running fit (wall_time_seconds == 0.0 sentinel).
+
+### 4.6 `camdl list` / `show` / `cat`
+
+```text
+list ──▶ discover_runs / discover_fits / discover_profiles
+            │
+            ▼
+       Vec<RunEntry> | Vec<FitEntry> | Vec<ProfileEntry>
+            │ filter (--since, --kind, --label-pattern)
+            ▼
+       comfy_table render with HASH + LABEL columns
+
+show ──▶ resolve_any(root, key)
+            │ walks <root>/{sims,fits,profiles}/**/run.json
+            │ matches Run.hash prefix; for sims also matches sim_hash
+            ▼
+       ResolvedRun { run, abs_path, rel_path, created }
+            │ match run.kind { ... }
+            ▼
+       show_simulate / show_fit / show_fit_stage /
+       show_profile_leaf / show_replicate_set
+
+cat ──▶ resolve_any
+            │
+            ▼
+       ResolvedRun ──▶ match kind:
+           Simulate → traj.tsv (or obs/*/<stream>.tsv with --stream)
+           ReplicateSet → summary.tsv
+           Profile → profile.tsv
+           Fit / FitStage → error: ambiguous
+```
+
+The post-collapse pattern: every kind goes through one `match
+run.kind` dispatch, no parallel `Resolved` enum.
+
+### 4.7 `camdl pfilter` / `camdl if2` (no-CAS standalones)
+
+These bypass CAS entirely. They take CLI args, build a sim setup
+inline, run, and write trace/diagnostic TSVs directly. No
+`run.json`, no cache, not surfaced by `camdl list`. Use case: quick
+interactive exploration; the persistent path is `fit run` with a
+`pfilter` / `if2` stage in the fit.toml.
 
 ---
 
-## 7. Fit summary documents
+## 5. Cross-crate seams
 
-`fit/fit_summary.rs`. Typed JSON-emittable representation of a fit
-summary (`camdl fit summary --format json | text | md | latex`). Each
-emitter walks this same shape; renaming drift between emitters
-(e.g. `clean_ll` → `loglik`, issue #26) happens at this layer.
+This is where most type-design risk concentrates. Each seam is a
+shape-conversion point between two layers' worldviews.
 
-```rust
-pub struct FitSummaryDoc {
-    pub fit_dir: String,
-    pub schema: SchemaInfo,
-    pub stages: Vec<StageReport>,
-    pub heuristics: Option<HeuristicReport>,
-}
+### 5.1 `FitConfigV2` → `FitRunConfig` (CLI → sim setup)
 
-pub struct SchemaInfo {
-    pub version: String,
-    pub camdl_version: String,
-}
+`runner.rs:97` `FitRunConfig::build(fit, prior_state, n_chains,
+n_particles, n_iterations, cooling, seed, random_starts) ->
+FitRunConfig`.
 
-pub struct StageReport {
-    pub name: String,
-    pub method: String,
-    pub n_chains: usize,
-    pub best_loglik: Option<f64>,
-    pub initial_loglik: Option<f64>,
-    pub stage_progression: Option<StageProgression>,
-    pub gate: Option<GateReport>,
-    pub method_result: Option<MethodResult>,
-    pub parameters: Vec<ParameterReport>,
-    pub chains: Vec<ChainReport>,
-    pub provenance: Option<ProvenanceReport>,
-    pub resolved_loglik_eval: Option<LoglikEvalConfig>,
-    pub resolved_gate: Option<GateConfig>,
-}
+Field-by-field mapping (~225 LOC):
 
-pub struct GateReport {
-    pub max_a_hat: f64,
-    pub max_a_param: Option<String>,
-    pub a_thresh: f64,
-    pub a_passes: bool,
-    pub delta_db: Option<f64>,
-    pub threshold_db: Option<f64>,
-    pub db_passes: Option<bool>,
-    pub overall_pass: Option<bool>,
-    pub threshold_source: String,
-}
+| `FitConfigV2` field | `FitRunConfig` field | Conversion |
+|---|---|---|
+| `model.camdl` (path) | `compiled : Arc<CompiledModel>` | `load_model + apply_scenario_filter + CompiledModel::new` |
+| `scenario` / `enable` / `disable` | (applied to `model` before compile) | mutually exclusive validation |
+| `fixed` (`FixedParams`) | (overlaid into `base_params`) | `FixedParams::resolve()` (file or inline) |
+| `estimate` (`IndexMap<EstimateSpecV2>`) | `estimated_params : Vec<EstimatedParam>` | `build_if2_params_from_specs` → see 5.2 below |
+| `data.observations` | `streams : Vec<ObsStream>` | `load_observations` per stream + `StreamProjection::from_ir` |
+| `config.dt`, `config.backend` | `if2_config.dt` | direct |
+| `ic_free` | `if2_config.skip_first_obs_from_loglik`, `ic_free` | direct |
+| (n_chains, particles, iterations, cooling come from the dispatcher) | `n_chains`, `if2_config` | per-stage knobs |
 
-pub struct StageProgression {
-    pub previous_stage: String,
-    pub delta_nats: f64,
-}
+This is the central conversion. Every fit downstream of `cmd_fit_run_v2`
+goes through it.
 
-pub struct ParameterReport {
-    pub name: String,
-    pub estimate: f64,
-    pub chain_agreement: Option<f64>,        // Â
-    pub ivp: bool,
-}
+### 5.2 `EstimateSpecV2` → `EstimatedParam` (the parameter contract)
 
-pub struct ChainReport {
-    pub chain_id: usize,
-    pub clean_loglik: f64,
-    pub clean_se: f64,
-    pub is_winner: bool,                     // data-side name; renderers say "selected"
-}
+`runner.rs:583` `build_if2_params_from_specs(estimate, model,
+compiled, base_params)`.
 
-pub struct ProvenanceReport {
-    pub final_params_matches_mle_params: Option<bool>,
-    pub fit_state_winner_matches_final_params: Option<bool>,
-    pub stale_camdl_version: Option<String>,
-}
-
-pub struct HeuristicReport { /* recommendations from gate failures, etc. */ }
+```text
+(EstimateSpecV2.bounds OR ir::Parameter.bounds)  ──┐
+EstimateSpecV2.transform OR derive_transform()    ──┤
+EstimateSpecV2.start OR base_params[idx]          ──┤  ──▶ EstimatedParam
+EstimateSpecV2.rw_sd (optional)                   ──┤        { name, index, initial,
+EstimateSpecV2.ivp (optional)                     ──┘          rw_sd, transform, lower,
+                                                                upper, ivp, rw_sd_auto }
 ```
+
+`derive_transform` (runner.rs:536) is the precedence chain:
+fit.toml override → IR `param_kind` → fallback heuristic. The seam
+point: CLI's `Transform` (`Log | Logit | Identity`, unbounded) maps
+to sim's `Transform` (`None | Log{lo,hi} | Logit{lo,hi}`, bounded)
+by attaching `(lower, upper)`.
+
+### 5.3 Prior conversion — *the four-PriorSpec smell*
+
+There are **four distinct prior representations** in the workspace:
+
+| Type | Where | Shape | Scope |
+|---|---|---|---|
+| `ir::parameter::PriorDist` | `ir/src/parameter.rs` | enum, 8 variants | Embedded in IR; what the OCaml compiler emits. |
+| `cli::fit::config_v2::PriorSpec` | `cli/src/fit/config_v2.rs` | enum, 7 variants (no Hierarchical) | What users write in `fit.toml`. |
+| `cli::sampling::PriorSpec` | `cli/src/sampling.rs` | struct, stringly-typed (`dist: String`) | Used by `batch run` for VOI importance weighting. |
+| `sim::inference::Prior` | `sim/src/inference/prior.rs` | enum, 9 variants (incl. Hierarchical) | The runtime evaluator. |
+
+Conversions:
+
+```
+ir::PriorDist ──Prior::from_ir()──▶ sim::Prior
+config_v2::PriorSpec ──prior_spec_to_prior()──▶ sim::Prior
+                                        (runner.rs:1492)
+
+resolve_prior(name, fit.estimate, model, default=Flat):
+    1. fit.toml's PriorSpec (if set)        → prior_spec_to_prior
+    2. else IR's PriorDist (if set)         → Prior::from_ir
+    3. else IR's HierarchicalPrior (if set) → Prior::Hierarchical
+    4. else                                 → Prior::Flat
+```
+
+`sampling::PriorSpec` is a *fifth* form that doesn't even share
+variants with the others (it's stringly-typed with optional fields).
+Used in exactly one place (`batch.rs:63`'s `DesignParam.prior` for
+VOI weighting); it doesn't currently feed into `sim::Prior`.
+
+**Smell.** This is the single biggest schema dedup opportunity. See
+`CLEANUP-prior-types.md` and §6.1.
+
+### 5.4 IR `ObservationModel` → sim `MultiStreamObsModel`
+
+Per stream in `runner.rs:230`:
+
+```text
+fit.data.observations[name] = path
+   │
+   │ load_observations(path, name, dt) ──▶ Vec<sim::Observation>
+   │
+   │ ir::Model.observations.find(name) ──▶ ir::ObservationModel
+   │     │
+   │     │ StreamProjection::from_ir(ir.projection, compiled, name)
+   │     ▼
+   │ sim::StreamProjection
+   │
+   ▼
+ObsStream { name, projection, obs_model_ir, data }
+
+vec![ObsStream] ──▶ MultiStreamObsModel::new(StreamSpec[])
+```
+
+The IR's `ObservationModel.likelihood` is consumed inside
+`MultiStreamObsModel`'s `log_likelihood` evaluation — never
+explicitly converted to a sim type.
+
+### 5.5 Stage results → `FitStageMeta.algorithm`
+
+After a stage finishes, the dispatcher builds a `FitStageMeta` for
+the per-stage `run.json`. The `algorithm` field is
+`serde_json::Value` — a free-form blob carrying method-specific
+knobs and convergence diagnostics. Per method:
+
+- **IF2**: `{method, chains, particles, iterations, cooling}` plus
+  the loglik-eval winner's θ̂ and per-chain table.
+- **PGAS**: `{method, chains, particles, sweeps, burn_in, thin}`
+  plus `n_sweeps_done` (resume support), R̂, ESS, acceptance rates.
+- **PMMH**: similar to PGAS, plus proposal-tuning state.
+- **PFilter**: `{method, particles, replicates}` plus loglik mean/SD.
+
+The `serde_json::Value` shape is a deliberate punt — the human-
+readable record doesn't need a typed schema, and the stages have
+genuinely different parameter sets. `MethodResult` /
+`MethodView` (in `fit/method_result.rs`) is the typed reader-side
+adapter that pulls back what the table/summary renderers need.
+
+### 5.6 `Trajectory` → `traj.tsv`
+
+`util::write_traj_tsv(model, trajectory, path)` reads the model
+structure to figure out compartment ordering, then walks
+`trajectory.snapshots` and writes `t \t state_1 \t ... \t state_N
+\t flow_1 \t ...` (flows optional). One-way; the file is the
+artefact, never re-parsed back into a `Trajectory`. The reverse
+direction — TSV → particle filter `Vec<Observation>` — only needs
+two columns (`t`, `value`) and lives in `pfilter`/runner code.
 
 ---
 
-## 8. Browse / list / show pipeline
+## 6. Type-flow smells
 
-`rust/crates/cli/src/browse.rs`. Reader-side types for `camdl list /
-show / cat`. Six parallel-ish entry types; the candidate for
-consolidation discussed in `SHOW-TYPES-EXPLAINER.md`.
+These are observations to refactor (or defer). Listed roughly by
+ROI of fix-now vs. ignore.
 
-### Entry types (parallel structures)
+### 6.1 The four `PriorSpec` representations (high ROI)
 
-```rust
-pub struct RunEntry {                        // for sims
-    pub run: Run,
-    pub meta: SimulateMeta,                  // duplicates run.kind
-    pub abs_path: PathBuf,
-    pub rel_path: String,
-    pub created: SystemTime,
-    pub traj_bytes: u64,
-}
+See §5.3. Tracked separately in `CLEANUP-prior-types.md`. Two
+candidate fixes:
 
-pub struct FitEntry {                        // for fit umbrellas
-    pub run: Run,
-    pub meta: FitMeta,
-    pub rel_path: String,
-    pub created: SystemTime,
-}
+- **Minimum**: delete `cli::sampling::PriorSpec`. It's stringly-
+  typed, doesn't feed into `sim::Prior`, and the VOI workflow could
+  use `config_v2::PriorSpec` directly.
+- **Full**: collapse to two types — `ir::PriorDist` (serialization /
+  schema) and `sim::Prior` (runtime evaluator), with `from_ir` as
+  the bridge. `config_v2::PriorSpec` becomes an alias / re-export of
+  `ir::PriorDist`. This requires the IR to gain Hierarchical (it
+  doesn't have it as a `PriorDist` variant — it lives separately as
+  `HierarchicalPrior`).
 
-pub struct ProfileEntry {                    // for list (profiles section)
-    pub run: Run,
-    pub rel_path: String,
-    pub created: SystemTime,
-    pub model: String,                       // pre-extracted display fields
-    pub focal: String,
-    pub shape: String,
-    pub n_seeds: usize,
-}
+Either way, the seam at `runner.rs:1492` (`prior_spec_to_prior`)
+goes away.
 
-pub struct ReplicateSetEntry {               // for show on multi-seed profile umbrella
-    pub run: Run,
-    pub meta: ReplicateSetMeta,
-    pub rel_path: String,
-    pub abs_path: PathBuf,
-    pub created: SystemTime,
-}
+### 6.2 Two `Transform` types — `ir::Transform` and `sim::Transform`
 
-// Proposed for issue #25 (FitStage in show):
-struct FitStageEntry {
-    run: Run,
-    meta: FitStageMeta,
-    rel_path: String,
-    abs_path: PathBuf,
-    created: SystemTime,
-}
+`ir::parameter::Transform` (`Log | Logit | Identity`) is unbounded —
+it carries no bounds. `sim::inference::types::Transform` (`None |
+Log{lo,hi} | Logit{lo,hi}`) is the *bounded* runtime version.
 
-// Proposed for single-seed Profile show gap:
-struct ProfileShowEntry {
-    run: Run,
-    meta: ProfileMeta,
-    rel_path: String,
-    abs_path: PathBuf,
-    created: SystemTime,
-}
-```
+The conversion happens silently in `EstimatedParam` construction:
+the IR transform is a kind discriminator and the sim transform
+attaches `(lower, upper)` from `EstimateSpecV2.bounds`. There's
+also a third — `cli::fit::config_v2::Transform` — which is a
+faithful clone of `ir::Transform`.
 
-### Resolved enum
+This is fine in practice (the bounds attachment is a real semantic
+step) but worth flagging: if you ever want to write `impl
+TryFrom<ir::Transform> for sim::Transform`, you'd need to thread
+bounds through the conversion, which clarifies what's happening.
 
-```rust
-enum Resolved {
-    Sim(RunEntry),
-    Fit(FitEntry),
-    ReplicateSet(ReplicateSetEntry),
-    // Proposed:
-    // Profile(ProfileShowEntry),
-    // FitStage(FitStageEntry),
-}
-```
+### 6.3 `cli::sampling::PriorSpec` is stringly-typed
 
-### Loaders
+`pub struct PriorSpec { pub dist: String, pub alpha: ..., ... }` —
+panics-on-dispatch (`other => format!("{}(?)", other)`). Should be
+an enum like `config_v2::PriorSpec`. Tracked under §6.1.
 
-```rust
-fn load_run_common(dir, cwd) -> Option<(Run, SystemTime, String)>;
-fn load_sim_entry(dir, cwd) -> Option<RunEntry>;
-fn load_fit_entry(dir, cwd) -> Option<FitEntry>;
-fn load_replicate_set_entry(dir, cwd) -> Option<ReplicateSetEntry>;
-// Proposed: load_profile_entry, load_fit_stage_entry
-```
+### 6.4 `FitStageMeta.algorithm: serde_json::Value`
 
-Pattern: each loader calls `load_run_common`, then matches `run.kind`
-to extract the typed meta + clones it into the Entry. The match
-returns `None` on kind mismatch.
+A typed `enum AlgorithmDiagnostics { IF2(...), PGAS(...), ... }`
+would be safer (no key-mistype risk in the renderers) but
+significantly heavier. Current `MethodResult` adapter approach is
+acceptable; defer.
 
-### Discoverers / resolvers
+### 6.5 `RunEntry` / `FitEntry` / `ProfileEntry` redundancy
 
-```rust
-fn discover_runs(root) -> Result<Vec<RunEntry>, String>;
-fn discover_fits(root) -> Result<Vec<FitEntry>, String>;
-fn discover_profiles(root) -> Result<Vec<ProfileEntry>, String>;
+Each is `{run, meta, paths, created}` where `meta` is a destructured
+copy of `run.kind`'s payload. Stored alongside for direct field
+access without repeated `match`. Now that `cmd_show` and `cmd_cat`
+go through `ResolvedRun + match` and don't use these typed entries,
+the typed entries only exist for `cmd_list`'s table renderers.
 
-fn resolve_any(root, key) -> Result<Resolved, String>;
-fn list_profile_children(root, parent_hash, args);  // for `--parent <hash>`
-fn resolve_stage_by_hash(root, hash_prefix);
-```
+Cleanup option: have `cmd_list` also use `ResolvedRun` and `match
+&run.kind { ... }` per row, deleting the three entry types. The
+typed-meta convenience in renderers is preserved by binding inside
+the match arm.
 
-### Filter
+Estimated diff: ~80 LOC removed, ~30 added. ROI is "nicer," not
+"unblocks anything."
 
-```rust
-enum KindFilter { Sim, Fit, Profile, All }
-```
+### 6.6 `loglik_eval` and `gate` defaulting in `FitRunConfig`
 
-### Show printers
+`FitRunConfig::build` sets these to `Default::default()` and the
+real values get patched in by the dispatcher (`fit/mod.rs`)
+*after* construction. That's a two-step initialization smell —
+the defaults are wrong-but-harmless because they get overwritten,
+but a bug that forgets to overwrite gets `(4000, 8)` for
+`loglik_eval` and never fires the gate.
 
-```rust
-fn show_sim(entry: &RunEntry);
-fn show_fit(entry: &FitEntry);
-fn show_replicate_set(entry: &ReplicateSetEntry);
-// Proposed: show_profile, show_fit_stage
-```
+Minimum fix: make these fields `Option<...>` and have the
+dispatcher require an explicit set. Bigger fix: pass them as
+`build()` arguments.
 
----
+### 6.7 PGAS / PMMH stage opts revert v1 knobs to defaults
 
-## 9. CLI argument types
+After the v1 cleanup, several v1-only knobs (`tempering`,
+`max_treedepth`, `trajectory_warmup`, `csmc_sweeps_per_nuts`,
+`n_trajectories` for PGAS; analogous for PMMH) revert to defaults
+because v2's `Stage::PGAS` / `Stage::PMMH` doesn't surface them.
+Documented in the v1-cleanup commit message.
 
-`rust/crates/cli/src/args/`. Two files: `types.rs` (shared parsed
-types) + `mod.rs` (per-command Args structs).
+This is an outstanding feature-completeness gap, not a smell —
+listed here because the doc-survey will surface it. If anyone
+needs those knobs, surfacing them in `Stage::PGAS` / `Stage::PMMH`
+plus the `PgasStageOpts::from_stage` / `PmmhStageOpts::from_stage`
+adapters is mechanical.
 
-### Shared parsed types (`args/types.rs`)
+### 6.8 `DEFAULT_N_TRAJECTORIES` constant in pgas.rs
 
-Implementing `FromStr` for clap's value parsers:
+`pgas.rs` has `const DEFAULT_N_TRAJECTORIES: usize = 200;` set
+inline. After v1 cleanup it's the only knob path; should either
+be in `Stage::PGAS` or documented as fixed.
 
-```rust
-pub struct ParamOverride { pub name: String, pub value: f64 }   // --param NAME=VALUE
-pub struct TableSpec { pub name: String, pub path: PathBuf }    // --table NAME=FILE
-pub struct ParamVecSpec { pub prefix: String, pub file: String }
-pub struct ListDuration(pub Duration);                          // --since 1h/30m/2d
+### 6.9 `--starts-from` is `Option<&str>` everywhere
 
-pub enum Backend { Gillespie, ChainBinomial, TauLeap, Ode }
-pub enum ProgressMode { Auto, Pretty, Plain, None }
+The `starts_from` arg is shaped as `Option<&str>` through pgas.rs
+and pmmh.rs entry points, but `Stage::PGAS.starts_from` is a typed
+`StartsFrom` enum. They get joined at the dispatcher level
+(`mod.rs`'s `effective_starts.as_deref()`). The narrow stringy
+shape is fine at the call boundary; just worth knowing the seam
+exists.
 
-pub enum SeedSpec {
-    Range { from: u64, to: u64 },
-    List(Vec<u64>),
-}
+### 6.10 `IF2Result` / `PGASResult` / `PMMHResult` shapes are diagnostic-heavy
 
-pub struct SweepSpec {
-    pub name: String,
-    pub grid: Grid,
-}
-pub enum Grid {                              // --sweep NAME=...
-    List(Vec<f64>),
-    Linear { min: f64, max: f64, n: usize },
-    Log10 { min: f64, max: f64, n: usize },
-}
+Each result type carries 10+ fields of inference diagnostics, and
+the `FitStageMeta.algorithm` JSON has to flatten them by hand at
+the dispatcher. A smaller `StageDiagnostics` trait that each result
+type implements (`fn into_meta_json(&self) -> Value`) would
+centralize the per-method diagnostic schema. Defer; the current
+pattern is verbose but the correctness pressure is low (it's
+diagnostic-only output).
 
-pub enum RwSd {
-    Auto,
-    Map(HashMap<String, Option<f64>>),
-}
-```
+### 6.11 `cli/src/util.rs` is a kitchen sink (~1300 LOC)
 
-### Shared arg groups (`args/mod.rs`)
+`SimRun`, `apply_scenario_filter`, `load_model`, `apply_params_file`,
+`derive_chain_seed`, `write_traj_tsv`, `resolve_ir_path`, …. The
+file is doing too much. Splittable into `util/io.rs` (load/write),
+`util/scenario.rs` (filter + apply), `util/seed.rs` (derive). Pure
+mechanical refactor; defer until there's a reason.
 
-Flattened into per-command Args:
+### 6.12 No `From` / `Into` impls across the seams
 
-```rust
-pub struct ModelOverrides {                  // --params + --param + --table
-    pub params: Vec<PathBuf>,
-    pub param: Vec<ParamOverride>,
-    pub table: Vec<TableSpec>,
-}
-
-pub struct ScenarioArgs {                    // --scenario | --enable + --disable
-    pub scenario: Option<String>,
-    pub enable: Vec<String>,
-    pub disable: Vec<String>,
-}
-
-pub struct SimBackend { pub backend: Option<Backend>, pub dt: Option<f64> }
-
-pub struct InferenceCore {                   // shared: pfilter / if2 / profile
-    pub particles: usize,
-    pub dt: f64,
-    pub seed: u64,
-    pub parallel: usize,
-}
-
-pub struct FlowProjection { pub obs: Option<String>, pub flow: Option<String> }
-```
-
-### Per-command Args (selected)
-
-There are 25+ `Args` structs. Highlights:
-
-```rust
-pub struct SimulateArgs { /* model, scenarios, seeds, replicates, output, --cas, ... */ }
-pub struct ProfileArgs { /* model, sweep: Vec<SweepSpec>, seeds: Option<SeedSpec>, ... */ }
-pub struct FitRunArgs { /* fit_path, sweep, seed, stage, label, ... */ }
-pub struct ListArgs { /* root, kind, parent, since, model, scenario, label_pattern, ... */ }
-pub struct ShowArgs { /* root, target */ }
-pub struct CatArgs { /* root, target, stream */ }
-pub struct CompareArgs { /* config, paths, baseline, metrics, format, ... */ }
-pub struct PfilterArgs { /* model, params, data, particles, replicates, ... */ }
-pub struct If2Args { /* particles, iterations, cooling, etc. — legacy direct cmd */ }
-pub struct BatchArgs { /* file, output_dir, parallel, dry_run, force */ }
-pub struct EvalArgs { /* model, expr, time grid */ }
-pub struct DataSplitArgs { /* train/test/holdout TSV split */ }
-pub struct FitSummaryArgs { /* dir, stage, format, params_only, strict */ }
-pub struct FitTableArgs { /* root, hash, label_pattern, format, since_seconds */ }
-pub struct FitDiffArgs { /* two fit dirs to diff their configs */ }
-pub struct FitNewArgs { /* scaffold a new fit.toml */ }
-pub struct FitWhereArgs { /* find a fit by hash */ }
-pub struct FitLabelArgs { /* re-label by hash; will become camdl label */ }
-pub struct FitStatusArgs { /* progress / completion of a fit */ }
-pub struct BatchStatusArgs { /* per-experiment batch progress */ }
-```
-
-### Format enums
-
-```rust
-pub enum FitSummaryFormat { Text, Json, Md, Latex }
-pub enum FitTableFormat { Plain, Md, Json }
-```
+Every CLI→sim conversion is a free function (`prior_spec_to_prior`,
+`derive_transform`, `StreamProjection::from_ir`). Idiomatic Rust
+would make these `From` / `TryFrom` impls. The current state is
+functional and grep-discoverable, just slightly less idiomatic.
 
 ---
 
-## 10. Filesystem layout & hashing
-
-### Layout helpers (`run_paths.rs`)
-
-```rust
-pub const DEFAULT_OUTPUT_ROOT: &str = "results";
-
-pub fn output_root(cli, config) -> PathBuf;       // CLI > config > $CAMDL_OUTPUT_DIR > default
-pub fn sim_run_dir(root, stem, sim_hash, scenario, scen_hash, seed) -> PathBuf;
-pub fn sim_run_rel(stem, sim_hash, scenario, scen_hash, seed) -> String;
-pub fn fit_run_dir(root, fit_toml_stem, fit_hash) -> PathBuf;
-pub fn profile_point_dir(profile_dir, point_idx) -> PathBuf;
-pub fn profile_point_start_dir(profile_dir, point_idx, start_idx) -> PathBuf;
-```
-
-Note: `profile_run_dir` was deleted in the typed-CAS migration —
-`ProfileInputs::cas_path` builds it now.
-
-### The canonical layout
-
-```
-<root>/
-  sims/                                          # simulate --cas
-    <model_stem>-<sim_hash[:8]>/                 # one model+config combo
-      <scenario_slug>-<scen_hash[:8]>/           # one scenario delta
-        seed_<N>/
-          run.json                               # RunKind::Simulate
-          traj.tsv
-          obs/<obs_hash>-<obs_seed>/             # optional: obs draws
-            <stream>.tsv
-
-  fits/                                          # fit run
-    <stem>-<fit_hash[:8]>/                       # one fit umbrella
-      run.json                                   # RunKind::Fit
-      fit.toml.original                          # archived input
-      real/                                      # OR synthetic/ds_NN/
-        fit_<seed>/                              # one fit_seed cell
-          <sweep_slug>/                          # optional: per sweep point
-            <stage_name>/
-              run.json                           # RunKind::FitStage
-              mle_params.toml                    # IF2 winner θ̂
-              fit_state.toml                     # inter-stage handoff
-              chain_evaluations.tsv              # per-chain clean-eval
-              <stage>_summary.json               # MethodResult
-              ...
-
-  profiles/                                      # profile (single-seed flat)
-    <stem>-<profile_content_hash[:8]>/
-      run.json                                   # RunKind::Profile
-      profile.tsv                                # rollup
-      points/{NNNNN}/
-        focal.toml                               # pinned focal values
-        start_<K>/
-          run.json                               # RunKind::FitStage (with parent_profile_hash)
-          mle.toml
-
-  profiles/                                      # profile (multi-seed nested)
-    <stem>-<parent_hash[:8]>/
-      run.json                                   # RunKind::ReplicateSet
-      summary.tsv                                # cross-seed aggregate
-      replicates/
-        seed_<S>/                                # one per replicate seed
-          run.json                               # RunKind::Profile
-          profile.tsv                            # per-seed rollup
-          points/.../start_K/                    # same as single-seed shape
-
-  runs/                                          # batch run (single output dir)
-    <scenario_slug>-<scen_hash[:8]>/seed_<N>/    # similar to sims
-```
-
-### Hashing helpers (`hashing.rs`)
-
-```rust
-pub fn model_hash(ir_json: &str) -> String;       // canonical IR → 64-char hex
-pub fn sim_hash(model_h, params_canon, backend, dt) -> String;
-pub fn scen_hash(enable, disable, params: &HashMap<String,f64>) -> String;
-pub fn file_hash(path: &str) -> Option<String>;   // 8-char hex of file bytes
-pub fn sha256_hex(bytes: &[u8]) -> String;        // full 64-char SHA-256
-pub fn fit_content_hash(model_ir, data_files, fit_toml_bytes) -> String;
-pub fn canonical_params(params: &HashMap<String,f64>) -> String;
-pub fn slug(name: &str) -> String;                // filesystem-safe
-pub fn path_stem_slug(path: &str) -> Option<String>;
-```
-
-`fit/provenance.rs::fit_stage_hash(model_ir, observations, estimate,
-fixed, stage_name, &Stage, seed) -> Result<String, String>` — fit's
-seed-inclusive per-stage hash.
-
----
-
-## 11. Other / cross-cutting
-
-### `util.rs::SimRun`
-
-The runner-level "I want to simulate this" struct. Used by both
-`simulate` and `batch` to share the simulation invocation pipeline.
-
-```rust
-pub struct SimRun {
-    pub ir_path: String,
-    pub params_files: Vec<String>,
-    pub overrides: HashMap<String, f64>,
-    pub scenario_name: Option<String>,
-    pub adhoc_enable: Vec<String>,
-    pub adhoc_disable: Vec<String>,
-    pub backend: String,
-    pub dt: f64,
-    pub seed: u64,
-    // ...
-}
-```
-
-### `batch.rs` types
-
-```rust
-pub struct ScenarioEntry { /* one [[scenario]] entry from a batch.toml */ }
-pub enum RunDecision { CacheHit, CacheMiss }
-pub struct RunPlan {
-    pub scenario: String,
-    pub seed: u64,
-    pub sweep_overrides: HashMap<String, f64>,
-    pub run_dir: String,
-    pub run_path: String,
-    pub decision: RunDecision,
-    // ...
-}
-```
-
-(Plus internal `SweepSpec`, `LinspaceSpec`, `RangeSpec` for the
-batch.toml's `[sweep]` section — distinct from `args::types::SweepSpec`.)
-
-### `sampling.rs`
-
-```rust
-pub struct PriorSpec { /* sampling-side, distinct from config_v2::PriorSpec */ }
-pub struct DesignParam { /* one row of an experiment design */ }
-pub struct DesignPoints { /* full design matrix */ }
-```
-
-### `progress.rs`
-
-```rust
-pub enum Resolved {                              // ← unrelated to browse::Resolved
-    Auto, Pretty, Plain, None,
-}
-pub struct Throttle { /* rate-limit progress prints */ }
-```
-
-### `fit/fit_tree.rs`
-
-```rust
-pub struct FitDirEntry {
-    pub fit_dir: PathBuf,
-    pub run: Run,
-    pub fit_meta: FitMeta,
-}
-
-pub struct StageNode { /* one stage in a fit's stage tree */ }
-pub struct StageAxes { /* per-cell stage decomposition: real/synthetic, fit_seed, sweep */ }
-pub enum DataKind { Real, Synthetic { dataset_idx: usize } }
-```
-
-### `fit/table_row.rs`
-
-```rust
-pub struct TableRowSchema { /* version + column order for fit table output */ }
-pub struct TableRow { /* one row of fit table — a stage's summary, flat */ }
-pub enum TableRowError { /* missing files, bad parses */ }
-```
-
-### `fit/config_diff.rs`
-
-```rust
-pub struct ConfigDiff { /* result of diffing two FitConfigV2 */ }
-pub struct BoundsChange { /* parameter bounds delta */ }
-pub struct PriorChange { /* prior-spec delta */ }
-pub struct DataHashesDiff { /* observation file changes */ }
-pub struct StagesChanged { /* added/removed/modified stages */ }
-pub struct StageSettingsChange { /* per-stage knob changes */ }
-```
-
-### `fit/grid_summary.rs`
-
-```rust
-pub struct SummaryRow { /* one row of a fit-grid summary.tsv */ }
-```
-
-### `fit/trace_writer.rs`
-
-```rust
-pub struct TraceWriter { /* streaming writer for chain traces */ }
-```
-
----
-
-## 12. Refactor opportunities
-
-Concrete observations after walking the whole inventory.
-
-### A. The 6-parallel-Entry-types pattern in browse.rs
-
-Already discussed in `SHOW-TYPES-EXPLAINER.md`. `RunEntry / FitEntry /
-ReplicateSetEntry / ProfileEntry` (+ two more proposed for #25 and
-single-seed Profile show) all have the same shape `(Run, paths, time,
-[extras])` with a redundant `meta: XMeta` field that's just a clone of
-`run.kind`'s payload. **Consolidating into a single `LoadedRun` saves
-~30 LOC even while adding two new show paths.**
-
-### B. Two unrelated `Resolved` enums
-
-`browse::Resolved` (sim/fit/replicate-set discriminator for show
-dispatch) and `progress::Resolved` (auto/pretty/plain/none progress
-mode) share a name. Trivial rename of progress's enum to
-`ProgressModeResolved` or similar would prevent confusion.
-
-### C. Two unrelated `PriorSpec` types
-
-`config_v2::PriorSpec` (fit.toml's prior declaration, tagged by
-`dist`) and `sampling::PriorSpec` (runtime sampling primitive, unrelated
-shape). Separate concerns, but the shared name is a footgun. Either
-disambiguate with module-qualified imports everywhere or rename one.
-
-### D. `ProfileMeta.seed_base` is misnamed post-typed-CAS
-
-Field name from when single-seed profile derived per-start seeds
-from a `seed_base` via XOR. Today the field carries the actual seed of
-this profile run. Rename to `seed` for clarity (cosmetic; serde-tagged
-in run.json).
-
-### E. `ProfileMeta.if2_config_hash` and `base_params_hash` are
-redundant
-
-These were CAS-relevant under the legacy hashing scheme. Now
-`ProfileInputs::content_hash()` is the cache key; these fields are
-diagnostic display-only. Could either drop them or rename to make the
-"display only" status explicit. Same logic for `SimulateMeta.sim_hash`
-/ `scen_hash` — they're path components, present in run.json for
-display, but the trait's `content_hash` is the actual key.
-
-### F. `label` lives on `FitMeta` but should live on `Run`
-
-Issue #24. Today only fits can have labels; profiles, sims, and
-replicate-set umbrellas can't. Lifting `label: Option<String>` to the
-top-level `Run` struct makes labels universal and `camdl label
-<hash>` kind-agnostic. ~150 LOC change, not big.
-
-### G. `MethodResult` and `RunKind::FitStage` carry overlapping but
-non-equal information
-
-`RunKind::FitStage(FitStageMeta)` is what's in `run.json` —
-backref-heavy provenance fields. `MethodResult` is the *typed
-interpretation* of a completed stage — typed by method, with
-posterior summaries, gate verdicts, ESS. They live at different
-layers (data-on-disk vs. typed-loaded-output) and that's fine, but
-the fields that overlap (`best_loglik`, `best_chain`, `n_chains`)
-duplicate. A `MethodResult::from_fit_stage_meta_and_state(stage_meta,
-fit_state)` constructor centralises the projection.
-
-### H. `args::types::SweepSpec` vs `batch::SweepSpec`
-
-The CLI's `--sweep NAME=lin(...)` parser produces
-`args::types::SweepSpec`. The batch.toml's `[sweep.x] linspace = ...`
-produces a *separate* internal `SweepSpec` type in `batch.rs`. Both
-expand to `Vec<f64>`. Could share a type if we want one "sweep
-specification" concept.
-
-### I. `LoglikEvalConfig` and `GateConfig` are referenced from both
-config and FitState
-
-They're declared in `config_v2.rs` (input config) and embedded into
-`FitState` (output state, carrying the *resolved* effective values).
-This is correct (the resolved values may differ from declared ones
-when defaults kick in), but the dual-location is a footgun for
-schema migrations. Worth a comment in both locations cross-referencing.
-
-### J. `Run.hash` semantics depends on kind
-
-```rust
-/// Content hash for this run, full 64-char hex. Scope depends on `kind`:
-///   - Simulate: hash of (sim_hash, scen_hash, seed).
-///   - Fit: seed-independent content hash of (fit.toml, model IR, data files).
-///   - FitStage: stage-scope config hash from fit_stage_hash (includes seed).
-```
-
-This is documented but conceptually confusing — `Run.hash` for a
-`Fit` is the umbrella hash, for `FitStage` it's the seed-scoped
-stage hash. After typed CAS, they're all `inputs.content_hash()` —
-which makes the meaning uniform IF you read it as "the typed-CAS
-hash for whatever this run *is*." Worth a doc-comment refresh.
-
-### K. `Run::write` is called many times during a single fit
-
-The umbrella `run.json` is written at fit start (with wall_time=0)
-and rewritten at fit end (with real wall time). Each stage's
-`run.json` is written at stage end. In a multi-cell fit
-(`fit_seeds`+ synthetic), the umbrella is rewritten N×M times even
-though only wall_time changes. Not a perf problem but worth noting:
-last-write-wins, atomic-rename ensures consistency.
-
-### L. There is no `Show` trait
-
-Every kind has a `show_X(entry)` function. They share structure
-(path / kind / hashes / created / version / argv) but with kind-
-specific middle sections. A `Show` trait hasn't been justified by a
-second consumer; if reader/writer split or external rendering
-becomes a need, that's the moment.
-
----
-
-## Summary count
-
-- **Core data model**: 10 types (`Run`, `RunKind` + 5 metas + 3
-  supporting). Stable; rename `ProfileMeta.seed_base` and lift
-  `FitMeta.label` to `Run.label` are the only proposed changes.
-- **CAS abstraction**: 4 types (trait + ContentHash + ReplicateSet +
-  ReplicateSetMeta). Stable.
-- **Per-command CasInputs impls**: 4 (SimulateInputs, ProfileInputs,
-  FitInputs, StageInputs). Stable.
-- **Fit config schema**: ~16 types (`FitConfigV2` + sub-types). v1
-  cleanup landed — the legacy `FitToml` + 6 sub-types are gone, and
-  there's no bridge layer.
-- **Fit runtime**: ~12 types. Mostly load-bearing. Adds two new
-  per-stage-opts structs (`pgas::PgasStageOpts`, `pmmh::PmmhStageOpts`)
-  carried at the dispatch site for the v2-only PGAS / PMMH entry
-  points.
-- **Fit method results**: 8 types (MethodResult + 3 stage results +
-  EssSummary + GateVerdict + 2 errors). Stable.
-- **Fit summary**: 9 types. Renderer-side; subject to
-  display-naming drift (issue #26).
-- **Browse / list / show**: 6 types (5 entries + Resolved).
-  Consolidation candidate (the "LoadedRun" discussion).
-- **CLI args**: 25+ Args structs + 10 shared parsed types + 2 format
-  enums. Stable, well-isolated by clap convention.
-- **Cross-cutting**: ~10 types in batch / sampling / progress / utils
-  / fit subdirs. Stable but with two name collisions (`Resolved`,
-  `PriorSpec`).
-
-Approximate total: **~125 public types** in `cli/src/` (down from
-~135 pre-cleanup; ~7 v1 fit-config types deleted, +2 stage-opts
-structs added).
+**Bottom line.** The codebase is in good shape post-cleanup. The
+big architectural decisions (CAS abstraction, FitConfigV2 as the
+single fit-config schema, kind-tagged `Run` envelope, identity vs
+extension hash split for resume) all hold up under the type-flow
+view. The only structural smell with non-trivial ROI is the
+four-`PriorSpec` situation (§6.1). Everything else is either
+deferred-defer (§6.4, §6.5, §6.10, §6.11) or one-commit cleanup
+(§6.6, §6.8).
+
+If we want to shave one more thing before alpha, **prior-type
+unification (§6.1)** is the natural next pass — it's the last place
+where the CLI/sim/IR seam shows obvious duplication.

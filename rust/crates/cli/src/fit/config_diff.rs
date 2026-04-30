@@ -349,6 +349,7 @@ fn stage_settings_map(stage: &Stage) -> BTreeMap<String, serde_json::Value> {
             particles,
             iterations,
             cooling,
+            cooling_target_iters,
             loglik_eval,
             gate,
             ..
@@ -357,6 +358,8 @@ fn stage_settings_map(stage: &Stage) -> BTreeMap<String, serde_json::Value> {
             m.insert("particles".into(), serde_json::json!(particles));
             m.insert("iterations".into(), serde_json::json!(iterations));
             m.insert("cooling".into(), serde_json::json!(cooling));
+            m.insert("cooling_target_iters".into(),
+                serde_json::json!(cooling_target_iters));
             m.insert(
                 "loglik_eval.n_particles".into(),
                 serde_json::json!(loglik_eval.n_particles),
