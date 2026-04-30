@@ -493,6 +493,47 @@ pub enum Stage {
         burn_in: Option<usize>,
         #[serde(default)]
         thin: Option<usize>,
+
+        /// Temperature ladder for parallel tempering (replica
+        /// exchange; Earl & Deem 2005, Geyer 1991). Each entry is
+        /// β ∈ (0, 1]. The first entry MUST be 1.0 (cold chain).
+        /// Only the cold rung contributes posterior samples; heated
+        /// rungs explore a flatter likelihood surface (ll × β) and
+        /// exchange with adjacent rungs via Metropolis swaps.
+        /// Default: `[1.0]` (no tempering, single rung).
+        /// Example: `[1.0, 0.7, 0.4, 0.15]`.
+        #[serde(default = "default_pgas_tempering")]
+        tempering: Vec<f64>,
+        /// Maximum NUTS tree depth (Hoffman & Gelman 2014). Stiff
+        /// posteriors hit this and need a higher value. Default: 10.
+        #[serde(default = "default_max_tree_depth")]
+        max_tree_depth: usize,
+        /// CSMC-only sweeps before parameter updates begin. The
+        /// trajectory is refreshed via CSMC-AS but parameters stay
+        /// fixed. Default: 0 (no warm-up).
+        #[serde(default)]
+        trajectory_warmup: usize,
+        /// CSMC trajectory updates per parameter update. Higher
+        /// values (3–5) help on long time series where ancestor
+        /// sampling is the bottleneck. Default: 1.
+        #[serde(default = "default_csmc_sweeps_per_nuts")]
+        csmc_sweeps_per_nuts: usize,
+        /// Posterior trajectory samples saved to disk (evenly spaced
+        /// post-burn-in). Output-side knob, not algorithmic — does
+        /// NOT affect the chain hash. Default: 200.
+        #[serde(default = "default_n_trajectories")]
+        n_trajectories: usize,
+        /// NUTS mass matrix shape. `true` = full covariance (handles
+        /// parameter correlations like the R0/amplitude ridge),
+        /// `false` = diagonal-only (faster but ignores correlations).
+        /// Default: true.
+        #[serde(default = "default_dense_mass")]
+        dense_mass: bool,
+        /// Use NUTS (gradient-based) for the θ|X update. `false`
+        /// falls back to MH-within-Gibbs. Requires `rate_grad`
+        /// expressions in the IR (compiled with autodiff). Default: true.
+        #[serde(default = "default_use_nuts")]
+        use_nuts: bool,
     },
 
     #[serde(rename = "pmmh")]
@@ -506,6 +547,23 @@ pub enum Stage {
         burn_in: Option<usize>,
         #[serde(default)]
         thin: Option<usize>,
+
+        /// Enable adaptive Metropolis (Haario et al. 2001) — proposal
+        /// SDs adapt to past acceptance. Set false to lock the
+        /// proposal during a refine run. Default: true.
+        #[serde(default = "default_pmmh_adapt")]
+        adapt: bool,
+        /// MCMC step at which adaptation begins. Earlier values risk
+        /// adapting on burn-in noise; later values delay convergence.
+        /// Default: 300.
+        #[serde(default = "default_pmmh_adapt_start")]
+        adapt_start: usize,
+        /// Crank-Nicolson correlation for correlated pseudo-marginal
+        /// MCMC (Deligiannidis et al. 2018). `None` = vanilla PMMH
+        /// with independent PF evaluations. `Some(0.99)` = CPM with
+        /// ρ=0.99 (recommended when CPM is enabled). Default: None.
+        #[serde(default)]
+        rho: Option<f64>,
     },
 
     #[serde(rename = "pfilter")]
@@ -515,6 +573,18 @@ pub enum Stage {
         replicates: Option<usize>,
         #[serde(default)]
         starts_from: StartsFrom,
+
+        /// Record per-step ancestor indices for smoothing-path
+        /// reconstruction. Off by default (extra memory + copy cost).
+        /// See `sim::inference::ancestor_trace`.
+        #[serde(default)]
+        record_ancestry: bool,
+        /// Record per-step predictive samples + log-likelihoods for
+        /// `camdl compare`'s prequential scoring (log score, CRPS, PIT).
+        /// Roughly N × T f64 per step; cheap relative to the filter
+        /// itself. Off by default.
+        #[serde(default)]
+        record_prequential: bool,
     },
 }
 
@@ -571,21 +641,46 @@ impl Stage {
     pub fn identity_payload(&self) -> serde_json::Value {
         use serde_json::json;
         match self {
-            Stage::PGAS { chains, particles, starts_from, burn_in, thin, .. } => json!({
+            // PGAS: omit `sweeps` (extension dimension) and
+            // `n_trajectories` (output-only knob; saving more or fewer
+            // posterior trajectories doesn't change chain dynamics).
+            // All other PGAS fields are identity-defining.
+            Stage::PGAS {
+                chains, particles, starts_from, burn_in, thin,
+                tempering, max_tree_depth, trajectory_warmup,
+                csmc_sweeps_per_nuts, dense_mass, use_nuts,
+                ..
+            } => json!({
                 "method": "pgas",
                 "chains": chains,
                 "particles": particles,
                 "starts_from": starts_from,
                 "burn_in": burn_in,
                 "thin": thin,
+                "tempering": tempering,
+                "max_tree_depth": max_tree_depth,
+                "trajectory_warmup": trajectory_warmup,
+                "csmc_sweeps_per_nuts": csmc_sweeps_per_nuts,
+                "dense_mass": dense_mass,
+                "use_nuts": use_nuts,
             }),
-            Stage::PMMH { chains, particles, starts_from, burn_in, thin, .. } => json!({
+            // PMMH: omit `iterations` (extension dimension). All other
+            // fields, including adapt / adapt_start / rho, are
+            // identity-defining (different sampler, not extension).
+            Stage::PMMH {
+                chains, particles, starts_from, burn_in, thin,
+                adapt, adapt_start, rho,
+                ..
+            } => json!({
                 "method": "pmmh",
                 "chains": chains,
                 "particles": particles,
                 "starts_from": starts_from,
                 "burn_in": burn_in,
                 "thin": thin,
+                "adapt": adapt,
+                "adapt_start": adapt_start,
+                "rho": rho,
             }),
             // No extension dimension: hash the full stage.
             Stage::IF2 { .. } | Stage::PFilter { .. } =>
@@ -633,6 +728,18 @@ fn default_loglik_eval_replicates() -> usize { 8 }
 /// Pomp's `cooling.fraction.50` default: cooling fraction is reached
 /// at iteration 50, then continues at the noise floor.
 fn default_cooling_target_iters() -> usize { 50 }
+
+// PGAS defaults
+fn default_pgas_tempering() -> Vec<f64> { vec![1.0] }
+fn default_max_tree_depth() -> usize { 10 }
+fn default_csmc_sweeps_per_nuts() -> usize { 1 }
+fn default_n_trajectories() -> usize { 200 }
+fn default_dense_mass() -> bool { true }
+fn default_use_nuts() -> bool { true }
+
+// PMMH defaults
+fn default_pmmh_adapt() -> bool { true }
+fn default_pmmh_adapt_start() -> usize { 300 }
 
 impl Default for LoglikEvalConfig {
     fn default() -> Self {
@@ -2458,59 +2565,131 @@ decibans_thresh = 100.0
         assert_eq!(format_dataset_dir(100), "ds_100");
     }
 
+    /// Default-equipped PGAS stage for identity tests. Builder pattern
+    /// keeps the test fixtures terse as Stage::PGAS grows fields.
+    fn make_pgas_stage(sweeps: usize) -> Stage {
+        Stage::PGAS {
+            chains: 4, particles: 100, sweeps,
+            starts_from: StartsFrom::default(),
+            burn_in: Some(200), thin: Some(2),
+            tempering: vec![1.0],
+            max_tree_depth: 10,
+            trajectory_warmup: 0,
+            csmc_sweeps_per_nuts: 1,
+            n_trajectories: 200,
+            dense_mass: true,
+            use_nuts: true,
+        }
+    }
+
+    /// Default-equipped PMMH stage for identity tests.
+    fn make_pmmh_stage(iterations: usize) -> Stage {
+        Stage::PMMH {
+            chains: 4, particles: 100, iterations,
+            starts_from: StartsFrom::default(),
+            burn_in: Some(200), thin: Some(2),
+            adapt: true, adapt_start: 300, rho: None,
+        }
+    }
+
     #[test]
     fn pgas_identity_payload_omits_sweeps() {
         // Two PGAS stages identical except for `sweeps` must produce
         // the same identity_payload — that's the contract that lets
         // --resume extend a chain by changing the iteration count.
-        let s_short = Stage::PGAS {
-            chains: 4, particles: 100, sweeps: 1000,
-            starts_from: StartsFrom::default(),
-            burn_in: Some(200), thin: Some(2),
-        };
-        let s_long = Stage::PGAS {
-            chains: 4, particles: 100, sweeps: 5000,
-            starts_from: StartsFrom::default(),
-            burn_in: Some(200), thin: Some(2),
-        };
+        let s_short = make_pgas_stage(1000);
+        let s_long = make_pgas_stage(5000);
         assert_eq!(s_short.identity_payload(), s_long.identity_payload());
 
         // Changing any *other* PGAS field must change the payload.
-        let s_more_chains = Stage::PGAS {
-            chains: 8, particles: 100, sweeps: 1000,
-            starts_from: StartsFrom::default(),
-            burn_in: Some(200), thin: Some(2),
+        let s_more_chains = match make_pgas_stage(1000) {
+            Stage::PGAS { particles, sweeps, starts_from, burn_in, thin,
+                tempering, max_tree_depth, trajectory_warmup, csmc_sweeps_per_nuts,
+                n_trajectories, dense_mass, use_nuts, .. } =>
+                Stage::PGAS { chains: 8, particles, sweeps, starts_from, burn_in, thin,
+                    tempering, max_tree_depth, trajectory_warmup, csmc_sweeps_per_nuts,
+                    n_trajectories, dense_mass, use_nuts },
+            _ => unreachable!(),
         };
         assert_ne!(s_short.identity_payload(), s_more_chains.identity_payload());
+    }
 
-        let s_more_particles = Stage::PGAS {
-            chains: 4, particles: 200, sweeps: 1000,
-            starts_from: StartsFrom::default(),
-            burn_in: Some(200), thin: Some(2),
-        };
-        assert_ne!(s_short.identity_payload(), s_more_particles.identity_payload());
+    #[test]
+    fn pgas_identity_payload_omits_n_trajectories() {
+        // n_trajectories is an output-side knob (how many posterior
+        // samples to save). It MUST NOT be in identity — saving more
+        // or fewer samples doesn't change chain dynamics, so resume
+        // should accept a different n_trajectories without
+        // re-running.
+        let mut s_few = make_pgas_stage(1000);
+        let mut s_many = make_pgas_stage(1000);
+        if let Stage::PGAS { ref mut n_trajectories, .. } = s_few { *n_trajectories = 100; }
+        if let Stage::PGAS { ref mut n_trajectories, .. } = s_many { *n_trajectories = 1000; }
+        assert_eq!(s_few.identity_payload(), s_many.identity_payload(),
+            "n_trajectories is output-only and must not affect identity");
+    }
 
-        let s_diff_burn_in = Stage::PGAS {
-            chains: 4, particles: 100, sweeps: 1000,
-            starts_from: StartsFrom::default(),
-            burn_in: Some(500), thin: Some(2),
-        };
-        assert_ne!(s_short.identity_payload(), s_diff_burn_in.identity_payload());
+    #[test]
+    fn pgas_identity_payload_includes_new_algorithmic_knobs() {
+        // tempering, max_tree_depth, trajectory_warmup,
+        // csmc_sweeps_per_nuts, dense_mass, use_nuts ALL change chain
+        // dynamics and MUST invalidate identity.
+        let base = make_pgas_stage(1000);
+
+        let mut s = make_pgas_stage(1000);
+        if let Stage::PGAS { ref mut tempering, .. } = s {
+            *tempering = vec![1.0, 0.5];
+        }
+        assert_ne!(base.identity_payload(), s.identity_payload(), "tempering");
+
+        let mut s = make_pgas_stage(1000);
+        if let Stage::PGAS { ref mut max_tree_depth, .. } = s { *max_tree_depth = 14; }
+        assert_ne!(base.identity_payload(), s.identity_payload(), "max_tree_depth");
+
+        let mut s = make_pgas_stage(1000);
+        if let Stage::PGAS { ref mut trajectory_warmup, .. } = s {
+            *trajectory_warmup = 100;
+        }
+        assert_ne!(base.identity_payload(), s.identity_payload(), "trajectory_warmup");
+
+        let mut s = make_pgas_stage(1000);
+        if let Stage::PGAS { ref mut csmc_sweeps_per_nuts, .. } = s {
+            *csmc_sweeps_per_nuts = 3;
+        }
+        assert_ne!(base.identity_payload(), s.identity_payload(),
+            "csmc_sweeps_per_nuts");
+
+        let mut s = make_pgas_stage(1000);
+        if let Stage::PGAS { ref mut dense_mass, .. } = s { *dense_mass = false; }
+        assert_ne!(base.identity_payload(), s.identity_payload(), "dense_mass");
+
+        let mut s = make_pgas_stage(1000);
+        if let Stage::PGAS { ref mut use_nuts, .. } = s { *use_nuts = false; }
+        assert_ne!(base.identity_payload(), s.identity_payload(), "use_nuts");
     }
 
     #[test]
     fn pmmh_identity_payload_omits_iterations() {
-        let s_short = Stage::PMMH {
-            chains: 4, particles: 100, iterations: 1000,
-            starts_from: StartsFrom::default(),
-            burn_in: Some(200), thin: Some(2),
-        };
-        let s_long = Stage::PMMH {
-            chains: 4, particles: 100, iterations: 8000,
-            starts_from: StartsFrom::default(),
-            burn_in: Some(200), thin: Some(2),
-        };
+        let s_short = make_pmmh_stage(1000);
+        let s_long = make_pmmh_stage(8000);
         assert_eq!(s_short.identity_payload(), s_long.identity_payload());
+    }
+
+    #[test]
+    fn pmmh_identity_payload_includes_new_algorithmic_knobs() {
+        let base = make_pmmh_stage(1000);
+
+        let mut s = make_pmmh_stage(1000);
+        if let Stage::PMMH { ref mut adapt, .. } = s { *adapt = false; }
+        assert_ne!(base.identity_payload(), s.identity_payload(), "adapt");
+
+        let mut s = make_pmmh_stage(1000);
+        if let Stage::PMMH { ref mut adapt_start, .. } = s { *adapt_start = 1000; }
+        assert_ne!(base.identity_payload(), s.identity_payload(), "adapt_start");
+
+        let mut s = make_pmmh_stage(1000);
+        if let Stage::PMMH { ref mut rho, .. } = s { *rho = Some(0.99); }
+        assert_ne!(base.identity_payload(), s.identity_payload(), "rho");
     }
 
     #[test]

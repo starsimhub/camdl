@@ -16,25 +16,26 @@ use sim::inference::{
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-/// Per-stage knobs extracted from a `Stage::PGAS { ... }` variant by the
-/// `camdl fit run` dispatcher and passed verbatim into `run_stage`.
-///
-/// Defaults for fields not represented in v2 (`tempering`,
-/// `max_treedepth`, `trajectory_warmup`, `csmc_sweeps_per_nuts`,
-/// `n_trajectories`) match the v1 defaults so behaviour is unchanged.
-/// Adding these knobs to v2's Stage::PGAS schema is out of scope for
-/// the v1-cleanup pass.
+/// Per-stage knobs extracted from a `Stage::PGAS { ... }` variant by
+/// the `camdl fit run` dispatcher and passed verbatim into `run_stage`.
+/// Mirrors every PGAS field in `Stage::PGAS` plus burn_in/thin defaults.
 pub struct PgasStageOpts {
     pub n_chains: usize,
     pub n_particles: usize,
     pub n_sweeps: usize,
     pub burn_in: usize,
     pub thin: usize,
+    pub tempering: Vec<f64>,
+    pub max_tree_depth: usize,
+    pub trajectory_warmup: usize,
+    pub csmc_sweeps_per_nuts: usize,
+    pub n_trajectories: usize,
+    pub dense_mass: bool,
+    pub use_nuts: bool,
 }
 
 const DEFAULT_BURN_IN: usize = 2000;
 const DEFAULT_THIN: usize = 5;
-const DEFAULT_N_TRAJECTORIES: usize = 200;
 
 impl PgasStageOpts {
     /// Build from a `Stage::PGAS { ... }` variant. Errors if `stage` is
@@ -42,14 +43,32 @@ impl PgasStageOpts {
     pub fn from_stage(stage: &super::config_v2::Stage) -> Result<Self, String> {
         match stage {
             super::config_v2::Stage::PGAS {
-                chains, particles, sweeps, burn_in, thin, ..
-            } => Ok(PgasStageOpts {
-                n_chains: *chains,
-                n_particles: *particles,
-                n_sweeps: *sweeps,
-                burn_in: burn_in.unwrap_or(DEFAULT_BURN_IN),
-                thin: thin.unwrap_or(DEFAULT_THIN),
-            }),
+                chains, particles, sweeps, burn_in, thin,
+                tempering, max_tree_depth, trajectory_warmup,
+                csmc_sweeps_per_nuts, n_trajectories,
+                dense_mass, use_nuts,
+                ..
+            } => {
+                if tempering.is_empty() || (tempering[0] - 1.0).abs() > 1e-9 {
+                    return Err(format!(
+                        "stage tempering ladder must start with β=1.0 \
+                         (cold chain). Got: {:?}", tempering));
+                }
+                Ok(PgasStageOpts {
+                    n_chains: *chains,
+                    n_particles: *particles,
+                    n_sweeps: *sweeps,
+                    burn_in: burn_in.unwrap_or(DEFAULT_BURN_IN),
+                    thin: thin.unwrap_or(DEFAULT_THIN),
+                    tempering: tempering.clone(),
+                    max_tree_depth: *max_tree_depth,
+                    trajectory_warmup: *trajectory_warmup,
+                    csmc_sweeps_per_nuts: *csmc_sweeps_per_nuts,
+                    n_trajectories: *n_trajectories,
+                    dense_mass: *dense_mass,
+                    use_nuts: *use_nuts,
+                })
+            }
             other => Err(format!(
                 "PgasStageOpts::from_stage: expected Stage::PGAS, got {}",
                 other.method_name())),
@@ -59,7 +78,7 @@ impl PgasStageOpts {
 
 // Per-stage entry point for PGAS — wide because every flag is
 // independent at the dispatch site (stage_dir, opts struct, RNG seed,
-// per-flag CLI overrides, --resume / --starts-from). Same pattern as
+// --resume / --starts-from). Same pattern as
 // `batch::run_one_scenario` and `main::run_simulate`, both of which
 // also carry this allow.
 #[allow(clippy::too_many_arguments)]
@@ -71,8 +90,6 @@ pub fn run_stage(
     pgas_opts: PgasStageOpts,
     seed: u64,
     force: bool,
-    use_nuts: bool,
-    dense_mass: bool,
     resume: bool,
     starts_from: Option<&str>,
 ) -> Result<(), String> {
@@ -82,7 +99,9 @@ pub fn run_stage(
     let n_particles = pgas_opts.n_particles;
     let burn_in = pgas_opts.burn_in;
     let thin = pgas_opts.thin;
-    let n_trajectories = DEFAULT_N_TRAJECTORIES;
+    let n_trajectories = pgas_opts.n_trajectories;
+    let use_nuts = pgas_opts.use_nuts;
+    let dense_mass = pgas_opts.dense_mass;
 
     if !force && !resume {
         let state_path = stage_dir.join("fit_state.toml");
@@ -289,12 +308,6 @@ pub fn run_stage(
             let chain_seed = crate::util::derive_chain_seed(seed, chain_id);
             let chain_dir = stage_dir.join(format!("chain_{}", chain_id + 1));
 
-            // v1's [pgas] section carried tempering / max_treedepth /
-            // trajectory_warmup / csmc_sweeps_per_nuts knobs; v2's
-            // Stage::PGAS doesn't surface these yet, so we use the v1
-            // defaults (single-rung tempering, depth=10, no warmup,
-            // 1 CSMC sweep per NUTS step). Adding them to v2's schema
-            // is out of scope for this cleanup.
             let pgas_config = PGASConfig {
                 n_particles,
                 n_sweeps,
@@ -302,11 +315,11 @@ pub fn run_stage(
                 thin,
                 dt,
                 use_nuts,
-                dense_mass, // --diagonal-mass to disable
-                tempering: vec![1.0],
-                max_tree_depth: 10,
-                trajectory_warmup: 0,
-                csmc_sweeps_per_nuts: 1,
+                dense_mass,
+                tempering: pgas_opts.tempering.clone(),
+                max_tree_depth: pgas_opts.max_tree_depth,
+                trajectory_warmup: pgas_opts.trajectory_warmup,
+                csmc_sweeps_per_nuts: pgas_opts.csmc_sweeps_per_nuts,
             };
 
             // Build multi-stream observation model (evaluates with params at call time)

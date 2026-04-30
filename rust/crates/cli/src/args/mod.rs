@@ -330,6 +330,99 @@ pub struct FitRunArgs {
     /// --label "iota free", --label "log_normal R0 prior".
     #[arg(long, value_name = "TEXT")]
     pub label: Option<String>,
+
+    // ── IF2-specific algorithm overrides (require --stage) ───────────
+
+    /// Override [stages.<stage>.cooling_target_iters]. Iterations
+    /// over which the cooling fraction is reached (pomp's
+    /// cooling.fraction.50 default). Requires --stage.
+    #[arg(long, value_name = "N", requires = "stage")]
+    pub cooling_target_iters: Option<usize>,
+
+    // ── PGAS-specific algorithm overrides (require --stage) ──────────
+
+    /// Override [stages.<stage>.tempering]. Comma-separated β values
+    /// for parallel tempering ladder. First value MUST be 1.0.
+    /// Example: `--tempering "1.0,0.7,0.4,0.15"`. Requires --stage.
+    #[arg(long, value_name = "B1,B2,...", requires = "stage",
+          value_parser = parse_f64_list)]
+    pub tempering: Option<Vec<f64>>,
+
+    /// Override [stages.<stage>.max_tree_depth] (NUTS depth ceiling).
+    /// Requires --stage.
+    #[arg(long, value_name = "N", requires = "stage")]
+    pub max_tree_depth: Option<usize>,
+
+    /// Override [stages.<stage>.trajectory_warmup] (CSMC-only sweeps
+    /// before parameter updates begin). Requires --stage.
+    #[arg(long, value_name = "N", requires = "stage")]
+    pub trajectory_warmup: Option<usize>,
+
+    /// Override [stages.<stage>.csmc_sweeps_per_nuts] (CSMC trajectory
+    /// updates per parameter update). Requires --stage.
+    #[arg(long, value_name = "N", requires = "stage")]
+    pub csmc_sweeps_per_nuts: Option<usize>,
+
+    /// Override [stages.<stage>.n_trajectories] (posterior trajectories
+    /// saved). Requires --stage.
+    #[arg(long, value_name = "N", requires = "stage")]
+    pub n_trajectories: Option<usize>,
+
+    /// Override [stages.<stage>.dense_mass] to false (use diagonal NUTS
+    /// mass matrix). One-way: edit TOML to flip back. Requires --stage.
+    #[arg(long, requires = "stage")]
+    pub diagonal_mass: bool,
+
+    /// Override [stages.<stage>.use_nuts] to false (fall back to
+    /// MH-within-Gibbs for the θ|X update). One-way: edit TOML to
+    /// flip back. Requires --stage.
+    #[arg(long, requires = "stage")]
+    pub no_nuts: bool,
+
+    // ── PMMH-specific algorithm overrides (require --stage) ──────────
+
+    /// Override [stages.<stage>.adapt] to false (lock proposal SDs;
+    /// disables Haario-style adaptation). One-way: edit TOML to flip
+    /// back. Requires --stage.
+    #[arg(long, requires = "stage")]
+    pub no_adapt: bool,
+
+    /// Override [stages.<stage>.adapt_start] (MCMC step at which
+    /// proposal-SD adaptation begins). Requires --stage.
+    #[arg(long, value_name = "N", requires = "stage")]
+    pub adapt_start: Option<usize>,
+
+    /// Override [stages.<stage>.rho] (Crank-Nicolson correlation for
+    /// correlated pseudo-marginal MCMC). Set to a value in [0, 1).
+    /// Requires --stage.
+    #[arg(long, value_name = "F", requires = "stage")]
+    pub rho: Option<f64>,
+
+    // ── PFilter-specific algorithm overrides (require --stage) ───────
+
+    /// Override [stages.<stage>.record_ancestry] to true (record
+    /// ancestor indices for smoothing-path reconstruction). Requires
+    /// --stage.
+    #[arg(long, requires = "stage")]
+    pub record_ancestry: bool,
+
+    /// Override [stages.<stage>.record_prequential] to true (record
+    /// per-step predictive samples for `camdl compare`). Requires
+    /// --stage.
+    #[arg(long, requires = "stage")]
+    pub record_prequential: bool,
+}
+
+/// Parser for `--tempering "1.0,0.7,0.4"` and similar comma-list
+/// f64 args. Empty string is rejected; spaces around commas are
+/// trimmed.
+fn parse_f64_list(s: &str) -> Result<Vec<f64>, String> {
+    if s.trim().is_empty() {
+        return Err("expected comma-separated f64 list".into());
+    }
+    s.split(',')
+        .map(|p| p.trim().parse::<f64>().map_err(|e| format!("'{}': {}", p, e)))
+        .collect()
 }
 
 #[derive(Args)]

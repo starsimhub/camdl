@@ -699,11 +699,13 @@ pub fn cmd_fit_run_v2(a: &crate::args::FitRunArgs) {
                     None => (None, Vec::new()),
                 };
 
+                let effective_cooling_target_iters = a.cooling_target_iters
+                    .unwrap_or(*cooling_target_iters);
                 let mut run_config = runner::FitRunConfig::build(
                     &sweep_config,
                     prior_state.as_ref(),
                     *chains, *particles, *iterations,
-                    *cooling, *cooling_target_iters,
+                    *cooling, effective_cooling_target_iters,
                     seed, effective_starts.is_none(),
                 ).unwrap_or_else(|e| {
                     eprintln!("error building run config: {}", e);
@@ -902,8 +904,23 @@ pub fn cmd_fit_run_v2(a: &crate::args::FitRunArgs) {
                 eprintln!("  best loglik: {:.1} (chain {})", chain_results.best_loglik, chain_results.best_chain + 1);
             }
             Stage::PGAS { .. } => {
-                let pgas_opts = pgas::PgasStageOpts::from_stage(stage)
+                let mut pgas_opts = pgas::PgasStageOpts::from_stage(stage)
                     .unwrap_or_else(|e| { eprintln!("error: {}", e); std::process::exit(1); });
+                // Apply CLI overrides (each requires --stage; clap enforces).
+                if let Some(ref t) = a.tempering {
+                    if t.is_empty() || (t[0] - 1.0).abs() > 1e-9 {
+                        eprintln!("error: --tempering must start with β=1.0 (cold chain). \
+                                   Got: {:?}", t);
+                        std::process::exit(1);
+                    }
+                    pgas_opts.tempering = t.clone();
+                }
+                if let Some(d) = a.max_tree_depth { pgas_opts.max_tree_depth = d; }
+                if let Some(w) = a.trajectory_warmup { pgas_opts.trajectory_warmup = w; }
+                if let Some(s) = a.csmc_sweeps_per_nuts { pgas_opts.csmc_sweeps_per_nuts = s; }
+                if let Some(n) = a.n_trajectories { pgas_opts.n_trajectories = n; }
+                if a.diagonal_mass { pgas_opts.dense_mass = false; }
+                if a.no_nuts       { pgas_opts.use_nuts   = false; }
 
                 pgas::run_stage(
                     &sweep_config,
@@ -912,8 +929,6 @@ pub fn cmd_fit_run_v2(a: &crate::args::FitRunArgs) {
                     &stage_dir,
                     pgas_opts,
                     seed, force,
-                    /* use_nuts */ true,
-                    /* dense_mass */ true,
                     a.resume,
                     effective_starts.as_deref(),
                 ).unwrap_or_else(|e| {
@@ -927,8 +942,17 @@ pub fn cmd_fit_run_v2(a: &crate::args::FitRunArgs) {
                 }
             }
             Stage::PMMH { .. } => {
-                let pmmh_opts = pmmh::PmmhStageOpts::from_stage(stage)
+                let mut pmmh_opts = pmmh::PmmhStageOpts::from_stage(stage)
                     .unwrap_or_else(|e| { eprintln!("error: {}", e); std::process::exit(1); });
+                if a.no_adapt { pmmh_opts.adapt = false; }
+                if let Some(s) = a.adapt_start { pmmh_opts.adapt_start = s; }
+                if let Some(r) = a.rho {
+                    if !(0.0..1.0).contains(&r) {
+                        eprintln!("error: --rho must be in [0, 1). Got: {}", r);
+                        std::process::exit(1);
+                    }
+                    pmmh_opts.rho = Some(r);
+                }
 
                 pmmh::run_stage(
                     &sweep_config,
@@ -949,8 +973,12 @@ pub fn cmd_fit_run_v2(a: &crate::args::FitRunArgs) {
                     stage_best_chain = Some(fs.best_chain);
                 }
             }
-            Stage::PFilter { particles, replicates, .. } => {
+            Stage::PFilter { particles, replicates, record_ancestry, record_prequential, .. } => {
                 let n_reps = replicates.unwrap_or(1);
+                // CLI flags are one-way overrides to true (default false
+                // in TOML); no flag means use TOML.
+                let record_ancestry = *record_ancestry || a.record_ancestry;
+                let want_prequential = *record_prequential || a.record_prequential;
                 let prior_state = effective_starts.as_ref().and_then(|dir| {
                     state::FitState::load(dir).ok()
                 });
@@ -988,9 +1016,15 @@ pub fn cmd_fit_run_v2(a: &crate::args::FitRunArgs) {
                     let pf_seed = seed ^ ((r as u64).wrapping_mul(0x7f4a7c15_u64));
                     let process = run_config.build_process();
                     let obs_model = run_config.build_obs_model();
-                    let record_preq = r == 0;
+                    // Prequential / ancestry recording: gated by the
+                    // user-facing flags from Stage::PFilter. Prequential
+                    // is per-stage scoring (point-estimate property),
+                    // so we only record it on the first replicate;
+                    // subsequent reps just build the loglik SD.
+                    let record_preq = want_prequential && r == 0;
                     let smc_config = sim::inference::traits::SMCConfig {
                         record_prequential: record_preq,
+                        record_ancestry,
                         ..run_config.smc_config()
                     };
                     let result = sim::inference::bootstrap_filter(

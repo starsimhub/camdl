@@ -17,24 +17,24 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-/// Per-stage knobs extracted from a `Stage::PMMH { ... }` variant by the
-/// `camdl fit run` dispatcher and passed verbatim into `run_stage`.
-///
-/// Defaults for fields not represented in v2 (`adapt`, `adapt_start`,
-/// `rho`, `proposal_from`) match the v1 defaults so behaviour is
-/// unchanged. v1 calls iterations `steps`; v2 calls them `iterations`.
+/// Per-stage knobs extracted from a `Stage::PMMH { ... }` variant by
+/// the `camdl fit run` dispatcher and passed verbatim into `run_stage`.
+/// Mirrors every PMMH field. v1 calls iterations `steps`; v2 calls
+/// them `iterations` (we keep the internal `n_steps` name to match
+/// `sim::PMMHConfig.n_steps`).
 pub struct PmmhStageOpts {
     pub n_chains: usize,
     pub n_particles: usize,
     pub n_steps: usize,
     pub burn_in: usize,
     pub thin: usize,
+    pub adapt: bool,
+    pub adapt_start: usize,
+    pub rho: Option<f64>,
 }
 
 const DEFAULT_BURN_IN: usize = 5000;
 const DEFAULT_THIN: usize = 10;
-const DEFAULT_ADAPT_START: usize = 500;
-const DEFAULT_ADAPT: bool = true;
 
 impl PmmhStageOpts {
     /// Build from a `Stage::PMMH { ... }` variant. Errors if `stage` is
@@ -42,14 +42,28 @@ impl PmmhStageOpts {
     pub fn from_stage(stage: &super::config_v2::Stage) -> Result<Self, String> {
         match stage {
             super::config_v2::Stage::PMMH {
-                chains, particles, iterations, burn_in, thin, ..
-            } => Ok(PmmhStageOpts {
-                n_chains: *chains,
-                n_particles: *particles,
-                n_steps: *iterations,
-                burn_in: burn_in.unwrap_or(DEFAULT_BURN_IN),
-                thin: thin.unwrap_or(DEFAULT_THIN),
-            }),
+                chains, particles, iterations, burn_in, thin,
+                adapt, adapt_start, rho,
+                ..
+            } => {
+                if let Some(r) = rho {
+                    if !(0.0..1.0).contains(r) {
+                        return Err(format!(
+                            "stage rho must be in [0, 1) for correlated \
+                             pseudo-marginal MCMC. Got: {}", r));
+                    }
+                }
+                Ok(PmmhStageOpts {
+                    n_chains: *chains,
+                    n_particles: *particles,
+                    n_steps: *iterations,
+                    burn_in: burn_in.unwrap_or(DEFAULT_BURN_IN),
+                    thin: thin.unwrap_or(DEFAULT_THIN),
+                    adapt: *adapt,
+                    adapt_start: *adapt_start,
+                    rho: *rho,
+                })
+            }
             other => Err(format!(
                 "PmmhStageOpts::from_stage: expected Stage::PMMH, got {}",
                 other.method_name())),
@@ -85,11 +99,9 @@ pub fn run_stage(
     let n_particles = pmmh_opts.n_particles;
     let burn_in = pmmh_opts.burn_in;
     let thin = pmmh_opts.thin;
-    // v1 [pmmh] carried adapt / adapt_start / rho / proposal_from knobs;
-    // v2's Stage::PMMH doesn't surface these. v1 defaults preserved.
-    let adapt = DEFAULT_ADAPT;
-    let adapt_start = DEFAULT_ADAPT_START;
-    let rho: Option<f64> = None;
+    let adapt = pmmh_opts.adapt;
+    let adapt_start = pmmh_opts.adapt_start;
+    let rho: Option<f64> = pmmh_opts.rho;
 
     // Load prior state if --starts-from provided
     let prior_state = starts_from.map(FitState::load).transpose()?;
