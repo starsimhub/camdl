@@ -526,9 +526,11 @@ struct ProfileEntry {
 }
 
 /// Walk `<root>/profiles/` one level deep. Each immediate child is a
-/// profile directory (`<stem>-<hash[:8]>/`). Per-child `run.json`
-/// determines whether it's a single-seed Profile or a multi-seed
-/// ReplicateSet umbrella; both yield a uniform `ProfileEntry`.
+/// profile-umbrella directory (`<stem>-<hash[:8]>/`) with a `run.json`
+/// of kind `ReplicateSet { child_kind: "profile" }`. Single-seed
+/// profiles are the trivial N=1 case of the same shape — there is no
+/// longer a `RunKind::Profile`-at-top-level path. Display fields
+/// (model/focal/shape) are read from the first child's run.json.
 fn discover_profiles(root: &str) -> Result<Vec<ProfileEntry>, String> {
     let profiles_root = Path::new(root).join("profiles");
     if !profiles_root.exists() { return Ok(Vec::new()); }
@@ -540,44 +542,31 @@ fn discover_profiles(root: &str) -> Result<Vec<ProfileEntry>, String> {
         let dir = entry.path();
         if !dir.is_dir() { continue; }
         let Some((run, created, rel_path)) = load_run_common(&dir, &cwd) else { continue; };
-        let pe = match &run.kind {
-            RunKind::Profile(m) => ProfileEntry {
-                model:   m.model.clone(),
-                focal:   m.focal_params.join(","),
-                shape:   format_grid_shape(&m.grid, m.n_starts),
-                n_seeds: 1,
-                run, rel_path, created,
-            },
-            RunKind::ReplicateSet(m) if m.child_kind == "profile" => {
-                // For multi-seed profile umbrellas, peek at the first
-                // child's run.json to surface the model/focal/shape
-                // (those are shared across replicates by construction).
-                let child_dir = dir.join("replicates").join(m.keys.first().cloned().unwrap_or_default());
-                let (model, focal, shape) = std::fs::read_to_string(child_dir.join("run.json"))
-                    .ok()
-                    .and_then(|s| serde_json::from_str::<Run>(&s).ok())
-                    .and_then(|child| match child.kind {
-                        RunKind::Profile(cm) => Some((
-                            cm.model,
-                            cm.focal_params.join(","),
-                            format_grid_shape(&cm.grid, cm.n_starts),
-                        )),
-                        _ => None,
-                    })
-                    .unwrap_or_else(|| (
-                        "?".to_string(),
-                        "?".to_string(),
-                        "?".to_string(),
-                    ));
-                ProfileEntry {
-                    model, focal, shape,
-                    n_seeds: m.keys.len(),
-                    run, rel_path, created,
-                }
-            }
-            _ => continue,  // unrelated kind sitting under profiles/
-        };
-        out.push(pe);
+        let RunKind::ReplicateSet(m) = &run.kind else { continue };
+        if m.child_kind != "profile" { continue }
+        let child_dir = dir.join("replicates")
+            .join(m.keys.first().cloned().unwrap_or_default());
+        let (model, focal, shape) = std::fs::read_to_string(child_dir.join("run.json"))
+            .ok()
+            .and_then(|s| serde_json::from_str::<Run>(&s).ok())
+            .and_then(|child| match child.kind {
+                RunKind::Profile(cm) => Some((
+                    cm.model,
+                    cm.focal_params.join(","),
+                    format_grid_shape(&cm.grid, cm.n_starts),
+                )),
+                _ => None,
+            })
+            .unwrap_or_else(|| (
+                "?".to_string(),
+                "?".to_string(),
+                "?".to_string(),
+            ));
+        let n_seeds = m.keys.len();
+        out.push(ProfileEntry {
+            model, focal, shape, n_seeds,
+            run, rel_path, created,
+        });
     }
     Ok(out)
 }

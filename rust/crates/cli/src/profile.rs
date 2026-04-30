@@ -9,19 +9,25 @@
 //!
 //! ## CAS integration (2026-04-24 rewrite)
 //!
-//! Every (grid_point × start) combination is a cacheable mini-fit.
-//! State lives under:
+//! Every profile is laid out as a `ReplicateSet` umbrella over its
+//! seeds — N=1 is the trivial case, N>1 is the IF2-stochastic-
+//! sensitivity sweep. Every (grid_point × start) under each seed is
+//! a cacheable mini-fit:
 //!
 //! ```text
-//! <root>/profiles/<stem>-<profile_hash[:8]>/
-//!   run.json                                    # RunKind::Profile
-//!   profile.tsv                                 # derived rollup
-//!   points/
-//!     {point_idx:05d}/
-//!       focal.toml                              # pinned focal values
-//!       start_{start_idx}/
-//!         run.json                              # RunKind::FitStage
-//!         mle.toml                              # MLE at this start
+//! <root>/profiles/<stem>-<umbrella_hash[:8]>/
+//!   run.json                                    # RunKind::ReplicateSet { child_kind: "profile" }
+//!   summary.tsv                                 # cross-seed aggregate (1 row at N=1)
+//!   replicates/
+//!     seed_<n>/
+//!       run.json                                # RunKind::Profile (per-seed)
+//!       profile.tsv                             # per-seed rollup
+//!       points/
+//!         {point_idx:05d}/
+//!           focal.toml                          # pinned focal values
+//!           start_{start_idx}/
+//!             run.json                          # RunKind::FitStage
+//!             mle.toml                          # MLE at this start
 //! ```
 //!
 //! Each `start_{k}/run.json` is written atomically (tmp-then-rename);
@@ -386,20 +392,17 @@ pub fn cmd_profile(a: &crate::args::ProfileArgs) {
         seed: seeds[0],   // overwritten per-seed below
     };
 
-    // ── Layout: single seed flat, multi-seed under replicates/ ────────
-    let multi_seed = seeds.len() > 1;
-    let replicate_set: Option<ReplicateSet> = if multi_seed {
-        Some(ReplicateSet {
-            inner_hash: template_inputs.inner_hash(),
-            dim_name:   "seed".to_string(),
-            keys:       seeds.iter().map(|s| format!("seed_{}", s)).collect(),
-            child_kind: "profile".to_string(),
-        })
-    } else {
-        None
+    // ── Layout: every profile is a ReplicateSet umbrella (N=1 trivially).
+    // The single-seed case is just the degenerate replicate-set; the
+    // disk layout, run.json schema, and resolution path are uniform.
+    let replicate_set = ReplicateSet {
+        inner_hash: template_inputs.inner_hash(),
+        dim_name:   "seed".to_string(),
+        keys:       seeds.iter().map(|s| format!("seed_{}", s)).collect(),
+        child_kind: "profile".to_string(),
     };
-    let umbrella_dir: Option<PathBuf> = if let Some(rset) = &replicate_set {
-        let parent_hash = rset.parent_hash();
+    let umbrella_dir: PathBuf = {
+        let parent_hash = replicate_set.parent_hash();
         let dirname = match &stem {
             Some(s) if !s.is_empty() => format!("{}-{}", s, parent_hash.short()),
             _ => parent_hash.short().to_string(),
@@ -416,15 +419,16 @@ pub fn cmd_profile(a: &crate::args::ProfileArgs) {
             argv:              argv.clone(),
             wall_time_seconds: 0.0,
             label:             label_arg.clone(),
-            kind:              rset.run_kind(),
+            kind:              replicate_set.run_kind(),
         };
         if let Err(e) = umbrella_run.write(&dir) {
             eprintln!("warning: could not write umbrella run.json: {}", e);
         }
-        eprintln!("profile (multi-seed, {} replicates): {}", seeds.len(), dir.display());
-        Some(dir)
-    } else {
-        None
+        eprintln!("profile ({} replicate{}): {}",
+            seeds.len(),
+            if seeds.len() == 1 { "" } else { "s" },
+            dir.display());
+        dir
     };
 
     // Per-seed directories + content hashes (the latter populates
@@ -433,16 +437,10 @@ pub fn cmd_profile(a: &crate::args::ProfileArgs) {
     let mut per_seed_hashes: Vec<String> = Vec::with_capacity(seeds.len());
     for &seed in &seeds {
         let inputs_seed = ProfileInputs { seed, ..template_inputs.clone() };
-        let dir = match (&replicate_set, &umbrella_dir) {
-            (Some(rset), Some(parent)) => rset.child_dir(parent, &format!("seed_{}", seed)),
-            _ => inputs_seed.cas_path(&root),
-        };
+        let dir = replicate_set.child_dir(&umbrella_dir, &format!("seed_{}", seed));
         if let Err(e) = std::fs::create_dir_all(&dir) {
             eprintln!("error: cannot create {}: {}", dir.display(), e);
             std::process::exit(1);
-        }
-        if !multi_seed {
-            eprintln!("profile tree: {}", dir.display());
         }
         let profile_run = Run {
             hash:              inputs_seed.content_hash().full().to_string(),
@@ -450,7 +448,7 @@ pub fn cmd_profile(a: &crate::args::ProfileArgs) {
             created_at:        crate::cas::iso8601_utc(std::time::SystemTime::now()),
             argv:              argv.clone(),
             wall_time_seconds: 0.0,
-            label:             if multi_seed { None } else { label_arg.clone() },
+            label:             None,
             kind:              inputs_seed.run_kind(),
         };
         if let Err(e) = profile_run.write(&dir) {
@@ -659,24 +657,23 @@ pub fn cmd_profile(a: &crate::args::ProfileArgs) {
             }
         }
 
-        // Cross-seed summary (throttled, multi-seed only).
-        if multi_seed {
-            let should_summary = {
-                let mut last = summary_throttle.lock().unwrap();
-                let now = std::time::Instant::now();
-                if now.duration_since(*last) >= std::time::Duration::from_secs(2) {
-                    *last = now;
-                    true
-                } else { false }
-            };
-            if should_summary {
-                if let Some(parent) = &umbrella_dir {
-                    if let Err(e) = write_cross_seed_summary(
-                        parent, &seed_dirs, &focal_names_ordered, &if2_params)
-                    {
-                        eprintln!("warning: summary rewrite failed: {}", e);
-                    }
-                }
+        // Cross-seed summary (throttled). For N=1 the aggregate is
+        // the trivial copy of the single seed's profile.tsv with
+        // zero-width spread columns — still written so the umbrella's
+        // summary.tsv is the universal user-facing artifact.
+        let should_summary = {
+            let mut last = summary_throttle.lock().unwrap();
+            let now = std::time::Instant::now();
+            if now.duration_since(*last) >= std::time::Duration::from_secs(2) {
+                *last = now;
+                true
+            } else { false }
+        };
+        if should_summary {
+            if let Err(e) = write_cross_seed_summary(
+                &umbrella_dir, &seed_dirs, &focal_names_ordered, &if2_params)
+            {
+                eprintln!("warning: summary rewrite failed: {}", e);
             }
         }
     });
@@ -691,14 +688,10 @@ pub fn cmd_profile(a: &crate::args::ProfileArgs) {
             eprintln!("warning: final rollup rewrite failed: {}", e);
         }
     }
-    if multi_seed {
-        if let Some(parent) = &umbrella_dir {
-            if let Err(e) = write_cross_seed_summary(
-                parent, &seed_dirs, &focal_names_ordered, &if2_params)
-            {
-                eprintln!("warning: final summary rewrite failed: {}", e);
-            }
-        }
+    if let Err(e) = write_cross_seed_summary(
+        &umbrella_dir, &seed_dirs, &focal_names_ordered, &if2_params)
+    {
+        eprintln!("warning: final summary rewrite failed: {}", e);
     }
 
     // Patch each per-seed (and umbrella) run.json with total wall time.
@@ -709,33 +702,25 @@ pub fn cmd_profile(a: &crate::args::ProfileArgs) {
             let _ = pr.write(seed_dir);
         }
     }
-    if let Some(parent) = &umbrella_dir {
-        if let Ok(mut pr) = Run::read(parent) {
-            pr.wall_time_seconds = total_wall;
-            let _ = pr.write(parent);
-        }
+    if let Ok(mut pr) = Run::read(&umbrella_dir) {
+        pr.wall_time_seconds = total_wall;
+        let _ = pr.write(&umbrella_dir);
     }
 
-    // Mirror the user-facing TSV. Multi-seed → cross-seed summary
-    // (the artifact you asked for when you ran with --seeds);
-    // single-seed → per-seed profile.tsv (legacy behavior).
-    let mirror_src: Option<PathBuf> = if multi_seed {
-        umbrella_dir.as_ref().map(|d| d.join("summary.tsv"))
-    } else {
-        Some(seed_dirs[0].join("profile.tsv"))
-    };
+    // Mirror the user-facing TSV: the umbrella's summary.tsv is the
+    // universal artifact — for N=1 it's a one-row aggregate of the
+    // single seed; for N>1 it's the cross-seed sensitivity summary.
+    let mirror_src = umbrella_dir.join("summary.tsv");
     if let Some(ref path) = output_tsv_path {
-        if let Some(src) = mirror_src.as_ref() {
-            if src.exists() {
-                match std::fs::copy(src, path) {
-                    Ok(_) => eprintln!("written to {}", path),
-                    Err(e) => eprintln!("warning: could not copy {} to {}: {}",
-                        src.display(), path, e),
-                }
+        if mirror_src.exists() {
+            match std::fs::copy(&mirror_src, path) {
+                Ok(_) => eprintln!("written to {}", path),
+                Err(e) => eprintln!("warning: could not copy {} to {}: {}",
+                    mirror_src.display(), path, e),
             }
         }
-    } else if let Some(src) = mirror_src.as_ref() {
-        eprintln!("output: {}", src.display());
+    } else {
+        eprintln!("output: {}", mirror_src.display());
     }
 }
 
