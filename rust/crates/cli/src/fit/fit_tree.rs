@@ -271,7 +271,7 @@ fn parse_ds_idx(s: &str) -> Option<usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::run_meta::{FitMeta, FitStageMeta, RunKind, SimulateMeta};
+    use crate::run_meta::{FitMeta, FitStageMeta, RunKind, RunStatus, SimulateMeta};
     use std::collections::HashMap;
 
     /// Allocate a unique tempdir for one test. Cleaned up by `Drop`.
@@ -307,7 +307,7 @@ mod tests {
             version: "0.1.0+test".into(),
             created_at: "2026-04-27T00:00:00Z".into(),
             argv: vec!["camdl".into(), "fit".into(), "run".into()],
-            wall_time_seconds: 1.0,
+            status: RunStatus::Completed { wall_time_seconds: 1.0 },
             label: None,
             kind: RunKind::Fit(FitMeta {
                 model: "sir.camdl".into(),
@@ -333,7 +333,7 @@ mod tests {
             version: "0.1.0+test".into(),
             created_at: "2026-04-27T00:00:00Z".into(),
             argv: vec!["camdl".into(), "fit".into(), "run".into()],
-            wall_time_seconds: 1.0,
+            status: RunStatus::Completed { wall_time_seconds: 1.0 },
             label: None,
             kind: RunKind::FitStage(FitStageMeta {
                 fit_hash: parent_hash.into(),
@@ -552,7 +552,7 @@ mod tests {
             version: "0.1.0+test".into(),
             created_at: "t".into(),
             argv: vec![],
-            wall_time_seconds: 0.0,
+            status: RunStatus::Running,
             label: None,
             kind: RunKind::Simulate(SimulateMeta {
                 model: "x".into(),

@@ -614,7 +614,9 @@ pub fn cmd_batch_run(a: &crate::args::BatchArgs) {
                         version:           version::VERSION_SHORT.to_string(),
                         created_at:        cas::iso8601_utc(std::time::SystemTime::now()),
                         argv:              std::env::args().collect(),
-                        wall_time_seconds: run_t0.elapsed().as_secs_f64(),
+                        status:            crate::run_meta::RunStatus::Completed {
+                            wall_time_seconds: run_t0.elapsed().as_secs_f64(),
+                        },
                         label:             None,
                         kind:              inputs.run_kind(),
                     };

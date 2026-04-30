@@ -277,7 +277,10 @@ fn list_profile_children(
         let ll = m.best_loglik
             .map(|x| format!("{:.2}", x))
             .unwrap_or_else(|| "—".into());
-        let wall = format!("{:.1}", run.wall_time_seconds);
+        let wall = match run.status.wall_time_seconds() {
+            Some(t) => format!("{:.1}", t),
+            None    => "running".to_string(),
+        };
         let rel = dir.strip_prefix(root_path)
             .unwrap_or(dir)
             .display()
@@ -330,7 +333,10 @@ fn show_footer(r: &ResolvedRun) {
         fmt_relative_time(r.created, SystemTime::now()));
     println!("{}", "version".bright_black()); println!("  {}", r.run.version);
     println!("{}", "wall time".bright_black());
-    println!("  {:.1}s", r.run.wall_time_seconds);
+    match r.run.status.wall_time_seconds() {
+        Some(t) => println!("  {:.1}s", t),
+        None    => println!("  (running)"),
+    }
     println!("{}", "argv".bright_black());
     println!("  {}", r.run.argv.join(" "));
 }
@@ -1184,6 +1190,7 @@ fn pathdiff_str(path: &Path, base: &Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::run_meta::RunStatus;
     use std::collections::HashMap;
 
     #[test]
@@ -1302,7 +1309,7 @@ mod tests {
             version: "0.1.0".into(),
             created_at: "2026-04-16T00:00:00Z".into(),
             argv: vec!["camdl".into(), "simulate".into(), "--cas".into()],
-            wall_time_seconds: 0.0,
+            status: RunStatus::Running,
             label: None,
             kind: RunKind::Simulate(SimulateMeta {
                 model: "sir.camdl".into(),

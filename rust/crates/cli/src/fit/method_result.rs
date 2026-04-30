@@ -635,7 +635,7 @@ fn posterior_summaries(
 mod tests {
     use super::*;
     use crate::fit::config_v2::{LoglikEvalConfig, GateConfig};
-    use crate::run_meta::{FitStageMeta, RunKind};
+    use crate::run_meta::{FitStageMeta, RunKind, RunStatus};
     use std::collections::HashMap;
 
     struct TempDir(PathBuf);
@@ -670,7 +670,7 @@ mod tests {
             version: "0.1.0+test".into(),
             created_at: "2026-04-27T00:00:00Z".into(),
             argv: vec!["camdl".into()],
-            wall_time_seconds: 1.0,
+            status: RunStatus::Completed { wall_time_seconds: 1.0 },
             label: None,
             kind: RunKind::FitStage(FitStageMeta {
                 fit_hash: "f00d".repeat(16),

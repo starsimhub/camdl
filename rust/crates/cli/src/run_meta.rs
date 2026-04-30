@@ -36,9 +36,13 @@ pub struct Run {
     /// Original argv that produced this run — `camdl show <hash>`
     /// prints it back for reproducibility.
     pub argv: Vec<String>,
-    /// Total wall time for the run (seconds). Always set; cache hits
-    /// record time-to-cache-hit-detection (typically < 0.1s).
-    pub wall_time_seconds: f64,
+    /// Run lifecycle state. `Running` is set at the first write
+    /// (run.json appears as soon as we know the directory layout, so
+    /// cancellations / crashes leave a discoverable trace);
+    /// `Completed { wall_time_seconds }` replaces it at end-of-run.
+    /// Replaces the prior sentinel `wall_time_seconds == 0.0`-means-
+    /// running pattern.
+    pub status: RunStatus,
     /// User-supplied display label. Optional — validated against
     /// `^[a-zA-Z0-9 ,._-]{1,64}$` after trim. Set at run-time via
     /// `--label` or post-hoc via `camdl label <hash> "<text>"`.
@@ -51,6 +55,44 @@ pub struct Run {
     pub label: Option<String>,
     /// Kind-specific payload.
     pub kind: RunKind,
+}
+
+/// Run lifecycle state. Two states:
+///
+/// - `Running` — the run.json was written but the run is still
+///   executing (or crashed before patching). Wall time isn't known.
+/// - `Completed { wall_time_seconds }` — the runner finished and
+///   patched run.json with the elapsed time.
+///
+/// Replaces a prior sentinel pattern (`wall_time_seconds == 0.0` ⇒
+/// running). Wire format is the snake-case enum:
+///
+///     "status": "running"
+///     "status": { "completed": { "wall_time_seconds": 42.5 } }
+///
+/// Test fixtures and renderers should not assume `Completed` —
+/// `cmd_label`, `camdl show`, etc. handle both states.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RunStatus {
+    Running,
+    Completed { wall_time_seconds: f64 },
+}
+
+impl RunStatus {
+    /// `true` iff the run is still executing (or crashed before
+    /// finalizing).
+    pub fn is_running(&self) -> bool {
+        matches!(self, RunStatus::Running)
+    }
+
+    /// Wall time in seconds when complete; `None` while running.
+    pub fn wall_time_seconds(&self) -> Option<f64> {
+        match self {
+            RunStatus::Completed { wall_time_seconds } => Some(*wall_time_seconds),
+            RunStatus::Running => None,
+        }
+    }
 }
 
 /// Tagged union over the three result shapes. `serde(tag = "kind")`
@@ -379,7 +421,7 @@ mod tests {
             version: "0.1.0+test".into(),
             created_at: "2026-04-19T12:00:00Z".into(),
             argv: vec!["camdl".into(), "simulate".into(), "sir.camdl".into()],
-            wall_time_seconds: 1.23,
+            status: RunStatus::Completed { wall_time_seconds: 1.23 },
             label: None,
             kind: RunKind::Simulate(SimulateMeta {
                 model: "sir.camdl".into(),
@@ -402,7 +444,7 @@ mod tests {
             version: "0.1.0+test".into(),
             created_at: "2026-04-19T12:00:00Z".into(),
             argv: vec!["camdl".into(), "fit".into(), "run".into(), "fit.toml".into()],
-            wall_time_seconds: 42.0,
+            status: RunStatus::Completed { wall_time_seconds: 42.0 },
             label: None,
             kind: RunKind::Fit(FitMeta {
                 model: "sir.camdl".into(),
@@ -433,7 +475,7 @@ mod tests {
             created_at: "2026-04-19T12:00:00Z".into(),
             argv: vec!["camdl".into(), "fit".into(), "run".into(),
                        "fit.toml".into(), "--stage".into(), "refine".into()],
-            wall_time_seconds: 10.0,
+            status: RunStatus::Completed { wall_time_seconds: 10.0 },
             label: None,
             kind: RunKind::FitStage(FitStageMeta {
                 fit_hash: "deadbeef".repeat(8),
@@ -563,7 +605,7 @@ mod tests {
             version: "v".into(),
             created_at: "t".into(),
             argv: vec![],
-            wall_time_seconds: 1.0,
+            status: RunStatus::Completed { wall_time_seconds: 1.0 },
             label: None,
             kind: RunKind::FitStage(FitStageMeta {
                 fit_hash: parent_hash.clone(),
@@ -640,7 +682,7 @@ mod tests {
         // writes.
         let json = r#"{
             "hash": "xxx", "version": "v", "created_at": "t",
-            "argv": [], "wall_time_seconds": 0.0,
+            "argv": [], "status": "running",
             "kind": {"kind": "fit-stage", "fit_hash": "fff", "stage": "refine",
                      "method": "if2", "seed": 1, "n_chains": 4,
                      "starts_from": {"stage": "scout", "stage_hash": ""}}
@@ -665,7 +707,7 @@ mod tests {
         // writes.
         let r = Run {
             hash: "x".repeat(64), version: "v".into(), created_at: "t".into(),
-            argv: vec![], wall_time_seconds: 0.0, label: None,
+            argv: vec![], status: RunStatus::Running, label: None,
             kind: RunKind::FitStage(FitStageMeta {
                 fit_hash: "f".repeat(64),
                 stage: "refine".into(), method: MethodKind::If2,
@@ -696,7 +738,7 @@ mod tests {
         // field shouldn't bloat the JSON.
         let r = Run {
             hash: "x".repeat(64), version: "v".into(),
-            created_at: "t".into(), argv: vec![], wall_time_seconds: 0.0,
+            created_at: "t".into(), argv: vec![], status: RunStatus::Running,
             label: None,
             kind: RunKind::FitStage(FitStageMeta {
                 fit_hash: "f".repeat(64),
@@ -724,7 +766,7 @@ mod tests {
             version: "v".into(),
             created_at: "2026-04-24T00:00:00Z".into(),
             argv: vec!["camdl".into(), "profile".into()],
-            wall_time_seconds: 3600.0,
+            status: RunStatus::Completed { wall_time_seconds: 3600.0 },
             label: None,
             kind: RunKind::Profile(ProfileMeta {
                 model: "he2010_london.camdl".into(),
@@ -766,7 +808,7 @@ mod tests {
             version: "v".into(),
             created_at: "2026-04-24T00:00:00Z".into(),
             argv: vec!["camdl".into(), "profile".into()],
-            wall_time_seconds: 120.0,
+            status: RunStatus::Completed { wall_time_seconds: 120.0 },
             label: None,
             kind: RunKind::FitStage(FitStageMeta {
                 fit_hash: "".into(),    // no parent Fit; parent is a Profile
@@ -797,5 +839,37 @@ mod tests {
             }
             _ => panic!("expected FitStage"),
         }
+    }
+
+    #[test]
+    fn run_status_running_serializes_as_lowercase_string() {
+        let s = RunStatus::Running;
+        let json = serde_json::to_string(&s).unwrap();
+        assert_eq!(json, r#""running""#);
+        let parsed: RunStatus = serde_json::from_str(&json).unwrap();
+        assert!(parsed.is_running());
+        assert_eq!(parsed.wall_time_seconds(), None);
+    }
+
+    #[test]
+    fn run_status_completed_carries_wall_time() {
+        let s = RunStatus::Completed { wall_time_seconds: 42.5 };
+        let json = serde_json::to_string(&s).unwrap();
+        assert_eq!(json, r#"{"completed":{"wall_time_seconds":42.5}}"#);
+        let parsed: RunStatus = serde_json::from_str(&json).unwrap();
+        assert!(!parsed.is_running());
+        assert_eq!(parsed.wall_time_seconds(), Some(42.5));
+    }
+
+    #[test]
+    fn run_status_round_trips_inside_run() {
+        // The status field round-trips inside a full Run wrapper, so
+        // run.json writes can read back into the typed RunStatus.
+        let r = sample_simulate_run();
+        let json = serde_json::to_string(&r).unwrap();
+        let parsed: Run = serde_json::from_str(&json).unwrap();
+        assert!(matches!(parsed.status,
+            RunStatus::Completed { wall_time_seconds }
+            if (wall_time_seconds - 1.23).abs() < 1e-9));
     }
 }

@@ -451,7 +451,7 @@ fn format_age(seconds: i64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::run_meta::{FitStageMeta, Run, RunKind};
+    use crate::run_meta::{FitStageMeta, Run, RunKind, RunStatus};
     use std::path::{Path, PathBuf};
 
     /// One-off tempdir helper that cleans up on Drop.
@@ -509,7 +509,7 @@ mod tests {
             version: "0.1.0+test".into(),
             created_at: "2026-04-27T00:00:00Z".into(),
             argv: vec!["camdl".into()],
-            wall_time_seconds: 1.0,
+            status: RunStatus::Completed { wall_time_seconds: 1.0 },
             label: None,
             kind: RunKind::Fit(FitMeta {
                 model: "sir.camdl".into(),
@@ -532,7 +532,7 @@ mod tests {
             version: "0.1.0+test".into(),
             created_at: "2026-04-27T00:00:00Z".into(),
             argv: vec![],
-            wall_time_seconds: 1.0,
+            status: RunStatus::Completed { wall_time_seconds: 1.0 },
             label: None,
             kind: RunKind::FitStage(FitStageMeta {
                 fit_hash: parent_hash.into(),

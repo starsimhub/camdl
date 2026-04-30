@@ -136,8 +136,11 @@ fn print_stage_status(name: &str, stage_dir: &str) {
             if let RunKind::FitStage(m) = &run.kind {
                 let ll    = m.best_loglik.map(|l| format!("{:.1}", l)).unwrap_or_else(|| "—".into());
                 let chain = m.best_chain.map(|c| format!(" (chain {})", c + 1)).unwrap_or_default();
-                println!("    {:12} \x1b[32m✓\x1b[0m {} — loglik={}{}, {:.0}s",
-                    name, m.method, ll, chain, run.wall_time_seconds);
+                let wall = run.status.wall_time_seconds()
+                    .map(|t| format!("{:.0}s", t))
+                    .unwrap_or_else(|| "running".to_string());
+                println!("    {:12} \x1b[32m✓\x1b[0m {} — loglik={}{}, {}",
+                    name, m.method, ll, chain, wall);
             }
         }
         Err(_) => {
@@ -1155,11 +1158,13 @@ pub fn cmd_fit_run_v2(a: &crate::args::FitRunArgs) {
             },
         };
         use crate::cas::typed::CasInputs;
-        let stage_run = stage_inputs.to_run(
+        let mut stage_run = stage_inputs.to_run(
             crate::version::VERSION_SHORT.to_string(),
             std::env::args().collect(),
-            stage_elapsed.as_secs_f64(),
         );
+        stage_run.status = crate::run_meta::RunStatus::Completed {
+            wall_time_seconds: stage_elapsed.as_secs_f64(),
+        };
         if let Err(e) = stage_run.write(&stage_dir) {
             eprintln!("warning: could not write {}/run.json: {}", stage_dir.display(), e);
         }
@@ -1259,7 +1264,9 @@ pub fn cmd_fit_run_v2(a: &crate::args::FitRunArgs) {
     // has completed (or aggregate post-processing has finished), patch
     // the wall-clock so `camdl list` / `camdl show` report honest
     // totals.
-    run_fit.wall_time_seconds = fit_start.elapsed().as_secs_f64();
+    run_fit.status = crate::run_meta::RunStatus::Completed {
+        wall_time_seconds: fit_start.elapsed().as_secs_f64(),
+    };
     if let Err(e) = run_fit.write(&fit_dir) {
         eprintln!("warning: cannot rewrite {}/run.json: {}", fit_dir.display(), e);
     }
@@ -1374,7 +1381,6 @@ fn build_fit_run(
     let mut run = inputs.to_run(
         crate::version::VERSION_SHORT.to_string(),
         std::env::args().collect(),
-        0.0,
     );
     run.label = label;
     run
@@ -1654,7 +1660,7 @@ pub fn validate_label(raw: &str) -> Result<String, String> {
 /// for `run.json` files whose `Run.hash` starts with the prefix. The
 /// label is validated, written to `Run.label`, and the run.json is
 /// rewritten atomically. Refuses to relabel a still-running fit
-/// (wall_time_seconds == 0.0).
+/// (`status == Running`).
 ///
 /// Concurrent invocations are last-write-wins; we don't lock the
 /// file. For single-user workflows this is fine; if cross-process
@@ -1713,18 +1719,14 @@ pub fn cmd_label(args: &crate::args::LabelArgs) {
 
     // Atomicity: refuse to relabel a still-running fit. The runner
     // sets wall_time_seconds at end-of-fit; mid-run it stays at the
-    // initial 0.0 sentinel. A running fit will overwrite our label
+    // RunStatus::Running. A running fit will overwrite our label
     // change when it finishes. Sim/profile/replicate-set writes set
-    // wall_time at write time, so the gate only fires for fits.
-    let is_fit_kind = matches!(
-        &run.kind,
-        crate::run_meta::RunKind::Fit(_) | crate::run_meta::RunKind::FitStage(_)
-    );
-    if is_fit_kind && run.wall_time_seconds == 0.0 {
+    // status to Completed at write time, so the gate only fires for
+    // mid-run fits.
+    if run.status.is_running() {
         eprintln!(
-            "error: run at {} is still in progress (wall_time_seconds is \
-             the pre-completion sentinel value 0.0). Wait for it to \
-             finish, or pass --label at run time.",
+            "error: run at {} is still in progress (status = running). \
+             Wait for it to finish, or pass --label at run time.",
             run_dir.display());
         std::process::exit(1);
     }

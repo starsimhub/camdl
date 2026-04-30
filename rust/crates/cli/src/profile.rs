@@ -58,7 +58,7 @@ use std::sync::{Arc, Mutex};
 use crate::cas::typed::{
     self, CasInputs, ContentHash, ReplicateSet, hash_canonical,
 };
-use crate::run_meta::{FitStageMeta, GridAxis, ProfileMeta, Run, RunKind};
+use crate::run_meta::{FitStageMeta, GridAxis, ProfileMeta, Run, RunKind, RunStatus};
 use crate::run_paths::{
     output_root, profile_point_dir, profile_point_start_dir,
 };
@@ -417,7 +417,7 @@ pub fn cmd_profile(a: &crate::args::ProfileArgs) {
             version:           crate::version::VERSION_SHORT.to_string(),
             created_at:        crate::cas::iso8601_utc(std::time::SystemTime::now()),
             argv:              argv.clone(),
-            wall_time_seconds: 0.0,
+            status: RunStatus::Running,
             label:             label_arg.clone(),
             kind:              replicate_set.run_kind(),
         };
@@ -447,7 +447,7 @@ pub fn cmd_profile(a: &crate::args::ProfileArgs) {
             version:           crate::version::VERSION_SHORT.to_string(),
             created_at:        crate::cas::iso8601_utc(std::time::SystemTime::now()),
             argv:              argv.clone(),
-            wall_time_seconds: 0.0,
+            status: RunStatus::Running,
             label:             None,
             kind:              inputs_seed.run_kind(),
         };
@@ -602,7 +602,7 @@ pub fn cmd_profile(a: &crate::args::ProfileArgs) {
             version: crate::version::VERSION_SHORT.to_string(),
             created_at: crate::cas::iso8601_utc(std::time::SystemTime::now()),
             argv: argv.clone(),
-            wall_time_seconds: elapsed,
+            status: RunStatus::Completed { wall_time_seconds: elapsed },
             label: None,
             kind: RunKind::FitStage(FitStageMeta {
                 fit_hash: String::new(),
@@ -698,12 +698,12 @@ pub fn cmd_profile(a: &crate::args::ProfileArgs) {
     let total_wall = start_time.elapsed().as_secs_f64();
     for seed_dir in &seed_dirs {
         if let Ok(mut pr) = Run::read(seed_dir) {
-            pr.wall_time_seconds = total_wall;
+            pr.status = RunStatus::Completed { wall_time_seconds: total_wall };
             let _ = pr.write(seed_dir);
         }
     }
     if let Ok(mut pr) = Run::read(&umbrella_dir) {
-        pr.wall_time_seconds = total_wall;
+        pr.status = RunStatus::Completed { wall_time_seconds: total_wall };
         let _ = pr.write(&umbrella_dir);
     }
 
@@ -777,10 +777,12 @@ fn rewrite_rollup(
             let Ok(start_idx) = start_idx_str.parse::<usize>() else { continue; };
             let start_dir = entry.path();
 
-            // Use run.json's wall_time_seconds for summation. Skip
-            // starts with missing/broken run.json — they're incomplete.
+            // Use run.json's wall time for summation. Skip starts
+            // with missing/broken run.json or still-running starts —
+            // they're incomplete.
             let Ok(start_run) = Run::read(&start_dir) else { continue; };
-            wall_time_sum += start_run.wall_time_seconds;
+            let Some(t) = start_run.status.wall_time_seconds() else { continue; };
+            wall_time_sum += t;
 
             let mle_path = start_dir.join("mle.toml");
             let Ok(mle_text) = std::fs::read_to_string(&mle_path) else { continue; };

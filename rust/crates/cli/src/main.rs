@@ -834,7 +834,9 @@ fn run_simulate(a: &args::SimulateArgs) {
     // ── CAS write (single-run --cas on cache miss) ─────────────────────────
     if let (Some(ctx), Some(buf)) = (cas_ctx.as_mut(), cas_buffer.as_ref()) {
         let bytes = buf.bytes();
-        ctx.run.wall_time_seconds = cas_sim_t0.elapsed().as_secs_f64();
+        ctx.run.status = run_meta::RunStatus::Completed {
+            wall_time_seconds: cas_sim_t0.elapsed().as_secs_f64(),
+        };
         // Mirror to user's destination
         if !suppress_trajectory {
             match &output_path {
@@ -1028,7 +1030,7 @@ fn prepare_cas_ctx(
         version:           version::VERSION_SHORT.to_string(),
         created_at:        cas::iso8601_utc(std::time::SystemTime::now()),
         argv:              std::env::args().collect(),
-        wall_time_seconds: 0.0,
+        status: run_meta::RunStatus::Running,
         label,
         kind:              inputs.run_kind(),
     };

@@ -26,7 +26,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::run_meta::{Run, RunKind};
+use crate::run_meta::{Run, RunKind, RunStatus};
 
 // ─── ContentHash ─────────────────────────────────────────────────────────────
 
@@ -110,13 +110,18 @@ pub trait CasInputs {
     /// + run_kind plus execution metadata (version, argv, wall time).
     /// Default impl matches what every command's write site does by
     /// hand; commands call it instead of inlining Run construction.
-    fn to_run(&self, version: String, argv: Vec<String>, wall_time_seconds: f64) -> Run {
+    /// Default impl produces a `Running` run; the caller transitions
+    /// to `Completed` at end-of-run by assigning
+    /// `run.status = RunStatus::Completed { wall_time_seconds: t }`.
+    /// This matches the typical "write run.json early so a crashed
+    /// run is still discoverable, patch wall_time at the end" pattern.
+    fn to_run(&self, version: String, argv: Vec<String>) -> Run {
         Run {
             hash:              self.content_hash().full().to_string(),
             version,
             created_at:        super::iso8601_utc(std::time::SystemTime::now()),
             argv,
-            wall_time_seconds,
+            status:            RunStatus::Running,
             label:             None,
             kind:              self.run_kind(),
         }

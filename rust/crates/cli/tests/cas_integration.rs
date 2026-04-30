@@ -217,7 +217,7 @@ fn starts_from_resolves_short_hash() {
     let run_json = format!(r#"{{
         "hash": "{}",
         "version": "0.1.0+test","created_at": "2026-04-19T12:00:00Z",
-        "argv": [],"wall_time_seconds": 1.0,
+        "argv": [],"status": {{"completed": {{"wall_time_seconds": 1.0}}}},
         "kind": {{"kind":"fit-stage","fit_hash":"f","stage":"scout",
                  "method":"if2","seed":1,"n_chains":2}}
     }}"#, target_hash);
@@ -382,7 +382,7 @@ fn list_kind_filter_isolates_sections() {
     let run_json = r#"{
         "hash": "abc12345deadbeef0000000000000000000000000000000000000000abc12345",
         "version":"0.1.0+test","created_at":"2026-04-19T12:00:00Z",
-        "argv":["camdl","fit","run","demo.toml"],"wall_time_seconds":1.0,
+        "argv":["camdl","fit","run","demo.toml"],"status":{"completed":{"wall_time_seconds":1.0}},
         "kind": {"kind":"fit","model":"demo.camdl","model_hash":"m",
         "fit_toml_path":"demo.toml","fit_toml_hash":"h",
         "data_hashes":{},"estimated":["beta"],"fixed":{},"stages_declared":["mle"]}
@@ -423,7 +423,7 @@ fn list_shows_fit_entries() {
         "version": "0.1.0+test",
         "created_at": "2026-04-19T12:00:00Z",
         "argv": ["camdl","fit","run","demo.toml"],
-        "wall_time_seconds": 3.2,
+        "status": {"completed": {"wall_time_seconds": 3.2}},
         "kind": {
             "kind": "fit",
             "model": "demo.camdl",
@@ -502,7 +502,7 @@ fn show_resolves_fit_by_hash_prefix() {
     let run_json = r#"{
         "hash":"deadbeefc0ffee00000000000000000000000000000000000000000000000000",
         "version":"0.1.0+test","created_at":"2026-04-19T12:00:00Z",
-        "argv":["camdl","fit","run","demo.toml"],"wall_time_seconds":1.0,
+        "argv":["camdl","fit","run","demo.toml"],"status":{"completed":{"wall_time_seconds":1.0}},
         "kind":{"kind":"fit","model":"demo.camdl","model_hash":"m",
         "fit_toml_path":"demo.toml","fit_toml_hash":"h",
         "data_hashes":{},"estimated":["beta"],"fixed":{},"stages_declared":["mle"]}
@@ -531,7 +531,7 @@ fn show_renders_fit_metadata() {
         "version": "0.1.0+test",
         "created_at": "2026-04-19T12:00:00Z",
         "argv": ["camdl","fit","run","demo.toml"],
-        "wall_time_seconds": 3.2,
+        "status": {"completed": {"wall_time_seconds": 3.2}},
         "kind": {
             "kind": "fit",
             "model": "demo.camdl",

@@ -1739,13 +1739,13 @@ mod tests {
     }
 
     fn write_top_level_fit_run(dir: &std::path::Path, parent_hash: &str) {
-        use crate::run_meta::{FitMeta, Run, RunKind};
+        use crate::run_meta::{FitMeta, Run, RunKind, RunStatus};
         let r = Run {
             hash: parent_hash.into(),
             version: "0.1.0+test".into(),
             created_at: "2026-04-27T00:00:00Z".into(),
             argv: vec!["camdl".into(), "fit".into(), "run".into()],
-            wall_time_seconds: 1.0,
+            status: RunStatus::Completed { wall_time_seconds: 1.0 },
             label: None,
             kind: RunKind::Fit(FitMeta {
                 model: "sir.camdl".into(),
@@ -1763,7 +1763,7 @@ mod tests {
     }
 
     fn write_stage_run(stage_dir: &std::path::Path, parent_hash: &str, stage: &str, method: crate::run_meta::MethodKind) {
-        use crate::run_meta::{FitStageMeta, Run, RunKind};
+        use crate::run_meta::{FitStageMeta, Run, RunKind, RunStatus};
         let r = Run {
             hash: format!("{}-{}", parent_hash, stage)
                 .chars()
@@ -1773,7 +1773,7 @@ mod tests {
             version: "0.1.0+test".into(),
             created_at: "2026-04-27T00:00:00Z".into(),
             argv: vec!["camdl".into()],
-            wall_time_seconds: 1.0,
+            status: RunStatus::Completed { wall_time_seconds: 1.0 },
             label: None,
             kind: RunKind::FitStage(FitStageMeta {
                 fit_hash: parent_hash.into(),
