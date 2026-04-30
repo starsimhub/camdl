@@ -19,6 +19,7 @@ use std::path::{Path, PathBuf};
 /// Per-stage knobs extracted from a `Stage::PGAS { ... }` variant by
 /// the `camdl fit run` dispatcher and passed verbatim into `run_stage`.
 /// Mirrors every PGAS field in `Stage::PGAS` plus burn_in/thin defaults.
+#[derive(Debug)]
 pub struct PgasStageOpts {
     pub n_chains: usize,
     pub n_particles: usize,
@@ -53,6 +54,21 @@ impl PgasStageOpts {
                     return Err(format!(
                         "stage tempering ladder must start with β=1.0 \
                          (cold chain). Got: {:?}", tempering));
+                }
+                // Every entry must be in (0, 1]. β > 1 concentrates the
+                // likelihood (sharper than the posterior); β ≤ 0 inverts
+                // it (anti-annealing). Either way the chain converges
+                // to the wrong target with no runtime error. Convention
+                // is also a non-increasing ladder, but that's not
+                // required for correctness — only the (0, 1] range is.
+                // See docs/dev/reviews/2026-04-30-correctness.md H4.
+                for (i, &beta) in tempering.iter().enumerate() {
+                    if !(beta > 0.0 && beta <= 1.0) {
+                        return Err(format!(
+                            "tempering[{}] = {} is out of range (0, 1]; \
+                             every β must be positive and ≤ 1.0. \
+                             Got ladder: {:?}", i, beta, tempering));
+                    }
                 }
                 Ok(PgasStageOpts {
                     n_chains: *chains,
@@ -679,4 +695,77 @@ fn write_summary(
         .map_err(|e| format!("json error: {}", e))?;
     std::fs::write(&path, contents)
         .map_err(|e| format!("cannot write {}: {}", path.display(), e))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use super::super::config_v2::{Stage, StartsFrom};
+
+    fn pgas_stage_with_tempering(tempering: Vec<f64>) -> Stage {
+        Stage::PGAS {
+            chains: 1, particles: 10, sweeps: 10,
+            starts_from: StartsFrom::default(),
+            burn_in: Some(2), thin: Some(1),
+            tempering,
+            max_tree_depth: 10,
+            trajectory_warmup: 0,
+            csmc_sweeps_per_nuts: 1,
+            n_trajectories: 10,
+            dense_mass: true,
+            use_nuts: true,
+        }
+    }
+
+    #[test]
+    fn tempering_rejects_first_entry_not_one() {
+        // First entry MUST be 1.0 (cold chain).
+        let stage = pgas_stage_with_tempering(vec![0.7, 0.4]);
+        let err = PgasStageOpts::from_stage(&stage).unwrap_err();
+        assert!(err.contains("must start with β=1.0"), "got: {}", err);
+    }
+
+    #[test]
+    fn tempering_rejects_beta_above_one() {
+        // β > 1 concentrates likelihood — physically nonsensical.
+        let stage = pgas_stage_with_tempering(vec![1.0, 1.5, 0.4]);
+        let err = PgasStageOpts::from_stage(&stage).unwrap_err();
+        assert!(err.contains("out of range"), "got: {}", err);
+        assert!(err.contains("1.5"), "got: {}", err);
+    }
+
+    #[test]
+    fn tempering_rejects_negative_beta() {
+        // β < 0 inverts the likelihood (anti-annealing).
+        let stage = pgas_stage_with_tempering(vec![1.0, -0.2]);
+        let err = PgasStageOpts::from_stage(&stage).unwrap_err();
+        assert!(err.contains("out of range"), "got: {}", err);
+    }
+
+    #[test]
+    fn tempering_rejects_zero_beta() {
+        // β = 0 would scale all log-likelihoods to 0 (uniform), not
+        // a valid replica-exchange rung.
+        let stage = pgas_stage_with_tempering(vec![1.0, 0.5, 0.0]);
+        let err = PgasStageOpts::from_stage(&stage).unwrap_err();
+        assert!(err.contains("out of range"), "got: {}", err);
+    }
+
+    #[test]
+    fn tempering_accepts_well_formed_ladder() {
+        // [1.0, 0.7, 0.4, 0.15] — typical 4-rung exchange ladder.
+        let stage = pgas_stage_with_tempering(vec![1.0, 0.7, 0.4, 0.15]);
+        let opts = PgasStageOpts::from_stage(&stage)
+            .expect("well-formed ladder must validate");
+        assert_eq!(opts.tempering, vec![1.0, 0.7, 0.4, 0.15]);
+    }
+
+    #[test]
+    fn tempering_default_single_rung() {
+        // Default `[1.0]` (no tempering) must validate.
+        let stage = pgas_stage_with_tempering(vec![1.0]);
+        let opts = PgasStageOpts::from_stage(&stage)
+            .expect("single-rung [1.0] must validate");
+        assert_eq!(opts.tempering, vec![1.0]);
+    }
 }
