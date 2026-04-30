@@ -29,8 +29,6 @@ struct RunEntry {
     /// Destructured Simulate payload (duplicates `run.kind` — stored
     /// alongside for direct field access without repeated matches).
     meta: SimulateMeta,
-    /// Absolute path to the `seed_{n}/` directory.
-    abs_path: PathBuf,
     /// Path relative to the current working directory, copy-paste ready.
     rel_path: String,
     /// When the run was written (from run.json `created_at`, parsed back
@@ -65,7 +63,7 @@ fn load_sim_entry(dir: &Path, cwd: &Path) -> Option<RunEntry> {
     let traj_bytes = std::fs::metadata(dir.join("traj.tsv"))
         .map(|m| m.len()).unwrap_or(0);
     Some(RunEntry {
-        run, meta, abs_path: dir.to_path_buf(), rel_path, created, traj_bytes,
+        run, meta, rel_path, created, traj_bytes,
     })
 }
 
@@ -295,71 +293,179 @@ fn list_profile_children(
 
 pub fn cmd_show(a: &crate::args::ShowArgs) {
     let root = a.root.to_string_lossy();
-    let entry = match resolve_any(&root, &a.target) {
-        Ok(Resolved::Fit(f)) => { show_fit(&f); return; }
-        Ok(Resolved::ReplicateSet(r)) => { show_replicate_set(&r); return; }
-        Ok(Resolved::Sim(s)) => s,
-        Err(e) => { eprintln!("error: {}", e); std::process::exit(1); }
-    };
-
-    println!("{}", "path".bright_black()); println!("  {}", entry.rel_path.cyan());
-    println!("{}", "model".bright_black()); println!("  {}", entry.meta.model);
-    println!("{}", "scenario".bright_black()); println!("  {}", entry.meta.scenario);
-    println!("{}", "seed".bright_black()); println!("  {}", entry.meta.seed);
-    println!("{}", "backend".bright_black());
-    println!("  {} (dt = {})", entry.meta.backend, entry.meta.dt);
-    println!("{}", "hashes".bright_black());
-    println!("  sim  {}", entry.meta.sim_hash.dimmed());
-    println!("  scen {}", entry.meta.scen_hash.dimmed());
-    println!("  model {}", entry.meta.model_hash.dimmed());
-    println!("{}", "created".bright_black());
-    println!("  {}  ({})", entry.run.created_at, fmt_relative_time(entry.created, SystemTime::now()));
-    println!("{}", "version".bright_black()); println!("  {}", entry.run.version);
-    println!("{}", "argv".bright_black());
-    println!("  {}", entry.run.argv.join(" "));
-    println!("{}", "trajectory".bright_black());
-    println!("  {} bytes", entry.traj_bytes);
+    let resolved = resolve_any(&root, &a.target).unwrap_or_else(|e| {
+        eprintln!("error: {}", e);
+        std::process::exit(1);
+    });
+    show(&resolved);
 }
 
-fn show_fit(entry: &FitEntry) {
-    println!("{}", "path".bright_black()); println!("  {}", entry.rel_path.cyan());
-    println!("{}", "kind".bright_black()); println!("  fit");
-    println!("{}", "model".bright_black()); println!("  {}", entry.meta.model);
-    println!("{}", "fit.toml".bright_black()); println!("  {}", entry.meta.fit_toml_path);
-    println!("{}", "estimate".bright_black()); println!("  {}", entry.meta.estimated.join(", "));
-    if !entry.meta.fixed.is_empty() {
-        let mut fx: Vec<_> = entry.meta.fixed.iter().collect();
+/// Kind-agnostic show entry point. One match on `run.kind`; per-kind
+/// renderers below. Adding a new `RunKind` variant gets a compiler
+/// error here until a renderer is wired in.
+fn show(r: &ResolvedRun) {
+    match &r.run.kind {
+        RunKind::Simulate(_)     => show_simulate(r),
+        RunKind::Fit(_)          => show_fit(r),
+        RunKind::FitStage(_)     => show_fit_stage(r),
+        RunKind::Profile(_)      => show_profile_leaf(r),
+        RunKind::ReplicateSet(_) => show_replicate_set(r),
+    }
+}
+
+/// Header shared by every kind: path, kind label, optional label,
+/// timing/version/argv. Keeps the per-kind renderers focused on
+/// kind-specific fields.
+fn show_header(r: &ResolvedRun) {
+    println!("{}", "path".bright_black()); println!("  {}", r.rel_path.cyan());
+    println!("{}", "kind".bright_black()); println!("  {}", kind_label(&r.run.kind));
+    if let Some(ref l) = r.run.label {
+        println!("{}", "label".bright_black()); println!("  {}", l);
+    }
+}
+
+fn show_footer(r: &ResolvedRun) {
+    println!("{}", "created".bright_black());
+    println!("  {}  ({})", r.run.created_at,
+        fmt_relative_time(r.created, SystemTime::now()));
+    println!("{}", "version".bright_black()); println!("  {}", r.run.version);
+    println!("{}", "wall time".bright_black());
+    println!("  {:.1}s", r.run.wall_time_seconds);
+    println!("{}", "argv".bright_black());
+    println!("  {}", r.run.argv.join(" "));
+}
+
+fn show_simulate(r: &ResolvedRun) {
+    let RunKind::Simulate(m) = &r.run.kind else { unreachable!() };
+    show_header(r);
+    println!("{}", "model".bright_black()); println!("  {}", m.model);
+    println!("{}", "scenario".bright_black()); println!("  {}", m.scenario);
+    println!("{}", "seed".bright_black()); println!("  {}", m.seed);
+    println!("{}", "backend".bright_black());
+    println!("  {} (dt = {})", m.backend, m.dt);
+    println!("{}", "hashes".bright_black());
+    println!("  sim   {}", m.sim_hash.dimmed());
+    println!("  scen  {}", m.scen_hash.dimmed());
+    println!("  model {}", m.model_hash.dimmed());
+    if let Some(fh) = &m.from_fit_hash {
+        println!("  from-fit {}", fh.dimmed());
+    }
+    let traj_bytes = std::fs::metadata(r.abs_path.join("traj.tsv"))
+        .map(|m| m.len()).unwrap_or(0);
+    println!("{}", "trajectory".bright_black());
+    println!("  {} bytes", traj_bytes);
+    show_footer(r);
+}
+
+fn show_fit(r: &ResolvedRun) {
+    let RunKind::Fit(m) = &r.run.kind else { unreachable!() };
+    show_header(r);
+    println!("{}", "model".bright_black()); println!("  {}", m.model);
+    println!("{}", "fit.toml".bright_black()); println!("  {}", m.fit_toml_path);
+    println!("{}", "estimate".bright_black()); println!("  {}", m.estimated.join(", "));
+    if !m.fixed.is_empty() {
+        let mut fx: Vec<_> = m.fixed.iter().collect();
         fx.sort_by_key(|(k, _)| k.to_string());
         let items: Vec<String> = fx.iter().map(|(k, v)| format!("{}={}", k, v)).collect();
         println!("{}", "fixed".bright_black()); println!("  {}", items.join(", "));
     }
     println!("{}", "stages".bright_black());
-    println!("  {}", entry.meta.stages_declared.join(", "));
+    println!("  {}", m.stages_declared.join(", "));
     println!("{}", "hashes".bright_black());
-    println!("  fit   {}", entry.run.hash.dimmed());
-    println!("  model {}", entry.meta.model_hash.dimmed());
-    println!("  fit.toml {}", entry.meta.fit_toml_hash.dimmed());
-    println!("{}", "created".bright_black());
-    println!("  {}  ({})", entry.run.created_at, fmt_relative_time(entry.created, SystemTime::now()));
-    println!("{}", "version".bright_black()); println!("  {}", entry.run.version);
-    println!("{}", "wall time".bright_black());
-    println!("  {:.1}s", entry.run.wall_time_seconds);
-    println!("{}", "argv".bright_black());
-    println!("  {}", entry.run.argv.join(" "));
+    println!("  fit      {}", r.run.hash.dimmed());
+    println!("  model    {}", m.model_hash.dimmed());
+    println!("  fit.toml {}", m.fit_toml_hash.dimmed());
+    show_footer(r);
 }
 
-fn show_replicate_set(entry: &ReplicateSetEntry) {
-    println!("{}", "path".bright_black()); println!("  {}", entry.rel_path.cyan());
-    println!("{}", "kind".bright_black());
-    println!("  replicate-set ({} of {})",
-        entry.meta.child_kind, entry.meta.dim_name);
+fn show_fit_stage(r: &ResolvedRun) {
+    let RunKind::FitStage(m) = &r.run.kind else { unreachable!() };
+    show_header(r);
+    println!("{}", "stage".bright_black());
+    println!("  {} (method: {})", m.stage, m.method);
+    println!("{}", "seed".bright_black()); println!("  {}", m.seed);
+    println!("{}", "chains".bright_black()); println!("  {}", m.n_chains);
+    if let Some(ll) = m.best_loglik {
+        let chain = m.best_chain.map(|c| format!(" (chain {})", c + 1)).unwrap_or_default();
+        println!("{}", "best loglik".bright_black());
+        println!("  {:.2}{}", ll, chain);
+    }
+    if !m.algorithm.is_null() {
+        println!("{}", "algorithm".bright_black());
+        let pretty = serde_json::to_string_pretty(&m.algorithm).unwrap_or_default();
+        for line in pretty.lines() { println!("  {}", line.dimmed()); }
+    }
+    if let Some(sf) = &m.starts_from {
+        let h = sf.stage_hash.as_deref().unwrap_or("?");
+        let short = &h[..h.len().min(16)];
+        println!("{}", "starts from".bright_black());
+        println!("  {} ({})", sf.stage, short.dimmed());
+    }
+    if let Some(ref hash) = m.parent_profile_hash {
+        let short = &hash[..hash.len().min(16)];
+        println!("{}", "parent profile".bright_black());
+        println!("  {}", short.dimmed());
+        if let (Some(pi), Some(si)) = (m.profile_point_idx, m.profile_start_idx) {
+            println!("  point {} / start {}", pi, si);
+        }
+    }
+    if let Some(ref df) = m.derived_from {
+        println!("{}", "derived from".bright_black());
+        println!("  {}", df);
+    }
+    println!("{}", "hashes".bright_black());
+    println!("  stage {}", r.run.hash.dimmed());
+    println!("  fit   {}", m.fit_hash.dimmed());
+    show_footer(r);
+}
+
+fn show_profile_leaf(r: &ResolvedRun) {
+    let RunKind::Profile(m) = &r.run.kind else { unreachable!() };
+    show_header(r);
+    println!("{}", "model".bright_black()); println!("  {}", m.model);
+    println!("{}", "focal params".bright_black());
+    println!("  {}", m.focal_params.join(", "));
+    println!("{}", "grid".bright_black());
+    for axis in &m.grid {
+        let n = axis.values.len();
+        let preview = if n <= 6 {
+            axis.values.iter().map(|v| format!("{}", v)).collect::<Vec<_>>().join(", ")
+        } else {
+            let head: Vec<String> = axis.values.iter().take(3).map(|v| format!("{}", v)).collect();
+            let tail: Vec<String> = axis.values.iter().rev().take(2).rev().map(|v| format!("{}", v)).collect();
+            format!("{}, …, {}", head.join(", "), tail.join(", "))
+        };
+        println!("  {}: {} values [{}]", axis.param, n, preview);
+    }
+    println!("{}", "starts".bright_black()); println!("  {} per grid point", m.n_starts);
+    println!("{}", "total jobs".bright_black()); println!("  {}", m.total_jobs);
+    println!("{}", "seed".bright_black()); println!("  {}", m.seed_base);
+    let profile_tsv = r.abs_path.join("profile.tsv");
+    if profile_tsv.exists() {
+        let bytes = std::fs::metadata(&profile_tsv).map(|m| m.len()).unwrap_or(0);
+        println!("{}", "rollup".bright_black());
+        println!("  profile.tsv ({} bytes)", bytes);
+    }
+    println!("{}", "hashes".bright_black());
+    println!("  profile        {}", r.run.hash.dimmed());
+    println!("  model          {}", m.model_hash.dimmed());
+    println!("  if2 config     {}", m.if2_config_hash.dimmed());
+    println!("  base params    {}", m.base_params_hash.dimmed());
+    show_footer(r);
+}
+
+fn show_replicate_set(r: &ResolvedRun) {
+    let RunKind::ReplicateSet(m) = &r.run.kind else { unreachable!() };
+    show_header(r);
+    println!("{}", "umbrella".bright_black());
+    println!("  {} of {}", m.child_kind, m.dim_name);
     println!("{}", "children".bright_black());
-    for k in &entry.meta.keys {
-        let child_dir = entry.abs_path.join("replicates").join(k);
+    for k in &m.keys {
+        let child_dir = r.abs_path.join("replicates").join(k);
         let exists_marker = if child_dir.join("run.json").exists() { "✓" } else { "·" };
         println!("  {} {}", exists_marker, k);
     }
-    let summary = entry.abs_path.join("summary.tsv");
+    let summary = r.abs_path.join("summary.tsv");
     if summary.exists() {
         let bytes = std::fs::metadata(&summary).map(|m| m.len()).unwrap_or(0);
         println!("{}", "summary".bright_black());
@@ -369,83 +475,95 @@ fn show_replicate_set(entry: &ReplicateSetEntry) {
         println!("  {} (not yet written)", "summary.tsv".dimmed());
     }
     println!("{}", "hashes".bright_black());
-    println!("  parent {}", entry.run.hash.dimmed());
-    println!("  inner  {}", entry.meta.inner_content_hash.dimmed());
-    println!("{}", "created".bright_black());
-    println!("  {}  ({})", entry.run.created_at,
-        fmt_relative_time(entry.created, SystemTime::now()));
-    println!("{}", "version".bright_black()); println!("  {}", entry.run.version);
-    println!("{}", "wall time".bright_black());
-    println!("  {:.1}s", entry.run.wall_time_seconds);
-    println!("{}", "argv".bright_black());
-    println!("  {}", entry.run.argv.join(" "));
+    println!("  parent {}", r.run.hash.dimmed());
+    println!("  inner  {}", m.inner_content_hash.dimmed());
+    show_footer(r);
 }
 
 // ── cmd_cat ──────────────────────────────────────────────────────────────────
 
 pub fn cmd_cat(a: &crate::args::CatArgs) {
     let root = a.root.to_string_lossy();
-    match resolve_any(&root, &a.target) {
-        Ok(Resolved::Fit(f)) => {
-            eprintln!("error: 'camdl cat' on a fit has no single-file target.\n  \
-                       {} is a fit directory. For stage output, pass the stage\n  \
-                       path directly, e.g. `camdl cat {}/real/fit_<seed>/<stage>/mle_params.toml`.",
-                      f.rel_path, f.rel_path);
-            std::process::exit(1);
-        }
-        Ok(Resolved::ReplicateSet(r)) => {
-            let summary = r.abs_path.join("summary.tsv");
-            if summary.exists() {
-                let bytes = std::fs::read(&summary).unwrap_or_else(|e| {
-                    eprintln!("error reading {}: {}", summary.display(), e);
-                    std::process::exit(1);
-                });
-                use std::io::Write as _;
-                let _ = std::io::stdout().write_all(&bytes);
-                return;
-            }
-            eprintln!("error: 'camdl cat' on a replicate-set umbrella expects \
-                summary.tsv, which has not been written yet for {}.",
-                r.rel_path);
-            std::process::exit(1);
-        }
-        Ok(Resolved::Sim(_)) | Err(_) => {}
-    }
-    let entry = resolve_run(&root, &a.target).unwrap_or_else(|e| {
+    let resolved = resolve_any(&root, &a.target).unwrap_or_else(|e| {
         eprintln!("error: {}", e); std::process::exit(1);
     });
 
     use std::io::Write as _;
-    if let Some(ref stream) = a.stream {
-        // Look under obs/*/{stream}.tsv — takes the first match.
-        let obs_root = entry.abs_path.join("obs");
-        let mut found = None;
-        if obs_root.exists() {
-            if let Ok(entries) = std::fs::read_dir(&obs_root) {
-                for entry in entries.flatten() {
-                    let file = entry.path().join(format!("{}.tsv", stream));
-                    if file.exists() { found = Some(file); break; }
-                }
-            }
-        }
-        match found {
-            Some(path) => {
-                let bytes = std::fs::read(&path).unwrap_or_else(|e| {
-                    eprintln!("error reading {}: {}", path.display(), e); std::process::exit(1);
+    match &resolved.run.kind {
+        RunKind::Simulate(_) => {
+            let bytes = if let Some(ref stream) = a.stream {
+                let path = find_obs_stream(&resolved.abs_path, stream).unwrap_or_else(|| {
+                    eprintln!("error: no observation stream '{}' in {}", stream, resolved.rel_path);
+                    std::process::exit(1);
                 });
-                std::io::stdout().write_all(&bytes).unwrap();
-            }
-            None => {
-                eprintln!("error: no observation stream '{}' in {}", stream, entry.rel_path);
+                std::fs::read(&path).unwrap_or_else(|e| {
+                    eprintln!("error reading {}: {}", path.display(), e); std::process::exit(1);
+                })
+            } else {
+                std::fs::read(resolved.abs_path.join("traj.tsv")).unwrap_or_else(|e| {
+                    eprintln!("error reading traj.tsv: {}", e); std::process::exit(1);
+                })
+            };
+            let _ = std::io::stdout().write_all(&bytes);
+        }
+        RunKind::ReplicateSet(_) => {
+            let summary = resolved.abs_path.join("summary.tsv");
+            if !summary.exists() {
+                eprintln!("error: 'camdl cat' on a replicate-set umbrella expects \
+                    summary.tsv, which has not been written yet for {}.",
+                    resolved.rel_path);
                 std::process::exit(1);
             }
+            let bytes = std::fs::read(&summary).unwrap_or_else(|e| {
+                eprintln!("error reading {}: {}", summary.display(), e);
+                std::process::exit(1);
+            });
+            let _ = std::io::stdout().write_all(&bytes);
         }
-    } else {
-        let bytes = std::fs::read(entry.abs_path.join("traj.tsv")).unwrap_or_else(|e| {
-            eprintln!("error reading traj.tsv: {}", e); std::process::exit(1);
-        });
-        std::io::stdout().write_all(&bytes).unwrap();
+        RunKind::Profile(_) => {
+            let profile_tsv = resolved.abs_path.join("profile.tsv");
+            if !profile_tsv.exists() {
+                eprintln!("error: 'camdl cat' on a profile leaf expects \
+                    profile.tsv, which has not been written yet for {}.",
+                    resolved.rel_path);
+                std::process::exit(1);
+            }
+            let bytes = std::fs::read(&profile_tsv).unwrap_or_else(|e| {
+                eprintln!("error reading {}: {}", profile_tsv.display(), e);
+                std::process::exit(1);
+            });
+            let _ = std::io::stdout().write_all(&bytes);
+        }
+        RunKind::Fit(_) => {
+            eprintln!("error: 'camdl cat' on a fit has no single-file target.\n  \
+                       {} is a fit directory. For stage output, pass the stage\n  \
+                       path directly, e.g. `camdl cat {}/real/fit_<seed>/<stage>/mle_params.toml`.",
+                      resolved.rel_path, resolved.rel_path);
+            std::process::exit(1);
+        }
+        RunKind::FitStage(_) => {
+            eprintln!("error: 'camdl cat' on a fit-stage has no canonical \
+                       single-file target. {} is a stage directory; pass a \
+                       specific file path (mle_params.toml, draws.tsv, …) \
+                       directly.",
+                      resolved.rel_path);
+            std::process::exit(1);
+        }
     }
+}
+
+/// Locate `<sim_dir>/obs/<obs_subdir>/<stream>.tsv`, taking the first
+/// match across `obs_subdir/`. Returns `None` if no stream by that
+/// name exists.
+fn find_obs_stream(sim_dir: &Path, stream: &str) -> Option<PathBuf> {
+    let obs_root = sim_dir.join("obs");
+    if !obs_root.exists() { return None; }
+    let entries = std::fs::read_dir(&obs_root).ok()?;
+    for entry in entries.flatten() {
+        let file = entry.path().join(format!("{}.tsv", stream));
+        if file.exists() { return Some(file); }
+    }
+    None
 }
 
 // ── Internals: discovery + resolution ────────────────────────────────────────
@@ -491,15 +609,6 @@ struct FitEntry {
     meta: crate::run_meta::FitMeta,
     rel_path: String,
     created: SystemTime,
-}
-
-fn load_fit_entry(dir: &Path, cwd: &Path) -> Option<FitEntry> {
-    let (run, created, rel_path) = load_run_common(dir, cwd)?;
-    let meta = match &run.kind {
-        RunKind::Fit(m) => m.clone(),
-        _ => return None,
-    };
-    Some(FitEntry { run, meta, rel_path, created })
 }
 
 // ── Profile listings ─────────────────────────────────────────────────────────
@@ -614,99 +723,97 @@ fn discover_fits(root: &str) -> Result<Vec<FitEntry>, String> {
         .collect())
 }
 
-/// Resolved by a user-supplied key: a sim run, a fit, or a
-/// replicate-set umbrella (e.g. multi-seed profile).
+/// One resolved run, kind-agnostic. Kind-specific data lives inside
+/// `run.kind` (a `RunKind` tagged union); renderers dispatch on the
+/// variant rather than carrying a parallel enum here. This single
+/// shape applies to every `RunKind` — sim, fit, fit-stage, profile,
+/// replicate-set — so `camdl show` and `camdl cat` can route
+/// uniformly.
 #[derive(Debug, Clone)]
-enum Resolved {
-    Sim(RunEntry),
-    Fit(FitEntry),
-    ReplicateSet(ReplicateSetEntry),
-}
-
-/// A discovered replicate-set umbrella (the parent of N seeded /
-/// dataset-indexed children). Currently produced by multi-seed
-/// `camdl profile` runs (`<root>/profiles/<stem>-<parent_hash>/`).
-#[derive(Debug, Clone)]
-struct ReplicateSetEntry {
+struct ResolvedRun {
     run: Run,
-    meta: crate::cas::typed::ReplicateSetMeta,
-    rel_path: String,
     abs_path: PathBuf,
+    rel_path: String,
     created: SystemTime,
 }
 
-/// Try to load a replicate-set umbrella from a directory. Returns
-/// `None` when the directory's `run.json` is missing, malformed, or
-/// not of kind `ReplicateSet`.
-fn load_replicate_set_entry(dir: &Path, cwd: &Path) -> Option<ReplicateSetEntry> {
-    let (run, created, rel_path) = load_run_common(dir, cwd)?;
-    let meta = match &run.kind {
-        RunKind::ReplicateSet(m) => m.clone(),
-        _ => return None,
-    };
-    Some(ReplicateSetEntry {
-        run, meta, rel_path,
-        abs_path: dir.to_path_buf(),
-        created,
-    })
-}
-
-/// Resolve a user-supplied key to either a sim run or a fit. Accepts:
+/// Resolve a user-supplied key to a single run, regardless of kind.
+/// Accepts:
 /// - Full relative or absolute path to a run.json-containing directory.
-/// - Short hash prefix (git-style): `abc1234` matches on sim.sim_hash
-///   OR fit.hash. If the prefix matches exactly one entry across both
-///   subtrees, we return it; if it matches multiple (even split across
-///   kinds), we surface a disambiguation error listing all candidates.
-/// - For sims only: `{prefix}/{scenario}` or `{prefix}/{scenario}/{seed}`
-///   narrows further. Fit matching ignores slash-delimited filters.
-fn resolve_any(root: &str, key: &str) -> Result<Resolved, String> {
+/// - Short hash prefix (git-style) on `Run.hash`. Matches across every
+///   kind under `<root>/{sims,fits,profiles}/**` (sim, fit, fit-stage,
+///   profile leaf, replicate-set umbrella). Ambiguous prefix → error
+///   listing all candidates with their kinds.
+/// - For sims only: `{prefix}/{scenario}` or `{prefix}/{scenario}/{seed_N}`
+///   narrows further by the SimulateMeta fields. Other kinds ignore
+///   slash-delimited filters.
+fn resolve_any(root: &str, key: &str) -> Result<ResolvedRun, String> {
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+
+    // Path form: load run.json directly.
     let as_path = Path::new(key);
     if as_path.is_dir() && as_path.join("run.json").exists() {
-        let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-        if let Some(r) = load_replicate_set_entry(as_path, &cwd) {
-            return Ok(Resolved::ReplicateSet(r));
-        }
-        if let Some(f) = load_fit_entry(as_path, &cwd) { return Ok(Resolved::Fit(f)); }
-        if let Some(s) = load_sim_entry(as_path, &cwd) { return Ok(Resolved::Sim(s)); }
-        return Err(format!("run.json at {} has an unrecognised kind", as_path.display()));
+        let (run, created, rel_path) = load_run_common(as_path, &cwd)
+            .ok_or_else(|| format!("could not read run.json at {}", as_path.display()))?;
+        return Ok(ResolvedRun {
+            run, rel_path, created,
+            abs_path: as_path.to_path_buf(),
+        });
     }
 
+    // Hash-prefix form: walk every run.json under <root>/{sims,fits,profiles}.
     let parts: Vec<&str> = key.split('/').collect();
     let hash_prefix = parts[0];
-
-    // Collect fit matches (fits don't use scenario/seed filters).
-    let fit_matches: Vec<FitEntry> = discover_fits(root)?.into_iter()
-        .filter(|f| f.run.hash.starts_with(hash_prefix))
-        .collect();
-
-    // Collect sim matches with optional /scenario[/seed] filters.
     let scen_filter = parts.get(1).copied();
     let seed_filter: Option<u64> = parts.get(2)
         .and_then(|s| s.strip_prefix("seed_"))
         .or_else(|| parts.get(2).copied())
         .and_then(|s| s.parse().ok());
-    let sim_matches: Vec<RunEntry> = discover_runs(root)?.into_iter()
-        .filter(|r| r.meta.sim_hash.starts_with(hash_prefix))
-        .filter(|r| scen_filter.is_none_or(|s| r.meta.scenario == s))
-        .filter(|r| seed_filter.is_none_or(|s| r.meta.seed == s))
-        .collect();
 
-    let total = fit_matches.len() + sim_matches.len();
-    match total {
+    let mut matches: Vec<ResolvedRun> = Vec::new();
+    for top in ["sims", "fits", "profiles"] {
+        let subroot = Path::new(root).join(top);
+        if !subroot.exists() { continue; }
+        for dir in walkdir_all(&subroot) {
+            if !dir.join("run.json").exists() { continue; }
+            let Some((run, created, rel_path)) = load_run_common(&dir, &cwd) else { continue; };
+            if !run.hash.starts_with(hash_prefix) { continue; }
+            // Sim-only narrowing on /scenario[/seed_N].
+            if let RunKind::Simulate(ref m) = run.kind {
+                if scen_filter.is_some_and(|s| s != m.scenario) { continue; }
+                if seed_filter.is_some_and(|s| s != m.seed) { continue; }
+            }
+            matches.push(ResolvedRun {
+                run, rel_path, created,
+                abs_path: dir,
+            });
+        }
+    }
+
+    match matches.len() {
         0 => Err(format!("no run matches '{}' in {}", key, root)),
-        1 => if let Some(s) = sim_matches.into_iter().next() {
-            Ok(Resolved::Sim(s))
-        } else {
-            Ok(Resolved::Fit(fit_matches.into_iter().next().unwrap()))
-        },
+        1 => Ok(matches.into_iter().next().unwrap()),
         n => {
             let mut msg = format!("'{}' is ambiguous, matches {} entries:\n", key, n);
-            for m in &sim_matches { msg.push_str(&format!("  sim  {}\n", m.rel_path)); }
-            for m in &fit_matches { msg.push_str(&format!("  fit  {}\n", m.rel_path)); }
-            msg.push_str("refine by appending /<scenario> and/or /<seed>, \
+            for r in &matches {
+                msg.push_str(&format!("  {:<14} {}\n", kind_label(&r.run.kind), r.rel_path));
+            }
+            msg.push_str("refine by appending /<scenario> and/or /<seed_N>, \
                          or pass a longer hash prefix");
             Err(msg)
         }
+    }
+}
+
+/// Short tag for the disambiguation listing (`camdl show <ambiguous>`)
+/// — same vocabulary as the `kind` discriminator in run.json.
+fn kind_label(kind: &RunKind) -> &'static str {
+    match kind {
+        RunKind::Simulate(_)     => "sim",
+        RunKind::Fit(_)          => "fit",
+        RunKind::FitStage(_)     => "fit-stage",
+        RunKind::Profile(_)      => "profile",
+        RunKind::ReplicateSet(_) => "replicate-set",
     }
 }
 
@@ -774,50 +881,6 @@ fn walkdir_all(root: &std::path::Path) -> Vec<std::path::PathBuf> {
         }
     }
     out
-}
-
-/// Sim-only resolver (legacy entry). `cmd_cat` keeps using this
-/// because `cat` on a fit has no single-file meaning.
-fn resolve_run(root: &str, key: &str) -> Result<RunEntry, String> {
-    // If the key is an existing directory, use it directly.
-    let as_path = Path::new(key);
-    if as_path.is_dir() && as_path.join("run.json").exists() {
-        let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-        return load_sim_entry(as_path, &cwd)
-            .ok_or_else(|| format!(
-                "run.json at {} is not a simulate run (or is unreadable)",
-                as_path.display()));
-    }
-
-    // Otherwise treat as sim_hash prefix (optionally "prefix/scenario" or
-    // "prefix/scenario/seed_N").
-    let all = discover_runs(root)?;
-    let parts: Vec<&str> = key.split('/').collect();
-    let hash_prefix = parts[0];
-    let scen_filter = parts.get(1).copied();
-    let seed_filter: Option<u64> = parts.get(2)
-        .and_then(|s| s.strip_prefix("seed_"))
-        .or_else(|| parts.get(2).copied())
-        .and_then(|s| s.parse().ok());
-
-    let matches: Vec<RunEntry> = all.into_iter()
-        .filter(|r| r.meta.sim_hash.starts_with(hash_prefix))
-        .filter(|r| scen_filter.is_none_or(|s| r.meta.scenario == s))
-        .filter(|r| seed_filter.is_none_or(|s| r.meta.seed == s))
-        .collect();
-
-    match matches.len() {
-        0 => Err(format!("no run matches '{}' in {}", key, root)),
-        1 => Ok(matches.into_iter().next().unwrap()),
-        n => {
-            let mut msg = format!("'{}' is ambiguous, matches {} runs:\n", key, n);
-            for m in &matches {
-                msg.push_str(&format!("  {}\n", m.rel_path));
-            }
-            msg.push_str("refine by appending /<scenario> and/or /<seed>");
-            Err(msg)
-        }
-    }
 }
 
 // ── Output formatting ────────────────────────────────────────────────────────
@@ -1251,12 +1314,19 @@ mod tests {
         record.write(&run_dir).unwrap();
 
         let root = tmp.path().to_str().unwrap();
-        let r = resolve_run(root, "abc12345").unwrap();
-        assert_eq!(r.meta.seed, 42);
-        let r = resolve_run(root, "abc").unwrap();
-        assert_eq!(r.meta.seed, 42);
-        let r = resolve_run(root, "abc/baseline").unwrap();
-        assert_eq!(r.meta.seed, 42);
-        assert!(resolve_run(root, "zzz").is_err());
+        let resolved = resolve_any(root, "abc12345").unwrap();
+        assert_seed_42(&resolved);
+        let resolved = resolve_any(root, "abc").unwrap();
+        assert_seed_42(&resolved);
+        let resolved = resolve_any(root, "abc/baseline").unwrap();
+        assert_seed_42(&resolved);
+        assert!(resolve_any(root, "zzz").is_err());
+    }
+
+    fn assert_seed_42(r: &ResolvedRun) {
+        match &r.run.kind {
+            RunKind::Simulate(m) => assert_eq!(m.seed, 42),
+            other => panic!("expected RunKind::Simulate, got {:?}", other),
+        }
     }
 }
