@@ -163,8 +163,16 @@ pub(crate) fn eval_likelihood_resolved(
             crate::inference::obs_loglik::beta_binomial_logpmf(k, n_int, alpha_val, beta_val)
         }
         ResolvedLikelihood::Bernoulli { p } => {
-            let p_val = eval_resolved(p, &ctx(projected));
-            if observed > 0.5 { p_val.max(LOG_PROB_FLOOR).ln() } else { (1.0 - p_val).max(LOG_PROB_FLOOR).ln() }
+            // Clamp p to [0, 1] before forming the log-probability.
+            // Without the clamp, an out-of-range p (e.g. PGAS proposes
+            // p_detect > 1 before the posterior concentrates) produces
+            // a positive log-probability — invalid as an SMC weight,
+            // and silently inflates posterior mass on the bad region.
+            // Mirrors the Binomial / BetaBinomial clamping at lines
+            // 154 and 162. See docs/dev/reviews/2026-04-30-correctness.md C1.
+            let p_val = eval_resolved(p, &ctx(projected)).clamp(0.0, 1.0);
+            if observed > 0.5 { p_val.max(LOG_PROB_FLOOR).ln() }
+            else              { (1.0 - p_val).max(LOG_PROB_FLOOR).ln() }
         }
     }
 }
@@ -278,7 +286,9 @@ pub(crate) fn sample_obs_resolved(
             rng.binomial(n_int, p.clamp(0.0, 1.0)) as f64
         }
         ResolvedLikelihood::Bernoulli { p } => {
-            let p_val = eval_resolved(p, &ctx(projected));
+            // Clamp before sampling — an out-of-range p would
+            // otherwise always-1 (p > 1) or always-0 (p < 0).
+            let p_val = eval_resolved(p, &ctx(projected)).clamp(0.0, 1.0);
             if rng.uniform() < p_val { 1.0 } else { 0.0 }
         }
     }
@@ -329,3 +339,55 @@ pub(crate) fn eval_obs_mean_resolved(
 // NOTE: The old compile_joint_obs_loglik was replaced by
 // types::joint_obs_weight + types::ObsStreamSpec. The join now happens
 // in ONE shared function used by PF, PGAS, CSMC, and gradient evaluation.
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Bernoulli log-pmf computation, isolated from the IR/CompiledModel
+    /// scaffolding so we can assert on edge cases directly. Mirrors
+    /// the inline expression at `eval_likelihood_resolved`'s
+    /// `ResolvedLikelihood::Bernoulli` arm.
+    fn bernoulli_logpmf_clamped(p_val: f64, observed: f64) -> f64 {
+        let p = p_val.clamp(0.0, 1.0);
+        if observed > 0.5 { p.max(LOG_PROB_FLOOR).ln() }
+        else              { (1.0 - p).max(LOG_PROB_FLOOR).ln() }
+    }
+
+    #[test]
+    fn bernoulli_logpmf_clamps_p_above_one() {
+        // p_val = 1.5 must produce log(1.0) = 0.0, not log(1.5) ≈ 0.405.
+        // The unclamped version was a critical bug: a positive log-prob
+        // inflates SMC weights for any particle that sampled an
+        // out-of-range p (e.g. PGAS proposals before the posterior
+        // concentrates).
+        let log_p = bernoulli_logpmf_clamped(1.5, 1.0);
+        assert!(log_p <= 0.0, "log-prob must be ≤ 0, got {}", log_p);
+        // Specifically, p=1 with observation=1 → log(1) = 0.
+        assert!(log_p.abs() < 1e-12, "expected 0.0, got {}", log_p);
+    }
+
+    #[test]
+    fn bernoulli_logpmf_clamps_p_below_zero() {
+        // p_val = -0.3 must produce log(1.0) = 0.0 for observation=0,
+        // not log(1.3) ≈ 0.262.
+        let log_p = bernoulli_logpmf_clamped(-0.3, 0.0);
+        assert!(log_p <= 0.0, "log-prob must be ≤ 0, got {}", log_p);
+        assert!(log_p.abs() < 1e-12, "expected 0.0, got {}", log_p);
+
+        // Observation = 1 with p = -0.3 → log(0) → LOG_PROB_FLOOR.ln().
+        let log_p_obs1 = bernoulli_logpmf_clamped(-0.3, 1.0);
+        assert!(log_p_obs1 <= LOG_PROB_FLOOR.ln() + 1e-12,
+            "p<0 with obs=1 must floor: got {}", log_p_obs1);
+    }
+
+    #[test]
+    fn bernoulli_logpmf_in_range_unchanged() {
+        // p=0.7, obs=1 → log(0.7) ≈ -0.357
+        let log_p = bernoulli_logpmf_clamped(0.7, 1.0);
+        assert!((log_p - 0.7_f64.ln()).abs() < 1e-12);
+        // p=0.7, obs=0 → log(0.3) ≈ -1.204
+        let log_p = bernoulli_logpmf_clamped(0.7, 0.0);
+        assert!((log_p - 0.3_f64.ln()).abs() < 1e-12);
+    }
+}
