@@ -10,7 +10,7 @@ use rayon::prelude::*;
 use crate::rng::StatefulRng;
 use crate::error::SimError;
 use super::traits::{ProcessModel, ObservationModel, SMCConfig};
-use super::types::{ParticleState, ParticleSwarm, log_sum_exp, RESAMPLE_RNG_STREAM, init_particle_rngs};
+use super::types::{ParticleState, ParticleSwarm, log_sum_exp, normalize_log_weights, RESAMPLE_RNG_STREAM, init_particle_rngs};
 use super::resampling::systematic_resample;
 /// Observation: one data point at a specific time.
 #[derive(Clone)]
@@ -338,16 +338,7 @@ fn weighted_quantiles(values: &[f64], log_weights: &[f64]) -> (f64, f64, f64, f6
         return (0.0, 0.0, 0.0, 0.0);
     }
 
-    // Normalize weights
-    let max_lw = log_weights.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
-    let weights: Vec<f64> = if max_lw.is_infinite() {
-        vec![1.0 / n as f64; n]
-    } else {
-        let raw: Vec<f64> = log_weights.iter().map(|&lw| (lw - max_lw).exp()).collect();
-        let sum: f64 = raw.iter().sum();
-        if sum == 0.0 { vec![1.0 / n as f64; n] }
-        else { raw.iter().map(|&w| w / sum).collect() }
-    };
+    let weights = normalize_log_weights(log_weights);
 
     // Weighted mean
     let mean: f64 = values.iter().zip(&weights).map(|(&v, &w)| v * w).sum();

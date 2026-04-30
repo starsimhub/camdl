@@ -12,7 +12,7 @@ use serde::{Serialize, Deserialize};
 use crate::chain_binomial::StepScratch;
 use crate::rng::StatefulRng;
 use crate::error::SimError;
-use super::types::{ParticleState, ParticleSwarm, log_sum_exp, LOG_PROB_FLOOR};
+use super::types::{ParticleState, ParticleSwarm, log_sum_exp, normalize_log_weights, LOG_PROB_FLOOR};
 use super::particle_filter::PFilterResult;
 use super::chain_binomial_process::ChainBinomialProcess;
 use super::traits::{ObservationModel, SMCConfig};
@@ -421,15 +421,7 @@ fn sorted_systematic_resample(log_weights: &[f64], base_uniform: f64) -> Vec<usi
     let n = log_weights.len();
     if n == 0 { return vec![]; }
 
-    let max_lw = log_weights.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
-    let weights: Vec<f64> = if max_lw.is_infinite() {
-        vec![1.0 / n as f64; n]
-    } else {
-        let raw: Vec<f64> = log_weights.iter().map(|&lw| (lw - max_lw).exp()).collect();
-        let sum: f64 = raw.iter().sum();
-        if sum == 0.0 { vec![1.0 / n as f64; n] }
-        else { raw.iter().map(|&w| w / sum).collect() }
-    };
+    let weights = normalize_log_weights(log_weights);
 
     let u = base_uniform / n as f64;
     let mut indices = Vec::with_capacity(n);

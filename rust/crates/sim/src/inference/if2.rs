@@ -18,7 +18,7 @@ use rayon::prelude::*;
 use crate::rng::StatefulRng;
 use crate::error::SimError;
 use super::traits::{ProcessModel, ObservationModel};
-use super::types::{ParticleState, log_sum_exp, LOG_PROB_FLOOR, init_particle_rngs};
+use super::types::{ParticleState, log_sum_exp, normalize_log_weights, LOG_PROB_FLOOR, init_particle_rngs};
 use super::resampling::systematic_resample;
 
 // `Transform` and `EstimatedParam` are defined in `types.rs` (shared by all
@@ -404,16 +404,7 @@ pub fn run_if2_with_progress<P: ProcessModel<State = ParticleState>>(
             // q_k: rw_sd_effective / sd(θ_k before perturbation)
             //   Perturbation-to-cloud width ratio.
             {
-                // Normalize log-weights to proper weights for weighted variance
-                let max_lw = log_weights.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
-                let weights: Vec<f64> = if max_lw.is_finite() {
-                    let raw: Vec<f64> = log_weights.iter().map(|&lw| (lw - max_lw).exp()).collect();
-                    let sum: f64 = raw.iter().sum();
-                    if sum > 0.0 { raw.iter().map(|&w| w / sum).collect() }
-                    else { vec![1.0 / n as f64; n] }
-                } else {
-                    vec![1.0 / n as f64; n]
-                };
+                let weights = normalize_log_weights(&log_weights);
 
                 for (pi, spec) in if2_params.iter().enumerate() {
                     let nf = n as f64;

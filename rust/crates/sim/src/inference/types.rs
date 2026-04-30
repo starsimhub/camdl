@@ -290,12 +290,19 @@ impl ParticleSwarm {
 
     /// Effective sample size: ESS = 1 / Σ(w_normalized²).
     /// Returns N when all weights are equal, 1 when one particle dominates.
+    ///
+    /// **Degenerate-case contract:** returns 0.0 if the maximum log-weight
+    /// is non-finite (every weight is `-∞` or `NaN`-poisoned), or if the
+    /// post-shift sum is non-positive or non-finite. ESS=0 signals to the
+    /// filter that the particle cloud has collapsed and resampling cannot
+    /// produce informative draws — a stronger signal than the
+    /// uniform-weight fallback used by `normalize_log_weights`.
     pub fn ess(&self) -> f64 {
         let max_lw = self.log_weights.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
-        if max_lw.is_infinite() { return 0.0; }
+        if !max_lw.is_finite() { return 0.0; }
         let sum_w: f64 = self.log_weights.iter().map(|&lw| (lw - max_lw).exp()).sum();
         let sum_w2: f64 = self.log_weights.iter().map(|&lw| (2.0 * (lw - max_lw)).exp()).sum();
-        if sum_w2 == 0.0 { return 0.0; }
+        if !sum_w.is_finite() || !sum_w2.is_finite() || sum_w2 <= 0.0 { return 0.0; }
         (sum_w * sum_w) / sum_w2
     }
 }
@@ -311,4 +318,103 @@ pub fn log_sum_exp(log_values: &[f64]) -> f64 {
     if max == f64::NEG_INFINITY { return f64::NEG_INFINITY; }
     if max == f64::INFINITY { return f64::INFINITY; }
     max + log_values.iter().map(|&lv| (lv - max).exp()).sum::<f64>().ln()
+}
+
+/// Normalize log-weights to a probability vector, with uniform fallback.
+///
+/// Applies the log-sum-exp trick: subtracts the max log-weight before
+/// exponentiating, then divides by the sum. The max-subtraction keeps
+/// `(lw - max).exp()` in `[0, 1]` regardless of the absolute scale of
+/// `log_weights`, so the sum cannot overflow.
+///
+/// **Degenerate-case contract:** if the maximum log-weight is non-finite
+/// (every weight is `-∞`, or any weight is `NaN` and all weights are NaN,
+/// or the slice is empty), or if the post-shift sum is non-positive, the
+/// function returns `[1/n, 1/n, ..., 1/n]`. This is the conservative
+/// choice: a particle filter or weighted-quantile call with
+/// uniform-degenerate weights should treat all particles as equally
+/// informative rather than propagate a `NaN` into downstream statistics.
+///
+/// `f64::max` ignores `NaN` operands when at least one argument is
+/// non-NaN, so a slice mixing finite values with `NaN` will pick a
+/// finite max — the corresponding `NaN.exp()` then leaks into `sum`,
+/// producing `NaN`. The `sum.is_finite() && sum > 0.0` guard catches
+/// that case and falls back to uniform.
+///
+/// Returns `vec![]` only when `log_weights` is empty.
+pub fn normalize_log_weights(log_weights: &[f64]) -> Vec<f64> {
+    let n = log_weights.len();
+    if n == 0 { return Vec::new(); }
+    let inv_n = 1.0 / n as f64;
+    let max_lw = log_weights.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+    if !max_lw.is_finite() {
+        return vec![inv_n; n];
+    }
+    let raw: Vec<f64> = log_weights.iter().map(|&lw| (lw - max_lw).exp()).collect();
+    let sum: f64 = raw.iter().sum();
+    if !sum.is_finite() || sum <= 0.0 {
+        return vec![inv_n; n];
+    }
+    raw.iter().map(|&w| w / sum).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn approx_eq(a: f64, b: f64) -> bool { (a - b).abs() < 1e-12 }
+
+    #[test]
+    fn empty_input_returns_empty() {
+        assert!(normalize_log_weights(&[]).is_empty());
+    }
+
+    #[test]
+    fn equal_weights_normalize_to_uniform() {
+        let w = normalize_log_weights(&[0.0, 0.0, 0.0, 0.0]);
+        assert_eq!(w.len(), 4);
+        for x in &w { assert!(approx_eq(*x, 0.25)); }
+    }
+
+    #[test]
+    fn extreme_log_weights_do_not_overflow() {
+        let w = normalize_log_weights(&[1e9, 1e9 + 2.0, 1e9 + 1.0]);
+        let sum: f64 = w.iter().sum();
+        assert!(approx_eq(sum, 1.0));
+        assert!(w.iter().all(|x| x.is_finite()));
+        // largest weight should dominate
+        assert!(w[1] > w[2] && w[2] > w[0]);
+    }
+
+    #[test]
+    fn all_neg_inf_falls_back_to_uniform() {
+        let w = normalize_log_weights(&[f64::NEG_INFINITY; 3]);
+        for x in &w { assert!(approx_eq(*x, 1.0 / 3.0)); }
+    }
+
+    #[test]
+    fn all_nan_falls_back_to_uniform() {
+        let w = normalize_log_weights(&[f64::NAN, f64::NAN]);
+        assert_eq!(w.len(), 2);
+        for x in &w { assert!(approx_eq(*x, 0.5),
+            "all-NaN must yield uniform, got {:?}", w); }
+    }
+
+    #[test]
+    fn nan_mixed_with_finite_falls_back_to_uniform() {
+        // Once NaN enters the sum, the result is NaN; helper must catch
+        // and return uniform rather than propagate poison.
+        let w = normalize_log_weights(&[0.0, f64::NAN, -1.0]);
+        assert_eq!(w.len(), 3);
+        for x in &w { assert!(approx_eq(*x, 1.0 / 3.0),
+            "NaN-poisoned slice must fall back to uniform, got {:?}", w); }
+    }
+
+    #[test]
+    fn pos_inf_max_falls_back_to_uniform() {
+        // +∞ is non-finite; helper falls back to uniform rather than
+        // attempting to compute (∞ - ∞).exp() = NaN.
+        let w = normalize_log_weights(&[0.0, f64::INFINITY, -1.0]);
+        for x in &w { assert!(approx_eq(*x, 1.0 / 3.0)); }
+    }
 }

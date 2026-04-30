@@ -4,6 +4,7 @@
 //! for bootstrap filters (Carpenter, Clifford & Fearnhead 1999).
 
 use crate::rng::StatefulRng;
+use super::types::normalize_log_weights;
 
 /// Systematic resampling. Returns indices of selected particles.
 ///
@@ -18,20 +19,7 @@ pub fn systematic_resample(log_weights: &[f64], rng: &mut StatefulRng) -> Vec<us
     let n = log_weights.len();
     if n == 0 { return vec![]; }
 
-    // Normalize to proper weights
-    let max_lw = log_weights.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
-    let weights: Vec<f64> = if max_lw.is_infinite() {
-        // All weights are -inf — uniform resampling as fallback
-        vec![1.0 / n as f64; n]
-    } else {
-        let raw: Vec<f64> = log_weights.iter().map(|&lw| (lw - max_lw).exp()).collect();
-        let sum: f64 = raw.iter().sum();
-        if sum == 0.0 {
-            vec![1.0 / n as f64; n]
-        } else {
-            raw.iter().map(|&w| w / sum).collect()
-        }
-    };
+    let weights = normalize_log_weights(log_weights);
 
     // Systematic resampling: one uniform draw, evenly spaced thresholds
     let u = rng.uniform() / n as f64;

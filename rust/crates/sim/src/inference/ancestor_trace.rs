@@ -18,6 +18,7 @@
 //! `docs/dev/proposals/2026-04-19-pf-latent-trajectories.md`.
 
 use crate::rng::StatefulRng;
+use super::types::normalize_log_weights;
 
 /// Per-step ancestry + states recorded during a bootstrap-filter run.
 ///
@@ -80,31 +81,22 @@ pub fn sample_paths(
     let mut rng = StatefulRng::new(seed.wrapping_add(0xa5ce57ea));
     let final_log_w = &trace.log_weights[n_obs - 1];
 
-    // Normalise final-step weights to a CDF we can inverse-sample
-    // from. Uses the usual log-sum-exp trick for numerical safety.
-    let max_lw = final_log_w.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
-    let total: f64 = if max_lw.is_infinite() {
-        // Pathological: all -inf. Fall back to uniform over particles.
-        final_log_w.len() as f64
-    } else {
-        final_log_w.iter().map(|&lw| (lw - max_lw).exp()).sum()
-    };
+    // Normalise final-step weights into a probability vector. The helper
+    // returns a uniform fallback when every weight is `-∞` or NaN, so the
+    // categorical draw below works in the degenerate case without a
+    // separate guard.
+    let weights = normalize_log_weights(final_log_w);
 
     let mut paths = Vec::with_capacity(n_paths);
     for _ in 0..n_paths {
-        // Pick the final particle.
-        let j_final = if max_lw.is_infinite() {
-            (rng.uniform() * final_log_w.len() as f64) as usize
-        } else {
-            let target = rng.uniform() * total;
-            let mut acc = 0.0;
-            let mut chosen = final_log_w.len() - 1;
-            for (i, &lw) in final_log_w.iter().enumerate() {
-                acc += (lw - max_lw).exp();
-                if acc >= target { chosen = i; break; }
-            }
-            chosen
-        };
+        // Pick the final particle by inverse-CDF sampling.
+        let target = rng.uniform();
+        let mut acc = 0.0;
+        let mut j_final = weights.len() - 1;
+        for (i, &w) in weights.iter().enumerate() {
+            acc += w;
+            if acc >= target { j_final = i; break; }
+        }
 
         // Walk back. states[t] is pre-resample; ancestors[t] points
         // into states[t]'s indices and IS the parent of position i
