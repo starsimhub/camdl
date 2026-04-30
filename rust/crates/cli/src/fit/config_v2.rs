@@ -343,8 +343,11 @@ pub struct EstimateSpecV2 {
 
     /// Prior distribution. Required for Bayesian methods (PGAS, PMMH).
     /// Optional for MLE (IF2 ignores priors).
+    ///
+    /// Wire format is externally-tagged (matches the OCaml IR emission):
+    /// `prior = { log_normal = { mu = 0.0, sigma = 1.0 } }`.
     #[serde(default)]
-    pub prior: Option<PriorSpec>,
+    pub prior: Option<PriorDist>,
 
     /// Initial value parameter: perturbed only at t=0 in IF2.
     #[serde(default)]
@@ -382,24 +385,14 @@ impl Transform {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
-#[serde(tag = "dist")]
-pub enum PriorSpec {
-    #[serde(rename = "log_normal")]
-    LogNormal { mu: f64, sigma: f64 },
-    #[serde(rename = "normal")]
-    Normal { mu: f64, sigma: f64 },
-    #[serde(rename = "beta")]
-    Beta { alpha: f64, beta: f64 },
-    #[serde(rename = "uniform")]
-    Uniform,
-    #[serde(rename = "half_normal")]
-    HalfNormal { sigma: f64 },
-    #[serde(rename = "gamma")]
-    Gamma { shape: f64, rate: f64 },
-    #[serde(rename = "exponential")]
-    Exponential { rate: f64 },
-}
+// Prior specification for `[estimate.<name>.prior]` is `ir::parameter::PriorDist`.
+//
+// One serialization form across the workspace: the externally-tagged
+// enum the OCaml compiler already emits for in-model `~`-syntax priors
+// (`{ log_normal = { mu = 0, sigma = 1 } }`). Re-exported here so
+// downstream `use config_v2::PriorSpec` imports continue to compile.
+pub use ir::parameter::PriorDist;
+pub use ir::parameter::PriorDist as PriorSpec;
 
 // ─── Fixed ──────────────────────────────────────────────────────────────────
 
@@ -1088,7 +1081,8 @@ impl FitConfigV2 {
                 if !missing_priors.is_empty() {
                     return Err(format!(
                         "stage '{}' (method={}) requires priors, but missing for: {}\n  \
-                         Add prior = {{ dist = \"...\", ... }} to each [estimate.*] entry.",
+                         Add prior = {{ <dist> = {{ ... }} }} to each [estimate.*] entry \
+                         (e.g. `prior = {{ log_normal = {{ mu = 0, sigma = 1 }} }}`).",
                         stage_name, stage.method_name(), missing_priors.join(", ")
                     ));
                 }
@@ -1316,9 +1310,9 @@ backend = "chain_binomial"
 dt = 1.0
 
 [estimate]
-gamma = { bounds = [0.05, 1.0], prior = { dist = "log_normal", mu = -2.0, sigma = 1.0 } }
-rho   = { bounds = [0.001, 1.0], prior = { dist = "beta", alpha = 2.0, beta = 5.0 } }
-k     = { bounds = [0.1, 100.0], prior = { dist = "half_normal", sigma = 10.0 } }
+gamma = { bounds = [0.05, 1.0], prior = { log_normal = { mu = -2.0, sigma = 1.0 } } }
+rho   = { bounds = [0.001, 1.0], prior = { beta = { alpha = 2.0, beta = 5.0 } } }
+k     = { bounds = [0.1, 100.0], prior = { half_normal = { sigma = 10.0 } } }
 
 [fixed]
 beta = 0.34
@@ -2505,8 +2499,8 @@ camdl = "models/sir.camdl"
 cases = "data/cases.tsv"
 
 [estimate]
-beta  = { bounds = [0.01, 2.0], prior = { dist = "log_normal", mu = -0.3, sigma = 0.5 } }
-gamma = { bounds = [0.05, 1.0], prior = { dist = "half_normal", sigma = 1.0 } }
+beta  = { bounds = [0.01, 2.0], prior = { log_normal = { mu = -0.3, sigma = 0.5 } } }
+gamma = { bounds = [0.05, 1.0], prior = { half_normal = { sigma = 1.0 } } }
 
 [fixed]
 N0 = 1000

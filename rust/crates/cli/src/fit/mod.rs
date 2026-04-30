@@ -1386,16 +1386,10 @@ fn build_fit_run(
     run
 }
 
-fn format_prior(p: &Option<config_v2::PriorSpec>) -> String {
+fn format_prior(p: &Option<config_v2::PriorDist>) -> String {
     match p {
         None => "(none)".to_string(),
-        Some(config_v2::PriorSpec::LogNormal { mu, sigma }) => format!("log_normal(mu={}, sigma={})", mu, sigma),
-        Some(config_v2::PriorSpec::Normal { mu, sigma }) => format!("normal(mu={}, sigma={})", mu, sigma),
-        Some(config_v2::PriorSpec::Beta { alpha, beta }) => format!("beta(alpha={}, beta={})", alpha, beta),
-        Some(config_v2::PriorSpec::Uniform) => "uniform".to_string(),
-        Some(config_v2::PriorSpec::HalfNormal { sigma }) => format!("half_normal(sigma={})", sigma),
-        Some(config_v2::PriorSpec::Gamma { shape, rate }) => format!("gamma(shape={}, rate={})", shape, rate),
-        Some(config_v2::PriorSpec::Exponential { rate }) => format!("exponential(rate={})", rate),
+        Some(pd) => crate::fit::config_diff::format_prior(pd),
     }
 }
 

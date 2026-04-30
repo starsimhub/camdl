@@ -1548,33 +1548,16 @@ pub fn collect_all_params(
     params
 }
 
-/// Convert a v2 `PriorSpec` (typed enum from fit.toml) to the runtime
+/// Convert a v2 `PriorSpec` (typed enum from fit.toml — currently a
+/// re-export of `ir::PriorDist`) to the runtime
 /// `sim::inference::Prior` used by PGAS/PMMH/IF2 log-density evaluators.
 ///
-/// Field-name conversion notes (see `CLEANUP-prior-types.md`):
-/// - `LogNormal { mu, sigma }` → `TransformedNormal { mean: mu, sd: sigma }`
-///   (log-normal in user terms = Normal on the log-transformed scale at
-///   inference time).
-/// - `Uniform` (no bounds in v2) → `Prior::Flat` (improper uniform).
-///   v2 doesn't carry explicit bounds because `EstimateSpecV2.bounds`
-///   already provides them at the parameter level.
+/// Thin pass-through to `Prior::from_ir`; kept for now so the
+/// fit.toml-vs-model precedence layer at `resolve_prior` reads
+/// uniformly. Slated for deletion in a follow-up commit (see
+/// `docs/dev/proposals/2026-04-30-prior-types-consolidation.md`).
 pub fn prior_spec_to_prior(spec: &super::config_v2::PriorSpec) -> Prior {
-    use super::config_v2::PriorSpec;
-    match spec {
-        PriorSpec::LogNormal { mu, sigma } =>
-            Prior::TransformedNormal { mean: *mu, sd: *sigma },
-        PriorSpec::Normal { mu, sigma } =>
-            Prior::Normal { mean: *mu, sd: *sigma },
-        PriorSpec::Beta { alpha, beta } =>
-            Prior::Beta { alpha: *alpha, beta: *beta },
-        PriorSpec::Uniform => Prior::Flat,
-        PriorSpec::HalfNormal { sigma } =>
-            Prior::HalfNormal { sigma: *sigma },
-        PriorSpec::Gamma { shape, rate } =>
-            Prior::Gamma { shape: *shape, rate: *rate },
-        PriorSpec::Exponential { rate } =>
-            Prior::Exponential { rate: *rate },
-    }
+    Prior::from_ir(spec)
 }
 
 /// Resolve the prior for a parameter using the precedence chain:
@@ -2229,8 +2212,8 @@ mod tests {
     /// resolve_prior precedence chain: fit.toml override → model IR → Flat.
     #[test]
     fn resolve_prior_precedence_chain() {
-        use ir::parameter::{Parameter, PriorDist, LogNormalPrior};
-        use crate::fit::config_v2::{EstimateSpecV2, PriorSpec};
+        use ir::parameter::{Parameter, PriorDist, LogNormalPrior, NormalPrior};
+        use crate::fit::config_v2::EstimateSpecV2;
         use indexmap::IndexMap;
 
         let beta_with_ir_prior = Parameter {
@@ -2260,11 +2243,11 @@ mod tests {
             presets: vec![], model_structure: None, balance: None,
         };
 
-        let est_with_normal = |name: &str, mu: f64, sigma: f64| {
+        let est_with_normal = |name: &str, mean: f64, sd: f64| {
             let mut m: IndexMap<String, EstimateSpecV2> = IndexMap::new();
             m.insert(name.to_string(), EstimateSpecV2 {
                 bounds: (0.01, 2.0), transform: None,
-                prior: Some(PriorSpec::Normal { mu, sigma }),
+                prior: Some(PriorDist::Normal(NormalPrior { mean, sd })),
                 ivp: false, rw_sd: None, start: None,
             });
             m
@@ -2582,7 +2565,8 @@ dt = 1.0
     /// for beta — the override must win over what's in the .camdl.
     #[test]
     fn fit_toml_override_beats_golden_ir_prior() {
-        use crate::fit::config_v2::{EstimateSpecV2, PriorSpec};
+        use crate::fit::config_v2::EstimateSpecV2;
+        use ir::parameter::{PriorDist, NormalPrior};
         use indexmap::IndexMap;
         let manifest = std::env::var("CARGO_MANIFEST_DIR").unwrap();
         let ir_path = format!("{}/../../../ocaml/golden/sir_priors.ir.json", manifest);
@@ -2592,7 +2576,7 @@ dt = 1.0
         let mut estimate: IndexMap<String, EstimateSpecV2> = IndexMap::new();
         estimate.insert("beta".to_string(), EstimateSpecV2 {
             bounds: (0.01, 5.0), transform: None,
-            prior: Some(PriorSpec::Normal { mu: 0.25, sigma: 0.05 }),
+            prior: Some(PriorDist::Normal(NormalPrior { mean: 0.25, sd: 0.05 })),
             ivp: false, rw_sd: None, start: None,
         });
 
@@ -2612,45 +2596,53 @@ dt = 1.0
     }
 
     /// Replaces the v1-era `parse_prior_covers_all_distributions` +
-    /// `parse_prior_rejects_invalid_input` tests. v2 carries `prior`
-    /// as a typed `PriorSpec` enum, so there's no string parsing left
-    /// to test — the only conversion is `prior_spec_to_prior`, which
+    /// `parse_prior_rejects_invalid_input` tests. fit.toml carries `prior`
+    /// as `ir::PriorDist` (re-exported as `PriorSpec`); the only conversion
+    /// is `prior_spec_to_prior` (delegates to `Prior::from_ir`), which
     /// each variant of must map onto the correct runtime `Prior`.
     #[test]
     fn prior_spec_to_prior_maps_each_variant() {
-        use crate::fit::config_v2::PriorSpec;
-        match prior_spec_to_prior(&PriorSpec::LogNormal { mu: 1.5, sigma: 0.4 }) {
+        use ir::parameter::{
+            PriorDist, LogNormalPrior, NormalPrior, BetaPrior, UniformPrior,
+            HalfNormalPrior, GammaPrior, ExponentialPrior,
+        };
+        match prior_spec_to_prior(&PriorDist::LogNormal(LogNormalPrior { mu: 1.5, sigma: 0.4 })) {
             Prior::TransformedNormal { mean, sd } => {
                 assert_eq!(mean, 1.5); assert_eq!(sd, 0.4);
             }
             other => panic!("LogNormal: {:?}", other),
         }
-        match prior_spec_to_prior(&PriorSpec::Normal { mu: 0.3, sigma: 0.1 }) {
+        match prior_spec_to_prior(&PriorDist::Normal(NormalPrior { mean: 0.3, sd: 0.1 })) {
             Prior::Normal { mean, sd } => {
                 assert_eq!(mean, 0.3); assert_eq!(sd, 0.1);
             }
             other => panic!("Normal: {:?}", other),
         }
-        match prior_spec_to_prior(&PriorSpec::Beta { alpha: 2.0, beta: 5.0 }) {
+        match prior_spec_to_prior(&PriorDist::Beta(BetaPrior { alpha: 2.0, beta: 5.0 })) {
             Prior::Beta { alpha, beta } => {
                 assert_eq!(alpha, 2.0); assert_eq!(beta, 5.0);
             }
             other => panic!("Beta: {:?}", other),
         }
-        // Uniform (no bounds) → Flat (improper). v2 puts bounds on
-        // EstimateSpecV2.bounds at the parameter level, not the prior.
-        assert!(matches!(prior_spec_to_prior(&PriorSpec::Uniform), Prior::Flat));
-        match prior_spec_to_prior(&PriorSpec::HalfNormal { sigma: 0.3 }) {
+        // Uniform now carries explicit bounds (no silent reduction to Flat
+        // on missing fields — that v2 behaviour is intentionally removed).
+        match prior_spec_to_prior(&PriorDist::Uniform(UniformPrior { lower: -1.0, upper: 2.0 })) {
+            Prior::Uniform { lower, upper } => {
+                assert_eq!(lower, -1.0); assert_eq!(upper, 2.0);
+            }
+            other => panic!("Uniform: {:?}", other),
+        }
+        match prior_spec_to_prior(&PriorDist::HalfNormal(HalfNormalPrior { sigma: 0.3 })) {
             Prior::HalfNormal { sigma } => assert_eq!(sigma, 0.3),
             other => panic!("HalfNormal: {:?}", other),
         }
-        match prior_spec_to_prior(&PriorSpec::Gamma { shape: 3.0, rate: 0.5 }) {
+        match prior_spec_to_prior(&PriorDist::Gamma(GammaPrior { shape: 3.0, rate: 0.5 })) {
             Prior::Gamma { shape, rate } => {
                 assert_eq!(shape, 3.0); assert_eq!(rate, 0.5);
             }
             other => panic!("Gamma: {:?}", other),
         }
-        match prior_spec_to_prior(&PriorSpec::Exponential { rate: 2.5 }) {
+        match prior_spec_to_prior(&PriorDist::Exponential(ExponentialPrior { rate: 2.5 })) {
             Prior::Exponential { rate } => assert_eq!(rate, 2.5),
             other => panic!("Exponential: {:?}", other),
         }

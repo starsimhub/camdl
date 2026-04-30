@@ -19,7 +19,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde::Serialize;
 
-use crate::fit::config_v2::{FitConfigV2, PriorSpec, Stage};
+use crate::fit::config_v2::{FitConfigV2, PriorDist, Stage};
 use crate::run_meta::FitMeta;
 
 /// Structured diff of one fit's config relative to a baseline. Map
@@ -222,26 +222,31 @@ impl ConfigDiff {
     }
 }
 
-/// Canonical string projection for a [`PriorSpec`]. Intentionally
-/// terse — `log_normal(mu=..., sigma=...)`, `normal(mu=..., sigma=...)`,
-/// `beta(alpha=..., beta=...)`, `uniform`, `half_normal(sigma=...)`.
+/// Canonical string projection for a [`PriorDist`]. Intentionally
+/// terse — `log_normal(mu=..., sigma=...)`, `normal(mean=..., sd=...)`,
+/// `beta(alpha=..., beta=...)`, `uniform(lower=..., upper=...)`,
+/// `half_normal(sigma=...)`, `gamma(shape=..., rate=...)`,
+/// `exponential(rate=...)`, `fixed(...)`.
 /// The format is stable across versions because `priors_changed`
 /// equality compares strings.
-pub fn format_prior(p: &PriorSpec) -> String {
+pub fn format_prior(p: &PriorDist) -> String {
     match p {
-        PriorSpec::LogNormal { mu, sigma } =>
-            format!("log_normal(mu={}, sigma={})", mu, sigma),
-        PriorSpec::Normal { mu, sigma } =>
-            format!("normal(mu={}, sigma={})", mu, sigma),
-        PriorSpec::Beta { alpha, beta } =>
-            format!("beta(alpha={}, beta={})", alpha, beta),
-        PriorSpec::Uniform => "uniform".to_string(),
-        PriorSpec::HalfNormal { sigma } =>
-            format!("half_normal(sigma={})", sigma),
-        PriorSpec::Gamma { shape, rate } =>
-            format!("gamma(shape={}, rate={})", shape, rate),
-        PriorSpec::Exponential { rate } =>
-            format!("exponential(rate={})", rate),
+        PriorDist::LogNormal(q) =>
+            format!("log_normal(mu={}, sigma={})", q.mu, q.sigma),
+        PriorDist::Normal(q) =>
+            format!("normal(mean={}, sd={})", q.mean, q.sd),
+        PriorDist::Beta(q) =>
+            format!("beta(alpha={}, beta={})", q.alpha, q.beta),
+        PriorDist::Uniform(q) =>
+            format!("uniform(lower={}, upper={})", q.lower, q.upper),
+        PriorDist::HalfNormal(q) =>
+            format!("half_normal(sigma={})", q.sigma),
+        PriorDist::Gamma(q) =>
+            format!("gamma(shape={}, rate={})", q.shape, q.rate),
+        PriorDist::Exponential(q) =>
+            format!("exponential(rate={})", q.rate),
+        PriorDist::Fixed(v) =>
+            format!("fixed({})", v),
     }
 }
 
@@ -450,7 +455,7 @@ mod tests {
 
         [estimate.sigma]
         bounds = [0.01, 0.5]
-        prior = { dist = "log_normal", mu = -2.0, sigma = 0.5 }
+        prior = { log_normal = { mu = -2.0, sigma = 0.5 } }
 
         [fixed]
         N0 = 1000.0
@@ -489,7 +494,7 @@ mod tests {
             "[fixed]\n        N0 = 1000.0\n        sigma = 0.08",
         );
         variant_str = variant_str.replace(
-            "[estimate.sigma]\n        bounds = [0.01, 0.5]\n        prior = { dist = \"log_normal\", mu = -2.0, sigma = 0.5 }\n",
+            "[estimate.sigma]\n        bounds = [0.01, 0.5]\n        prior = { log_normal = { mu = -2.0, sigma = 0.5 } }\n",
             "",
         );
         let variant = parse(&variant_str);
@@ -528,7 +533,7 @@ mod tests {
         // Add a prior on R0 (was none).
         let variant_str = BASELINE_TOML.replace(
             "[estimate.R0]\n        bounds = [1.0, 100.0]",
-            "[estimate.R0]\n        bounds = [1.0, 100.0]\n        prior = { dist = \"log_normal\", mu = 4.0, sigma = 0.4 }",
+            "[estimate.R0]\n        bounds = [1.0, 100.0]\n        prior = { log_normal = { mu = 4.0, sigma = 0.4 } }",
         );
         let variant = parse(&variant_str);
         let diff = ConfigDiff::compare(

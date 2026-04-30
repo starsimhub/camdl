@@ -1258,7 +1258,8 @@ fn generate_prior_draws(
     n: usize,
     seed: u64,
 ) -> Result<Vec<HashMap<String, f64>>, String> {
-    use fit::config_v2::{FitConfigV2, PriorSpec};
+    use fit::config_v2::FitConfigV2;
+    use ir::parameter::PriorDist;
 
     let config = FitConfigV2::load(fit_path)?;
     let fixed = config.fixed.resolve()?;
@@ -1272,7 +1273,8 @@ fn generate_prior_draws(
         return Err(format!(
             "--draws prior requires priors for all estimated parameters.\n  \
              Missing priors: {}\n  \
-             Add prior = {{ dist = \"...\", ... }} to [estimate.{}]",
+             Add prior = {{ <dist> = {{ ... }} }} to [estimate.{}] \
+             (e.g. `prior = {{ log_normal = {{ mu = 0, sigma = 1 }} }}`).",
             missing.join(", "), missing[0]
         ));
     }
@@ -1284,40 +1286,40 @@ fn generate_prior_draws(
         let mut row = HashMap::new();
         for (name, spec) in &config.estimate {
             let value = match spec.prior.as_ref().unwrap() {
-                PriorSpec::LogNormal { mu, sigma } => {
+                PriorDist::LogNormal(p) => {
                     // z ~ N(mu, sigma), value = exp(z)
-                    let z = mu + sigma * rng.normal();
+                    let z = p.mu + p.sigma * rng.normal();
                     z.exp()
                 }
-                PriorSpec::Normal { mu, sigma } => {
-                    mu + sigma * rng.normal()
+                PriorDist::Normal(p) => {
+                    p.mean + p.sd * rng.normal()
                 }
-                PriorSpec::Beta { alpha, beta } => {
+                PriorDist::Beta(p) => {
                     // Beta via ratio of Gammas: X/(X+Y) where X~Gamma(a), Y~Gamma(b)
                     use rand::prelude::Distribution;
-                    let x = rand_distr::Gamma::new(*alpha, 1.0).unwrap()
+                    let x = rand_distr::Gamma::new(p.alpha, 1.0).unwrap()
                         .sample(rng.inner_mut());
-                    let y = rand_distr::Gamma::new(*beta, 1.0).unwrap()
+                    let y = rand_distr::Gamma::new(p.beta, 1.0).unwrap()
                         .sample(rng.inner_mut());
                     x / (x + y)
                 }
-                PriorSpec::Uniform => {
-                    let (lo, hi) = spec.bounds;
-                    lo + (hi - lo) * rng.uniform()
+                PriorDist::Uniform(p) => {
+                    p.lower + (p.upper - p.lower) * rng.uniform()
                 }
-                PriorSpec::HalfNormal { sigma } => {
-                    (sigma * rng.normal()).abs()
+                PriorDist::HalfNormal(p) => {
+                    (p.sigma * rng.normal()).abs()
                 }
-                PriorSpec::Gamma { shape, rate } => {
+                PriorDist::Gamma(p) => {
                     use rand::prelude::Distribution;
-                    rand_distr::Gamma::new(*shape, 1.0 / *rate).unwrap()
+                    rand_distr::Gamma::new(p.shape, 1.0 / p.rate).unwrap()
                         .sample(rng.inner_mut())
                 }
-                PriorSpec::Exponential { rate } => {
+                PriorDist::Exponential(p) => {
                     use rand::prelude::Distribution;
-                    rand_distr::Exp::new(*rate).unwrap()
+                    rand_distr::Exp::new(p.rate).unwrap()
                         .sample(rng.inner_mut())
                 }
+                PriorDist::Fixed(v) => *v,
             };
             let clamped = value.clamp(spec.bounds.0, spec.bounds.1);
             row.insert(name.clone(), clamped);
