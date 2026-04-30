@@ -727,14 +727,27 @@ let parameter_to_json (p : parameter) : Yojson.Safe.t =
   ]
 
 let parameter_of_json j =
-  { name          = as_string (member "name"  j);
+  let name = as_string (member "name" j) in
+  let prior = (match member_opt "prior" j with
+    | Some `Null | None -> None
+    | Some p -> Some (prior_dist_of_json p)) in
+  let hierarchical = (match member_opt "hierarchical" j with
+    | Some `Null | None -> None
+    | Some h -> Some (hierarchical_prior_of_json h)) in
+  (match prior, hierarchical with
+   | Some _, Some _ ->
+     fail "parameter '%s': prior and hierarchical are mutually exclusive — \
+           a parameter is either fitted under a single-level prior or pooled \
+           under a hierarchical prior, not both" name
+   | _ -> ());
+  { name;
     value         = (match member_opt "value" j with Some `Null | None -> None | Some v -> Some (as_float v));
     bounds        = (match member_opt "bounds" j with
       | Some `Null | None -> None
       | Some (`List [lo; hi]) -> Some (as_float lo, as_float hi)
       | _ -> fail "bounds must be a two-element array [lo, hi]");
-    prior         = (match member_opt "prior"         j with Some `Null | None -> None | Some p -> Some (prior_dist_of_json p));
-    hierarchical  = (match member_opt "hierarchical"  j with Some `Null | None -> None | Some h -> Some (hierarchical_prior_of_json h));
+    prior;
+    hierarchical;
     transform     = (match member_opt "transform"     j with Some `Null | None -> None | Some t -> Some (transform_of_json  t));
     initial_value = (match member_opt "initial_value" j with Some `Null | None -> None | Some v -> Some (as_float v));
     param_kind    = (match member_opt "param_kind"    j with Some `Null | None -> None | Some k -> Some (as_string k));

@@ -91,10 +91,67 @@ let golden_cases =
     "seir_age";
   ]
 
+(* ── Deserializer invariant: prior ⊕ hierarchical ────────────────────────── *)
+
+(* Take a known-good IR, splice a hand-crafted parameter object that has both
+   `prior` and `hierarchical` set, and assert the deserializer rejects it. The
+   compiler enforces this invariant during expansion, but a hand-edited or
+   externally-generated IR bypasses the compiler and must still be caught. *)
+let prior_xor_hierarchical_test () =
+  let json_in = read_golden "sir_basic" in
+  let j = Yojson.Safe.from_string json_in in
+  let bad_param = `Assoc [
+    ("name",          `String "fabricated");
+    ("value",         `Float 1.0);
+    ("bounds",        `Null);
+    ("prior",         `Assoc [("normal", `Assoc [
+      ("mean", `Float 0.0); ("sd", `Float 1.0)])]);
+    ("hierarchical",  `Assoc [
+      ("kind", `String "normal");
+      ("args", `Assoc []);
+      ("pool_over", `String "")]);
+    ("transform",     `Null);
+    ("initial_value", `Null);
+    ("param_kind",    `Null);
+    ("param_dim",     `Null);
+  ] in
+  let j' = match j with
+    | `Assoc kvs ->
+      `Assoc (List.map (fun (k, v) ->
+        if String.equal k "parameters" then
+          (k, match v with `List xs -> `List (xs @ [bad_param]) | _ -> v)
+        else (k, v)) kvs)
+    | _ -> failwith "sir_basic.ir.json is not a top-level object"
+  in
+  let s = Yojson.Safe.to_string j' in
+  match Serde.model_of_string s with
+  | Ok _ ->
+    Alcotest.failf "deserializer accepted a parameter with both prior and \
+                    hierarchical set; expected rejection"
+  | Error msg ->
+    let lc = String.lowercase_ascii msg in
+    let mentions sub =
+      let nlc = String.length lc and nsub = String.length sub in
+      let rec scan i =
+        if i + nsub > nlc then false
+        else if String.sub lc i nsub = sub then true
+        else scan (i + 1)
+      in scan 0
+    in
+    if not (mentions "prior" && mentions "hierarchical" && mentions "mutually exclusive") then
+      Alcotest.failf "expected error to mention 'prior', 'hierarchical', and \
+                      'mutually exclusive'; got: %s" msg
+
 let () =
   let tests =
     List.map (fun name ->
       Alcotest.test_case name `Quick (roundtrip_test name)
     ) golden_cases
   in
-  Alcotest.run "IR round-trip" [("golden", tests)]
+  let invariant_tests = [
+    Alcotest.test_case "prior ⊕ hierarchical" `Quick prior_xor_hierarchical_test;
+  ] in
+  Alcotest.run "IR round-trip" [
+    ("golden", tests);
+    ("deser-invariants", invariant_tests);
+  ]
