@@ -777,7 +777,13 @@ fn resolve_any(root: &str, key: &str) -> Result<ResolvedRun, String> {
         for dir in walkdir_all(&subroot) {
             if !dir.join("run.json").exists() { continue; }
             let Some((run, created, rel_path)) = load_run_common(&dir, &cwd) else { continue; };
-            if !run.hash.starts_with(hash_prefix) { continue; }
+            // Match against Run.hash universally. For Simulate runs
+            // also match against `sim_hash`, since the on-disk path
+            // is keyed by sim_hash (`<root>/sims/<sim_hash>/...`) and
+            // users naturally type the prefix they see.
+            let hash_match = run.hash.starts_with(hash_prefix)
+                || matches!(&run.kind, RunKind::Simulate(m) if m.sim_hash.starts_with(hash_prefix));
+            if !hash_match { continue; }
             // Sim-only narrowing on /scenario[/seed_N].
             if let RunKind::Simulate(ref m) = run.kind {
                 if scen_filter.is_some_and(|s| s != m.scenario) { continue; }

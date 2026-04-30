@@ -498,6 +498,49 @@ impl Stage {
             Stage::PFilter { .. } => 1,
         }
     }
+
+    /// Hashable subset of the stage that defines its statistical
+    /// identity. For PGAS / PMMH this *omits* the extension dimension
+    /// (`sweeps` / `iterations` respectively), so `--resume` can extend
+    /// a chain by changing only that field without invalidating the
+    /// stored `resume_state.bin`. Every other field is identity-
+    /// defining: changing chains, particles, burn_in, thin, or
+    /// starts_from requires a fresh run.
+    ///
+    /// IF2 has no extension dimension — its cooling schedule is
+    /// determined by the total iteration count, so resuming from the
+    /// middle of a different schedule is statistically incoherent.
+    /// PFilter is single-pass; nothing to extend.
+    ///
+    /// Returned as `serde_json::Value` so `provenance::fit_stage_hash`
+    /// can hash it via `serde_json::to_vec` (the same canonical form
+    /// it used pre-split for the whole stage). Stable across
+    /// recompiles because `serde_json` sorts object keys lexically
+    /// when serializing maps.
+    pub fn identity_payload(&self) -> serde_json::Value {
+        use serde_json::json;
+        match self {
+            Stage::PGAS { chains, particles, starts_from, burn_in, thin, .. } => json!({
+                "method": "pgas",
+                "chains": chains,
+                "particles": particles,
+                "starts_from": starts_from,
+                "burn_in": burn_in,
+                "thin": thin,
+            }),
+            Stage::PMMH { chains, particles, starts_from, burn_in, thin, .. } => json!({
+                "method": "pmmh",
+                "chains": chains,
+                "particles": particles,
+                "starts_from": starts_from,
+                "burn_in": burn_in,
+                "thin": thin,
+            }),
+            // No extension dimension: hash the full stage.
+            Stage::IF2 { .. } | Stage::PFilter { .. } =>
+                serde_json::to_value(self).unwrap_or(json!({})),
+        }
+    }
 }
 
 // ─── Clean-evaluation + gate (IF2 scout/refine) ─────────────────────────────
@@ -2089,5 +2132,90 @@ decibans_thresh = 100.0
         assert_eq!(format_dataset_dir(9),   "ds_09");
         assert_eq!(format_dataset_dir(10),  "ds_10");
         assert_eq!(format_dataset_dir(100), "ds_100");
+    }
+
+    #[test]
+    fn pgas_identity_payload_omits_sweeps() {
+        // Two PGAS stages identical except for `sweeps` must produce
+        // the same identity_payload — that's the contract that lets
+        // --resume extend a chain by changing the iteration count.
+        let s_short = Stage::PGAS {
+            chains: 4, particles: 100, sweeps: 1000,
+            starts_from: StartsFrom::default(),
+            burn_in: Some(200), thin: Some(2),
+        };
+        let s_long = Stage::PGAS {
+            chains: 4, particles: 100, sweeps: 5000,
+            starts_from: StartsFrom::default(),
+            burn_in: Some(200), thin: Some(2),
+        };
+        assert_eq!(s_short.identity_payload(), s_long.identity_payload());
+
+        // Changing any *other* PGAS field must change the payload.
+        let s_more_chains = Stage::PGAS {
+            chains: 8, particles: 100, sweeps: 1000,
+            starts_from: StartsFrom::default(),
+            burn_in: Some(200), thin: Some(2),
+        };
+        assert_ne!(s_short.identity_payload(), s_more_chains.identity_payload());
+
+        let s_more_particles = Stage::PGAS {
+            chains: 4, particles: 200, sweeps: 1000,
+            starts_from: StartsFrom::default(),
+            burn_in: Some(200), thin: Some(2),
+        };
+        assert_ne!(s_short.identity_payload(), s_more_particles.identity_payload());
+
+        let s_diff_burn_in = Stage::PGAS {
+            chains: 4, particles: 100, sweeps: 1000,
+            starts_from: StartsFrom::default(),
+            burn_in: Some(500), thin: Some(2),
+        };
+        assert_ne!(s_short.identity_payload(), s_diff_burn_in.identity_payload());
+    }
+
+    #[test]
+    fn pmmh_identity_payload_omits_iterations() {
+        let s_short = Stage::PMMH {
+            chains: 4, particles: 100, iterations: 1000,
+            starts_from: StartsFrom::default(),
+            burn_in: Some(200), thin: Some(2),
+        };
+        let s_long = Stage::PMMH {
+            chains: 4, particles: 100, iterations: 8000,
+            starts_from: StartsFrom::default(),
+            burn_in: Some(200), thin: Some(2),
+        };
+        assert_eq!(s_short.identity_payload(), s_long.identity_payload());
+    }
+
+    #[test]
+    fn if2_identity_payload_includes_iterations_and_cooling() {
+        // IF2 has no extension dimension — its cooling schedule is
+        // determined by the total iteration count, so changing
+        // iterations *must* invalidate identity (and thus reject
+        // resume). This guards against a future refactor accidentally
+        // moving `iterations` out of identity.
+        let s50 = Stage::IF2 {
+            chains: 4, particles: 100, iterations: 50, cooling: 0.95,
+            starts_from: StartsFrom::default(),
+            loglik_eval: LoglikEvalConfig::default(),
+            gate: GateConfig::default(),
+        };
+        let s100 = Stage::IF2 {
+            chains: 4, particles: 100, iterations: 100, cooling: 0.95,
+            starts_from: StartsFrom::default(),
+            loglik_eval: LoglikEvalConfig::default(),
+            gate: GateConfig::default(),
+        };
+        assert_ne!(s50.identity_payload(), s100.identity_payload());
+
+        let s_diff_cooling = Stage::IF2 {
+            chains: 4, particles: 100, iterations: 50, cooling: 0.70,
+            starts_from: StartsFrom::default(),
+            loglik_eval: LoglikEvalConfig::default(),
+            gate: GateConfig::default(),
+        };
+        assert_ne!(s50.identity_payload(), s_diff_cooling.identity_payload());
     }
 }

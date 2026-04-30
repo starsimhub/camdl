@@ -255,6 +255,24 @@ pub fn cmd_fit_run_v2(a: &crate::args::FitRunArgs) {
         std::process::exit(1);
     }
 
+    // Validate --resume requires a PGAS or PMMH stage. Other methods
+    // have no extension dimension (IF2's cooling depends on total
+    // iterations, PFilter is single-pass), so resuming would be
+    // statistically incoherent.
+    if a.resume {
+        if let Some(ref name) = stage_filter {
+            match config.stages.get(name.as_str()) {
+                Some(s) if matches!(s, Stage::PGAS { .. } | Stage::PMMH { .. }) => {}
+                Some(s) => {
+                    eprintln!("error: --resume is only supported for PGAS and PMMH stages; \
+                               '{}' is method '{}'.", name, s.method_name());
+                    std::process::exit(1);
+                }
+                None => {} // The stage_filter check below will report this.
+            }
+        }
+    }
+
     // Determine which stages to run
     let stages_to_run: Vec<(&str, &Stage)> = if let Some(ref name) = stage_filter {
         match config.stages.get(name.as_str()) {
@@ -894,7 +912,7 @@ pub fn cmd_fit_run_v2(a: &crate::args::FitRunArgs) {
                     seed, force,
                     /* use_nuts */ true,
                     /* dense_mass */ true,
-                    /* resume */ false,
+                    a.resume,
                     effective_starts.as_deref(),
                 ).unwrap_or_else(|e| {
                     eprintln!("error running pgas stage '{}': {}", stage_name, e);
@@ -918,7 +936,7 @@ pub fn cmd_fit_run_v2(a: &crate::args::FitRunArgs) {
                     pmmh_opts,
                     seed, force,
                     /* check_variance */ false,
-                    /* resume */ false,
+                    a.resume,
                     effective_starts.as_deref(),
                 ).unwrap_or_else(|e| {
                     eprintln!("error running pmmh stage '{}': {}", stage_name, e);

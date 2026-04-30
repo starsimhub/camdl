@@ -346,11 +346,13 @@ pub fn fit_stage_hash(
         h.update(b"\x00");
     }
 
-    // Stage config
+    // Stage config — uses Stage::identity_payload(), which omits the
+    // extension dimension (PGAS sweeps, PMMH iterations) so resume
+    // can extend a chain without invalidating its stored state.
     h.update(b"\x00stage\x00");
     h.update(stage_name.as_bytes());
     h.update(b"\x00");
-    h.update(serde_json::to_vec(stage).unwrap_or_default());
+    h.update(serde_json::to_vec(&stage.identity_payload()).unwrap_or_default());
 
     // Seed
     h.update(b"\x00seed\x00");

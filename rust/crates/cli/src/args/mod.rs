@@ -286,6 +286,15 @@ pub struct FitRunArgs {
     #[arg(long)]
     pub force: bool,
 
+    /// Resume a previously-completed PGAS or PMMH stage from its
+    /// stored `chain_<n>/resume_state.bin`. Requires --stage.
+    /// Identity fields (chains, particles, burn_in, thin, model,
+    /// data, priors, fixed, seed) must match the original run; the
+    /// extension dimension (PGAS `sweeps` / PMMH `iterations`) may
+    /// change to extend the chain. Conflicts with --force.
+    #[arg(long, requires = "stage", conflicts_with = "force")]
+    pub resume: bool,
+
     /// Starting-point directory or short run hash (requires --stage)
     #[arg(long, requires = "stage")]
     pub starts_from: Option<String>,
