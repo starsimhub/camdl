@@ -70,7 +70,7 @@ the user and the sim.
 
 The two seams are where most design risk concentrates:
 
-- **CLI → sim**: e.g., `fit::config_v2::PriorSpec` → `sim::Prior`,
+- **CLI → sim**: e.g., `ir::PriorDist` → `sim::Prior`,
   `FitConfigV2` → `FitRunConfig` → `IF2Config`. Each conversion is a
   place where the user's mental model meets the algorithm's needs.
 - **CLI → ir**: e.g., `Model` reads (load + scenario filter +
@@ -210,8 +210,8 @@ side of the seam — algorithm-agnostic, declarative, validated.
 | Type | Role |
 |---|---|
 | **`FitConfigV2`** | Top of the fit.toml schema. Holds `model, data, scenario/enable/disable, ic_free, config (backend+dt), estimate (IndexMap), fixed, stages (IndexMap)`. |
-| `EstimateSpecV2` | Per-parameter inference spec: `bounds, transform, prior, start, ivp, rw_sd`. |
-| **`PriorSpec`** | 7-variant enum (tagged on `dist` field): `LogNormal, Normal, Beta, Uniform, HalfNormal, Gamma, Exponential`. |
+| `EstimateSpecV2` | Per-parameter inference spec: `bounds, transform, prior, start, ivp, rw_sd`. The `prior` field is `Option<ir::parameter::PriorDist>`. |
+| `ir::parameter::PriorDist` | 8-variant enum (Uniform, Normal, LogNormal, HalfNormal, Beta, Gamma, Exponential, Fixed) — the single workspace-wide prior wire format. Re-exported as `config_v2::PriorDist`. |
 | **`Transform`** | CLI's flavor: `Log | Logit | Identity`. |
 | `FixedParams` | Either inline values or a TOML file path (resolved at runtime). |
 | `DataSpec` | `observations: IndexMap<stream_name, file_path>`. |
@@ -298,7 +298,7 @@ Type helpers in `args/types.rs`: `ParamKv` (`NAME=VALUE`), `RwSd`
 |---|---|
 | `hashing.rs` | sha256 helpers — `model_hash`, `sim_hash`, `scen_hash`, `file_hash`, `path_stem_slug`, `canonical_params`. The shared low-level building block for the CAS impls. |
 | `run_paths.rs` | `output_root`, `sim_run_dir`, `fit_run_dir`, `profile_point_dir`, `profile_point_start_dir`. The single source of truth for the on-disk layout. |
-| `sampling.rs` | Space-filling sample helpers: `PriorSpec` (batch's flavour), `DesignParam`, `DesignPoints`, Sobol/LHS/random generators. Used by `batch run`. |
+| `sampling.rs` | Space-filling sample helpers: `DesignParam` (carries `Option<ir::PriorDist>` for VOI importance weighting), `DesignPoints`, `describe_prior`, Sobol/LHS/random generators. Used by `batch run`. |
 | `progress.rs` | Indicatif vs plain-log progress mode. |
 | `version.rs` | `VERSION_SHORT` (e.g. `"0.1.0+5f18aea"`). |
 | `util.rs` | `SimRun`, `apply_scenario_filter`, `load_model`, `apply_params_file`, `derive_chain_seed`, `write_traj_tsv`, … the shared infrastructure used by every command. |
@@ -617,38 +617,32 @@ point: CLI's `Transform` (`Log | Logit | Identity`, unbounded) maps
 to sim's `Transform` (`None | Log{lo,hi} | Logit{lo,hi}`, bounded)
 by attaching `(lower, upper)`.
 
-### 5.3 Prior conversion — *the four-PriorSpec smell*
+### 5.3 Prior conversion (consolidated 2026-04-30)
 
-There are **four distinct prior representations** in the workspace:
+Two types across the workspace:
 
 | Type | Where | Shape | Scope |
 |---|---|---|---|
-| `ir::parameter::PriorDist` | `ir/src/parameter.rs` | enum, 8 variants | Embedded in IR; what the OCaml compiler emits. |
-| `cli::fit::config_v2::PriorSpec` | `cli/src/fit/config_v2.rs` | enum, 7 variants (no Hierarchical) | What users write in `fit.toml`. |
-| `cli::sampling::PriorSpec` | `cli/src/sampling.rs` | struct, stringly-typed (`dist: String`) | Used by `batch run` for VOI importance weighting. |
+| `ir::parameter::PriorDist` | `ir/src/parameter.rs` | externally-tagged enum, 8 variants | Embedded in IR; what the OCaml compiler emits; what users write in `fit.toml`'s `[estimate.X.prior]` and in batch design TOML's `[design.X.parameters.Y.prior]`. Re-exported as `config_v2::PriorDist`. |
 | `sim::inference::Prior` | `sim/src/inference/prior.rs` | enum, 9 variants (incl. Hierarchical) | The runtime evaluator. |
 
-Conversions:
+Single conversion site: `Prior::from_ir(&ir::PriorDist) -> Prior`.
 
 ```
-ir::PriorDist ──Prior::from_ir()──▶ sim::Prior
-config_v2::PriorSpec ──prior_spec_to_prior()──▶ sim::Prior
-                                        (runner.rs:1492)
-
 resolve_prior(name, fit.estimate, model, default=Flat):
-    1. fit.toml's PriorSpec (if set)        → prior_spec_to_prior
+    1. fit.toml's PriorDist (if set)        → Prior::from_ir
     2. else IR's PriorDist (if set)         → Prior::from_ir
     3. else IR's HierarchicalPrior (if set) → Prior::Hierarchical
     4. else                                 → Prior::Flat
 ```
 
-`sampling::PriorSpec` is a *fifth* form that doesn't even share
-variants with the others (it's stringly-typed with optional fields).
-Used in exactly one place (`batch.rs:63`'s `DesignParam.prior` for
-VOI weighting); it doesn't currently feed into `sim::Prior`.
-
-**Smell.** This is the single biggest schema dedup opportunity. See
-`CLEANUP-prior-types.md` and §6.1.
+The earlier four-way duplication (`config_v2::PriorSpec`,
+`sampling::PriorSpec`, the bridge function `prior_spec_to_prior`,
+plus the IR's `PriorDist`) was collapsed in
+`docs/dev/proposals/2026-04-30-prior-types-consolidation.md`. The
+`Hierarchical` runtime variant continues to be sourced from
+`ir::Parameter.hierarchical` (a separate field on `Parameter`)
+rather than from a hypothetical hierarchical `PriorDist` variant.
 
 ### 5.4 IR `ObservationModel` → sim `MultiStreamObsModel`
 
@@ -712,23 +706,18 @@ two columns (`t`, `value`) and lives in `pfilter`/runner code.
 These are observations to refactor (or defer). Listed roughly by
 ROI of fix-now vs. ignore.
 
-### 6.1 The four `PriorSpec` representations (high ROI)
+### 6.1 The four `PriorSpec` representations — *resolved 2026-04-30*
 
-See §5.3. Tracked separately in `CLEANUP-prior-types.md`. Two
-candidate fixes:
-
-- **Minimum**: delete `cli::sampling::PriorSpec`. It's stringly-
-  typed, doesn't feed into `sim::Prior`, and the VOI workflow could
-  use `config_v2::PriorSpec` directly.
-- **Full**: collapse to two types — `ir::PriorDist` (serialization /
-  schema) and `sim::Prior` (runtime evaluator), with `from_ir` as
-  the bridge. `config_v2::PriorSpec` becomes an alias / re-export of
-  `ir::PriorDist`. This requires the IR to gain Hierarchical (it
-  doesn't have it as a `PriorDist` variant — it lives separately as
-  `HierarchicalPrior`).
-
-Either way, the seam at `runner.rs:1492` (`prior_spec_to_prior`)
-goes away.
+Status: **resolved**. Collapsed to two types — `ir::parameter::PriorDist`
+(serialization / schema, re-exported as `config_v2::PriorDist`) and
+`sim::inference::Prior` (runtime evaluator). The `prior_spec_to_prior`
+bridge function is gone; all CLI prior-handling sites either accept
+`ir::PriorDist` directly or call `Prior::from_ir`. Hierarchical priors
+continue to live at `Parameter.hierarchical` rather than as a
+`PriorDist` variant — that asymmetry is intentional, since
+hierarchical args are `Expr`-valued while the `PriorDist` variants
+are scalar-valued. See §5.3 and
+`docs/dev/proposals/2026-04-30-prior-types-consolidation.md`.
 
 ### 6.2 Two `Transform` types — `ir::Transform` and `sim::Transform`
 
@@ -747,20 +736,14 @@ step) but worth flagging: if you ever want to write `impl
 TryFrom<ir::Transform> for sim::Transform`, you'd need to thread
 bounds through the conversion, which clarifies what's happening.
 
-### 6.3 `cli::sampling::PriorSpec` is stringly-typed
-
-`pub struct PriorSpec { pub dist: String, pub alpha: ..., ... }` —
-panics-on-dispatch (`other => format!("{}(?)", other)`). Should be
-an enum like `config_v2::PriorSpec`. Tracked under §6.1.
-
-### 6.4 `FitStageMeta.algorithm: serde_json::Value`
+### 6.3 `FitStageMeta.algorithm: serde_json::Value`
 
 A typed `enum AlgorithmDiagnostics { IF2(...), PGAS(...), ... }`
 would be safer (no key-mistype risk in the renderers) but
 significantly heavier. Current `MethodResult` adapter approach is
 acceptable; defer.
 
-### 6.5 `RunEntry` / `FitEntry` / `ProfileEntry` redundancy
+### 6.4 `RunEntry` / `FitEntry` / `ProfileEntry` redundancy
 
 Each is `{run, meta, paths, created}` where `meta` is a destructured
 copy of `run.kind`'s payload. Stored alongside for direct field
@@ -776,7 +759,7 @@ the match arm.
 Estimated diff: ~80 LOC removed, ~30 added. ROI is "nicer," not
 "unblocks anything."
 
-### 6.6 `loglik_eval` and `gate` defaulting in `FitRunConfig`
+### 6.5 `loglik_eval` and `gate` defaulting in `FitRunConfig`
 
 `FitRunConfig::build` sets these to `Default::default()` and the
 real values get patched in by the dispatcher (`fit/mod.rs`)
@@ -789,7 +772,7 @@ Minimum fix: make these fields `Option<...>` and have the
 dispatcher require an explicit set. Bigger fix: pass them as
 `build()` arguments.
 
-### 6.7 PGAS / PMMH stage opts revert v1 knobs to defaults
+### 6.6 PGAS / PMMH stage opts revert v1 knobs to defaults
 
 After the v1 cleanup, several v1-only knobs (`tempering`,
 `max_treedepth`, `trajectory_warmup`, `csmc_sweeps_per_nuts`,
@@ -803,13 +786,13 @@ needs those knobs, surfacing them in `Stage::PGAS` / `Stage::PMMH`
 plus the `PgasStageOpts::from_stage` / `PmmhStageOpts::from_stage`
 adapters is mechanical.
 
-### 6.8 `DEFAULT_N_TRAJECTORIES` constant in pgas.rs
+### 6.7 `DEFAULT_N_TRAJECTORIES` constant in pgas.rs
 
 `pgas.rs` has `const DEFAULT_N_TRAJECTORIES: usize = 200;` set
 inline. After v1 cleanup it's the only knob path; should either
 be in `Stage::PGAS` or documented as fixed.
 
-### 6.9 `--starts-from` is `Option<&str>` everywhere
+### 6.8 `--starts-from` is `Option<&str>` everywhere
 
 The `starts_from` arg is shaped as `Option<&str>` through pgas.rs
 and pmmh.rs entry points, but `Stage::PGAS.starts_from` is a typed
@@ -818,7 +801,7 @@ and pmmh.rs entry points, but `Stage::PGAS.starts_from` is a typed
 shape is fine at the call boundary; just worth knowing the seam
 exists.
 
-### 6.10 `IF2Result` / `PGASResult` / `PMMHResult` shapes are diagnostic-heavy
+### 6.9 `IF2Result` / `PGASResult` / `PMMHResult` shapes are diagnostic-heavy
 
 Each result type carries 10+ fields of inference diagnostics, and
 the `FitStageMeta.algorithm` JSON has to flatten them by hand at
@@ -828,7 +811,7 @@ centralize the per-method diagnostic schema. Defer; the current
 pattern is verbose but the correctness pressure is low (it's
 diagnostic-only output).
 
-### 6.11 `cli/src/util.rs` is a kitchen sink (~1300 LOC)
+### 6.10 `cli/src/util.rs` is a kitchen sink (~1300 LOC)
 
 `SimRun`, `apply_scenario_filter`, `load_model`, `apply_params_file`,
 `derive_chain_seed`, `write_traj_tsv`, `resolve_ir_path`, …. The
@@ -836,9 +819,9 @@ file is doing too much. Splittable into `util/io.rs` (load/write),
 `util/scenario.rs` (filter + apply), `util/seed.rs` (derive). Pure
 mechanical refactor; defer until there's a reason.
 
-### 6.12 No `From` / `Into` impls across the seams
+### 6.11 No `From` / `Into` impls across the seams
 
-Every CLI→sim conversion is a free function (`prior_spec_to_prior`,
+Every CLI→sim conversion is a free function (`Prior::from_ir`,
 `derive_transform`, `StreamProjection::from_ir`). Idiomatic Rust
 would make these `From` / `TryFrom` impls. The current state is
 functional and grep-discoverable, just slightly less idiomatic.
@@ -849,11 +832,6 @@ functional and grep-discoverable, just slightly less idiomatic.
 big architectural decisions (CAS abstraction, FitConfigV2 as the
 single fit-config schema, kind-tagged `Run` envelope, identity vs
 extension hash split for resume) all hold up under the type-flow
-view. The only structural smell with non-trivial ROI is the
-four-`PriorSpec` situation (§6.1). Everything else is either
-deferred-defer (§6.4, §6.5, §6.10, §6.11) or one-commit cleanup
-(§6.6, §6.8).
-
-If we want to shave one more thing before alpha, **prior-type
-unification (§6.1)** is the natural next pass — it's the last place
-where the CLI/sim/IR seam shows obvious duplication.
+view. The four-`PriorSpec` situation (§6.1) was resolved in
+2026-04-30; everything else is either deferred-defer (§6.3, §6.4,
+§6.9, §6.10) or one-commit cleanup (§6.5, §6.7).
