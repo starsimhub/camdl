@@ -65,7 +65,8 @@ pub fn generate_synthetic_datasets(
     std::fs::write(synthetic_dir.join("truth.toml"), &truth_bytes)
         .map_err(|e| format!("cannot write synthetic/truth.toml: {}", e))?;
 
-    let seeds = spec.sim_seeds.to_vec();
+    let seeds = spec.sim_seeds.to_vec()
+        .map_err(|e| format!("[synthetic] sim_seeds: {}", e))?;
     let mut out = Vec::with_capacity(seeds.len());
     for (i, &sim_seed) in seeds.iter().enumerate() {
         let idx = i + 1;
@@ -403,6 +404,6 @@ simulate { from = 0 'days  to = 10 'days }
     #[test]
     fn spec_roundtrips_seed_lists() {
         let s = SeedsSpec::List(vec![1, 2, 3]);
-        assert_eq!(s.to_vec(), vec![1u64, 2, 3]);
+        assert_eq!(s.to_vec().unwrap(), vec![1u64, 2, 3]);
     }
 }

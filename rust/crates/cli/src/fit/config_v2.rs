@@ -212,7 +212,8 @@ pub struct SyntheticSpec {
 impl SyntheticSpec {
     pub fn validate(&self) -> Result<(), String> {
         // Ensure sim_seeds is non-empty and has no duplicates.
-        let seeds = self.sim_seeds.to_vec();
+        let seeds = self.sim_seeds.to_vec()
+            .map_err(|e| format!("[synthetic] sim_seeds: {}", e))?;
         if seeds.is_empty() {
             return Err("[synthetic] sim_seeds is empty — at least one seed required".into());
         }
@@ -276,28 +277,26 @@ impl<'de> Deserialize<'de> for SeedsSpec {
 
 impl SeedsSpec {
     /// Expand to a concrete list. Parses the range form on demand.
-    pub fn to_vec(&self) -> Vec<u64> {
+    /// Returns `Err` on malformed range strings (typo `"1-20"` instead
+    /// of `"1:20"`, inverted bounds `"20:1"`, non-integer tokens) so a
+    /// silently-empty fit replicate set is impossible.
+    pub fn to_vec(&self) -> Result<Vec<u64>, String> {
         match self {
-            SeedsSpec::List(xs) => xs.clone(),
-            SeedsSpec::Range(s) => parse_seed_range(s).unwrap_or_default(),
+            SeedsSpec::List(xs) => Ok(xs.clone()),
+            SeedsSpec::Range(s) => parse_seed_range(s).ok_or_else(|| format!(
+                "malformed seed range '{}' — use 'start:end' with \
+                 start ≤ end, e.g. '1:20'", s)),
         }
     }
 
     pub fn validate_no_duplicates(&self) -> Result<(), String> {
-        let v = self.to_vec();
+        let v = self.to_vec()?;
         let mut seen = BTreeSet::new();
         for s in &v {
             if !seen.insert(*s) {
                 return Err(format!(
                     "duplicate seed {} — each seed must be unique to avoid \
                      provenance-hash collisions between fits", s));
-            }
-        }
-        if let SeedsSpec::Range(s) = self {
-            if v.is_empty() {
-                return Err(format!(
-                    "malformed seed range '{}' — use 'start:end' with start ≤ end, \
-                     e.g. '1:20'", s));
             }
         }
         Ok(())
@@ -2385,7 +2384,7 @@ sim_seeds   = "1:20"
         let config = parse(&src).unwrap();
         let syn = config.synthetic.as_ref().expect("[synthetic] missing");
         assert_eq!(syn.true_params, "truth.toml");
-        assert_eq!(syn.datasets.unwrap_or_else(|| syn.sim_seeds.to_vec().len()), 20);
+        assert_eq!(syn.datasets.unwrap_or_else(|| syn.sim_seeds.to_vec().unwrap().len()), 20);
         assert!(syn.scenario.is_none());
     }
 
@@ -2399,7 +2398,7 @@ sim_seeds   = [7, 42, 101]
         let config = parse(&src).unwrap();
         let syn = config.synthetic.unwrap();
         assert!(syn.datasets.is_none(), "datasets should be inferred, not set");
-        assert_eq!(syn.sim_seeds.to_vec().len(), 3);
+        assert_eq!(syn.sim_seeds.to_vec().unwrap().len(), 3);
         syn.validate().expect("inferred count must validate");
     }
 
@@ -2447,17 +2446,27 @@ sim_seeds   = "1:5"
     #[test]
     fn seeds_range_parses() {
         let s = SeedsSpec::Range("1:5".into());
-        assert_eq!(s.to_vec(), vec![1u64, 2, 3, 4, 5]);
+        assert_eq!(s.to_vec().unwrap(), vec![1u64, 2, 3, 4, 5]);
         s.validate_no_duplicates().unwrap();
     }
 
     #[test]
     fn seeds_inverted_range_errors() {
         let s = SeedsSpec::Range("10:5".into());
-        assert_eq!(s.to_vec(), Vec::<u64>::new());
-        let err = s.validate_no_duplicates().unwrap_err();
+        let err = s.to_vec().unwrap_err();
         assert!(err.contains("malformed") || err.contains("start ≤ end"),
             "inverted range must surface a clear error: {}", err);
+        let err = s.validate_no_duplicates().unwrap_err();
+        assert!(err.contains("malformed") || err.contains("start ≤ end"),
+            "validate_no_duplicates must propagate parse error: {}", err);
+    }
+
+    #[test]
+    fn seeds_malformed_range_errors() {
+        let s = SeedsSpec::Range("not-a-range".into());
+        let err = s.to_vec().unwrap_err();
+        assert!(err.contains("malformed"),
+            "malformed range must surface a clear error: {}", err);
     }
 
     #[test]
