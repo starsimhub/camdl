@@ -1548,22 +1548,10 @@ pub fn collect_all_params(
     params
 }
 
-/// Convert a v2 `PriorSpec` (typed enum from fit.toml — currently a
-/// re-export of `ir::PriorDist`) to the runtime
-/// `sim::inference::Prior` used by PGAS/PMMH/IF2 log-density evaluators.
-///
-/// Thin pass-through to `Prior::from_ir`; kept for now so the
-/// fit.toml-vs-model precedence layer at `resolve_prior` reads
-/// uniformly. Slated for deletion in a follow-up commit (see
-/// `docs/dev/proposals/2026-04-30-prior-types-consolidation.md`).
-pub fn prior_spec_to_prior(spec: &super::config_v2::PriorSpec) -> Prior {
-    Prior::from_ir(spec)
-}
-
 /// Resolve the prior for a parameter using the precedence chain:
 ///
-///   1. fit.toml `[estimate.<name>.prior]` (typed PriorSpec; override
-///      for sensitivity analysis)
+///   1. fit.toml `[estimate.<name>.prior]` (typed `ir::PriorDist`;
+///      override for sensitivity analysis)
 ///   2. model IR parameter.prior (from `~` syntax in .camdl)
 ///   3. Prior::Flat (improper uniform, default for inference)
 ///
@@ -1573,10 +1561,10 @@ pub fn resolve_prior(
     estimate: &indexmap::IndexMap<String, super::config_v2::EstimateSpecV2>,
     model: &ir::Model,
 ) -> (Prior, &'static str) {
-    // 1. fit.toml override (typed PriorSpec — no string parsing).
+    // 1. fit.toml override.
     if let Some(est) = estimate.get(name) {
-        if let Some(ref spec) = est.prior {
-            return (prior_spec_to_prior(spec), "fit.toml");
+        if let Some(ref pd) = est.prior {
+            return (Prior::from_ir(pd), "fit.toml");
         }
     }
     // 2. model IR
@@ -2597,28 +2585,27 @@ dt = 1.0
 
     /// Replaces the v1-era `parse_prior_covers_all_distributions` +
     /// `parse_prior_rejects_invalid_input` tests. fit.toml carries `prior`
-    /// as `ir::PriorDist` (re-exported as `PriorSpec`); the only conversion
-    /// is `prior_spec_to_prior` (delegates to `Prior::from_ir`), which
-    /// each variant of must map onto the correct runtime `Prior`.
+    /// as `ir::PriorDist`; each variant must map onto the correct runtime
+    /// `Prior` via `Prior::from_ir`.
     #[test]
-    fn prior_spec_to_prior_maps_each_variant() {
+    fn prior_dist_to_prior_maps_each_variant() {
         use ir::parameter::{
             PriorDist, LogNormalPrior, NormalPrior, BetaPrior, UniformPrior,
             HalfNormalPrior, GammaPrior, ExponentialPrior,
         };
-        match prior_spec_to_prior(&PriorDist::LogNormal(LogNormalPrior { mu: 1.5, sigma: 0.4 })) {
+        match Prior::from_ir(&PriorDist::LogNormal(LogNormalPrior { mu: 1.5, sigma: 0.4 })) {
             Prior::TransformedNormal { mean, sd } => {
                 assert_eq!(mean, 1.5); assert_eq!(sd, 0.4);
             }
             other => panic!("LogNormal: {:?}", other),
         }
-        match prior_spec_to_prior(&PriorDist::Normal(NormalPrior { mean: 0.3, sd: 0.1 })) {
+        match Prior::from_ir(&PriorDist::Normal(NormalPrior { mean: 0.3, sd: 0.1 })) {
             Prior::Normal { mean, sd } => {
                 assert_eq!(mean, 0.3); assert_eq!(sd, 0.1);
             }
             other => panic!("Normal: {:?}", other),
         }
-        match prior_spec_to_prior(&PriorDist::Beta(BetaPrior { alpha: 2.0, beta: 5.0 })) {
+        match Prior::from_ir(&PriorDist::Beta(BetaPrior { alpha: 2.0, beta: 5.0 })) {
             Prior::Beta { alpha, beta } => {
                 assert_eq!(alpha, 2.0); assert_eq!(beta, 5.0);
             }
@@ -2626,23 +2613,23 @@ dt = 1.0
         }
         // Uniform now carries explicit bounds (no silent reduction to Flat
         // on missing fields — that v2 behaviour is intentionally removed).
-        match prior_spec_to_prior(&PriorDist::Uniform(UniformPrior { lower: -1.0, upper: 2.0 })) {
+        match Prior::from_ir(&PriorDist::Uniform(UniformPrior { lower: -1.0, upper: 2.0 })) {
             Prior::Uniform { lower, upper } => {
                 assert_eq!(lower, -1.0); assert_eq!(upper, 2.0);
             }
             other => panic!("Uniform: {:?}", other),
         }
-        match prior_spec_to_prior(&PriorDist::HalfNormal(HalfNormalPrior { sigma: 0.3 })) {
+        match Prior::from_ir(&PriorDist::HalfNormal(HalfNormalPrior { sigma: 0.3 })) {
             Prior::HalfNormal { sigma } => assert_eq!(sigma, 0.3),
             other => panic!("HalfNormal: {:?}", other),
         }
-        match prior_spec_to_prior(&PriorDist::Gamma(GammaPrior { shape: 3.0, rate: 0.5 })) {
+        match Prior::from_ir(&PriorDist::Gamma(GammaPrior { shape: 3.0, rate: 0.5 })) {
             Prior::Gamma { shape, rate } => {
                 assert_eq!(shape, 3.0); assert_eq!(rate, 0.5);
             }
             other => panic!("Gamma: {:?}", other),
         }
-        match prior_spec_to_prior(&PriorDist::Exponential(ExponentialPrior { rate: 2.5 })) {
+        match Prior::from_ir(&PriorDist::Exponential(ExponentialPrior { rate: 2.5 })) {
             Prior::Exponential { rate } => assert_eq!(rate, 2.5),
             other => panic!("Exponential: {:?}", other),
         }

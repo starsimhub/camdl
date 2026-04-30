@@ -390,9 +390,9 @@ impl Transform {
 // One serialization form across the workspace: the externally-tagged
 // enum the OCaml compiler already emits for in-model `~`-syntax priors
 // (`{ log_normal = { mu = 0, sigma = 1 } }`). Re-exported here so
-// downstream `use config_v2::PriorSpec` imports continue to compile.
+// downstream `use config_v2::PriorDist` imports keep working without
+// touching the `ir` crate dependency directly.
 pub use ir::parameter::PriorDist;
-pub use ir::parameter::PriorDist as PriorSpec;
 
 // ─── Fixed ──────────────────────────────────────────────────────────────────
 
