@@ -200,6 +200,13 @@ pub struct SimulateArgs {
     /// Re-run even if cached output already exists
     #[arg(long)]
     pub force: bool,
+
+    /// User-supplied display label for this simulate run. Validated
+    /// against `^[a-zA-Z0-9 ,._-]{1,64}$` after trim. Surfaced in
+    /// `camdl list` and `camdl show`. With `--seeds`, the label
+    /// applies to each per-seed run.
+    #[arg(long, value_name = "TEXT")]
+    pub label: Option<String>,
 }
 
 // ─── batch ────────────────────────────────────────────────────────────────────
@@ -792,6 +799,13 @@ pub struct ProfileArgs {
     /// inclusive range `1:5`.
     #[arg(long, value_name = "SPEC")]
     pub seeds: Option<SeedSpec>,
+
+    /// User-supplied display label for this profile run. Validated
+    /// against `^[a-zA-Z0-9 ,._-]{1,64}$` after trim. Surfaced in
+    /// `camdl list` and `camdl show`. For multi-seed runs the label
+    /// applies to the umbrella; per-seed children remain unlabelled.
+    #[arg(long, value_name = "TEXT")]
+    pub label: Option<String>,
 }
 
 // ─── eval ─────────────────────────────────────────────────────────────────────

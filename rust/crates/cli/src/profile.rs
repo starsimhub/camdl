@@ -189,6 +189,16 @@ pub fn cmd_profile(a: &crate::args::ProfileArgs) {
     let output_tsv_path: Option<String> = a.output.as_ref().map(|p| p.to_string_lossy().into_owned());
     let scenario_name = a.scenario.scenario.clone();
     let flow_name = a.flow.flow.clone();
+    let label_arg: Option<String> = match a.label.as_deref() {
+        Some(raw) => match crate::fit::validate_label(raw) {
+            Ok(l) => Some(l),
+            Err(e) => {
+                eprintln!("error: invalid --label: {}", e);
+                std::process::exit(1);
+            }
+        },
+        None => None,
+    };
     let overrides: HashMap<String, f64> = a.model_overrides.param.iter()
         .map(|p| (p.name.clone(), p.value))
         .collect();
@@ -405,6 +415,7 @@ pub fn cmd_profile(a: &crate::args::ProfileArgs) {
             created_at:        crate::cas::iso8601_utc(std::time::SystemTime::now()),
             argv:              argv.clone(),
             wall_time_seconds: 0.0,
+            label:             label_arg.clone(),
             kind:              rset.run_kind(),
         };
         if let Err(e) = umbrella_run.write(&dir) {
@@ -439,6 +450,7 @@ pub fn cmd_profile(a: &crate::args::ProfileArgs) {
             created_at:        crate::cas::iso8601_utc(std::time::SystemTime::now()),
             argv:              argv.clone(),
             wall_time_seconds: 0.0,
+            label:             if multi_seed { None } else { label_arg.clone() },
             kind:              inputs_seed.run_kind(),
         };
         if let Err(e) = profile_run.write(&dir) {
@@ -593,6 +605,7 @@ pub fn cmd_profile(a: &crate::args::ProfileArgs) {
             created_at: crate::cas::iso8601_utc(std::time::SystemTime::now()),
             argv: argv.clone(),
             wall_time_seconds: elapsed,
+            label: None,
             kind: RunKind::FitStage(FitStageMeta {
                 fit_hash: String::new(),
                 stage: "if2".to_string(),

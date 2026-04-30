@@ -39,6 +39,16 @@ pub struct Run {
     /// Total wall time for the run (seconds). Always set; cache hits
     /// record time-to-cache-hit-detection (typically < 0.1s).
     pub wall_time_seconds: f64,
+    /// User-supplied display label. Optional — validated against
+    /// `^[a-zA-Z0-9 ,._-]{1,64}$` after trim. Set at run-time via
+    /// `--label` or post-hoc via `camdl label <hash> "<text>"`.
+    /// Surfaced in `camdl list`, `camdl fit table`, `camdl show` to
+    /// help disambiguate iterations of the same operation that share
+    /// the same stem (e.g. multiple `fit_he2010-XXXXXXXX` directories
+    /// with different bounds / priors). Applies uniformly to all
+    /// `RunKind` variants — sims, fits, profiles, replicate-sets.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
     /// Kind-specific payload.
     pub kind: RunKind,
 }
@@ -127,17 +137,6 @@ pub struct FitMeta {
     /// IC-free inference flag (see 2026-04-18 proposal).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub ic_free: bool,
-    /// User-supplied display label for this fit. Optional — validated
-    /// against `^[a-zA-Z0-9 ,._-]{1,64}$` after trim. Set at fit-run
-    /// time via `--label` or post-hoc via `camdl fit label <hash>
-    /// "<new label>"`. Surfaced in `camdl fit list` and
-    /// `camdl fit table` to help scientists distinguish iterations
-    /// of a model that share the same stem (e.g. multiple
-    /// `fit_he2010-XXXXXXXX` directories with different bounds /
-    /// fixed-vs-estimate splits / priors).
-    /// See proposal §5 (`docs/dev/proposals/2026-04-28-fit-experiment-management.md`).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub label: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -348,6 +347,7 @@ mod tests {
             created_at: "2026-04-19T12:00:00Z".into(),
             argv: vec!["camdl".into(), "simulate".into(), "sir.camdl".into()],
             wall_time_seconds: 1.23,
+            label: None,
             kind: RunKind::Simulate(SimulateMeta {
                 model: "sir.camdl".into(),
                 model_hash: "f00d".repeat(16),
@@ -370,6 +370,7 @@ mod tests {
             created_at: "2026-04-19T12:00:00Z".into(),
             argv: vec!["camdl".into(), "fit".into(), "run".into(), "fit.toml".into()],
             wall_time_seconds: 42.0,
+            label: None,
             kind: RunKind::Fit(FitMeta {
                 model: "sir.camdl".into(),
                 model_hash: "f00d".repeat(16),
@@ -388,7 +389,6 @@ mod tests {
                 },
                 stages_declared: vec!["scout".into(), "refine".into()],
                 ic_free: false,
-                label: None,
             }),
         }
     }
@@ -401,6 +401,7 @@ mod tests {
             argv: vec!["camdl".into(), "fit".into(), "run".into(),
                        "fit.toml".into(), "--stage".into(), "refine".into()],
             wall_time_seconds: 10.0,
+            label: None,
             kind: RunKind::FitStage(FitStageMeta {
                 fit_hash: "deadbeef".repeat(8),
                 stage: "refine".into(),
@@ -530,6 +531,7 @@ mod tests {
             created_at: "t".into(),
             argv: vec![],
             wall_time_seconds: 1.0,
+            label: None,
             kind: RunKind::FitStage(FitStageMeta {
                 fit_hash: parent_hash.clone(),
                 stage: "scout".into(),
@@ -630,7 +632,7 @@ mod tests {
         // writes.
         let r = Run {
             hash: "x".repeat(64), version: "v".into(), created_at: "t".into(),
-            argv: vec![], wall_time_seconds: 0.0,
+            argv: vec![], wall_time_seconds: 0.0, label: None,
             kind: RunKind::FitStage(FitStageMeta {
                 fit_hash: "f".repeat(64),
                 stage: "refine".into(), method: "if2".into(),
@@ -662,6 +664,7 @@ mod tests {
         let r = Run {
             hash: "x".repeat(64), version: "v".into(),
             created_at: "t".into(), argv: vec![], wall_time_seconds: 0.0,
+            label: None,
             kind: RunKind::FitStage(FitStageMeta {
                 fit_hash: "f".repeat(64),
                 stage: "mle".into(), method: "if2".into(),
@@ -689,6 +692,7 @@ mod tests {
             created_at: "2026-04-24T00:00:00Z".into(),
             argv: vec!["camdl".into(), "profile".into()],
             wall_time_seconds: 3600.0,
+            label: None,
             kind: RunKind::Profile(ProfileMeta {
                 model: "he2010_london.camdl".into(),
                 model_hash: "b".repeat(64),
@@ -730,6 +734,7 @@ mod tests {
             created_at: "2026-04-24T00:00:00Z".into(),
             argv: vec!["camdl".into(), "profile".into()],
             wall_time_seconds: 120.0,
+            label: None,
             kind: RunKind::FitStage(FitStageMeta {
                 fit_hash: "".into(),    // no parent Fit; parent is a Profile
                 stage: "if2".into(),

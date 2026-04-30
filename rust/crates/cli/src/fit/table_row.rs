@@ -211,7 +211,7 @@ pub fn build_row(
         schema: TableRowSchema::current(),
         fit_id: short_hash(&run.hash),
         fit_hash: run.hash.clone(),
-        label: fit_meta.label.clone(),
+        label: run.label.clone(),
         stem,
         model_hash: fit_meta.model_hash.clone(),
         stages: completed_stages,

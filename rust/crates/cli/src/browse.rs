@@ -928,7 +928,7 @@ fn print_fits_table(fits: &[FitEntry], now: SystemTime) {
             } else { joined }
         };
         let stages = f.meta.stages_declared.join(",");
-        let label_cell = match &f.meta.label {
+        let label_cell = match &f.run.label {
             Some(l) => Cell::new(l),
             None => {
                 unlabelled += 1;
@@ -1218,6 +1218,7 @@ mod tests {
             created_at: "2026-04-16T00:00:00Z".into(),
             argv: vec!["camdl".into(), "simulate".into(), "--cas".into()],
             wall_time_seconds: 0.0,
+            label: None,
             kind: RunKind::Simulate(SimulateMeta {
                 model: "sir.camdl".into(),
                 model_hash: "m".into(),

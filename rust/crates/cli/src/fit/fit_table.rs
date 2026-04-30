@@ -207,7 +207,7 @@ fn matches_outer_filters(entry: &FitDirEntry, args: &FitTableArgs, now_unix: i64
         }
     }
     if let Some(pat) = &args.label_pattern {
-        let label = entry.fit_meta.label.as_deref().unwrap_or("");
+        let label = entry.run.label.as_deref().unwrap_or("");
         if !glob_match(pat, label) {
             return false;
         }
@@ -510,6 +510,7 @@ mod tests {
             created_at: "2026-04-27T00:00:00Z".into(),
             argv: vec!["camdl".into()],
             wall_time_seconds: 1.0,
+            label: None,
             kind: RunKind::Fit(FitMeta {
                 model: "sir.camdl".into(),
                 model_hash: "f00d".repeat(16),
@@ -520,7 +521,6 @@ mod tests {
                 fixed: HashMap::new(),
                 stages_declared: vec!["mle".into()],
                 ic_free: false,
-                label: None,
             }),
         };
         r.write(dir).unwrap();
@@ -533,6 +533,7 @@ mod tests {
             created_at: "2026-04-27T00:00:00Z".into(),
             argv: vec![],
             wall_time_seconds: 1.0,
+            label: None,
             kind: RunKind::FitStage(FitStageMeta {
                 fit_hash: parent_hash.into(),
                 stage: "mle".into(),

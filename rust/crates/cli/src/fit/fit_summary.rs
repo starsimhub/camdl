@@ -1746,6 +1746,7 @@ mod tests {
             created_at: "2026-04-27T00:00:00Z".into(),
             argv: vec!["camdl".into(), "fit".into(), "run".into()],
             wall_time_seconds: 1.0,
+            label: None,
             kind: RunKind::Fit(FitMeta {
                 model: "sir.camdl".into(),
                 model_hash: "f00d".repeat(16),
@@ -1756,7 +1757,6 @@ mod tests {
                 fixed: HashMap::new(),
                 stages_declared: vec!["scout".into(), "refine".into(), "validate".into()],
                 ic_free: false,
-                label: None,
             }),
         };
         r.write(dir).unwrap();
@@ -1774,6 +1774,7 @@ mod tests {
             created_at: "2026-04-27T00:00:00Z".into(),
             argv: vec!["camdl".into()],
             wall_time_seconds: 1.0,
+            label: None,
             kind: RunKind::FitStage(FitStageMeta {
                 fit_hash: parent_hash.into(),
                 stage: stage.into(),

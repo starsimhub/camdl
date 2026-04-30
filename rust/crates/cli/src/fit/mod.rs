@@ -1312,15 +1312,16 @@ fn build_fit_run(
             fixed,
             stages_declared,
             ic_free: config.ic_free.unwrap_or(false),
-            label,
         },
     };
     use crate::cas::typed::CasInputs;
-    inputs.to_run(
+    let mut run = inputs.to_run(
         crate::version::VERSION_SHORT.to_string(),
         std::env::args().collect(),
         0.0,
-    )
+    );
+    run.label = label;
+    run
 }
 
 fn format_prior(p: &Option<config_v2::PriorSpec>) -> String {
@@ -1686,31 +1687,22 @@ pub fn cmd_fit_label(args: &crate::args::FitLabelArgs) {
         std::process::exit(1);
     }
 
-    match &mut run.kind {
-        crate::run_meta::RunKind::Fit(meta) => {
-            let prior = meta.label.clone();
-            meta.label = Some(new_label.clone());
-            // Atomic write: Run::write writes to .tmp then renames.
-            if let Err(e) = run.write(&fit_dir) {
-                eprintln!("error: cannot write {}: {}", run_json_path.display(), e);
-                std::process::exit(1);
-            }
-            match prior {
-                Some(p) if p != new_label =>
-                    eprintln!("ok: label updated from \"{}\" to \"{}\" on {}",
-                        p, new_label, fit_dir.display()),
-                Some(_) =>
-                    eprintln!("ok: label unchanged (\"{}\") on {}",
-                        new_label, fit_dir.display()),
-                None =>
-                    eprintln!("ok: label set to \"{}\" on {}",
-                        new_label, fit_dir.display()),
-            }
-        }
-        _ => {
-            eprintln!("error: {} is not a fit run.json", run_json_path.display());
-            std::process::exit(1);
-        }
+    let prior = run.label.clone();
+    run.label = Some(new_label.clone());
+    if let Err(e) = run.write(&fit_dir) {
+        eprintln!("error: cannot write {}: {}", run_json_path.display(), e);
+        std::process::exit(1);
+    }
+    match prior {
+        Some(p) if p != new_label =>
+            eprintln!("ok: label updated from \"{}\" to \"{}\" on {}",
+                p, new_label, fit_dir.display()),
+        Some(_) =>
+            eprintln!("ok: label unchanged (\"{}\") on {}",
+                new_label, fit_dir.display()),
+        None =>
+            eprintln!("ok: label set to \"{}\" on {}",
+                new_label, fit_dir.display()),
     }
 }
 

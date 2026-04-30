@@ -522,9 +522,19 @@ fn run_simulate(a: &args::SimulateArgs) {
     // Compute hashes, resolve run path, check for cache hit. If the cached
     // trajectory already exists, we short-circuit: read it, emit to user's
     // destination, log 'cache hit' to stderr, and return.
+    let label_arg: Option<String> = match a.label.as_deref() {
+        Some(raw) => match crate::fit::validate_label(raw) {
+            Ok(l) => Some(l),
+            Err(e) => {
+                eprintln!("error: invalid --label: {}", e);
+                std::process::exit(1);
+            }
+        },
+        None => None,
+    };
     let mut cas_ctx: Option<CasCtx> = if cas_enabled {
         match prepare_cas_ctx(&base_sim_run, scenario_list[0].clone(), seeds[0],
-                              &cas_root, from_fit_hash.clone()) {
+                              &cas_root, from_fit_hash.clone(), label_arg.clone()) {
             Ok(ctx) => Some(ctx),
             Err(e) => {
                 eprintln!("error preparing CAS: {}", e);
@@ -950,6 +960,7 @@ fn prepare_cas_ctx(
     seed: u64,
     cas_root: &str,
     from_fit_hash: Option<String>,
+    label: Option<String>,
 ) -> Result<CasCtx, String> {
     // Load IR source + parse model
     let (ir_path_resolved, _tmp) = util::resolve_ir_path(&run.ir_path)?;
@@ -1017,6 +1028,7 @@ fn prepare_cas_ctx(
         created_at:        cas::iso8601_utc(std::time::SystemTime::now()),
         argv:              std::env::args().collect(),
         wall_time_seconds: 0.0,
+        label,
         kind:              inputs.run_kind(),
     };
 

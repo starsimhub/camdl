@@ -117,6 +117,7 @@ pub trait CasInputs {
             created_at:        super::iso8601_utc(std::time::SystemTime::now()),
             argv,
             wall_time_seconds,
+            label:             None,
             kind:              self.run_kind(),
         }
     }

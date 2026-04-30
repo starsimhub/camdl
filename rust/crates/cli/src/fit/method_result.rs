@@ -671,6 +671,7 @@ mod tests {
             created_at: "2026-04-27T00:00:00Z".into(),
             argv: vec!["camdl".into()],
             wall_time_seconds: 1.0,
+            label: None,
             kind: RunKind::FitStage(FitStageMeta {
                 fit_hash: "f00d".repeat(16),
                 stage: "scout".into(),
