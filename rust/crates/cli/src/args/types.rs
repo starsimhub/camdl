@@ -49,15 +49,25 @@ impl FromStr for TableSpec {
 /// ValueEnum rendering is kebab-case, which would diverge from
 /// everywhere else in the tool — hence the explicit `#[value(name=...)]`.
 /// The kebab form is kept as an alias so old scripts don't break.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, clap::ValueEnum)]
+///
+/// Serde derives use the same canonical names so this enum can
+/// substitute for `String` in `run.json` (`SimulateMeta.backend`),
+/// `fit.toml` (`[config].backend`), and `SimRun.backend` without
+/// changing the wire format.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, clap::ValueEnum,
+         serde::Serialize, serde::Deserialize)]
 pub enum Backend {
     #[value(name = "gillespie")]
+    #[serde(rename = "gillespie")]
     Gillespie,
     #[value(name = "tau_leap", alias = "tau-leap")]
+    #[serde(rename = "tau_leap", alias = "tau-leap")]
     TauLeap,
     #[value(name = "chain_binomial", alias = "chain-binomial")]
+    #[serde(rename = "chain_binomial", alias = "chain-binomial")]
     ChainBinomial,
     #[value(name = "ode")]
+    #[serde(rename = "ode")]
     Ode,
 }
 

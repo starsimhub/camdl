@@ -193,10 +193,11 @@ pub fn build_row(
     })?;
     let completed_stages = completed_stage_names(&fit_meta, &nodes);
 
-    let method = match &terminal.run.kind {
-        RunKind::FitStage(m) => m.method.clone(),
+    let method_kind = match &terminal.run.kind {
+        RunKind::FitStage(m) => m.method,
         _ => unreachable!("walker only returns FitStage runs"),
     };
+    let method = method_kind.as_str().to_string();
     let method_result = MethodResult::load_from(&terminal.stage_dir, &method)?;
     let view = MethodView::from(&method_result);
 

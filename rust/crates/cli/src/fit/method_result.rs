@@ -664,7 +664,7 @@ mod tests {
         TempDir(p)
     }
 
-    fn write_stage_run(dir: &Path, method: &str, n_chains: usize, algorithm: serde_json::Value) {
+    fn write_stage_run(dir: &Path, method: crate::run_meta::MethodKind, n_chains: usize, algorithm: serde_json::Value) {
         let run = Run {
             hash: "deadbeef".repeat(8),
             version: "0.1.0+test".into(),
@@ -675,7 +675,7 @@ mod tests {
             kind: RunKind::FitStage(FitStageMeta {
                 fit_hash: "f00d".repeat(16),
                 stage: "scout".into(),
-                method: method.into(),
+                method,
                 seed: 1,
                 n_chains,
                 algorithm,
@@ -730,7 +730,7 @@ mod tests {
         let dir = tmp.path();
         write_stage_run(
             dir,
-            "if2",
+            crate::run_meta::MethodKind::If2,
             4,
             serde_json::json!({"method": "if2", "iterations": 50}),
         );
@@ -763,7 +763,7 @@ mod tests {
         let dir = tmp.path();
         write_stage_run(
             dir,
-            "if2",
+            crate::run_meta::MethodKind::If2,
             4,
             serde_json::json!({"method": "if2", "iterations": 50}),
         );
@@ -781,7 +781,7 @@ mod tests {
         let dir = tmp.path();
         write_stage_run(
             dir,
-            "if2",
+            crate::run_meta::MethodKind::If2,
             2,
             serde_json::json!({"method": "if2", "iterations": 10}),
         );
@@ -811,7 +811,7 @@ mod tests {
         let dir = tmp.path();
         write_stage_run(
             dir,
-            "if2",
+            crate::run_meta::MethodKind::If2,
             2,
             serde_json::json!({"method": "if2", "iterations": 10}),
         );
@@ -828,7 +828,7 @@ mod tests {
         let dir = tmp.path();
         write_stage_run(
             dir,
-            "pgas",
+            crate::run_meta::MethodKind::Pgas,
             2,
             serde_json::json!({"method": "pgas", "sweeps": 100}),
         );
@@ -875,7 +875,7 @@ mod tests {
         let dir = tmp.path();
         write_stage_run(
             dir,
-            "pmmh",
+            crate::run_meta::MethodKind::Pmmh,
             2,
             serde_json::json!({"method": "pmmh", "iterations": 50}),
         );
@@ -917,7 +917,7 @@ mod tests {
         let dir = tmp.path();
         write_stage_run(
             dir,
-            "if2",
+            crate::run_meta::MethodKind::If2,
             2,
             serde_json::json!({"method": "if2", "iterations": 5}),
         );

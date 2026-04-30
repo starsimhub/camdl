@@ -319,7 +319,7 @@ fn run_simulate(a: &args::SimulateArgs) {
     let dt_explicit      = a.backend.dt.is_some();
     // Default is chain_binomial so `simulate` and `fit` agree at the
     // same MLE params (see docs/dev/incidents/2026-04-19-backend-default-mismatch.md).
-    let mut backend      = a.backend.backend.map(|b| b.to_string()).unwrap_or_else(|| "chain_binomial".to_string());
+    let mut backend      = a.backend.backend.unwrap_or(args::types::Backend::ChainBinomial);
     let mut dt           = a.backend.dt.unwrap_or(1.0_f64);
     let seed             = a.seed;
     let overrides: HashMap<String, f64> = a.model_overrides.param.iter()
@@ -443,7 +443,7 @@ fn run_simulate(a: &args::SimulateArgs) {
                       the fit's backend is the consistent default for forward \
                       sims of the MLE.",
                 prov.backend, prov.dt, pf);
-            backend = prov.backend.clone();
+            backend = prov.backend;
             if !dt_explicit { dt = prov.dt; }
         } else if backend != prov.backend {
             // Explicit-differs path — warn.
@@ -669,7 +669,7 @@ fn run_simulate(a: &args::SimulateArgs) {
     // ── Dry run ─────────────────────────────────────────────────────────────
     if dry_run {
         print_dry_run(
-            &ir_path, &base_sim_run.backend, dt, seed,
+            &ir_path, base_sim_run.backend, dt, seed,
             &base_sim_run.params_files, &base_sim_run.overrides,
             &scenario_list, &seeds, &draws_path,
             n_draws, replicates, total_runs,
@@ -1589,7 +1589,7 @@ fn load_draws_tsv(path: &str) -> Result<Vec<HashMap<String, f64>>, String> {
 #[allow(clippy::too_many_arguments)]
 fn print_dry_run(
     ir_path: &str,
-    backend: &str,
+    backend: args::types::Backend,
     dt: f64,
     seed: u64,
     params_files: &[String],

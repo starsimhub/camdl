@@ -47,7 +47,7 @@ pub struct MleProvenance {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fit_hash: Option<String>,
     /// Dynamics fields — load-bearing for the backend-guardrail.
-    pub backend: String,
+    pub backend: crate::args::types::Backend,
     pub dt: f64,
     pub model: String,
     pub model_hash: String,
@@ -191,7 +191,7 @@ pub struct MleMetadata {
     /// Simulation backend the fit used. Load-bearing for the
     /// backend-provenance guardrail in `camdl simulate --params`
     /// — downstream can only auto-match if we record this.
-    pub backend: String,
+    pub backend: crate::args::types::Backend,
     /// Timestep used by the fit. Paired with `backend`.
     pub dt: f64,
     pub loglik: f64,

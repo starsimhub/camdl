@@ -399,7 +399,7 @@ pub fn cmd_fit_run_v2(a: &crate::args::FitRunArgs) {
             spec,
             &config.model.camdl,
             &fit_dir,
-            &config.config.backend,
+            config.config.backend,
             config.config.dt,
         ).unwrap_or_else(|e| {
             eprintln!("error: synthetic-data generation failed: {}", e);
@@ -884,7 +884,7 @@ pub fn cmd_fit_run_v2(a: &crate::args::FitRunArgs) {
                     seed,
                     stage: stage_name.to_string(),
                     best_chain: chain_results.best_chain,
-                    backend: sweep_config.config.backend.clone(),
+                    backend: sweep_config.config.backend,
                     dt: sweep_config.config.dt,
                     loglik: chain_results.best_loglik,
                     loglik_sd: 0.0,
@@ -1140,7 +1140,7 @@ pub fn cmd_fit_run_v2(a: &crate::args::FitRunArgs) {
             meta: crate::run_meta::FitStageMeta {
                 fit_hash: parent_fit_hash.clone(),
                 stage: stage_name.to_string(),
-                method: stage.method_name().to_string(),
+                method: stage.method_kind(),
                 seed,
                 n_chains,
                 algorithm: algo_json,

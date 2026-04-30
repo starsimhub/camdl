@@ -133,7 +133,7 @@ fn discover_stages(fit_dir: &Path) -> Vec<ResolvedStage> {
     let mut best: BTreeMap<String, (String, Rank, PathBuf)> = BTreeMap::new();
     for node in &nodes {
         let (stage, method) = match &node.run.kind {
-            RunKind::FitStage(m) => (m.stage.clone(), m.method.clone()),
+            RunKind::FitStage(m) => (m.stage.clone(), m.method.as_str().to_string()),
             _ => continue,
         };
         let rank: Rank = match &node.axes {
@@ -1725,7 +1725,7 @@ mod tests {
         let stage_dir = dir.join("real").join("fit_1").join(stage);
         std::fs::create_dir_all(&stage_dir).unwrap();
         state.save(&stage_dir.to_string_lossy()).unwrap();
-        write_stage_run(&stage_dir, &parent_hash, stage, "if2");
+        write_stage_run(&stage_dir, &parent_hash, stage, crate::run_meta::MethodKind::If2);
 
         // final_params.toml + mle_params.toml carrying matching values
         // so the provenance cross-check passes.
@@ -1762,7 +1762,7 @@ mod tests {
         r.write(dir).unwrap();
     }
 
-    fn write_stage_run(stage_dir: &std::path::Path, parent_hash: &str, stage: &str, method: &str) {
+    fn write_stage_run(stage_dir: &std::path::Path, parent_hash: &str, stage: &str, method: crate::run_meta::MethodKind) {
         use crate::run_meta::{FitStageMeta, Run, RunKind};
         let r = Run {
             hash: format!("{}-{}", parent_hash, stage)
@@ -1778,7 +1778,7 @@ mod tests {
             kind: RunKind::FitStage(FitStageMeta {
                 fit_hash: parent_hash.into(),
                 stage: stage.into(),
-                method: method.into(),
+                method,
                 seed: 1,
                 n_chains: 8,
                 algorithm: serde_json::json!({
@@ -1911,7 +1911,7 @@ mod tests {
         let refine_dir = dir.join("real").join("fit_1").join("refine");
         std::fs::create_dir_all(&refine_dir).unwrap();
         state.save(&refine_dir.to_string_lossy()).unwrap();
-        write_stage_run(&refine_dir, &parent_hash, "refine", "if2");
+        write_stage_run(&refine_dir, &parent_hash, "refine", crate::run_meta::MethodKind::If2);
         let mut body = String::new();
         for (k, v) in refine_params { body.push_str(&format!("{} = {}\n", k, v)); }
         std::fs::write(refine_dir.join("final_params.toml"), &body).unwrap();

@@ -1265,7 +1265,7 @@ mod tests {
         SimulateMeta {
             model: "m".into(), model_hash: "".into(), scenario: "".into(),
             sim_hash: "".into(), scen_hash: "".into(), seed: 0,
-            backend: "gillespie".into(), dt: 1.0,
+            backend: crate::args::types::Backend::Gillespie, dt: 1.0,
             sweep_point: HashMap::new(),
             from_fit_hash: None,
         }
@@ -1311,7 +1311,7 @@ mod tests {
                 sim_hash: "abc12345aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
                 scen_hash: "def45678".into(),
                 seed: 42,
-                backend: "gillespie".into(),
+                backend: crate::args::types::Backend::Gillespie,
                 dt: 1.0,
                 sweep_point: HashMap::new(),
             from_fit_hash: None,

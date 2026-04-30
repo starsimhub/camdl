@@ -629,7 +629,7 @@ pub struct SimRun {
     pub scenario_name: Option<String>,
     pub adhoc_enable: Vec<String>,
     pub adhoc_disable: Vec<String>,
-    pub backend: String,
+    pub backend: crate::args::types::Backend,
     pub dt: f64,
     pub seed: u64,
 }
@@ -645,7 +645,7 @@ impl Default for SimRun {
             scenario_name: None,
             adhoc_enable: Vec::new(),
             adhoc_disable: Vec::new(),
-            backend: "chain_binomial".to_string(),
+            backend: crate::args::types::Backend::ChainBinomial,
             dt: 1.0,
             seed: 1,
         }
@@ -850,21 +850,20 @@ pub fn run_simulation(run: &SimRun) -> Result<(Trajectory, ir::Model), String> {
     let t_start = model.simulation.t_start;
     let t_end   = model.simulation.t_end;
 
-    let config = match run.backend.as_str() {
-        "gillespie"      => SimConfig::Gillespie(GillespieConfig { t_start, t_end, output_dt: None }),
-        "tau_leap"       => SimConfig::TauLeap(TauLeapConfig { t_start, t_end, dt: run.dt }),
-        "chain_binomial" => SimConfig::ChainBinomial(ChainBinomialConfig { t_start, t_end, dt: run.dt }),
-        "ode"            => SimConfig::Ode(OdeConfig { t_start, t_end, dt: run.dt }),
-        s => return Err(format!("unknown backend: {}", s)),
+    use crate::args::types::Backend;
+    let config = match run.backend {
+        Backend::Gillespie     => SimConfig::Gillespie(GillespieConfig { t_start, t_end, output_dt: None }),
+        Backend::TauLeap       => SimConfig::TauLeap(TauLeapConfig { t_start, t_end, dt: run.dt }),
+        Backend::ChainBinomial => SimConfig::ChainBinomial(ChainBinomialConfig { t_start, t_end, dt: run.dt }),
+        Backend::Ode           => SimConfig::Ode(OdeConfig { t_start, t_end, dt: run.dt }),
     };
 
     // Check backend compatibility before running
-    let backend: &dyn Simulate = match run.backend.as_str() {
-        "gillespie"      => &GillespieSim,
-        "tau_leap"       => &TauLeapSim,
-        "chain_binomial" => &ChainBinomialSim,
-        "ode"            => &OdeSim,
-        _ => unreachable!(),
+    let backend: &dyn Simulate = match run.backend {
+        Backend::Gillespie     => &GillespieSim,
+        Backend::TauLeap       => &TauLeapSim,
+        Backend::ChainBinomial => &ChainBinomialSim,
+        Backend::Ode           => &OdeSim,
     };
     let unsupported = compiled.required_capabilities() - backend.capabilities();
     if !unsupported.is_empty() {
@@ -1069,7 +1068,7 @@ mod tests {
     fn base_sim_run(ir_path: &str) -> SimRun {
         SimRun {
             ir_path: ir_path.to_string(),
-            backend: "chain_binomial".to_string(),
+            backend: crate::args::types::Backend::ChainBinomial,
             dt: 1.0,
             seed: 1,
             ..Default::default()

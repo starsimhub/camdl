@@ -173,7 +173,7 @@ struct ConfigSection {
     #[serde(default)]
     geo: Option<String>,
     #[serde(default = "default_backend")]
-    backend: String,
+    backend: crate::args::types::Backend,
     #[serde(default = "default_dt")]
     dt: f64,
     #[serde(default = "default_output_dir")]
@@ -184,7 +184,9 @@ struct ConfigSection {
     seeds: SeedsSection,
 }
 
-fn default_backend() -> String { "chain_binomial".to_string() }
+fn default_backend() -> crate::args::types::Backend {
+    crate::args::types::Backend::ChainBinomial
+}
 fn default_dt() -> f64 { 1.0 }
 fn default_output_dir() -> String { crate::run_paths::DEFAULT_OUTPUT_ROOT.to_string() }
 fn default_parallel() -> usize { 1 }
@@ -379,7 +381,7 @@ pub fn cmd_batch_run(a: &crate::args::BatchArgs) {
         .map(|p| p.to_string_lossy().into_owned())
         .unwrap_or_else(|| exp.config.output_dir.clone());
     let parallel = a.parallel.unwrap_or(exp.config.parallel);
-    let backend    = exp.config.backend.clone();
+    let backend    = exp.config.backend;
     let dt         = exp.config.dt;
     let model_path = exp.config.model.clone();
 
@@ -440,7 +442,7 @@ pub fn cmd_batch_run(a: &crate::args::BatchArgs) {
     } else {
         HashMap::new()
     };
-    let shash = sim_hash(&mhash, &canonical_params(&base_params), &backend, dt);
+    let shash = sim_hash(&mhash, &canonical_params(&base_params), backend.as_str(), dt);
 
     let seeds = exp.config.seeds.resolve().unwrap_or_else(|e| {
         eprintln!("error resolving seeds: {}", e);
@@ -467,7 +469,7 @@ pub fn cmd_batch_run(a: &crate::args::BatchArgs) {
             exp.scenario.clone()
         };
         run_design_experiment(scenarios, exp.design, &ir_path_resolved, &output_dir, &shash,
-                              &backend, dt, a.force, parallel, &params_file_opt, &seeds);
+                              backend, dt, a.force, parallel, &params_file_opt, &seeds);
         return;
     }
 
@@ -490,7 +492,7 @@ pub fn cmd_batch_run(a: &crate::args::BatchArgs) {
 
     if a.dry_run {
         print_batch_dry_run(
-            &model_path, &backend, dt, &output_dir, parallel,
+            &model_path, backend, dt, &output_dir, parallel,
             &scenarios, &sweep_points, &seeds, &base_params,
             exp.config.params.as_deref(), &plans,
         );
@@ -564,7 +566,7 @@ pub fn cmd_batch_run(a: &crate::args::BatchArgs) {
                 scenario_name: None,
                 adhoc_enable: sc.enable.clone(),
                 adhoc_disable: sc.disable.clone(),
-                backend: backend.clone(),
+                backend,
                 dt,
                 seed: plan.seed,
                 ..Default::default()
@@ -597,7 +599,7 @@ pub fn cmd_batch_run(a: &crate::args::BatchArgs) {
                         scenario:             plan.scenario.clone(),
                         model_hash:           mhash.clone(),
                         base_params_canonical: canonical_params(&base_params),
-                        backend:              backend.clone(),
+                        backend,
                         dt,
                         enable:               sc.enable.clone(),
                         disable:              sc.disable.clone(),
@@ -688,7 +690,7 @@ fn run_design_experiment(
     ir_path: &str,
     output_dir: &str,
     shash: &str,
-    backend: &str,
+    backend: crate::args::types::Backend,
     dt: f64,
     force: bool,
     parallel: usize,
@@ -796,7 +798,7 @@ fn run_design_experiment(
                     scenario_name: None,
                     adhoc_enable: sc.enable.clone(),
                     adhoc_disable: sc.disable.clone(),
-                    backend: backend.to_string(),
+                    backend,
                     dt,
                     seed: plan.seed,
                     ..Default::default()
@@ -901,7 +903,7 @@ pub fn cmd_batch_status(a: &crate::args::BatchStatusArgs) {
                 let base_params: HashMap<String, f64> = exp.config.params.as_ref()
                     .and_then(|p| load_params_toml(p).ok())
                     .unwrap_or_default();
-                let shash   = sim_hash(&mhash, &canonical_params(&base_params), &exp.config.backend, exp.config.dt);
+                let shash   = sim_hash(&mhash, &canonical_params(&base_params), exp.config.backend.as_str(), exp.config.dt);
                 let scenarios: Vec<ScenarioEntry> = if exp.scenario.is_empty() {
                     vec![ScenarioEntry { name: "baseline".to_string(), params: HashMap::new(), enable: vec![], disable: vec![] }]
                 } else {
@@ -933,7 +935,7 @@ pub fn cmd_batch_status(a: &crate::args::BatchStatusArgs) {
 #[allow(clippy::too_many_arguments)]
 fn print_batch_dry_run(
     model_path: &str,
-    backend: &str,
+    backend: crate::args::types::Backend,
     dt: f64,
     output_dir: &str,
     parallel: usize,

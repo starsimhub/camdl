@@ -102,7 +102,7 @@ pub struct SimulateMeta {
     /// Scenario delta hash: enable/disable/overrides.
     pub scen_hash: String,
     pub seed: u64,
-    pub backend: String,
+    pub backend: crate::args::types::Backend,
     pub dt: f64,
     /// Sweep-point param values (empty for single-run `--cas`).
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
@@ -139,6 +139,38 @@ pub struct FitMeta {
     pub ic_free: bool,
 }
 
+/// Inference method tag — discriminator-only enum. Used in
+/// `FitStageMeta.method` and surfaced by `Stage::method_kind()`. Wire
+/// format matches the legacy strings (`"if2"` / `"pgas"` / `"pmmh"`
+/// / `"pfilter"`) so existing run.json files round-trip unchanged.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum MethodKind {
+    If2,
+    Pgas,
+    Pmmh,
+    Pfilter,
+}
+
+impl MethodKind {
+    /// String form matching the legacy `FitStageMeta.method` value
+    /// and the `Stage::FOO` serde tag.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            MethodKind::If2     => "if2",
+            MethodKind::Pgas    => "pgas",
+            MethodKind::Pmmh    => "pmmh",
+            MethodKind::Pfilter => "pfilter",
+        }
+    }
+}
+
+impl std::fmt::Display for MethodKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FitStageMeta {
     /// Hash of the parent fit (matches the `hash` on the enclosing
@@ -147,8 +179,9 @@ pub struct FitStageMeta {
     pub fit_hash: String,
     /// Stage name within the fit (e.g. "scout", "refine").
     pub stage: String,
-    /// Stage method: "if2", "pgas", "pmmh", "pfilter".
-    pub method: String,
+    /// Stage method discriminator. Wire format: `"if2" | "pgas" |
+    /// "pmmh" | "pfilter"`.
+    pub method: MethodKind,
     // NB: the stage's own content hash lives in the enclosing
     // `Run.hash` field (a FitStage run hashes exactly its stage-scope
     // inputs). Previously FitStageMeta carried a duplicate
@@ -355,7 +388,7 @@ mod tests {
                 sim_hash: "abc12345".into(),
                 scen_hash: "def67890".into(),
                 seed: 42,
-                backend: "gillespie".into(),
+                backend: crate::args::types::Backend::Gillespie,
                 dt: 1.0,
                 sweep_point: HashMap::new(),
                 from_fit_hash: None,
@@ -405,7 +438,7 @@ mod tests {
             kind: RunKind::FitStage(FitStageMeta {
                 fit_hash: "deadbeef".repeat(8),
                 stage: "refine".into(),
-                method: "if2".into(),
+                method: MethodKind::If2,
                 seed: 42,
                 n_chains: 4,
                 algorithm: serde_json::Value::Null,
@@ -535,7 +568,7 @@ mod tests {
             kind: RunKind::FitStage(FitStageMeta {
                 fit_hash: parent_hash.clone(),
                 stage: "scout".into(),
-                method: "if2".into(),
+                method: MethodKind::If2,
                 seed: 1,
                 n_chains: 4,
                 algorithm: serde_json::Value::Null,
@@ -635,7 +668,7 @@ mod tests {
             argv: vec![], wall_time_seconds: 0.0, label: None,
             kind: RunKind::FitStage(FitStageMeta {
                 fit_hash: "f".repeat(64),
-                stage: "refine".into(), method: "if2".into(),
+                stage: "refine".into(), method: MethodKind::If2,
                 seed: 1, n_chains: 1,
                 algorithm: serde_json::Value::Null,
                 best_loglik: None, best_chain: None,
@@ -667,7 +700,7 @@ mod tests {
             label: None,
             kind: RunKind::FitStage(FitStageMeta {
                 fit_hash: "f".repeat(64),
-                stage: "mle".into(), method: "if2".into(),
+                stage: "mle".into(), method: MethodKind::If2,
                 seed: 1, n_chains: 1,
                 algorithm: serde_json::Value::Null,
                 best_loglik: None, best_chain: None, starts_from: None,
@@ -738,7 +771,7 @@ mod tests {
             kind: RunKind::FitStage(FitStageMeta {
                 fit_hash: "".into(),    // no parent Fit; parent is a Profile
                 stage: "if2".into(),
-                method: "if2".into(),
+                method: MethodKind::If2,
                 seed: 142,
                 n_chains: 1,
                 algorithm: serde_json::Value::Null,

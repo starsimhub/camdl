@@ -323,7 +323,7 @@ mod tests {
         }
     }
 
-    fn stage_run(parent_hash: &str, stage: &str, method: &str, seed: u64) -> Run {
+    fn stage_run(parent_hash: &str, stage: &str, method: crate::run_meta::MethodKind, seed: u64) -> Run {
         Run {
             hash: format!("{}-{}-{}", parent_hash, stage, seed)
                 .chars()
@@ -338,7 +338,7 @@ mod tests {
             kind: RunKind::FitStage(FitStageMeta {
                 fit_hash: parent_hash.into(),
                 stage: stage.into(),
-                method: method.into(),
+                method,
                 seed,
                 n_chains: 2,
                 algorithm: serde_json::Value::Null,
@@ -372,12 +372,12 @@ mod tests {
         place_stage(
             &fit_dir,
             "real/fit_1/scout",
-            &stage_run(&parent, "scout", "if2", 1),
+            &stage_run(&parent, "scout", crate::run_meta::MethodKind::If2, 1),
         );
         place_stage(
             &fit_dir,
             "real/fit_1/refine",
-            &stage_run(&parent, "refine", "if2", 1),
+            &stage_run(&parent, "refine", crate::run_meta::MethodKind::If2, 1),
         );
 
         let nodes = walk_fit_dir(&fit_dir).unwrap();
@@ -410,7 +410,7 @@ mod tests {
         for ds in 1..=2usize {
             for fs in [11u64, 22] {
                 let rel = format!("synthetic/ds_{:02}/fit_{}/mle", ds, fs);
-                place_stage(&fit_dir, &rel, &stage_run(&parent, "mle", "if2", fs));
+                place_stage(&fit_dir, &rel, &stage_run(&parent, "mle", crate::run_meta::MethodKind::If2, fs));
             }
         }
         let nodes = walk_fit_dir(&fit_dir).unwrap();
@@ -437,12 +437,12 @@ mod tests {
         place_stage(
             &fit_dir,
             "real/fit_1/R0_1.000/mle",
-            &stage_run(&parent, "mle", "if2", 1),
+            &stage_run(&parent, "mle", crate::run_meta::MethodKind::If2, 1),
         );
         place_stage(
             &fit_dir,
             "real/fit_1/R0_2.000/mle",
-            &stage_run(&parent, "mle", "if2", 1),
+            &stage_run(&parent, "mle", crate::run_meta::MethodKind::If2, 1),
         );
         let nodes = walk_fit_dir(&fit_dir).unwrap();
         assert_eq!(nodes.len(), 2);
@@ -464,12 +464,12 @@ mod tests {
         place_stage(
             &fit_dir,
             "real/fit_1/scout",
-            &stage_run(&parent, "scout", "if2", 1),
+            &stage_run(&parent, "scout", crate::run_meta::MethodKind::If2, 1),
         );
         place_stage(
             &fit_dir,
             "real/fit_1/pgas",
-            &stage_run(&parent, "pgas", "pgas", 1),
+            &stage_run(&parent, "pgas", crate::run_meta::MethodKind::Pgas, 1),
         );
         let nodes = walk_fit_dir(&fit_dir).unwrap();
         assert_eq!(nodes.len(), 2);
@@ -522,7 +522,7 @@ mod tests {
         place_stage(
             &fit_dir,
             "weird_layout/scout",
-            &stage_run(&parent, "scout", "if2", 1),
+            &stage_run(&parent, "scout", crate::run_meta::MethodKind::If2, 1),
         );
         let nodes = walk_fit_dir(&fit_dir).unwrap();
         assert_eq!(nodes.len(), 1);
@@ -561,7 +561,7 @@ mod tests {
                 sim_hash: "s".repeat(64),
                 scen_hash: "c".repeat(64),
                 seed: 1,
-                backend: "gillespie".into(),
+                backend: crate::args::types::Backend::Gillespie,
                 dt: 1.0,
                 sweep_point: HashMap::new(),
                 from_fit_hash: None,

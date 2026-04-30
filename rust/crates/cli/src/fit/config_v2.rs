@@ -119,11 +119,13 @@ pub struct ModelRef {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct FitBackendConfig {
     #[serde(default = "default_backend")]
-    pub backend: String,
+    pub backend: crate::args::types::Backend,
     #[serde(default = "default_dt")]
     pub dt: f64,
 }
-fn default_backend() -> String { "chain_binomial".to_string() }
+fn default_backend() -> crate::args::types::Backend {
+    crate::args::types::Backend::ChainBinomial
+}
 fn default_dt() -> f64 { 1.0 }
 impl Default for FitBackendConfig {
     fn default() -> Self { FitBackendConfig { backend: default_backend(), dt: default_dt() } }
@@ -598,12 +600,17 @@ impl Stage {
         }
     }
 
-    pub fn method_name(&self) -> &str {
+    pub fn method_name(&self) -> &'static str {
+        self.method_kind().as_str()
+    }
+
+    pub fn method_kind(&self) -> crate::run_meta::MethodKind {
+        use crate::run_meta::MethodKind;
         match self {
-            Stage::IF2 { .. } => "if2",
-            Stage::PGAS { .. } => "pgas",
-            Stage::PMMH { .. } => "pmmh",
-            Stage::PFilter { .. } => "pfilter",
+            Stage::IF2     { .. } => MethodKind::If2,
+            Stage::PGAS    { .. } => MethodKind::Pgas,
+            Stage::PMMH    { .. } => MethodKind::Pmmh,
+            Stage::PFilter { .. } => MethodKind::Pfilter,
         }
     }
 
@@ -1070,14 +1077,8 @@ impl FitConfigV2 {
             }
         }
 
-        // Validate backend
-        let valid_backends = ["gillespie", "tau_leap", "chain_binomial", "ode"];
-        if !valid_backends.contains(&self.config.backend.as_str()) {
-            return Err(format!(
-                "unknown backend '{}'. Valid backends: {}",
-                self.config.backend, valid_backends.join(", ")
-            ));
-        }
+        // Backend validation is now handled at TOML parse time via the
+        // typed `Backend` enum (serde rejects unknown strings).
 
         // Validate stage DAG: starts_from references must be valid
         self.validate_stage_dag()?;
@@ -1703,7 +1704,11 @@ cooling = 0.70
 
     #[test]
     fn validate_bad_backend() {
-        let config = parse(r#"
+        // After backend was typed as `Backend` enum, unknown strings
+        // are rejected at TOML parse time (not at config.validate).
+        // This is strictly better — surfaces the error sooner with a
+        // toml/serde location.
+        let err = parse(r#"
 [model]
 camdl = "models/sir.camdl"
 
@@ -1726,12 +1731,10 @@ chains = 4
 particles = 1000
 iterations = 50
 cooling = 0.70
-        "#).unwrap();
-
-        let model_params = vec!["beta".to_string(), "N0".to_string()];
-        let err = config.validate(&model_params).unwrap_err();
-        assert!(err.contains("unknown backend"));
-        assert!(err.contains("gilelspie"));
+        "#).expect_err("typo in backend must reject at parse");
+        // Serde reports this as an unknown variant.
+        assert!(err.contains("gilelspie") || err.contains("unknown variant"),
+            "expected parse error mentioning backend: got {}", err);
     }
 
     #[test]
@@ -1990,7 +1993,7 @@ iterations = 50
 cooling = 0.70
         "#).unwrap();
 
-        assert_eq!(config.config.backend, "chain_binomial");
+        assert_eq!(config.config.backend, crate::args::types::Backend::ChainBinomial);
         assert_eq!(config.config.dt, 1.0);
     }
 

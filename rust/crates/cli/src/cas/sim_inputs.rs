@@ -35,7 +35,7 @@ pub struct SimulateInputs {
     /// Canonical base-params string (used inside `sim_hash`).
     pub base_params_canonical: String,
     /// Backend name (gillespie / chain_binomial / tau_leap / ode).
-    pub backend: String,
+    pub backend: crate::args::types::Backend,
     /// Step size.
     pub dt: f64,
     /// Scenario `enable` interventions.
@@ -63,7 +63,7 @@ impl SimulateInputs {
     pub fn sim_hash_str(&self) -> String {
         hashing::sim_hash(
             &self.model_hash, &self.base_params_canonical,
-            &self.backend, self.dt,
+            self.backend.as_str(), self.dt,
         )
     }
     /// Scenario-side hash component (enable + disable + scen_params).

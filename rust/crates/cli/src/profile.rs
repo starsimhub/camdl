@@ -607,7 +607,7 @@ pub fn cmd_profile(a: &crate::args::ProfileArgs) {
             kind: RunKind::FitStage(FitStageMeta {
                 fit_hash: String::new(),
                 stage: "if2".to_string(),
-                method: "if2".to_string(),
+                method: crate::run_meta::MethodKind::If2,
                 seed: job_seed,
                 n_chains: 1,
                 algorithm: serde_json::json!({
