@@ -576,8 +576,11 @@ pub enum Stage {
         /// Record per-step predictive samples + log-likelihoods for
         /// `camdl compare`'s prequential scoring (log score, CRPS, PIT).
         /// Roughly N × T f64 per step; cheap relative to the filter
-        /// itself. Off by default.
-        #[serde(default)]
+        /// itself. **On by default** — the post-fit PFilter stage is
+        /// where prequential is needed and the proposal calls for
+        /// it as a first-class output. Set `false` to skip the trace
+        /// write (e.g. when running PFilter purely for a loglik SD).
+        #[serde(default = "default_record_prequential")]
         record_prequential: bool,
     },
 }
@@ -739,6 +742,19 @@ fn default_use_nuts() -> bool { true }
 // PMMH defaults
 fn default_pmmh_adapt() -> bool { true }
 fn default_pmmh_adapt_start() -> usize { 300 }
+
+// PFilter defaults
+/// Default to recording the prequential trace at the post-fit PFilter
+/// stage. Per the 2026-04-20 prequential proposal, every fit pipeline
+/// should produce a `PrequentialTrace` as a first-class output —
+/// downstream `camdl compare` consumes the per-step log-score / CRPS
+/// / PIT samples that this flag toggles. Cost is one extra
+/// per-particle obs draw per observation, on the first replicate
+/// only; the trace is auto-written to `prequential.{tsv,json}` in
+/// the stage dir. Set `record_prequential = false` in `[stages.X]`
+/// to opt out (e.g. running PFilter purely for loglik SD without
+/// the diagnostic write).
+fn default_record_prequential() -> bool { true }
 
 impl Default for LoglikEvalConfig {
     fn default() -> Self {
@@ -2659,6 +2675,72 @@ cooling = 0.7
         });
         assert_eq!(cfg.per_fit_prefix(101, Some(2)),
                    std::path::PathBuf::from("synthetic").join("ds_02").join("fit_101"));
+    }
+
+    #[test]
+    fn pfilter_record_prequential_defaults_to_true() {
+        // Per the 2026-04-20 prequential proposal, the post-fit
+        // PFilter stage should record a PrequentialTrace by default —
+        // omitting the field in TOML must produce `true`, not `false`.
+        let cfg = parse(r#"
+[model]
+camdl = "models/sir.camdl"
+
+[data.observations]
+weekly_cases = "data/cases.tsv"
+
+[estimate]
+beta = { bounds = [0.01, 2.0] }
+
+[fixed]
+N0 = 1000
+
+[stages.evaluate]
+method = "pfilter"
+particles = 1000
+        "#).unwrap();
+
+        match &cfg.stages["evaluate"] {
+            Stage::PFilter { record_prequential, record_ancestry, .. } => {
+                assert!(*record_prequential,
+                    "record_prequential must default to true");
+                assert!(!*record_ancestry,
+                    "record_ancestry stays opt-in (false default)");
+            }
+            _ => panic!("expected PFilter stage"),
+        }
+    }
+
+    #[test]
+    fn pfilter_record_prequential_can_be_disabled() {
+        // Explicit `record_prequential = false` opts out — used when
+        // running PFilter purely for a loglik SD without the trace
+        // write.
+        let cfg = parse(r#"
+[model]
+camdl = "models/sir.camdl"
+
+[data.observations]
+weekly_cases = "data/cases.tsv"
+
+[estimate]
+beta = { bounds = [0.01, 2.0] }
+
+[fixed]
+N0 = 1000
+
+[stages.evaluate]
+method = "pfilter"
+particles = 1000
+record_prequential = false
+        "#).unwrap();
+
+        match &cfg.stages["evaluate"] {
+            Stage::PFilter { record_prequential, .. } =>
+                assert!(!*record_prequential,
+                    "explicit record_prequential = false must override the default"),
+            _ => panic!("expected PFilter stage"),
+        }
     }
 
     #[test]

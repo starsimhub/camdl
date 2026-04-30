@@ -978,8 +978,13 @@ pub fn cmd_fit_run_v2(a: &crate::args::FitRunArgs) {
             }
             Stage::PFilter { particles, replicates, record_ancestry, record_prequential, .. } => {
                 let n_reps = replicates.unwrap_or(1);
-                // CLI flags are one-way overrides to true (default false
-                // in TOML); no flag means use TOML.
+                // record_ancestry: CLI flag is a one-way override to true
+                // (TOML default false); no flag means use TOML.
+                // record_prequential: TOML default true (per the
+                // 2026-04-20 prequential proposal); explicit
+                // `record_prequential = false` in [stages.X] opts out,
+                // and the CLI flag can re-enable it on a per-invocation
+                // basis without editing the TOML.
                 let record_ancestry = *record_ancestry || a.record_ancestry;
                 let want_prequential = *record_prequential || a.record_prequential;
                 let prior_state = effective_starts.as_ref().and_then(|dir| {
