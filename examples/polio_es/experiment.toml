@@ -29,12 +29,12 @@ n = 512
 [design.prior.parameters.beta]
 range = { min = 0.05, max = 1.0 }
 transform = "log"
-prior = { dist = "log_normal", mu = -1.2, sigma = 0.6 }
+prior = { log_normal = { mu = -1.2, sigma = 0.6 } }
 
 [design.prior.parameters.gamma]
 range = { min = 0.05, max = 0.40 }
 transform = "log"
-prior = { dist = "log_normal", mu = -2.1, sigma = 0.4 }
+prior = { log_normal = { mu = -2.1, sigma = 0.4 } }
 
 [[scenario]]
 name = "no_sia"

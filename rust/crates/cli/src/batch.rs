@@ -24,7 +24,8 @@ use rayon::prelude::*;
 
 use crate::util::{run_simulation, write_traj_tsv, load_params_toml, resolve_ir_path, SimRun};
 use crate::hashing::{model_hash, sim_hash, scen_hash, canonical_params};
-use crate::sampling::{generate_design, DesignParam, PriorSpec};
+use crate::sampling::{generate_design, describe_prior, DesignParam};
+use ir::parameter::PriorDist;
 use crate::cas;
 use crate::version;
 
@@ -60,7 +61,7 @@ struct DesignParamToml {
     #[serde(default)]
     transform: Option<String>,   // "log" | "logit" | None (linear)
     #[serde(default)]
-    prior: Option<PriorSpec>,    // prior distribution for VOI importance weighting
+    prior: Option<PriorDist>,    // prior distribution for VOI importance weighting
 }
 
 #[derive(Debug, Deserialize)]
@@ -854,7 +855,7 @@ fn build_priors_txt(params: &[(String, DesignParam)]) -> Option<String> {
     let mut txt = String::from("Parameter priors:\n\n");
     for (name, param) in params {
         let prior_desc = match &param.prior {
-            Some(p) => p.describe(),
+            Some(p) => describe_prior(p),
             None => "Uniform (no prior specified)".to_string(),
         };
         let transform_desc = match param.transform.as_deref() {

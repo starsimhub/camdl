@@ -11,43 +11,30 @@
 /// map them to the desired parameter range.
 
 use std::collections::HashMap;
-use serde::Deserialize;
 
-/// Prior distribution specification for a design parameter.
+use ir::parameter::PriorDist;
+
+/// Human-readable description for a prior distribution. Used by
+/// `priors.txt` (the assumptions log written alongside design output)
+/// and error messages.
 ///
-/// Used by the VOI tool for importance-weighted preposterior analysis.
-/// If omitted, the parameter is treated as having a uniform prior over its range.
-///
+/// Wire format for the `prior = ...` block in design TOML matches
+/// `ir::parameter::PriorDist`'s externally-tagged form:
 /// ```toml
-/// prior = { dist = "beta", alpha = 4.0, beta = 6.0 }
-/// prior = { dist = "log_normal", mu = 1.0, sigma = 0.5 }
-/// prior = { dist = "normal", mu = 0.3, sigma = 0.1 }
+/// prior = { beta = { alpha = 4.0, beta = 6.0 } }
+/// prior = { log_normal = { mu = 1.0, sigma = 0.5 } }
+/// prior = { normal = { mean = 0.3, sd = 0.1 } }
 /// ```
-#[derive(Debug, Clone, Deserialize)]
-pub struct PriorSpec {
-    pub dist: String,           // "beta" | "log_normal" | "normal" | "uniform"
-    pub alpha: Option<f64>,     // Beta(alpha, beta): shape parameter 1
-    pub beta: Option<f64>,      // Beta(alpha, beta): shape parameter 2
-    pub mu: Option<f64>,        // Normal / LogNormal: mean (log space for log_normal)
-    pub sigma: Option<f64>,     // Normal / LogNormal: standard deviation
-}
-
-impl PriorSpec {
-    /// Human-readable description for assumptions.txt and error messages.
-    pub fn describe(&self) -> String {
-        match self.dist.as_str() {
-            "beta" => format!("Beta(alpha={}, beta={})",
-                self.alpha.unwrap_or(f64::NAN),
-                self.beta.unwrap_or(f64::NAN)),
-            "log_normal" => format!("LogNormal(mu={}, sigma={})",
-                self.mu.unwrap_or(f64::NAN),
-                self.sigma.unwrap_or(f64::NAN)),
-            "normal" => format!("Normal(mu={}, sigma={})",
-                self.mu.unwrap_or(f64::NAN),
-                self.sigma.unwrap_or(f64::NAN)),
-            "uniform" => "Uniform".to_string(),
-            other => format!("{}(?)", other),
-        }
+pub fn describe_prior(p: &PriorDist) -> String {
+    match p {
+        PriorDist::Beta(q) => format!("Beta(alpha={}, beta={})", q.alpha, q.beta),
+        PriorDist::LogNormal(q) => format!("LogNormal(mu={}, sigma={})", q.mu, q.sigma),
+        PriorDist::Normal(q) => format!("Normal(mean={}, sd={})", q.mean, q.sd),
+        PriorDist::Uniform(q) => format!("Uniform(lower={}, upper={})", q.lower, q.upper),
+        PriorDist::HalfNormal(q) => format!("HalfNormal(sigma={})", q.sigma),
+        PriorDist::Gamma(q) => format!("Gamma(shape={}, rate={})", q.shape, q.rate),
+        PriorDist::Exponential(q) => format!("Exponential(rate={})", q.rate),
+        PriorDist::Fixed(v) => format!("Fixed({})", v),
     }
 }
 
@@ -60,7 +47,7 @@ pub struct DesignParam {
     pub transform: Option<String>,
     /// Optional prior distribution for VOI importance weighting.
     /// If None, uniform over [min, max] is assumed.
-    pub prior: Option<PriorSpec>,
+    pub prior: Option<PriorDist>,
 }
 
 impl DesignParam {
