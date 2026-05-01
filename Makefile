@@ -51,7 +51,7 @@ install: build
 	  echo "warning: another \`camdl\` is shadowing this install on your PATH."; \
 	  echo "  Resolves first on PATH: $$first"; \
 	  echo "  Just installed:         $$expected"; \
-	  echo "  Fix: \`rm $$first\`, or put $(INSTALL_DIR) ahead of $$(dirname \"$$first\") on your PATH."; \
+	  echo "  Fix: \`rm $$first\`, or put $(INSTALL_DIR) ahead of $${first%/*} on your PATH."; \
 	fi
 
 uninstall:

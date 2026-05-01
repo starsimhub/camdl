@@ -894,11 +894,29 @@ fn toml_as_f64(v: &toml::Value) -> Option<f64> {
 }
 
 /// Cross-seed aggregator. Reads each per-seed `profile.tsv` and emits
-/// `summary.tsv` at the umbrella directory: one row per grid point
-/// with mean / sd / min / max of `best_loglik` across seeds plus
-/// per-MLE-column mean/sd. High `sd_loglik` at a grid point flags
-/// stochastic IF2 instability — that cell's MLE is not trustworthy
-/// from a single chain.
+/// `summary.tsv` at the umbrella directory: one row per grid point.
+///
+/// Schema (per gh#30 — option A):
+///
+/// * Bare-name columns (`loglik`, `<param>`) are always present and
+///   carry the central value: the single per-seed value when
+///   n_seeds=1, the mean across seeds when n_seeds>1. A reader doing
+///   `df["loglik"]` and `df["R0"]` works identically in both cases —
+///   the n_seeds=1 case (the common case for first-time profiles, the
+///   camdl-book chapters, and "what does the surface look like"
+///   checks) doesn't have to learn the multi-seed schema to read the
+///   single value back.
+/// * Spread-diagnostic columns (`loglik_sd / _min / _max`,
+///   `<param>_sd`) are emitted *additively* and only when n_seeds>1,
+///   where they describe stochastic IF2 instability across replicate
+///   chains. High `loglik_sd` at a grid point flags an untrustworthy
+///   conditional MLE.
+///
+/// Header preserves bare/`_sd` adjacency (`R0  R0_sd  alpha
+/// alpha_sd`) so per-parameter pairs read together. The per-cell
+/// finite-seed count is inlined as elevated `loglik_sd` rather than a
+/// separate column; users who need the raw count can read the
+/// per-seed `replicates/seed_*/profile.tsv` files.
 ///
 /// Atomic write (tmp-then-rename) so concurrent throttled rewrites
 /// from the rayon pool can't expose a half-written summary.
@@ -923,7 +941,7 @@ fn write_cross_seed_summary(
             if line.starts_with('#') { continue; }
             let cols: Vec<&str> = line.split('\t').collect();
             // Header row uses literal column names; skip it.
-            if cols.get(focal_names.len()).map(|s| *s) == Some("best_loglik") {
+            if cols.get(focal_names.len()).copied() == Some("best_loglik") {
                 continue;
             }
             // Layout: focal_1 ... focal_N | best_loglik | best_start_idx |
@@ -949,33 +967,48 @@ fn write_cross_seed_summary(
         }
     }
 
+    let n_seeds = seed_dirs.len();
+    let multi_seed = n_seeds > 1;
+
     let mut body = String::new();
-    body.push_str(&format!("# {} cross-seed summary across {} seeds\n",
-        crate::version::VERSION, seed_dirs.len()));
+    body.push_str(&format!("# {} cross-seed summary across {} seed{}\n",
+        crate::version::VERSION, n_seeds, if multi_seed { "s" } else { "" }));
     body.push_str(&format!("# n_grid_points={} n_seeds={}\n",
-        by_grid.len(), seed_dirs.len()));
+        by_grid.len(), n_seeds));
+
+    // Header: focal | loglik [| loglik_sd loglik_min loglik_max] |
+    //         <param_1> [| <param_1>_sd] | <param_2> [| <param_2>_sd] | ...
     for name in focal_names { body.push_str(&format!("{}\t", name)); }
-    body.push_str("n_seeds\tmean_loglik\tsd_loglik\tmin_loglik\tmax_loglik");
+    body.push_str("loglik");
+    if multi_seed {
+        body.push_str("\tloglik_sd\tloglik_min\tloglik_max");
+    }
     for spec in if2_params.iter() {
-        body.push_str(&format!("\t{}_mean\t{}_sd", spec.name, spec.name));
+        body.push_str(&format!("\t{}", spec.name));
+        if multi_seed {
+            body.push_str(&format!("\t{}_sd", spec.name));
+        }
     }
     body.push('\n');
 
     for (focal_key, samples) in &by_grid {
         for v in focal_key { body.push_str(&format!("{}\t", v)); }
-        let n = samples.len();
         let logliks: Vec<f64> = samples.iter().map(|(ll, _)| *ll)
             .filter(|x| x.is_finite()).collect();
-        let n_finite = logliks.len();
         let (mean_ll, sd_ll, min_ll, max_ll) = summary_stats(&logliks);
-        body.push_str(&format!("{}\t{:.4}\t{:.4}\t{:.4}\t{:.4}",
-            n_finite.max(n), mean_ll, sd_ll, min_ll, max_ll));
+        body.push_str(&format!("{:.4}", mean_ll));
+        if multi_seed {
+            body.push_str(&format!("\t{:.4}\t{:.4}\t{:.4}", sd_ll, min_ll, max_ll));
+        }
         for spec in if2_params.iter() {
             let vals: Vec<f64> = samples.iter()
                 .filter_map(|(_, mle)| mle.get(spec.index).copied())
                 .filter(|x| x.is_finite()).collect();
             let (m, s, _, _) = summary_stats(&vals);
-            body.push_str(&format!("\t{:.6}\t{:.6}", m, s));
+            body.push_str(&format!("\t{:.6}", m));
+            if multi_seed {
+                body.push_str(&format!("\t{:.6}", s));
+            }
         }
         body.push('\n');
     }
@@ -1001,5 +1034,131 @@ fn summary_stats(xs: &[f64]) -> (f64, f64, f64, f64) {
     let min = xs.iter().cloned().fold(f64::INFINITY, f64::min);
     let max = xs.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
     (mean, sd, min, max)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sim::inference::if2::EstimatedParam;
+    use sim::inference::types::Transform;
+
+    fn estimated(name: &str, index: usize) -> EstimatedParam {
+        EstimatedParam {
+            name: name.into(), index, initial: 0.0, rw_sd: 0.0,
+            transform: Transform::None, lower: 0.0, upper: 1.0,
+            rw_sd_auto: false, ivp: false,
+        }
+    }
+
+    /// Helper: write a per-seed `profile.tsv` in the expected
+    /// pre-aggregation layout (matches what the in-process profile
+    /// driver emits on disk, line 929-930 of this file).
+    fn write_per_seed_profile(
+        seed_dir: &std::path::Path,
+        focal_names: &[&str],
+        rows: &[(Vec<f64>, f64, Vec<f64>)],  // (focal vals, best_loglik, mle vals)
+    ) {
+        std::fs::create_dir_all(seed_dir).unwrap();
+        let mut s = String::new();
+        for n in focal_names { s.push_str(&format!("{}\t", n)); }
+        s.push_str("best_loglik\tbest_start_idx\twall_time_seconds");
+        for i in 0..rows[0].2.len() { s.push_str(&format!("\tparam_{}", i)); }
+        s.push('\n');
+        for (focal, ll, mle) in rows {
+            for v in focal { s.push_str(&format!("{}\t", v)); }
+            s.push_str(&format!("{:.4}\t0\t0.0", ll));
+            for v in mle { s.push_str(&format!("\t{:.6}", v)); }
+            s.push('\n');
+        }
+        std::fs::write(seed_dir.join("profile.tsv"), s).unwrap();
+    }
+
+    fn data_lines(text: &str) -> Vec<&str> {
+        text.lines().filter(|l| !l.starts_with('#') && !l.is_empty()).collect()
+    }
+
+    #[test]
+    fn n1_summary_uses_bare_names_only() {
+        // gh#30 option A, n=1 (the common case): the schema is
+        //   <focal>  loglik  <param_1>  <param_2>  ...
+        // No `_sd` / `_min` / `_max` — there's no aggregation to
+        // describe.
+        let tmp = tempfile::tempdir().unwrap();
+        let umbrella = tmp.path();
+        let seed_dir = umbrella.join("replicates").join("seed_1");
+        write_per_seed_profile(
+            &seed_dir,
+            &["s0"],
+            &[
+                (vec![0.10], -42.5, vec![1.5, 0.3]),
+                (vec![0.20], -38.1, vec![1.7, 0.4]),
+            ],
+        );
+        let if2 = vec![estimated("R0", 0), estimated("alpha", 1)];
+        write_cross_seed_summary(umbrella, &[seed_dir], &["s0".into()], &if2).unwrap();
+
+        let text = std::fs::read_to_string(umbrella.join("summary.tsv")).unwrap();
+        let lines = data_lines(&text);
+        let header = lines[0];
+        let cols: Vec<&str> = header.split('\t').collect();
+        assert_eq!(cols, vec!["s0", "loglik", "R0", "alpha"],
+            "n=1 schema must be focal + bare loglik + bare params; got {:?}", cols);
+
+        // No spread columns must leak through.
+        for forbidden in &["loglik_sd", "loglik_min", "loglik_max",
+                           "R0_sd", "alpha_sd", "n_seeds",
+                           "mean_loglik", "max_loglik", "R0_mean", "alpha_mean"] {
+            assert!(!header.contains(forbidden),
+                "n=1 header must not contain {:?}: {}", forbidden, header);
+        }
+
+        // Two data rows, four columns each, no all-zero `_sd` chaff.
+        assert_eq!(lines.len(), 3, "expected header + 2 grid rows: {:?}", lines);
+        assert_eq!(lines[1].split('\t').count(), 4);
+        assert_eq!(lines[2].split('\t').count(), 4);
+    }
+
+    #[test]
+    fn multi_seed_summary_appends_spread_columns() {
+        // gh#30 option A, n>1: bare names stay, `_sd / _min / _max`
+        // are appended additively. Bare loglik = mean across seeds;
+        // bare param = mean across seeds.
+        let tmp = tempfile::tempdir().unwrap();
+        let umbrella = tmp.path();
+        let mut seed_dirs = Vec::new();
+        for (idx, ll_offset, r0_off) in
+            [(1usize, 0.0_f64, 0.0_f64), (2, 0.5, 0.05), (3, -0.5, -0.05)]
+        {
+            let seed_dir = umbrella.join("replicates").join(format!("seed_{}", idx));
+            write_per_seed_profile(
+                &seed_dir,
+                &["s0"],
+                &[
+                    (vec![0.10], -42.5 + ll_offset, vec![1.5 + r0_off, 0.3]),
+                    (vec![0.20], -38.1 + ll_offset, vec![1.7 + r0_off, 0.4]),
+                ],
+            );
+            seed_dirs.push(seed_dir);
+        }
+        let if2 = vec![estimated("R0", 0), estimated("alpha", 1)];
+        write_cross_seed_summary(umbrella, &seed_dirs, &["s0".into()], &if2).unwrap();
+
+        let text = std::fs::read_to_string(umbrella.join("summary.tsv")).unwrap();
+        let lines = data_lines(&text);
+        let cols: Vec<&str> = lines[0].split('\t').collect();
+        // Bare/_sd adjacency for params; `_sd / _min / _max` appended
+        // after the bare loglik.
+        assert_eq!(cols, vec![
+            "s0", "loglik", "loglik_sd", "loglik_min", "loglik_max",
+            "R0", "R0_sd", "alpha", "alpha_sd",
+        ], "n>1 schema: {:?}", cols);
+
+        // Bare `loglik` value is the mean across seeds at the first
+        // grid cell: mean(-42.5, -42.0, -43.0) = -42.5
+        let row1: Vec<&str> = lines[1].split('\t').collect();
+        let bare_loglik: f64 = row1[1].parse().unwrap();
+        assert!((bare_loglik - (-42.5)).abs() < 1e-3,
+            "bare loglik should be the cross-seed mean, got {}", bare_loglik);
+    }
 }
 
