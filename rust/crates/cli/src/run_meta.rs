@@ -311,32 +311,12 @@ pub struct GridAxis {
 pub struct StartsFromRef {
     pub stage: String,
     /// Content hash of the upstream stage, if its `run.json` could be
-    /// read at write time. `None` when the upstream directory was a
-    /// legacy path (no run.json) or the file was unreadable — absent
-    /// rather than empty so the provenance chain doesn't silently
-    /// corrupt into "has a parent, but we don't know its hash."
-    ///
-    /// A custom `Deserialize` shim maps legacy `""` (the sentinel used
-    /// by pre-hardening writes) to `None`, so old run.json files round-
-    /// trip cleanly. See `deserialize_empty_as_none`.
-    #[serde(default, deserialize_with = "deserialize_empty_as_none",
-            skip_serializing_if = "Option::is_none")]
+    /// read at write time. `None` when the upstream directory had no
+    /// readable run.json — absent rather than empty so the provenance
+    /// chain doesn't silently corrupt into "has a parent, but we don't
+    /// know its hash."
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stage_hash: Option<String>,
-}
-
-/// Treat legacy empty-string values as `None`. Pre-hardening
-/// `StartsFromRef.stage_hash` was `String` with an empty-string
-/// fallback on read error; the hardening pass changed it to
-/// `Option<String>` and writes either a real hash or omits the field.
-/// This deserializer makes old records consistent with the new schema.
-fn deserialize_empty_as_none<'de, D>(deser: D) -> Result<Option<String>, D::Error>
-where D: serde::Deserializer<'de>,
-{
-    let opt = <Option<String>>::deserialize(deser)?;
-    Ok(match opt {
-        Some(s) if s.is_empty() => None,
-        other => other,
-    })
 }
 
 /// Unified cache status: result of comparing an expected content hash
@@ -670,32 +650,6 @@ mod tests {
             other => panic!("expected Miss (no run.json), got {:?}", other),
         }
         std::fs::remove_dir_all(&tmp).ok();
-    }
-
-    #[test]
-    fn legacy_empty_stage_hash_deserializes_to_none() {
-        // Pre-hardening run.json files wrote "stage_hash": "" as an
-        // error-path sentinel. The custom deserializer maps that to
-        // None so legacy records round-trip consistently with new
-        // writes.
-        let json = r#"{
-            "hash": "xxx", "version": "v", "created_at": "t",
-            "argv": [], "status": "running",
-            "kind": {"kind": "fit-stage", "fit_hash": "fff", "stage": "refine",
-                     "method": "if2", "seed": 1, "n_chains": 4,
-                     "starts_from": {"stage": "scout", "stage_hash": ""}}
-        }"#;
-        let parsed: Run = serde_json::from_str(json).unwrap();
-        match parsed.kind {
-            RunKind::FitStage(m) => {
-                let sf = m.starts_from.expect("starts_from present");
-                assert_eq!(sf.stage, "scout");
-                assert!(sf.stage_hash.is_none(),
-                    "empty-string stage_hash must deserialize to None, got {:?}",
-                    sf.stage_hash);
-            }
-            _ => panic!("expected FitStage"),
-        }
     }
 
     #[test]
