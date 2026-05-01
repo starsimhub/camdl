@@ -2,15 +2,13 @@
 //!
 //! One `Run` type with a `kind: RunKind` discriminator covers every
 //! result camdl produces — simulate runs, top-level fits, and
-//! per-stage fits — under one schema. Replaces the parallel
+//! per-stage fits — under one schema. Replaced the parallel
 //! `cas::RunMeta` and `fit::provenance::StageProvenance` structs that
 //! had ~80 % field overlap with drifting names (version vs
-//! camdl_version, created_at vs timestamp, etc.).
+//! camdl_version, created_at vs timestamp, etc.); both are now gone.
 //!
 //! See `docs/dev/proposals/2026-04-19-unified-output-tree.md` for the
-//! full design. This module is introduced in commit 2/6 of the plan:
-//! types live alongside the legacy structs and get filled at write
-//! sites in commit 4, at which point the legacy types get deleted.
+//! original design.
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;

@@ -655,7 +655,7 @@ Notes:
   - The hash is matched as a prefix (8+ chars recommended) across
     every kind under <root>/ (sims, fits, profiles, replicate-sets).
   - Errors on ambiguous or unmatched prefix.
-  - Errors on a still-running fit (wall_time_seconds == 0.0); the
+  - Errors on a still-running fit (RunStatus::Running); the
     runner would otherwise overwrite the label at completion.
   - Concurrent invocations are last-write-wins.
 ")]
