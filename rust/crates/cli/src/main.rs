@@ -46,27 +46,30 @@ use std::collections::HashMap;
     about = "Stochastic compartmental model simulation and inference",
     disable_help_subcommand = true,
     arg_required_else_help = true,
+    after_help = "\
+Common workflows:
+  Simulate a model:        camdl simulate model.camdl --params p.toml
+  Fit to data:             camdl fit run fit.toml
+  Likelihood at θ:         camdl pfilter model.camdl --params p.toml --data cases.tsv
+  Browse cached runs:      camdl list
+  Diagnose a fit:          camdl fit summary <fit-dir>
+
+Run `camdl <command> --help` for any subcommand.",
 )]
 pub(crate) struct Cli {
     #[command(subcommand)]
     pub command: Command,
 
-    /// Log verbosity; overrides RUST_LOG (error/warn/info/debug/trace).
-    /// When unset, defaults to `warn` unless `--progress plain` (or
-    /// `auto` resolving to plain on non-TTY stderr) is in effect, in
-    /// which case we bump to `info` so the plain-mode per-chain
-    /// progress lines — which are emitted via `log::info!` — actually
-    /// reach the user. Passing `--verbosity` explicitly always wins,
-    /// including explicit `--verbosity warn` with `--progress plain`
-    /// (self-silencing is a valid user choice). See GH #14.
+    /// Log verbosity (error/warn/info/debug/trace). Overrides RUST_LOG.
+    /// Defaults to `warn`; `--progress plain` auto-bumps to `info` so
+    /// per-chain progress lines (`log::info!`) reach the user.
     #[arg(long, global = true, value_name = "LEVEL",
           help_heading = "Global options")]
     verbosity: Option<log::LevelFilter>,
 
-    /// Progress output mode for long-running subcommands (`fit run`,
-    /// `simulate`, `if2`, ...). `auto` uses indicatif bars on a TTY and
-    /// plain timestamped log lines otherwise; `plain` forces plain lines
-    /// (use under `tee`, `&> log`, `ssh`, or CI). See GH #14.
+    /// Progress output mode for long-running subcommands. `auto` uses
+    /// indicatif bars on a TTY, plain log lines otherwise; `plain` forces
+    /// plain lines (use under `tee`, `ssh`, or CI).
     #[arg(long, global = true, default_value_t = args::types::ProgressMode::Auto,
           value_name = "MODE", help_heading = "Global options")]
     progress: args::types::ProgressMode,
@@ -180,6 +183,16 @@ Examples:
 }
 
 #[derive(Subcommand)]
+#[command(arg_required_else_help = true,
+          after_help = "\
+Examples:
+  # Run a parameter / scenario sweep declared in a TOML manifest
+  camdl batch run sweep.toml --parallel 8
+
+  # Check completion of a long-running sweep
+  camdl batch status sweep.toml
+
+See `camdl batch <subcommand> --help` for full options.")]
 pub(crate) enum BatchCmd {
     /// Run a batch sweep from a TOML manifest
     Run(args::BatchArgs),
@@ -188,6 +201,19 @@ pub(crate) enum BatchCmd {
 }
 
 #[derive(Subcommand)]
+#[command(arg_required_else_help = true,
+          after_help = "\
+Examples:
+  # Run the full inference pipeline declared in fit.toml
+  camdl fit run fit.toml --seed 1
+
+  # Render the convergence + MLE table for a completed fit
+  camdl fit summary results/fits/he2010-abc123/
+
+  # Browse every fit under a results tree
+  camdl fit table results/fits/
+
+See `camdl fit <subcommand> --help` for full options.")]
 pub(crate) enum FitCmd {
     /// Run inference stages defined in a fit.toml
     Run(args::FitRunArgs),
@@ -206,6 +232,14 @@ pub(crate) enum FitCmd {
 }
 
 #[derive(Subcommand)]
+#[command(arg_required_else_help = true,
+          after_help = "\
+Examples:
+  # Split a data TSV into training + holdout sets
+  camdl data split cases.tsv --at-time 100 \\
+      --train train.tsv --holdout holdout.tsv
+
+See `camdl data split --help` for full options.")]
 pub(crate) enum DataCmd {
     /// Split a data TSV into train and holdout sets
     Split(args::DataSplitArgs),

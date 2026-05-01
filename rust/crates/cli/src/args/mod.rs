@@ -250,6 +250,9 @@ pub struct BatchArgs {
 Examples:
   # Count completed vs pending runs for a sweep
   camdl batch status sweep.toml
+
+  # Watch a long-running sweep from another shell
+  watch -n 5 camdl batch status sweep.toml
 ")]
 pub struct BatchStatusArgs {
     /// Batch TOML manifest file
@@ -264,11 +267,16 @@ Examples:
   # Run the full inference pipeline declared in fit.toml
   camdl fit run fit.toml --seed 1
 
-  # Run with a specific RNG seed for reproducibility
-  camdl fit run fit.toml --seed 42
+  # Long fits: capture progress + diagnostics to a log file
+  camdl fit run fit.toml --seed 1 --progress plain 2>&1 | tee fit.log
 
   # Force rerun even if cached results match
   camdl fit run fit.toml --seed 1 --force
+
+Notes:
+  - PGAS/PMMH fits can resume a partial run with `--resume`.
+  - Output goes under `<root>/fits/<stem>-<hash>/`; resolve with
+    `camdl fit where fit.toml`.
 ")]
 pub struct FitRunArgs {
     /// Fit configuration file (v2 TOML)
@@ -428,8 +436,11 @@ fn parse_f64_list(s: &str) -> Result<Vec<f64>, String> {
 #[derive(Args)]
 #[command(after_help = "\
 Examples:
-  # Summarize progress / convergence for a fit
+  # Completion / convergence summary for a fit config
   camdl fit status fit.toml
+
+  # Same, by results-directory path
+  camdl fit status results/fits/he2010-abc123/
 ")]
 pub struct FitStatusArgs {
     /// Fit config file or results directory
@@ -612,8 +623,8 @@ pub struct FitTableArgs {
 #[derive(Args)]
 #[command(after_help = "\
 Examples:
-  # Scaffold a new fit.toml from an existing one
-  camdl fit new base.toml --output variant.toml
+  # Scaffold a new fit.toml from an existing baseline
+  camdl fit new --from base.toml variant.toml
 ")]
 pub struct FitNewArgs {
     /// Source fit.toml to derive from
@@ -629,6 +640,9 @@ pub struct FitNewArgs {
 Examples:
   # Print the content-addressed output directory for a fit.toml
   camdl fit where fit.toml
+
+  # Per-seed cell directory (multi-seed fits)
+  camdl fit where fit.toml --seed 42
 ")]
 pub struct FitWhereArgs {
     /// Fit config file
@@ -962,8 +976,12 @@ pub struct EvalArgs {
 #[derive(Args)]
 #[command(after_help = "\
 Examples:
-  # Split a data TSV at t=100 into training + holdout sets
+  # Split at a specific time point
   camdl data split cases.tsv --at-time 100 \\
+      --train train.tsv --holdout holdout.tsv
+
+  # Split at a fraction of the rows (last 20% as holdout)
+  camdl data split cases.tsv --fraction 0.8 \\
       --train train.tsv --holdout holdout.tsv
 ")]
 pub struct DataSplitArgs {
@@ -1149,9 +1167,6 @@ Examples:
 
   # Render despite different T_score across fits (Δ columns → '—')
   camdl compare fits/a/pf fits/b/pf --allow-mismatched-horizon
-
-See docs/dev/proposals/2026-04-20-prequential-evaluation.md §8 for the
-scoring-rule design.
 ")]
 pub struct CompareArgs {
     /// Stage directories (or .json paths) to compare — need ≥2 when
