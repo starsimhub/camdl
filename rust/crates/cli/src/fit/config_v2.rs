@@ -1086,6 +1086,20 @@ impl FitConfigV2 {
             ));
         }
 
+        // IF2 stages require at least one iteration — zero iterations would
+        // leave `iterations` empty and cause `last().unwrap()` to panic in
+        // `run_if2`. Catch it here so the user gets a config error, not a crash.
+        for (stage_name, stage) in &self.stages {
+            if let Stage::IF2 { iterations, .. } = stage {
+                if *iterations == 0 {
+                    return Err(format!(
+                        "stage '{}': iterations must be ≥ 1 (got 0). \
+                         IF2 needs at least one filtering pass to produce \
+                         a parameter estimate.", stage_name));
+                }
+            }
+        }
+
         // Bayesian stages require priors on all estimated params
         for (stage_name, stage) in &self.stages {
             if stage.requires_priors() {
@@ -1190,11 +1204,14 @@ impl FitConfigV2 {
             let names = non_if2_stages.iter()
                 .map(|(n, m)| format!("'{}' ({})", n, m))
                 .collect::<Vec<_>>().join(", ");
-            eprintln!("\x1b[33mwarning:\x1b[0m fit declares simplex_groups, \
+            let use_color = std::io::IsTerminal::is_terminal(&std::io::stderr())
+                && std::env::var("NO_COLOR").is_err();
+            let tag = if use_color { "\x1b[33mwarning:\x1b[0m" } else { "warning:" };
+            eprintln!("{} fit declares simplex_groups, \
                 but non-IF2 stage(s) {} do not currently honour the \
                 simplex constraint — members will be perturbed \
                 independently and rely on the model to enforce sum = 1 \
-                indirectly.", names);
+                indirectly.", tag, names);
         }
 
         Ok(())
@@ -2133,6 +2150,40 @@ cooling = 0.7
             "expected duplicate-seed error: got {}", err);
         assert!(err.contains("2"),
             "expected duplicate value in error: got {}", err);
+    }
+
+    #[test]
+    fn validate_if2_zero_iterations_rejects() {
+        let config = parse(r#"
+[model]
+camdl = "models/sir.camdl"
+
+[data.observations]
+weekly_cases = "data/cases.tsv"
+
+[config]
+backend = "chain_binomial"
+dt = 1.0
+
+[estimate]
+beta = { bounds = [0.01, 2.0] }
+
+[fixed]
+N0 = 1000000
+
+[stages.mle]
+method = "if2"
+chains = 4
+particles = 100
+iterations = 0
+cooling = 0.7
+        "#).unwrap();
+        let model_params = vec!["beta".into(), "N0".into()];
+        let err = config.validate(&model_params).unwrap_err();
+        assert!(err.contains("iterations must be"),
+            "expected iterations error: got {}", err);
+        assert!(err.contains("mle"),
+            "expected stage name in error: got {}", err);
     }
 
     #[test]

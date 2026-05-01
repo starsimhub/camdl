@@ -687,6 +687,20 @@
       ]
     },
 
+    "hierarchical_prior": {
+      "type": "object",
+      "required": ["kind", "args", "pool_over"],
+      "properties": {
+        "kind": { "type": "string" },
+        "args": {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/definitions/expr" }
+        },
+        "pool_over": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+
     "parameter": {
       "type": "object",
       "required": ["name"],
@@ -700,8 +714,16 @@
           ]
         },
         "prior": { "oneOf": [{ "type": "null" }, { "$ref": "#/definitions/prior_dist" }] },
+        "hierarchical": { "oneOf": [{ "type": "null" }, { "$ref": "#/definitions/hierarchical_prior" }] },
         "transform": { "oneOf": [{ "type": "null" }, { "type": "string", "enum": ["log", "logit", "identity"] }] },
-        "initial_value": { "type": ["number", "null"] }
+        "initial_value": { "type": ["number", "null"] },
+        "param_kind": { "type": ["string", "null"] },
+        "param_dim": {
+          "oneOf": [
+            { "type": "null" },
+            { "type": "array", "items": { "type": "integer" }, "minItems": 2, "maxItems": 2 }
+          ]
+        }
       }
     },
 

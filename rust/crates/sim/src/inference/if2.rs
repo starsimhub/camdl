@@ -511,7 +511,7 @@ pub fn run_if2_with_progress<P: ProcessModel<State = ParticleState>>(
         current_params = param_means;
     }
 
-    let last_iter = iterations.last().unwrap();
+    let last_iter = iterations.last().expect("n_iterations ≥ 1 enforced at FitConfigV2::validate");
     let best_iter = iterations.iter()
         .filter(|it| it.if2_perturbed_loglik.is_finite())
         .max_by(|a, b| a.if2_perturbed_loglik.total_cmp(&b.if2_perturbed_loglik))
