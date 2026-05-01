@@ -982,6 +982,10 @@ fn prepare_cas_ctx(
             p.value = Some(*v);
         }
     }
+    // Bounds + finite-value check after all override paths resolved (gh#31).
+    // Catches violations early — before any CAS-cache work — rather than
+    // letting a downstream `run_simulation` re-validate post-hash.
+    util::validate_parameter_values(&model)?;
     let base_params: HashMap<String, f64> = model.parameters.iter()
         .filter_map(|p| p.value.map(|v| (p.name.clone(), v)))
         .collect();
@@ -1370,6 +1374,13 @@ fn generate_prior_draws_from_ir(
             }
         }
     }
+
+    // Bounds + finite-value check after scenario application but before
+    // prior sampling. Each per-draw prior sample is independently
+    // bounds-checked by `sample_with_bounds`; this pass catches the
+    // *fixed* (scenario- or model-default-pinned) values that the prior
+    // sampler will leave alone (gh#31).
+    util::validate_parameter_values(&model)?;
 
     // Check all params have either a prior or a (scenario-resolved) value.
     let missing: Vec<&str> = model.parameters.iter()

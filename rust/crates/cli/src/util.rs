@@ -463,6 +463,14 @@ pub fn load_params_toml(path: &str) -> Result<HashMap<String, f64>, String> {
 }
 
 /// Load a TOML params file and apply values to the model's parameters.
+///
+/// Validates the resulting `model.parameters` after applying — if the
+/// supplied file leaves any parameter with a non-finite value or a
+/// value outside its declared `[bounds: lo, hi]`, returns an error
+/// rather than silently accepting (gh#31). Validation runs against the
+/// full parameter set, not just the keys present in the file, so a
+/// bounds violation already on the model (e.g. from a prior
+/// `apply_params_file` call) still fires.
 pub fn apply_params_file(model: &mut ir::Model, path: &str) -> Result<(), String> {
     let vals = load_params_toml(path)?;
     for p in &mut model.parameters {
@@ -470,7 +478,58 @@ pub fn apply_params_file(model: &mut ir::Model, path: &str) -> Result<(), String
             p.value = Some(v);
         }
     }
+    validate_parameter_values(model)?;
     Ok(())
+}
+
+/// Validate that every parameter with a declared `bounds` carries a value
+/// within those bounds, and that every parameter value is finite (no NaN,
+/// no ±∞).
+///
+/// Call after all parameter-override resolution is complete and before
+/// the model reaches the simulation/inference layer. Bounds are declared
+/// inclusively, so values exactly equal to `lo` or `hi` pass.
+///
+/// Returns `Err(joined_messages)` when any parameter violates. All
+/// violations are collected and reported together so the user sees the
+/// full list rather than fixing them one at a time. Parameters with
+/// `value = None` are left to the resolution layer (some subcommands
+/// fill them later from prior draws or scenarios) — only set values are
+/// checked here.
+///
+/// Lives in the CLI layer, not `crates/ir/src/validate.rs`, because
+/// bounds enforcement is a CLI-input-validation concern: the IR
+/// validator is for structural integrity (unknown references, missing
+/// ODE, etc.) of the IR-as-emitted-by-the-compiler. A user can
+/// legitimately hand-author an IR with `value: 5.0` and `bounds: [0,
+/// 2]`, and the IR is structurally valid; what's wrong is that the
+/// CLI-supplied or scenario-supplied value is outside the bounds the
+/// model author declared.
+pub fn validate_parameter_values(model: &ir::Model) -> Result<(), String> {
+    let mut errs: Vec<String> = Vec::new();
+    for p in &model.parameters {
+        let Some(v) = p.value else { continue; };
+        if !v.is_finite() {
+            errs.push(format!(
+                "parameter '{}' = {} is not finite (NaN or ±∞).\n  \
+                 Fix: supply a finite numeric value via --param, --params, or the scenario block.",
+                p.name, v));
+            continue;
+        }
+        if let Some((lo, hi)) = p.bounds {
+            if v < lo || v > hi {
+                errs.push(format!(
+                    "parameter '{}' = {} is outside declared bounds [{}, {}].\n  \
+                     Fix: either widen the bounds in the model, or supply a value within the declared range.",
+                    p.name, v, lo, hi));
+            }
+        }
+    }
+    if errs.is_empty() {
+        Ok(())
+    } else {
+        Err(errs.join("\n"))
+    }
 }
 
 /// Load a keyed TSV file (two columns: name<TAB>value) for --param-vec.
@@ -907,6 +966,11 @@ pub fn run_simulation(run: &SimRun) -> Result<(Trajectory, ir::Model), String> {
             }
         }
     }
+
+    // Final post-resolution check: every parameter value is finite and
+    // (if bounded) within declared bounds. See `validate_parameter_values`
+    // for rationale; gh#31 for the silent-acceptance bug this closes.
+    validate_parameter_values(&model)?;
 
     let compiled = CompiledModel::new(model.clone())
         .map_err(|e| format!("model compile error: {:?}", e))?;
@@ -1606,5 +1670,170 @@ mod tests {
                 cold.as_millis()
             );
         }
+    }
+
+    // ── validate_parameter_values (gh#31) ────────────────────────────────
+
+    /// Build a minimal `ir::Model` with a single parameter, used as a
+    /// fixture for the validator unit tests. Avoids depending on a
+    /// golden IR file just to assert pure-function behavior — the
+    /// validator only inspects `model.parameters`, so every other
+    /// field is zero/empty/default.
+    fn model_with_one_param(value: Option<f64>, bounds: Option<(f64, f64)>) -> ir::Model {
+        ir::Model {
+            name: "fixture".into(),
+            version: "0.0".into(),
+            time_unit: "days".into(),
+            description: None,
+            origin: None,
+            compartments: Vec::new(),
+            transitions: Vec::new(),
+            ode_equations: Vec::new(),
+            time_functions: Vec::new(),
+            tables: Vec::new(),
+            interventions: Vec::new(),
+            observations: Vec::new(),
+            parameters: vec![ir::parameter::Parameter {
+                name: "x".into(),
+                value,
+                bounds,
+                prior: None,
+                hierarchical: None,
+                transform: None,
+                initial_value: None,
+                param_kind: None,
+                param_dim: None,
+            }],
+            initial_conditions: ir::model::InitialConditions::Explicit(HashMap::new()),
+            output: ir::model::OutputConfig {
+                times: ir::model::OutputSchedule::AtTimes(vec![0.0]),
+                format: "tsv".into(),
+                trajectory: true,
+                observations: false,
+            },
+            simulation: ir::model::SimulationConfig {
+                t_start: 0.0, t_end: 1.0,
+                time_semantics: "days".into(), dt: None, rng_seed: None,
+            },
+            presets: Vec::new(),
+            model_structure: None,
+            balance: None,
+        }
+    }
+
+    #[test]
+    fn validate_accepts_in_bounds_value() {
+        let m = model_with_one_param(Some(0.5), Some((0.0, 1.0)));
+        assert!(validate_parameter_values(&m).is_ok());
+    }
+
+    #[test]
+    fn validate_accepts_value_on_lower_bound() {
+        // Bounds are inclusive — a value exactly on the lower bound
+        // must pass. Open-interval semantics would force the user to
+        // perturb a deliberately-set boundary value just to satisfy
+        // the validator, which is a UX hazard for "natural" boundary
+        // values like 0 for a probability or 1 for a count.
+        let m = model_with_one_param(Some(0.0), Some((0.0, 1.0)));
+        assert!(validate_parameter_values(&m).is_ok());
+    }
+
+    #[test]
+    fn validate_accepts_value_on_upper_bound() {
+        let m = model_with_one_param(Some(1.0), Some((0.0, 1.0)));
+        assert!(validate_parameter_values(&m).is_ok());
+    }
+
+    #[test]
+    fn validate_rejects_value_above_upper_bound() {
+        let m = model_with_one_param(Some(1.5), Some((0.0, 1.0)));
+        let err = validate_parameter_values(&m).unwrap_err();
+        assert!(err.contains("'x'"), "param name absent: {err}");
+        assert!(err.contains("1.5"), "supplied value absent: {err}");
+        assert!(err.contains("[0") && err.contains("1]"),
+            "declared bounds absent: {err}");
+        assert!(err.contains("outside"), "violation kind unclear: {err}");
+    }
+
+    #[test]
+    fn validate_rejects_value_below_lower_bound() {
+        let m = model_with_one_param(Some(-0.1), Some((0.0, 1.0)));
+        let err = validate_parameter_values(&m).unwrap_err();
+        assert!(err.contains("'x'") && err.contains("outside"),
+            "expected bounds violation; got: {err}");
+    }
+
+    #[test]
+    fn validate_rejects_nan() {
+        // NaN must error even when bounds are absent — a NaN
+        // parameter is downstream-poison regardless of constraint.
+        let m = model_with_one_param(Some(f64::NAN), None);
+        let err = validate_parameter_values(&m).unwrap_err();
+        assert!(err.contains("'x'"), "param name absent: {err}");
+        assert!(err.contains("not finite"),
+            "should report finiteness, not bounds: {err}");
+        // Bounds-violation hint must NOT appear: the underlying
+        // problem is finiteness, and surfacing the wrong category
+        // wastes the user's first fix attempt.
+        assert!(!err.contains("outside declared bounds"),
+            "NaN reported as bounds violation; got: {err}");
+    }
+
+    #[test]
+    fn validate_rejects_positive_infinity() {
+        let m = model_with_one_param(Some(f64::INFINITY), Some((0.0, 1e9)));
+        let err = validate_parameter_values(&m).unwrap_err();
+        assert!(err.contains("not finite"),
+            "+∞ should fail the finiteness check before bounds; got: {err}");
+    }
+
+    #[test]
+    fn validate_rejects_negative_infinity() {
+        let m = model_with_one_param(Some(f64::NEG_INFINITY), None);
+        let err = validate_parameter_values(&m).unwrap_err();
+        assert!(err.contains("not finite"),
+            "-∞ should fail the finiteness check; got: {err}");
+    }
+
+    #[test]
+    fn validate_accepts_unset_value() {
+        // value = None: subcommands resolve from priors / scenarios
+        // later; the validator must NOT pre-empt that with a "missing
+        // value" error. The brief is explicit on this.
+        let m = model_with_one_param(None, Some((0.0, 1.0)));
+        assert!(validate_parameter_values(&m).is_ok());
+    }
+
+    #[test]
+    fn validate_accepts_finite_value_when_no_bounds_declared() {
+        // No bounds: any finite value passes.
+        let m = model_with_one_param(Some(1e9), None);
+        assert!(validate_parameter_values(&m).is_ok());
+        let m = model_with_one_param(Some(-1e9), None);
+        assert!(validate_parameter_values(&m).is_ok());
+    }
+
+    #[test]
+    fn validate_collects_all_violations_in_one_message() {
+        // Two violations: report both. Saves the user from a
+        // fix-rerun-fix loop.
+        let mut m = model_with_one_param(Some(5.0), Some((0.0, 1.0)));
+        m.parameters.push(ir::parameter::Parameter {
+            name: "y".into(),
+            value: Some(f64::NAN),
+            bounds: None,
+            prior: None,
+            hierarchical: None,
+            transform: None,
+            initial_value: None,
+            param_kind: None,
+            param_dim: None,
+        });
+        let err = validate_parameter_values(&m).unwrap_err();
+        assert!(err.contains("'x'"), "x violation missing: {err}");
+        assert!(err.contains("'y'"), "y violation missing: {err}");
+        // Both messages should be in the same error string.
+        assert!(err.contains("outside") && err.contains("not finite"),
+            "expected both kinds of violation reported; got: {err}");
     }
 }

@@ -173,6 +173,13 @@ impl FitRunConfig {
             }
         }
 
+        // Bounds + finite-value check after all override paths resolved
+        // (estimate.start, fixed, scenario params). Validates the `value`
+        // field on `model.parameters`; the post-compile `base_params`
+        // writes from `prior_state` are inference-engine state and out
+        // of scope here. See gh#31.
+        crate::util::validate_parameter_values(&model)?;
+
         let compiled = CompiledModel::new(model.clone())
             .map_err(|e| format!("compile error: {:?}", e))?;
         let mut base_params = compiled.default_params.clone();
@@ -2297,8 +2304,12 @@ mod tests {
         use std::collections::HashMap;
 
         // Tiny v2 fit.toml referencing the seir golden. We set
-        // beta's `start = 1.5`; prior_state will supply 9.9. The
+        // beta's `start = 0.1`; prior_state will supply 0.4. The
         // bug has `start` winning; the fix has `prior_state` winning.
+        // Both values must sit within seir's declared beta bounds
+        // [0.001, 0.5] so the post-resolution validator (gh#31) lets
+        // the build succeed; the precedence test only needs the two
+        // values to be distinguishable.
         let manifest = std::env::var("CARGO_MANIFEST_DIR").unwrap();
         let ir_path = format!("{}/../../../ocaml/golden/seir_observations.ir.json", manifest);
         let data_dir = std::env::temp_dir().join(format!(
@@ -2310,7 +2321,7 @@ mod tests {
         std::fs::write(&data_path,
             "time\tweekly_cases\n7\t1\n14\t2\n21\t3\n28\t4\n35\t5\n").unwrap();
 
-        // The v2 fit.toml. We use `start = 1.5` on beta and a [stages.scout]
+        // The v2 fit.toml. We use `start = 0.1` on beta and a [stages.scout]
         // section so the config validates; build() doesn't actually consume
         // the stage block (chains/particles come from its own args).
         let fit_toml_path = data_dir.join("fit.toml");
@@ -2324,8 +2335,8 @@ camdl = "{}"
 weekly_cases = "{}"
 
 [estimate.beta]
-bounds = [0.01, 20.0]
-start  = 1.5
+bounds = [0.01, 0.5]
+start  = 0.1
 
 [fixed]
 sigma    = 0.25
@@ -2353,8 +2364,9 @@ dt = 1.0
 
         // Scout produced a very different "best" — a clearly
         // distinguishable value so a win/loss is unambiguous.
+        // Within [0.001, 0.5] but visibly far from est.start=0.1.
         let mut start_values = HashMap::new();
-        start_values.insert("beta".to_string(), 9.9);
+        start_values.insert("beta".to_string(), 0.4);
         let prior_state = FitState {
             stage: "scout".into(), seed: 1,
             timestamp: "2026-04-18T00:00:00Z".into(),
@@ -2381,9 +2393,9 @@ dt = 1.0
 
         let beta_idx = config.compiled.param_index.get("beta").copied()
             .expect("beta present");
-        assert!((config.base_params[beta_idx] - 9.9).abs() < 1e-9,
-            "prior_state must win over est.start — got {}, expected 9.9 \
-             (scout's best). 1.5 means est.start overwrote scout — the \
+        assert!((config.base_params[beta_idx] - 0.4).abs() < 1e-9,
+            "prior_state must win over est.start — got {}, expected 0.4 \
+             (scout's best). 0.1 means est.start overwrote scout — the \
              pre-fix bug is back.",
             config.base_params[beta_idx]);
 
@@ -2427,7 +2439,7 @@ rho      = 0.5
 k        = 10.0
 p_detect = 0.5
 N0       = 1000
-beta     = 1.5
+beta     = 0.1
 
 [stages.scout]
 method     = "if2"

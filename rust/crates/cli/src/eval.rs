@@ -94,6 +94,10 @@ pub fn cmd_eval(a: &crate::args::EvalArgs) {
         if let Some(&v) = overrides.get(&p.name) { p.value = Some(v); }
     }
 
+    // Bounds + finite-value check after all override paths resolved (gh#31).
+    crate::util::validate_parameter_values(&model)
+        .unwrap_or_else(|e| { eprintln!("error: {}", e); std::process::exit(1); });
+
     let compiled = CompiledModel::new(model.clone())
         .unwrap_or_else(|e| { eprintln!("compile error: {:?}", e); std::process::exit(1); });
     let params = compiled.default_params.clone();
