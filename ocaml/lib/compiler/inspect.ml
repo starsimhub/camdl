@@ -388,7 +388,7 @@ let run_parameters ppf (model : Ir.model) (ctx : Expander.context) =
          | None -> ());
         (match p.hierarchical with
          | Some h ->
-           Term_style.dim_style Fmt.string ppf (Printf.sprintf "  ~ %s | " h.hkind);
+           Term_style.dim_style Fmt.string ppf (Printf.sprintf "  ~ %s | " (Ir.hierarchical_kind_name h.hkind));
            (* Show referenced hyperparameter names *)
            let parents = List.filter_map (fun (_, e) ->
              match e with Ir.Param n -> Some n | _ -> None) h.hargs in

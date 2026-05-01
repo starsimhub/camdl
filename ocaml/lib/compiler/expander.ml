@@ -1896,7 +1896,7 @@ let classify_and_resolve_prior_spec ?(loc = Diagnostics.no_loc) ctx ~pname
     in
     List.iter (fun (_, e) -> check_refs e) resolved_args;
     `Hierarchical {
-      Ir.hkind      = ps.ps_name;
+      Ir.hkind      = Ir.hierarchical_kind_of_name ps.ps_name;
       Ir.hargs      = resolved_args;
       Ir.hpool_over = Option.value ~default:"" ps.ps_pool_over;
     }

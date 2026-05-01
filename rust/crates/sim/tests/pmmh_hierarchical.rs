@@ -17,13 +17,13 @@
 
 use std::collections::BTreeMap;
 use ir::expr::Expr;
-use ir::parameter::HierarchicalPrior;
+use ir::parameter::{HierarchicalKind, HierarchicalPrior};
 use sim::inference::hierarchical::NamedParams;
 use sim::inference::prior::{Prior, Scale};
 
-fn make_hier(kind: &str, args: &[(&str, Expr)]) -> HierarchicalPrior {
+fn make_hier(kind: HierarchicalKind, args: &[(&str, Expr)]) -> HierarchicalPrior {
     HierarchicalPrior {
-        kind: kind.into(),
+        kind,
         args: args.iter().map(|(k, v)| (k.to_string(), v.clone())).collect::<BTreeMap<_,_>>(),
         pool_over: "".into(),
     }
@@ -34,7 +34,7 @@ fn make_hier(kind: &str, args: &[(&str, Expr)]) -> HierarchicalPrior {
 /// analytically-expected amount.
 #[test]
 fn test_prior_hierarchical_env_propagation() {
-    let prior = Prior::Hierarchical(make_hier("normal", &[
+    let prior = Prior::Hierarchical(make_hier(HierarchicalKind::Normal, &[
         ("mu",    Expr::param("mu_h")),
         ("sigma", Expr::param("sigma_h")),
     ]));
@@ -64,7 +64,7 @@ fn test_prior_hierarchical_env_propagation() {
 /// posterior (−∞) rather than a silently-wrong one.
 #[test]
 fn test_prior_hierarchical_env_less_returns_neg_inf() {
-    let prior = Prior::Hierarchical(make_hier("normal", &[
+    let prior = Prior::Hierarchical(make_hier(HierarchicalKind::Normal, &[
         ("mu", Expr::param("mu_h")),
         ("sigma", Expr::const_(1.0)),
     ]));
@@ -101,7 +101,7 @@ fn test_plain_priors_ignore_env() {
 /// but verifying it composes correctly at the Prior level.
 #[test]
 fn test_prior_hierarchical_missing_hyperparent_neg_inf() {
-    let prior = Prior::Hierarchical(make_hier("normal", &[
+    let prior = Prior::Hierarchical(make_hier(HierarchicalKind::Normal, &[
         ("mu",    Expr::param("mu_missing")),
         ("sigma", Expr::const_(1.0)),
     ]));

@@ -691,7 +691,7 @@
       "type": "object",
       "required": ["kind", "args", "pool_over"],
       "properties": {
-        "kind": { "type": "string" },
+        "kind": { "type": "string", "enum": ["uniform", "normal", "log_normal", "half_normal", "beta", "gamma", "exponential"] },
         "args": {
           "type": "object",
           "additionalProperties": { "$ref": "#/definitions/expr" }

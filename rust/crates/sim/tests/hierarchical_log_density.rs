@@ -14,7 +14,7 @@
 use std::collections::HashMap;
 
 use ir::expr::Expr;
-use ir::parameter::HierarchicalPrior;
+use ir::parameter::{HierarchicalKind, HierarchicalPrior};
 use sim::inference::hierarchical::hierarchical_log_density;
 use sim::inference::prior::Scale;
 
@@ -35,7 +35,7 @@ const HALF_LN_2PI: f64 = 0.918_938_533_204_672_8;
 #[test]
 fn test_normal_density_matches_oracle() {
     let hp = HierarchicalPrior {
-        kind: "normal".into(),
+        kind: HierarchicalKind::Normal,
         args: args_from(&[
             ("mu",    Expr::param("mu_h")),
             ("sigma", Expr::param("sigma_h")),
@@ -69,7 +69,7 @@ fn test_normal_density_matches_oracle() {
 #[test]
 fn test_log_normal_density_matches_oracle() {
     let hp = HierarchicalPrior {
-        kind: "log_normal".into(),
+        kind: HierarchicalKind::LogNormal,
         args: args_from(&[
             ("mu",    Expr::const_(-1.0)),
             ("sigma", Expr::const_(0.5)),
@@ -99,7 +99,7 @@ fn test_log_normal_density_matches_oracle() {
 #[test]
 fn test_half_normal_density_matches_oracle() {
     let hp = HierarchicalPrior {
-        kind: "half_normal".into(),
+        kind: HierarchicalKind::HalfNormal,
         args: args_from(&[("sigma", Expr::const_(1.0))]),
         pool_over: "".into(),
     };
@@ -125,7 +125,7 @@ fn test_half_normal_density_matches_oracle() {
 #[test]
 fn test_beta_density_matches_oracle() {
     let hp = HierarchicalPrior {
-        kind: "beta".into(),
+        kind: HierarchicalKind::Beta,
         args: args_from(&[
             ("alpha", Expr::const_(2.0)),
             ("beta",  Expr::const_(5.0)),
@@ -152,7 +152,7 @@ fn test_beta_density_matches_oracle() {
 #[test]
 fn test_gamma_density_matches_oracle() {
     let hp = HierarchicalPrior {
-        kind: "gamma".into(),
+        kind: HierarchicalKind::Gamma,
         args: args_from(&[
             ("shape", Expr::const_(3.0)),
             ("rate",  Expr::const_(2.0)),
@@ -179,7 +179,7 @@ fn test_gamma_density_matches_oracle() {
 #[test]
 fn test_exponential_density_matches_oracle() {
     let hp = HierarchicalPrior {
-        kind: "exponential".into(),
+        kind: HierarchicalKind::Exponential,
         args: args_from(&[("rate", Expr::const_(0.5))]),
         pool_over: "".into(),
     };
@@ -204,7 +204,7 @@ fn test_exponential_density_matches_oracle() {
 #[test]
 fn test_uniform_density_matches_oracle() {
     let hp = HierarchicalPrior {
-        kind: "uniform".into(),
+        kind: HierarchicalKind::Uniform,
         args: args_from(&[
             ("lower", Expr::const_(2.0)),
             ("upper", Expr::const_(5.0)),
@@ -235,7 +235,7 @@ fn test_uniform_density_matches_oracle() {
 #[test]
 fn test_log_normal_no_jacobian_double_count() {
     let hp = HierarchicalPrior {
-        kind: "log_normal".into(),
+        kind: HierarchicalKind::LogNormal,
         args: args_from(&[
             ("mu",    Expr::const_(-1.0)),
             ("sigma", Expr::const_(0.5)),
@@ -266,7 +266,7 @@ fn test_log_normal_no_jacobian_double_count() {
 fn test_out_of_support_returns_neg_inf() {
     // Half-normal: x < 0
     let hp = HierarchicalPrior {
-        kind: "half_normal".into(),
+        kind: HierarchicalKind::HalfNormal,
         args: args_from(&[("sigma", Expr::const_(1.0))]),
         pool_over: "".into(),
     };
@@ -275,7 +275,7 @@ fn test_out_of_support_returns_neg_inf() {
 
     // Beta: x <= 0 or >= 1
     let hp = HierarchicalPrior {
-        kind: "beta".into(),
+        kind: HierarchicalKind::Beta,
         args: args_from(&[("alpha", Expr::const_(2.0)), ("beta", Expr::const_(5.0))]),
         pool_over: "".into(),
     };
@@ -286,7 +286,7 @@ fn test_out_of_support_returns_neg_inf() {
 
     // Gamma / Exponential: x <= 0 (Gamma) or < 0 (Exp)
     let hp = HierarchicalPrior {
-        kind: "gamma".into(),
+        kind: HierarchicalKind::Gamma,
         args: args_from(&[("shape", Expr::const_(2.0)), ("rate", Expr::const_(1.0))]),
         pool_over: "".into(),
     };
@@ -301,7 +301,7 @@ fn test_out_of_support_returns_neg_inf() {
 #[test]
 fn test_hyperparent_change_propagates_analytically() {
     let hp = HierarchicalPrior {
-        kind: "normal".into(),
+        kind: HierarchicalKind::Normal,
         args: args_from(&[
             ("mu",    Expr::param("mu_h")),
             ("sigma", Expr::param("sigma_h")),
@@ -326,7 +326,7 @@ fn test_hyperparent_change_propagates_analytically() {
 #[test]
 fn test_env_insertion_order_independent() {
     let hp = HierarchicalPrior {
-        kind: "normal".into(),
+        kind: HierarchicalKind::Normal,
         args: args_from(&[
             ("mu",    Expr::param("m")),
             ("sigma", Expr::param("s")),
@@ -351,7 +351,7 @@ fn test_expression_valued_hyperparent_args() {
     // mu = log(mu_h) + shift ; i.e. a log-transform of the hyperparent
     // plus a constant shift carried as another parameter.
     let hp = HierarchicalPrior {
-        kind: "normal".into(),
+        kind: HierarchicalKind::Normal,
         args: args_from(&[
             ("mu", Expr::BinOp(ir::expr::BinOpWrap {
                 bin_op: ir::expr::BinOpExpr {
@@ -383,7 +383,7 @@ fn test_expression_valued_hyperparent_args() {
 #[test]
 fn test_missing_hyperparent_returns_neg_inf() {
     let hp = HierarchicalPrior {
-        kind: "normal".into(),
+        kind: HierarchicalKind::Normal,
         args: args_from(&[
             ("mu",    Expr::param("mu_absent")),
             ("sigma", Expr::const_(1.0)),
@@ -406,7 +406,7 @@ fn test_log_transform_composition() {
     // This test is effectively the same as A3 but documents the
     // downstream contract that the inference code relies on.
     let hp = HierarchicalPrior {
-        kind: "log_normal".into(),
+        kind: HierarchicalKind::LogNormal,
         args: args_from(&[
             ("mu",    Expr::const_(0.0)),
             ("sigma", Expr::const_(1.0)),
@@ -431,7 +431,7 @@ fn test_log_transform_composition() {
 #[test]
 fn test_bounds_not_implicitly_truncated() {
     let hp = HierarchicalPrior {
-        kind: "normal".into(),
+        kind: HierarchicalKind::Normal,
         args: args_from(&[
             ("mu",    Expr::const_(0.0)),
             ("sigma", Expr::const_(1.0)),
@@ -450,7 +450,7 @@ fn test_bounds_not_implicitly_truncated() {
 #[test]
 fn test_small_sigma_stable() {
     let hp = HierarchicalPrior {
-        kind: "normal".into(),
+        kind: HierarchicalKind::Normal,
         args: args_from(&[
             ("mu",    Expr::const_(0.0)),
             ("sigma", Expr::param("sigma_h")),
@@ -479,7 +479,7 @@ fn test_small_sigma_stable() {
 #[test]
 fn test_cancellation_near_mean() {
     let hp = HierarchicalPrior {
-        kind: "normal".into(),
+        kind: HierarchicalKind::Normal,
         args: args_from(&[
             ("mu",    Expr::const_(1.234567890123)),
             ("sigma", Expr::const_(0.000_123_456)),
@@ -498,7 +498,7 @@ fn test_cancellation_near_mean() {
 #[test]
 fn test_gamma_large_shape_stable() {
     let hp = HierarchicalPrior {
-        kind: "gamma".into(),
+        kind: HierarchicalKind::Gamma,
         args: args_from(&[
             ("shape", Expr::const_(1e4)),
             ("rate",  Expr::const_(1.0)),
@@ -516,7 +516,7 @@ fn test_gamma_large_shape_stable() {
 #[test]
 fn test_nan_isolated_to_current_call() {
     let hp = HierarchicalPrior {
-        kind: "normal".into(),
+        kind: HierarchicalKind::Normal,
         args: args_from(&[
             ("mu",    Expr::param("mu_h")),
             ("sigma", Expr::const_(1.0)),
@@ -554,7 +554,7 @@ fn test_two_level_joint_log_prior() {
     let sigma = 0.4;
 
     let hp_leaf = HierarchicalPrior {
-        kind: "normal".into(),
+        kind: HierarchicalKind::Normal,
         args: args_from(&[
             ("mu",    Expr::param("mu_hyper")),
             ("sigma", Expr::param("sigma_hyper")),

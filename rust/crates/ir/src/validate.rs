@@ -168,7 +168,7 @@ pub fn validate(model: &Model) -> Result<(), Vec<ValidationError>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::parameter::{Parameter, PriorDist, NormalPrior, HierarchicalPrior};
+    use crate::parameter::{Parameter, PriorDist, NormalPrior, HierarchicalKind, HierarchicalPrior};
 
     fn param_both_set() -> Parameter {
         Parameter {
@@ -177,7 +177,7 @@ mod tests {
             bounds:        None,
             prior:         Some(PriorDist::Normal(NormalPrior { mean: 0.0, sd: 1.0 })),
             hierarchical:  Some(HierarchicalPrior {
-                kind: "normal".into(),
+                kind: HierarchicalKind::Normal,
                 args: Default::default(),
                 pool_over: "".into(),
             }),

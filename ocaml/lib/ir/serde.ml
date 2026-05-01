@@ -699,14 +699,18 @@ let transform_of_json j =
 
 let hierarchical_prior_to_json (h : hierarchical_prior) : Yojson.Safe.t =
   obj [
-    ("kind",       str h.hkind);
+    ("kind",       str (hierarchical_kind_name h.hkind));
     ("args",       obj (List.map (fun (k, e) -> (k, expr_to_json e)) h.hargs));
     ("pool_over",  str h.hpool_over);
   ]
 
 let hierarchical_prior_of_json j : hierarchical_prior =
+  let kind_str = as_string (member "kind" j) in
   {
-    hkind      = as_string (member "kind" j);
+    hkind      = (match hierarchical_kind_of_name kind_str with
+                  | exception Failure _ ->
+                    fail "unknown hierarchical prior kind '%s'" kind_str
+                  | k -> k);
     hargs      = (match member "args" j with
                   | `Assoc kvs -> List.map (fun (k, v) -> (k, expr_of_json v)) kvs
                   | _ -> fail "hierarchical prior args must be an object");

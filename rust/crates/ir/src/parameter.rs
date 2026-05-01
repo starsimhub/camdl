@@ -32,6 +32,45 @@ pub enum PriorDist {
 
 // ── Hierarchical priors ───────────────────────────────────────────────────────
 
+/// Distribution family for a hierarchical (pooled) prior leaf.
+///
+/// Mirrors the variants of `PriorDist` except `Fixed` (which has no
+/// meaning in a hierarchical context). Serializes to/from the same
+/// snake_case strings used in the IR JSON ("uniform", "normal",
+/// "log_normal", …).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HierarchicalKind {
+    Uniform,
+    Normal,
+    LogNormal,
+    HalfNormal,
+    Beta,
+    Gamma,
+    Exponential,
+}
+
+impl HierarchicalKind {
+    /// Returns the snake_case string used in IR JSON serialization.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Uniform     => "uniform",
+            Self::Normal      => "normal",
+            Self::LogNormal   => "log_normal",
+            Self::HalfNormal  => "half_normal",
+            Self::Beta        => "beta",
+            Self::Gamma       => "gamma",
+            Self::Exponential => "exponential",
+        }
+    }
+}
+
+impl std::fmt::Display for HierarchicalKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 /// Hierarchical prior for a leaf parameter in a pooled group (wave 2 /
 /// malaria #3).
 ///
@@ -42,11 +81,8 @@ pub enum PriorDist {
 /// the `args` expressions are resolved against the current
 /// hyperparameter values.
 ///
-/// - `kind` names the distribution family: "normal", "log_normal",
-///   "half_normal", "beta", "gamma", "exponential", "uniform".
-///   (Stringly typed here rather than sharing `PriorDist`'s enum because
-///   the existing variants carry `f64` fields; hierarchical args are
-///   `Expr`.)
+/// - `kind` names the distribution family. Typed enum — rejected at
+///   IR deserialisation time, not at inference time.
 /// - `args` are keyword → expression pairs (e.g. `"mu" → Param("mu_h")`,
 ///   `"sigma" → Param("sigma_h")`).
 /// - `pool_over` names the dimension over which shrinkage is applied
@@ -54,7 +90,7 @@ pub enum PriorDist {
 ///   with hyperparent references but no pooling dimension.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct HierarchicalPrior {
-    pub kind:      String,
+    pub kind:      HierarchicalKind,
     pub args:      std::collections::BTreeMap<String, crate::expr::Expr>,
     pub pool_over: String,
 }

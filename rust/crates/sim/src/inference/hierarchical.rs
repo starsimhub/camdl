@@ -23,7 +23,7 @@
 use crate::inference::obs_loglik::lgamma;
 use crate::inference::prior::Scale;
 use ir::expr::{BinOp, Expr, UnOp};
-use ir::parameter::HierarchicalPrior;
+use ir::parameter::{HierarchicalKind, HierarchicalPrior};
 
 /// 0.5 · ln(2π).
 const HALF_LN_2PI: f64 = 0.918_938_533_204_672_8;
@@ -159,8 +159,8 @@ pub fn hierarchical_log_density<E: ParamEnv>(
     // plan E4 (NaN propagation isolation).
     let finite_or_neg_inf = |v: f64| if v.is_finite() { v } else { f64::NEG_INFINITY };
 
-    match hp.kind.as_str() {
-        "uniform" => {
+    match hp.kind {
+        HierarchicalKind::Uniform => {
             let lower = arg("lower");
             let upper = arg("upper");
             if !lower.is_finite() || !upper.is_finite() || lower >= upper {
@@ -172,7 +172,7 @@ pub fn hierarchical_log_density<E: ParamEnv>(
                 -((upper - lower).ln())
             }
         }
-        "normal" => {
+        HierarchicalKind::Normal => {
             let mu    = arg("mu");
             let sigma = arg("sigma");
             if !mu.is_finite() || !sigma.is_finite() || sigma <= 0.0 {
@@ -181,7 +181,7 @@ pub fn hierarchical_log_density<E: ParamEnv>(
             let z = (natural - mu) / sigma;
             finite_or_neg_inf(-HALF_LN_2PI - sigma.ln() - 0.5 * z * z)
         }
-        "log_normal" => {
+        HierarchicalKind::LogNormal => {
             // Natural-scale density: log p(θ) = log N(log θ; μ, σ) − log θ.
             // For log-transformed leaves evaluated on z-scale, caller
             // adds log|dθ/dz| = z back (Log transform), recovering
@@ -195,7 +195,7 @@ pub fn hierarchical_log_density<E: ParamEnv>(
             let z_score = (transformed - mu) / sigma;
             finite_or_neg_inf(-transformed - HALF_LN_2PI - sigma.ln() - 0.5 * z_score * z_score)
         }
-        "half_normal" => {
+        HierarchicalKind::HalfNormal => {
             let sigma = arg("sigma");
             if !sigma.is_finite() || sigma <= 0.0 {
                 return f64::NEG_INFINITY;
@@ -204,7 +204,7 @@ pub fn hierarchical_log_density<E: ParamEnv>(
             let z = natural / sigma;
             finite_or_neg_inf(std::f64::consts::LN_2 - sigma.ln() - HALF_LN_2PI - 0.5 * z * z)
         }
-        "beta" => {
+        HierarchicalKind::Beta => {
             let alpha = arg("alpha");
             let beta  = arg("beta");
             if !alpha.is_finite() || !beta.is_finite() || alpha <= 0.0 || beta <= 0.0 {
@@ -217,7 +217,7 @@ pub fn hierarchical_log_density<E: ParamEnv>(
                 - (lgamma(alpha) + lgamma(beta) - lgamma(alpha + beta))
             )
         }
-        "gamma" => {
+        HierarchicalKind::Gamma => {
             let shape = arg("shape");
             let rate  = arg("rate");
             if !shape.is_finite() || !rate.is_finite() || shape <= 0.0 || rate <= 0.0 {
@@ -231,12 +231,11 @@ pub fn hierarchical_log_density<E: ParamEnv>(
                 - lgamma(shape)
             )
         }
-        "exponential" => {
+        HierarchicalKind::Exponential => {
             let rate = arg("rate");
             if !rate.is_finite() || rate <= 0.0 { return f64::NEG_INFINITY; }
             if natural < 0.0 { return f64::NEG_INFINITY; }
             finite_or_neg_inf(rate.ln() - rate * natural)
         }
-        _ => f64::NEG_INFINITY,  // unknown kind — compiler should have rejected
     }
 }

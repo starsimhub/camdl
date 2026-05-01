@@ -204,18 +204,50 @@ type prior_dist =
 
 type transform = Log | Logit | Identity
 
+(** Distribution family for a hierarchical (pooled) prior leaf.
+    Mirrors [prior_dist] variants but excludes Fixed (no meaning for
+    a hierarchically-parameterised prior). Serialises to/from the same
+    snake_case strings used in [prior_dist]: "uniform", "normal",
+    "log_normal", "half_normal", "beta", "gamma", "exponential". *)
+type hierarchical_kind =
+  | HkUniform
+  | HkNormal
+  | HkLogNormal
+  | HkHalfNormal
+  | HkBeta
+  | HkGamma
+  | HkExponential
+
+let hierarchical_kind_of_name = function
+  | "uniform"     -> HkUniform
+  | "normal"      -> HkNormal
+  | "log_normal"  -> HkLogNormal
+  | "half_normal" -> HkHalfNormal
+  | "beta"        -> HkBeta
+  | "gamma"       -> HkGamma
+  | "exponential" -> HkExponential
+  | s -> failwith (Printf.sprintf "unknown hierarchical kind '%s'" s)
+
+let hierarchical_kind_name = function
+  | HkUniform     -> "uniform"
+  | HkNormal      -> "normal"
+  | HkLogNormal   -> "log_normal"
+  | HkHalfNormal  -> "half_normal"
+  | HkBeta        -> "beta"
+  | HkGamma       -> "gamma"
+  | HkExponential -> "exponential"
+
 (** Hierarchical prior (wave 2 / malaria #3). When a parameter's prior
     references other parameters, we can't fold the args down to floats
     — they're evaluated at inference time against the current
-    hyperparameter values. [hkind] names the distribution (same as
-    [prior_dist] constructor names, but stringly-typed here because
-    args carry expressions rather than the existing float fields).
-    [hargs] are keyword → expression pairs (e.g. [("mu", Param "mu_h"),
-    ("sigma", Param "sigma_h")]). [hpool_over] is the dimension name
-    from the `| age` pooling clause — empty string when the leaf is a
-    flat scalar with hyperparent references (no indexed pooling). *)
+    hyperparameter values. [hkind] is the distribution family (typed
+    enum). [hargs] are keyword → expression pairs (e.g.
+    [("mu", Param "mu_h"), ("sigma", Param "sigma_h")]). [hpool_over]
+    is the dimension name from the `| age` pooling clause — empty string
+    when the leaf is a flat scalar with hyperparent references (no
+    indexed pooling). *)
 type hierarchical_prior = {
-  hkind:       string;
+  hkind:       hierarchical_kind;
   hargs:       (string * expr) list;
   hpool_over:  string;
 }

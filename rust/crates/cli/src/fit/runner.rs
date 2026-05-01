@@ -17,6 +17,7 @@ use sim::{
     },
     rng::StatefulRng,
 };
+use ir::parameter::HierarchicalKind;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -1668,16 +1669,18 @@ pub fn validate_prior_transform_compat(
             Prior::Uniform { .. } | Prior::Normal { .. } | Prior::Flat => {
                 // Compatible with any transform.
             }
-            // Hierarchical priors carry the same kind string ("log_normal",
-            // "half_normal", ...) as their plain counterpart. Reuse the
-            // same transform compatibility rules by matching on hkind.
+            // Hierarchical priors carry the same kind as their plain
+            // counterpart. Reuse the same transform compatibility rules.
             // Wave 2 / #3 Gate 3a.
-            Prior::Hierarchical(ref h) => match h.kind.as_str() {
-                "log_normal" | "half_normal" | "gamma" | "exponential" => {
+            Prior::Hierarchical(ref h) => match h.kind {
+                HierarchicalKind::LogNormal
+                | HierarchicalKind::HalfNormal
+                | HierarchicalKind::Gamma
+                | HierarchicalKind::Exponential => {
                     if !is_log { return err("Log"); }
                 }
-                "beta" => { if !is_logit { return err("Logit"); } }
-                _ => {} // uniform / normal: any transform ok
+                HierarchicalKind::Beta => { if !is_logit { return err("Logit"); } }
+                HierarchicalKind::Uniform | HierarchicalKind::Normal => {} // any transform ok
             },
         }
     }

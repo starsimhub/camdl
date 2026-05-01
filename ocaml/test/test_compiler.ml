@@ -2984,7 +2984,7 @@ let test_hierarchical_scalar_leaf_ir_shape () =
     true (beta_p.Ir.prior = None && beta_p.Ir.hierarchical <> None);
   match beta_p.Ir.hierarchical with
   | Some h ->
-    Alcotest.(check string) "leaf dist kind" "log_normal" h.Ir.hkind;
+    Alcotest.(check string) "leaf dist kind" "log_normal" (Ir.hierarchical_kind_name h.Ir.hkind);
     (* `mu` arg references parameter mu_beta *)
     let mu_arg = List.assoc "mu" h.Ir.hargs in
     Alcotest.(check bool) "mu arg references mu_beta"
@@ -3029,7 +3029,7 @@ let test_hierarchical_indexed_ir_shape () =
     let p = List.find (fun (p : Ir.parameter) -> p.Ir.name = n) m.Ir.parameters in
     match p.Ir.hierarchical with
     | Some h ->
-      Alcotest.(check string) (n ^ " dist kind") "log_normal" h.Ir.hkind;
+      Alcotest.(check string) (n ^ " dist kind") "log_normal" (Ir.hierarchical_kind_name h.Ir.hkind);
       Alcotest.(check string) (n ^ " pool_over") "age" h.Ir.hpool_over;
       let mu_arg = List.assoc "mu" h.Ir.hargs in
       Alcotest.(check bool) (n ^ " mu refs mu_alpha") true (mu_arg = Ir.Param "mu_alpha");
