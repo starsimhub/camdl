@@ -140,7 +140,23 @@ impl Default for FitBackendConfig {
 /// data file paths.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct DataSpec {
-    /// Map from observation stream name → data file path.
+    /// Single-file shorthand: every observation stream declared in the
+    /// model expects a column with the same name in this TSV.
+    ///
+    /// Mutually exclusive with `observations`. Use this form for
+    /// stratified models where one wide TSV holds all the columns
+    /// (e.g. an indexed `cases[a in age]` block expanding to 5 stream
+    /// names → 5 columns in one file). Avoids the per-stream
+    /// `cases_a02 = "x.tsv"` / `cases_a25 = "x.tsv"` repetition that
+    /// would otherwise be N copies of the same path.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file: Option<String>,
+
+    /// Per-stream form: explicit map from observation stream name →
+    /// data file path. Mutually exclusive with `file`. Use this form
+    /// when streams genuinely come from different files (e.g.
+    /// observation streams from different surveillance systems).
+    #[serde(default)]
     pub observations: IndexMap<String, String>,
 
     /// Time threshold for temporal holdout: observations at t > this value
@@ -153,6 +169,54 @@ pub struct DataSpec {
     /// Mutually exclusive with `holdout_after`.
     #[serde(default)]
     pub holdout: Option<IndexMap<String, String>>,
+}
+
+impl DataSpec {
+    /// Exactly one of `file` / `observations` must be set.
+    pub fn validate(&self) -> Result<(), String> {
+        match (self.file.is_some(), !self.observations.is_empty()) {
+            (true, true) => Err(
+                "[data]: `file = \"...\"` and `[data.observations]` are mutually \
+                 exclusive — choose one. Use `file` when one wide TSV holds all \
+                 streams; use `[data.observations]` when streams come from \
+                 different files.".to_string()),
+            (false, false) => Err(
+                "[data]: must specify either `file = \"<path>\"` (one wide TSV \
+                 with columns matching the model's declared observation streams) \
+                 or `[data.observations]` (per-stream file paths).".to_string()),
+            _ => Ok(()),
+        }
+    }
+
+    /// Resolve this spec into the canonical per-stream map, given the
+    /// names of the model's declared observation streams. The single-
+    /// file shorthand expands by mapping every model-declared stream
+    /// to the same file.
+    ///
+    /// Errors if the resolved map is empty (no streams declared in the
+    /// model).
+    pub fn effective_observations(
+        &self,
+        model_obs_names: &[String],
+    ) -> Result<IndexMap<String, String>, String> {
+        let map = if let Some(file) = &self.file {
+            if model_obs_names.is_empty() {
+                return Err(format!(
+                    "[data] file = \"{}\" but the model declares no observation \
+                     streams. Either add an `observations {{ }}` block to the \
+                     .camdl file, or remove [data] from fit.toml.",
+                    file));
+            }
+            let mut out = IndexMap::new();
+            for name in model_obs_names {
+                out.insert(name.clone(), file.clone());
+            }
+            out
+        } else {
+            self.observations.clone()
+        };
+        Ok(map)
+    }
 }
 
 // ─── Synthetic data ──────────────────────────────────────────────────────────
@@ -875,6 +939,9 @@ impl FitConfigV2 {
         config.model.camdl = crate::util::resolve_relative_to_toml(
             toml_path, &config.model.camdl);
         if let Some(data) = &mut config.data {
+            if let Some(file) = &mut data.file {
+                *file = crate::util::resolve_relative_to_toml(toml_path, file);
+            }
             for v in data.observations.values_mut() {
                 *v = crate::util::resolve_relative_to_toml(toml_path, v);
             }
@@ -899,6 +966,15 @@ impl FitConfigV2 {
             .map_err(|e| format!("cannot read model at '{}': {}", self.model.camdl, e))?;
         let mut data_files: Vec<(String, Vec<u8>)> = Vec::new();
         if let Some(data) = &self.data {
+            // Single-file shorthand: hash the one file once. Per-stream
+            // form: hash each. The hash is keyed on (name, bytes); under
+            // shorthand the name is the file path itself so two fits
+            // pointing at the same file produce the same hash.
+            if let Some(path) = &data.file {
+                let bytes = std::fs::read(path)
+                    .map_err(|e| format!("cannot read data file '{}': {}", path, e))?;
+                data_files.push((path.clone(), bytes));
+            }
             for (name, path) in &data.observations {
                 let bytes = std::fs::read(path)
                     .map_err(|e| format!("cannot read data file '{}' ({}): {}", name, path, e))?;
@@ -1013,6 +1089,11 @@ impl FitConfigV2 {
         // Validate synthetic spec if present.
         if let Some(syn) = &self.synthetic {
             syn.validate()?;
+        }
+
+        // Validate [data] block: exactly one of `file` / `observations`.
+        if let Some(data) = &self.data {
+            data.validate()?;
         }
 
         // Validate fit_seeds if present (reject duplicates — they would
@@ -2012,6 +2093,131 @@ cooling = 0.7
             "expected mutex error: got {}", err);
         assert!(err.contains("[data]") && err.contains("[synthetic]"),
             "expected both section names: got {}", err);
+    }
+
+    #[test]
+    fn data_file_shorthand_parses() {
+        // `[data] file = "..."` is the single-file shorthand for stratified
+        // models where one wide TSV holds all the columns.
+        let cfg = parse(r#"
+[model]
+camdl = "models/sir.camdl"
+
+[data]
+file = "data/typhoid_all.tsv"
+
+[estimate]
+beta = { bounds = [0.01, 2.0] }
+
+[fixed]
+N0 = 1000
+
+[stages.scout]
+method = "if2"
+chains = 4
+particles = 500
+iterations = 30
+cooling = 0.9
+        "#).unwrap();
+
+        let data = cfg.data.as_ref().expect("[data] missing");
+        assert_eq!(data.file.as_deref(), Some("data/typhoid_all.tsv"));
+        assert!(data.observations.is_empty());
+    }
+
+    #[test]
+    fn data_file_and_observations_are_mutually_exclusive() {
+        // Both forms set → DataSpec::validate() rejects.
+        let cfg = parse(r#"
+[model]
+camdl = "models/sir.camdl"
+
+[data]
+file = "data/typhoid_all.tsv"
+
+[data.observations]
+weekly_cases = "data/cases.tsv"
+
+[estimate]
+beta = { bounds = [0.01, 2.0] }
+
+[fixed]
+N0 = 1000
+
+[stages.scout]
+method = "if2"
+chains = 4
+particles = 500
+iterations = 30
+cooling = 0.9
+        "#).unwrap();
+
+        let err = cfg.validate(&["beta".into(), "N0".into()]).unwrap_err();
+        assert!(err.contains("mutually exclusive"),
+            "error should call out mutual exclusion: {}", err);
+        assert!(err.contains("file") && err.contains("observations"),
+            "error should name both forms: {}", err);
+    }
+
+    #[test]
+    fn data_with_neither_file_nor_observations_rejected() {
+        // Empty [data] block (no file, no observations) → DataSpec::validate fails.
+        let cfg = parse(r#"
+[model]
+camdl = "models/sir.camdl"
+
+[data]
+
+[estimate]
+beta = { bounds = [0.01, 2.0] }
+
+[fixed]
+N0 = 1000
+
+[stages.scout]
+method = "if2"
+chains = 4
+particles = 500
+iterations = 30
+cooling = 0.9
+        "#).unwrap();
+
+        let err = cfg.validate(&["beta".into(), "N0".into()]).unwrap_err();
+        assert!(err.contains("must specify either"),
+            "error should suggest both forms: {}", err);
+    }
+
+    #[test]
+    fn effective_observations_expands_shorthand() {
+        // The shorthand expands to one entry per declared stream in the model,
+        // all pointing at the same file.
+        let data = DataSpec {
+            file: Some("data/x.tsv".into()),
+            observations: IndexMap::new(),
+            holdout_after: None,
+            holdout: None,
+        };
+        let names = vec!["a".to_string(), "b".to_string(), "c".to_string()];
+        let resolved = data.effective_observations(&names).unwrap();
+        assert_eq!(resolved.len(), 3);
+        for n in &names {
+            assert_eq!(resolved.get(n).map(String::as_str), Some("data/x.tsv"));
+        }
+    }
+
+    #[test]
+    fn effective_observations_passes_through_per_stream_form() {
+        let mut obs = IndexMap::new();
+        obs.insert("a".to_string(), "data/a.tsv".to_string());
+        obs.insert("b".to_string(), "data/b.tsv".to_string());
+        let data = DataSpec {
+            file: None,
+            observations: obs.clone(),
+            holdout_after: None,
+            holdout: None,
+        };
+        let resolved = data.effective_observations(&[]).unwrap();
+        assert_eq!(resolved, obs);
     }
 
     #[test]

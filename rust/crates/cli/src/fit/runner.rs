@@ -226,10 +226,19 @@ impl FitRunConfig {
 
         // Load data — one or more observation streams (real-data only;
         // synthetic-data fits route through a generator before this path).
+        // Resolve any single-file shorthand (`[data] file = "..."`) into
+        // the canonical per-stream map by mapping every model-declared
+        // stream name to that file. From here on the loop is the same.
         let dt = fit.config.dt;
         let data_spec = fit.data_spec()?;
-        if data_spec.observations.is_empty() {
-            return Err("fit.toml [data.observations] is empty".into());
+        let model_obs_names: Vec<String> = model.observations.iter()
+            .map(|o| o.name.clone()).collect();
+        let effective = data_spec.effective_observations(&model_obs_names)?;
+        if effective.is_empty() {
+            return Err(
+                "fit.toml [data] resolves to zero observation streams. Either \
+                 set `[data] file = \"<path>\"` (one wide TSV) or fill \
+                 [data.observations] (per-stream paths).".into());
         }
 
         let mut streams = Vec::new();
@@ -239,7 +248,7 @@ impl FitRunConfig {
         // insertion order — we pin a sort here so two fits with the
         // same observations but different toml ordering still hash
         // identically downstream.)
-        let mut data_entries: Vec<_> = data_spec.observations.iter().collect();
+        let mut data_entries: Vec<_> = effective.iter().collect();
         data_entries.sort_by_key(|(k, _)| k.as_str());
 
         for (stream_name, data_path) in &data_entries {
