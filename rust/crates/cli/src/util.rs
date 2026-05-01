@@ -42,15 +42,71 @@ fn camdlc_versioned_name() -> String {
         if cfg!(windows) { ".exe" } else { "" })
 }
 
+/// Plain `camdl` binary name, platform-suffixed.
+fn camdl_bin_name() -> &'static str {
+    if cfg!(windows) { "camdl.exe" } else { "camdl" }
+}
+
+/// Detect the "shadowed install" pattern: a `camdl` lives next to the
+/// disagreeing camdlc (so this is presumably the binary `make install`
+/// just wrote), but the `camdl` actually executing came from somewhere
+/// else (typically `~/.cargo/bin/camdl` from a stale `cargo install`,
+/// which prepends to PATH ahead of `~/.local/bin/`).
+///
+/// In that case the version-mismatch error's standard "run make
+/// install to sync" advice is a dead end — the user just did that, and
+/// it had no effect because their shell still resolves `camdl` to the
+/// shadowing copy. The hint names both paths and points at the actual
+/// fix.
+///
+/// Returns `None` (no hint) when:
+///  - `current_exe()` is unavailable;
+///  - no colocated `camdl` exists alongside `camdlc`;
+///  - the colocated `camdl` resolves to the same file as the running
+///    one (no shadowing — ordinary version skew).
+fn detect_camdl_shadowing(camdlc: &std::path::Path) -> Option<String> {
+    let running = std::env::current_exe().ok()?;
+    let camdlc_dir = camdlc.parent()?;
+    let colocated = camdlc_dir.join(camdl_bin_name());
+    if !colocated.exists() { return None; }
+    // Canonicalise both sides so symlinked installs (e.g. Homebrew
+    // shimming into /opt/homebrew/bin) don't false-positive, and so
+    // the paths printed in the hint share a base form.
+    let running_canon  = running.canonicalize().ok()?;
+    let colocated_canon = colocated.canonicalize().ok()?;
+    if running_canon == colocated_canon { return None; }
+    let installed_dir = colocated_canon.parent()
+        .map(|p| p.display().to_string())
+        .unwrap_or_else(|| camdlc_dir.display().to_string());
+    let shadow_dir = running_canon.parent()
+        .map(|p| p.display().to_string())
+        .unwrap_or_else(|| "the shadowing dir".into());
+    Some(format!(
+        "  Note: another `camdl` is shadowing this install.\n  \
+         Running:   {}\n  \
+         Installed: {}  (alongside the camdlc above)\n  \
+         Fix: `rm {}`, or put {} ahead of {} on your PATH.",
+        running_canon.display(),
+        colocated_canon.display(),
+        running_canon.display(),
+        installed_dir,
+        shadow_dir,
+    ))
+}
+
 /// Pure helper: given raw camdlc subprocess output, return `Ok(())` if the
 /// reported hash matches `our_hash`, or `Err(message)` otherwise.
 /// `location` is a human-readable path string used in the error text.
+/// `shadow_hint`, when present, is appended after the standard advice —
+/// see `detect_camdl_shadowing` for the diagnosis it carries.
 fn eval_version_output(
     stdout: &[u8],
     exit_success: bool,
     our_hash: &str,
     location: &str,
+    shadow_hint: Option<&str>,
 ) -> Result<(), String> {
+    let suffix = shadow_hint.map(|h| format!("\n{h}")).unwrap_or_default();
     if exit_success {
         let reported = String::from_utf8_lossy(stdout).trim().to_string();
         if reported == our_hash {
@@ -61,14 +117,14 @@ fn eval_version_output(
                  camdl:  {our_hash}\n  \
                  camdlc: {reported} ({location})\n  \
                  Run `make build-ocaml && make install` to sync.\n  \
-                 Set CAMDL_SKIP_VERSION_CHECK=1 to bypass (unsupported)."
+                 Set CAMDL_SKIP_VERSION_CHECK=1 to bypass (unsupported).{suffix}"
             ))
         }
     } else {
         Err(format!(
             "error: camdlc ({location}) does not report a version (old build).\n  \
              Run `make build-ocaml && make install` to rebuild.\n  \
-             Set CAMDL_SKIP_VERSION_CHECK=1 to bypass (unsupported)."
+             Set CAMDL_SKIP_VERSION_CHECK=1 to bypass (unsupported).{suffix}"
         ))
     }
 }
@@ -88,11 +144,13 @@ fn check_camdlc_version_once(camdlc: &std::path::Path) {
             .output()
         {
             Ok(out) => {
+                let hint = detect_camdl_shadowing(camdlc);
                 if let Err(msg) = eval_version_output(
                     &out.stdout,
                     out.status.success(),
                     crate::version::GIT_HASH,
                     &camdlc.display().to_string(),
+                    hint.as_deref(),
                 ) {
                     eprintln!("{msg}");
                     std::process::exit(1);
@@ -143,27 +201,33 @@ fn find_camdlc() -> Result<std::path::PathBuf, String> {
     }
 
     // 3. System PATH: --camdl-version probe doubles as existence check
-    match std::process::Command::new(camdlc_name())
+    if let Ok(out) = std::process::Command::new(camdlc_name())
         .arg("--camdl-version")
         .output()
     {
-        Ok(out) => {
-            let p = PathBuf::from(camdlc_name());
-            CAMDLC_CHECKED.get_or_init(|| {
-                if std::env::var("CAMDL_SKIP_VERSION_CHECK").is_ok() { return; }
-                if let Err(msg) = eval_version_output(
-                    &out.stdout,
-                    out.status.success(),
-                    crate::version::GIT_HASH,
-                    "on PATH",
-                ) {
-                    eprintln!("{msg}");
-                    std::process::exit(1);
-                }
-            });
-            return Ok(p);
-        }
-        Err(_) => {} // binary not found on PATH
+        let p = PathBuf::from(camdlc_name());
+        // Resolve the on-PATH camdlc to a real path so the shadowing
+        // detector can compare it to where camdl is running from.
+        // `which`-style lookup via PATH walk; canonicalise on hit.
+        let resolved = std::env::var_os("PATH")
+            .and_then(|paths| std::env::split_paths(&paths)
+                .map(|d| d.join(camdlc_name()))
+                .find(|c| c.is_file()));
+        CAMDLC_CHECKED.get_or_init(|| {
+            if std::env::var("CAMDL_SKIP_VERSION_CHECK").is_ok() { return; }
+            let hint = resolved.as_deref().and_then(detect_camdl_shadowing);
+            if let Err(msg) = eval_version_output(
+                &out.stdout,
+                out.status.success(),
+                crate::version::GIT_HASH,
+                "on PATH",
+                hint.as_deref(),
+            ) {
+                eprintln!("{msg}");
+                std::process::exit(1);
+            }
+        });
+        return Ok(p);
     }
 
     Err(format!(
@@ -1015,27 +1079,61 @@ mod tests {
 
     #[test]
     fn version_output_match() {
-        assert!(eval_version_output(b"abc1234\n", true, "abc1234", "test").is_ok());
+        assert!(eval_version_output(b"abc1234\n", true, "abc1234", "test", None).is_ok());
         // trim whitespace variants
-        assert!(eval_version_output(b"abc1234", true, "abc1234", "test").is_ok());
+        assert!(eval_version_output(b"abc1234", true, "abc1234", "test", None).is_ok());
     }
 
     #[test]
     fn version_output_mismatch() {
-        let err = eval_version_output(b"old0000\n", true, "abc1234", "/usr/bin/camdlc")
+        let err = eval_version_output(b"old0000\n", true, "abc1234", "/usr/bin/camdlc", None)
             .unwrap_err();
         assert!(err.contains("version mismatch"), "unexpected message: {err}");
         assert!(err.contains("abc1234"), "our hash missing: {err}");
         assert!(err.contains("old0000"), "reported hash missing: {err}");
         assert!(err.contains("/usr/bin/camdlc"), "location missing: {err}");
+        // No hint passed, so the shadowing-note line must not appear —
+        // ordinary version skew with no shadowing detected should keep
+        // the existing single-block message intact.
+        assert!(!err.contains("shadowing"), "unsolicited shadow hint: {err}");
+    }
+
+    #[test]
+    fn version_output_mismatch_with_shadow_hint() {
+        let hint = "  Note: another `camdl` is shadowing this install.\n  \
+                    Running:   /Users/x/.cargo/bin/camdl\n  \
+                    Installed: /Users/x/.local/bin/camdl  (alongside the camdlc above)\n  \
+                    Fix: `rm /Users/x/.cargo/bin/camdl`, or put /Users/x/.local/bin ahead of /Users/x/.cargo/bin on your PATH.";
+        let err = eval_version_output(
+            b"new1234\n", true, "old0000", "/Users/x/.local/bin/camdlc", Some(hint))
+            .unwrap_err();
+        assert!(err.contains("version mismatch"), "header missing: {err}");
+        assert!(err.contains("shadowing this install"), "shadow hint missing: {err}");
+        assert!(err.contains("/Users/x/.cargo/bin/camdl"),
+            "running path missing from hint: {err}");
+        assert!(err.contains("/Users/x/.local/bin/camdl"),
+            "installed path missing from hint: {err}");
+        // The standard `make install` advice and the shadow note must
+        // both appear — neither suppresses the other.
+        assert!(err.contains("make build-ocaml && make install"),
+            "standard advice elided when hint present: {err}");
     }
 
     #[test]
     fn version_output_old_build() {
-        let err = eval_version_output(b"", false, "abc1234", "on PATH")
+        let err = eval_version_output(b"", false, "abc1234", "on PATH", None)
             .unwrap_err();
         assert!(err.contains("old build"), "unexpected message: {err}");
         assert!(err.contains("on PATH"), "location missing: {err}");
+    }
+
+    #[test]
+    fn version_output_old_build_with_shadow_hint_appends() {
+        let hint = "  Note: shadow detected at /a vs /b.";
+        let err = eval_version_output(b"", false, "abc1234", "on PATH", Some(hint))
+            .unwrap_err();
+        assert!(err.contains("old build"), "header missing: {err}");
+        assert!(err.contains("shadow detected"), "hint elided: {err}");
     }
 
     #[test]
