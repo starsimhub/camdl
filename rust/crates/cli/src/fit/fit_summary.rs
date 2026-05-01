@@ -87,10 +87,10 @@ pub fn cmd_fit_summary(args: &FitSummaryArgs) {
     };
 
     match args.format {
-        FitSummaryFormat::Text => cmd_text(&dir, args, &selected, strict),
-        FitSummaryFormat::Json => cmd_json(&dir, args, &selected, strict),
-        FitSummaryFormat::Md => cmd_md(&dir, args, &selected, strict),
-        FitSummaryFormat::Latex => cmd_latex(&dir, args, &selected, strict),
+        FitSummaryFormat::Text => format_text(&dir, args, &selected, strict),
+        FitSummaryFormat::Json => format_json(&dir, args, &selected, strict),
+        FitSummaryFormat::Md => format_md(&dir, args, &selected, strict),
+        FitSummaryFormat::Latex => format_latex(&dir, args, &selected, strict),
     }
 }
 
@@ -181,7 +181,7 @@ fn discover_stages(fit_dir: &Path) -> Vec<ResolvedStage> {
     out
 }
 
-fn cmd_text(dir: &str, args: &FitSummaryArgs, stages: &[ResolvedStage], strict: bool) {
+fn format_text(dir: &str, args: &FitSummaryArgs, stages: &[ResolvedStage], strict: bool) {
     let use_color = should_use_color(args.no_color);
     let fmt = Formatter { use_color };
     let mut had_provenance_failure = false;
@@ -268,7 +268,7 @@ fn cmd_text(dir: &str, args: &FitSummaryArgs, stages: &[ResolvedStage], strict: 
     }
 }
 
-fn cmd_json(dir: &str, _args: &FitSummaryArgs, stages: &[ResolvedStage], strict: bool) {
+fn format_json(dir: &str, _args: &FitSummaryArgs, stages: &[ResolvedStage], strict: bool) {
     let doc = build_summary_doc(dir, stages);
     let any_failed = doc.stages.iter().any(|s| s.provenance_failed());
     let s = serde_json::to_string_pretty(&doc).expect("FitSummaryDoc must serialize");
@@ -279,7 +279,7 @@ fn cmd_json(dir: &str, _args: &FitSummaryArgs, stages: &[ResolvedStage], strict:
     }
 }
 
-fn cmd_md(dir: &str, _args: &FitSummaryArgs, stages: &[ResolvedStage], strict: bool) {
+fn format_md(dir: &str, _args: &FitSummaryArgs, stages: &[ResolvedStage], strict: bool) {
     let doc = build_summary_doc(dir, stages);
     let any_failed = doc.stages.iter().any(|s| s.provenance_failed());
     print!("{}", render_markdown(&doc));
@@ -289,7 +289,7 @@ fn cmd_md(dir: &str, _args: &FitSummaryArgs, stages: &[ResolvedStage], strict: b
     }
 }
 
-fn cmd_latex(dir: &str, _args: &FitSummaryArgs, stages: &[ResolvedStage], strict: bool) {
+fn format_latex(dir: &str, _args: &FitSummaryArgs, stages: &[ResolvedStage], strict: bool) {
     let doc = build_summary_doc(dir, stages);
     let any_failed = doc.stages.iter().any(|s| s.provenance_failed());
     print!("{}", render_latex(&doc));

@@ -13,7 +13,7 @@
 //!   read per row.
 //!
 //! Replaces three current walkers (the buggy v1 walker in
-//! `fit_summary.rs::cmd_text`, `grid_summary::iter_cells`, and
+//! `fit_summary.rs::format_text`, `grid_summary::iter_cells`, and
 //! `browse::resolve_stage_by_hash`). See
 //! `docs/dev/proposals/2026-04-28-fit-experiment-management.md` §1.
 //!
