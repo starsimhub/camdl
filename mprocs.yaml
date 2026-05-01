@@ -1,9 +1,0 @@
-procs:
-  server:
-    cmd: ["npx", "tsx", "server.ts"]
-    cwd: web/compiler-server
-
-  web:
-    cmd: ["npm", "run", "dev"]
-    cwd: web
-    depends_on: ["server"]

@@ -12,7 +12,7 @@ OCAML_GOLDENS := $(wildcard ocaml/golden/*.camdl)
 
 # ── Build ─────────────────────────────────────────────────────────────────────
 
-.PHONY: build build-ocaml build-rust build-wasm
+.PHONY: build build-ocaml build-rust
 
 build: build-ocaml build-rust
 
@@ -21,48 +21,6 @@ build-ocaml:
 
 build-rust:
 	cd rust && cargo build --release --workspace --bins
-
-# ── WASM (browser simulation) ─────────────────────────────────────────────────
-
-WASM_OUT := web/src/lib/wasm/pkg
-
-build-wasm:
-	cd rust && wasm-pack build crates/wasm \
-	    --target web \
-	    --out-dir $(CURDIR)/$(WASM_OUT) \
-	    --release
-
-# ── Web editor ────────────────────────────────────────────────────────────────
-
-.PHONY: dev web-dev web server web-build
-
-web/node_modules/.package-lock.json: web/package.json
-	cd web && npm install
-
-web/compiler-server/node_modules/.package-lock.json: web/compiler-server/package.json
-	cd web/compiler-server && npm install
-
-# Primary dev entry point — mprocs gives a clean TUI with one pane per process.
-# Env vars (ANTHROPIC_API_KEY etc.) are inherited from the shell via direnv.
-dev: build-wasm \
-     web/node_modules/.package-lock.json \
-     web/compiler-server/node_modules/.package-lock.json
-	mprocs
-
-# Fallback: run individual processes in separate terminals
-web: web/node_modules/.package-lock.json
-	cd web && npm run dev
-
-server: web/compiler-server/node_modules/.package-lock.json
-	cd web/compiler-server && npx tsx server.ts
-
-# Alias for muscle memory
-web-dev: dev
-
-web-build: build-ocaml build-wasm \
-           web/node_modules/.package-lock.json \
-           web/compiler-server/node_modules/.package-lock.json
-	cd web && npm run build
 
 # ── Install ───────────────────────────────────────────────────────────────────
 

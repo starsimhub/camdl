@@ -74,8 +74,7 @@ camdl/
 │   │   │           └── pgas.rs      # PGAS posterior sampling (production)
 │   │   │
 │   │   ├── io/                      # TSV read/write
-│   │   ├── observe/                 # Observation projection + sampling
-│   │   └── wasm/                    # WebAssembly bindings
+│   │   └── observe/                 # Observation projection + sampling
 │   │
 │   └── tests/                       # Integration tests (golden deser + simulate)
 │
