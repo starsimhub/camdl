@@ -81,6 +81,20 @@ install: build
 	install -m 755 $(CAMDL)  $(INSTALL_DIR)/camdl
 	@echo "Installed to $(INSTALL_DIR)  [camdlc-$(GIT_HASH)]"
 	@echo "Make sure $(INSTALL_DIR) is on your PATH."
+	@# Postflight: detect when another `camdl` (typically a leftover
+	@# `cargo install --path crates/cli` in ~/.cargo/bin/) wins on PATH
+	@# ahead of the binary we just wrote. Without this check the user
+	@# only finds out at first invocation, and the runtime error tells
+	@# them to "run make install" — which they just did. Catch it now.
+	@expected=$(INSTALL_DIR)/camdl; \
+	first=$$(command -v camdl 2>/dev/null || true); \
+	if [ -n "$$first" ] && [ "$$first" != "$$expected" ]; then \
+	  echo ""; \
+	  echo "warning: another \`camdl\` is shadowing this install on your PATH."; \
+	  echo "  Resolves first on PATH: $$first"; \
+	  echo "  Just installed:         $$expected"; \
+	  echo "  Fix: \`rm $$first\`, or put $(INSTALL_DIR) ahead of $$(dirname \"$$first\") on your PATH."; \
+	fi
 
 uninstall:
 	rm -f $(INSTALL_DIR)/camdlc $(INSTALL_DIR)/camdl
