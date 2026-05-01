@@ -1,6 +1,0 @@
-study	sample_size	EVSI	EVSI_se	current_EU	optimal_action_current	ess_warning
-es	5	28796.5583	2701.7365	35220.0288	target_10	yes
-es	10	36632.5458	2974.8921	35220.0288	target_10	yes
-es	20	37295.5429	3118.7261	35220.0288	target_10	yes
-es	30	37406.3862	3162.0969	35220.0288	target_10	yes
-es	50	37454.0487	3203.3334	35220.0288	target_10	yes
