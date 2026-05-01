@@ -165,78 +165,6 @@ pub fn validate(model: &Model) -> Result<(), Vec<ValidationError>> {
     Ok(())
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::parameter::{Parameter, PriorDist, NormalPrior, HierarchicalKind, HierarchicalPrior};
-
-    fn param_both_set() -> Parameter {
-        Parameter {
-            name:          "beta".into(),
-            value:         Some(1.0),
-            bounds:        None,
-            prior:         Some(PriorDist::Normal(NormalPrior { mean: 0.0, sd: 1.0 })),
-            hierarchical:  Some(HierarchicalPrior {
-                kind: HierarchicalKind::Normal,
-                args: Default::default(),
-                pool_over: "".into(),
-            }),
-            transform:     None,
-            initial_value: None,
-            param_kind:    None,
-            param_dim:     None,
-        }
-    }
-
-    fn param_only_prior() -> Parameter {
-        let mut p = param_both_set();
-        p.hierarchical = None;
-        p
-    }
-
-    fn param_only_hierarchical() -> Parameter {
-        let mut p = param_both_set();
-        p.prior = None;
-        p
-    }
-
-    fn load_sir() -> Model {
-        let s = std::fs::read_to_string(concat!(
-            env!("CARGO_MANIFEST_DIR"), "/../../../ir/golden/sir_basic.ir.json"))
-            .expect("read sir_basic.ir.json");
-        serde_json::from_str::<Model>(&s).expect("parse sir_basic")
-    }
-
-    #[test]
-    fn prior_and_hierarchical_both_set_is_rejected() {
-        let mut m = load_sir();
-        m.parameters.push(param_both_set());
-        let errs = validate(&m).expect_err("must reject parameter with both fields set");
-        assert!(errs.iter().any(|e| matches!(e,
-            ValidationError::PriorAndHierarchicalBothSet(name) if name == "beta")),
-            "expected PriorAndHierarchicalBothSet for 'beta', got: {:?}", errs);
-    }
-
-    #[test]
-    fn only_prior_is_accepted() {
-        let mut m = load_sir();
-        // Use a fresh name to avoid the duplicate-parameter check tripping.
-        let mut p = param_only_prior();
-        p.name = "beta_extra".into();
-        m.parameters.push(p);
-        validate(&m).expect("only prior set must validate");
-    }
-
-    #[test]
-    fn only_hierarchical_is_accepted() {
-        let mut m = load_sir();
-        let mut p = param_only_hierarchical();
-        p.name = "beta_extra".into();
-        m.parameters.push(p);
-        validate(&m).expect("only hierarchical set must validate");
-    }
-}
-
 struct RefCtx<'a> {
     comp_names:  &'a HashSet<&'a str>,
     param_names: &'a HashSet<&'a str>,
@@ -333,5 +261,77 @@ fn check_likelihood_exprs(
         Likelihood::Bernoulli(l) => {
             check_expr(&l.p, ctx, true, errors);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::parameter::{Parameter, PriorDist, NormalPrior, HierarchicalKind, HierarchicalPrior};
+
+    fn param_both_set() -> Parameter {
+        Parameter {
+            name:          "beta".into(),
+            value:         Some(1.0),
+            bounds:        None,
+            prior:         Some(PriorDist::Normal(NormalPrior { mean: 0.0, sd: 1.0 })),
+            hierarchical:  Some(HierarchicalPrior {
+                kind: HierarchicalKind::Normal,
+                args: Default::default(),
+                pool_over: "".into(),
+            }),
+            transform:     None,
+            initial_value: None,
+            param_kind:    None,
+            param_dim:     None,
+        }
+    }
+
+    fn param_only_prior() -> Parameter {
+        let mut p = param_both_set();
+        p.hierarchical = None;
+        p
+    }
+
+    fn param_only_hierarchical() -> Parameter {
+        let mut p = param_both_set();
+        p.prior = None;
+        p
+    }
+
+    fn load_sir() -> Model {
+        let s = std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"), "/../../../ir/golden/sir_basic.ir.json"))
+            .expect("read sir_basic.ir.json");
+        serde_json::from_str::<Model>(&s).expect("parse sir_basic")
+    }
+
+    #[test]
+    fn prior_and_hierarchical_both_set_is_rejected() {
+        let mut m = load_sir();
+        m.parameters.push(param_both_set());
+        let errs = validate(&m).expect_err("must reject parameter with both fields set");
+        assert!(errs.iter().any(|e| matches!(e,
+            ValidationError::PriorAndHierarchicalBothSet(name) if name == "beta")),
+            "expected PriorAndHierarchicalBothSet for 'beta', got: {:?}", errs);
+    }
+
+    #[test]
+    fn only_prior_is_accepted() {
+        let mut m = load_sir();
+        // Use a fresh name to avoid the duplicate-parameter check tripping.
+        let mut p = param_only_prior();
+        p.name = "beta_extra".into();
+        m.parameters.push(p);
+        validate(&m).expect("only prior set must validate");
+    }
+
+    #[test]
+    fn only_hierarchical_is_accepted() {
+        let mut m = load_sir();
+        let mut p = param_only_hierarchical();
+        p.name = "beta_extra".into();
+        m.parameters.push(p);
+        validate(&m).expect("only hierarchical set must validate");
     }
 }
