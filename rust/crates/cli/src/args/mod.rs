@@ -9,6 +9,7 @@ pub mod types;
 
 use std::path::PathBuf;
 use clap::Args;
+use crate::colored_help;
 use types::{Backend, ListDuration, ParamOverride, ParamVecSpec, RwSd, SeedSpec, SweepSpec, TableSpec};
 
 // ─── Shared flat arg groups ───────────────────────────────────────────────────
@@ -93,7 +94,7 @@ pub struct FlowProjection {
 // ─── simulate ─────────────────────────────────────────────────────────────────
 
 #[derive(Args)]
-#[command(after_help = "\
+#[command(after_help = colored_help!("\
 Examples:
   # Basic simulation, output to stdout
   camdl simulate sir.camdl --params p.toml --seed 42
@@ -113,7 +114,7 @@ Examples:
 
   # Posterior predictive check from a fit's draws
   camdl simulate sir.camdl --draws posterior.tsv --replicates 10 --obs ppc.tsv
-")]
+"))]
 pub struct SimulateArgs {
     /// IR JSON or .camdl model file
     pub model: PathBuf,
@@ -212,7 +213,7 @@ pub struct SimulateArgs {
 // ─── batch ────────────────────────────────────────────────────────────────────
 
 #[derive(Args)]
-#[command(after_help = "\
+#[command(after_help = colored_help!("\
 Examples:
   # Run a batch sweep
   camdl batch run sweep.toml --parallel 8
@@ -222,7 +223,7 @@ Examples:
 
   # Force rerun, ignoring cached outputs
   camdl batch run sweep.toml --force
-")]
+"))]
 pub struct BatchArgs {
     /// Batch TOML manifest file
     pub file: PathBuf,
@@ -246,14 +247,14 @@ pub struct BatchArgs {
 
 /// `camdl batch status FILE`
 #[derive(Args)]
-#[command(after_help = "\
+#[command(after_help = colored_help!("\
 Examples:
   # Count completed vs pending runs for a sweep
   camdl batch status sweep.toml
 
   # Watch a long-running sweep from another shell
   watch -n 5 camdl batch status sweep.toml
-")]
+"))]
 pub struct BatchStatusArgs {
     /// Batch TOML manifest file
     pub file: PathBuf,
@@ -262,7 +263,7 @@ pub struct BatchStatusArgs {
 // ─── fit ──────────────────────────────────────────────────────────────────────
 
 #[derive(Args)]
-#[command(after_help = "\
+#[command(after_help = colored_help!("\
 Examples:
   # Run the full inference pipeline declared in fit.toml
   camdl fit run fit.toml --seed 1
@@ -277,7 +278,7 @@ Notes:
   - PGAS/PMMH fits can resume a partial run with `--resume`.
   - Output goes under `<root>/fits/<stem>-<hash>/`; resolve with
     `camdl fit where fit.toml`.
-")]
+"))]
 pub struct FitRunArgs {
     /// Fit configuration file (v2 TOML)
     pub config: PathBuf,
@@ -434,14 +435,14 @@ fn parse_f64_list(s: &str) -> Result<Vec<f64>, String> {
 }
 
 #[derive(Args)]
-#[command(after_help = "\
+#[command(after_help = colored_help!("\
 Examples:
   # Completion / convergence summary for a fit config
   camdl fit status fit.toml
 
   # Same, by results-directory path
   camdl fit status results/fits/he2010-abc123/
-")]
+"))]
 pub struct FitStatusArgs {
     /// Fit config file or results directory
     pub path: Option<PathBuf>,
@@ -460,7 +461,7 @@ pub enum FitSummaryFormat {
 }
 
 #[derive(Args)]
-#[command(after_help = "\
+#[command(after_help = colored_help!("\
 Examples:
   # Render summary for a completed fit
   camdl fit summary fit/he2010
@@ -485,7 +486,7 @@ Examples:
   # Strict mode for CI: exit non-zero on provenance mismatch.
   # Auto-enabled when CI=true or CI=1 in the environment.
   camdl fit summary fit/he2010 --strict
-")]
+"))]
 pub struct FitSummaryArgs {
     /// Fit results directory (e.g. `fit/he2010`)
     pub fit_dir: PathBuf,
@@ -526,11 +527,11 @@ pub struct FitSummaryArgs {
 }
 
 #[derive(Args)]
-#[command(after_help = "\
+#[command(after_help = colored_help!("\
 Examples:
   # Compare two fit.toml configurations side-by-side
   camdl fit diff fit-a.toml fit-b.toml
-")]
+"))]
 pub struct FitDiffArgs {
     /// First fit config
     pub a: PathBuf,
@@ -548,7 +549,7 @@ pub enum FitTableFormat {
 }
 
 #[derive(Args)]
-#[command(after_help = "\
+#[command(after_help = colored_help!("\
 Examples:
   # Show every fit under results/fits/, default text view
   camdl fit table results/fits
@@ -561,7 +562,7 @@ Examples:
 
   # Filter by method
   camdl fit table results/fits --with-method pgas
-")]
+"))]
 pub struct FitTableArgs {
     /// Path to the fits root (`results/fits/` or wherever the project
     /// stores them). Walks every `<root>/<dir>/run.json` of kind
@@ -621,11 +622,11 @@ pub struct FitTableArgs {
 }
 
 #[derive(Args)]
-#[command(after_help = "\
+#[command(after_help = colored_help!("\
 Examples:
   # Scaffold a new fit.toml from an existing baseline
   camdl fit new --from base.toml variant.toml
-")]
+"))]
 pub struct FitNewArgs {
     /// Source fit.toml to derive from
     #[arg(long)]
@@ -636,14 +637,14 @@ pub struct FitNewArgs {
 }
 
 #[derive(Args)]
-#[command(after_help = "\
+#[command(after_help = colored_help!("\
 Examples:
   # Print the content-addressed output directory for a fit.toml
   camdl fit where fit.toml
 
   # Per-seed cell directory (multi-seed fits)
   camdl fit where fit.toml --seed 42
-")]
+"))]
 pub struct FitWhereArgs {
     /// Fit config file
     pub config: PathBuf,
@@ -656,7 +657,7 @@ pub struct FitWhereArgs {
 // ─── label ────────────────────────────────────────────────────────────
 
 #[derive(Args)]
-#[command(after_help = "\
+#[command(after_help = colored_help!("\
 Examples:
   # Label any run kind by its short hash
   camdl label 04ab12cd \"narrow R0, take 1\"
@@ -672,7 +673,7 @@ Notes:
   - Errors on a still-running fit (RunStatus::Running); the
     runner would otherwise overwrite the label at completion.
   - Concurrent invocations are last-write-wins.
-")]
+"))]
 pub struct LabelArgs {
     /// Hash prefix of the target run (matches against
     /// `<root>/{sims,fits,profiles}/**/run.json`'s `Run.hash`)
@@ -690,7 +691,7 @@ pub struct LabelArgs {
 // ─── pfilter ──────────────────────────────────────────────────────────────────
 
 #[derive(Args)]
-#[command(after_help = "\
+#[command(after_help = colored_help!("\
 Examples:
   # Loglik at fixed parameters
   camdl pfilter sir.camdl --params p.toml --data cases.tsv \\
@@ -707,7 +708,7 @@ Examples:
   # Prequential out-of-sample evaluation
   camdl pfilter sir.camdl --params p.toml --data cases.tsv \\
       --particles 5000 --save-prequential preq
-")]
+"))]
 pub struct PfilterArgs {
     /// IR JSON or .camdl model file
     pub model: PathBuf,
@@ -772,7 +773,7 @@ pub struct PfilterArgs {
 // ─── if2 ──────────────────────────────────────────────────────────────────────
 
 #[derive(Args)]
-#[command(after_help = "\
+#[command(after_help = colored_help!("\
 Examples:
   # IF2 from scratch with explicit rw-sd map
   camdl if2 sir.camdl --data cases.tsv \\
@@ -784,7 +785,7 @@ Examples:
   # Multiple chains in parallel
   camdl if2 sir.camdl --data cases.tsv --rw-sd auto \\
       --regime refine --chains 4 --parallel 4
-")]
+"))]
 pub struct If2Args {
     /// IR JSON or .camdl model file
     pub model: PathBuf,
@@ -849,7 +850,7 @@ pub struct If2Args {
 // ─── profile ──────────────────────────────────────────────────────────────────
 
 #[derive(Args)]
-#[command(after_help = "\
+#[command(after_help = colored_help!("\
 Examples:
   # 1D profile likelihood for R0 via parallel IF2
   camdl profile sir.camdl --data cases.tsv \\
@@ -859,7 +860,7 @@ Examples:
   camdl profile sir.camdl --data cases.tsv \\
       --param R0 --grid 0.5:5:10 \\
       --param sigma --grid 0.1:1.0:10
-")]
+"))]
 pub struct ProfileArgs {
     /// IR JSON or .camdl model file
     pub model: PathBuf,
@@ -929,7 +930,7 @@ pub struct ProfileArgs {
 // ─── eval ─────────────────────────────────────────────────────────────────────
 
 #[derive(Args)]
-#[command(after_help = "\
+#[command(after_help = colored_help!("\
 Examples:
   # Evaluate one or more expressions on a time grid
   camdl eval sir.camdl --params p.toml \\
@@ -938,7 +939,7 @@ Examples:
   # Inspect a forcing function over time
   camdl eval sir.camdl --params p.toml \\
       --expr \"seasonal(t)\" --from 0 --to 365
-")]
+"))]
 pub struct EvalArgs {
     /// IR JSON or .camdl model file
     pub model: PathBuf,
@@ -974,7 +975,7 @@ pub struct EvalArgs {
 // ─── data split ───────────────────────────────────────────────────────────────
 
 #[derive(Args)]
-#[command(after_help = "\
+#[command(after_help = colored_help!("\
 Examples:
   # Split at a specific time point
   camdl data split cases.tsv --at-time 100 \\
@@ -983,7 +984,7 @@ Examples:
   # Split at a fraction of the rows (last 20% as holdout)
   camdl data split cases.tsv --fraction 0.8 \\
       --train train.tsv --holdout holdout.tsv
-")]
+"))]
 pub struct DataSplitArgs {
     /// Input data TSV
     pub file: PathBuf,
@@ -1012,7 +1013,7 @@ pub struct DataSplitArgs {
 // ─── browse ───────────────────────────────────────────────────────────────────
 
 #[derive(Args)]
-#[command(after_help = "\
+#[command(after_help = colored_help!("\
 Examples:
   # Show the most recent cached runs and fits
   camdl list
@@ -1028,7 +1029,7 @@ Examples:
 
   # Machine-readable JSON
   camdl list --format json
-")]
+"))]
 pub struct ListArgs {
     /// Root directory to scan (default: ./results)
     #[arg(default_value = "./results", env = "CAMDL_OUTPUT_DIR")]
@@ -1070,7 +1071,7 @@ pub struct ListArgs {
 }
 
 #[derive(Args)]
-#[command(after_help = "\
+#[command(after_help = colored_help!("\
 Examples:
   # Resolve a run by short hash prefix
   camdl show abc1234
@@ -1080,7 +1081,7 @@ Examples:
 
   # JSON output for scripting
   camdl show abc1234 --format json
-")]
+"))]
 pub struct ShowArgs {
     /// Short hash prefix or path to run directory
     pub target: String,
@@ -1095,14 +1096,14 @@ pub struct ShowArgs {
 }
 
 #[derive(Args)]
-#[command(after_help = "\
+#[command(after_help = colored_help!("\
 Examples:
   # Emit the trajectory for a cached run
   camdl cat abc1234
 
   # Select a particular observation stream
   camdl cat abc1234 --stream weekly_cases
-")]
+"))]
 pub struct CatArgs {
     /// Short hash prefix or path to run directory
     pub target: String,
@@ -1124,7 +1125,7 @@ pub struct CatArgs {
 /// and renders a baseline-centered comparison.
 /// See docs/dev/proposals/2026-04-20-prequential-evaluation.md §8.
 #[derive(Args)]
-#[command(after_help = "\
+#[command(after_help = colored_help!("\
 Columns:
   T_score    Number of scored observations (after the t0 burn-in).
              Differs across fits if they were evaluated on different data
@@ -1167,7 +1168,7 @@ Examples:
 
   # Render despite different T_score across fits (Δ columns → '—')
   camdl compare fits/a/pf fits/b/pf --allow-mismatched-horizon
-")]
+"))]
 pub struct CompareArgs {
     /// Stage directories (or .json paths) to compare — need ≥2 when
     /// --config is not used

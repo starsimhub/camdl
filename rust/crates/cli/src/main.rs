@@ -19,18 +19,23 @@ mod evidence;
 pub mod version;
 
 /// Terminal formatting helpers. Pure ANSI SGR codes, no dependencies.
-/// Respects NO_COLOR (https://no-color.org/) — when set, all formatting
-/// is stripped and strings are returned unchanged.
-mod term {
-    fn enabled() -> bool { std::env::var("NO_COLOR").is_err() }
-    fn wrap(code: &str, s: &str) -> String {
-        if enabled() { format!("\x1b[{}m{}\x1b[0m", code, s) } else { s.to_string() }
-    }
-    pub fn dim(s: &str) -> String { wrap("2", s) }
-    pub fn bold(s: &str) -> String { wrap("1", s) }
-}
+// Terminal styling lives in `crate::style`; the `colored_help!` macro
+// is exported at the crate root via `#[macro_export]` and used from
+// `crate::args` to colorize subcommand `after_help` blocks.
+pub mod style;
 
 use clap::{Parser, Subcommand};
+use clap::builder::styling::{AnsiColor, Effects, Styles};
+
+/// Color scheme for clap's own help rendering (section headings, flag
+/// names, usage). Respects `NO_COLOR` and TTY detection automatically
+/// via clap's `ColorChoice::Auto`. After-help blocks are styled
+/// separately via `colored_help!` (see `crate::style`).
+const HELP_STYLES: Styles = Styles::styled()
+    .header   (AnsiColor::Yellow.on_default().effects(Effects::BOLD))
+    .usage    (AnsiColor::Yellow.on_default().effects(Effects::BOLD))
+    .literal  (AnsiColor::Cyan  .on_default())
+    .placeholder(AnsiColor::Cyan.on_default());
 use sim::{write_diagnostics_tsv, warn_zero_firings};
 use std::collections::HashMap;
 
@@ -46,7 +51,9 @@ use std::collections::HashMap;
     about = "Stochastic compartmental model simulation and inference",
     disable_help_subcommand = true,
     arg_required_else_help = true,
-    after_help = "\
+    max_term_width = 100,
+    styles = HELP_STYLES,
+    after_help = colored_help!("\
 Common workflows:
   Simulate a model:        camdl simulate model.camdl --params p.toml
   Fit to data:             camdl fit run fit.toml
@@ -54,7 +61,7 @@ Common workflows:
   Browse cached runs:      camdl list
   Diagnose a fit:          camdl fit summary <fit-dir>
 
-Run `camdl <command> --help` for any subcommand.",
+Run `camdl <command> --help` for any subcommand."),
 )]
 pub(crate) struct Cli {
     #[command(subcommand)]
@@ -122,7 +129,7 @@ pub(crate) enum Command {
     Label(args::LabelArgs),
 
     /// Compile a .camdl model to IR JSON (delegates to camdlc)
-    #[command(after_help = "\
+    #[command(after_help = colored_help!("\
 This subcommand forwards all arguments verbatim to the OCaml compiler
 `camdlc`. Flags shown above belong to camdl; camdlc's own flags (e.g.
 `--set NAME=VALUE`, `--json-errors`, `--no-dim-check`) are parsed by
@@ -137,11 +144,11 @@ Examples:
 
   # Machine-readable diagnostics
   camdl compile sir.camdl --json-errors
-")]
+"))]
     Compile(Passthrough),
 
     /// Parse and type-check a .camdl model (delegates to camdlc)
-    #[command(after_help = "\
+    #[command(after_help = colored_help!("\
 This subcommand forwards all arguments verbatim to the OCaml compiler
 `camdlc`. Run `camdlc check` with no arguments for usage, or see
 `camdlc --help` for global flags.
@@ -152,11 +159,11 @@ Examples:
 
   # Skip the dimensional-analysis checker (only for a confirmed false positive)
   camdl check sir.camdl --no-dim-check
-")]
+"))]
     Check(Passthrough),
 
     /// Print model structure (delegates to camdlc)
-    #[command(after_help = "\
+    #[command(after_help = colored_help!("\
 This subcommand forwards all arguments verbatim to the OCaml compiler
 `camdlc`. Input must be a .camdl source file (not a compiled .ir.json).
 Run `camdlc inspect` with no arguments for usage.
@@ -178,13 +185,13 @@ Examples:
 
   # Transition rates only
   camdl inspect sir.camdl --transitions
-")]
+"))]
     Inspect(Passthrough),
 }
 
 #[derive(Subcommand)]
 #[command(arg_required_else_help = true,
-          after_help = "\
+          after_help = colored_help!("\
 Examples:
   # Run a parameter / scenario sweep declared in a TOML manifest
   camdl batch run sweep.toml --parallel 8
@@ -192,7 +199,7 @@ Examples:
   # Check completion of a long-running sweep
   camdl batch status sweep.toml
 
-See `camdl batch <subcommand> --help` for full options.")]
+See `camdl batch <subcommand> --help` for full options."))]
 pub(crate) enum BatchCmd {
     /// Run a batch sweep from a TOML manifest
     Run(args::BatchArgs),
@@ -202,7 +209,7 @@ pub(crate) enum BatchCmd {
 
 #[derive(Subcommand)]
 #[command(arg_required_else_help = true,
-          after_help = "\
+          after_help = colored_help!("\
 Examples:
   # Run the full inference pipeline declared in fit.toml
   camdl fit run fit.toml --seed 1
@@ -213,7 +220,7 @@ Examples:
   # Browse every fit under a results tree
   camdl fit table results/fits/
 
-See `camdl fit <subcommand> --help` for full options.")]
+See `camdl fit <subcommand> --help` for full options."))]
 pub(crate) enum FitCmd {
     /// Run inference stages defined in a fit.toml
     Run(args::FitRunArgs),
@@ -233,13 +240,13 @@ pub(crate) enum FitCmd {
 
 #[derive(Subcommand)]
 #[command(arg_required_else_help = true,
-          after_help = "\
+          after_help = colored_help!("\
 Examples:
   # Split a data TSV into training + holdout sets
   camdl data split cases.tsv --at-time 100 \\
       --train train.tsv --holdout holdout.tsv
 
-See `camdl data split --help` for full options.")]
+See `camdl data split --help` for full options."))]
 pub(crate) enum DataCmd {
     /// Split a data TSV into train and holdout sets
     Split(args::DataSplitArgs),
@@ -1653,8 +1660,8 @@ fn print_dry_run(
     obs_dir: &Option<String>,
     obs_only: &Option<String>,
 ) {
-    let d = term::dim;
-    let b = term::bold;
+    let d = style::dim;
+    let b = style::bold;
 
     eprintln!("{}", b("camdl simulate (dry run)"));
     eprintln!();
