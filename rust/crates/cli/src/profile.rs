@@ -63,6 +63,80 @@ use crate::run_paths::{
     output_root, profile_point_dir, profile_point_start_dir,
 };
 
+// ─── Observation family resolution ───────────────────────────────────────────
+
+/// Resolve `--obs <name>` against the IR's observation list.
+///
+/// gh#38: profile must walk the *full* indexed observation family and
+/// sum log-likelihood across every concrete stream that descended from
+/// it — matching `camdl fit run`. Previously profile silently scored
+/// only the first IR observation entry, producing a profile loglik
+/// ~5 orders of magnitude off what the user thought they were
+/// plotting on a 15-cell stratified family like typhoid's
+/// `cases[s in setting, a in age]`.
+///
+/// Resolution rules:
+///
+/// 1. If `obs_name` is supplied:
+///    a. Exact match against an IR obs name → single-stream profile.
+///       (Family-name lookup never sees this — it's the leaf of an
+///        already-expanded family.)
+///    b. Otherwise treat the name as a family root and match every
+///       IR obs whose name starts with `<name>_` (the OCaml expander
+///       names indexed observations as `<family>_<idx1>_<idx2>...`).
+///    c. No matches → `Err`.
+/// 2. If `obs_name` is `None`:
+///    a. Exactly one IR observation → use it.
+///    b. Multiple → `Err` listing available names.
+///    c. Zero → `Err`.
+///
+/// Returns the borrowed IR observations, in IR declaration order. The
+/// returned slice is non-empty on `Ok`.
+pub(crate) fn resolve_obs_family<'a>(
+    observations: &'a [ir::observation::ObservationModel],
+    obs_name: Option<&str>,
+) -> Result<Vec<&'a ir::observation::ObservationModel>, String> {
+    match obs_name {
+        Some(name) => {
+            // 1a. Exact match (single stream).
+            let exact: Vec<_> = observations.iter().filter(|o| o.name == name).collect();
+            if !exact.is_empty() {
+                return Ok(exact);
+            }
+            // 1b. Family match.
+            let prefix = format!("{}_", name);
+            let family: Vec<_> = observations.iter()
+                .filter(|o| o.name.starts_with(&prefix))
+                .collect();
+            if family.is_empty() {
+                let avail = observations.iter().map(|o| o.name.as_str())
+                    .collect::<Vec<_>>().join(", ");
+                return Err(format!(
+                    "error: --obs '{}' matches no observation in the IR.\n\
+                     Available observation names: {}",
+                    name, avail));
+            }
+            Ok(family)
+        }
+        None => {
+            if observations.is_empty() {
+                Err("error: model has no observations block".to_string())
+            } else if observations.len() == 1 {
+                Ok(vec![&observations[0]])
+            } else {
+                let avail = observations.iter().map(|o| o.name.as_str())
+                    .collect::<Vec<_>>().join(", ");
+                Err(format!(
+                    "error: model declares {} observation streams. Pass `--obs <NAME>` \
+                     to select one (exact stream name) or a family root (e.g. `cases` \
+                     for an indexed `cases[s,a]` block — sums all expanded streams).\n\
+                     Available: {}",
+                    observations.len(), avail))
+            }
+        }
+    }
+}
+
 // ─── ProfileInputs ───────────────────────────────────────────────────────────
 
 /// Typed CAS inputs for a single-realization profile run. The struct
@@ -92,6 +166,14 @@ pub struct ProfileInputs {
     /// Fixed parameters (`--fixed`): excluded from IF2 estimation. Order
     /// doesn't matter; sorted before hashing.
     pub fixed: Vec<String>,
+    /// `--obs <NAME>` argument as resolved against the IR. Either an
+    /// exact stream name (single-stream profile) or a family root that
+    /// expanded to N>1 concrete streams (joint multi-stream profile).
+    /// Empty string when the model has exactly one observation and
+    /// `--obs` was omitted. gh#38: this **must** be in the cache key —
+    /// switching `--obs cases` ↔ `--obs cases_p1` changes the loglik
+    /// scale by orders of magnitude (5 streams summed vs 1).
+    pub obs_family: String,
     /// IF2 hyperparameter set.
     pub if2_config: ProfileIf2Config,
     /// Hash of an upstream stage's content this profile starts from.
@@ -128,6 +210,7 @@ impl ProfileInputs {
             ("base_params", &self.base_params_hash),
             ("focal_grid",  &grid_canonical),
             ("fixed",       &fixed_sorted.join(",")),
+            ("obs_family",  &self.obs_family),
             ("if2",         &if2),
             ("starts_from", self.starts_from_lineage.as_deref().unwrap_or("")),
         ])
@@ -251,9 +334,133 @@ pub fn cmd_profile(a: &crate::args::ProfileArgs) {
         .unwrap_or_else(|e| { eprintln!("{:?}", e); std::process::exit(1); }));
     let base_params = compiled.default_params.clone();
 
-    let observations: Vec<Observation> = crate::pfilter::load_data_tsv_pub(&data_path)
-        .unwrap_or_else(|e| { eprintln!("{}", e); std::process::exit(1); })
-        .into_iter().map(|o| Observation { time: o.time, value: o.value }).collect();
+    // ── Resolve --obs against the IR's observation list ─────────────
+    //
+    // gh#38: profile must walk the *full* indexed observation family
+    // and sum log-likelihood across every concrete stream that
+    // descended from it — matching `camdl fit run`. Previously this
+    // path silently scored only the first IR observation (e.g.
+    // `cases_medium_a02`), producing a profile loglik ~5 orders of
+    // magnitude off what the user thought they were plotting on a
+    // 15-cell stratified family like typhoid's
+    // `cases[s in setting, a in age]`.
+    //
+    // Resolution rules (mirrors `pfilter` for the single-stream case
+    // and `fit run` for the family case):
+    //
+    // 1. If `--obs <name>` is supplied:
+    //    a. Exact match against an IR obs name → single-stream profile.
+    //       (Family-name lookup never sees this — it's the leaf of an
+    //        already-expanded family.)
+    //    b. Otherwise treat `<name>` as a family root and match every
+    //       IR obs whose name starts with `<name>_` (the OCaml expander
+    //       names indexed observations as `<family>_<idx1>_<idx2>...`).
+    //    c. No matches → hard error.
+    // 2. If `--obs` is omitted:
+    //    a. Exactly one IR observation → use it.
+    //    b. Multiple → error, list available names + family roots.
+    //    c. Zero → error (model declares no observations block).
+    //
+    // `--flow <name>` is only meaningful for single-stream profiles
+    // (it overrides the obs model's projection to a custom flow sum).
+    // It's incompatible with a multi-stream resolution because each
+    // stream has its own per-stratum projection.
+    let obs_name_arg = a.flow.obs.clone();
+    let resolved_obs: Vec<&ir::observation::ObservationModel> =
+        resolve_obs_family(&model.observations, obs_name_arg.as_deref())
+            .unwrap_or_else(|e| { eprintln!("{}", e); std::process::exit(1); });
+
+    if resolved_obs.len() > 1 && flow_name.is_some() {
+        eprintln!(
+            "error: --flow <NAME> is incompatible with a multi-stream observation \
+             family. `--obs '{}'` resolved to {} concrete streams (each has its own \
+             per-stratum projection); `--flow` only makes sense when scoring a single \
+             stream against a custom flow override.",
+            obs_name_arg.as_deref().unwrap_or(""), resolved_obs.len(),
+        );
+        std::process::exit(1);
+    }
+
+    if resolved_obs.len() > 1 {
+        eprintln!(
+            "profile: --obs '{}' resolved to {} expanded streams \
+             (joint loglik = sum across all)",
+            obs_name_arg.as_deref().unwrap_or(""), resolved_obs.len(),
+        );
+    } else {
+        eprintln!("profile: using observation model '{}' from IR",
+            resolved_obs[0].name);
+    }
+
+    // Load each stream's column from the data TSV. The lookup keys
+    // on `obs.name` to match the rest of the toolchain:
+    //
+    // * `camdl fit run` (runner.rs:271) loads per stream by the model
+    //   observation's `name`, not its `data_stream`. Profile must
+    //   agree so a `--data <file>.tsv` produced by `camdl simulate
+    //   --obs-only` (which writes columns by `name`) reads back
+    //   identically under both commands.
+    // * The IR's `data_stream` field is preserved as the *declarer's*
+    //   intended source-file column (see ocaml/lib/compiler/expander.ml
+    //   ~line 2958), but for the runtime data-loading path the
+    //   `name`/`data_stream` distinction is dead code today — fit
+    //   uses `name`, simulate writes by `name`, and the wide-TSV
+    //   convention assumed by indexed-obs families (e.g. typhoid's
+    //   `cases_<setting>_<age>`) makes `name == data_stream`
+    //   anyway when no explicit override was declared.
+    //
+    // Fallback for single-stream models: if the user supplied a 2-col
+    // (time, value) TSV with a non-matching column name, accept it
+    // via `load_data_tsv_pub` — same behaviour profile had before the
+    // multi-stream rewrite, and matches what `camdl pfilter` does.
+    // For multi-stream resolution every column must match by name;
+    // no ambiguity is allowed.
+    let load_stream_obs = |column: &str| -> Vec<Observation> {
+        let result = if resolved_obs.len() == 1 {
+            // Single stream: try by-name first, fall back to first
+            // value column if the TSV has only (time, value).
+            crate::pfilter::load_data_tsv_column(&data_path, column)
+                .or_else(|_| crate::pfilter::load_data_tsv_pub(&data_path))
+        } else {
+            crate::pfilter::load_data_tsv_column(&data_path, column)
+        };
+        match result {
+            Ok(v) => v.into_iter().map(|o| Observation { time: o.time, value: o.value }).collect(),
+            Err(e) => {
+                eprintln!("error: cannot load data column '{}' from {}: {}",
+                    column, data_path, e);
+                std::process::exit(1);
+            }
+        }
+    };
+
+    let mut per_stream_obs: Vec<Vec<Observation>> = Vec::with_capacity(resolved_obs.len());
+    let mut canonical_times: Option<Vec<f64>> = None;
+    for obs in &resolved_obs {
+        let stream_obs = load_stream_obs(&obs.name);
+        let times: Vec<f64> = stream_obs.iter().map(|o| o.time).collect();
+        match &canonical_times {
+            None => canonical_times = Some(times),
+            Some(ct) => {
+                if ct.len() != times.len()
+                    || ct.iter().zip(&times).any(|(a, b)| (a - b).abs() > 1e-9)
+                {
+                    eprintln!(
+                        "error: observation times for stream '{}' differ from the first \
+                         resolved stream. All streams in a profile family must share \
+                         identical observation times.",
+                        obs.name
+                    );
+                    std::process::exit(1);
+                }
+            }
+        }
+        per_stream_obs.push(stream_obs);
+    }
+
+    // First stream's obs vector is the canonical schedule; downstream
+    // code reads it for `obs_times` only.
+    let observations: Vec<Observation> = per_stream_obs[0].clone();
     let observations = Arc::new(observations);
 
     let flow_indices = crate::util::resolve_flow_indices(&model, flow_name.as_deref())
@@ -305,33 +512,37 @@ pub fn cmd_profile(a: &crate::args::ProfileArgs) {
     let if2_params = Arc::new(if2_params);
 
     let process = Arc::new(ChainBinomialProcess::new(compiled.clone()));
+    // Build one StreamSpec per resolved IR observation. For
+    // single-stream profiles `--flow <name>` overrides the IR
+    // projection (forces incidence over the named transition family);
+    // for multi-stream we always use each stream's IR projection
+    // (the `--flow` + multi-stream combination was already rejected
+    // upstream).
     let obs_model_obj: Arc<dyn ObservationModel<ParticleState> + Send + Sync> = {
-        let obs_block = model.observations.first();
-        if let Some(obs) = obs_block {
-            eprintln!("profile: using observation model '{}' from IR", obs.name);
-            let projection = if flow_name.is_some() {
-                sim::inference::multi_stream_obs::StreamProjection::FlowSum(flow_indices.to_vec())
+        let obs_times: Vec<f64> = observations.iter().map(|o| o.time).collect();
+        let mut stream_specs = Vec::with_capacity(resolved_obs.len());
+        for (obs, stream_obs) in resolved_obs.iter().zip(per_stream_obs.iter()) {
+            let projection = if resolved_obs.len() == 1 && flow_name.is_some() {
+                sim::inference::multi_stream_obs::StreamProjection::FlowSum(
+                    flow_indices.to_vec(),
+                )
             } else {
                 sim::inference::multi_stream_obs::StreamProjection::from_ir(
                     &obs.projection, &compiled, &obs.name,
                 ).unwrap_or_else(|e| { eprintln!("error: {}", e); std::process::exit(1); })
             };
-            Arc::new(MultiStreamObsModel::new(
-                vec![StreamSpec {
-                    projection,
-                    ir_model: obs.clone(),
-                    observations: observations.iter().map(|o| o.value).collect(),
-                    obs_times: observations.iter().map(|o| o.time).collect(),
-                }],
-                compiled.clone(),
-            ).unwrap_or_else(|e| {
+            stream_specs.push(StreamSpec {
+                projection,
+                ir_model: (*obs).clone(),
+                observations: stream_obs.iter().map(|o| o.value).collect(),
+                obs_times: obs_times.clone(),
+            });
+        }
+        Arc::new(MultiStreamObsModel::new(stream_specs, compiled.clone())
+            .unwrap_or_else(|e| {
                 eprintln!("error: observation model construction failed: {:?}", e);
                 std::process::exit(1);
             }))
-        } else {
-            eprintln!("error: model has no observations block");
-            std::process::exit(1);
-        }
     };
 
     // Build Cartesian product of all focal grids.
@@ -382,6 +593,13 @@ pub fn cmd_profile(a: &crate::args::ProfileArgs) {
     let root = output_root(None, None);
     let stem = crate::hashing::path_stem_slug(&ir_path);
 
+    // gh#38: obs_family is the resolved canonical name we used to pick
+    // the IR observation set. For an explicit `--obs`, it's the
+    // user-supplied name. For an implicit single-stream model it's the
+    // sole IR observation's name (so two profiles on the same model
+    // with one obs and the same params still hit the cache).
+    let obs_family_key = obs_name_arg.clone()
+        .unwrap_or_else(|| resolved_obs[0].name.clone());
     let template_inputs = ProfileInputs {
         model_path: ir_path.clone(),
         stem: stem.clone(),
@@ -389,6 +607,7 @@ pub fn cmd_profile(a: &crate::args::ProfileArgs) {
         base_params_hash,
         focal_grid: grid_spec,
         fixed: a.fixed.clone(),
+        obs_family: obs_family_key,
         if2_config: ProfileIf2Config {
             n_particles, n_iterations, cooling, dt, n_starts,
         },
@@ -1163,6 +1382,110 @@ mod tests {
         let bare_loglik: f64 = row1[1].parse().unwrap();
         assert!((bare_loglik - (-42.5)).abs() < 1e-3,
             "bare loglik should be the cross-seed mean, got {}", bare_loglik);
+    }
+
+    // ── gh#38 obs-family resolution ─────────────────────────────────
+
+    /// Build a synthetic `ObservationModel` for resolution tests.
+    /// Likelihood/projection/schedule fields are placeholders — only
+    /// `name` is exercised by `resolve_obs_family`.
+    fn make_obs(name: &str) -> ir::observation::ObservationModel {
+        use ir::observation::{
+            Likelihood, ObservationSchedule, PoissonLikelihood,
+            Projection, RegularSchedule,
+        };
+        use ir::expr::Expr;
+        ir::observation::ObservationModel {
+            name: name.to_string(),
+            data_stream: name.to_string(),
+            schedule: ObservationSchedule::Regular(RegularSchedule {
+                start: 0.0, step: 1.0, end: 10.0,
+            }),
+            projection: Projection::CumulativeFlow("flow".to_string()),
+            likelihood: Likelihood::Poisson(PoissonLikelihood {
+                rate: Expr::Const(ir::expr::ConstExpr { value: 1.0 }),
+            }),
+        }
+    }
+
+    #[test]
+    fn resolve_obs_family_root_matches_full_indexed_expansion() {
+        // gh#38 core: passing the family root resolves to ALL expanded
+        // streams (not just the first). The OCaml expander emits names
+        // like `<family>_<idx1>_<idx2>...`.
+        let obs = vec![
+            make_obs("cases_medium_a02"),
+            make_obs("cases_medium_a25"),
+            make_obs("cases_high_a02"),
+            make_obs("cases_high_a25"),
+            make_obs("cases_veryhigh_a02"),
+        ];
+        let resolved = resolve_obs_family(&obs, Some("cases")).unwrap();
+        assert_eq!(resolved.len(), 5,
+            "family root 'cases' must match all 5 expanded streams, got {}",
+            resolved.len());
+        let names: Vec<&str> = resolved.iter().map(|o| o.name.as_str()).collect();
+        assert_eq!(names, vec![
+            "cases_medium_a02", "cases_medium_a25",
+            "cases_high_a02", "cases_high_a25", "cases_veryhigh_a02",
+        ]);
+    }
+
+    #[test]
+    fn resolve_obs_family_exact_match_takes_precedence_over_family() {
+        // 1a: an exact match against an expanded leaf must short-circuit
+        // — passing `cases_medium_a02` should give back exactly that
+        // stream, not also the other `cases_medium_a02_*` siblings if
+        // the model happened to declare any.
+        let obs = vec![
+            make_obs("cases_medium_a02"),
+            make_obs("cases_medium_a02_extra"),
+            make_obs("cases_medium_a25"),
+        ];
+        let resolved = resolve_obs_family(&obs, Some("cases_medium_a02")).unwrap();
+        assert_eq!(resolved.len(), 1,
+            "exact match must take precedence over family expansion");
+        assert_eq!(resolved[0].name, "cases_medium_a02");
+    }
+
+    #[test]
+    fn resolve_obs_family_unknown_name_errors() {
+        let obs = vec![make_obs("cases_a02"), make_obs("cases_a25")];
+        let err = resolve_obs_family(&obs, Some("deaths")).unwrap_err();
+        assert!(err.contains("deaths") && err.contains("Available"),
+            "error should name the unknown obs and list available, got: {}", err);
+    }
+
+    #[test]
+    fn resolve_obs_family_no_arg_picks_unique_obs() {
+        let obs = vec![make_obs("reported_cases")];
+        let resolved = resolve_obs_family(&obs, None).unwrap();
+        assert_eq!(resolved.len(), 1);
+        assert_eq!(resolved[0].name, "reported_cases");
+    }
+
+    #[test]
+    fn resolve_obs_family_no_arg_with_multiple_errors() {
+        // No --obs + multiple observations is the failure mode that
+        // the gh#38 fix is closing: previously profile silently picked
+        // the first one and reported "using observation model
+        // 'cases_medium_a02' from IR", off by orders of magnitude.
+        let obs = vec![
+            make_obs("cases_a02"),
+            make_obs("cases_a25"),
+        ];
+        let err = resolve_obs_family(&obs, None).unwrap_err();
+        assert!(err.contains("Pass `--obs"),
+            "error should prompt user to pass --obs, got: {}", err);
+        assert!(err.contains("cases_a02") && err.contains("cases_a25"),
+            "error should list available streams, got: {}", err);
+    }
+
+    #[test]
+    fn resolve_obs_family_no_observations_errors() {
+        let obs: Vec<ir::observation::ObservationModel> = vec![];
+        assert!(resolve_obs_family(&obs, None).is_err());
+        assert!(resolve_obs_family(&obs, Some("cases")).is_err());
     }
 }
 
