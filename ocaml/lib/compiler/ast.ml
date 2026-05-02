@@ -92,9 +92,10 @@ type table_dim_entry =
 
 (** Table value: inline literal or EFuncCall for read_long/external *)
 type table_decl = {
-  tnames : string list;           (* one or more names for multi-value columns *)
-  tdims  : table_dim_entry list;
-  tvalue : expr;
+  tnames     : string list;           (* one or more names for multi-value columns *)
+  tdims      : table_dim_entry list;
+  tcell_kind : param_type option;     (* optional cell-type annotation: rate, probability, ... (gh#32) *)
+  tvalue     : expr;
 }
 
 (** A stoichiometry reference: compartment name + optional indices *)

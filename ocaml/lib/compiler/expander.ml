@@ -2054,6 +2054,7 @@ let expand_tables ctx =
     let dim_entries = td.tdims in
     let primary_name = List.hd td.tnames in
     let table_unit = extract_table_unit ctx ~table_name:primary_name dim_entries in
+    let cell_kind = Option.map param_kind_to_string td.tcell_kind in
     match td.tvalue with
     | EFuncCall ("read", args) ->
       (* Multi-value loader: produces one Ir.table per name in td.tnames *)
@@ -2078,6 +2079,7 @@ let expand_tables ctx =
            { Ir.name          = name;
              Ir.source        = Ir.Inline vals;
              Ir.out_of_bounds = Ir.Error;
+             Ir.cell_kind     = cell_kind;
            }
          ) td.tnames)
     | _ ->
@@ -2095,7 +2097,8 @@ let expand_tables ctx =
       in
       (match source with
        | Ir.Inline [] -> []   (* empty inline = compile error upstream, skip *)
-       | _ -> [{ Ir.name; Ir.source; Ir.out_of_bounds = Ir.Error }])
+       | _ -> [{ Ir.name; Ir.source; Ir.out_of_bounds = Ir.Error;
+                 Ir.cell_kind = cell_kind }])
   ) ctx.table_decls
 
 (* ── Initial conditions ──────────────────────────────────────────────────── *)

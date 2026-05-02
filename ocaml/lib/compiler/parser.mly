@@ -287,10 +287,12 @@ table_list:
   | ts = list(table_decl) { ts }
 
 table_decl:
+  | names = separated_nonempty_list(COMMA, IDENT) COLON dims = table_dims_nonempty COLON kind = param_kind EQ v = expr
+      { { tnames = names; tdims = dims; tcell_kind = Some kind; tvalue = v } }
   | names = separated_nonempty_list(COMMA, IDENT) COLON dims = table_dims_nonempty EQ v = expr
-      { { tnames = names; tdims = dims; tvalue = v } }
+      { { tnames = names; tdims = dims; tcell_kind = None; tvalue = v } }
   | name = IDENT EQ v = expr
-      { { tnames = [name]; tdims = []; tvalue = v } }
+      { { tnames = [name]; tdims = []; tcell_kind = None; tvalue = v } }
 
 table_dims_nonempty:
   | ds = separated_nonempty_list(CROSS, table_dim_entry) { ds }

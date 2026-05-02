@@ -1,0 +1,82 @@
+# SEIR with age-stratified aging rates from a per-bin table (gh#32).
+#
+# The aging_rate table is annotated `:rate`, telling the dim checker
+# every cell carries dimension T^-1. With that annotation,
+# `aging_rate[a] * S[a]` resolves to P*T^-1 — the dimension a
+# transition rate must have. Without the annotation the same
+# expression would trip E300.
+
+time_unit = 'days
+
+compartments { S, E, I, R }
+
+dimensions {
+  age = [a02, a25, a510, a1015, a15plus]
+}
+
+stratify(by = age)
+
+let N_local[a in age] = S[a] + E[a] + I[a] + R[a]
+
+parameters {
+  beta  : rate
+  sigma : rate
+  gamma : rate
+}
+
+tables {
+  C_age : age × age = [
+    [12.0, 6.0, 4.0, 2.0, 1.0],
+    [ 6.0,10.0, 4.0, 2.0, 1.0],
+    [ 4.0, 4.0, 8.0, 3.0, 1.0],
+    [ 2.0, 2.0, 3.0, 6.0, 2.0],
+    [ 1.0, 1.0, 1.0, 2.0, 4.0]
+  ]
+  # gh#32: `:rate` annotation stamps each cell with dim T^-1 so
+  # `aging_rate[a] * S[a]` typechecks as P*T^-1 in transition rate
+  # position.
+  aging_rate : age :rate = [
+    1.0 / (2.0 * 365.0),
+    1.0 / (3.0 * 365.0),
+    1.0 / (5.0 * 365.0),
+    1.0 / (5.0 * 365.0),
+    0.0
+  ]
+}
+
+transitions {
+  infection[a in age] : S[a] --> E[a]
+    @ beta * S[a] * sum(b in age, C_age[a, b] * I[b] / N_local[b])
+
+  progression[a in age] : E[a] --> I[a]  @ sigma * E[a]
+  recovery[a in age]    : I[a] --> R[a]  @ gamma * I[a]
+
+  aging[c in compartments, (a, a_next) in consecutive(age)]
+    : c[a] --> c[a_next]
+    @ aging_rate[a] * c[a]
+}
+
+init {
+  S[a02]     = 1000
+  S[a25]     = 1500
+  S[a510]    = 2500
+  S[a1015]   = 2500
+  S[a15plus] = 2490
+  I[a02]     = 10
+}
+
+simulate {
+  from = 0 'days
+  to   = 100 'days
+}
+
+scenarios {
+  baseline {
+    label = "default"
+    set = {
+      beta  = 0.05
+      sigma = 0.2
+      gamma = 0.1
+    }
+  }
+}

@@ -900,6 +900,7 @@ let () =
       Alcotest.test_case "polio_spatial_5"          `Quick (test_golden_no_dim_errors "polio_spatial_5");
       Alcotest.test_case "malaria_two_species"      `Quick (test_golden_no_dim_errors "malaria_two_species");
       Alcotest.test_case "sir_dim_annotated"        `Quick (test_golden_no_dim_errors "sir_dim_annotated");
+      Alcotest.test_case "seir_age_table_rates"     `Quick (test_golden_no_dim_errors "seir_age_table_rates");
     ];
     "union_find", [
       Alcotest.test_case "linked unknowns consistent"  `Quick test_unknown_unknown_linking_conflict;

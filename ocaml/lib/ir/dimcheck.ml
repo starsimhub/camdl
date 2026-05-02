@@ -478,25 +478,31 @@ and propagate_product st ~ctx e expected =
 
 let init_table_dims st (tables : table list) =
   List.iter (fun (tbl : table) ->
-    let dim = match tbl.source with
-      | External _ -> fresh_var st  (* can't know *)
-      | Inline exprs ->
-        (* If all values are bare constants, the table dimension is ambiguous
-           (e.g. age durations in years, contact matrix entries). Treat as
-           unknown so the solver can infer from context. *)
-        let all_const = List.for_all (fun e ->
-          match e with Const _ -> true | _ -> false
-        ) exprs in
-        if all_const then
-          fresh_var st
-        else begin
-          let ctx = Printf.sprintf "table '%s'" tbl.name in
-          let dims = List.map (fun e -> infer st ~ctx e) exprs in
-          (match dims with
-           | [] -> Known dimensionless
-           | d :: rest ->
-             List.fold_left (fun acc d2 -> unify st ~loc:ctx acc d2) d rest)
-        end
+    let dim = match tbl.cell_kind with
+      | Some _ ->
+        (* gh#32: explicit cell-type annotation. Stamp the table with
+           the declared dim — exactly the way scalar parameters work. *)
+        param_dim_of_kind st tbl.cell_kind
+      | None ->
+        match tbl.source with
+        | External _ -> fresh_var st  (* can't know *)
+        | Inline exprs ->
+          (* If all values are bare constants, the table dimension is ambiguous
+             (e.g. age durations in years, contact matrix entries). Treat as
+             unknown so the solver can infer from context. *)
+          let all_const = List.for_all (fun e ->
+            match e with Const _ -> true | _ -> false
+          ) exprs in
+          if all_const then
+            fresh_var st
+          else begin
+            let ctx = Printf.sprintf "table '%s'" tbl.name in
+            let dims = List.map (fun e -> infer st ~ctx e) exprs in
+            (match dims with
+             | [] -> Known dimensionless
+             | d :: rest ->
+               List.fold_left (fun acc d2 -> unify st ~loc:ctx acc d2) d rest)
+          end
     in
     Hashtbl.replace st.table_dims tbl.name dim
   ) tables

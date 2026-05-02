@@ -434,6 +434,151 @@ let test_table_no_unit_annotation_leaves_values_alone () =
   assert_inline_const ~epsilon:1e-12 tbl 2 0.5;
   assert_inline_const ~epsilon:1e-12 tbl 3 1.0
 
+(* ── gh#32 — table cell-type annotations ────────────────────────────────────
+   `tables { x : dim :rate = [...] }` stamps every cell with the declared
+   dimensional kind, so a per-bin rate table can drive a transition rate
+   position without tripping E300. The annotation parallels scalar parameter
+   syntax (`p : rate`); absent annotation = legacy dimensionless behaviour. *)
+
+let test_table_cell_type_rate_parses_and_stamps_ir () =
+  (* :rate annotation on a 1-D age table — the typhoid aging-rate motivator. *)
+  let src = {|
+    time_unit = 'days
+    dimensions { age = [a02, a25, a510, a1015, a15] }
+    compartments { S, I }
+    stratify(by = age)
+    parameters { gamma : rate }
+    tables {
+      aging_rate : age :rate = [
+        1.0 / (2.0 * 365.0),
+        1.0 / (3.0 * 365.0),
+        1.0 / (5.0 * 365.0),
+        1.0 / (5.0 * 365.0),
+        0.0
+      ]
+    }
+    let N = S_a02 + I_a02 + S_a25 + I_a25 + S_a510 + I_a510 + S_a1015 + I_a1015 + S_a15 + I_a15
+    transitions {
+      recovery[g in age] : I[g] --> S[g]  @ gamma * I[g]
+      aging[g in age, (a, a_next) in consecutive(age)]
+        : S[a] --> S[a_next]
+        @ aging_rate[a] * S[a] where g == a
+    }
+    init { S_a02 = 100 I_a02 = 1 }
+    simulate { from = 0 'days  to = 30 'days }
+  |} in
+  let m = compile_expect_ok src in
+  let tbl = List.find (fun (t : Ir.table) -> t.Ir.name = "aging_rate") m.Ir.tables in
+  Alcotest.(check (option string))
+    "aging_rate.cell_kind = Some \"rate\""
+    (Some "rate") tbl.Ir.cell_kind
+
+let test_table_cell_type_probability_parses () =
+  let src = {|
+    time_unit = 'days
+    dimensions { age = [a, b] }
+    compartments { S, I }
+    stratify(by = age)
+    parameters { gamma : rate }
+    tables { p_severe : age :probability = [0.1, 0.5] }
+    let N = S_a + I_a + S_b + I_b
+    transitions {
+      recovery[g in age] : I[g] --> S[g]  @ gamma * p_severe[g] * I[g]
+    }
+    init { S_a = 100 I_a = 1 }
+    simulate { from = 0 'days  to = 10 'days }
+  |} in
+  let m = compile_expect_ok src in
+  let tbl = List.find (fun (t : Ir.table) -> t.Ir.name = "p_severe") m.Ir.tables in
+  Alcotest.(check (option string))
+    "p_severe.cell_kind = Some \"probability\""
+    (Some "probability") tbl.Ir.cell_kind
+
+let test_table_no_cell_type_annotation_remains_none () =
+  (* No annotation = absent cell_kind — backward compatible. *)
+  let src = {|
+    time_unit = 'days
+    dimensions { age = [a, b] }
+    compartments { S }
+    stratify(by = age)
+    parameters { beta : rate }
+    tables { C : age × age = [[1.0, 0.5], [0.5, 1.0]] }
+    let N = S_a + S_b
+    transitions {
+      dummy[g in age] : S[g] -->   @ beta * C[g, g] * S[g]
+    }
+    init { S_a = 1 S_b = 1 }
+    simulate { from = 0 'days  to = 1 'days }
+  |} in
+  let m = compile_expect_ok src in
+  let tbl = List.find (fun (t : Ir.table) -> t.Ir.name = "C") m.Ir.tables in
+  Alcotest.(check (option string))
+    "C.cell_kind = None"
+    None tbl.Ir.cell_kind
+
+let with_dim_check_enabled f =
+  let prev = !Compiler.no_dim_check in
+  Compiler.no_dim_check := false;
+  Fun.protect ~finally:(fun () -> Compiler.no_dim_check := prev) f
+
+let test_table_cell_type_dim_check_passes_in_rate_position () =
+  (* gh#32 motivator: with :rate annotation the dim checker must accept
+     `aging_rate[a] * S[a]` as P*T^-1 (population-level rate). *)
+  let src = {|
+    time_unit = 'days
+    dimensions { age = [a02, a25, a510] }
+    compartments { S, I }
+    stratify(by = age)
+    parameters { gamma : rate }
+    tables {
+      aging_rate : age :rate = [
+        1.0 / (2.0 * 365.0),
+        1.0 / (3.0 * 365.0),
+        0.0
+      ]
+    }
+    let N = S_a02 + I_a02 + S_a25 + I_a25 + S_a510 + I_a510
+    transitions {
+      recovery[g in age] : I[g] --> S[g]  @ gamma * I[g]
+      aging_a02 : S[a02] --> S[a25]   @ aging_rate[a02] * S[a02]
+      aging_a25 : S[a25] --> S[a510]  @ aging_rate[a25] * S[a25]
+    }
+    init { S_a02 = 100 I_a02 = 1 }
+    simulate { from = 0 'days  to = 30 'days }
+  |} in
+  with_dim_check_enabled (fun () ->
+    match Compiler.compile ~name:"test_cell_type_dim" src with
+    | Ok _    -> ()
+    | Error e -> Alcotest.failf "expected dim-check pass, got: %s" e)
+
+let test_table_cell_type_ir_round_trips_through_serde () =
+  (* Compile a model with :rate cell type, serialise to JSON, deserialise,
+     confirm the cell_kind survives the round trip. *)
+  let src = {|
+    time_unit = 'days
+    dimensions { age = [a, b] }
+    compartments { S, I }
+    stratify(by = age)
+    parameters { gamma : rate }
+    tables { aging : age :rate = [0.001, 0.002] }
+    let N = S_a + I_a + S_b + I_b
+    transitions {
+      recovery[g in age] : I[g] --> S[g]  @ gamma * I[g]
+    }
+    init { S_a = 100 I_a = 1 }
+    simulate { from = 0 'days  to = 10 'days }
+  |} in
+  let m = compile_expect_ok src in
+  let json = Serde.model_to_string m in
+  let m2 = match Serde.model_of_string json with
+    | Ok m -> m
+    | Error e -> Alcotest.failf "round-trip parse failed: %s" e
+  in
+  let tbl = List.find (fun (t : Ir.table) -> t.Ir.name = "aging") m2.Ir.tables in
+  Alcotest.(check (option string))
+    "round-tripped cell_kind"
+    (Some "rate") tbl.Ir.cell_kind
+
 (* ── P3.1 — let-binding inlining (spec §9) ──────────────────────────────────
    Spec claim: `let N = S + I + R` is inlined at every use site.
    Direct assertion: the compiled transition rate must contain Pop "S" +
@@ -3372,6 +3517,7 @@ let () =
       Alcotest.test_case "seir_defines_patch"      `Quick (test_golden "seir_defines_patch");
       Alcotest.test_case "seir_spatial_5_inference" `Quick (test_golden "seir_spatial_5_inference");
       Alcotest.test_case "malaria_two_species"     `Quick (test_golden "malaria_two_species");
+      Alcotest.test_case "seir_age_table_rates"    `Quick (test_golden "seir_age_table_rates");
     ];
     "table_lookup_flattening", [
       Alcotest.test_case "single index per lookup" `Quick test_table_lookup_single_index;
@@ -3397,6 +3543,18 @@ let () =
         `Quick test_table_read_path_scales_unit;
       Alcotest.test_case "no unit annotation leaves values untouched"
         `Quick test_table_no_unit_annotation_leaves_values_alone;
+    ];
+    "table_cell_type_annotation_gh32", [
+      Alcotest.test_case ":rate annotation parses + stamps IR.cell_kind"
+        `Quick test_table_cell_type_rate_parses_and_stamps_ir;
+      Alcotest.test_case ":probability annotation parses"
+        `Quick test_table_cell_type_probability_parses;
+      Alcotest.test_case "no annotation = cell_kind None (back-compat)"
+        `Quick test_table_no_cell_type_annotation_remains_none;
+      Alcotest.test_case "dim-check passes with :rate-typed table in rate position"
+        `Quick test_table_cell_type_dim_check_passes_in_rate_position;
+      Alcotest.test_case "cell_kind survives JSON serde round-trip"
+        `Quick test_table_cell_type_ir_round_trips_through_serde;
     ];
     "spec_claims_v1", [
       Alcotest.test_case "§9 let binding is inlined at use sites (P3.1)"

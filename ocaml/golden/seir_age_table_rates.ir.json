@@ -1,0 +1,2163 @@
+{
+  "name": "seir_age_table_rates",
+  "version": "0.3",
+  "time_unit": "days",
+  "description": null,
+  "compartments": [
+    { "name": "S_a02", "kind": "integer" },
+    { "name": "S_a25", "kind": "integer" },
+    { "name": "S_a510", "kind": "integer" },
+    { "name": "S_a1015", "kind": "integer" },
+    { "name": "S_a15plus", "kind": "integer" },
+    { "name": "E_a02", "kind": "integer" },
+    { "name": "E_a25", "kind": "integer" },
+    { "name": "E_a510", "kind": "integer" },
+    { "name": "E_a1015", "kind": "integer" },
+    { "name": "E_a15plus", "kind": "integer" },
+    { "name": "I_a02", "kind": "integer" },
+    { "name": "I_a25", "kind": "integer" },
+    { "name": "I_a510", "kind": "integer" },
+    { "name": "I_a1015", "kind": "integer" },
+    { "name": "I_a15plus", "kind": "integer" },
+    { "name": "R_a02", "kind": "integer" },
+    { "name": "R_a25", "kind": "integer" },
+    { "name": "R_a510", "kind": "integer" },
+    { "name": "R_a1015", "kind": "integer" },
+    { "name": "R_a15plus", "kind": "integer" }
+  ],
+  "transitions": [
+    {
+      "name": "infection_a02",
+      "stoichiometry": [ [ "S_a02", -1 ], [ "E_a02", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": {
+            "bin_op": {
+              "op": "mul",
+              "left": { "param": "beta" },
+              "right": { "pop": "S_a02" }
+            }
+          },
+          "right": {
+            "bin_op": {
+              "op": "add",
+              "left": {
+                "bin_op": {
+                  "op": "add",
+                  "left": {
+                    "bin_op": {
+                      "op": "add",
+                      "left": {
+                        "bin_op": {
+                          "op": "add",
+                          "left": {
+                            "bin_op": {
+                              "op": "div",
+                              "left": {
+                                "bin_op": {
+                                  "op": "mul",
+                                  "left": {
+                                    "table_lookup": {
+                                      "table": "C_age",
+                                      "indices": [ { "const": 0.0 } ]
+                                    }
+                                  },
+                                  "right": { "pop": "I_a02" }
+                                }
+                              },
+                              "right": {
+                                "pop_sum": [
+                                  "S_a02", "E_a02", "I_a02", "R_a02"
+                                ]
+                              }
+                            }
+                          },
+                          "right": {
+                            "bin_op": {
+                              "op": "div",
+                              "left": {
+                                "bin_op": {
+                                  "op": "mul",
+                                  "left": {
+                                    "table_lookup": {
+                                      "table": "C_age",
+                                      "indices": [ { "const": 1.0 } ]
+                                    }
+                                  },
+                                  "right": { "pop": "I_a25" }
+                                }
+                              },
+                              "right": {
+                                "pop_sum": [
+                                  "S_a25", "E_a25", "I_a25", "R_a25"
+                                ]
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "right": {
+                        "bin_op": {
+                          "op": "div",
+                          "left": {
+                            "bin_op": {
+                              "op": "mul",
+                              "left": {
+                                "table_lookup": {
+                                  "table": "C_age",
+                                  "indices": [ { "const": 2.0 } ]
+                                }
+                              },
+                              "right": { "pop": "I_a510" }
+                            }
+                          },
+                          "right": {
+                            "pop_sum": [
+                              "S_a510", "E_a510", "I_a510", "R_a510"
+                            ]
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "right": {
+                    "bin_op": {
+                      "op": "div",
+                      "left": {
+                        "bin_op": {
+                          "op": "mul",
+                          "left": {
+                            "table_lookup": {
+                              "table": "C_age",
+                              "indices": [ { "const": 3.0 } ]
+                            }
+                          },
+                          "right": { "pop": "I_a1015" }
+                        }
+                      },
+                      "right": {
+                        "pop_sum": [
+                          "S_a1015", "E_a1015", "I_a1015", "R_a1015"
+                        ]
+                      }
+                    }
+                  }
+                }
+              },
+              "right": {
+                "bin_op": {
+                  "op": "div",
+                  "left": {
+                    "bin_op": {
+                      "op": "mul",
+                      "left": {
+                        "table_lookup": {
+                          "table": "C_age",
+                          "indices": [ { "const": 4.0 } ]
+                        }
+                      },
+                      "right": { "pop": "I_a15plus" }
+                    }
+                  },
+                  "right": {
+                    "pop_sum": [
+                      "S_a15plus", "E_a15plus", "I_a15plus", "R_a15plus"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "metadata": {
+        "origin_kind": "transmission",
+        "source_compartment": "S_a02",
+        "dest_compartment": "E_a02"
+      },
+      "rate_grad": {
+        "beta": {
+          "bin_op": {
+            "op": "mul",
+            "left": { "pop": "S_a02" },
+            "right": {
+              "bin_op": {
+                "op": "add",
+                "left": {
+                  "bin_op": {
+                    "op": "add",
+                    "left": {
+                      "bin_op": {
+                        "op": "add",
+                        "left": {
+                          "bin_op": {
+                            "op": "add",
+                            "left": {
+                              "bin_op": {
+                                "op": "div",
+                                "left": {
+                                  "bin_op": {
+                                    "op": "mul",
+                                    "left": {
+                                      "table_lookup": {
+                                        "table": "C_age",
+                                        "indices": [ { "const": 0.0 } ]
+                                      }
+                                    },
+                                    "right": { "pop": "I_a02" }
+                                  }
+                                },
+                                "right": {
+                                  "pop_sum": [
+                                    "S_a02", "E_a02", "I_a02", "R_a02"
+                                  ]
+                                }
+                              }
+                            },
+                            "right": {
+                              "bin_op": {
+                                "op": "div",
+                                "left": {
+                                  "bin_op": {
+                                    "op": "mul",
+                                    "left": {
+                                      "table_lookup": {
+                                        "table": "C_age",
+                                        "indices": [ { "const": 1.0 } ]
+                                      }
+                                    },
+                                    "right": { "pop": "I_a25" }
+                                  }
+                                },
+                                "right": {
+                                  "pop_sum": [
+                                    "S_a25", "E_a25", "I_a25", "R_a25"
+                                  ]
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "right": {
+                          "bin_op": {
+                            "op": "div",
+                            "left": {
+                              "bin_op": {
+                                "op": "mul",
+                                "left": {
+                                  "table_lookup": {
+                                    "table": "C_age",
+                                    "indices": [ { "const": 2.0 } ]
+                                  }
+                                },
+                                "right": { "pop": "I_a510" }
+                              }
+                            },
+                            "right": {
+                              "pop_sum": [
+                                "S_a510", "E_a510", "I_a510", "R_a510"
+                              ]
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "right": {
+                      "bin_op": {
+                        "op": "div",
+                        "left": {
+                          "bin_op": {
+                            "op": "mul",
+                            "left": {
+                              "table_lookup": {
+                                "table": "C_age",
+                                "indices": [ { "const": 3.0 } ]
+                              }
+                            },
+                            "right": { "pop": "I_a1015" }
+                          }
+                        },
+                        "right": {
+                          "pop_sum": [
+                            "S_a1015", "E_a1015", "I_a1015", "R_a1015"
+                          ]
+                        }
+                      }
+                    }
+                  }
+                },
+                "right": {
+                  "bin_op": {
+                    "op": "div",
+                    "left": {
+                      "bin_op": {
+                        "op": "mul",
+                        "left": {
+                          "table_lookup": {
+                            "table": "C_age",
+                            "indices": [ { "const": 4.0 } ]
+                          }
+                        },
+                        "right": { "pop": "I_a15plus" }
+                      }
+                    },
+                    "right": {
+                      "pop_sum": [
+                        "S_a15plus", "E_a15plus", "I_a15plus", "R_a15plus"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "infection_a25",
+      "stoichiometry": [ [ "S_a25", -1 ], [ "E_a25", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": {
+            "bin_op": {
+              "op": "mul",
+              "left": { "param": "beta" },
+              "right": { "pop": "S_a25" }
+            }
+          },
+          "right": {
+            "bin_op": {
+              "op": "add",
+              "left": {
+                "bin_op": {
+                  "op": "add",
+                  "left": {
+                    "bin_op": {
+                      "op": "add",
+                      "left": {
+                        "bin_op": {
+                          "op": "add",
+                          "left": {
+                            "bin_op": {
+                              "op": "div",
+                              "left": {
+                                "bin_op": {
+                                  "op": "mul",
+                                  "left": {
+                                    "table_lookup": {
+                                      "table": "C_age",
+                                      "indices": [ { "const": 5.0 } ]
+                                    }
+                                  },
+                                  "right": { "pop": "I_a02" }
+                                }
+                              },
+                              "right": {
+                                "pop_sum": [
+                                  "S_a02", "E_a02", "I_a02", "R_a02"
+                                ]
+                              }
+                            }
+                          },
+                          "right": {
+                            "bin_op": {
+                              "op": "div",
+                              "left": {
+                                "bin_op": {
+                                  "op": "mul",
+                                  "left": {
+                                    "table_lookup": {
+                                      "table": "C_age",
+                                      "indices": [ { "const": 6.0 } ]
+                                    }
+                                  },
+                                  "right": { "pop": "I_a25" }
+                                }
+                              },
+                              "right": {
+                                "pop_sum": [
+                                  "S_a25", "E_a25", "I_a25", "R_a25"
+                                ]
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "right": {
+                        "bin_op": {
+                          "op": "div",
+                          "left": {
+                            "bin_op": {
+                              "op": "mul",
+                              "left": {
+                                "table_lookup": {
+                                  "table": "C_age",
+                                  "indices": [ { "const": 7.0 } ]
+                                }
+                              },
+                              "right": { "pop": "I_a510" }
+                            }
+                          },
+                          "right": {
+                            "pop_sum": [
+                              "S_a510", "E_a510", "I_a510", "R_a510"
+                            ]
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "right": {
+                    "bin_op": {
+                      "op": "div",
+                      "left": {
+                        "bin_op": {
+                          "op": "mul",
+                          "left": {
+                            "table_lookup": {
+                              "table": "C_age",
+                              "indices": [ { "const": 8.0 } ]
+                            }
+                          },
+                          "right": { "pop": "I_a1015" }
+                        }
+                      },
+                      "right": {
+                        "pop_sum": [
+                          "S_a1015", "E_a1015", "I_a1015", "R_a1015"
+                        ]
+                      }
+                    }
+                  }
+                }
+              },
+              "right": {
+                "bin_op": {
+                  "op": "div",
+                  "left": {
+                    "bin_op": {
+                      "op": "mul",
+                      "left": {
+                        "table_lookup": {
+                          "table": "C_age",
+                          "indices": [ { "const": 9.0 } ]
+                        }
+                      },
+                      "right": { "pop": "I_a15plus" }
+                    }
+                  },
+                  "right": {
+                    "pop_sum": [
+                      "S_a15plus", "E_a15plus", "I_a15plus", "R_a15plus"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "metadata": {
+        "origin_kind": "transmission",
+        "source_compartment": "S_a25",
+        "dest_compartment": "E_a25"
+      },
+      "rate_grad": {
+        "beta": {
+          "bin_op": {
+            "op": "mul",
+            "left": { "pop": "S_a25" },
+            "right": {
+              "bin_op": {
+                "op": "add",
+                "left": {
+                  "bin_op": {
+                    "op": "add",
+                    "left": {
+                      "bin_op": {
+                        "op": "add",
+                        "left": {
+                          "bin_op": {
+                            "op": "add",
+                            "left": {
+                              "bin_op": {
+                                "op": "div",
+                                "left": {
+                                  "bin_op": {
+                                    "op": "mul",
+                                    "left": {
+                                      "table_lookup": {
+                                        "table": "C_age",
+                                        "indices": [ { "const": 5.0 } ]
+                                      }
+                                    },
+                                    "right": { "pop": "I_a02" }
+                                  }
+                                },
+                                "right": {
+                                  "pop_sum": [
+                                    "S_a02", "E_a02", "I_a02", "R_a02"
+                                  ]
+                                }
+                              }
+                            },
+                            "right": {
+                              "bin_op": {
+                                "op": "div",
+                                "left": {
+                                  "bin_op": {
+                                    "op": "mul",
+                                    "left": {
+                                      "table_lookup": {
+                                        "table": "C_age",
+                                        "indices": [ { "const": 6.0 } ]
+                                      }
+                                    },
+                                    "right": { "pop": "I_a25" }
+                                  }
+                                },
+                                "right": {
+                                  "pop_sum": [
+                                    "S_a25", "E_a25", "I_a25", "R_a25"
+                                  ]
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "right": {
+                          "bin_op": {
+                            "op": "div",
+                            "left": {
+                              "bin_op": {
+                                "op": "mul",
+                                "left": {
+                                  "table_lookup": {
+                                    "table": "C_age",
+                                    "indices": [ { "const": 7.0 } ]
+                                  }
+                                },
+                                "right": { "pop": "I_a510" }
+                              }
+                            },
+                            "right": {
+                              "pop_sum": [
+                                "S_a510", "E_a510", "I_a510", "R_a510"
+                              ]
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "right": {
+                      "bin_op": {
+                        "op": "div",
+                        "left": {
+                          "bin_op": {
+                            "op": "mul",
+                            "left": {
+                              "table_lookup": {
+                                "table": "C_age",
+                                "indices": [ { "const": 8.0 } ]
+                              }
+                            },
+                            "right": { "pop": "I_a1015" }
+                          }
+                        },
+                        "right": {
+                          "pop_sum": [
+                            "S_a1015", "E_a1015", "I_a1015", "R_a1015"
+                          ]
+                        }
+                      }
+                    }
+                  }
+                },
+                "right": {
+                  "bin_op": {
+                    "op": "div",
+                    "left": {
+                      "bin_op": {
+                        "op": "mul",
+                        "left": {
+                          "table_lookup": {
+                            "table": "C_age",
+                            "indices": [ { "const": 9.0 } ]
+                          }
+                        },
+                        "right": { "pop": "I_a15plus" }
+                      }
+                    },
+                    "right": {
+                      "pop_sum": [
+                        "S_a15plus", "E_a15plus", "I_a15plus", "R_a15plus"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "infection_a510",
+      "stoichiometry": [ [ "S_a510", -1 ], [ "E_a510", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": {
+            "bin_op": {
+              "op": "mul",
+              "left": { "param": "beta" },
+              "right": { "pop": "S_a510" }
+            }
+          },
+          "right": {
+            "bin_op": {
+              "op": "add",
+              "left": {
+                "bin_op": {
+                  "op": "add",
+                  "left": {
+                    "bin_op": {
+                      "op": "add",
+                      "left": {
+                        "bin_op": {
+                          "op": "add",
+                          "left": {
+                            "bin_op": {
+                              "op": "div",
+                              "left": {
+                                "bin_op": {
+                                  "op": "mul",
+                                  "left": {
+                                    "table_lookup": {
+                                      "table": "C_age",
+                                      "indices": [ { "const": 10.0 } ]
+                                    }
+                                  },
+                                  "right": { "pop": "I_a02" }
+                                }
+                              },
+                              "right": {
+                                "pop_sum": [
+                                  "S_a02", "E_a02", "I_a02", "R_a02"
+                                ]
+                              }
+                            }
+                          },
+                          "right": {
+                            "bin_op": {
+                              "op": "div",
+                              "left": {
+                                "bin_op": {
+                                  "op": "mul",
+                                  "left": {
+                                    "table_lookup": {
+                                      "table": "C_age",
+                                      "indices": [ { "const": 11.0 } ]
+                                    }
+                                  },
+                                  "right": { "pop": "I_a25" }
+                                }
+                              },
+                              "right": {
+                                "pop_sum": [
+                                  "S_a25", "E_a25", "I_a25", "R_a25"
+                                ]
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "right": {
+                        "bin_op": {
+                          "op": "div",
+                          "left": {
+                            "bin_op": {
+                              "op": "mul",
+                              "left": {
+                                "table_lookup": {
+                                  "table": "C_age",
+                                  "indices": [ { "const": 12.0 } ]
+                                }
+                              },
+                              "right": { "pop": "I_a510" }
+                            }
+                          },
+                          "right": {
+                            "pop_sum": [
+                              "S_a510", "E_a510", "I_a510", "R_a510"
+                            ]
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "right": {
+                    "bin_op": {
+                      "op": "div",
+                      "left": {
+                        "bin_op": {
+                          "op": "mul",
+                          "left": {
+                            "table_lookup": {
+                              "table": "C_age",
+                              "indices": [ { "const": 13.0 } ]
+                            }
+                          },
+                          "right": { "pop": "I_a1015" }
+                        }
+                      },
+                      "right": {
+                        "pop_sum": [
+                          "S_a1015", "E_a1015", "I_a1015", "R_a1015"
+                        ]
+                      }
+                    }
+                  }
+                }
+              },
+              "right": {
+                "bin_op": {
+                  "op": "div",
+                  "left": {
+                    "bin_op": {
+                      "op": "mul",
+                      "left": {
+                        "table_lookup": {
+                          "table": "C_age",
+                          "indices": [ { "const": 14.0 } ]
+                        }
+                      },
+                      "right": { "pop": "I_a15plus" }
+                    }
+                  },
+                  "right": {
+                    "pop_sum": [
+                      "S_a15plus", "E_a15plus", "I_a15plus", "R_a15plus"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "metadata": {
+        "origin_kind": "transmission",
+        "source_compartment": "S_a510",
+        "dest_compartment": "E_a510"
+      },
+      "rate_grad": {
+        "beta": {
+          "bin_op": {
+            "op": "mul",
+            "left": { "pop": "S_a510" },
+            "right": {
+              "bin_op": {
+                "op": "add",
+                "left": {
+                  "bin_op": {
+                    "op": "add",
+                    "left": {
+                      "bin_op": {
+                        "op": "add",
+                        "left": {
+                          "bin_op": {
+                            "op": "add",
+                            "left": {
+                              "bin_op": {
+                                "op": "div",
+                                "left": {
+                                  "bin_op": {
+                                    "op": "mul",
+                                    "left": {
+                                      "table_lookup": {
+                                        "table": "C_age",
+                                        "indices": [ { "const": 10.0 } ]
+                                      }
+                                    },
+                                    "right": { "pop": "I_a02" }
+                                  }
+                                },
+                                "right": {
+                                  "pop_sum": [
+                                    "S_a02", "E_a02", "I_a02", "R_a02"
+                                  ]
+                                }
+                              }
+                            },
+                            "right": {
+                              "bin_op": {
+                                "op": "div",
+                                "left": {
+                                  "bin_op": {
+                                    "op": "mul",
+                                    "left": {
+                                      "table_lookup": {
+                                        "table": "C_age",
+                                        "indices": [ { "const": 11.0 } ]
+                                      }
+                                    },
+                                    "right": { "pop": "I_a25" }
+                                  }
+                                },
+                                "right": {
+                                  "pop_sum": [
+                                    "S_a25", "E_a25", "I_a25", "R_a25"
+                                  ]
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "right": {
+                          "bin_op": {
+                            "op": "div",
+                            "left": {
+                              "bin_op": {
+                                "op": "mul",
+                                "left": {
+                                  "table_lookup": {
+                                    "table": "C_age",
+                                    "indices": [ { "const": 12.0 } ]
+                                  }
+                                },
+                                "right": { "pop": "I_a510" }
+                              }
+                            },
+                            "right": {
+                              "pop_sum": [
+                                "S_a510", "E_a510", "I_a510", "R_a510"
+                              ]
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "right": {
+                      "bin_op": {
+                        "op": "div",
+                        "left": {
+                          "bin_op": {
+                            "op": "mul",
+                            "left": {
+                              "table_lookup": {
+                                "table": "C_age",
+                                "indices": [ { "const": 13.0 } ]
+                              }
+                            },
+                            "right": { "pop": "I_a1015" }
+                          }
+                        },
+                        "right": {
+                          "pop_sum": [
+                            "S_a1015", "E_a1015", "I_a1015", "R_a1015"
+                          ]
+                        }
+                      }
+                    }
+                  }
+                },
+                "right": {
+                  "bin_op": {
+                    "op": "div",
+                    "left": {
+                      "bin_op": {
+                        "op": "mul",
+                        "left": {
+                          "table_lookup": {
+                            "table": "C_age",
+                            "indices": [ { "const": 14.0 } ]
+                          }
+                        },
+                        "right": { "pop": "I_a15plus" }
+                      }
+                    },
+                    "right": {
+                      "pop_sum": [
+                        "S_a15plus", "E_a15plus", "I_a15plus", "R_a15plus"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "infection_a1015",
+      "stoichiometry": [ [ "S_a1015", -1 ], [ "E_a1015", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": {
+            "bin_op": {
+              "op": "mul",
+              "left": { "param": "beta" },
+              "right": { "pop": "S_a1015" }
+            }
+          },
+          "right": {
+            "bin_op": {
+              "op": "add",
+              "left": {
+                "bin_op": {
+                  "op": "add",
+                  "left": {
+                    "bin_op": {
+                      "op": "add",
+                      "left": {
+                        "bin_op": {
+                          "op": "add",
+                          "left": {
+                            "bin_op": {
+                              "op": "div",
+                              "left": {
+                                "bin_op": {
+                                  "op": "mul",
+                                  "left": {
+                                    "table_lookup": {
+                                      "table": "C_age",
+                                      "indices": [ { "const": 15.0 } ]
+                                    }
+                                  },
+                                  "right": { "pop": "I_a02" }
+                                }
+                              },
+                              "right": {
+                                "pop_sum": [
+                                  "S_a02", "E_a02", "I_a02", "R_a02"
+                                ]
+                              }
+                            }
+                          },
+                          "right": {
+                            "bin_op": {
+                              "op": "div",
+                              "left": {
+                                "bin_op": {
+                                  "op": "mul",
+                                  "left": {
+                                    "table_lookup": {
+                                      "table": "C_age",
+                                      "indices": [ { "const": 16.0 } ]
+                                    }
+                                  },
+                                  "right": { "pop": "I_a25" }
+                                }
+                              },
+                              "right": {
+                                "pop_sum": [
+                                  "S_a25", "E_a25", "I_a25", "R_a25"
+                                ]
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "right": {
+                        "bin_op": {
+                          "op": "div",
+                          "left": {
+                            "bin_op": {
+                              "op": "mul",
+                              "left": {
+                                "table_lookup": {
+                                  "table": "C_age",
+                                  "indices": [ { "const": 17.0 } ]
+                                }
+                              },
+                              "right": { "pop": "I_a510" }
+                            }
+                          },
+                          "right": {
+                            "pop_sum": [
+                              "S_a510", "E_a510", "I_a510", "R_a510"
+                            ]
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "right": {
+                    "bin_op": {
+                      "op": "div",
+                      "left": {
+                        "bin_op": {
+                          "op": "mul",
+                          "left": {
+                            "table_lookup": {
+                              "table": "C_age",
+                              "indices": [ { "const": 18.0 } ]
+                            }
+                          },
+                          "right": { "pop": "I_a1015" }
+                        }
+                      },
+                      "right": {
+                        "pop_sum": [
+                          "S_a1015", "E_a1015", "I_a1015", "R_a1015"
+                        ]
+                      }
+                    }
+                  }
+                }
+              },
+              "right": {
+                "bin_op": {
+                  "op": "div",
+                  "left": {
+                    "bin_op": {
+                      "op": "mul",
+                      "left": {
+                        "table_lookup": {
+                          "table": "C_age",
+                          "indices": [ { "const": 19.0 } ]
+                        }
+                      },
+                      "right": { "pop": "I_a15plus" }
+                    }
+                  },
+                  "right": {
+                    "pop_sum": [
+                      "S_a15plus", "E_a15plus", "I_a15plus", "R_a15plus"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "metadata": {
+        "origin_kind": "transmission",
+        "source_compartment": "S_a1015",
+        "dest_compartment": "E_a1015"
+      },
+      "rate_grad": {
+        "beta": {
+          "bin_op": {
+            "op": "mul",
+            "left": { "pop": "S_a1015" },
+            "right": {
+              "bin_op": {
+                "op": "add",
+                "left": {
+                  "bin_op": {
+                    "op": "add",
+                    "left": {
+                      "bin_op": {
+                        "op": "add",
+                        "left": {
+                          "bin_op": {
+                            "op": "add",
+                            "left": {
+                              "bin_op": {
+                                "op": "div",
+                                "left": {
+                                  "bin_op": {
+                                    "op": "mul",
+                                    "left": {
+                                      "table_lookup": {
+                                        "table": "C_age",
+                                        "indices": [ { "const": 15.0 } ]
+                                      }
+                                    },
+                                    "right": { "pop": "I_a02" }
+                                  }
+                                },
+                                "right": {
+                                  "pop_sum": [
+                                    "S_a02", "E_a02", "I_a02", "R_a02"
+                                  ]
+                                }
+                              }
+                            },
+                            "right": {
+                              "bin_op": {
+                                "op": "div",
+                                "left": {
+                                  "bin_op": {
+                                    "op": "mul",
+                                    "left": {
+                                      "table_lookup": {
+                                        "table": "C_age",
+                                        "indices": [ { "const": 16.0 } ]
+                                      }
+                                    },
+                                    "right": { "pop": "I_a25" }
+                                  }
+                                },
+                                "right": {
+                                  "pop_sum": [
+                                    "S_a25", "E_a25", "I_a25", "R_a25"
+                                  ]
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "right": {
+                          "bin_op": {
+                            "op": "div",
+                            "left": {
+                              "bin_op": {
+                                "op": "mul",
+                                "left": {
+                                  "table_lookup": {
+                                    "table": "C_age",
+                                    "indices": [ { "const": 17.0 } ]
+                                  }
+                                },
+                                "right": { "pop": "I_a510" }
+                              }
+                            },
+                            "right": {
+                              "pop_sum": [
+                                "S_a510", "E_a510", "I_a510", "R_a510"
+                              ]
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "right": {
+                      "bin_op": {
+                        "op": "div",
+                        "left": {
+                          "bin_op": {
+                            "op": "mul",
+                            "left": {
+                              "table_lookup": {
+                                "table": "C_age",
+                                "indices": [ { "const": 18.0 } ]
+                              }
+                            },
+                            "right": { "pop": "I_a1015" }
+                          }
+                        },
+                        "right": {
+                          "pop_sum": [
+                            "S_a1015", "E_a1015", "I_a1015", "R_a1015"
+                          ]
+                        }
+                      }
+                    }
+                  }
+                },
+                "right": {
+                  "bin_op": {
+                    "op": "div",
+                    "left": {
+                      "bin_op": {
+                        "op": "mul",
+                        "left": {
+                          "table_lookup": {
+                            "table": "C_age",
+                            "indices": [ { "const": 19.0 } ]
+                          }
+                        },
+                        "right": { "pop": "I_a15plus" }
+                      }
+                    },
+                    "right": {
+                      "pop_sum": [
+                        "S_a15plus", "E_a15plus", "I_a15plus", "R_a15plus"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "infection_a15plus",
+      "stoichiometry": [ [ "S_a15plus", -1 ], [ "E_a15plus", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": {
+            "bin_op": {
+              "op": "mul",
+              "left": { "param": "beta" },
+              "right": { "pop": "S_a15plus" }
+            }
+          },
+          "right": {
+            "bin_op": {
+              "op": "add",
+              "left": {
+                "bin_op": {
+                  "op": "add",
+                  "left": {
+                    "bin_op": {
+                      "op": "add",
+                      "left": {
+                        "bin_op": {
+                          "op": "add",
+                          "left": {
+                            "bin_op": {
+                              "op": "div",
+                              "left": {
+                                "bin_op": {
+                                  "op": "mul",
+                                  "left": {
+                                    "table_lookup": {
+                                      "table": "C_age",
+                                      "indices": [ { "const": 20.0 } ]
+                                    }
+                                  },
+                                  "right": { "pop": "I_a02" }
+                                }
+                              },
+                              "right": {
+                                "pop_sum": [
+                                  "S_a02", "E_a02", "I_a02", "R_a02"
+                                ]
+                              }
+                            }
+                          },
+                          "right": {
+                            "bin_op": {
+                              "op": "div",
+                              "left": {
+                                "bin_op": {
+                                  "op": "mul",
+                                  "left": {
+                                    "table_lookup": {
+                                      "table": "C_age",
+                                      "indices": [ { "const": 21.0 } ]
+                                    }
+                                  },
+                                  "right": { "pop": "I_a25" }
+                                }
+                              },
+                              "right": {
+                                "pop_sum": [
+                                  "S_a25", "E_a25", "I_a25", "R_a25"
+                                ]
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "right": {
+                        "bin_op": {
+                          "op": "div",
+                          "left": {
+                            "bin_op": {
+                              "op": "mul",
+                              "left": {
+                                "table_lookup": {
+                                  "table": "C_age",
+                                  "indices": [ { "const": 22.0 } ]
+                                }
+                              },
+                              "right": { "pop": "I_a510" }
+                            }
+                          },
+                          "right": {
+                            "pop_sum": [
+                              "S_a510", "E_a510", "I_a510", "R_a510"
+                            ]
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "right": {
+                    "bin_op": {
+                      "op": "div",
+                      "left": {
+                        "bin_op": {
+                          "op": "mul",
+                          "left": {
+                            "table_lookup": {
+                              "table": "C_age",
+                              "indices": [ { "const": 23.0 } ]
+                            }
+                          },
+                          "right": { "pop": "I_a1015" }
+                        }
+                      },
+                      "right": {
+                        "pop_sum": [
+                          "S_a1015", "E_a1015", "I_a1015", "R_a1015"
+                        ]
+                      }
+                    }
+                  }
+                }
+              },
+              "right": {
+                "bin_op": {
+                  "op": "div",
+                  "left": {
+                    "bin_op": {
+                      "op": "mul",
+                      "left": {
+                        "table_lookup": {
+                          "table": "C_age",
+                          "indices": [ { "const": 24.0 } ]
+                        }
+                      },
+                      "right": { "pop": "I_a15plus" }
+                    }
+                  },
+                  "right": {
+                    "pop_sum": [
+                      "S_a15plus", "E_a15plus", "I_a15plus", "R_a15plus"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "metadata": {
+        "origin_kind": "transmission",
+        "source_compartment": "S_a15plus",
+        "dest_compartment": "E_a15plus"
+      },
+      "rate_grad": {
+        "beta": {
+          "bin_op": {
+            "op": "mul",
+            "left": { "pop": "S_a15plus" },
+            "right": {
+              "bin_op": {
+                "op": "add",
+                "left": {
+                  "bin_op": {
+                    "op": "add",
+                    "left": {
+                      "bin_op": {
+                        "op": "add",
+                        "left": {
+                          "bin_op": {
+                            "op": "add",
+                            "left": {
+                              "bin_op": {
+                                "op": "div",
+                                "left": {
+                                  "bin_op": {
+                                    "op": "mul",
+                                    "left": {
+                                      "table_lookup": {
+                                        "table": "C_age",
+                                        "indices": [ { "const": 20.0 } ]
+                                      }
+                                    },
+                                    "right": { "pop": "I_a02" }
+                                  }
+                                },
+                                "right": {
+                                  "pop_sum": [
+                                    "S_a02", "E_a02", "I_a02", "R_a02"
+                                  ]
+                                }
+                              }
+                            },
+                            "right": {
+                              "bin_op": {
+                                "op": "div",
+                                "left": {
+                                  "bin_op": {
+                                    "op": "mul",
+                                    "left": {
+                                      "table_lookup": {
+                                        "table": "C_age",
+                                        "indices": [ { "const": 21.0 } ]
+                                      }
+                                    },
+                                    "right": { "pop": "I_a25" }
+                                  }
+                                },
+                                "right": {
+                                  "pop_sum": [
+                                    "S_a25", "E_a25", "I_a25", "R_a25"
+                                  ]
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "right": {
+                          "bin_op": {
+                            "op": "div",
+                            "left": {
+                              "bin_op": {
+                                "op": "mul",
+                                "left": {
+                                  "table_lookup": {
+                                    "table": "C_age",
+                                    "indices": [ { "const": 22.0 } ]
+                                  }
+                                },
+                                "right": { "pop": "I_a510" }
+                              }
+                            },
+                            "right": {
+                              "pop_sum": [
+                                "S_a510", "E_a510", "I_a510", "R_a510"
+                              ]
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "right": {
+                      "bin_op": {
+                        "op": "div",
+                        "left": {
+                          "bin_op": {
+                            "op": "mul",
+                            "left": {
+                              "table_lookup": {
+                                "table": "C_age",
+                                "indices": [ { "const": 23.0 } ]
+                              }
+                            },
+                            "right": { "pop": "I_a1015" }
+                          }
+                        },
+                        "right": {
+                          "pop_sum": [
+                            "S_a1015", "E_a1015", "I_a1015", "R_a1015"
+                          ]
+                        }
+                      }
+                    }
+                  }
+                },
+                "right": {
+                  "bin_op": {
+                    "op": "div",
+                    "left": {
+                      "bin_op": {
+                        "op": "mul",
+                        "left": {
+                          "table_lookup": {
+                            "table": "C_age",
+                            "indices": [ { "const": 24.0 } ]
+                          }
+                        },
+                        "right": { "pop": "I_a15plus" }
+                      }
+                    },
+                    "right": {
+                      "pop_sum": [
+                        "S_a15plus", "E_a15plus", "I_a15plus", "R_a15plus"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "progression_a02",
+      "stoichiometry": [ [ "E_a02", -1 ], [ "I_a02", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": { "param": "sigma" },
+          "right": { "pop": "E_a02" }
+        }
+      },
+      "metadata": {
+        "origin_kind": "intrinsic",
+        "source_compartment": "E_a02",
+        "dest_compartment": "I_a02"
+      },
+      "rate_grad": { "sigma": { "pop": "E_a02" } }
+    },
+    {
+      "name": "progression_a25",
+      "stoichiometry": [ [ "E_a25", -1 ], [ "I_a25", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": { "param": "sigma" },
+          "right": { "pop": "E_a25" }
+        }
+      },
+      "metadata": {
+        "origin_kind": "intrinsic",
+        "source_compartment": "E_a25",
+        "dest_compartment": "I_a25"
+      },
+      "rate_grad": { "sigma": { "pop": "E_a25" } }
+    },
+    {
+      "name": "progression_a510",
+      "stoichiometry": [ [ "E_a510", -1 ], [ "I_a510", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": { "param": "sigma" },
+          "right": { "pop": "E_a510" }
+        }
+      },
+      "metadata": {
+        "origin_kind": "intrinsic",
+        "source_compartment": "E_a510",
+        "dest_compartment": "I_a510"
+      },
+      "rate_grad": { "sigma": { "pop": "E_a510" } }
+    },
+    {
+      "name": "progression_a1015",
+      "stoichiometry": [ [ "E_a1015", -1 ], [ "I_a1015", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": { "param": "sigma" },
+          "right": { "pop": "E_a1015" }
+        }
+      },
+      "metadata": {
+        "origin_kind": "intrinsic",
+        "source_compartment": "E_a1015",
+        "dest_compartment": "I_a1015"
+      },
+      "rate_grad": { "sigma": { "pop": "E_a1015" } }
+    },
+    {
+      "name": "progression_a15plus",
+      "stoichiometry": [ [ "E_a15plus", -1 ], [ "I_a15plus", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": { "param": "sigma" },
+          "right": { "pop": "E_a15plus" }
+        }
+      },
+      "metadata": {
+        "origin_kind": "intrinsic",
+        "source_compartment": "E_a15plus",
+        "dest_compartment": "I_a15plus"
+      },
+      "rate_grad": { "sigma": { "pop": "E_a15plus" } }
+    },
+    {
+      "name": "recovery_a02",
+      "stoichiometry": [ [ "I_a02", -1 ], [ "R_a02", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": { "param": "gamma" },
+          "right": { "pop": "I_a02" }
+        }
+      },
+      "metadata": {
+        "origin_kind": "intrinsic",
+        "source_compartment": "I_a02",
+        "dest_compartment": "R_a02"
+      },
+      "rate_grad": { "gamma": { "pop": "I_a02" } }
+    },
+    {
+      "name": "recovery_a25",
+      "stoichiometry": [ [ "I_a25", -1 ], [ "R_a25", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": { "param": "gamma" },
+          "right": { "pop": "I_a25" }
+        }
+      },
+      "metadata": {
+        "origin_kind": "intrinsic",
+        "source_compartment": "I_a25",
+        "dest_compartment": "R_a25"
+      },
+      "rate_grad": { "gamma": { "pop": "I_a25" } }
+    },
+    {
+      "name": "recovery_a510",
+      "stoichiometry": [ [ "I_a510", -1 ], [ "R_a510", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": { "param": "gamma" },
+          "right": { "pop": "I_a510" }
+        }
+      },
+      "metadata": {
+        "origin_kind": "intrinsic",
+        "source_compartment": "I_a510",
+        "dest_compartment": "R_a510"
+      },
+      "rate_grad": { "gamma": { "pop": "I_a510" } }
+    },
+    {
+      "name": "recovery_a1015",
+      "stoichiometry": [ [ "I_a1015", -1 ], [ "R_a1015", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": { "param": "gamma" },
+          "right": { "pop": "I_a1015" }
+        }
+      },
+      "metadata": {
+        "origin_kind": "intrinsic",
+        "source_compartment": "I_a1015",
+        "dest_compartment": "R_a1015"
+      },
+      "rate_grad": { "gamma": { "pop": "I_a1015" } }
+    },
+    {
+      "name": "recovery_a15plus",
+      "stoichiometry": [ [ "I_a15plus", -1 ], [ "R_a15plus", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": { "param": "gamma" },
+          "right": { "pop": "I_a15plus" }
+        }
+      },
+      "metadata": {
+        "origin_kind": "intrinsic",
+        "source_compartment": "I_a15plus",
+        "dest_compartment": "R_a15plus"
+      },
+      "rate_grad": { "gamma": { "pop": "I_a15plus" } }
+    },
+    {
+      "name": "aging_S_a02",
+      "stoichiometry": [ [ "S_a02", -1 ], [ "S_a25", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": {
+            "table_lookup": {
+              "table": "aging_rate",
+              "indices": [ { "const": 0.0 } ]
+            }
+          },
+          "right": { "pop": "S_a02" }
+        }
+      },
+      "metadata": {
+        "origin_kind": "intrinsic",
+        "source_compartment": "S_a02",
+        "dest_compartment": "S_a25"
+      }
+    },
+    {
+      "name": "aging_S_a25",
+      "stoichiometry": [ [ "S_a25", -1 ], [ "S_a510", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": {
+            "table_lookup": {
+              "table": "aging_rate",
+              "indices": [ { "const": 1.0 } ]
+            }
+          },
+          "right": { "pop": "S_a25" }
+        }
+      },
+      "metadata": {
+        "origin_kind": "intrinsic",
+        "source_compartment": "S_a25",
+        "dest_compartment": "S_a510"
+      }
+    },
+    {
+      "name": "aging_S_a510",
+      "stoichiometry": [ [ "S_a510", -1 ], [ "S_a1015", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": {
+            "table_lookup": {
+              "table": "aging_rate",
+              "indices": [ { "const": 2.0 } ]
+            }
+          },
+          "right": { "pop": "S_a510" }
+        }
+      },
+      "metadata": {
+        "origin_kind": "intrinsic",
+        "source_compartment": "S_a510",
+        "dest_compartment": "S_a1015"
+      }
+    },
+    {
+      "name": "aging_S_a1015",
+      "stoichiometry": [ [ "S_a1015", -1 ], [ "S_a15plus", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": {
+            "table_lookup": {
+              "table": "aging_rate",
+              "indices": [ { "const": 3.0 } ]
+            }
+          },
+          "right": { "pop": "S_a1015" }
+        }
+      },
+      "metadata": {
+        "origin_kind": "intrinsic",
+        "source_compartment": "S_a1015",
+        "dest_compartment": "S_a15plus"
+      }
+    },
+    {
+      "name": "aging_E_a02",
+      "stoichiometry": [ [ "E_a02", -1 ], [ "E_a25", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": {
+            "table_lookup": {
+              "table": "aging_rate",
+              "indices": [ { "const": 0.0 } ]
+            }
+          },
+          "right": { "pop": "E_a02" }
+        }
+      },
+      "metadata": {
+        "origin_kind": "intrinsic",
+        "source_compartment": "E_a02",
+        "dest_compartment": "E_a25"
+      }
+    },
+    {
+      "name": "aging_E_a25",
+      "stoichiometry": [ [ "E_a25", -1 ], [ "E_a510", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": {
+            "table_lookup": {
+              "table": "aging_rate",
+              "indices": [ { "const": 1.0 } ]
+            }
+          },
+          "right": { "pop": "E_a25" }
+        }
+      },
+      "metadata": {
+        "origin_kind": "intrinsic",
+        "source_compartment": "E_a25",
+        "dest_compartment": "E_a510"
+      }
+    },
+    {
+      "name": "aging_E_a510",
+      "stoichiometry": [ [ "E_a510", -1 ], [ "E_a1015", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": {
+            "table_lookup": {
+              "table": "aging_rate",
+              "indices": [ { "const": 2.0 } ]
+            }
+          },
+          "right": { "pop": "E_a510" }
+        }
+      },
+      "metadata": {
+        "origin_kind": "intrinsic",
+        "source_compartment": "E_a510",
+        "dest_compartment": "E_a1015"
+      }
+    },
+    {
+      "name": "aging_E_a1015",
+      "stoichiometry": [ [ "E_a1015", -1 ], [ "E_a15plus", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": {
+            "table_lookup": {
+              "table": "aging_rate",
+              "indices": [ { "const": 3.0 } ]
+            }
+          },
+          "right": { "pop": "E_a1015" }
+        }
+      },
+      "metadata": {
+        "origin_kind": "intrinsic",
+        "source_compartment": "E_a1015",
+        "dest_compartment": "E_a15plus"
+      }
+    },
+    {
+      "name": "aging_I_a02",
+      "stoichiometry": [ [ "I_a02", -1 ], [ "I_a25", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": {
+            "table_lookup": {
+              "table": "aging_rate",
+              "indices": [ { "const": 0.0 } ]
+            }
+          },
+          "right": { "pop": "I_a02" }
+        }
+      },
+      "metadata": {
+        "origin_kind": "intrinsic",
+        "source_compartment": "I_a02",
+        "dest_compartment": "I_a25"
+      }
+    },
+    {
+      "name": "aging_I_a25",
+      "stoichiometry": [ [ "I_a25", -1 ], [ "I_a510", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": {
+            "table_lookup": {
+              "table": "aging_rate",
+              "indices": [ { "const": 1.0 } ]
+            }
+          },
+          "right": { "pop": "I_a25" }
+        }
+      },
+      "metadata": {
+        "origin_kind": "intrinsic",
+        "source_compartment": "I_a25",
+        "dest_compartment": "I_a510"
+      }
+    },
+    {
+      "name": "aging_I_a510",
+      "stoichiometry": [ [ "I_a510", -1 ], [ "I_a1015", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": {
+            "table_lookup": {
+              "table": "aging_rate",
+              "indices": [ { "const": 2.0 } ]
+            }
+          },
+          "right": { "pop": "I_a510" }
+        }
+      },
+      "metadata": {
+        "origin_kind": "intrinsic",
+        "source_compartment": "I_a510",
+        "dest_compartment": "I_a1015"
+      }
+    },
+    {
+      "name": "aging_I_a1015",
+      "stoichiometry": [ [ "I_a1015", -1 ], [ "I_a15plus", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": {
+            "table_lookup": {
+              "table": "aging_rate",
+              "indices": [ { "const": 3.0 } ]
+            }
+          },
+          "right": { "pop": "I_a1015" }
+        }
+      },
+      "metadata": {
+        "origin_kind": "intrinsic",
+        "source_compartment": "I_a1015",
+        "dest_compartment": "I_a15plus"
+      }
+    },
+    {
+      "name": "aging_R_a02",
+      "stoichiometry": [ [ "R_a02", -1 ], [ "R_a25", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": {
+            "table_lookup": {
+              "table": "aging_rate",
+              "indices": [ { "const": 0.0 } ]
+            }
+          },
+          "right": { "pop": "R_a02" }
+        }
+      },
+      "metadata": {
+        "origin_kind": "intrinsic",
+        "source_compartment": "R_a02",
+        "dest_compartment": "R_a25"
+      }
+    },
+    {
+      "name": "aging_R_a25",
+      "stoichiometry": [ [ "R_a25", -1 ], [ "R_a510", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": {
+            "table_lookup": {
+              "table": "aging_rate",
+              "indices": [ { "const": 1.0 } ]
+            }
+          },
+          "right": { "pop": "R_a25" }
+        }
+      },
+      "metadata": {
+        "origin_kind": "intrinsic",
+        "source_compartment": "R_a25",
+        "dest_compartment": "R_a510"
+      }
+    },
+    {
+      "name": "aging_R_a510",
+      "stoichiometry": [ [ "R_a510", -1 ], [ "R_a1015", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": {
+            "table_lookup": {
+              "table": "aging_rate",
+              "indices": [ { "const": 2.0 } ]
+            }
+          },
+          "right": { "pop": "R_a510" }
+        }
+      },
+      "metadata": {
+        "origin_kind": "intrinsic",
+        "source_compartment": "R_a510",
+        "dest_compartment": "R_a1015"
+      }
+    },
+    {
+      "name": "aging_R_a1015",
+      "stoichiometry": [ [ "R_a1015", -1 ], [ "R_a15plus", 1 ] ],
+      "rate": {
+        "bin_op": {
+          "op": "mul",
+          "left": {
+            "table_lookup": {
+              "table": "aging_rate",
+              "indices": [ { "const": 3.0 } ]
+            }
+          },
+          "right": { "pop": "R_a1015" }
+        }
+      },
+      "metadata": {
+        "origin_kind": "intrinsic",
+        "source_compartment": "R_a1015",
+        "dest_compartment": "R_a15plus"
+      }
+    }
+  ],
+  "ode_equations": [],
+  "time_functions": [],
+  "tables": [
+    {
+      "name": "C_age",
+      "values": [
+        { "const": 12.0 },
+        { "const": 6.0 },
+        { "const": 4.0 },
+        { "const": 2.0 },
+        { "const": 1.0 },
+        { "const": 6.0 },
+        { "const": 10.0 },
+        { "const": 4.0 },
+        { "const": 2.0 },
+        { "const": 1.0 },
+        { "const": 4.0 },
+        { "const": 4.0 },
+        { "const": 8.0 },
+        { "const": 3.0 },
+        { "const": 1.0 },
+        { "const": 2.0 },
+        { "const": 2.0 },
+        { "const": 3.0 },
+        { "const": 6.0 },
+        { "const": 2.0 },
+        { "const": 1.0 },
+        { "const": 1.0 },
+        { "const": 1.0 },
+        { "const": 2.0 },
+        { "const": 4.0 }
+      ],
+      "out_of_bounds": "error"
+    },
+    {
+      "name": "aging_rate",
+      "values": [
+        {
+          "bin_op": {
+            "op": "div",
+            "left": { "const": 1.0 },
+            "right": {
+              "bin_op": {
+                "op": "mul",
+                "left": { "const": 2.0 },
+                "right": { "const": 365.0 }
+              }
+            }
+          }
+        },
+        {
+          "bin_op": {
+            "op": "div",
+            "left": { "const": 1.0 },
+            "right": {
+              "bin_op": {
+                "op": "mul",
+                "left": { "const": 3.0 },
+                "right": { "const": 365.0 }
+              }
+            }
+          }
+        },
+        {
+          "bin_op": {
+            "op": "div",
+            "left": { "const": 1.0 },
+            "right": {
+              "bin_op": {
+                "op": "mul",
+                "left": { "const": 5.0 },
+                "right": { "const": 365.0 }
+              }
+            }
+          }
+        },
+        {
+          "bin_op": {
+            "op": "div",
+            "left": { "const": 1.0 },
+            "right": {
+              "bin_op": {
+                "op": "mul",
+                "left": { "const": 5.0 },
+                "right": { "const": 365.0 }
+              }
+            }
+          }
+        },
+        { "const": 0.0 }
+      ],
+      "out_of_bounds": "error",
+      "cell_kind": "rate"
+    }
+  ],
+  "interventions": [],
+  "observations": [],
+  "parameters": [
+    {
+      "name": "beta",
+      "value": null,
+      "bounds": null,
+      "prior": null,
+      "hierarchical": null,
+      "transform": null,
+      "initial_value": null,
+      "param_kind": "rate",
+      "param_dim": null
+    },
+    {
+      "name": "sigma",
+      "value": null,
+      "bounds": null,
+      "prior": null,
+      "hierarchical": null,
+      "transform": null,
+      "initial_value": null,
+      "param_kind": "rate",
+      "param_dim": null
+    },
+    {
+      "name": "gamma",
+      "value": null,
+      "bounds": null,
+      "prior": null,
+      "hierarchical": null,
+      "transform": null,
+      "initial_value": null,
+      "param_kind": "rate",
+      "param_dim": null
+    }
+  ],
+  "initial_conditions": {
+    "explicit": {
+      "S_a02": 1000.0,
+      "S_a25": 1500.0,
+      "S_a510": 2500.0,
+      "S_a1015": 2500.0,
+      "S_a15plus": 2490.0,
+      "I_a02": 10.0
+    }
+  },
+  "output": {
+    "times": { "regular": { "start": 0.0, "step": 1.0, "end": 100.0 } },
+    "format": "tsv",
+    "trajectory": true,
+    "observations": true
+  },
+  "simulation": {
+    "t_start": 0.0,
+    "t_end": 100.0,
+    "time_semantics": "continuous",
+    "dt": null,
+    "rng_seed": null
+  },
+  "scenarios": [
+    {
+      "name": "baseline",
+      "label": "default",
+      "params": { "beta": 0.05, "sigma": 0.2, "gamma": 0.1 },
+      "enable": [],
+      "disable": [],
+      "t_end": null
+    }
+  ],
+  "model_structure": {
+    "dimensions": [
+      {
+        "name": "age",
+        "values": [ "a02", "a25", "a510", "a1015", "a15plus" ]
+      }
+    ],
+    "compartment_dims": {
+      "S": [ "age" ],
+      "E": [ "age" ],
+      "I": [ "age" ],
+      "R": [ "age" ]
+    },
+    "base_compartments": [ "S", "E", "I", "R" ],
+    "transmission_transitions": [ "infection" ],
+    "infectious_compartments": [ "I" ]
+  }
+}

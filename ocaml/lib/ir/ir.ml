@@ -114,6 +114,13 @@ type table = {
   name:          string;
   source:        table_source;
   out_of_bounds: oob_policy;
+  (* Optional cell-type annotation (gh#32). When present, declares the
+     dimensional kind of every value cell — same vocabulary as
+     [parameter.param_kind] ("rate", "probability", "positive",
+     "count", "real"). Absent = dimensionless cells (legacy
+     behaviour). The dim-checker treats this as authoritative, the
+     same way it treats `parameter.param_kind`. *)
+  cell_kind:     string option;
 }
 
 (* ── Interventions ───────────────────────────────────────────────────────────── *)

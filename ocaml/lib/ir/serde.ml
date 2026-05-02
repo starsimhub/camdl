@@ -394,11 +394,16 @@ let table_to_json (t : table) : Yojson.Safe.t =
     | Inline vs  -> ("values",   arr (List.map expr_to_json vs))
     | External n -> ("external", str n)
   in
-  obj [
+  let base = [
     ("name",          str t.name);
     source_field;
     ("out_of_bounds", oob_policy_to_json t.out_of_bounds);
-  ]
+  ] in
+  let with_cell_kind = match t.cell_kind with
+    | None   -> base
+    | Some k -> base @ [("cell_kind", str k)]
+  in
+  obj with_cell_kind
 
 let table_source_of_json j =
   match j with
@@ -411,7 +416,10 @@ let table_source_of_json j =
 let table_of_json j =
   { Ir.name          = as_string (member "name" j);
     Ir.source        = table_source_of_json j;
-    Ir.out_of_bounds = oob_policy_of_json (member "out_of_bounds" j) }
+    Ir.out_of_bounds = oob_policy_of_json (member "out_of_bounds" j);
+    Ir.cell_kind     = (match member_opt "cell_kind" j with
+                        | Some `Null | None -> None
+                        | Some k -> Some (as_string k)); }
 
 (* ── Interventions ───────────────────────────────────────────────────────── *)
 
