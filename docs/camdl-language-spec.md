@@ -546,6 +546,12 @@ stratify(by = immunity, only = [R])
 
 After this, S/E/I have dimensions `[age, sex]` but R has `[age, sex, immunity]`.
 
+> **See also:** for sequential transitions across dimension levels (aging
+> across age bins, Erlang sub-stages of a compartment), use the
+> `consecutive(dim)` index binding documented in §9.4. Don't enumerate
+> level-by-level transitions by hand — `[(a, a_next) in consecutive(age)]`
+> generates them all from one declaration.
+
 ### 5.1 Indexing Rules
 
 **Positional indexing** (declaration order of stratify blocks):
@@ -1307,6 +1313,43 @@ progression_final : E[e3] --> I
 This gives an Erlang(k=3, rate=sigma) distributed latent period. The mean is the
 same as exponential (1/sigma), but the variance is reduced by factor k,
 producing a more peaked distribution — closer to real disease progression.
+
+#### 9.4.1 Aging across a stratified model (canonical use case)
+
+`consecutive(dim)` is also the right primitive for **demographic aging
+across age bins** in any stratified model. Combined with `c in
+compartments` and an outer `[s in setting]` binding, one declaration
+covers all compartment families and all outer strata:
+
+```camdl
+dimensions {
+  setting = [low_burden, mid_burden, high_burden]
+  age     = [a02, a25, a510, a1015, a15plus]
+}
+
+compartments { S, I, R }
+stratify(by = setting)
+stratify(by = age)
+
+tables {
+  age_dur : age = [2.0, 3.0, 5.0, 5.0, 0.0]   # years; last is open-ended
+}
+
+transitions {
+  aging[c in compartments, s in setting, (a, a_next) in consecutive(age)]
+    : c[s, a] --> c[s, a_next]
+    @ (1 / (age_dur[a] * 365.0)) * c[s, a]
+}
+```
+
+For 3 settings × 3 compartments × 4 age boundaries this expands to 36
+IR transitions — from one DSL declaration. Without `consecutive(dim)`
+the same pattern needs 36 hand-written lines (one per
+compartment/setting/boundary), all structurally identical, and a new
+boundary requires editing every compartment family.
+
+If you find yourself writing `age_S_02`, `age_S_25`, `age_S_5`, ...
+hand-enumerated transitions, you want this primitive.
 
 ### 9.5 Compartment Iteration
 
