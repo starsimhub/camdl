@@ -1438,6 +1438,24 @@ pub fn cmd_fit_where(a: &crate::args::FitWhereArgs) {
         eprintln!("error parsing fit.toml: {}", e);
         std::process::exit(1);
     });
+
+    // Run the same deeper validation `fit run` runs (gh#35). Loading +
+    // light parsing isn't enough — `[estimate]` entries with missing
+    // `start =`, `[fixed]` blocks that don't cover every model param,
+    // and other completeness checks only fire once the model's
+    // parameter list is known. Without this, `fit where` silently
+    // accepts toml that `fit run` would reject — a misleading
+    // affordance for scripts using `where` as a "is this valid?" probe.
+    let (model, _) = crate::util::load_model(&config.model.camdl).unwrap_or_else(|e| {
+        eprintln!("error loading model '{}': {}", config.model.camdl, e);
+        std::process::exit(1);
+    });
+    let model_params: Vec<String> = model.parameters.iter().map(|p| p.name.clone()).collect();
+    config.validate(&model_params).unwrap_or_else(|e| {
+        eprintln!("error: {}", e);
+        std::process::exit(1);
+    });
+
     let root = config.fit_dir(&fit_path).unwrap_or_else(|e| {
         eprintln!("error: {}", e);
         std::process::exit(1);

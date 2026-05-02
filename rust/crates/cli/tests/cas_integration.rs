@@ -310,11 +310,17 @@ starts_from = "{{use CLI}}"
 fn fit_where_prints_fit_root_and_cell_dir() {
     let Some(bin) = skip_if_missing_binary() else { return; };
     let tmp = tempfile::tempdir().unwrap();
+    // gh#35: fit where now runs the same validation depth as fit run,
+    // so the IR must declare every parameter the fit.toml estimates or
+    // fixes. Pre-gh#35 this fixture was a hand-written minimal IR with
+    // an empty parameters list, which only worked because `where`
+    // didn't validate — exactly the bug gh#35 closed. Use the real
+    // sir_basic golden (4 params: beta, gamma, N0, I0) and align the
+    // fit.toml below.
+    let manifest = std::env::var("CARGO_MANIFEST_DIR").unwrap();
+    let golden_ir = format!("{}/../../../ir/golden/sir_basic.ir.json", manifest);
     let ir = tmp.path().join("dummy.ir.json");
-    // A minimal-but-valid IR so FitConfigV2 can load and hash the
-    // referenced file. Actual content doesn't matter — where doesn't
-    // run anything.
-    std::fs::write(&ir, r#"{"compartments":[],"parameters":[]}"#).unwrap();
+    std::fs::copy(&golden_ir, &ir).expect("copy golden IR");
     let data = tmp.path().join("cases.tsv");
     std::fs::write(&data, "time\tcases\n1\t5\n").unwrap();
     let fit_toml = tmp.path().join("myfit.toml");
@@ -328,10 +334,12 @@ camdl = "{}"
 cases = "{}"
 
 [estimate]
-beta = {{ bounds = [0.01, 2.0] }}
+beta = {{ bounds = [0.01, 2.0], start = 0.3 }}
 
 [fixed]
+gamma = 0.1
 N0 = 1000
+I0 = 10
 
 [stages.mle]
 method = "if2"
