@@ -668,6 +668,16 @@ pub enum Stage {
         cooling_target_iters: usize,
         #[serde(default)]
         starts_from: StartsFrom,
+        /// How per-chain starting points are drawn (gh#42). Default
+        /// `"uniform"` matches v1 scout: per-chain uniform random within
+        /// natural-scale bounds. `"single"` keeps every chain at the
+        /// seeded `[estimate].start` (refine-style). `"lhs"` uses
+        /// Latin-hypercube stratified sampling, scale-aware via the
+        /// parameter's transform — log-typed rates LHS in log space,
+        /// linear otherwise. LHS gives stratified coverage at low
+        /// chain counts where uniform random is clumpy.
+        #[serde(default)]
+        init_method: super::init::InitMethod,
         /// Clean-evaluation re-scoring of candidate parameter points after
         /// IF2 finishes. See proposal §Proposal 1. Defaults give 4000
         /// particles × 8 replicates combined via logmeanexp.
@@ -3525,6 +3535,7 @@ decibans_thresh = 100.0
             cooling_target_iters: 50,
             starts_from: StartsFrom::default(),
             loglik_eval: LoglikEvalConfig::default(),
+            init_method: Default::default(),
             gate: GateConfig::default(),
         };
         let s100 = Stage::IF2 {
@@ -3532,6 +3543,7 @@ decibans_thresh = 100.0
             cooling_target_iters: 50,
             starts_from: StartsFrom::default(),
             loglik_eval: LoglikEvalConfig::default(),
+            init_method: Default::default(),
             gate: GateConfig::default(),
         };
         assert_ne!(s50.identity_payload(), s100.identity_payload());
@@ -3541,6 +3553,7 @@ decibans_thresh = 100.0
             cooling_target_iters: 50,
             starts_from: StartsFrom::default(),
             loglik_eval: LoglikEvalConfig::default(),
+            init_method: Default::default(),
             gate: GateConfig::default(),
         };
         assert_ne!(s50.identity_payload(), s_diff_cooling.identity_payload());
@@ -3552,6 +3565,7 @@ decibans_thresh = 100.0
             cooling_target_iters: 100,
             starts_from: StartsFrom::default(),
             loglik_eval: LoglikEvalConfig::default(),
+            init_method: Default::default(),
             gate: GateConfig::default(),
         };
         assert_ne!(s50.identity_payload(), s_diff_target.identity_payload());

@@ -23,6 +23,7 @@ pub mod pgas;
 pub mod trace_writer;
 pub mod synthetic;
 pub mod gating;
+pub mod init;
 pub mod loglik_eval;
 
 pub fn cmd_fit_status(a: &crate::args::FitStatusArgs) {
@@ -183,6 +184,7 @@ pub fn cmd_fit_run_v2(a: &crate::args::FitRunArgs) {
     let cli_loglik_eval_particles = a.loglik_eval_particles;
     let cli_loglik_eval_reps      = a.loglik_eval_reps;
     let cli_decibans_thresh      = a.decibans_thresh;
+    let cli_init_method          = a.init_method;
     let sweep_specs: Vec<(String, Vec<f64>)> = a.sweep.iter()
         .map(|s| (s.name.clone(), s.grid.expand()))
         .collect();
@@ -634,7 +636,7 @@ pub fn cmd_fit_run_v2(a: &crate::args::FitRunArgs) {
         let mut stage_best_chain: Option<usize> = None;
 
         match stage {
-            Stage::IF2 { chains, particles, iterations, cooling, cooling_target_iters, loglik_eval, gate, .. } => {
+            Stage::IF2 { chains, particles, iterations, cooling, cooling_target_iters, init_method, loglik_eval, gate, .. } => {
                 // Resolve effective clean_eval / gate: stage TOML, then CLI
                 // override (per Step 4 — overrides are stage-scoped because
                 // clap requires --stage). CLI flags pass `requires = "stage"`
@@ -750,20 +752,27 @@ pub fn cmd_fit_run_v2(a: &crate::args::FitRunArgs) {
 
                 let collector = sim::inference::diagnostic::DiagnosticCollector::new(stage_name);
                 let t0 = std::time::Instant::now();
-                // When a stage has no `starts_from` predecessor and runs
-                // > 1 chain, give each chain its own random starting
-                // point from bounds. This matches v1 scout's default
-                // and is what makes Â across chains meaningful —
-                // chains starting from the same point only diverge via
-                // per-chain RNG, so their between-chain variance
-                // reflects sampling noise rather than
-                // independence-of-starts. When `starts_from` resolves
-                // to a prior stage, every chain correctly starts from
-                // that stage's MLE (the intent of the handoff).
-                let per_chain_params = if effective_starts.is_none() && *chains > 1 {
-                    Some(runner::build_random_chain_starts(&run_config, seed, *chains))
-                } else {
+                // Per-chain starting points. When this stage consumes
+                // a prior stage (`starts_from`), every chain starts from
+                // that stage's MLE (intent of the handoff) regardless
+                // of init_method — that's what makes refine-after-scout
+                // meaningful. Otherwise dispatch on `init_method`
+                // (gh#42): Single = all chains at the seeded start
+                // (legacy refine semantics, useful when bounds are
+                // tight); Uniform = per-chain uniform random within
+                // bounds (v1 default — keeps existing fit.toml files
+                // unchanged); Lhs = Latin-hypercube stratified, scale-
+                // aware via Transform.
+                //
+                // CLI `--init` overrides the stage-config init_method
+                // when a single stage is selected (clap requires --stage
+                // with --init).
+                let effective_init = cli_init_method.unwrap_or(*init_method);
+                let per_chain_params = if effective_starts.is_some() {
                     None
+                } else {
+                    init::build_chain_starts(
+                        effective_init, &run_config.estimated_params, *chains, seed)
                 };
                 let chain_results = runner::run_chains_with_per_chain_params(
                     &run_config, per_chain_params.as_deref(), &collector);

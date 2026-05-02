@@ -331,6 +331,17 @@ pub struct FitRunArgs {
     #[arg(long, value_name = "DB", requires = "stage")]
     pub decibans_thresh: Option<f64>,
 
+    /// Override [stages.<stage>.init_method] for chain starts (gh#42):
+    /// `single` (all chains at the seeded start), `uniform` (per-chain
+    /// uniform random within bounds — v1 default), or `lhs`
+    /// (Latin-hypercube stratified, scale-aware via Transform — best
+    /// basin coverage at low chain counts). Requires --stage so scout
+    /// and refine can be set independently. Has no effect when the
+    /// stage uses `starts_from = "<prior_stage>"` — those chains start
+    /// from the prior MLE regardless.
+    #[arg(long, value_name = "MODE", requires = "stage")]
+    pub init_method: Option<crate::fit::init::InitMethod>,
+
     /// User-supplied display label for this fit (1–64 chars after
     /// trim; allowed: letters, digits, spaces, commas, dot,
     /// underscore, hyphen). Surfaced in `camdl fit list` and
