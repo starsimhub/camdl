@@ -188,13 +188,21 @@ pub fn cmd_fit_run_v2(a: &crate::args::FitRunArgs) {
         .collect();
 
     // Load v2 config
-    let config = FitConfigV2::load(&fit_path).unwrap_or_else(|e| {
+    let mut config = FitConfigV2::load(&fit_path).unwrap_or_else(|e| {
         eprintln!("error: {}", e);
         std::process::exit(1);
     });
 
     // Load model and validate completeness
     let (model, model_json) = crate::util::load_model(&config.model.camdl).unwrap_or_else(|e| {
+        eprintln!("error: {}", e);
+        std::process::exit(1);
+    });
+    // gh#33: expand `[fixed] from_scenario = "name"` into the inline
+    // values map by looking up the named scenario in the model. Must
+    // happen after model load but before validate, so the every-param-
+    // resolved check sees the expanded values.
+    config.fixed.expand_from_scenario(&model).unwrap_or_else(|e| {
         eprintln!("error: {}", e);
         std::process::exit(1);
     });
@@ -1434,7 +1442,7 @@ pub fn cmd_fit_where(a: &crate::args::FitWhereArgs) {
     let seed     = a.seed;
 
     // v2 fit.toml only — v1 schema deleted in the v1-cleanup pass.
-    let config = config_v2::FitConfigV2::load(&fit_path).unwrap_or_else(|e| {
+    let mut config = config_v2::FitConfigV2::load(&fit_path).unwrap_or_else(|e| {
         eprintln!("error parsing fit.toml: {}", e);
         std::process::exit(1);
     });
@@ -1448,6 +1456,13 @@ pub fn cmd_fit_where(a: &crate::args::FitWhereArgs) {
     // affordance for scripts using `where` as a "is this valid?" probe.
     let (model, _) = crate::util::load_model(&config.model.camdl).unwrap_or_else(|e| {
         eprintln!("error loading model '{}': {}", config.model.camdl, e);
+        std::process::exit(1);
+    });
+    // gh#33: expand `[fixed] from_scenario = "name"` (must run before
+    // validate so the every-param-resolved check sees the scenario's
+    // values).
+    config.fixed.expand_from_scenario(&model).unwrap_or_else(|e| {
+        eprintln!("error: {}", e);
         std::process::exit(1);
     });
     let model_params: Vec<String> = model.parameters.iter().map(|p| p.name.clone()).collect();

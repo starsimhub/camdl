@@ -152,10 +152,11 @@ impl FitRunConfig {
         };
         crate::util::apply_scenario_filter(&mut model, &enable_list, &disable_list)?;
 
-        // Resolve fixed up-front (file load + inline overlay). v2's
-        // FixedParams.resolve() can fail (file-not-found / parse), so
-        // propagate the Result rather than swallowing.
-        let fixed_resolved = fit.fixed.resolve()?;
+        // Resolve fixed up-front (file load + inline overlay, or
+        // scenario lookup via gh#33's `from_scenario`). v2's
+        // resolve_with_model can fail (file-not-found, scenario name
+        // not in model, etc.), so propagate the Result.
+        let fixed_resolved = fit.fixed.resolve_with_model(&model)?;
 
         // Apply parameter values from fit.toml BEFORE compiling, so that
         // parameters without model defaults get values.

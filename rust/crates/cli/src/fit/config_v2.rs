@@ -459,20 +459,160 @@ pub use ir::parameter::PriorDist;
 
 // ─── Fixed ──────────────────────────────────────────────────────────────────
 
-/// Fixed parameters. Supports bulk loading from a file + inline overrides.
+/// Fixed parameters. Supports bulk loading from a file or a .camdl
+/// scenario block + inline overrides.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct FixedParams {
     /// Bulk load from a TOML file (all key=value pairs become fixed).
+    /// Inline `values` override file entries on key collision.
     #[serde(default)]
     pub from_file: Option<String>,
 
-    /// Inline fixed values. Override from_file if both specify a key.
+    /// Bulk load from a named scenario block declared in the .camdl
+    /// model (gh#33). Reads the scenario's `set = { ... }` map and
+    /// uses every entry as a fixed value. Mutually exclusive with
+    /// `from_file` and inline `values` — by design (see comment on
+    /// `expand_scenario` below).
+    ///
+    /// Resolution requires the loaded model and so happens after
+    /// load via `expand_scenario` (called from each fit-pipeline
+    /// entry point that has the model in hand). After `expand_scenario`
+    /// runs, this field is cleared and the scenario's params land in
+    /// `values` for the rest of the pipeline.
+    #[serde(default)]
+    pub from_scenario: Option<String>,
+
+    /// Inline fixed values. Override `from_file` entries on key
+    /// collision. **Mutually exclusive with `from_scenario`** — see
+    /// `expand_scenario` for the design rationale.
     #[serde(flatten)]
     pub values: IndexMap<String, f64>,
 }
 
 impl FixedParams {
+    /// Resolve to a concrete map, with scenario lookup if needed.
+    ///
+    /// **Design choice — no inline overrides on top of `from_scenario`.**
+    /// If both `from_scenario` and inline `values` (or `from_file`) are
+    /// set in fit.toml, this errors loudly. Reasoning:
+    ///
+    /// 1. **Scenario semantics get muddy.** If `[fixed]` can override
+    ///    a scenario's params, the fit no longer faithfully represents
+    ///    that scenario — it's a hybrid that doesn't correspond to
+    ///    anything in the .camdl. Reading the fit.toml in isolation no
+    ///    longer tells you what parameters the model actually uses.
+    /// 2. **Pressure on naming.** Users who want "baseline with
+    ///    low_kappa" are best served by defining a `low_kappa` scenario
+    ///    in the .camdl, where the deviation lives next to the canonical
+    ///    values. Forcing this surfaces scenario sprawl as a data-
+    ///    modeling concern rather than letting it accumulate as
+    ///    fit-config drift.
+    /// 3. **Cheap to add later** if user demand surfaces, behind a
+    ///    loud warning. Until then, the simpler form is one less
+    ///    footgun.
+    ///
+    /// Asymmetry vs `from_file` (which DOES allow inline overrides)
+    /// is intentional: `from_file` is just bulk-load convenience for
+    /// numbers the user authored; `from_scenario` references a named
+    /// abstraction in the .camdl that has its own meaning. Overriding
+    /// the named abstraction silently is the whole problem.
+    /// Expand `from_scenario` (gh#33) in-place, copying the named
+    /// scenario's params into the inline `values` map and clearing
+    /// `from_scenario`. Idempotent. After this runs, `resolve()`
+    /// returns the right map without needing the model.
+    ///
+    /// Call this once per fit-pipeline entry point AFTER the model is
+    /// loaded but BEFORE `FitConfigV2::validate(&model_params)` (the
+    /// every-param-resolved check needs to see the scenario-expanded
+    /// values).
+    ///
+    /// See `resolve_with_model` for the design rationale on
+    /// mutual-exclusion of `from_scenario` with `from_file` and
+    /// inline `values`.
+    pub fn expand_from_scenario(&mut self, model: &ir::Model) -> Result<(), String> {
+        let Some(scen_name) = self.from_scenario.clone() else { return Ok(()); };
+
+        if self.from_file.is_some() {
+            return Err(format!(
+                "[fixed] from_scenario = \"{}\" and from_file are mutually exclusive. \
+                 If you need to override scenario values, define a new scenario in \
+                 the .camdl model rather than splitting [fixed] across two sources.",
+                scen_name));
+        }
+        if !self.values.is_empty() {
+            let names: Vec<&str> = self.values.keys().map(|s| s.as_str()).collect();
+            return Err(format!(
+                "[fixed] from_scenario = \"{}\" does not allow inline overrides \
+                 (got: {}). Define a new scenario in the .camdl model instead — \
+                 fit.toml shouldn't silently mutate scenario semantics.",
+                scen_name, names.join(", ")));
+        }
+
+        let preset = model.presets.iter()
+            .find(|p| p.name == scen_name)
+            .ok_or_else(|| {
+                let available: Vec<&str> = model.presets.iter()
+                    .map(|p| p.name.as_str()).collect();
+                format!(
+                    "[fixed] from_scenario = \"{}\" not found in model. Available scenarios: {}",
+                    scen_name,
+                    if available.is_empty() { "(none declared)".into() }
+                    else { available.join(", ") })
+            })?;
+
+        for (k, &v) in &preset.params {
+            self.values.insert(k.clone(), v);
+        }
+        self.from_scenario = None;
+        Ok(())
+    }
+
+    pub fn resolve_with_model(&self, model: &ir::Model) -> Result<IndexMap<String, f64>, String> {
+        if let Some(scen_name) = &self.from_scenario {
+            if self.from_file.is_some() {
+                return Err(format!(
+                    "[fixed] from_scenario = \"{}\" and from_file are mutually exclusive. \
+                     If you need to override scenario values, define a new scenario in \
+                     the .camdl model rather than splitting [fixed] across two sources.",
+                    scen_name));
+            }
+            if !self.values.is_empty() {
+                let names: Vec<&str> = self.values.keys().map(|s| s.as_str()).collect();
+                return Err(format!(
+                    "[fixed] from_scenario = \"{}\" does not allow inline overrides \
+                     (got: {}). Define a new scenario in the .camdl model instead — \
+                     fit.toml shouldn't silently mutate scenario semantics.",
+                    scen_name, names.join(", ")));
+            }
+
+            let preset = model.presets.iter()
+                .find(|p| p.name == *scen_name)
+                .ok_or_else(|| {
+                    let available: Vec<&str> = model.presets.iter()
+                        .map(|p| p.name.as_str()).collect();
+                    format!(
+                        "[fixed] from_scenario = \"{}\" not found in model. Available scenarios: {}",
+                        scen_name,
+                        if available.is_empty() { "(none declared)".into() }
+                        else { available.join(", ") })
+                })?;
+
+            let mut map = IndexMap::new();
+            for (k, &v) in &preset.params {
+                map.insert(k.clone(), v);
+            }
+            return Ok(map);
+        }
+        self.resolve()
+    }
+
     /// Resolve to a concrete map: load from_file, then overlay inline values.
+    /// Does NOT handle `from_scenario` — call `resolve_with_model` for that.
+    /// This method is kept for callers (config_diff, etc.) that don't have
+    /// the model loaded; if a fit.toml uses `from_scenario`, those callers
+    /// will see an empty map and may produce slightly less informative
+    /// output — that's fine for diff/inspection paths, not OK for the
+    /// fit pipeline (which uses `resolve_with_model`).
     pub fn resolve(&self) -> Result<IndexMap<String, f64>, String> {
         let mut merged = match &self.from_file {
             Some(path) => {
@@ -2218,6 +2358,112 @@ cooling = 0.9
         };
         let resolved = data.effective_observations(&[]).unwrap();
         assert_eq!(resolved, obs);
+    }
+
+    // ── gh#33: [fixed] from_scenario shorthand ─────────────────────────
+
+    /// Build a minimal in-memory ir::Model with one scenario for tests.
+    fn model_with_scenario(scen: &str, params: &[(&str, f64)]) -> ir::Model {
+        use std::collections::HashMap;
+        let manifest = std::env::var("CARGO_MANIFEST_DIR").unwrap();
+        let golden = format!("{}/../../../ir/golden/sir_basic.ir.json", manifest);
+        let s = std::fs::read_to_string(&golden).unwrap();
+        let mut model: ir::Model = serde_json::from_str(&s).unwrap();
+        let mut p = HashMap::new();
+        for (k, v) in params { p.insert((*k).to_string(), *v); }
+        model.presets.push(ir::model::Preset {
+            name: scen.to_string(),
+            label: format!("test scenario {}", scen),
+            params: p,
+            enable: vec![],
+            disable: vec![],
+            scale: HashMap::new(),
+            compose: vec![],
+            t_end: None,
+        });
+        model
+    }
+
+    #[test]
+    fn from_scenario_expands_to_inline_values() {
+        // gh#33: `[fixed] from_scenario = "name"` copies the named
+        // scenario's `set = { ... }` map into the inline values, so the
+        // rest of the pipeline (resolve, validate) sees the same shape
+        // it would see for a verbose hand-written [fixed] block.
+        let model = model_with_scenario("gh33_only", &[
+            ("beta", 0.3), ("gamma", 0.1), ("N0", 1000.0), ("I0", 10.0),
+        ]);
+        let mut fixed = FixedParams {
+            from_file: None,
+            from_scenario: Some("gh33_only".into()),
+            values: IndexMap::new(),
+        };
+        fixed.expand_from_scenario(&model).unwrap();
+        assert!(fixed.from_scenario.is_none(), "expansion clears from_scenario");
+        let resolved = fixed.resolve().unwrap();
+        assert_eq!(resolved.len(), 4);
+        assert_eq!(resolved.get("beta"), Some(&0.3));
+        assert_eq!(resolved.get("gamma"), Some(&0.1));
+    }
+
+    #[test]
+    fn from_scenario_idempotent_after_first_call() {
+        let model = model_with_scenario("gh33_idem", &[("beta", 0.3)]);
+        let mut fixed = FixedParams {
+            from_file: None,
+            from_scenario: Some("gh33_idem".into()),
+            values: IndexMap::new(),
+        };
+        fixed.expand_from_scenario(&model).unwrap();
+        // Second call must be a no-op (from_scenario is already None).
+        fixed.expand_from_scenario(&model).unwrap();
+        assert_eq!(fixed.values.len(), 1);
+    }
+
+    #[test]
+    fn from_scenario_unknown_scenario_errors_with_available_list() {
+        let model = model_with_scenario("gh33_present", &[("beta", 0.3)]);
+        let mut fixed = FixedParams {
+            from_file: None,
+            from_scenario: Some("gh33_typo".into()),
+            values: IndexMap::new(),
+        };
+        let err = fixed.expand_from_scenario(&model).unwrap_err();
+        assert!(err.contains("gh33_typo"), "error names the bad scenario: {}", err);
+        assert!(err.contains("gh33_present"), "error lists what is available: {}", err);
+    }
+
+    #[test]
+    fn from_scenario_rejects_inline_overrides() {
+        // Design choice: no inline overrides on top of from_scenario.
+        // Document via test so a future "let's allow it" PR notices the
+        // intentional asymmetry vs from_file.
+        let model = model_with_scenario("gh33_inline", &[("beta", 0.3)]);
+        let mut values = IndexMap::new();
+        values.insert("beta".to_string(), 0.5);
+        let mut fixed = FixedParams {
+            from_file: None,
+            from_scenario: Some("gh33_inline".into()),
+            values,
+        };
+        let err = fixed.expand_from_scenario(&model).unwrap_err();
+        assert!(err.contains("does not allow inline overrides"),
+            "error explains the design choice: {}", err);
+        assert!(err.contains("beta"),
+            "error names the offending key: {}", err);
+    }
+
+    #[test]
+    fn from_scenario_rejects_alongside_from_file() {
+        let model = model_with_scenario("gh33_file", &[("beta", 0.3)]);
+        let mut fixed = FixedParams {
+            from_file: Some("/some/file.toml".into()),
+            from_scenario: Some("gh33_file".into()),
+            values: IndexMap::new(),
+        };
+        let err = fixed.expand_from_scenario(&model).unwrap_err();
+        assert!(err.contains("mutually exclusive") && err.contains("from_file"),
+            "error names the conflict: {}", err);
     }
 
     #[test]
