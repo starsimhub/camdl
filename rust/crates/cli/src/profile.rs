@@ -161,6 +161,13 @@ pub struct ProfileInputs {
     pub model_hash: String,
     /// Canonical-form hash of the base parameter vector.
     pub base_params_hash: String,
+    /// Full SHA-256 of the `--data` file's bytes. Content-only — the
+    /// path is not part of this hash, so two users with the same TSV
+    /// at different paths share a cache entry, while two users with
+    /// different TSVs at the same path do not (gh#39: editing the data
+    /// file in place must invalidate the cache, not silently return the
+    /// previous run's logliks against the old observations).
+    pub data_hash: String,
     /// Focal grid (one axis per `--sweep` flag).
     pub focal_grid: Vec<GridAxis>,
     /// Fixed parameters (`--fixed`): excluded from IF2 estimation. Order
@@ -213,6 +220,7 @@ impl ProfileInputs {
             ("obs_family",  &self.obs_family),
             ("if2",         &if2),
             ("starts_from", self.starts_from_lineage.as_deref().unwrap_or("")),
+            ("data",        &self.data_hash),
         ])
     }
 }
@@ -600,11 +608,26 @@ pub fn cmd_profile(a: &crate::args::ProfileArgs) {
     // with one obs and the same params still hit the cache).
     let obs_family_key = obs_name_arg.clone()
         .unwrap_or_else(|| resolved_obs[0].name.clone());
+
+    // gh#39: hash the --data file's bytes once at launch. The previous
+    // CAS key omitted observation data entirely, so a user editing
+    // `cases.tsv` in place silently got the prior run's logliks back
+    // (correct shape, wrong likelihood). Mirrors the fit-side pattern
+    // (see `FitConfigV2::fit_content_hash`). Path-independent: only
+    // the bytes participate, so moving the file or pointing two
+    // commands at copies of the same TSV still produces a cache hit.
+    let data_bytes = std::fs::read(&data_path).unwrap_or_else(|e| {
+        eprintln!("error: cannot read --data file '{}': {}", data_path, e);
+        std::process::exit(1);
+    });
+    let data_hash = crate::hashing::sha256_hex(&data_bytes);
+
     let template_inputs = ProfileInputs {
         model_path: ir_path.clone(),
         stem: stem.clone(),
         model_hash: model_hash.clone(),
         base_params_hash,
+        data_hash,
         focal_grid: grid_spec,
         fixed: a.fixed.clone(),
         obs_family: obs_family_key,
@@ -1486,6 +1509,99 @@ mod tests {
         let obs: Vec<ir::observation::ObservationModel> = vec![];
         assert!(resolve_obs_family(&obs, None).is_err());
         assert!(resolve_obs_family(&obs, Some("cases")).is_err());
+    }
+
+    // ── gh#39 data-file content hashing ─────────────────────────────────
+
+    /// Construct a `ProfileInputs` with all content fields fixed to
+    /// stable placeholders. Caller overrides only the field under test
+    /// (typically `data_hash`) so cross-test comparisons are crisp.
+    fn fixture_inputs(data_hash: &str) -> ProfileInputs {
+        ProfileInputs {
+            model_path: "model.camdl".into(),
+            stem: Some("model".into()),
+            model_hash: "deadbeef".repeat(8),
+            base_params_hash: "cafef00d".repeat(8),
+            data_hash: data_hash.to_string(),
+            focal_grid: vec![GridAxis {
+                param: "R0".into(),
+                values: vec![1.5, 2.0, 2.5],
+            }],
+            fixed: vec![],
+            obs_family: "cases".into(),
+            if2_config: ProfileIf2Config {
+                n_particles: 100, n_iterations: 50, cooling: 0.5, dt: 1.0, n_starts: 4,
+            },
+            starts_from_lineage: None,
+            seed: 1,
+        }
+    }
+
+    #[test]
+    fn inner_hash_same_data_same_hash() {
+        // Sanity: two identical input sets produce identical hashes.
+        let h_data = crate::hashing::sha256_hex(b"time\tvalue\n1\t5\n2\t7\n");
+        let a = fixture_inputs(&h_data);
+        let b = fixture_inputs(&h_data);
+        assert_eq!(a.inner_hash().full(), b.inner_hash().full());
+    }
+
+    #[test]
+    fn inner_hash_different_data_different_hash() {
+        // gh#39 core fix: changing the bytes the user supplied as
+        // `--data` MUST invalidate the cache. Two TSVs with the same
+        // shape but different observation values must hash differently.
+        let h_a = crate::hashing::sha256_hex(b"time\tvalue\n1\t5\n2\t7\n");
+        let h_b = crate::hashing::sha256_hex(b"time\tvalue\n1\t8\n2\t9\n");
+        assert_ne!(h_a, h_b, "sanity: distinct bytes must hash differently");
+        let a = fixture_inputs(&h_a);
+        let b = fixture_inputs(&h_b);
+        assert_ne!(a.inner_hash().full(), b.inner_hash().full(),
+            "editing --data file bytes must invalidate the profile CAS \
+             key (gh#39); otherwise the cache silently returns stale \
+             logliks against the old observations");
+    }
+
+    #[test]
+    fn inner_hash_data_via_different_paths_same_hash() {
+        // Locks the "content not path" invariant: two users with
+        // identical TSVs at different filesystem paths must share a
+        // cache entry. Implemented by hashing only the bytes of
+        // `--data` at construction time, never the path string.
+        let tmp = tempfile::tempdir().unwrap();
+        let body = b"time\tvalue\n1\t5\n2\t7\n";
+        let path_a = tmp.path().join("dir_a/cases.tsv");
+        let path_b = tmp.path().join("dir_b/cases.tsv");
+        std::fs::create_dir_all(path_a.parent().unwrap()).unwrap();
+        std::fs::create_dir_all(path_b.parent().unwrap()).unwrap();
+        std::fs::write(&path_a, body).unwrap();
+        std::fs::write(&path_b, body).unwrap();
+
+        // Hash exactly the way `cmd_profile` does at launch.
+        let h_a = crate::hashing::sha256_hex(&std::fs::read(&path_a).unwrap());
+        let h_b = crate::hashing::sha256_hex(&std::fs::read(&path_b).unwrap());
+        assert_eq!(h_a, h_b,
+            "same TSV bytes at different paths must hash identically");
+
+        let a = fixture_inputs(&h_a);
+        let b = fixture_inputs(&h_b);
+        assert_eq!(a.inner_hash().full(), b.inner_hash().full(),
+            "two profiles with identical content but different --data \
+             paths must share a cache entry (path is not part of the \
+             hash, only bytes are)");
+    }
+
+    #[test]
+    fn inner_hash_data_field_is_load_bearing() {
+        // Cross-check against the canonical-key implementation: with
+        // every other field fixed, varying only `data_hash` must move
+        // the inner_hash. This catches a future refactor that
+        // accidentally drops the `("data", ...)` entry from the
+        // canonical-keys vector.
+        let a = fixture_inputs(&"a".repeat(64));
+        let b = fixture_inputs(&"b".repeat(64));
+        assert_ne!(a.inner_hash().full(), b.inner_hash().full(),
+            "data_hash must be wired into inner_hash's canonical keys");
     }
 }
 
