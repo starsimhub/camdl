@@ -160,10 +160,26 @@ impl FitRunConfig {
         // Apply parameter values from fit.toml BEFORE compiling, so that
         // parameters without model defaults get values.
         // Priority: fit_state start_values > estimate start > fixed value > model default
+        //
+        // gh#34: when [estimate] entry has no explicit `start =` AND
+        // the model param has no value yet (no scenario default, no
+        // model-declared `value`), fall back to the bounds midpoint.
+        // Geometric mean for log-friendly bounds (both > 0); arithmetic
+        // otherwise. Picks a position that won't immediately bias IF2
+        // toward either bound — better than refusing to fit, much better
+        // than forcing every estimate entry to carry a redundant start.
         for (name, spec) in &fit.estimate {
-            if let Some(start) = spec.start {
-                if let Some(p) = model.parameters.iter_mut().find(|p| p.name == *name) {
-                    if p.value.is_none() { p.value = Some(start); }
+            if let Some(p) = model.parameters.iter_mut().find(|p| p.name == *name) {
+                if p.value.is_none() {
+                    let value = spec.start.unwrap_or_else(|| {
+                        let (lo, hi) = spec.bounds;
+                        if lo > 0.0 && hi > 0.0 {
+                            (lo * hi).sqrt()         // geometric mean
+                        } else {
+                            0.5 * (lo + hi)          // arithmetic mean
+                        }
+                    });
+                    p.value = Some(value);
                 }
             }
         }
@@ -2657,5 +2673,80 @@ dt = 1.0
             Prior::Exponential { rate } => assert_eq!(rate, 2.5),
             other => panic!("Exponential: {:?}", other),
         }
+    }
+
+    /// gh#34: when [estimate] entry omits `start =`, the run-config
+    /// builder fills in a value automatically. Geometric mean of
+    /// bounds for both-positive bounds; arithmetic mean otherwise. No
+    /// more "parameter 'foo' has no value" failure for forgetful users.
+    #[test]
+    fn estimate_without_start_falls_back_to_bounds_midpoint() {
+        use crate::fit::config_v2::FitConfigV2;
+
+        let manifest = std::env::var("CARGO_MANIFEST_DIR").unwrap();
+        let ir_path = format!("{}/../../../ocaml/golden/seir_observations.ir.json", manifest);
+        let data_dir = std::env::temp_dir().join(format!(
+            "camdl_gh34_test_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        std::fs::create_dir_all(&data_dir).unwrap();
+        let data_path = data_dir.join("obs.tsv");
+        std::fs::write(&data_path,
+            "time\tweekly_cases\n7\t1\n14\t2\n21\t3\n28\t4\n35\t5\n").unwrap();
+
+        // beta has bounds [0.01, 0.5] and NO `start =`. The geometric
+        // mean is sqrt(0.01 * 0.5) ≈ 0.0707. Pre-gh#34 this would fail
+        // with "parameter 'beta' has no value".
+        let fit_toml_path = data_dir.join("fit.toml");
+        let toml = format!(r#"
+output_dir = "{}"
+
+[model]
+camdl = "{}"
+
+[data.observations]
+weekly_cases = "{}"
+
+[estimate.beta]
+bounds = [0.01, 0.5]
+
+[fixed]
+sigma    = 0.25
+gamma    = 0.3
+rho      = 0.5
+k        = 10.0
+p_detect = 0.5
+N0       = 1000
+I0       = 1
+
+[stages.scout]
+method     = "if2"
+chains     = 1
+particles  = 100
+iterations = 1
+cooling    = 0.5
+
+[config]
+backend = "gillespie"
+dt = 1.0
+"#, data_dir.display(), ir_path, data_path.display());
+        std::fs::write(&fit_toml_path, &toml).unwrap();
+        let fit = FitConfigV2::load(&fit_toml_path.to_string_lossy())
+            .expect("v2 fit.toml parse");
+
+        let config = FitRunConfig::build(
+            &fit, None,
+            1, 100, 1, 0.5, 50, 1, false,
+        ).expect("build must succeed without explicit start (gh#34)");
+
+        let beta_idx = config.compiled.param_index.get("beta").copied()
+            .expect("beta present");
+        let expected = (0.01_f64 * 0.5).sqrt();
+        assert!((config.base_params[beta_idx] - expected).abs() < 1e-9,
+            "missing start should fall back to geometric mean of bounds \
+             — got {}, expected {} (sqrt(0.01 * 0.5))",
+            config.base_params[beta_idx], expected);
+
+        std::fs::remove_dir_all(&data_dir).ok();
     }
 }
