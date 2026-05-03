@@ -809,6 +809,50 @@ camdl fit run    fit.toml --stage validate
 camdl fit status fit.toml
 ```
 
+### Per-chain init: `init_method`
+
+How chain (or per-cell) starting points are drawn. Set on each
+stage in `fit.toml` (or override per-stage on the CLI with
+`--init`); also available as `--init` on `camdl profile` for
+per-cell starts. Honoured by **IF2**, **PGAS**, **PMMH**, and
+**profile**.
+
+```toml
+[stages.scout]
+method      = "if2"
+chains      = 16
+init_method = "lhs"            # default is "uniform"
+```
+
+| Mode | Behaviour | When to use |
+|---|---|---|
+| `single` | Every chain at the seeded `[estimate].start` (or its bounds-midpoint fallback). Chains differ only by per-chain RNG. | Refine stages where chains should converge to the same basin from a known good point. |
+| `uniform` (default) | Per-chain uniform random within natural-scale bounds. Chain 0 keeps the seeded start. | Simple multi-chain runs where bounds are tight enough that uniform coverage is fine. |
+| `lhs` | Latin-hypercube stratified sampling, **scale-aware via the parameter's transform**: `Log`-typed rates are sampled in log space and exponentiated, so a single LHS pass spans orders of magnitude. `Logit`/`None`-typed parameters are sampled linearly in `[lo, hi]`. | Scout stages or profile cells where the likelihood surface is multi-basin. LHS gives stratified coverage at low chain count where uniform random clumps. |
+
+When a stage uses `starts_from = "<prior>"`, every chain starts from
+the prior stage's MLE regardless of `init_method` — that's the
+intent of the handoff.
+
+**Why it matters.** With single-point starts (or clumpy uniform
+starts at low chain counts), chains find one basin and miss the
+rest. On a stratified epi model with multiple modes, LHS-drawn
+starts can reach a basin that single-point starts never see —
+empirically, large nat-level gaps between the LHS-found and
+single-start MLE on multi-modal likelihoods.
+
+**Per-stage independence.** Scout and refine can use different
+`init_method` (LHS in scout for basin-finding, `single` in refine
+to converge from scout's MLE). The CLI `--init` flag requires
+`--stage` for the same reason — it's stage-scoped.
+
+**`camdl profile`** dispatches the same way at each grid cell:
+`--starts N --init lhs` draws N stratified per-cell starts across
+the non-focal estimated parameters; the focal parameters stay
+pinned to the grid point. `--init single` reproduces the
+historical "every start at the same point, IF2 RNG provides the
+spread" behaviour.
+
 ### Out-of-sample validation
 
 Add a `[holdout]` section to fit.toml with holdout data files:
