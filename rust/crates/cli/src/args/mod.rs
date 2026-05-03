@@ -1095,11 +1095,20 @@ pub struct SurveyArgs {
     #[arg(long, default_value_t = 1000)]
     pub n_points: usize,
 
-    /// Likelihood evaluation method. Default `pfilter` handles
-    /// process noise via PMMH-style MC estimator; `simulate` is a
-    /// faster fast-path for known-deterministic models (warns at
-    /// start; not safe for high-noise models).
-    #[arg(long, default_value_t = crate::run_meta::SurveyEvalMethod::Pfilter)]
+    /// Likelihood evaluation method:
+    ///   `auto` (default) — pick from the model: `pfilter` if any rate
+    ///     uses overdispersed() / similar process noise; otherwise
+    ///     `simulate`. The chosen method is announced at run start and
+    ///     stored in run.json; the `auto` discriminator itself is never
+    ///     persisted.
+    ///   `pfilter` — particle filter, K replicates → logmeanexp combiner.
+    ///     Estimates p(y|θ) under the chain-binomial process. Doucet et
+    ///     al. 2015 gives the bar for trustworthy ranks: per-point loglik
+    ///     SE ≤ ~1.7 nats.
+    ///   `simulate` — single deterministic trajectory per point. ~10×
+    ///     cheaper but biased toward "lucky outliers" when process noise
+    ///     is non-trivial. Safe only for known-deterministic models.
+    #[arg(long, default_value_t = crate::run_meta::SurveyEvalMethod::Auto)]
     pub eval: crate::run_meta::SurveyEvalMethod,
 
     /// Particle count for `--eval pfilter`. 200 is adequate for

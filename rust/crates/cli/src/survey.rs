@@ -239,8 +239,9 @@ pub fn cmd_survey(a: &crate::args::SurveyArgs) {
         eprintln!("error: --eval-replicates must be >= 1 (got 0).");
         std::process::exit(1);
     }
-    if a.eval_particles == 0 && a.eval == SurveyEvalMethod::Pfilter {
-        eprintln!("error: --eval pfilter requires --eval-particles >= 1.");
+    if a.eval_particles == 0 && matches!(a.eval, SurveyEvalMethod::Pfilter | SurveyEvalMethod::Auto) {
+        eprintln!("error: --eval-particles must be >= 1 \
+                   (in case --eval auto resolves to pfilter).");
         std::process::exit(1);
     }
     if a.n_points == 0 {
@@ -274,6 +275,31 @@ pub fn cmd_survey(a: &crate::args::SurveyArgs) {
         }
     };
 
+    // Resolve `--eval auto` against the compiled model. `Auto` picks
+    // Pfilter when the model has stochastic process noise
+    // (`Capabilities::OVERDISPERSION` required), Simulate otherwise.
+    // Resolved before any persistent state is written — `SurveyMeta`
+    // stores the resolved method, not `Auto`.
+    let eval_method: SurveyEvalMethod = match a.eval {
+        SurveyEvalMethod::Auto => {
+            let needs_pf = resolved.compiled
+                .required_capabilities()
+                .contains(sim::Capabilities::OVERDISPERSION);
+            let resolved_eval = if needs_pf {
+                SurveyEvalMethod::Pfilter
+            } else {
+                SurveyEvalMethod::Simulate
+            };
+            eprintln!(
+                "survey: --eval auto resolved to '{}' (model {} \
+                 stochastic process noise)",
+                resolved_eval,
+                if needs_pf { "has" } else { "does not have" });
+            resolved_eval
+        }
+        explicit => explicit,
+    };
+
     // Curse-of-dim warnings (proposal §"Runtime warnings").
     let d = resolved.estimated.len();
     if d > 10 {
@@ -300,7 +326,10 @@ pub fn cmd_survey(a: &crate::args::SurveyArgs) {
                 a.n_points, d, coverage_floor as usize, coverage_floor as usize);
         }
     }
-    if a.eval == SurveyEvalMethod::Simulate {
+    if eval_method == SurveyEvalMethod::Simulate && a.eval == SurveyEvalMethod::Simulate {
+        // Only warn on explicit --eval simulate. `Auto`-resolved
+        // Simulate already eprintln'd that the model has no process
+        // noise; doubling the warning would confuse the user.
         eprintln!(
             "warning: --eval simulate uses a single deterministic \
              trajectory per LHS point. This is a 1-sample MC estimator \
@@ -327,7 +356,7 @@ pub fn cmd_survey(a: &crate::args::SurveyArgs) {
         fixed:           resolved.fixed.clone(),
         scenario:        resolved.scenario.clone(),
         n_points:        a.n_points,
-        eval_method:     a.eval,
+        eval_method:     eval_method,
         eval_particles:  a.eval_particles,
         eval_replicates: a.eval_replicates,
         seed:            a.seed,
@@ -379,7 +408,7 @@ pub fn cmd_survey(a: &crate::args::SurveyArgs) {
     }
 
     eprintln!("survey: {} ({} points, eval={})",
-        run_dir.display(), a.n_points, a.eval);
+        run_dir.display(), a.n_points, eval_method);
 
     let t0 = std::time::Instant::now();
 
@@ -442,13 +471,15 @@ pub fn cmd_survey(a: &crate::args::SurveyArgs) {
             for spec in draw {
                 params[spec.index] = spec.initial;
             }
-            let row = match a.eval {
+            let row = match eval_method {
                 SurveyEvalMethod::Pfilter => eval_point_pfilter(
                     &process, obs_model.as_ref(),
                     &params, &resolved.estimated, draw,
                     a.eval_particles, a.eval_replicates,
                     smc_dt, t_start, a.seed, point_id,
                 ),
+                SurveyEvalMethod::Auto => unreachable!(
+                    "Auto resolved before parallel eval loop"),
                 SurveyEvalMethod::Simulate => eval_point_simulate(
                     &process, obs_model.as_ref(),
                     &params, &resolved.estimated, draw,
@@ -472,7 +503,7 @@ pub fn cmd_survey(a: &crate::args::SurveyArgs) {
         bv.partial_cmp(&av).unwrap_or(std::cmp::Ordering::Equal)
     });
     if let Err(e) = write_landscape_tsv(
-        &landscape_path, &sorted, &resolved.estimated, a.eval,
+        &landscape_path, &sorted, &resolved.estimated, eval_method,
         &expected_hash) {
         eprintln!("error writing landscape.tsv: {}", e);
         std::process::exit(1);
@@ -480,12 +511,12 @@ pub fn cmd_survey(a: &crate::args::SurveyArgs) {
     eprintln!("survey: wrote {} ({} rows)", landscape_path.display(), sorted.len());
 
     // ── SE-distribution warning (proposal §"Runtime warnings") ──────
-    if a.eval == SurveyEvalMethod::Pfilter {
+    if eval_method == SurveyEvalMethod::Pfilter {
         emit_se_warning(&sorted);
     }
 
     // ── summary.json ────────────────────────────────────────────────
-    if let Err(e) = write_summary_json(&summary_path, &sorted, a, d) {
+    if let Err(e) = write_summary_json(&summary_path, &sorted, a, eval_method, d) {
         eprintln!("warning: could not write summary.json: {}", e);
     }
 
@@ -992,6 +1023,7 @@ fn write_summary_json(
     path: &Path,
     rows: &[LandscapeRow],
     a: &crate::args::SurveyArgs,
+    eval_method: SurveyEvalMethod,
     d: usize,
 ) -> std::io::Result<()> {
     let finite_lls: Vec<f64> = rows.iter()
@@ -1013,7 +1045,7 @@ fn write_summary_json(
     let summary = serde_json::json!({
         "n_points": rows.len(),
         "dimensions": d,
-        "eval_method": a.eval.as_str(),
+        "eval_method": eval_method.as_str(),
         "eval_particles": a.eval_particles,
         "eval_replicates": a.eval_replicates,
         "seed": a.seed,

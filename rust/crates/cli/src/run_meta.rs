@@ -329,6 +329,12 @@ pub enum SurveyEvalMethod {
     /// when process noise is non-trivial. Andrieu & Roberts 2009 frame
     /// the failure mode.
     Simulate,
+    /// Auto-detect from the compiled model: `Pfilter` when the model
+    /// requires `Capabilities::OVERDISPERSION` (i.e. it has stochastic
+    /// process noise via `overdispersed()` or similar), `Simulate`
+    /// otherwise. Resolved before any persistent state is written —
+    /// `SurveyMeta` stores the resolved method, never `Auto`.
+    Auto,
 }
 
 impl SurveyEvalMethod {
@@ -336,6 +342,7 @@ impl SurveyEvalMethod {
         match self {
             SurveyEvalMethod::Pfilter  => "pfilter",
             SurveyEvalMethod::Simulate => "simulate",
+            SurveyEvalMethod::Auto     => "auto",
         }
     }
 }

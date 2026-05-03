@@ -542,6 +542,10 @@ fn show_survey(r: &ResolvedRun) {
                 m.eval_particles, m.eval_replicates),
         crate::run_meta::SurveyEvalMethod::Simulate =>
             println!("  simulate (single trajectory per point)"),
+        // SurveyMeta only stores resolved methods — `Auto` is
+        // resolved in `cmd_survey` before persistence.
+        crate::run_meta::SurveyEvalMethod::Auto =>
+            println!("  auto (unresolved — bug; SurveyMeta should never store Auto)"),
     }
     println!("{}", "seed".bright_black()); println!("  {}", m.seed);
     let landscape = r.abs_path.join("landscape.tsv");
@@ -846,6 +850,7 @@ fn discover_surveys(root: &str) -> Result<Vec<SurveyEntry>, String> {
             crate::run_meta::SurveyEvalMethod::Pfilter =>
                 format!("pfilter {}p×{}r", m.eval_particles, m.eval_replicates),
             crate::run_meta::SurveyEvalMethod::Simulate => "simulate".to_string(),
+            crate::run_meta::SurveyEvalMethod::Auto => "auto".to_string(),
         };
         // Read top loglik from summary.json when present.
         let top_loglik = std::fs::read_to_string(dir.join("summary.json"))
