@@ -249,10 +249,8 @@ pub fn cmd_survey(a: &crate::args::SurveyArgs) {
                    (in case --eval auto resolves to pfilter).");
         std::process::exit(1);
     }
-    if a.n_points == 0 {
-        eprintln!("error: --n-points must be >= 1 (got 0).");
-        std::process::exit(1);
-    }
+    // n_points = 0 is the auto-scale sentinel; resolved against d
+    // after model loading. Negative values can't happen — usize.
 
     let label_arg: Option<String> = match a.label.as_deref() {
         Some(raw) => match crate::fit::validate_label(raw) {
@@ -305,8 +303,23 @@ pub fn cmd_survey(a: &crate::args::SurveyArgs) {
         explicit => explicit,
     };
 
-    // Curse-of-dim warnings (proposal §"Runtime warnings").
+    // Curse-of-dim warnings + n_points auto-resolution
+    // (proposal §"Runtime warnings"; gh43 follow-up).
+    //
+    // n_points = 0 is the auto-scale sentinel; resolve to
+    // max(1000, 50 * d^2) so the n/d^2 >= 50 pair-plot coverage rule
+    // is satisfied by default. d = 4 gives 1000 (unchanged from v1);
+    // d = 8 gives 3200; d = 12 gives 7200. User can override with
+    // --n-points N for fast iteration or sparse-basin models.
     let d = resolved.estimated.len();
+    let n_points: usize = if a.n_points == 0 {
+        let auto = (1000usize).max(50 * d.saturating_mul(d));
+        eprintln!("survey: --n-points auto-scaled to {} for d={}", auto, d);
+        auto
+    } else {
+        a.n_points
+    };
+
     if d > 10 {
         eprintln!(
             "warning: surveying {} parameters; pair-plots become \
@@ -322,13 +335,13 @@ pub fn cmd_survey(a: &crate::args::SurveyArgs) {
     }
     if d > 0 {
         let coverage_floor = 50.0 * (d as f64) * (d as f64);
-        if (a.n_points as f64) < coverage_floor {
+        if (n_points as f64) < coverage_floor {
             eprintln!(
                 "note: --n-points {} is below the rule-of-thumb \
                  coverage floor of n_points/d^2 >= 50 (d={}, \
                  recommended >= {}). Consider --n-points {} for \
                  adequate pair-plot resolution.",
-                a.n_points, d, coverage_floor as usize, coverage_floor as usize);
+                n_points, d, coverage_floor as usize, coverage_floor as usize);
         }
     }
     if eval_method == SurveyEvalMethod::Simulate && a.eval == SurveyEvalMethod::Simulate {
@@ -360,7 +373,7 @@ pub fn cmd_survey(a: &crate::args::SurveyArgs) {
         estimated:       estimated_names,
         fixed:           resolved.fixed.clone(),
         scenario:        resolved.scenario.clone(),
-        n_points:        a.n_points,
+        n_points:        n_points,
         eval_method:     eval_method,
         eval_particles:  a.eval_particles,
         eval_replicates: a.eval_replicates,
@@ -413,7 +426,7 @@ pub fn cmd_survey(a: &crate::args::SurveyArgs) {
     }
 
     eprintln!("survey: {} ({} points, eval={})",
-        run_dir.display(), a.n_points, eval_method);
+        run_dir.display(), n_points, eval_method);
 
     let t0 = std::time::Instant::now();
 
@@ -425,11 +438,11 @@ pub fn cmd_survey(a: &crate::args::SurveyArgs) {
     let lhs_starts = crate::fit::init::build_chain_starts(
         crate::fit::init::InitMethod::Lhs,
         &resolved.estimated,
-        a.n_points,
+        n_points,
         a.seed,
     ).unwrap_or_else(|| {
-        // n_points < 2 already rejected; this is unreachable today.
-        eprintln!("internal error: LHS sampler returned None at n_points={}", a.n_points);
+        // n_points < 2 returns None from build_chain_starts.
+        eprintln!("internal error: LHS sampler returned None at n_points={}", n_points);
         std::process::exit(1);
     });
 
@@ -465,7 +478,7 @@ pub fn cmd_survey(a: &crate::args::SurveyArgs) {
     };
 
     let progress = std::sync::atomic::AtomicUsize::new(0);
-    let total = a.n_points;
+    let total = n_points;
     let progress_step = (total / 20).max(1);
     let rows: Vec<LandscapeRow> = lhs_starts.par_iter().enumerate()
         .map(|(point_id, draw)| {

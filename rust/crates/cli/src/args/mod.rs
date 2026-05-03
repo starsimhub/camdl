@@ -1090,9 +1090,16 @@ pub struct SurveyArgs {
     #[arg(long)]
     pub scenario: Option<String>,
 
-    /// Number of Latin-hypercube points to evaluate. Defaults to 1000;
-    /// proposal §"Defaults" balances coverage vs cost for d <= 8.
-    #[arg(long, default_value_t = 1000)]
+    /// Number of Latin-hypercube points to evaluate.
+    ///
+    /// Default behaviour: auto-scale with parameter dimension as
+    /// `max(1000, 50 * d^2)` so the n/d^2 >= 50 pair-plot coverage
+    /// floor is met by default. For d=4 this is 1000 (unchanged from
+    /// v1); for d=8 it's 3200; for d=12 it's 7200. Pass `--n-points
+    /// N` to override (e.g. lower it explicitly for fast iteration,
+    /// or higher for sparse-basin models). Set 0 to use the auto rule
+    /// regardless.
+    #[arg(long, default_value_t = 0)]
     pub n_points: usize,
 
     /// Likelihood evaluation method:
@@ -1117,9 +1124,14 @@ pub struct SurveyArgs {
     #[arg(long, default_value_t = 200)]
     pub eval_particles: usize,
 
-    /// PF replicates per LHS point (logmeanexp combiner). 3 reps
-    /// cuts SE by ~sqrt(3) vs 1 rep. Always 1 with `--eval simulate`.
-    #[arg(long, default_value_t = 3)]
+    /// PF replicates per LHS point (logmeanexp combiner). The
+    /// replicate variance also drives the per-point loglik_se column;
+    /// at K=3 the SE *estimate* itself has ~50% uncertainty (df=2),
+    /// which can fire the Doucet 1.7-nat warning spuriously. K=5
+    /// matches Sherlock et al. 2015's recommendation for
+    /// pseudo-marginal MCMC and gives a tighter SE estimate at
+    /// 5/3× the compute. Always 1 with `--eval simulate`.
+    #[arg(long, default_value_t = 5)]
     pub eval_replicates: usize,
 
     /// LHS / PF base seed.
