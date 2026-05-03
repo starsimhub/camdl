@@ -697,6 +697,14 @@ pub enum Stage {
         sweeps: usize,
         #[serde(default)]
         starts_from: StartsFrom,
+        /// Per-chain init draws (gh#42). See `Stage::IF2::init_method`
+        /// for the full enum description. Default `uniform` matches
+        /// PGAS's prior behaviour (per-chain uniform random within
+        /// natural-scale bounds — overdispersed initialisation, standard
+        /// MCMC practice). LHS gives stratified posterior coverage at
+        /// low chain counts.
+        #[serde(default)]
+        init_method: super::init::InitMethod,
         #[serde(default)]
         burn_in: Option<usize>,
         #[serde(default)]
@@ -751,6 +759,12 @@ pub enum Stage {
         iterations: usize,
         #[serde(default)]
         starts_from: StartsFrom,
+        /// Per-chain init draws (gh#42). See `Stage::IF2::init_method`
+        /// for the full enum description. Default `uniform` (per-chain
+        /// uniform random within bounds). LHS gives stratified
+        /// posterior coverage at low chain counts.
+        #[serde(default)]
+        init_method: super::init::InitMethod,
         #[serde(default)]
         burn_in: Option<usize>,
         #[serde(default)]
@@ -3367,6 +3381,7 @@ decibans_thresh = 100.0
         Stage::PGAS {
             chains: 4, particles: 100, sweeps,
             starts_from: StartsFrom::default(),
+            init_method: Default::default(),
             burn_in: Some(200), thin: Some(2),
             tempering: vec![1.0],
             max_tree_depth: 10,
@@ -3383,6 +3398,7 @@ decibans_thresh = 100.0
         Stage::PMMH {
             chains: 4, particles: 100, iterations,
             starts_from: StartsFrom::default(),
+            init_method: Default::default(),
             burn_in: Some(200), thin: Some(2),
             adapt: true, adapt_start: 300, rho: None,
         }
@@ -3399,10 +3415,10 @@ decibans_thresh = 100.0
 
         // Changing any *other* PGAS field must change the payload.
         let s_more_chains = match make_pgas_stage(1000) {
-            Stage::PGAS { particles, sweeps, starts_from, burn_in, thin,
+            Stage::PGAS { particles, sweeps, starts_from, init_method, burn_in, thin,
                 tempering, max_tree_depth, trajectory_warmup, csmc_sweeps_per_nuts,
                 n_trajectories, dense_mass, use_nuts, .. } =>
-                Stage::PGAS { chains: 8, particles, sweeps, starts_from, burn_in, thin,
+                Stage::PGAS { chains: 8, particles, sweeps, starts_from, init_method, burn_in, thin,
                     tempering, max_tree_depth, trajectory_warmup, csmc_sweeps_per_nuts,
                     n_trajectories, dense_mass, use_nuts },
             _ => unreachable!(),

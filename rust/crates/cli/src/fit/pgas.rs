@@ -33,6 +33,7 @@ pub struct PgasStageOpts {
     pub n_trajectories: usize,
     pub dense_mass: bool,
     pub use_nuts: bool,
+    pub init_method: super::init::InitMethod,
 }
 
 const DEFAULT_BURN_IN: usize = 2000;
@@ -47,7 +48,7 @@ impl PgasStageOpts {
                 chains, particles, sweeps, burn_in, thin,
                 tempering, max_tree_depth, trajectory_warmup,
                 csmc_sweeps_per_nuts, n_trajectories,
-                dense_mass, use_nuts,
+                dense_mass, use_nuts, init_method,
                 ..
             } => {
                 if tempering.is_empty() || (tempering[0] - 1.0).abs() > 1e-9 {
@@ -83,6 +84,7 @@ impl PgasStageOpts {
                     n_trajectories: *n_trajectories,
                     dense_mass: *dense_mass,
                     use_nuts: *use_nuts,
+                    init_method: *init_method,
                 })
             }
             other => Err(format!(
@@ -263,30 +265,24 @@ pub fn run_stage(
     };
 
     // Generate per-chain starting parameters.
-    // Without --starts-from: random uniform on the natural scale within declared
-    // bounds (overdispersed initialization, standard MCMC practice).
-    // With --starts-from: use prior stage's start_values for all chains (user
-    // has already identified the high-posterior region via IF2).
+    // - With --starts-from: use prior stage's start_values for all chains
+    //   (user has already identified the high-posterior region via IF2).
+    // - Otherwise: dispatch on `init_method` (gh#42). Default `uniform`
+    //   matches PGAS's prior behaviour (per-chain uniform random within
+    //   bounds — overdispersed, standard MCMC practice). `lhs` gives
+    //   stratified posterior coverage at low chain counts. `single`
+    //   sends every chain to `base_params` (refine semantics).
     let has_starts = prior_state.is_some();
-    let chain_starts: Vec<Vec<f64>> = {
-        let mut init_rng = sim::rng::StatefulRng::new(seed ^ 0xbeef_cafe);
-        (0..n_chains).map(|_| {
-            let mut params = config.base_params.clone();
-            if !has_starts {
-                // Random uniform within bounds on natural scale
-                for spec in &config.estimated_params {
-                    let lo = spec.lower;
-                    let hi = spec.upper;
-                    if lo.is_finite() && hi.is_finite() {
-                        params[spec.index] = lo + init_rng.uniform() * (hi - lo);
-                    } else {
-                        // Unbounded: jitter ±50% around initial value
-                        params[spec.index] *= 1.0 + (init_rng.uniform() - 0.5);
-                    }
-                }
-            }
-            params
-        }).collect()
+    let chain_starts: Vec<Vec<f64>> = if has_starts {
+        vec![config.base_params.clone(); n_chains]
+    } else {
+        super::init::build_chain_param_vecs(
+            pgas_opts.init_method,
+            &config.estimated_params,
+            &config.base_params,
+            n_chains,
+            seed,
+        ).unwrap_or_else(|| vec![config.base_params.clone(); n_chains])
     };
 
     eprintln!("\npgas: {} chains × {} sweeps × {} particles, burn_in={}, thin={}",
@@ -706,6 +702,7 @@ mod tests {
         Stage::PGAS {
             chains: 1, particles: 10, sweeps: 10,
             starts_from: StartsFrom::default(),
+            init_method: Default::default(),
             burn_in: Some(2), thin: Some(1),
             tempering,
             max_tree_depth: 10,

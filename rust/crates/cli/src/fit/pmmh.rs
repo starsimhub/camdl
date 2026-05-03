@@ -31,6 +31,7 @@ pub struct PmmhStageOpts {
     pub adapt: bool,
     pub adapt_start: usize,
     pub rho: Option<f64>,
+    pub init_method: super::init::InitMethod,
 }
 
 const DEFAULT_BURN_IN: usize = 5000;
@@ -43,7 +44,7 @@ impl PmmhStageOpts {
         match stage {
             super::config_v2::Stage::PMMH {
                 chains, particles, iterations, burn_in, thin,
-                adapt, adapt_start, rho,
+                adapt, adapt_start, rho, init_method,
                 ..
             } => {
                 if let Some(r) = rho {
@@ -62,6 +63,7 @@ impl PmmhStageOpts {
                     adapt: *adapt,
                     adapt_start: *adapt_start,
                     rho: *rho,
+                    init_method: *init_method,
                 })
             }
             other => Err(format!(
@@ -132,6 +134,25 @@ pub fn run_stage(
         }
         p
     }).unwrap_or_else(|| config.base_params.clone());
+
+    // Per-chain starting parameters (gh#42).
+    // - With --starts-from: every chain at the prior MLE (`base` above).
+    // - Otherwise: dispatch on `init_method`. Default `uniform` matches
+    //   PMMH's prior behaviour of passing the same base to every chain
+    //   (one starting point) — `Single` and `Uniform`-with-n_chains=1
+    //   both return None; we then materialise N copies of `base`. `Lhs`
+    //   gives stratified posterior coverage at low chain counts.
+    let chain_starts: Vec<Vec<f64>> = if prior_state.is_some() {
+        vec![base.clone(); n_chains]
+    } else {
+        super::init::build_chain_param_vecs(
+            pmmh_opts.init_method,
+            &config.estimated_params,
+            &base,
+            n_chains,
+            seed,
+        ).unwrap_or_else(|| vec![base.clone(); n_chains])
+    };
 
     let logliks: Vec<f64> = (0..20)
         .map(|i| runner::run_quick_pfilter(&config, &base, n_particles, seed + i))
@@ -458,7 +479,7 @@ pub fn run_stage(
             };
 
             let result = run_pmmh(
-                &config.estimated_params, &priors, &config.base_params,
+                &config.estimated_params, &priors, &chain_starts[chain_id],
                 &config.param_names,
                 &pmmh_config, &config.observations, &eval_loglik, eval_corr_ref, chain_seed,
                 Some(&progress_cb), resume_states[chain_id].clone(), config_hash.clone(),

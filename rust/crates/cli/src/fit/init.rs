@@ -98,6 +98,29 @@ pub fn build_chain_starts(
     }
 }
 
+/// Resolve `method` to per-chain full parameter vectors, for routines
+/// (PGAS, PMMH) that work with `Vec<f64>` directly rather than the
+/// IF2-shaped `Vec<EstimatedParam>`. Returns one full param-vector
+/// per chain, with each `EstimatedParam`-listed index overwritten by
+/// the per-chain draw and all other slots taken from `base_params`.
+///
+/// Returns `None` when the caller should treat every chain as starting
+/// from `base_params` directly (i.e. `Single`, or `n_chains < 2`).
+pub fn build_chain_param_vecs(
+    method: InitMethod,
+    base_specs: &[EstimatedParam],
+    base_params: &[f64],
+    n_chains: usize,
+    seed: u64,
+) -> Option<Vec<Vec<f64>>> {
+    let per_chain = build_chain_starts(method, base_specs, n_chains, seed)?;
+    Some(per_chain.iter().map(|chain| {
+        let mut params = base_params.to_vec();
+        for spec in chain { params[spec.index] = spec.initial; }
+        params
+    }).collect())
+}
+
 /// Per-chain uniform random draw within natural-scale bounds. Chain 0
 /// keeps the seeded start (reproducibility); chains 1..N draw fresh.
 /// Equivalent to the previous `runner::build_random_chain_starts`

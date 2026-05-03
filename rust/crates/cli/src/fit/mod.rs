@@ -959,6 +959,7 @@ pub fn cmd_fit_run_v2(a: &crate::args::FitRunArgs) {
                 if let Some(n) = a.n_trajectories { pgas_opts.n_trajectories = n; }
                 if a.diagonal_mass { pgas_opts.dense_mass = false; }
                 if a.no_nuts       { pgas_opts.use_nuts   = false; }
+                if let Some(m) = cli_init_method { pgas_opts.init_method = m; }
 
                 pgas::run_stage(
                     &sweep_config,
@@ -991,6 +992,7 @@ pub fn cmd_fit_run_v2(a: &crate::args::FitRunArgs) {
                     }
                     pmmh_opts.rho = Some(r);
                 }
+                if let Some(m) = cli_init_method { pmmh_opts.init_method = m; }
 
                 pmmh::run_stage(
                     &sweep_config,
