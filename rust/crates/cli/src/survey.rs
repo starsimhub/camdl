@@ -210,6 +210,11 @@ struct ResolvedSurveyInputs {
     fixed: HashMap<String, f64>,
     /// Named scenario applied (`None` = baseline).
     scenario: Option<String>,
+    /// Per-parameter `[estimate].start =` values from fit.toml when in
+    /// fit-aware mode; `None` in inline mode (no fit.toml). Used by
+    /// the start-rank diagnostic to flag when the user's seeded
+    /// best-guess falls in a low-loglik region of the LHS landscape.
+    estimate_starts: Option<HashMap<String, f64>>,
 }
 
 // ─── cmd_survey entry point ──────────────────────────────────────────────────
@@ -515,6 +520,31 @@ pub fn cmd_survey(a: &crate::args::SurveyArgs) {
         emit_se_warning(&sorted);
     }
 
+    // ── Silent-miss mitigation: bound clustering + start-rank check ─
+    //
+    // After ranking, scan the top-10% of survey points for parameters
+    // whose values pin near a bound. A pinned top-K means either:
+    //   (a) the basin extends outside the user's declared bounds —
+    //       the survey is ranking points along the bound itself; or
+    //   (b) the bounds reflect informed priors and the basin really
+    //       is at the edge.
+    // Either way, surfacing it is worth ~30 LOC. Real reproducer:
+    // typhoid SIRC β_veryhigh pinned at lower bound, ξ_a15plus at
+    // upper, both invisible from loglik alone.
+    //
+    // Threshold: 5% of bound width (linear) or 5% of log-bound range
+    // (Log-typed). Fires when the median of top-K values falls within
+    // that fraction of either bound.
+    emit_bound_clustering_warning(&sorted, &resolved.estimated, 0.10);
+
+    // Start-rank check (fit-aware mode): for each [estimate].start =
+    // value present in the fit.toml, find where it falls in the LHS
+    // landscape. Quick "is the user's prior best-guess even in the
+    // bounds box?" sanity check.
+    if let Some(starts) = &resolved.estimate_starts {
+        emit_start_rank_report(&sorted, &resolved.estimated, starts);
+    }
+
     // ── summary.json ────────────────────────────────────────────────
     if let Err(e) = write_summary_json(&summary_path, &sorted, a, eval_method, d) {
         eprintln!("warning: could not write summary.json: {}", e);
@@ -675,6 +705,10 @@ fn resolve_survey_inputs(a: &crate::args::SurveyArgs)
             per_stream_obs.push(observations);
         }
 
+        // Capture [estimate].start for the start-rank diagnostic.
+        let estimate_starts: HashMap<String, f64> = config.estimate.iter()
+            .filter_map(|(name, spec)| spec.start.map(|v| (name.clone(), v)))
+            .collect();
         Ok(ResolvedSurveyInputs {
             model_ir_json,
             compiled,
@@ -685,6 +719,11 @@ fn resolve_survey_inputs(a: &crate::args::SurveyArgs)
             data_hashes,
             fixed: fixed_resolved.into_iter().collect(),
             scenario: config.scenario,
+            estimate_starts: if estimate_starts.is_empty() {
+                None
+            } else {
+                Some(estimate_starts)
+            },
         })
     } else {
         // Inline mode: --estimate flags + --data (already validated).
@@ -784,6 +823,8 @@ fn resolve_survey_inputs(a: &crate::args::SurveyArgs)
             data_hashes,
             fixed: fixed_map,
             scenario: a.scenario.clone(),
+            // Inline mode has no fit.toml [estimate].start values.
+            estimate_starts: None,
         })
     }
 }
@@ -1014,6 +1055,159 @@ fn emit_se_warning(rows: &[LandscapeRow]) {
              --eval-replicates 5  (3x compute, ~sqrt(5/3) variance reduction)\n  \
              --eval-particles 500 (2.5x compute, lower per-replicate variance)",
             pct, DOUCET);
+    }
+}
+
+// ─── Silent-miss diagnostics: bound clustering & start rank ──────────────────
+//
+// Survey's documented "silent miss case" (the bounds box excludes the
+// true basin and the user has no signal that this happened) gets two
+// concrete mitigations at run end:
+//
+//  1. Bound clustering: scan the top-K rows for parameters whose
+//     median value pins near a bound (within 5% of the bound's range).
+//     Real reproducer: typhoid SIRC β_veryhigh pinned at lower bound,
+//     ξ_a15plus at upper — both invisible from loglik alone.
+//  2. Start rank: in fit-aware mode, locate where the user's
+//     [estimate].start = values fall in the LHS landscape. A start
+//     in the bottom 90% is a "your prior best-guess looks worse
+//     than 90% of random draws" sanity flag.
+//
+// Both are advisory — neither aborts the run. Both surface data the
+// user can act on without re-running compute.
+
+const BOUND_PIN_FRACTION: f64 = 0.05;
+
+fn emit_bound_clustering_warning(
+    rows: &[LandscapeRow],
+    estimated: &[EstimatedParam],
+    top_pct: f64,
+) {
+    let finite: Vec<&LandscapeRow> = rows.iter()
+        .filter(|r| r.loglik.is_finite()).collect();
+    if finite.is_empty() { return; }
+    let k = ((finite.len() as f64) * top_pct).ceil() as usize;
+    let k = k.max(1).min(finite.len());
+    // rows are already sorted by loglik desc; first k are the top.
+    let top: &[&LandscapeRow] = &finite[..k];
+
+    let mut warnings: Vec<String> = Vec::new();
+    for (i, spec) in estimated.iter().enumerate() {
+        if !spec.lower.is_finite() || !spec.upper.is_finite() { continue; }
+        let mut vals: Vec<f64> = top.iter().map(|r| r.param_values[i]).collect();
+        vals.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        let median = vals[vals.len() / 2];
+
+        // For Log-typed bounds (both > 0) measure the pin fraction in
+        // log space — otherwise a Log-bounds [1e-5, 1.0] median of
+        // 1e-4 looks "near the lower bound" on linear scale even
+        // though it's the geometric midpoint.
+        let (frac_to_lo, frac_to_hi) = if matches!(spec.transform,
+            sim::inference::types::Transform::Log { .. })
+            && spec.lower > 0.0 && spec.upper > 0.0
+        {
+            let log_lo = spec.lower.ln();
+            let log_hi = spec.upper.ln();
+            let log_med = median.max(spec.lower).ln();
+            let span = log_hi - log_lo;
+            ((log_med - log_lo) / span, (log_hi - log_med) / span)
+        } else {
+            let span = spec.upper - spec.lower;
+            ((median - spec.lower) / span, (spec.upper - median) / span)
+        };
+
+        if frac_to_lo < BOUND_PIN_FRACTION {
+            warnings.push(format!(
+                "  '{}' top-{:.0}% median = {} pinned near LOWER bound {} \
+                 (within {:.0}% of bound width)",
+                spec.name, top_pct * 100.0,
+                format_param_value_short(median), format_param_value_short(spec.lower),
+                frac_to_lo * 100.0));
+        } else if frac_to_hi < BOUND_PIN_FRACTION {
+            warnings.push(format!(
+                "  '{}' top-{:.0}% median = {} pinned near UPPER bound {} \
+                 (within {:.0}% of bound width)",
+                spec.name, top_pct * 100.0,
+                format_param_value_short(median), format_param_value_short(spec.upper),
+                frac_to_hi * 100.0));
+        }
+    }
+
+    if !warnings.is_empty() {
+        eprintln!(
+            "warning: top-{:.0}% of survey points cluster near declared \
+             bounds for these parameters:",
+            top_pct * 100.0);
+        for w in &warnings { eprintln!("{}", w); }
+        eprintln!(
+            "  this can mean (a) the true basin extends outside your \
+             bounds box, or (b) the bounds reflect informed priors and \
+             the basin really is at the edge. Consider widening the \
+             relevant bounds and re-running to disambiguate.");
+    }
+}
+
+fn emit_start_rank_report(
+    rows: &[LandscapeRow],
+    estimated: &[EstimatedParam],
+    starts: &HashMap<String, f64>,
+) {
+    let finite: Vec<&LandscapeRow> = rows.iter()
+        .filter(|r| r.loglik.is_finite()).collect();
+    if finite.is_empty() || starts.is_empty() { return; }
+    let n = finite.len();
+
+    // Find the row whose param vector is closest to the start vector
+    // (Euclidean distance on the natural-scale, normalised by bound
+    // width per dim — same scale-invariance trick the LHS sampler
+    // uses). Report its rank.
+    let target: Vec<Option<f64>> = estimated.iter()
+        .map(|spec| starts.get(&spec.name).copied()).collect();
+    if target.iter().all(|x| x.is_none()) { return; }
+
+    let mut best_rank = 0usize;
+    let mut best_dist = f64::INFINITY;
+    for (rank, row) in finite.iter().enumerate() {
+        let mut d2 = 0.0_f64;
+        for (i, spec) in estimated.iter().enumerate() {
+            let Some(s) = target[i] else { continue };
+            let span = (spec.upper - spec.lower).max(1e-30);
+            let dx = (row.param_values[i] - s) / span;
+            d2 += dx * dx;
+        }
+        if d2 < best_dist {
+            best_dist = d2;
+            best_rank = rank;
+        }
+    }
+
+    let pct = 100.0 * (best_rank as f64) / (n as f64);
+    if pct > 90.0 {
+        eprintln!(
+            "warning: closest LHS draw to your [estimate].start values \
+             ranks {} of {} ({:.0}th percentile from the top) — your \
+             seeded best-guess falls in the bottom {}% of survey points. \
+             Likely causes: bounds exclude the basin, prior best-guess \
+             is in a low-loglik region, or the model is misspecified.",
+            best_rank + 1, n, 100.0 - pct, (100.0 - pct).round() as i64);
+    } else if pct > 50.0 {
+        eprintln!(
+            "note: closest LHS draw to your [estimate].start values \
+             ranks {} of {} (top {:.0}%) — outside the top half of \
+             the survey. The basin LHS found may be a better starting \
+             point for refine; consider passing scout's MLE via \
+             starts_from instead of a hardcoded start.",
+            best_rank + 1, n, pct);
+    }
+}
+
+/// Compact float formatter for warning messages. Keeps log-scale
+/// values readable (1e-5 not 0.00001) and clamps precision.
+fn format_param_value_short(v: f64) -> String {
+    if v.abs() >= 1e-3 && v.abs() < 1e6 {
+        format!("{:.4}", v)
+    } else {
+        format!("{:.3e}", v)
     }
 }
 
