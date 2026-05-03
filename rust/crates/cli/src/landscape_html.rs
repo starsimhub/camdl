@@ -203,7 +203,13 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   font-size: 13px; }
 #controls label { display: inline-flex; align-items: center; gap: 6px; }
 #controls input[type=range] { width: 160px; }
-#plot { width: 100%; min-height: 700px; padding: 8px; }
+/* Square plot container — pair-plot grid is rows = columns = nParams,
+   so the figure displays right when the outer container is 1:1.
+   max-width keeps the plot from filling a 4K monitor; margin auto
+   centers it under the controls bar. CSS aspect-ratio is supported
+   in every evergreen browser. */
+#plot { width: 100%; max-width: 1400px; aspect-ratio: 1;
+  padding: 8px; margin: 0 auto; }
 .note { color: #666; font-size: 11px; margin-left: auto; }
 ";
 
