@@ -905,6 +905,16 @@ pub struct ProfileArgs {
     #[arg(long, default_value_t = 3)]
     pub starts: usize,
 
+    /// How the per-cell starting points (for `--starts > 1`) are drawn
+    /// across the non-focal estimated parameters' bounds:
+    /// `single` (every start at the seeded base — chains differ only
+    /// by IF2 RNG), `uniform` (per-start uniform random within bounds —
+    /// historical default), or `lhs` (Latin-hypercube stratified,
+    /// scale-aware via Transform — best basin coverage at low
+    /// `--starts`). gh#42.
+    #[arg(long, value_name = "MODE", default_value_t = crate::fit::init::InitMethod::Uniform)]
+    pub init: crate::fit::init::InitMethod,
+
     /// Cooling schedule
     #[arg(long, default_value_t = 0.95)]
     pub cooling: f64,

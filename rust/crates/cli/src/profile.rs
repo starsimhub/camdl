@@ -519,6 +519,16 @@ pub fn cmd_profile(a: &crate::args::ProfileArgs) {
     ).unwrap_or_else(|e| { eprintln!("error: {}", e); std::process::exit(1); });
     let if2_params = Arc::new(if2_params);
 
+    // Per-start init draws across non-focal estimated params (gh#42).
+    // Computed once, reused at every grid cell so start_idx=k means the
+    // same draw across cells (lets the per-start TSV rows be compared
+    // cell-to-cell). `None` → every start uses `if2_params` directly
+    // (Single mode; or `--starts 1`).
+    let per_start_params: Option<Arc<Vec<Vec<sim::inference::if2::EstimatedParam>>>> =
+        crate::fit::init::build_chain_starts(
+            a.init, &if2_params, n_starts, seed_base,
+        ).map(Arc::new);
+
     let process = Arc::new(ChainBinomialProcess::new(compiled.clone()));
     // Build one StreamSpec per resolved IR observation. For
     // single-stream profiles `--flow <name>` overrides the IR
@@ -810,8 +820,17 @@ pub fn cmd_profile(a: &crate::args::ProfileArgs) {
         let job_seed = seed ^ (grid_idx as u64 * 1000 + start_idx as u64);
         let job_t0 = std::time::Instant::now();
 
+        // gh#42: when --init lhs/uniform, each start uses its own draw
+        // across the non-focal estimated params; otherwise (Single, or
+        // --starts 1) every start shares `if2_params`. The focal params
+        // are already pinned in `params` above, so the LHS draw on
+        // non-focal indices doesn't perturb the grid point.
+        let per_start_specs: &[sim::inference::if2::EstimatedParam] =
+            per_start_params.as_ref()
+                .map(|psp| psp[start_idx].as_slice())
+                .unwrap_or(if2_params.as_slice());
         let result = run_if2(
-            &*process, &*obs_model_obj, &params, &if2_params, &config, job_seed,
+            &*process, &*obs_model_obj, &params, per_start_specs, &config, job_seed,
         );
         let elapsed = job_t0.elapsed().as_secs_f64();
 
