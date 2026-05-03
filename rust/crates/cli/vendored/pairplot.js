@@ -134,11 +134,25 @@
 
     for (let i = 0; i < nParams; i++) {
       for (let j = 0; j < nParams; j++) {
+        // Plotly grid + `pattern: "independent"` gives every subplot its
+        // own (xaxis_N, yaxis_N) pair with the same N. Subplot 1 alone
+        // uses the unsubscripted "x" / "y" / "xaxis" / "yaxis"; every
+        // other subplot uses "xN" / "yN" / "xaxisN" / "yaxisN".
+        //
+        // The earlier conditioning on `j === 0` / `i === 0` (per-row /
+        // per-column) silently routed every subplot in column 0 onto
+        // shared default x-axis and every subplot in row 0 onto shared
+        // default y-axis, which made traces in those panels render in
+        // the figure's outer gutter strip. Symptom: scattered points
+        // along the left edge spanning figure height + along the top
+        // edge spanning figure width. The layout dict also clobbered
+        // itself when multiple subplots wrote `layout["xaxis"] = ...`.
         const subplotId = i * nParams + j + 1;
-        const xRef = j === 0 ? "xaxis" : `xaxis${subplotId}`;
-        const yRef = i === 0 ? "yaxis" : `yaxis${subplotId}`;
-        const xkey = j === 0 ? "x" : `x${subplotId}`;
-        const ykey = i === 0 ? "y" : `y${subplotId}`;
+        const isFirst = subplotId === 1;
+        const xRef = isFirst ? "xaxis" : `xaxis${subplotId}`;
+        const yRef = isFirst ? "yaxis" : `yaxis${subplotId}`;
+        const xkey = isFirst ? "x" : `x${subplotId}`;
+        const ykey = isFirst ? "y" : `y${subplotId}`;
 
         // Set axis layout for this subplot.
         layout[xRef] = {
