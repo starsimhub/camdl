@@ -130,6 +130,13 @@
       paper_bgcolor: "#fff",
       plot_bgcolor: "#fff",
       annotations: [],
+      // Diagonals are three histograms in subset relationship
+      // (gray = all rows, green = top X%, red = top 1%). With
+      // barmode "overlay" plus per-layer opacity, plotly draws
+      // them on top of each other on a shared y-scale instead of
+      // putting bars side-by-side per bin — matches the Python
+      // prototype's `ax.hist(..., alpha=0.6)` layering.
+      barmode: "overlay",
     };
 
     for (let i = 0; i < nParams; i++) {
@@ -181,26 +188,35 @@
             const t = b / nbins;
             edges.push(useLog ? lo * Math.pow(hi / lo, t) : lo + t * (hi - lo));
           }
-          const grayVals = [], greenVals = [], redVals = [];
+          // Three subset layers — each one is a strict subset of
+          // the one below it, so at every bin red ≤ green ≤ gray.
+          // With barmode=overlay + per-layer opacity, plotly draws
+          // them stacked: gray bar = total height, green = subset
+          // height visible against gray's translucency, red = top-1%
+          // peak. Matches the Python prototype's matplotlib hist
+          // layering exactly.
+          const grayVals = rows.map((r) => r.params[i]);
+          const greenVals = [], redVals = [];
           rows.forEach((r, k) => {
             const v = r.params[i];
-            const band = bandFor(k);
-            if (band === "red")        redVals.push(v);
-            else if (band === "green") greenVals.push(v);
-            else                       grayVals.push(v);
+            if (greenIdx.has(k)) greenVals.push(v);
+            if (redIdx.has(k))   redVals.push(v);
           });
-          // Plotly histograms with explicit xbins to share bins across layers.
-          const histogram = (vals, color, name) => ({
+          // Plotly histograms with explicit xbins to share bins
+          // across layers. The opacities mirror the Python
+          // prototype (0.6 / 0.85 / 0.95) so gray reads as
+          // background, green as foreground, red as peak marker.
+          const histogram = (vals, color, opacity, name) => ({
             type: "histogram", x: vals,
             xbins: { start: edges[0], end: edges[edges.length - 1],
               size: useLog ? null : (edges[1] - edges[0]) },
             marker: { color },
-            opacity: 1.0, name,
+            opacity, name,
             xaxis: xkey, yaxis: ykey,
           });
-          traces.push(histogram(grayVals,  COLORS.GREY_HIST,  "bottom"));
-          traces.push(histogram(greenVals, COLORS.TOP10_GREEN, "top X%"));
-          traces.push(histogram(redVals,   COLORS.TOP1_RED,   "top 1%"));
+          traces.push(histogram(grayVals,  COLORS.GREY_HIST,   0.60, "all"));
+          traces.push(histogram(greenVals, COLORS.TOP10_GREEN, 0.85, "top X%"));
+          traces.push(histogram(redVals,   COLORS.TOP1_RED,    0.95, "top 1%"));
         } else {
           // ── Off-diagonal: gray scatter + top-K viridis + top-5 stars.
           const grayPts = { x: [], y: [], text: [] };
