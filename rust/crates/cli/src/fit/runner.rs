@@ -477,6 +477,7 @@ fn build_if2_params(
             rw_sd,
             transform: est.transform.as_ref().map(|t| t.as_str().to_string()),
             ivp: est.ivp,
+            bounds: Some(est.bounds),
         }
     }).collect();
 
@@ -640,7 +641,22 @@ pub fn derive_transform(
     ir_param: &ir::parameter::Parameter,
     transform_override: Option<&str>,
 ) -> Transform {
-    let (lower, upper) = ir_param.bounds.unwrap_or((0.0, f64::INFINITY));
+    let bounds = ir_param.bounds.unwrap_or((0.0, f64::INFINITY));
+    derive_transform_with_bounds(ir_param, transform_override, bounds)
+}
+
+/// Like `derive_transform`, but the caller supplies explicit `(lo, hi)`
+/// bounds — typically the fit.toml `[estimate].bounds` after validation
+/// against the model's declared range. The resulting `Transform::Log`
+/// or `Transform::Logit` clamps to *these* bounds, which is what IF2
+/// uses to keep particles in the search box. Without this, a fit that
+/// tightens bounds would still see IF2 walk particles out to the model
+/// bounds, defeating the tightening.
+pub fn derive_transform_with_bounds(
+    ir_param: &ir::parameter::Parameter,
+    transform_override: Option<&str>,
+    (lower, upper): (f64, f64),
+) -> Transform {
     if let Some(t) = transform_override {
         return match t {
             "log" => Transform::Log { lo: lower, hi: upper },
@@ -679,6 +695,16 @@ pub struct ParamSpec {
     /// None = auto from param_kind. Some("log") = override.
     pub transform: Option<String>,
     pub ivp: bool,
+    /// Caller-supplied bounds override (typically from fit.toml's
+    /// `[estimate].bounds`). When `Some`, replaces the model-declared
+    /// `ir_param.bounds` for both the `EstimatedParam.{lower, upper}`
+    /// fields AND the `Transform::{Log, Logit}.{lo, hi}` clamp ranges,
+    /// so IF2's bound enforcement and the init samplers (LHS, uniform)
+    /// honour the user's tightening. Must lie within `ir_param.bounds`
+    /// when those are present (a fit cannot loosen physical bounds).
+    /// `None` = use model bounds verbatim (the profile / pfilter
+    /// pattern, where no fit.toml is involved).
+    pub bounds: Option<(f64, f64)>,
 }
 
 /// Build EstimatedParam specs from caller-provided ParamSpecs.
@@ -698,12 +724,40 @@ pub fn build_if2_params_from_specs(
         let idx = *compiled.param_index.get(spec.name.as_str())
             .ok_or_else(|| format!("parameter '{}' not in compiled model", spec.name))?;
 
-        let (lo, hi) = ir_param.bounds.unwrap_or((0.0, f64::INFINITY));
+        // Resolve bounds: caller-supplied (fit.toml [estimate].bounds)
+        // wins over model-declared ir_param.bounds. Reject configurations
+        // that try to loosen physical bounds — a fit's bounds must lie
+        // within whatever the model declared. This propagates through
+        // `EstimatedParam.{lower, upper}` (used by LHS / uniform-random
+        // init samplers) AND through the `Transform::{Log, Logit}` clamp
+        // bounds (used by IF2 to keep particles in the search box).
+        // Without this propagation, fit.toml's bounds are advisory only —
+        // IF2 happily walks particles out to model bounds even when the
+        // user tightened.
+        let (lo, hi) = match (spec.bounds, ir_param.bounds) {
+            (Some((flo, fhi)), Some((mlo, mhi))) => {
+                if flo < mlo || fhi > mhi {
+                    return Err(format!(
+                        "estimate.{}: fit.toml bounds [{}, {}] lie outside \
+                         model bounds [{}, {}]. A fit can tighten bounds but \
+                         not loosen them — model bounds may reflect physical \
+                         constraints. Either widen the model bounds or \
+                         tighten the fit bounds.",
+                        spec.name, flo, fhi, mlo, mhi));
+                }
+                (flo, fhi)
+            }
+            (Some(b), None)  => b,
+            (None, Some(b))  => b,
+            (None, None)     => (0.0, f64::INFINITY),
+        };
 
-        // Transform: spec override > param_kind > fallback
-        let transform = derive_transform(ir_param, spec.transform.as_deref());
+        // Transform: spec override > param_kind > fallback. Built with
+        // the resolved (lo, hi) so the clamp bounds match the search box.
+        let transform = derive_transform_with_bounds(
+            ir_param, spec.transform.as_deref(), (lo, hi));
 
-        // rw_sd: spec explicit > auto from bounds
+        // rw_sd: spec explicit > auto from resolved bounds
         let rw_sd = spec.rw_sd
             .unwrap_or_else(|| auto_rw_sd_from_value(base_params[idx], lo, hi, &transform));
 
@@ -2713,5 +2767,167 @@ dt = 1.0
             config.base_params[beta_idx], expected);
 
         std::fs::remove_dir_all(&data_dir).ok();
+    }
+
+    // ── Fit-bounds plumbing (gh#42 follow-up) ────────────────────────
+    //
+    // `[estimate].bounds` in fit.toml must propagate to:
+    //   - `EstimatedParam.{lower, upper}` — read by LHS / uniform init
+    //   - `Transform::{Log, Logit}.{lo, hi}` — read by IF2 to clamp
+    //     particles to the search box
+    //
+    // Without this, fit.toml bounds were advisory only: the search
+    // proceeded over the model-declared bounds even when the user
+    // tightened. LHS made the bug visible (init draws spanning model
+    // bounds, not fit bounds).
+
+    fn make_one_param_model(name: &str, lo: f64, hi: f64, kind: Option<&str>)
+        -> (ir::Model, sim::CompiledModel)
+    {
+        use ir::{
+            model::{Compartment, CompartmentKind, InitialConditions, OutputConfig,
+                    OutputSchedule, SimulationConfig},
+            parameter::Parameter,
+        };
+        let model = ir::Model {
+            name: "t".into(), version: "0.3".into(), time_unit: "days".into(),
+            description: None, origin: None,
+            compartments: vec![Compartment { name: "S".into(), kind: CompartmentKind::Integer }],
+            transitions: vec![], ode_equations: vec![],
+            time_functions: vec![], tables: vec![], interventions: vec![],
+            observations: vec![],
+            parameters: vec![Parameter {
+                name: name.into(), value: Some((lo + hi) * 0.5),
+                bounds: Some((lo, hi)), prior: None, transform: None,
+                initial_value: None, param_kind: kind.map(|k| k.to_string()),
+                param_dim: None, hierarchical: None,
+            }],
+            initial_conditions: InitialConditions::Explicit({
+                let mut m = HashMap::new(); m.insert("S".into(), 1.0); m
+            }),
+            output: OutputConfig {
+                times: OutputSchedule::AtTimes(vec![0.0, 1.0]),
+                format: "tsv".into(), trajectory: true, observations: false,
+            },
+            simulation: SimulationConfig {
+                t_start: 0.0, t_end: 1.0, time_semantics: "continuous".into(),
+                dt: Some(1.0), rng_seed: Some(42),
+            },
+            presets: vec![], model_structure: None, balance: None,
+        };
+        let compiled = sim::CompiledModel::new(model.clone()).expect("compile");
+        (model, compiled)
+    }
+
+    #[test]
+    fn fit_bounds_tighten_estimated_param_lower_upper() {
+        let (model, compiled) = make_one_param_model("beta", 0.0, 1.0, Some("rate"));
+        let base_params = compiled.default_params.clone();
+        let specs = vec![ParamSpec {
+            name: "beta".into(),
+            rw_sd: None,
+            transform: None,
+            ivp: false,
+            bounds: Some((0.1, 0.5)),  // tightened
+        }];
+        let result = build_if2_params_from_specs(&model, &compiled, &base_params, &specs)
+            .expect("tightened bounds within model bounds is valid");
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].lower, 0.1, "EstimatedParam.lower must reflect fit bounds");
+        assert_eq!(result[0].upper, 0.5, "EstimatedParam.upper must reflect fit bounds");
+    }
+
+    #[test]
+    fn fit_bounds_propagate_to_log_transform_clamp() {
+        // Transform clamp ranges drive IF2 particle clamping. If they
+        // don't track fit bounds, the inference walks particles out to
+        // model bounds even when the user tightened.
+        let (model, compiled) = make_one_param_model("beta", 1e-5, 1.0, Some("rate"));
+        let base_params = compiled.default_params.clone();
+        let specs = vec![ParamSpec {
+            name: "beta".into(),
+            rw_sd: None,
+            transform: None,
+            ivp: false,
+            bounds: Some((1e-3, 0.5)),
+        }];
+        let result = build_if2_params_from_specs(&model, &compiled, &base_params, &specs)
+            .expect("ok");
+        match &result[0].transform {
+            Transform::Log { lo, hi } => {
+                assert_eq!(*lo, 1e-3, "Transform::Log.lo must reflect fit bounds");
+                assert_eq!(*hi, 0.5,  "Transform::Log.hi must reflect fit bounds");
+            }
+            other => panic!("expected Log transform on rate-typed param, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn fit_bounds_outside_model_bounds_rejected() {
+        // A fit must not loosen physical bounds the model declared.
+        let (model, compiled) = make_one_param_model("beta", 0.0, 1.0, Some("rate"));
+        let base_params = compiled.default_params.clone();
+        let specs = vec![ParamSpec {
+            name: "beta".into(),
+            rw_sd: None,
+            transform: None,
+            ivp: false,
+            bounds: Some((-0.5, 2.0)),  // wider than model — must reject
+        }];
+        let err = build_if2_params_from_specs(&model, &compiled, &base_params, &specs)
+            .expect_err("fit bounds outside model bounds must error");
+        assert!(err.contains("outside model bounds"),
+            "error must mention the bounds violation, got: {}", err);
+    }
+
+    #[test]
+    fn fit_bounds_none_falls_back_to_model_bounds() {
+        // Profile / pfilter pass bounds: None — they should keep using
+        // the model-declared bounds verbatim.
+        let (model, compiled) = make_one_param_model("beta", 0.01, 2.0, Some("rate"));
+        let base_params = compiled.default_params.clone();
+        let specs = vec![ParamSpec {
+            name: "beta".into(),
+            rw_sd: None,
+            transform: None,
+            ivp: false,
+            bounds: None,
+        }];
+        let result = build_if2_params_from_specs(&model, &compiled, &base_params, &specs)
+            .expect("ok");
+        assert_eq!(result[0].lower, 0.01);
+        assert_eq!(result[0].upper, 2.0);
+    }
+
+    #[test]
+    fn fit_bounds_propagate_to_rw_sd_auto_log_scale() {
+        // auto_rw_sd_from_value works in transformed-scale units, then
+        // converts to natural scale at the geometric midpoint. The
+        // load-bearing thing is that the *log-scale* perturbation
+        // magnitude shrinks with tighter bounds — IF2 perturbs in
+        // transformed space, so that's what governs how many steps it
+        // takes to traverse the search box. (Natural-scale rw_sd isn't
+        // directly comparable across bound widths because the midpoint
+        // changes with the bounds.)
+        let (model, compiled) = make_one_param_model("beta", 1e-6, 1.0, Some("rate"));
+        let base_params = compiled.default_params.clone();
+        let wide = vec![ParamSpec {
+            name: "beta".into(), rw_sd: None, transform: None, ivp: false,
+            bounds: None,  // model bounds [1e-6, 1.0]
+        }];
+        let tight = vec![ParamSpec {
+            name: "beta".into(), rw_sd: None, transform: None, ivp: false,
+            bounds: Some((0.1, 0.5)),
+        }];
+        let r_wide  = build_if2_params_from_specs(&model, &compiled, &base_params, &wide).unwrap();
+        let r_tight = build_if2_params_from_specs(&model, &compiled, &base_params, &tight).unwrap();
+        // Convert each rw_sd back to log-scale by dividing by midpoint.
+        let mid_wide  = (1e-6_f64 * 1.0).sqrt();
+        let mid_tight = (0.1_f64 * 0.5).sqrt();
+        let log_sd_wide  = r_wide[0].rw_sd  / mid_wide;
+        let log_sd_tight = r_tight[0].rw_sd / mid_tight;
+        assert!(log_sd_tight < log_sd_wide,
+            "tighter bounds must yield smaller log-scale rw_sd \
+             (wide_log_sd={}, tight_log_sd={})", log_sd_wide, log_sd_tight);
     }
 }

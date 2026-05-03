@@ -511,6 +511,7 @@ pub fn cmd_profile(a: &crate::args::ProfileArgs) {
             rw_sd: rw_sd_map_raw.get(name).and_then(|v| *v),
             transform: None,
             ivp: false,
+            bounds: None,
         }
     }).collect();
 
