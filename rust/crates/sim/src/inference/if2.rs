@@ -185,8 +185,18 @@ pub struct Observation {
 /// * `obs_loglik_fn` — observation log-likelihood (takes projected, observed, params)
 /// * `seed` — base RNG seed
 /// Optional callback invoked after each IF2 iteration.
-/// Arguments: (iteration_index, log_likelihood).
-pub type ProgressCallback<'a> = Option<&'a dyn Fn(usize, f64)>;
+/// Arguments: `(iteration_index, log_likelihood, param_means)`.
+///
+/// The `log_likelihood` value is the IF2 in-run perturbed loglik
+/// (matches `IF2IterResult.if2_perturbed_loglik`); the post-hoc
+/// clean-PF re-evaluation that populates `IF2IterResult.loglik`
+/// runs after `run_if2_with_progress` returns and is not visible
+/// here. `param_means` is the iteration's filter-mean estimate of
+/// every estimated parameter, in the same order as `if2_params`.
+/// The runner uses this to stream a per-iteration trace row to
+/// `chain_N/parameter_traces.tsv` so users can `tail -f` long
+/// scout runs and watch parameters move in real time.
+pub type ProgressCallback<'a> = Option<&'a dyn Fn(usize, f64, &[f64])>;
 
 pub fn run_if2<P: ProcessModel<State = ParticleState>>(
     process: &P,
@@ -495,9 +505,10 @@ pub fn run_if2_with_progress<P: ProcessModel<State = ParticleState>>(
             param_diag,
         });
 
-        // Report progress
+        // Report progress (passes filter-mean params so the runner can
+        // stream a trace row per iteration; see ProgressCallback doc).
         if let Some(cb) = &on_iteration {
-            cb(iter, total_loglik);
+            cb(iter, total_loglik, &param_means);
         }
         if n_skipped_obs > 0 {
             log::debug!(

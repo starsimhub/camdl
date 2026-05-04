@@ -50,7 +50,10 @@ fn run_one_chain(
     // interior mutation is safe. Cadence from progress::DEFAULT_THROTTLE.
     let throttle = std::cell::RefCell::new(crate::progress::Throttle::default());
 
-    let progress_cb = |iter: usize, loglik: f64| {
+    // `_param_means` is unused here — the standalone `camdl if2`
+    // subcommand doesn't write streaming traces. Only `cmd_fit_run`'s
+    // chain runner does.
+    let progress_cb = |iter: usize, loglik: f64, _param_means: &[f64]| {
         if let Some(bar) = pb {
             bar.set_position((iter + 1) as u64);
             if loglik.is_finite() {

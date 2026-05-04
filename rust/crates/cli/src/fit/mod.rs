@@ -774,8 +774,10 @@ pub fn cmd_fit_run_v2(a: &crate::args::FitRunArgs) {
                     init::build_chain_starts(
                         effective_init, &run_config.estimated_params, *chains, seed)
                 };
+                let stage_dir_str = stage_dir.to_string_lossy();
                 let chain_results = runner::run_chains_with_per_chain_params(
-                    &run_config, per_chain_params.as_deref(), &collector);
+                    &run_config, per_chain_params.as_deref(), &collector,
+                    Some(stage_dir_str.as_ref()));
                 let elapsed = t0.elapsed();
 
                 // Gate 2 — post-stage: refine must not regress below

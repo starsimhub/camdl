@@ -847,6 +847,7 @@ fn run_one_chain(
     config: &FitRunConfig,
     per_chain_params: Option<&[EstimatedParam]>,
     pb: Option<&ProgressBar>,
+    stage_dir: Option<&str>,
 ) -> IF2Result {
     let chain_seed = crate::util::derive_chain_seed(config.seed, chain_id);
     let if2_params = per_chain_params.unwrap_or(&config.estimated_params);
@@ -861,7 +862,36 @@ fn run_one_chain(
     // Cadence from progress::DEFAULT_THROTTLE.
     let throttle = std::cell::RefCell::new(crate::progress::Throttle::default());
 
-    let progress_cb = |iter: usize, loglik: f64| {
+    // Streaming trace writer (opt-in via stage_dir). Each chain writes
+    // its own `chain_N/parameter_traces.tsv` from inside the IF2
+    // progress callback, one row per iteration. Users can `tail -f`
+    // during a long scout run to watch parameters move in real time.
+    // The post-hoc `write_chain_outputs` overwrites this file with the
+    // same column schema after the clean-PF re-eval populates
+    // `IF2IterResult.loglik`; until then the `loglik` column is `NA`
+    // (the in-run perturbed loglik lives in `if2_perturbed_loglik`).
+    //
+    // Per-chain, single-writer-per-thread: no Mutex needed. RefCell
+    // lets the `Fn` closure mutate the BufWriter.
+    let trace_writer: Option<std::cell::RefCell<std::io::BufWriter<std::fs::File>>>
+        = stage_dir.and_then(|dir| {
+            let chain_dir = format!("{}/chain_{}", dir, chain_id + 1);
+            if std::fs::create_dir_all(&chain_dir).is_err() { return None; }
+            let path = format!("{}/parameter_traces.tsv", chain_dir);
+            std::fs::File::create(&path).ok().map(|f| {
+                use std::io::Write;
+                let mut w = std::io::BufWriter::new(f);
+                let _ = writeln!(w, "# {}", crate::version::VERSION);
+                let _ = write!(w, "iteration\tloglik\tif2_perturbed_loglik");
+                for spec in if2_params {
+                    let _ = write!(w, "\t{}", spec.name);
+                }
+                let _ = writeln!(w);
+                std::cell::RefCell::new(w)
+            })
+        });
+
+    let progress_cb = |iter: usize, loglik: f64, param_means: &[f64]| {
         if let Some(bar) = pb {
             bar.set_position((iter + 1) as u64);
             if loglik.is_finite() {
@@ -879,6 +909,22 @@ fn run_one_chain(
                     chain_id + 1, iter + 1, n_iter);
             }
         }
+        // Stream one row per iteration. `loglik` column is `NA` until
+        // the post-hoc clean-PF re-eval; `if2_perturbed_loglik` is the
+        // in-run value the callback already has. Flush every 10 rows
+        // so `tail -f` sees output without waiting on the BufWriter.
+        if let Some(cell) = &trace_writer {
+            use std::io::Write;
+            if let Ok(mut w) = cell.try_borrow_mut() {
+                let _ = write!(w, "{}\tNA\t{:.2}", iter, loglik);
+                for spec in if2_params {
+                    let v = param_means.get(spec.index).copied().unwrap_or(f64::NAN);
+                    let _ = write!(w, "\t{:.6}", v);
+                }
+                let _ = writeln!(w);
+                if iter % 10 == 0 || iter + 1 == n_iter { let _ = w.flush(); }
+            }
+        }
     };
 
     let result = run_if2_with_progress(
@@ -889,6 +935,13 @@ fn run_one_chain(
         eprintln!("chain {} error: {:?}", chain_id + 1, e);
         std::process::exit(1);
     });
+
+    // Final flush so partial buffers don't leave the file truncated
+    // if the post-hoc rewrite is delayed.
+    if let Some(cell) = &trace_writer {
+        use std::io::Write;
+        if let Ok(mut w) = cell.try_borrow_mut() { let _ = w.flush(); }
+    }
 
     if let Some(bar) = pb {
         bar.finish_with_message(format!("ll={:.1}", result.final_loglik));
@@ -906,6 +959,7 @@ pub fn run_chains_with_per_chain_params(
     config: &FitRunConfig,
     per_chain_params: Option<&[Vec<EstimatedParam>]>,
     collector: &DiagnosticCollector,
+    stage_dir: Option<&str>,
 ) -> ChainResults {
     eprintln!("running {} chains × {} particles × {} iterations, cooling={}, dt={}",
         config.n_chains, config.if2_config.n_particles, config.if2_config.n_iterations,
@@ -934,7 +988,7 @@ pub fn run_chains_with_per_chain_params(
         .into_par_iter()
         .map(|chain_id| {
             let per_chain = per_chain_params.map(|pcp| &pcp[chain_id][..]);
-            let result = run_one_chain(chain_id, config, per_chain, Some(&bars[chain_id]));
+            let result = run_one_chain(chain_id, config, per_chain, Some(&bars[chain_id]), stage_dir);
             (chain_id, result)
         })
         .collect();
@@ -1352,19 +1406,35 @@ pub fn write_chain_outputs(
         std::fs::create_dir_all(&chain_dir)
             .map_err(|e| format!("cannot create {}: {}", chain_dir, e))?;
 
-        // Parameter traces
+        // Parameter traces: post-hoc write is a *fallback* now. The
+        // chain-side streaming writer in `run_one_chain` writes this
+        // file incrementally during IF2 (so users can `tail -f` long
+        // scout runs). When it ran, the file exists and is the source
+        // of truth — we skip the post-hoc write to avoid clobbering
+        // it. When it didn't run (e.g. an embedded test or non-CLI
+        // consumer that called `run_chains_with_per_chain_params`
+        // with `stage_dir = None`), fall back to the post-hoc write.
+        //
+        // Trade-off: the streaming version writes `NA` in the
+        // `loglik` column (clean-PF re-eval is post-hoc). The
+        // post-hoc fallback populates `loglik` for every 10th
+        // iteration from `IF2IterResult.loglik`. Consumers that need
+        // the clean-PF values per-iteration can join with
+        // `clean_eval.tsv` / `fit_state.toml` on iteration index.
         let trace_path = format!("{}/parameter_traces.tsv", chain_dir);
-        let mut f = std::fs::File::create(&trace_path)
-            .map_err(|e| format!("cannot write {}: {}", trace_path, e))?;
-        writeln!(f, "# {}", crate::version::VERSION).unwrap();
-        write!(f, "iteration\tloglik\tif2_perturbed_loglik").unwrap();
-        for spec in if2_params { write!(f, "\t{}", spec.name).unwrap(); }
-        writeln!(f).unwrap();
-        for it in &result.iterations {
-            let loglik_str = if it.loglik.is_finite() { format!("{:.2}", it.loglik) } else { "NA".into() };
-            write!(f, "{}\t{}\t{:.2}", it.iteration, loglik_str, it.if2_perturbed_loglik).unwrap();
-            for spec in if2_params { write!(f, "\t{:.6}", it.param_means[spec.index]).unwrap(); }
+        if !std::path::Path::new(&trace_path).exists() {
+            let mut f = std::fs::File::create(&trace_path)
+                .map_err(|e| format!("cannot write {}: {}", trace_path, e))?;
+            writeln!(f, "# {}", crate::version::VERSION).unwrap();
+            write!(f, "iteration\tloglik\tif2_perturbed_loglik").unwrap();
+            for spec in if2_params { write!(f, "\t{}", spec.name).unwrap(); }
             writeln!(f).unwrap();
+            for it in &result.iterations {
+                let loglik_str = if it.loglik.is_finite() { format!("{:.2}", it.loglik) } else { "NA".into() };
+                write!(f, "{}\t{}\t{:.2}", it.iteration, loglik_str, it.if2_perturbed_loglik).unwrap();
+                for spec in if2_params { write!(f, "\t{:.6}", it.param_means[spec.index]).unwrap(); }
+                writeln!(f).unwrap();
+            }
         }
 
         // Resolve this chain's clean-eval score (if any). Falls back to
