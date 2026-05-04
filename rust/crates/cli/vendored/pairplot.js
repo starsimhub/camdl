@@ -70,28 +70,58 @@
     return VIRIDIS_R[idx];
   }
 
-  // Map |loglik - loglik_max| to a [0, 1] color coord on a log scale,
-  // matching the Python LogNorm behaviour.
-  function colorCoord(rowsArr, key) {
-    const vals = rowsArr.map((r) => r[key]).filter(Number.isFinite);
-    if (!vals.length) return rowsArr.map(() => 0);
+  // Map a per-row scalar to a [0, 1] color coord. Normalisation is
+  // computed over `displayedSet` only (the top-K subset that actually
+  // gets colored on off-diagonals) so the full viridis range maps onto
+  // the displayed points instead of being wasted on the gray-and-
+  // -not-displayed bottom of the distribution. Coords for rows
+  // outside `displayedSet` are returned as 0 (unused — those rows
+  // render as gray scatter, not viridis).
+  //
+  //  - `loglik`: log-scale on |loglik − loglik_max|, floored at 0.5
+  //    nats so the very best point doesn't take log(0). Within the
+  //    top-K's actual abs_dll range, not capped at a fixed vmax.
+  //  - other keys (`loglik_se`, `mean_ess`): linear over the top-K
+  //    range. Long tails in the unselected gray points don't squish
+  //    the displayed gradient.
+  function colorCoord(rowsArr, displayedSet, key) {
+    if (!displayedSet || displayedSet.size === 0) return rowsArr.map(() => 0);
+    const idxs = [...displayedSet];
     if (key === "loglik") {
-      const maxLL = Math.max(...vals);
-      const deltas = rowsArr.map((r) =>
-        Number.isFinite(r.loglik) ? Math.max(maxLL - r.loglik, 1e-3) : NaN);
-      const finiteDelt = deltas.filter(Number.isFinite);
-      const lo = Math.min(...finiteDelt);
-      const hi = Math.max(...finiteDelt);
-      if (hi <= lo) return deltas.map(() => 0);
-      return deltas.map((d) =>
-        Number.isFinite(d) ? (Math.log(d) - Math.log(lo)) / (Math.log(hi) - Math.log(lo)) : 0);
-    } else {
-      const lo = Math.min(...vals);
-      const hi = Math.max(...vals);
+      // Best loglik over all rows (so abs_dll is anchored to the
+      // global best, not the displayed-set best).
+      const allLLs = rowsArr.map((r) => r.loglik).filter(Number.isFinite);
+      if (!allLLs.length) return rowsArr.map(() => 0);
+      const maxLL = Math.max(...allLLs);
+      const FLOOR = 0.5;
+      const topAbs = idxs.map((k) => {
+        const v = rowsArr[k].loglik;
+        return Number.isFinite(v) ? Math.max(maxLL - v, FLOOR) : null;
+      }).filter((d) => d !== null);
+      if (!topAbs.length) return rowsArr.map(() => 0);
+      const lo = Math.min(...topAbs);
+      const hi = Math.max(...topAbs);
       if (hi <= lo) return rowsArr.map(() => 0);
-      return rowsArr.map((r) =>
-        Number.isFinite(r[key]) ? (r[key] - lo) / (hi - lo) : 0);
+      const logLo = Math.log(lo);
+      const span = Math.log(hi) - logLo;
+      return rowsArr.map((r) => {
+        if (!Number.isFinite(r.loglik)) return 0;
+        const d = Math.max(maxLL - r.loglik, FLOOR);
+        return clamp01((Math.log(d) - logLo) / span);
+      });
     }
+    // Linear normalisation over the displayed-set range.
+    const topVals = idxs
+      .map((k) => rowsArr[k][key])
+      .filter(Number.isFinite);
+    if (!topVals.length) return rowsArr.map(() => 0);
+    const lo = Math.min(...topVals);
+    const hi = Math.max(...topVals);
+    if (hi <= lo) return rowsArr.map(() => 0);
+    return rowsArr.map((r) => {
+      const v = r[key];
+      return Number.isFinite(v) ? clamp01((v - lo) / (hi - lo)) : 0;
+    });
   }
 
   // ── Rebuild the pair-plot from the current top-K + color-by ─────
@@ -118,8 +148,11 @@
       return "gray";
     };
 
-    // Color coords for the off-diagonal viridis layer (top-K only).
-    const cc = colorCoord(rows, colorKey);
+    // Color coords for the off-diagonal viridis layer. Normalised
+    // over the displayed top-K (greenIdx) — not all rows — so the
+    // full viridis range exercises across the colored points
+    // regardless of whether the unselected tail is short or heavy.
+    const cc = colorCoord(rows, greenIdx, colorKey);
 
     const traces = [];
     const layout = {
