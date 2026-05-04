@@ -20,11 +20,11 @@ ODE — and we burn 100×–1000× more compute than necessary.
 This proposal adds three new algorithm-explicit stage methods to fit.toml, each
 implicitly running on the ODE backend:
 
-| Method         | Algorithm                                                        | Phase | LOC  |
-| -------------- | ---------------------------------------------------------------- | ----- | ---- |
-| `Stage::NLopt` | Deterministic MLE via NLopt (Sbplx default)                      | 1     | ~400 |
-| `Stage::MH`    | Vanilla Metropolis-Hastings on deterministic marginal likelihood | 2     | ~300 |
-| `Stage::NUTS`  | Gradient-based Bayesian via NUTS + forward sensitivity ODE       | 3     | ~500 |
+| `algorithm`              | Backend       | Description                                                                | Phase | LOC  |
+| ------------------------ | ------------- | -------------------------------------------------------------------------- | ----- | ---- |
+| `nl-sbplx` / `nl-bobyqa` | `ode`         | Deterministic MLE via NLopt; Sbplx default, BOBYQA for smooth objectives   | 1     | ~550 |
+| `mh`                     | `ode`         | Vanilla Metropolis-Hastings on deterministic marginal likelihood           | 2     | ~300 |
+| `nuts`                   | `ode`         | Gradient-based Bayesian via NUTS + forward sensitivity ODE                 | 3     | ~600 |
 
 Existing methods (`if2`, `pgas`, `pmmh`) keep their current chain_binomial PF
 semantics unchanged. The two paths coexist; users pick the algorithm that
@@ -117,123 +117,321 @@ This proposal incorporates all four corrections explicitly.
 
 ## Architecture
 
-### Three new stage methods, additive
+### Tuple schema: `algorithm` + `backend` (replaces `method`)
 
-Stage names are user-chosen — the examples below use `scout` / `refine` /
-`posterior` to mirror existing fit.toml conventions, but any name works.
-Existing `[stages.scout]` blocks with `method = "if2"` keep their names
-with no migration required; the new methods are purely additive.
+The fit.toml `method = "..."` field smuggled `(algorithm, implicit-backend)`
+pairs into a single value — `method = "if2"` always meant chain_binomial,
+`method = "pgas"` always meant chain_binomial. With ODE inference adding a
+second backend, the smuggling becomes visible and confusing: a user reading
+`method = "nl-sbplx"` shouldn't have to remember "wait, does that mean ODE?"
+
+This proposal replaces `method` with two explicit fields:
 
 ```toml
-# Existing — unchanged, stochastic chain_binomial PF
+[stages.<name>]
+algorithm = "..."   # what optimizer/sampler runs
+backend   = "..."   # what simulator computes the likelihood
+# rest of the algorithm-specific fields...
+```
+
+Stage names stay user-chosen — examples below use `scout` / `refine` /
+`posterior` to mirror conventional fit.toml structure, but any name works.
+
+```toml
+# Existing semantics — unchanged behavior, new schema
 [stages.scout]
-method = "if2"
-chains = 8
-particles = 200
-iterations = 50
-init_method = "lhs" # gh#42
+algorithm = "if2"
+backend   = "chain_binomial"
+chains      = 8
+particles   = 200
+iterations  = 50
+init_method = "lhs"   # gh#42
 
-# NEW — Phase 1: deterministic MLE via NLopt
-[stages.scout]                   # OR a different name; what changes is
-method = "nlopt"                 # the `method`, not the stage label
-algorithm = "sbplx" # bobyqa | sbplx | cobyla | isres | crs2
-chains = 8 # LHS-drawn multi-start, take best
-tolerance = 1e-6 # xtol_rel
-max_evals = 5000 # per-chain budget
-init_method = "lhs" # default; same dispatcher as gh#42
+# Phase 1: deterministic MLE via NLopt + Sbplx
+[stages.scout]
+algorithm = "nl-sbplx"            # default; nl-bobyqa for smooth objectives
+backend   = "ode"
+chains      = 8                    # LHS-drawn multi-start, take best
+tolerance   = 1e-6                 # xtol_rel
+max_evals   = 5000                 # per-chain budget
+init_method = "lhs"
 
-# NEW — Phase 2: deterministic Bayesian via vanilla MH
+# Phase 2: deterministic Bayesian via vanilla MH
 [stages.posterior]
-method = "mh"
-chains = 4
-iterations = 50000
-burn_in = 5000
-thin = 5
-adapt = true # adaptive Metropolis (Haario et al. 2001)
+algorithm = "mh"
+backend   = "ode"
+chains      = 4
+iterations  = 50000
+burn_in     = 5000
+thin        = 5
+adapt       = true
 adapt_start = 2000
 init_method = "lhs"
 
-# NEW — Phase 3: deterministic Bayesian via NUTS (gradient-based)
+# Phase 3: deterministic Bayesian via NUTS (gradient-based)
 [stages.posterior]
-method = "nuts"
-chains = 4
-warmup = 1000
-samples = 1000
-dense_mass = true # full covariance preconditioner
+algorithm = "nuts"
+backend   = "ode"
+chains      = 4
+warmup      = 1000
+samples     = 1000
+dense_mass  = true
 max_tree_depth = 10
 init_method = "lhs"
 ```
 
-### Why naming the algorithm rather than the backend
+### Valid `(algorithm, backend)` combinations
 
-The backend choice is **structurally bound** to the algorithm — there's no
-chain_binomial-MH that makes inference sense (you'd get an unbiased noisy
-estimator of `log p(y|θ)`, but then PMMH already does that better with the PF).
-Treating ODE as implicit-with-method makes the user-facing decision tree
-cleaner:
+The matrix is sparse — algorithms structurally require a specific backend:
 
-> "Which algorithm matches my inference question?"
+| Algorithm    | chain_binomial | ode | Status |
+|---|---|---|---|
+| `if2`        | ✓              | ✗   | stable |
+| `pgas`       | ✓              | ✗   | stable |
+| `pmmh`       | ✓              | ✗   | experimental |
+| `nl-sbplx`   | ✗              | ✓   | beta (Phase 1) |
+| `nl-bobyqa`  | ✗              | ✓   | beta (Phase 1) |
+| `mh`         | ✗              | ✓   | beta (Phase 2) |
+| `nuts`       | ✗              | ✓   | experimental (Phase 3) |
 
-rather than the matrix:
+Why each `✗`:
 
-> "Which method × which backend × which gradient strategy?"
+- `if2`/`pgas`/`pmmh` + `ode`: PF-based algorithms need stochastic process variance to compute their objectives. Under ODE all particles produce identical trajectories per θ; the algorithms collapse to noisy / degenerate variants of themselves.
+- `nl-sbplx`/`nl-bobyqa` + `chain_binomial`: deterministic optimizers operating on a stochastic objective (single-trajectory loglik) get a noisy ranking signal — IF2 is the right tool for that case.
+- `mh` + `chain_binomial`: vanilla MH on a stochastic likelihood gives biased posteriors (PF wrapping is exactly what makes PMMH unbiased).
+- `nuts` + `chain_binomial`: gradients become noisy under PF wrapping; PGAS handles this by integrating NUTS into a Gibbs sweep over trajectories, but vanilla NUTS-on-stochastic isn't a coherent algorithm.
+
+Two completely disjoint subsets — that's not coincidence, it reflects the structural truth that PF-based methods need stochasticity and gradient-/exact-likelihood methods need determinism.
+
+### Single source of truth: `METHODS` registry
+
+The matrix lives once in code, not duplicated across the validator, error messages, `--help` output, docs:
+
+```rust
+// rust/crates/cli/src/fit/methods.rs (new module)
+
+#[derive(Debug, Clone, Copy)]
+pub enum MethodStatus {
+    /// Validated against published / vignette use cases; production-ready.
+    Stable,
+    /// Shipped and exercised but downstream validation still accumulating.
+    /// Surfaced as "BETA"; runtime banner names the caveat.
+    Beta,
+    /// Known limitations that affect correctness in some regime.
+    /// Surfaced as "EXPERIMENTAL"; runtime banner is loud.
+    Experimental,
+}
+
+pub struct InferenceMethod {
+    pub algorithm: &'static str,
+    pub backend: &'static str,
+    pub status: MethodStatus,
+    pub one_liner: &'static str,
+    pub description: &'static str,
+    pub status_note: &'static str,   // banner text for Beta/Experimental
+}
+
+pub const METHODS: &[InferenceMethod] = &[
+    InferenceMethod {
+        algorithm: "if2",   backend: "chain_binomial",
+        status: MethodStatus::Stable,
+        one_liner: "Iterated filtering MLE",
+        description: "...",
+        status_note: "",
+    },
+    InferenceMethod {
+        algorithm: "pmmh",  backend: "chain_binomial",
+        status: MethodStatus::Experimental,
+        one_liner: "Pseudo-marginal MH",
+        description: "...",
+        status_note:
+            "PMMH acceptance rates degrade for T > 500 observations. \
+             Correlated pseudo-marginal (rho config) helps but has \
+             limits on discrete-state models. PGAS is the production \
+             Bayesian path.",
+    },
+    // ... 5 more entries — see Phase 1/2/3 sections for exact text
+];
+
+/// Validate (algorithm, backend) at config-load time.
+pub fn validate_combo(algo: &str, backend: &str)
+    -> Result<&'static InferenceMethod, String> { ... }
+
+/// Render the matrix table for `camdl fit methods` and error messages.
+pub fn render_matrix() -> String { /* iterates METHODS, formats */ }
+```
+
+Adding a new algorithm = one entry in `METHODS` plus its dispatcher arm. The validator, runtime status banner, error messages, and `camdl fit methods` output all read from the same list.
+
+### `camdl fit methods` subcommand
+
+A new top-level subcommand renders the registry as a user-facing reference:
+
+```
+$ camdl fit methods
+
+CHAIN_BINOMIAL backend (stochastic process kernel)
+
+  algorithm = "if2"           [stable]
+    Iterated filtering MLE — perturbation-and-filter loop.
+    Use for: scout/refine pipelines on stochastic models.
+
+  algorithm = "pgas"          [stable]
+    Particle Gibbs + NUTS-on-θ; production Bayesian path.
+
+  algorithm = "pmmh"          [experimental]
+    Pseudo-marginal MH. ⚠ acceptance degrades for T > 500 obs;
+    PGAS is the production Bayesian path.
+
+ODE backend (deterministic skeleton; new in this release)
+
+  algorithm = "nl-sbplx"      [beta — default deterministic MLE]
+    Sbplx via NLopt — Nelder-Mead variant, robust to boundary
+    non-smoothness. Phase 1 typhoid validation passed; other model
+    classes still gathering downstream feedback.
+
+  algorithm = "nl-bobyqa"     [beta]
+    BOBYQA via NLopt — quadratic-trust-region. ⚠ requires smooth
+    objective in search box; fails at parameter-bound boundaries
+    where Sbplx succeeds.
+
+  algorithm = "mh"            [beta]
+    Vanilla MH; deterministic Bayesian. Adaptive covariance from
+    PMMH; recommend adapt_start = max(1000, 200·d).
+
+  algorithm = "nuts"          [experimental]
+    Gradient-based Bayesian via forward-sensitivity ODE. ⚠ reactive
+    interventions not supported; hierarchical models with d > 30
+    untested (forward-mode AD cost).
+
+Methods compute different statistical objects across backends:
+  chain_binomial → p(y|θ) under stochastic process noise
+  ode           → p(y|θ, ODE_skeleton) — Jensen's inequality bias
+In low-noise regimes these converge empirically. See
+docs/inference.md §"Two likelihoods" for guidance.
+```
+
+### Invalid-combination error template
+
+When `validate_combo` rejects, the error message names the structural reason and points at the right alternative:
+
+```
+error: stage 'scout' has algorithm = "if2" with backend = "ode", which is not
+       a supported inference method.
+
+       IF2 (Iterated Filtering 2) is a particle-filter-based MLE algorithm.
+       It perturbs parameters across particles and uses the between-particle
+       trajectory variance to drive the optimization. Under the ODE backend
+       all particles produce identical trajectories per parameter point —
+       there is no between-particle variance for IF2 to exploit. The
+       algorithm collapses to a noisy gradient-free hill-climber that is
+       structurally a worse optimizer than the deterministic alternatives.
+
+       If you want MLE on the ODE backend, use:
+         algorithm = "nl-sbplx"   default deterministic MLE; robust to
+                                  boundary non-smoothness
+         algorithm = "nl-bobyqa"  faster than Sbplx on smooth objectives
+
+       Supported (algorithm, backend) pairs:
+         (if2,       chain_binomial)  Iterated filtering MLE (stochastic)
+         (pgas,      chain_binomial)  Particle Gibbs Bayesian
+         (pmmh,      chain_binomial)  Pseudo-marginal MH; experimental
+         (nl-sbplx,  ode)             Deterministic MLE; Sbplx (default)
+         (nl-bobyqa, ode)             Deterministic MLE; BOBYQA
+         (mh,        ode)             Vanilla MH; deterministic Bayesian
+         (nuts,      ode)             Gradient-based Bayesian via NUTS
+
+       Note: camdl computes a different statistical object on each backend
+       (chain_binomial → p(y|θ); ode → p(y|θ, ODE_skeleton)). In low-noise
+       regimes these converge empirically. See docs/inference.md
+       §"Two likelihoods" for guidance.
+```
+
+The "specific structural reason" line varies per invalid pair (5–6 distinct rejection reasons total for the 7 valid + N invalid combos), pulled from a small lookup table keyed by `(algorithm, backend)`.
 
 ### Mixed-mode pipelines
 
 `starts_from` handoff works across algorithm-mode boundaries:
 
 ```toml
-[stages.scout]   method = "nlopt" ...    # fast deterministic MLE for basin-finding
-[stages.refine]  method = "if2"   ...    starts_from = "scout"  # stochastic refinement
-[stages.posterior] method = "pgas" ...   starts_from = "refine"  # stochastic Bayesian
+[stages.scout]
+algorithm = "nl-sbplx"
+backend   = "ode"
+
+[stages.refine]
+algorithm    = "if2"
+backend      = "chain_binomial"
+starts_from  = "scout"   # stochastic refinement from deterministic basin
+
+[stages.posterior]
+algorithm    = "pgas"
+backend      = "chain_binomial"
+starts_from  = "refine"
 ```
 
 or the reverse:
 
 ```toml
-[stages.scout]   method = "if2"    ...
-[stages.refine]  method = "nlopt"  ...   starts_from = "scout"   # deterministic polish
+[stages.scout]
+algorithm = "if2"
+backend   = "chain_binomial"
+
+[stages.refine]
+algorithm    = "nl-sbplx"
+backend      = "ode"
+starts_from  = "scout"   # deterministic polish of stochastic MLE
 ```
 
-The handoff just consumes prior `fit_state.toml` for `start_values`; the
-consumer doesn't care what algorithm produced them. This composes naturally and
-lets users build pipelines that play to each algorithm's strengths.
+The handoff consumes prior `fit_state.toml` for `start_values`; the consumer doesn't care what algorithm/backend produced them. Composes naturally; lets users build pipelines that play to each algorithm's strengths.
 
 ### CAS / RunKind integration
 
-Each new method gets a `Stage::*` enum variant in `config_v2.rs` and a
-`MethodKind::*` in `run_meta.rs`. The existing `RunKind::FitStage` discriminator
-already carries the method tag — no new top-level RunKind variants needed.
-Provenance hashing extends naturally (each new stage variant gets its own
-canonical `identity_payload()` / `non_identity_payload()` partition).
+`Stage` carries the new `algorithm` + `backend` tuple plus algorithm-specific
+knobs as flat fields (chains, iterations, tolerance, etc.). `MethodKind` in
+`run_meta.rs` becomes `{ algorithm: String, backend: String }` instead of a
+single tag. The existing `RunKind::FitStage` discriminator already carries the
+method tag — no new top-level RunKind variants needed. Provenance hashing
+extends naturally: the canonical `identity_payload()` includes both
+`algorithm` and `backend`, so two stages with the same algorithm but different
+backends hash to different cache keys (correct — they compute different
+likelihoods).
 
-## Phase 1 — `Stage::NLopt`
+## Phase 1 — `nl-sbplx` and `nl-bobyqa`
 
 ### Scope
 
 Deterministic MLE via NLopt over the ODE marginal likelihood. The biggest single
 use case (profile likelihood, scout-MLE basin finding, equilibrium fitting).
-Validates the cross-cutting algorithm-replacement architecture against a real
-worked example before Phase 2/3 scale it.
+Validates the cross-cutting tuple-schema architecture against a real worked
+example before Phase 2/3 scale it.
 
-### Algorithm and defaults
+### Algorithms shipped
 
 NLopt crate (`nlopt = "0.8"`, MIT-licensed Rust wrapper around Steven Johnson's
-C library). Five algorithms exposed in v1:
+C library). Two algorithms surfaced as `algorithm` values in v1:
 
-| Flag     | NLopt name   | Use case                                                                      | Default? |
-| -------- | ------------ | ----------------------------------------------------------------------------- | -------- |
-| `sbplx`  | `LN_SBPLX`   | Robust to boundary non-smoothness; safe default for compartmental likelihoods | ✓        |
-| `bobyqa` | `LN_BOBYQA`  | When objective is known smooth — faster on those                              |          |
-| `cobyla` | `LN_COBYLA`  | Active linear-inequality constraints (rare)                                   |          |
-| `isres`  | `GN_ISRES`   | Global multi-modal "is this the basin?" pass                                  |          |
-| `crs2`   | `GN_CRS2_LM` | Global controlled random search; faster than ISRES                            |          |
+| `algorithm` value | NLopt name  | Use case                                                                                            |
+| ----------------- | ----------- | --------------------------------------------------------------------------------------------------- |
+| `nl-sbplx`        | `LN_SBPLX`  | Default deterministic MLE; Nelder-Mead variant robust to boundary non-smoothness                     |
+| `nl-bobyqa`       | `LN_BOBYQA` | Quadratic-trust-region; faster than Sbplx on smooth objectives, fails at parameter-bound boundaries  |
 
-Sbplx default per the closed gh#40 review's correct point: compartmental
+Sbplx is the default per the closed gh#40 review's correct point: compartmental
 likelihoods are smooth in the interior of the parameter box but non-smooth at
 boundaries (degenerate states) and where event timing depends on parameter
-values. BOBYQA's quadratic trust region fails badly in those regions; Sbplx
-(Nelder-Mead variant) doesn't.
+values. BOBYQA's quadratic trust region fails badly in those regions.
+
+**Cut from the closed-gh#40 list** (deferred until a real use case shows up):
+
+- `cobyla` — constrained optimization is rare in compartmental models
+- `isres` / `crs2` — global multi-modal optimizers; `camdl survey` already
+  serves the global-exploration role better (LHS coverage + pair-plot
+  diagnostics + filter-health columns). Adding global optimizers as
+  `algorithm` values would be redundant with the survey-then-NLopk-from-top-K
+  workflow we've been building.
+
+If global optimization is genuinely needed later, `nl-crs2` is a one-line addition
+(new `METHODS` entry + `nlopt::Algorithm::Crs2Lm` mapping). Two for v1 keeps the
+matrix tight and surfaces only what works.
 
 ### Multi-start
 
@@ -330,17 +528,37 @@ and a NLopt-side one that bypasses survey).
 `Capabilities::OVERDISPERSION` already structurally rejects overdispersed models
 from running on ODE — see `crates/sim/src/lib.rs`. The dispatch layer scans
 `CompiledModel::required_capabilities()` and rejects backend-mismatched models
-before inference starts. So a model using `overdispersed(rate, σ²)` will
-hard-error at fit time with `method = nlopt`. Clear error message:
+before inference starts. With the new tuple schema, this fires at the
+`(algorithm, backend)` validation step:
 
 ```
-error: stage 'scout' uses method=nlopt (deterministic ODE) but the model
-       requires the OVERDISPERSION capability. Methods nlopt/mh/nuts run
-       on the ODE backend, which is not compatible with overdispersed()
-       process noise. Use method=if2/pgas/pmmh for stochastic-process
-       inference, or remove overdispersed() from the rate expressions
-       if the noise is not load-bearing for your inference question.
+error: stage 'scout' has algorithm = "nl-sbplx" with backend = "ode", which
+       is a supported (algorithm, backend) pair — but the model requires
+       the OVERDISPERSION capability that the ode backend does not provide.
+
+       The ode backend produces deterministic trajectories and cannot
+       represent overdispersed process noise. Two options:
+
+         1. Switch to a stochastic algorithm/backend pair:
+              algorithm = "if2"   backend = "chain_binomial"   (MLE)
+              algorithm = "pgas"  backend = "chain_binomial"   (Bayesian)
+
+         2. Remove overdispersed() from the rate expressions if the
+            process noise is not load-bearing for your inference question
+            (i.e. the deterministic skeleton matches your data).
+
+       The two backends compute different statistical objects:
+         chain_binomial → p(y | θ) under stochastic process noise
+         ode           → p(y | θ, ODE_skeleton) — Jensen's inequality bias
+       In low-noise regimes these converge empirically; if your overdispersed
+       term has σ² near zero the skeleton path may be the right call.
 ```
+
+This is one entry in the per-`(algorithm, backend)` rejection-reason lookup
+table referenced under §"Invalid-combination error template" in Architecture.
+The OVERDISPERSION case is one of ~5 distinct rejection reasons; the table
+keys on either the invalid-pair structure or the model-capabilities mismatch
+and renders the matching reason text.
 
 ### Convergence diagnostics for NLopt chains
 
@@ -389,34 +607,52 @@ false-negative-tolerance without missing real basin disagreement.
 
 Spelled out at the dispatch boundary, not lumped under a single `status` string.
 
-### `camdl profile --method nlopt`
+### `camdl profile --algorithm` and `--backend`
 
-Profile gets a `--method` flag that controls per-cell optimization:
+Profile gets `--algorithm` and `--backend` flags that control per-cell
+optimization (mirroring the fit.toml tuple schema):
 
 ```bash
 # Per-cell IF2 (current default, stochastic)
 camdl profile model.camdl --data X.tsv --sweep "omega=log10(1e-5,1e-2,21)"
 
-# Per-cell deterministic NLopt (new)
-camdl profile model.camdl --data X.tsv --sweep "omega=..." --method nlopt
+# Per-cell deterministic NLopt (Phase 1, default Sbplx)
+camdl profile model.camdl --data X.tsv --sweep "omega=..." \
+    --algorithm nl-sbplx --backend ode
 ```
 
-Multi-start per cell uses `--starts N` with LHS-drawn starts (existing
-infrastructure). Per-cell convergence diagnostics use the two-number gate above.
+Per-cell `(algorithm, backend)` validates through the same `methods.rs`
+registry as fit.toml stages — invalid pairs error with the same message
+template. Multi-start per cell uses `--starts N` with LHS-drawn starts
+(existing infrastructure). Per-cell convergence diagnostics use the
+two-number gate above.
 
 ### Implementation outline
 
 Files touched:
 
+- `rust/crates/cli/src/fit/methods.rs` (new) — `MethodStatus` enum,
+  `InferenceMethod` struct, the `METHODS` const registry covering all 7
+  valid `(algorithm, backend)` combos, `validate_combo()`, `render_matrix()`,
+  and the per-pair rejection-reason lookup table for invalid combos. ~150 LOC
+  including all 7 methods' descriptions and status notes. Single source of
+  truth for the validator, error messages, runtime status banners, and
+  `camdl fit methods` output.
 - `rust/crates/sim/src/inference/deterministic.rs` (new) — `optimize_det()`
-  wrapping NLopt; takes a closure for the deterministic forward sim + obs
-  likelihood scoring. Pure function, no global state.
-- `rust/crates/cli/src/fit/config_v2.rs` — add `Stage::NLopt { ... }` variant,
-  defaults, validation, identity/non-identity payload partition.
+  wrapping NLopt; takes the algorithm enum (`NlSbplx | NlBobyqa`), a closure
+  for the deterministic forward sim + obs likelihood scoring. Pure function,
+  no global state.
+- `rust/crates/cli/src/fit/config_v2.rs` — replace `method: String` with
+  `algorithm: String, backend: String` in `Stage`. Validate via
+  `methods::validate_combo()` at config-load time. Algorithm-specific knobs
+  (chains, tolerance, etc.) stay in the same `Stage` struct; the
+  `(algorithm, backend)` pair determines which knobs are read. Identity /
+  non-identity payload partition extends naturally.
 - `rust/crates/cli/src/fit/nlopt_stage.rs` (new) — per-stage runner mirroring
   `pmmh.rs::run_stage`. Dispatches `optimize_det` per chain via rayon, writes
   per-chain `final_params.toml`, aggregates winner, writes `fit_state.toml`.
-- `rust/crates/cli/src/fit/mod.rs` — `Stage::NLopt { .. }` arm in dispatch.
+- `rust/crates/cli/src/fit/mod.rs` — dispatch arm switches on
+  `(algorithm, backend)` tuple instead of single method string.
 - `rust/crates/cli/src/fit/runner.rs` — add a
   `compute_ode_loglik(config, params)` helper alongside the existing
   `run_quick_pfilter`. Not a refactor of any shared seam:
@@ -426,20 +662,31 @@ Files touched:
   snapshots that build a `ParticleState` directly via the existing
   `ode.rs::to_states` rounding path. ~30 LOC for the new helper, ~10 LOC for any
   `Trajectory.snapshots_at` glue.
-- `rust/crates/cli/src/profile.rs` + `args/mod.rs` — `--method` flag, per-cell
-  dispatch.
+- `rust/crates/cli/src/main.rs` + `args/mod.rs` — new `camdl fit methods`
+  subcommand that prints the `render_matrix()` output. ~40 LOC including
+  the clap subcommand + dispatch.
+- `rust/crates/cli/src/profile.rs` + `args/mod.rs` — add `--algorithm`
+  and `--backend` flags (mirroring the fit.toml tuple schema). Per-cell
+  dispatch validates `(algorithm, backend)` through the same
+  `methods::validate_combo()` as fit stages.
 - `rust/crates/cli/src/survey.rs` — reroute `eval_point_simulate` through
   `compute_ode_loglik` instead of the 1-particle bootstrap PF. ~30 LOC
   swap. Bump `SurveyInputs.canonical_hash` version tag so prior
   `--eval simulate` cache entries are invalidated. Update run-start banner
   to name the change so users see what they got.
-- `rust/crates/cli/src/run_meta.rs` — `MethodKind::Nlopt` variant.
+- `rust/crates/cli/src/run_meta.rs` — `MethodKind` becomes
+  `MethodKind { algorithm: String, backend: String }` (was a single tag).
+- Existing fit.toml fixtures and golden files: bulk rename `method = "if2"`
+  → `algorithm = "if2"\nbackend = "chain_binomial"`. Mechanical, ~5–10
+  files, scriptable.
 - Tests: per-stage unit tests; a typhoid integration test as the headline
   diagnostic experiment; a survey regression test that confirms
   `--eval simulate` numbers are within the documented sub-nat bound of the
   prior 1-particle PF values for typhoid-class N (i.e. the behaviour change
   doesn't surprise consumers expecting "deterministic eval" — they get a
-  *more* deterministic eval, not a wildly different one).
+  *more* deterministic eval, not a wildly different one); a validation test
+  that exercises every invalid `(algorithm, backend)` pair through
+  `validate_combo()` and confirms error messages name the right alternative.
 
 Reuse paths:
 
@@ -456,10 +703,18 @@ Reuse paths:
 
 ### Estimated cost
 
-~400 LOC across implementation + ~200 LOC tests, ~1 week including the
-diagnostic experiment and docs.
+~550 LOC across implementation + ~250 LOC tests, ~1.5 weeks including the
+diagnostic experiment and docs. Up from the original ~400 LOC estimate after
+factoring in:
 
-## Phase 2 — `Stage::MH`
+- `methods.rs` registry (~150 LOC) — single source of truth for the
+  `(algorithm, backend)` matrix, status notes, error messages, and
+  `camdl fit methods` output. Pays for itself across all three phases.
+- Tuple-schema migration of fit.toml fixtures and golden files (~50 LOC of
+  test-fixture updates, mostly mechanical).
+- `camdl fit methods` subcommand (~40 LOC) — pure rendering of the registry.
+
+## Phase 2 — `mh` on `ode`
 
 ### Scope
 
@@ -490,14 +745,15 @@ kicks in). The only difference vs PMMH is the likelihood evaluator:
 Defaults:
 
 ```toml
-[stages.posterior_mh]
-method = "mh"
-chains = 4
-iterations = 50000
-burn_in = 5000
-thin = 5
-adapt = true
-adapt_start = 2000 # iter where adaptation kicks in
+[stages.posterior]
+algorithm   = "mh"
+backend     = "ode"
+chains      = 4
+iterations  = 50000
+burn_in     = 5000
+thin        = 5
+adapt       = true
+adapt_start = 2000   # iter where adaptation kicks in
 init_method = "lhs"
 ```
 
@@ -556,7 +812,9 @@ Files touched:
   refactor (file move + `mod` declaration + import update in PMMH).
 - `rust/crates/sim/src/inference/mh_det.rs` (new) — vanilla MH on a
   deterministic-loglik closure, using the relocated `AdaptiveProposal`.
-- `rust/crates/cli/src/fit/config_v2.rs` — `Stage::MH { ... }` variant.
+- `rust/crates/cli/src/fit/config_v2.rs` — register `("mh", "ode")` in
+  `methods.rs::METHODS` plus the MH-specific knobs (chains, iterations,
+  burn_in, thin, adapt, adapt_start) on `Stage`.
 - `rust/crates/cli/src/fit/mh_stage.rs` (new) — per-stage runner.
 - `rust/crates/cli/src/fit/mod.rs` — dispatch arm.
 - `rust/crates/cli/src/run_meta.rs` — `MethodKind::Mh`.
@@ -574,7 +832,7 @@ Reuse:
 
 ~300 LOC implementation + ~150 LOC tests, ~3 days.
 
-## Phase 3 — `Stage::NUTS`
+## Phase 3 — `nuts` on `ode`
 
 ### Scope
 
@@ -783,7 +1041,9 @@ Files touched:
 - `rust/crates/sim/src/inference/det_grad.rs` (new) — assembles
   `(log_prob, gradient)` from sensitivity-solver output + obs likelihood scores.
   ~100 LOC.
-- `rust/crates/cli/src/fit/config_v2.rs` — `Stage::NUTS` variant.
+- `rust/crates/cli/src/fit/config_v2.rs` — register `("nuts", "ode")` in
+  `methods.rs::METHODS` plus NUTS-specific knobs (chains, warmup, samples,
+  dense_mass, max_tree_depth) on `Stage`.
 - `rust/crates/cli/src/fit/nuts_stage.rs` (new) — wraps `nuts.rs` engine with
   the new `det_grad` source. ~150 LOC.
 - `rust/crates/cli/src/fit/mod.rs` — dispatch arm.
@@ -813,7 +1073,9 @@ LOC) needed to avoid NUTS divergences at integer boundaries.
 | `fit::init::build_chain_starts` (LHS)             | gh#42, shipped          | reuse                                  | reuse       | reuse                          |
 | `build_if2_params_from_specs` (bounds resolution) | gh#42-followup, shipped | reuse                                  | reuse       | reuse                          |
 | `Capabilities` dispatch                           | sim crate, existing     | reuse                                  | reuse       | reuse                          |
-| Stage config infrastructure                       | existing                | new variant                            | new variant | new variant                    |
+| Stage config infrastructure                       | existing                | tuple-schema migration + new fields    | extend      | extend                         |
+| `methods.rs` registry (METHODS, validate_combo)   | n/a                     | new (~150 LOC)                         | extend (1 entry) | extend (1 entry)          |
+| `camdl fit methods` subcommand                    | n/a                     | new (~40 LOC)                          | reuse       | reuse                          |
 | Provenance + CAS hashing                          | existing                | extend                                 | extend      | extend                         |
 | `TraceWriter` (streaming)                         | existing                | n/a (NLopt has no per-iter trace need) | reuse       | reuse                          |
 | Â / ESS / acceptance diagnostics                  | PMMH, existing          | new (det. variant)                     | reuse       | reuse                          |
@@ -822,8 +1084,10 @@ LOC) needed to avoid NUTS divergences at integer boundaries.
 | `nlopt` crate                                     | new dep                 | new                                    | n/a         | n/a                            |
 | Sensitivity-ODE solver                            | n/a                     | n/a                                    | n/a         | new                            |
 
-Net new infrastructure across all three phases: NLopt crate dep, sensitivity-ODE
-solver, three new stage variants. Everything else is reuse or extension.
+Net new infrastructure across all three phases: NLopt crate dep,
+sensitivity-ODE solver, the `methods.rs` registry (single source of truth for
+algorithm + backend combos), the `camdl fit methods` subcommand, and the
+tuple-schema migration of `Stage`. Everything else is reuse or extension.
 
 ## Speedup estimates (rough)
 
@@ -914,8 +1178,8 @@ The runtime banner when a stage's `starts_from` crosses a likelihood boundary
 must say so explicitly:
 
 ```
-warning: stage 'refine' (method=if2, stochastic chain_binomial) starts from
-  stage 'scout' (method=nlopt, deterministic ODE). These methods compute
+warning: stage 'refine' (algorithm=if2, backend=chain_binomial) starts from
+  stage 'scout' (algorithm=nl-sbplx, backend=ode). These methods compute
   different statistical objects (p(y|θ) vs p(y|θ, ODE_skeleton)). The
   starting point is taken as-is; this stage's convergence diagnostics
   (Â, decibans-spread) are independent and must be evaluated from
