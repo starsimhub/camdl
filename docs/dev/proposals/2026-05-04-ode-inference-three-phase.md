@@ -119,9 +119,14 @@ This proposal incorporates all four corrections explicitly.
 
 ### Three new stage methods, additive
 
+Stage names are user-chosen — the examples below use `scout` / `refine` /
+`posterior` to mirror existing fit.toml conventions, but any name works.
+Existing `[stages.scout]` blocks with `method = "if2"` keep their names
+with no migration required; the new methods are purely additive.
+
 ```toml
 # Existing — unchanged, stochastic chain_binomial PF
-[stages.scout_stochastic]
+[stages.scout]
 method = "if2"
 chains = 8
 particles = 200
@@ -129,8 +134,8 @@ iterations = 50
 init_method = "lhs" # gh#42
 
 # NEW — Phase 1: deterministic MLE via NLopt
-[stages.scout_det]
-method = "nlopt"
+[stages.scout]                   # OR a different name; what changes is
+method = "nlopt"                 # the `method`, not the stage label
 algorithm = "sbplx" # bobyqa | sbplx | cobyla | isres | crs2
 chains = 8 # LHS-drawn multi-start, take best
 tolerance = 1e-6 # xtol_rel
@@ -138,18 +143,18 @@ max_evals = 5000 # per-chain budget
 init_method = "lhs" # default; same dispatcher as gh#42
 
 # NEW — Phase 2: deterministic Bayesian via vanilla MH
-[stages.posterior_mh]
+[stages.posterior]
 method = "mh"
 chains = 4
 iterations = 50000
 burn_in = 5000
 thin = 5
 adapt = true # adaptive Metropolis (Haario et al. 2001)
-adapt_start = 500
+adapt_start = 2000
 init_method = "lhs"
 
 # NEW — Phase 3: deterministic Bayesian via NUTS (gradient-based)
-[stages.posterior_nuts]
+[stages.posterior]
 method = "nuts"
 chains = 4
 warmup = 1000
