@@ -211,7 +211,7 @@ error: stage 'scout' uses method=nlopt (deterministic ODE) but the model
 
 IF2's compound gate (chain-agreement Â on iteration trajectories + decibans-spread across chains) doesn't carry over directly — NLopt chains are deterministic optimizers, not stochastic chains, so iteration-trajectory Â is undefined. The intent generalizes:
 
-- **Leg 1: did chains agree on the basin?** Compare final parameter vectors across N starts. Two-number gate: relative range vs bound width AND absolute range. Refuse only if both exceed thresholds.
+- **Leg 1: did chains agree on the basin?** Compare final parameter vectors across N starts. Two-number gate: relative range vs bound width AND absolute range. Refuse only if **both** exceed thresholds.
 - **Leg 2: was the agreed basin actually good?** Loglik spread across N converged chains (decibans). Same threshold semantics as IF2.
 
 Verdict line UX matches IF2's:
@@ -220,6 +220,17 @@ Verdict line UX matches IF2's:
 chain-agreement: rel range = X% bound | abs range = Y nat. units   ✓/✗
 loglik-eval:     Δ = X dB / threshold Y dB                         ✓/✗
 ```
+
+**First-pass thresholds** (placeholder values; calibrated against the typhoid diagnostic experiment before merge):
+
+| Constant | Initial value | Source |
+|---|---|---|
+| `DET_REL_RANGE_THRESH` | 0.05 (5% of bound width) | matches IF2's "tight cluster" intuition |
+| `DET_ABS_RANGE_FACTOR` | 2× the within-chain xtol_rel × parameter scale | so absolute spread within numerical noise of the optimizer is OK |
+| `DET_DECIBANS_THRESH` | 30.0 nats (matches IF2's `decibans_thresh`) | tail-area heuristic |
+| Refusal rule | rel-range > 0.05 **AND** abs-range > 2× xtol-implied scale | both must fire to refuse |
+
+The diagnostic experiment is the primary calibration: run typhoid scout under NLopt, observe the spread across 8 chains, set thresholds at 2–3× the observed spread on a known-good fit. If the empirical chain spread on a converged typhoid scout is e.g. 1.2% of bound width, threshold at 5% leaves comfortable room for false-negative-tolerance without missing real basin disagreement.
 
 ### NLopt success-state semantics
 
@@ -250,7 +261,7 @@ Files touched:
 - `rust/crates/cli/src/fit/config_v2.rs` — add `Stage::NLopt { ... }` variant, defaults, validation, identity/non-identity payload partition.
 - `rust/crates/cli/src/fit/nlopt_stage.rs` (new) — per-stage runner mirroring `pmmh.rs::run_stage`. Dispatches `optimize_det` per chain via rayon, writes per-chain `final_params.toml`, aggregates winner, writes `fit_state.toml`.
 - `rust/crates/cli/src/fit/mod.rs` — `Stage::NLopt { .. }` arm in dispatch.
-- `rust/crates/cli/src/fit/runner.rs` — minor: factor out `build_obs_eval_closure()` so deterministic-stage code can reuse it.
+- `rust/crates/cli/src/fit/runner.rs` — add a `compute_ode_loglik(config, params)` helper alongside the existing `run_quick_pfilter`. Not a refactor of any shared seam: `MultiStreamObsModel::log_likelihood(state, obs_idx, params)` is already cleanly separated from PF particle indexing — it just needs a `ParticleState` (counts + flow_accumulators), and the existing `OdeSim::run` produces snapshots that build a `ParticleState` directly via the existing `ode.rs::to_states` rounding path. ~30 LOC for the new helper, ~10 LOC for any `Trajectory.snapshots_at` glue.
 - `rust/crates/cli/src/profile.rs` + `args/mod.rs` — `--method` flag, per-cell dispatch.
 - `rust/crates/cli/src/run_meta.rs` — `MethodKind::Nlopt` variant.
 - Tests: per-stage unit tests + a typhoid integration test as the headline diagnostic experiment.
@@ -300,9 +311,11 @@ iterations  = 50000
 burn_in     = 5000
 thin        = 5
 adapt       = true
-adapt_start = 500   # iter where adaptation kicks in
+adapt_start = 2000  # iter where adaptation kicks in
 init_method = "lhs"
 ```
+
+**`adapt_start = 2000` rationale**: Haario adaptation needs enough samples per dimension to estimate the sample covariance reliably. At d=8 estimated parameters, 2000 iters → ~250 samples per dimension before the sample covariance becomes the proposal — enough for a stable Cholesky. PMMH's existing default of 300 was tuned for low-dimensional problems and is too aggressive for d > 5; we want the new default to behave reasonably at d ~ 10. The user-facing `--help` text should note that for d > 10 they may want `adapt_start = 200 × d` and that hierarchical models with many shared hyperparameters should bump this further. Stan's NUTS gets away with much shorter warmups because its trajectory length absorbs adaptation noise; vanilla MH random-walk has no such cushion.
 
 ### Per-eval cost vs PMMH
 
@@ -326,7 +339,8 @@ Before merge: same typhoid case as Phase 1. Run `method = mh` posterior. Compare
 ### Implementation outline
 
 Files touched:
-- `rust/crates/sim/src/inference/mh_det.rs` (new) — vanilla MH on a deterministic-loglik closure. Reuses Haario adaptive-covariance machinery from `pmmh.rs::adaptive` (factor it out into shared module).
+- `rust/crates/sim/src/inference/adaptive_metropolis.rs` (new) — move the existing `AdaptiveProposal` struct from `pmmh.rs:117-179` here verbatim. The struct is already self-contained (Welford online mean + covariance, Cholesky factor, `sample_perturbation` + `update`); zero entanglement with PMMH's pseudo-marginal acceptance logic — its two integration points in PMMH are `ap.sample_perturbation(...)` for proposal generation and `ap.update(&theta_transformed)` after each step. ~10 LOC of mechanical refactor (file move + `mod` declaration + import update in PMMH).
+- `rust/crates/sim/src/inference/mh_det.rs` (new) — vanilla MH on a deterministic-loglik closure, using the relocated `AdaptiveProposal`.
 - `rust/crates/cli/src/fit/config_v2.rs` — `Stage::MH { ... }` variant.
 - `rust/crates/cli/src/fit/mh_stage.rs` (new) — per-stage runner.
 - `rust/crates/cli/src/fit/mod.rs` — dispatch arm.
@@ -372,16 +386,39 @@ dS/dt = (∂f/∂x)·S + ∂f/∂θ    (sensitivity ODE — new)
 where `f = stoichiometry · rates(x, θ)`. So:
 
 - `∂f/∂θ = stoichiometry · ∂rates/∂θ` — direct from existing `rate_grad`.
-- `∂f/∂x = stoichiometry · ∂rates/∂x` — needs new emission alongside `rate_grad`. Same recursion structure in `autodiff.ml`. ~50 LOC OCaml.
+- `∂f/∂x = stoichiometry · ∂rates/∂x` — needs new emission alongside `rate_grad`. Same recursion structure in `autodiff.ml`. **~50–100 LOC OCaml depending on how the existing `autodiff.ml` represents its "with respect to" target** — if already parameterised over the differentiation target, ~50 LOC to add a `Pop(C_k)` case to the recursion; if the target is hardcoded to `Param`, ~100+ LOC to thread a generic target through. We'd verify which case applies by reading `autodiff.ml` before Phase 3 starts; the LOC estimate doesn't change merge readiness either way.
 
 Then chain rule at obs times:
 
 - `∂log p(y_t|x_t) / ∂x_t` — score function of the obs distribution. Closed form per distribution; mostly already in `obs_loglik.rs`.
 - Multiply: `∂log p / ∂θ = (∂log p/∂x) · S(t)` at each obs time, sum.
 
+### Real-valued obs evaluation (load-bearing for NUTS)
+
+Phase 1 uses the existing obs-eval path which expects `ParticleState.counts: Vec<i64>` — ODE state gets rounded at snapshot time before the obs likelihood is evaluated. For Phase 1 (NLopt, gradient-free) and Phase 2 (MH on the rounded loglik) this is fine: at typhoid-scale Poisson rates (`λ ≈ 500,000`) the rounding-induced loglik change is `~10⁻⁶`, deep in the optimizer's numerical noise floor.
+
+For Phase 3 (NUTS), rounding is **not** acceptable. The gradient sees a piecewise-constant function of the continuous ODE state wherever rounding snaps to the next integer, which is undefined-derivative at every integer boundary. NUTS will not handle this gracefully — expect spurious divergences clustering at integer boundaries, especially in low-count regimes.
+
+**Design decision: Phase 3 uses continuous obs evaluation, no rounding.** The obs likelihood expressions natively accept real-valued state — Poisson `log p(y|λ)` works for any positive `λ`, NegBin `(μ, k)` for positive `μ`, Normal `(μ, σ)` for any real `μ`. The path forward is to extend the obs eval entry point so it can take `f64`-valued compartment counts, then bypass the rounding step that the Phase 1/2 path uses.
+
+camdl already has the right infrastructure pattern for this: `EvalCtx.int_float_override` (`crates/sim/src/ode.rs:64`). The ODE solver uses this to evaluate rate expressions at full f64 compartment values during substeps without rounding through `IntState`. Phase 3 extends the same pattern to obs eval: a parallel `MultiStreamObsModel::log_likelihood_continuous(real_counts: &[f64], ...)` entry point that uses `int_float_override` to evaluate the obs expressions at the unrounded ODE state.
+
+**Cost**: ~100–150 LOC to plumb the override through `eval_likelihood_resolved` and the projection helpers, plus a parallel `with_scratch_real_from_counts` helper. Not surfaced in the original LOC estimate; revising Phase 3 cost upward by ~150 LOC (now ~600–650 LOC total).
+
+For Phase 1 / Phase 2, the rounded path stays — it's correct for those algorithms and reuses the existing `ParticleState`-based obs eval verbatim. No work needed there.
+
 ### Sensitivity-ODE solver
 
-State dim grows from `n` (compartments) to `n + n·d` (compartments + sensitivity matrix). For typhoid n=15 compartments, d=8 estimated params: 135 ODEs. Same RK integrator, same step size adaptation. The only sensitivity-specific code is the right-hand-side construction:
+`OdeSim` is already generic over dimension — state is `Vec<f64>` for both `int_vals` and `real_vals` (`crates/sim/src/ode.rs:95-96, 160-161`), with the RK4 stepper iterating over Vec lengths. **No type surgery needed** to support an augmented (n + n·d)-state system; we just allocate a larger Vec.
+
+**Architecture decision: Option A (wrapper) for v1.** Two viable architectures:
+
+- **Option A (wrapper)** — Run the existing state-only `OdeSim` step, then run a separate sensitivity-ODE step with the just-computed state. The sensitivity ODE is linear in S given the state and Jacobians, so it's cheaper than the state ODE; total per-step cost ~2× state-only. Cleaner module boundary; the gradient-correctness validation (finite-diff comparison) can independently inspect state and sensitivity paths. **This is what we ship in v1.**
+- **Option B (stacked)** — Augment state to `[x; S_flat]` length `n + n·d`, single RK4 step over the joint system. Faster (one set of stage evaluations instead of two), but couples state and sensitivity at the stepper level — harder to validate piecewise.
+
+The Option A speed cost is ~10–20% slower at d=8; negligible vs the gradient cost itself. Wrapper boundary lets us swap to Option B later without touching `OdeSim` internals.
+
+State dim under Option A: `n` for the state ODE step + `n·d` for the sensitivity ODE step (run separately). For typhoid n=15, d=8: 15 + 120 = 135 ODEs total per likelihood eval. The sensitivity-specific code is the right-hand-side construction:
 
 ```rust
 fn rhs_with_sensitivity(t: f64, y: &[f64], dy: &mut [f64], ...) {
@@ -453,7 +490,7 @@ Reuse:
 
 ### Estimated cost
 
-~500 LOC implementation + ~200 LOC tests, ~1 week.
+~600–650 LOC implementation + ~200 LOC tests, ~1.5 weeks. Up from the original ~500 LOC estimate after factoring in the real-valued obs eval path (~100–150 LOC) needed to avoid NUTS divergences at integer boundaries.
 
 ## What gets reused vs built new
 
@@ -479,16 +516,18 @@ Net new infrastructure across all three phases: NLopt crate dep, sensitivity-ODE
 
 ## Speedup estimates (rough)
 
-Per typical workflow:
+Per typical workflow. **chain_binomial timings marked O are observed** (from typhoid SIRC vignette at typhoid-issues.md, gh#40 reproducer); deterministic timings marked P are projected from per-eval cost × estimated optimizer convergence count and have not yet been observed end-to-end (that's the diagnostic experiment).
 
-| Workflow | chain_binomial | ODE deterministic | Speedup |
+| Workflow | chain_binomial (O) | ODE deterministic (P) | Speedup |
 |---|---|---|---|
-| 1-D profile likelihood (21 cells × per-cell MLE) | ~10 h | ~5 s | ~7000× |
-| 2-D profile (11×11 cells × per-cell MLE) | ~25 h | ~2 min | ~750× |
-| Joint 8-param scout MLE | ~14 h | ~30 s | ~1700× |
-| Bayesian posterior (4 chains, 1000 effective samples) | PGAS ~24 h | NUTS ~30 s, MH ~10 min | ~2800× / ~140× |
+| 1-D profile likelihood (21 cells × per-cell MLE) | ~6 h (typhoid ω profile, observed) | ~5 s | ~4300× |
+| 2-D profile (11×11 cells × per-cell MLE) | ~25 h (typhoid β-pair, observed) | ~2 min | ~750× |
+| Joint 8-param scout MLE | ~14 h (typhoid SIRC scout, observed) | ~30 s | ~1700× |
+| Bayesian posterior (4 chains, 1000 effective samples) | PGAS ~24 h (projected from PMMH typhoid attempts) | NUTS ~30 s, MH ~10 min | ~2800× / ~140× |
 
 Order of magnitude: **100×–1000× per workflow**. The biggest wins are workflows that iterate the optimizer many times (profile likelihood) or that need long chains (Bayesian posterior with NUTS).
+
+The deterministic projections will be replaced with observed numbers in the proposal's update once the Phase 1 diagnostic experiment runs.
 
 ## Two-likelihoods framing — required user-facing
 
@@ -505,7 +544,7 @@ The non-negotiable framing: **camdl computes a different statistical object unde
 
 - **Reactive interventions under ODE inference** (parameter-dependent event times). Not in typhoid-class endemic-equilibrium use cases; deferable until malaria/reactive-intervention modeling lands.
 - **Hierarchical priors specifically for NLopt MLE.** NLopt is point-estimate inference; hierarchical priors only make sense under MH or NUTS.
-- **Adjoint-mode autodiff for gradients.** Forward-mode sensitivity is `O(d)` extra solves; adjoint is `O(1)`. For `d ~ 10` the difference is small enough to defer; reach for adjoint when `d > 30`.
+- **Adjoint-mode autodiff for gradients.** Forward-mode sensitivity is `O(d)` extra solves; adjoint is `O(1)`. For `d ~ 10` the difference is small enough to defer; reach for adjoint when `d > 30`. **Note for future hierarchical models**: a typhoid-style model with shared hyperparameters across many strata (50 settings × 8 params = `d = 400`) makes forward-mode prohibitive — adjoint becomes mandatory at that scale, not optional. Worth pre-flagging so the future-Phase-4 implementer doesn't rediscover this constraint.
 - **Stiff ODE solvers for Phase 3.** Existing OdeSim's RK integrator is fine for typical compartmental models. Stiff solvers add complexity; defer until a real model needs one.
 - **Mixed PF-and-ODE chains.** A scout=ODE/refine=chain_binomial pipeline works via `starts_from`; we don't try to interleave at finer granularity than stage boundaries.
 - **`--method auto`** that picks between deterministic and stochastic algorithms based on model capabilities. The user should make this choice explicitly per stage; auto-selection on inference algorithm is too high-stakes for silent magic. (Compare to `camdl survey --eval auto` which is fine because survey is diagnostic.)
@@ -522,11 +561,27 @@ If the typhoid case shows MLEs disagree significantly between `method = if2` and
 
 ### Mixed-mode pipelines may behave surprisingly
 
-A user combining deterministic scout with stochastic refine sees scout finding a different basin than refine because they're optimizing different likelihoods. Document this loudly in the `starts_from` cross-mode handoff path: "the prior stage used a different statistical object; this stage starts from there but optimizes its own likelihood — expect drift if the two likelihoods disagree."
+A user combining deterministic scout with stochastic refine sees scout finding a different basin than refine because they're optimizing different likelihoods. The runtime banner when a stage's `starts_from` crosses a likelihood boundary must say so explicitly:
+
+```
+warning: stage 'refine' (method=if2, stochastic chain_binomial) starts from
+  stage 'scout' (method=nlopt, deterministic ODE). These methods compute
+  different statistical objects (p(y|θ) vs p(y|θ, ODE_skeleton)). The
+  starting point is taken as-is; this stage's convergence diagnostics
+  (Â, decibans-spread) are independent and must be evaluated from
+  scratch — do NOT treat scout's convergence verdict as evidence that
+  this stage starts in a good basin for the chain_binomial likelihood.
+```
+
+The downstream stage is required to run its own convergence diagnostics regardless of the upstream stage's verdict. The closed-gh#40 lesson generalises here: convergence on one likelihood is not convergence on another, even when they agree empirically in the bulk of parameter space.
 
 ### Phase 3 OCaml IR schema bump
 
 Adding `state_grad` is backward-compat (missing field means "no NUTS available"), but it does require a schema version bump and golden-file regeneration. Standard procedure per CLAUDE.md (atomic commit: schema + both language changes + golden files together).
+
+### Phase 3 NUTS divergences at integer boundaries
+
+If we accidentally ship Phase 3 against the rounded obs-eval path (Phase 1's), NUTS will diverge at integer boundaries because the gradient is undefined at those discontinuities. Observable as: divergent transitions clustered at small-integer-count regions of parameter space, or systematic underestimation of posterior mass near low-count basins. Mitigation: the Phase 3 design decision (real-valued obs eval, no rounding) explicitly addresses this; the gradient-vs-finite-difference validation in Phase 3's diagnostic experiment will catch any regression to the rounded path. Worth naming as a class of failure to test for explicitly during Phase 3 work.
 
 ## Phasing rationale
 
@@ -550,6 +605,6 @@ Recommended order: Phase 1 → Phase 2 (parallel possible) → Phase 3 after Pha
 
 No phase ships without its diagnostic experiment passing.
 
-## Visual style attribution
+## Prior work attribution
 
-This proposal incorporates the closed gh#40's correct technical observations (Sbplx default, two-likelihoods framing, NLopt success-state semantics, multi-start convergence gate replacement) while correcting its scope mistake (profile-only) and integration mistake (backend-flag vs algorithm-explicit). The closed gh#40 author and reviewer get implicit credit; the substantive design improvements come from the post-merge review, the gh#42 LHS work, and the closed gh#40's PR review thread.
+This proposal incorporates the closed gh#40's correct technical observations (Sbplx default, two-likelihoods framing, NLopt success-state semantics, multi-start convergence gate replacement) while correcting its scope mistake (profile-only) and integration mistake (backend-flag vs algorithm-explicit). The closed gh#40 author and reviewer get implicit credit; the substantive design improvements come from the post-merge review, the gh#42 LHS work, and the closed gh#40's PR review thread. The pressure-test review (Q1/Q2/Q3 coupling-point checks, the rounding-discontinuity observation for NUTS, the `adapt_start` calibration for d > 8) confirmed the approach is buildable as proposed and surfaced the Phase 3 real-valued obs eval requirement that this iteration documents explicitly.
