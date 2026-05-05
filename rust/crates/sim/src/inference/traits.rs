@@ -116,6 +116,15 @@ pub trait ObservationModel<S>: Send + Sync {
     fn mean(&self, _state: &S, _obs_idx: usize, _params: &[f64]) -> Vec<f64> {
         vec![]
     }
+
+    /// Per-stream names for output schemas (paths.tsv columns,
+    /// posterior-predictive labels). Returns one name per stream;
+    /// length must equal `n_streams()`. Default is generic
+    /// `["stream_0", ...]` for impls that don't carry IR-level
+    /// observation names.
+    fn stream_names(&self) -> Vec<String> {
+        (0..self.n_streams()).map(|i| format!("stream_{}", i)).collect()
+    }
 }
 
 /// Extension of ProcessModel for algorithms that need transition density

@@ -210,6 +210,10 @@ fn resolve_int_comp(compiled: &CompiledModel, name: &str) -> Option<usize> {
 
 /// One observation stream.
 struct Stream {
+    /// IR-level observation block name. Used by `stream_names()` for
+    /// output schemas (`paths.tsv` columns, posterior-predictive
+    /// labels). Persisted from `StreamSpec.ir_model.name`.
+    name: String,
     projection: StreamProjection,
     /// Resolved likelihood expression tree (pre-resolved at construction,
     /// but evaluates with params at call time — no baked-in values).
@@ -289,6 +293,7 @@ impl MultiStreamObsModel {
                 &spec.ir_model.likelihood, &compiled,
             )?;
             streams.push(Stream {
+                name: spec.ir_model.name.clone(),
                 projection: spec.projection,
                 resolved,
                 observations: spec.observations,
@@ -392,6 +397,10 @@ impl ObservationModel<ParticleState> for MultiStreamObsModel {
     fn n_observations(&self) -> usize { self.obs_times.len() }
     fn obs_time(&self, obs_idx: usize) -> f64 { self.obs_times[obs_idx] }
     fn n_streams(&self) -> usize { self.streams.len() }
+
+    fn stream_names(&self) -> Vec<String> {
+        self.streams.iter().map(|s| s.name.clone()).collect()
+    }
 
     fn sample(
         &self, state: &ParticleState, _obs_idx: usize,

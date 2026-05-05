@@ -48,6 +48,20 @@ pub struct AncestorTrace {
     pub ancestors: Vec<Vec<usize>>,
     /// Observation times, one per step (matches `states.len()`).
     pub obs_times: Vec<f64>,
+    /// gh#48: per-step per-particle per-stream model-predicted
+    /// observation. `projections[t][i][s] = E[y_s | state_{t,i}, params]`,
+    /// computed via `obs_model.mean(...)` at recording time. Length
+    /// matches `states`. Empty when the obs model doesn't implement
+    /// `mean()` (returns `vec![]`) or when `record_ancestry == false`.
+    /// Carries the model's declared projection through to
+    /// `--save-paths` output so downstream tooling doesn't have to
+    /// reconstruct incidence by finite-differencing compartment
+    /// counts (which is unsafe under event + balance interactions).
+    pub projections: Vec<Vec<Vec<f64>>>,
+    /// Stream names for output schema. Length matches `obs_model.
+    /// n_streams()`. Read from `obs_model.stream_names()` at record
+    /// time; passed through to `SampledPath` for TSV column headers.
+    pub stream_names: Vec<String>,
 }
 
 /// One ancestor-traced sample path from the smoothing distribution.
@@ -57,6 +71,15 @@ pub struct AncestorTrace {
 pub struct SampledPath {
     pub states: Vec<Vec<f64>>,
     pub obs_times: Vec<f64>,
+    /// gh#48: per-step per-stream model-predicted observation, walked
+    /// along the ancestor chain in lockstep with `states`. Length
+    /// matches `states`; inner length matches the trace's
+    /// `stream_names`. Empty when the source trace's `projections`
+    /// is empty.
+    pub projections: Vec<Vec<f64>>,
+    /// Stream names corresponding to the inner index of `projections`.
+    /// Cloned from the source trace.
+    pub stream_names: Vec<String>,
 }
 
 /// Sample `n` trajectory paths from the smoothing distribution
@@ -87,6 +110,14 @@ pub fn sample_paths(
     // separate guard.
     let weights = normalize_log_weights(final_log_w);
 
+    // Projections are recorded only when obs_model implements `mean()`;
+    // a degenerate empty trace (n_obs == 0) is already short-circuited
+    // above. We walk projections in lockstep with states; if the trace
+    // didn't capture any (i.e. `projections.is_empty()`), per-path
+    // projections stay empty and the TSV writer omits stream columns.
+    let has_projections = trace.projections.len() == n_obs
+        && trace.projections.iter().all(|step| step.len() == trace.states[0].len());
+
     let mut paths = Vec::with_capacity(n_paths);
     for _ in 0..n_paths {
         // Pick the final particle by inverse-CDF sampling.
@@ -102,15 +133,28 @@ pub fn sample_paths(
         // into states[t]'s indices and IS the parent of position i
         // at step t+1.
         let mut states = vec![Vec::new(); n_obs];
+        let mut projections = if has_projections {
+            vec![Vec::new(); n_obs]
+        } else {
+            Vec::new()
+        };
         let mut j = j_final;
         states[n_obs - 1] = trace.states[n_obs - 1][j].clone();
+        if has_projections {
+            projections[n_obs - 1] = trace.projections[n_obs - 1][j].clone();
+        }
         for t in (0..n_obs - 1).rev() {
             j = trace.ancestors[t][j];
             states[t] = trace.states[t][j].clone();
+            if has_projections {
+                projections[t] = trace.projections[t][j].clone();
+            }
         }
         paths.push(SampledPath {
             states,
             obs_times: trace.obs_times.clone(),
+            projections,
+            stream_names: trace.stream_names.clone(),
         });
     }
     paths
@@ -150,6 +194,8 @@ mod tests {
             log_weights,
             ancestors,
             obs_times,
+            projections: Vec::new(),
+            stream_names: Vec::new(),
         }
     }
 
@@ -207,6 +253,8 @@ mod tests {
             log_weights: vec![],
             ancestors: vec![],
             obs_times: vec![],
+            projections: vec![],
+            stream_names: vec![],
         };
         assert!(sample_paths(&trace, 10, 0).is_empty());
     }
@@ -224,5 +272,68 @@ mod tests {
         for w in &mut trace.log_weights[2] { *w = f64::NEG_INFINITY; }
         let paths = sample_paths(&trace, 10, 7);
         assert_eq!(paths.len(), 10);
+    }
+
+    // ── Projections walked along ancestor chain (gh#48) ──────────────
+
+    #[test]
+    fn projections_walk_with_states_along_ancestor_chain() {
+        // Build a trace where particle 0 carries projection 100*t at
+        // step t, particle 1 carries 200*t, etc. Identity ancestry
+        // (every chain stays on its own particle index). After
+        // sampling, each path's projections at step t should equal
+        // 100*t × <chosen final particle> — i.e. the projection
+        // walked the chain coherently with the state.
+        let n_obs = 4;
+        let n_particles = 5;
+        let mut trace = make_trace(n_obs, n_particles, 2);
+        // Replace ancestry with identity (i → i).
+        for t in 0..n_obs - 1 {
+            for i in 0..n_particles {
+                trace.ancestors[t][i] = i;
+            }
+        }
+        // Two streams; projections[t][i] = [100*t*(i+1), 200*t*(i+1)].
+        trace.stream_names = vec!["a".into(), "b".into()];
+        trace.projections = (0..n_obs).map(|t| {
+            (0..n_particles).map(|i| {
+                let coef = (i + 1) as f64;
+                vec![100.0 * (t as f64) * coef, 200.0 * (t as f64) * coef]
+            }).collect()
+        }).collect();
+        // Force final-step weight onto particle 3 so we know which
+        // lineage the sampled paths trace.
+        for i in 0..n_particles {
+            trace.log_weights[n_obs - 1][i] =
+                if i == 3 { 0.0 } else { f64::NEG_INFINITY };
+        }
+        let paths = sample_paths(&trace, 4, 7);
+        assert_eq!(paths.len(), 4);
+        for p in &paths {
+            assert_eq!(p.stream_names, vec!["a", "b"]);
+            assert_eq!(p.projections.len(), n_obs);
+            for t in 0..n_obs {
+                let coef = 4.0;  // (3 + 1) for particle 3
+                assert_eq!(p.projections[t],
+                    vec![100.0 * (t as f64) * coef, 200.0 * (t as f64) * coef],
+                    "projection at t={} must walk the same lineage as states", t);
+            }
+        }
+    }
+
+    #[test]
+    fn projections_empty_when_obs_model_doesnt_record_them() {
+        // Trace with no projections (default-empty) — sample_paths
+        // should still work and return paths with empty projection
+        // arrays. This is the backward-compat case for obs models
+        // that don't override `mean()`.
+        let trace = make_trace(3, 4, 1);
+        assert!(trace.projections.is_empty());
+        let paths = sample_paths(&trace, 5, 0);
+        assert_eq!(paths.len(), 5);
+        for p in &paths {
+            assert!(p.projections.is_empty());
+            assert!(p.stream_names.is_empty());
+        }
     }
 }

@@ -152,6 +152,15 @@ pub fn bootstrap_filter<P: ProcessModel<State = ParticleState>>(
     let mut history_times: Vec<f64> = if config.record_ancestry {
         Vec::with_capacity(n_obs)
     } else { Vec::new() };
+    // gh#48: per-step per-particle per-stream projections. Computed via
+    // `obs_model.mean(state, obs_idx, params)` at the same point states
+    // are recorded — pre-resample, pre-flow-reset, so flow accumulators
+    // are still populated for incidence projections. Empty per step
+    // when `obs_model.mean()` returns `vec![]` (the trait default for
+    // impls that don't override).
+    let mut history_projections: Vec<Vec<Vec<f64>>> = if config.record_ancestry {
+        Vec::with_capacity(n_obs)
+    } else { Vec::new() };
 
     // Prequential recording (allocated only if requested).
     let mut preq_times: Vec<f64> = if config.record_prequential {
@@ -241,7 +250,21 @@ pub fn bootstrap_filter<P: ProcessModel<State = ParticleState>>(
             let step_states: Vec<Vec<f64>> = swarm.states.iter()
                 .map(|s| s.counts.iter().map(|&c| c as f64).collect())
                 .collect();
+            // gh#48: capture per-particle per-stream projections via
+            // the obs model's `mean()`. This is the model's predicted
+            // observation — what `incidence(recovery)` evaluates to,
+            // scaled by however the user wrote the likelihood (e.g.
+            // `rho * projected`). Recording here (pre-resample,
+            // pre-flow-reset) is the only point where flow_accumulators
+            // carry the just-completed obs interval's flow integrals,
+            // which is what incidence projections need. After
+            // resampling + reset two lines below, flow_accumulators
+            // start the next interval at zero.
+            let step_projections: Vec<Vec<f64>> = swarm.states.iter()
+                .map(|s| obs_model.mean(s, obs_idx, params))
+                .collect();
             history_states.push(step_states);
+            history_projections.push(step_projections);
             history_lw.push(swarm.log_weights.clone());
             history_times.push(obs_time);
         }
@@ -304,6 +327,8 @@ pub fn bootstrap_filter<P: ProcessModel<State = ParticleState>>(
             log_weights: history_lw,
             ancestors: history_ancestors,
             obs_times: history_times,
+            projections: history_projections,
+            stream_names: obs_model.stream_names(),
         })
     } else {
         None

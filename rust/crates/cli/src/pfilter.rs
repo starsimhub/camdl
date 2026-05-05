@@ -542,6 +542,29 @@ fn write_paths_tsv(
     for name in &comp_names {
         write!(f, "\t{}", name).unwrap();
     }
+    // gh#48: emit one column per observation stream alongside the
+    // compartment columns. Carries the model's declared projection
+    // (incidence/prevalence/arithmetic) so downstream tooling doesn't
+    // have to reconstruct it by finite-differencing compartment
+    // counts — which silently breaks under event + balance
+    // interactions (the constrained compartment becomes an
+    // unfaithful tracker of its own dynamics, e.g. ΔR records fake
+    // flows on cohort-event days).
+    //
+    // Column source: `SampledPath.projections[t][stream]` (= `mean()`
+    // from the obs model at record time, walked along the ancestor
+    // chain in lockstep with states). Skipped entirely when the obs
+    // model's `mean()` returns empty (the trait default).
+    let stream_names: &[String] = paths.first()
+        .map(|p| p.stream_names.as_slice())
+        .unwrap_or(&[]);
+    let has_projections = !stream_names.is_empty()
+        && paths.iter().all(|p| !p.projections.is_empty());
+    if has_projections {
+        for name in stream_names {
+            write!(f, "\t{}", name).unwrap();
+        }
+    }
     writeln!(f).unwrap();
 
     for (i, p) in paths.iter().enumerate() {
@@ -552,6 +575,16 @@ fn write_paths_tsv(
             // but we present only the public compartments.
             for k in 0..comp_names.len() {
                 write!(f, "\t{}", p.states[t_idx][k]).unwrap();
+            }
+            if has_projections {
+                let row_projs = &p.projections[t_idx];
+                for s in 0..stream_names.len() {
+                    if let Some(&v) = row_projs.get(s) {
+                        write!(f, "\t{}", v).unwrap();
+                    } else {
+                        write!(f, "\tNaN").unwrap();
+                    }
+                }
             }
             writeln!(f).unwrap();
         }
