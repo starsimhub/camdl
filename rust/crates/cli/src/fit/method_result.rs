@@ -676,6 +676,7 @@ mod tests {
                 fit_hash: "f00d".repeat(16),
                 stage: "scout".into(),
                 method,
+                backend: crate::run_meta::Backend::ChainBinomial,
                 seed: 1,
                 n_chains,
                 algorithm,

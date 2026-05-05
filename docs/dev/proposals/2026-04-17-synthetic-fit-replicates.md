@@ -408,14 +408,16 @@ N0 = 763
 I0 = 5
 
 [stages.scout]
-method     = "if2"
+algorithm     = "if2"
+backend     = "chain_binomial"
 chains     = 24
 particles  = 1000
 iterations = 100
 cooling    = 0.9
 
 [stages.refine]
-method     = "if2"
+algorithm     = "if2"
+backend     = "chain_binomial"
 chains     = 8
 particles  = 2000
 iterations = 120
@@ -457,13 +459,15 @@ gamma = { bounds = [0.1, 1.0], start = 0.4 }
 N0 = 763
 I0 = 5
 [stages.scout]
-method = "if2"
+algorithm = "if2"
+backend = "chain_binomial"
 chains = 24
 particles = 1000
 iterations = 100
 cooling = 0.9
 [stages.refine]
-method = "if2"
+algorithm = "if2"
+backend = "chain_binomial"
 chains = 8
 particles = 2000
 iterations = 120

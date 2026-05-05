@@ -645,12 +645,18 @@ impl FixedParams {
 
 // ─── Stages ─────────────────────────────────────────────────────────────────
 
-/// A named inference stage. Tagged by method.
+/// A named inference stage. Tagged by `algorithm`. Each variant carries
+/// an explicit `backend` field; the (algorithm, backend) pair is validated
+/// against `methods::METHODS` at config-load time. See proposal
+/// 2026-05-04-ode-inference-three-phase.md §"Tuple schema" for the
+/// rationale (algorithm and backend used to be smuggled together as
+/// `method = "if2"` implying chain_binomial).
 #[derive(Debug, Clone, Deserialize, Serialize)]
-#[serde(tag = "method")]
+#[serde(tag = "algorithm")]
 pub enum Stage {
     #[serde(rename = "if2")]
     IF2 {
+        backend: crate::run_meta::Backend,
         chains: usize,
         particles: usize,
         iterations: usize,
@@ -692,6 +698,7 @@ pub enum Stage {
 
     #[serde(rename = "pgas")]
     PGAS {
+        backend: crate::run_meta::Backend,
         chains: usize,
         particles: usize,
         sweeps: usize,
@@ -754,6 +761,7 @@ pub enum Stage {
 
     #[serde(rename = "pmmh")]
     PMMH {
+        backend: crate::run_meta::Backend,
         chains: usize,
         particles: usize,
         iterations: usize,
@@ -790,6 +798,7 @@ pub enum Stage {
 
     #[serde(rename = "pfilter")]
     PFilter {
+        backend: crate::run_meta::Backend,
         particles: usize,
         #[serde(default)]
         replicates: Option<usize>,
@@ -811,6 +820,57 @@ pub enum Stage {
         #[serde(default = "default_record_prequential")]
         record_prequential: bool,
     },
+
+    /// NLopt Sbplx (subspace-searching simplex) — deterministic MLE on the
+    /// ODE-skeleton likelihood. Default for ODE-backend MLE; robust to
+    /// boundary non-smoothness. Phase 1 of the ODE-inference proposal.
+    #[serde(rename = "nl-sbplx")]
+    NlSbplx(NloptStageConfig),
+
+    /// NLopt BOBYQA — quadratic-trust-region MLE on the ODE-skeleton
+    /// likelihood. Faster than Sbplx on smooth interior objectives but
+    /// fails at parameter-bound boundaries.
+    #[serde(rename = "nl-bobyqa")]
+    NlBobyqa(NloptStageConfig),
+}
+
+/// Shared config for the two NLopt deterministic MLE stages
+/// (`nl-sbplx`, `nl-bobyqa`). Both algorithms read identical knobs;
+/// the variant tag picks which NLopt algorithm runs.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct NloptStageConfig {
+    pub backend: crate::run_meta::Backend,
+    /// Number of LHS-spread starting points. Each runs an independent
+    /// NLopt optimization to convergence; best-loglik chain wins.
+    pub chains: usize,
+    /// `xtol_rel` passed to NLopt. Optimizer stops when relative
+    /// parameter change between iterations falls below this.
+    #[serde(default = "default_nlopt_tolerance")]
+    pub tolerance: f64,
+    /// Per-chain budget on objective evaluations. Hitting this is a
+    /// soft failure (`MaxEvalReached`); successful convergence is
+    /// `Success | XtolReached | FtolReached`.
+    #[serde(default = "default_nlopt_max_evals")]
+    pub max_evals: usize,
+    #[serde(default)]
+    pub starts_from: StartsFrom,
+    /// Per-chain init draws (gh#42). NLopt stages default to `lhs` —
+    /// deterministic optimizers from a single starting point find one
+    /// basin; multi-start LHS gives the chain-agreement leg of the
+    /// convergence gate something to disagree about.
+    #[serde(default = "default_nlopt_init_method")]
+    pub init_method: super::init::InitMethod,
+    /// Convergence-gate thresholds. Two-leg version of IF2's gate
+    /// (chain-agreement + decibans-spread); see proposal §"Convergence
+    /// diagnostics for NLopt chains".
+    #[serde(default)]
+    pub gate: GateConfig,
+}
+
+fn default_nlopt_tolerance() -> f64 { 1e-6 }
+fn default_nlopt_max_evals() -> usize { 5000 }
+fn default_nlopt_init_method() -> super::init::InitMethod {
+    super::init::InitMethod::Lhs
 }
 
 impl Stage {
@@ -820,6 +880,7 @@ impl Stage {
             | Stage::PGAS { starts_from, .. }
             | Stage::PMMH { starts_from, .. }
             | Stage::PFilter { starts_from, .. } => starts_from,
+            Stage::NlSbplx(c) | Stage::NlBobyqa(c) => &c.starts_from,
         }
     }
 
@@ -830,10 +891,26 @@ impl Stage {
     pub fn method_kind(&self) -> crate::run_meta::MethodKind {
         use crate::run_meta::MethodKind;
         match self {
-            Stage::IF2     { .. } => MethodKind::If2,
-            Stage::PGAS    { .. } => MethodKind::Pgas,
-            Stage::PMMH    { .. } => MethodKind::Pmmh,
-            Stage::PFilter { .. } => MethodKind::Pfilter,
+            Stage::IF2      { .. } => MethodKind::If2,
+            Stage::PGAS     { .. } => MethodKind::Pgas,
+            Stage::PMMH     { .. } => MethodKind::Pmmh,
+            Stage::PFilter  { .. } => MethodKind::Pfilter,
+            Stage::NlSbplx  { .. } => MethodKind::NlSbplx,
+            Stage::NlBobyqa { .. } => MethodKind::NlBobyqa,
+        }
+    }
+
+    /// Simulation backend the stage runs on. The (algorithm, backend)
+    /// pair is set by the user in fit.toml and validated against
+    /// `methods::METHODS`; this accessor returns whichever backend was
+    /// declared so dispatch and provenance can branch on it.
+    pub fn backend(&self) -> crate::run_meta::Backend {
+        match self {
+            Stage::IF2      { backend, .. }
+            | Stage::PGAS    { backend, .. }
+            | Stage::PMMH    { backend, .. }
+            | Stage::PFilter { backend, .. } => *backend,
+            Stage::NlSbplx(c) | Stage::NlBobyqa(c) => c.backend,
         }
     }
 
@@ -847,6 +924,7 @@ impl Stage {
             Stage::PGAS { chains, .. } => *chains,
             Stage::PMMH { chains, .. } => *chains,
             Stage::PFilter { .. } => 1,
+            Stage::NlSbplx(c) | Stage::NlBobyqa(c) => c.chains,
         }
     }
 
@@ -876,12 +954,13 @@ impl Stage {
             // posterior trajectories doesn't change chain dynamics).
             // All other PGAS fields are identity-defining.
             Stage::PGAS {
-                chains, particles, starts_from, burn_in, thin,
+                backend, chains, particles, starts_from, burn_in, thin,
                 tempering, max_tree_depth, trajectory_warmup,
                 csmc_sweeps_per_nuts, dense_mass, use_nuts,
                 ..
             } => json!({
-                "method": "pgas",
+                "algorithm": "pgas",
+                "backend": backend,
                 "chains": chains,
                 "particles": particles,
                 "starts_from": starts_from,
@@ -898,11 +977,12 @@ impl Stage {
             // fields, including adapt / adapt_start / rho, are
             // identity-defining (different sampler, not extension).
             Stage::PMMH {
-                chains, particles, starts_from, burn_in, thin,
+                backend, chains, particles, starts_from, burn_in, thin,
                 adapt, adapt_start, rho,
                 ..
             } => json!({
-                "method": "pmmh",
+                "algorithm": "pmmh",
+                "backend": backend,
                 "chains": chains,
                 "particles": particles,
                 "starts_from": starts_from,
@@ -912,8 +992,14 @@ impl Stage {
                 "adapt_start": adapt_start,
                 "rho": rho,
             }),
-            // No extension dimension: hash the full stage.
-            Stage::IF2 { .. } | Stage::PFilter { .. } =>
+            // No extension dimension: hash the full stage. NLopt stages
+            // also have no extension dimension — every knob (chains,
+            // tolerance, max_evals, init_method, gate) is identity-
+            // defining, so hash the full struct.
+            Stage::IF2 { .. }
+            | Stage::PFilter { .. }
+            | Stage::NlSbplx(_)
+            | Stage::NlBobyqa(_) =>
                 serde_json::to_value(self).unwrap_or(json!({})),
         }
     }
@@ -1212,7 +1298,8 @@ impl FitConfigV2 {
              IF2 (scout / refine / validate) maximises the likelihood and \
              ignores prior terms.\n  \
              To silence this warning, do one of:\n    \
-             - add a Bayesian stage:   [stages.pgas] method = \"pgas\"\n    \
+             - add a Bayesian stage:   [stages.pgas] algorithm = \"pgas\"\n      \
+                                        backend = \"chain_binomial\"\n    \
              - use priors for starts:  fit_starts = \"prior\"\n    \
              - remove the priors:      drop `prior = {{...}}` from [estimate.*] entries",
             params_with_priors.join(", ")))
@@ -1329,6 +1416,17 @@ impl FitConfigV2 {
                 "parameters not in model: {}",
                 extra.iter().map(|s| **s).collect::<Vec<_>>().join(", ")
             ));
+        }
+
+        // (algorithm, backend) must be a supported pair. Method registry
+        // is the single source of truth (see fit/methods.rs); errors name
+        // the right alternative when the user picked an incoherent combo.
+        for (stage_name, stage) in &self.stages {
+            let algo = stage.method_name();
+            let backend = stage.backend().as_str();
+            if let Err(msg) = super::methods::validate_combo(algo, backend) {
+                return Err(format!("stage '{}': {}", stage_name, msg));
+            }
         }
 
         // IF2 stages require at least one iteration — zero iterations would
@@ -1546,7 +1644,8 @@ N0 = 1000000
 I0 = 10
 
 [stages.mle]
-method = "if2"
+algorithm = "if2"
+backend = "chain_binomial"
 chains = 8
 particles = 1000
 iterations = 80
@@ -1597,7 +1696,8 @@ N0 = 1000000
 I0 = 10
 
 [stages.mle]
-method = "if2"
+algorithm = "if2"
+backend = "chain_binomial"
 chains = 4
 particles = 2000
 iterations = 60
@@ -1605,14 +1705,16 @@ cooling = 0.95
 starts_from = "output/fits/01_all_free/mle"
 
 [stages.posterior]
-method = "pgas"
+algorithm = "pgas"
+backend = "chain_binomial"
 chains = 4
 particles = 50
 sweeps = 5000
 starts_from = "mle"
 
 [stages.evaluate]
-method = "pfilter"
+algorithm = "pfilter"
+backend = "chain_binomial"
 particles = 10000
 replicates = 100
 starts_from = "mle"
@@ -1665,7 +1767,8 @@ from_file = "params/fixed.toml"
 vacc_frac = 0.80
 
 [stages.mle]
-method = "if2"
+algorithm = "if2"
+backend = "chain_binomial"
 chains = 8
 particles = 2000
 iterations = 100
@@ -1699,7 +1802,8 @@ beta = { bounds = [0.01, 2.0] }
 N0 = 1000000
 
 [stages.mle]
-method = "if2"
+algorithm = "if2"
+backend = "chain_binomial"
 chains = 4
 particles = 1000
 iterations = 50
@@ -1733,7 +1837,8 @@ N0 = 1000000
 I0 = 10
 
 [stages.mle]
-method = "if2"
+algorithm = "if2"
+backend = "chain_binomial"
 chains = 4
 particles = 1000
 iterations = 50
@@ -1768,7 +1873,8 @@ beta = { bounds = [0.01, 2.0] }
 N0 = 1000000
 
 [stages.mle]
-method = "if2"
+algorithm = "if2"
+backend = "chain_binomial"
 chains = 4
 particles = 1000
 iterations = 50
@@ -1806,7 +1912,8 @@ beta = 0.5
 N0 = 1000000
 
 [stages.mle]
-method = "if2"
+algorithm = "if2"
+backend = "chain_binomial"
 chains = 4
 particles = 1000
 iterations = 50
@@ -1840,7 +1947,8 @@ typo_param = { bounds = [0.0, 1.0] }
 N0 = 1000000
 
 [stages.mle]
-method = "if2"
+algorithm = "if2"
+backend = "chain_binomial"
 chains = 4
 particles = 1000
 iterations = 50
@@ -1873,7 +1981,8 @@ beta = { bounds = [0.01, 2.0] }
 N0 = 1000000
 
 [stages.posterior]
-method = "pgas"
+algorithm = "pgas"
+backend = "chain_binomial"
 chains = 4
 particles = 50
 sweeps = 5000
@@ -1905,7 +2014,8 @@ beta = { bounds = [0.01, 2.0] }
 N0 = 1000000
 
 [stages.refine]
-method = "if2"
+algorithm = "if2"
+backend = "chain_binomial"
 chains = 4
 particles = 2000
 iterations = 50
@@ -1913,7 +2023,8 @@ cooling = 0.95
 starts_from = "mle"
 
 [stages.mle]
-method = "if2"
+algorithm = "if2"
+backend = "chain_binomial"
 chains = 8
 particles = 1000
 iterations = 80
@@ -1945,7 +2056,8 @@ beta = { bounds = [0.01, 2.0] }
 N0 = 1000000
 
 [stages.mle]
-method = "if2"
+algorithm = "if2"
+backend = "chain_binomial"
 chains = 4
 particles = 1000
 iterations = 50
@@ -1978,7 +2090,8 @@ beta = { bounds = [2.0, 0.01] }
 N0 = 1000000
 
 [stages.mle]
-method = "if2"
+algorithm = "if2"
+backend = "chain_binomial"
 chains = 4
 particles = 1000
 iterations = 50
@@ -2015,7 +2128,8 @@ beta = { bounds = [0.01, 2.0] }
 N0 = 1000000
 
 [stages.mle]
-method = "if2"
+algorithm = "if2"
+backend = "chain_binomial"
 chains = 4
 particles = 1000
 iterations = 50
@@ -2042,7 +2156,8 @@ beta = { bounds = [0.01, 2.0] }
 [fixed]
 N0 = 1000000
 [stages.mle]
-method = "if2"
+algorithm = "if2"
+backend = "chain_binomial"
 chains = 4
 particles = 100
 iterations = 50
@@ -2073,7 +2188,8 @@ beta = { bounds = [0.01, 2.0] }
 N0 = 1000000
 S0_e = 0.2
 [stages.mle]
-method = "if2"
+algorithm = "if2"
+backend = "chain_binomial"
 chains = 4
 particles = 100
 iterations = 50
@@ -2107,7 +2223,8 @@ beta = { bounds = [0.01, 2.0] }
 [fixed]
 N0 = 1000000
 [stages.mle]
-method = "if2"
+algorithm = "if2"
+backend = "chain_binomial"
 chains = 4
 particles = 100
 iterations = 50
@@ -2142,7 +2259,8 @@ beta = { bounds = [0.01, 2.0] }
 [fixed]
 N0 = 1000000
 [stages.mle]
-method = "if2"
+algorithm = "if2"
+backend = "chain_binomial"
 chains = 4
 particles = 100
 iterations = 50
@@ -2175,7 +2293,8 @@ beta = { bounds = [0.01, 2.0] }
 N0 = 1000000
 S0_e = 0.2
 [stages.mle]
-method = "if2"
+algorithm = "if2"
+backend = "chain_binomial"
 chains = 4
 particles = 100
 iterations = 50
@@ -2207,7 +2326,8 @@ beta = { bounds = [0.01, 2.0] }
 [fixed]
 N0 = 1000000
 [stages.mle]
-method = "if2"
+algorithm = "if2"
+backend = "chain_binomial"
 chains = 4
 particles = 100
 iterations = 50
@@ -2245,7 +2365,8 @@ beta = { bounds = [0.01, 2.0] }
 N0 = 1000000
 
 [stages.mle]
-method = "if2"
+algorithm = "if2"
+backend = "chain_binomial"
 chains = 4
 particles = 100
 iterations = 50
@@ -2277,7 +2398,8 @@ beta = { bounds = [0.01, 2.0] }
 N0 = 1000
 
 [stages.scout]
-method = "if2"
+algorithm = "if2"
+backend = "chain_binomial"
 chains = 4
 particles = 500
 iterations = 30
@@ -2309,7 +2431,8 @@ beta = { bounds = [0.01, 2.0] }
 N0 = 1000
 
 [stages.scout]
-method = "if2"
+algorithm = "if2"
+backend = "chain_binomial"
 chains = 4
 particles = 500
 iterations = 30
@@ -2339,7 +2462,8 @@ beta = { bounds = [0.01, 2.0] }
 N0 = 1000
 
 [stages.scout]
-method = "if2"
+algorithm = "if2"
+backend = "chain_binomial"
 chains = 4
 particles = 500
 iterations = 30
@@ -2508,7 +2632,8 @@ beta = { bounds = [0.01, 2.0] }
 N0 = 1000000
 
 [stages.mle]
-method = "if2"
+algorithm = "if2"
+backend = "chain_binomial"
 chains = 4
 particles = 100
 iterations = 50
@@ -2544,7 +2669,8 @@ beta = { bounds = [0.01, 2.0] }
 N0 = 1000000
 
 [stages.mle]
-method = "if2"
+algorithm = "if2"
+backend = "chain_binomial"
 chains = 4
 particles = 100
 iterations = 50
@@ -2580,7 +2706,8 @@ beta = { bounds = [0.01, 2.0] }
 N0 = 1000000
 
 [stages.mle]
-method = "if2"
+algorithm = "if2"
+backend = "chain_binomial"
 chains = 4
 particles = 100
 iterations = 50
@@ -2614,7 +2741,8 @@ beta = { bounds = [0.01, 2.0] }
 N0 = 1000000
 
 [stages.mle]
-method = "if2"
+algorithm = "if2"
+backend = "chain_binomial"
 chains = 4
 particles = 100
 iterations = 50
@@ -2648,7 +2776,8 @@ beta = { bounds = [0.01, 2.0] }
 N0 = 1000000
 
 [stages.mle]
-method = "if2"
+algorithm = "if2"
+backend = "chain_binomial"
 chains = 4
 particles = 100
 iterations = 0
@@ -2688,7 +2817,8 @@ beta = { bounds = [0.01, 2.0] }
 N0 = 1000000
 
 [stages.mle]
-method = "if2"
+algorithm = "if2"
+backend = "chain_binomial"
 chains = 4
 particles = 1000
 iterations = 50
@@ -2717,7 +2847,8 @@ beta = { bounds = [0.01, 2.0] }
 N0 = 1000000
 
 [stages.mle]
-method = "if2"
+algorithm = "if2"
+backend = "chain_binomial"
 chains = 4
 particles = 1000
 iterations = 50
@@ -2744,7 +2875,8 @@ beta = { bounds = [0.01, 2.0] }
 N0 = 1000000
 
 [stages.mle]
-method = "if2"
+algorithm = "if2"
+backend = "chain_binomial"
 chains = 4
 particles = 1000
 iterations = 50
@@ -2774,14 +2906,16 @@ beta = { bounds = [0.01, 2.0] }
 N0 = 1000000
 
 [stages.mle]
-method = "if2"
+algorithm = "if2"
+backend = "chain_binomial"
 chains = 4
 particles = 1000
 iterations = 50
 cooling = 0.70
 
 [stages.refine]
-method = "if2"
+algorithm = "if2"
+backend = "chain_binomial"
 chains = 2
 particles = 2000
 iterations = 30
@@ -2811,7 +2945,8 @@ beta = { bounds = [0.01, 2.0] }
 N0 = 1000000
 
 [stages.mle]
-method = "if2"
+algorithm = "if2"
+backend = "chain_binomial"
 chains = 4
 particles = 1000
 iterations = 50
@@ -2842,7 +2977,8 @@ beta = {{ bounds = [0.01, 2.0] }}
 from_file = "{}"
 
 [stages.mle]
-method = "if2"
+algorithm = "if2"
+backend = "chain_binomial"
 chains = 4
 particles = 1000
 iterations = 50
@@ -2880,7 +3016,8 @@ from_file = "{}"
 I0 = 50
 
 [stages.mle]
-method = "if2"
+algorithm = "if2"
+backend = "chain_binomial"
 chains = 4
 particles = 1000
 iterations = 50
@@ -2909,7 +3046,8 @@ I0 = 5
 gamma = 0.1
 
 [stages.mle]
-method = "if2"
+algorithm = "if2"
+backend = "chain_binomial"
 chains = 4
 particles = 1000
 iterations = 50
@@ -3058,14 +3196,16 @@ gamma = { bounds = [0.05, 1.0], prior = { half_normal = { sigma = 1.0 } } }
 N0 = 1000
 
 [stages.scout]
-method = "if2"
+algorithm = "if2"
+backend = "chain_binomial"
 chains = 4
 particles = 500
 iterations = 50
 cooling = 0.7
 
 [stages.refine]
-method = "if2"
+algorithm = "if2"
+backend = "chain_binomial"
 chains = 4
 particles = 1000
 iterations = 50
@@ -3094,7 +3234,8 @@ starts_from = "scout"
         let mut src = fit_with_priors_if2_only().to_string();
         src.push_str(r#"
 [stages.pgas]
-method = "pgas"
+algorithm = "pgas"
+backend = "chain_binomial"
 chains = 4
 particles = 1000
 sweeps = 1000
@@ -3134,7 +3275,8 @@ gamma = 0.3
 N0 = 1000
 
 [stages.mle]
-method = "if2"
+algorithm = "if2"
+backend = "chain_binomial"
 chains = 2
 particles = 500
 iterations = 50
@@ -3175,7 +3317,8 @@ beta = { bounds = [0.01, 2.0] }
 N0 = 1000
 
 [stages.mle]
-method = "if2"
+algorithm = "if2"
+backend = "chain_binomial"
 chains = 4
 particles = 1000
 iterations = 50
@@ -3223,7 +3366,8 @@ beta = { bounds = [0.01, 2.0] }
 N0 = 1000
 
 [stages.evaluate]
-method = "pfilter"
+algorithm = "pfilter"
+backend = "chain_binomial"
 particles = 1000
         "#).unwrap();
 
@@ -3257,7 +3401,8 @@ beta = { bounds = [0.01, 2.0] }
 N0 = 1000
 
 [stages.evaluate]
-method = "pfilter"
+algorithm = "pfilter"
+backend = "chain_binomial"
 particles = 1000
 record_prequential = false
         "#).unwrap();
@@ -3286,7 +3431,8 @@ beta = { bounds = [0.01, 2.0] }
 N0 = 1000
 
 [stages.scout]
-method = "if2"
+algorithm = "if2"
+backend = "chain_binomial"
 chains = 4
 particles = 500
 iterations = 30
@@ -3321,7 +3467,8 @@ beta = { bounds = [0.01, 2.0] }
 N0 = 1000
 
 [stages.scout]
-method = "if2"
+algorithm = "if2"
+backend = "chain_binomial"
 chains = 4
 particles = 500
 iterations = 30
@@ -3330,7 +3477,8 @@ loglik_eval = { n_particles = 8000, n_replicates = 16, combine = "mean" }
 gate = { a_thresh = 1.05, decibans_thresh = 60.0 }
 
 [stages.refine]
-method = "if2"
+algorithm = "if2"
+backend = "chain_binomial"
 chains = 4
 particles = 1000
 iterations = 60
@@ -3379,6 +3527,7 @@ decibans_thresh = 100.0
     /// keeps the test fixtures terse as Stage::PGAS grows fields.
     fn make_pgas_stage(sweeps: usize) -> Stage {
         Stage::PGAS {
+            backend: crate::run_meta::Backend::ChainBinomial,
             chains: 4, particles: 100, sweeps,
             starts_from: StartsFrom::default(),
             init_method: Default::default(),
@@ -3396,6 +3545,7 @@ decibans_thresh = 100.0
     /// Default-equipped PMMH stage for identity tests.
     fn make_pmmh_stage(iterations: usize) -> Stage {
         Stage::PMMH {
+            backend: crate::run_meta::Backend::ChainBinomial,
             chains: 4, particles: 100, iterations,
             starts_from: StartsFrom::default(),
             init_method: Default::default(),
@@ -3415,10 +3565,10 @@ decibans_thresh = 100.0
 
         // Changing any *other* PGAS field must change the payload.
         let s_more_chains = match make_pgas_stage(1000) {
-            Stage::PGAS { particles, sweeps, starts_from, init_method, burn_in, thin,
+            Stage::PGAS { backend, particles, sweeps, starts_from, init_method, burn_in, thin,
                 tempering, max_tree_depth, trajectory_warmup, csmc_sweeps_per_nuts,
                 n_trajectories, dense_mass, use_nuts, .. } =>
-                Stage::PGAS { chains: 8, particles, sweeps, starts_from, init_method, burn_in, thin,
+                Stage::PGAS { backend, chains: 8, particles, sweeps, starts_from, init_method, burn_in, thin,
                     tempering, max_tree_depth, trajectory_warmup, csmc_sweeps_per_nuts,
                     n_trajectories, dense_mass, use_nuts },
             _ => unreachable!(),
@@ -3503,7 +3653,7 @@ decibans_thresh = 100.0
         let stage = make_pgas_stage(1000);
         let payload_bytes = serde_json::to_vec(&stage.identity_payload()).unwrap();
         let payload_str = String::from_utf8(payload_bytes).unwrap();
-        let expected = r#"{"burn_in":200,"chains":4,"csmc_sweeps_per_nuts":1,"dense_mass":true,"max_tree_depth":10,"method":"pgas","particles":100,"starts_from":"random","tempering":[1.0],"thin":2,"trajectory_warmup":0,"use_nuts":true}"#;
+        let expected = r#"{"algorithm":"pgas","backend":"chain_binomial","burn_in":200,"chains":4,"csmc_sweeps_per_nuts":1,"dense_mass":true,"max_tree_depth":10,"particles":100,"starts_from":"random","tempering":[1.0],"thin":2,"trajectory_warmup":0,"use_nuts":true}"#;
         assert_eq!(payload_str, expected,
             "identity_payload byte format drifted — every existing \
              resume_state.bin would be invalidated. If this change is \
@@ -3516,7 +3666,7 @@ decibans_thresh = 100.0
     fn pmmh_identity_payload_byte_stable() {
         let stage = make_pmmh_stage(1000);
         let payload_str = serde_json::to_string(&stage.identity_payload()).unwrap();
-        let expected = r#"{"adapt":true,"adapt_start":300,"burn_in":200,"chains":4,"method":"pmmh","particles":100,"rho":null,"starts_from":"random","thin":2}"#;
+        let expected = r#"{"adapt":true,"adapt_start":300,"algorithm":"pmmh","backend":"chain_binomial","burn_in":200,"chains":4,"particles":100,"rho":null,"starts_from":"random","thin":2}"#;
         assert_eq!(payload_str, expected,
             "PMMH identity_payload byte format drifted — see \
              pgas_identity_payload_byte_stable for context.");
@@ -3547,6 +3697,7 @@ decibans_thresh = 100.0
         // resume). This guards against a future refactor accidentally
         // moving `iterations` out of identity.
         let s50 = Stage::IF2 {
+            backend: crate::run_meta::Backend::ChainBinomial,
             chains: 4, particles: 100, iterations: 50, cooling: 0.95,
             cooling_target_iters: 50,
             starts_from: StartsFrom::default(),
@@ -3555,6 +3706,7 @@ decibans_thresh = 100.0
             gate: GateConfig::default(),
         };
         let s100 = Stage::IF2 {
+            backend: crate::run_meta::Backend::ChainBinomial,
             chains: 4, particles: 100, iterations: 100, cooling: 0.95,
             cooling_target_iters: 50,
             starts_from: StartsFrom::default(),
@@ -3565,6 +3717,7 @@ decibans_thresh = 100.0
         assert_ne!(s50.identity_payload(), s100.identity_payload());
 
         let s_diff_cooling = Stage::IF2 {
+            backend: crate::run_meta::Backend::ChainBinomial,
             chains: 4, particles: 100, iterations: 50, cooling: 0.70,
             cooling_target_iters: 50,
             starts_from: StartsFrom::default(),
@@ -3577,6 +3730,7 @@ decibans_thresh = 100.0
         // cooling_target_iters is identity-defining (different schedule
         // → different chain dynamics).
         let s_diff_target = Stage::IF2 {
+            backend: crate::run_meta::Backend::ChainBinomial,
             chains: 4, particles: 100, iterations: 50, cooling: 0.95,
             cooling_target_iters: 100,
             starts_from: StartsFrom::default(),

@@ -1779,10 +1779,12 @@ mod tests {
                 fit_hash: parent_hash.into(),
                 stage: stage.into(),
                 method,
+                backend: crate::run_meta::Backend::ChainBinomial,
                 seed: 1,
                 n_chains: 8,
                 algorithm: serde_json::json!({
-                    "method": method,
+                    "algorithm": method,
+                    "backend": "chain_binomial",
                     "iterations": 50,
                 }),
                 best_loglik: Some(-3804.9),

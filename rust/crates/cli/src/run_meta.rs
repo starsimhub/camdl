@@ -185,33 +185,63 @@ pub struct FitMeta {
     pub ic_free: bool,
 }
 
-/// Inference method tag — discriminator-only enum. Used in
-/// `FitStageMeta.method` and surfaced by `Stage::method_kind()`. Wire
-/// format matches the legacy strings (`"if2"` / `"pgas"` / `"pmmh"`
-/// / `"pfilter"`) so existing run.json files round-trip unchanged.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
+/// Inference algorithm tag — discriminator enum naming the algorithm
+/// independent of the simulation backend. Stored on `FitStageMeta`
+/// alongside `Backend` to record the (algorithm, backend) pair the
+/// stage ran. Wire format matches the lowercased / kebab-cased name
+/// the user writes in fit.toml (`algorithm = "if2"`, `algorithm =
+/// "nl-sbplx"`, ...).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum MethodKind {
-    If2,
-    Pgas,
-    Pmmh,
-    Pfilter,
+    #[serde(rename = "if2")]      If2,
+    #[serde(rename = "pgas")]     Pgas,
+    #[serde(rename = "pmmh")]     Pmmh,
+    #[serde(rename = "pfilter")]  Pfilter,
+    #[serde(rename = "nl-sbplx")] NlSbplx,
+    #[serde(rename = "nl-bobyqa")] NlBobyqa,
 }
 
 impl MethodKind {
-    /// String form matching the legacy `FitStageMeta.method` value
-    /// and the `Stage::FOO` serde tag.
+    /// Wire-format string. Matches the `algorithm = "..."` value in fit.toml
+    /// and the `FitStageMeta.algorithm` serialized form.
     pub fn as_str(self) -> &'static str {
         match self {
-            MethodKind::If2     => "if2",
-            MethodKind::Pgas    => "pgas",
-            MethodKind::Pmmh    => "pmmh",
-            MethodKind::Pfilter => "pfilter",
+            MethodKind::If2      => "if2",
+            MethodKind::Pgas     => "pgas",
+            MethodKind::Pmmh     => "pmmh",
+            MethodKind::Pfilter  => "pfilter",
+            MethodKind::NlSbplx  => "nl-sbplx",
+            MethodKind::NlBobyqa => "nl-bobyqa",
         }
     }
 }
 
 impl std::fmt::Display for MethodKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+/// Simulation backend the stage ran on. The (algorithm, backend) pair
+/// is constrained by `methods::METHODS`; PF-based algorithms require
+/// `chain_binomial`, deterministic-likelihood algorithms require `ode`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Backend {
+    ChainBinomial,
+    Ode,
+}
+
+impl Backend {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Backend::ChainBinomial => "chain_binomial",
+            Backend::Ode           => "ode",
+        }
+    }
+}
+
+impl std::fmt::Display for Backend {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(self.as_str())
     }
@@ -225,9 +255,15 @@ pub struct FitStageMeta {
     pub fit_hash: String,
     /// Stage name within the fit (e.g. "scout", "refine").
     pub stage: String,
-    /// Stage method discriminator. Wire format: `"if2" | "pgas" |
-    /// "pmmh" | "pfilter"`.
+    /// Stage algorithm discriminator. Wire format: `"if2" | "pgas" |
+    /// "pmmh" | "pfilter" | "nl-sbplx" | "nl-bobyqa"`.
     pub method: MethodKind,
+    /// Simulation backend this stage ran on. The (algorithm, backend)
+    /// pair determines what statistical object the loglik computes —
+    /// `chain_binomial` for stochastic process kernel, `ode` for the
+    /// deterministic skeleton. Validated against the `methods::METHODS`
+    /// registry at config-load time.
+    pub backend: Backend,
     // NB: the stage's own content hash lives in the enclosing
     // `Run.hash` field (a FitStage run hashes exactly its stage-scope
     // inputs). Previously FitStageMeta carried a duplicate
@@ -552,6 +588,7 @@ mod tests {
                 fit_hash: "deadbeef".repeat(8),
                 stage: "refine".into(),
                 method: MethodKind::If2,
+                backend: Backend::ChainBinomial,
                 seed: 42,
                 n_chains: 4,
                 algorithm: serde_json::Value::Null,
@@ -682,6 +719,7 @@ mod tests {
                 fit_hash: parent_hash.clone(),
                 stage: "scout".into(),
                 method: MethodKind::If2,
+                backend: Backend::ChainBinomial,
                 seed: 1,
                 n_chains: 4,
                 algorithm: serde_json::Value::Null,
@@ -756,6 +794,7 @@ mod tests {
             kind: RunKind::FitStage(FitStageMeta {
                 fit_hash: "f".repeat(64),
                 stage: "refine".into(), method: MethodKind::If2,
+                backend: Backend::ChainBinomial,
                 seed: 1, n_chains: 1,
                 algorithm: serde_json::Value::Null,
                 best_loglik: None, best_chain: None,
@@ -788,6 +827,7 @@ mod tests {
             kind: RunKind::FitStage(FitStageMeta {
                 fit_hash: "f".repeat(64),
                 stage: "mle".into(), method: MethodKind::If2,
+                backend: Backend::ChainBinomial,
                 seed: 1, n_chains: 1,
                 algorithm: serde_json::Value::Null,
                 best_loglik: None, best_chain: None, starts_from: None,
@@ -912,6 +952,7 @@ mod tests {
                 fit_hash: "".into(),    // no parent Fit; parent is a Profile
                 stage: "if2".into(),
                 method: MethodKind::If2,
+                backend: Backend::ChainBinomial,
                 seed: 142,
                 n_chains: 1,
                 algorithm: serde_json::Value::Null,

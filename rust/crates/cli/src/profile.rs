@@ -274,6 +274,29 @@ impl CasInputs for ProfileInputs {
 }
 
 pub fn cmd_profile(a: &crate::args::ProfileArgs) {
+    // Validate (algorithm, backend) early, before any expensive setup.
+    // Phase 1 surfaces the flags + matrix validation; the per-cell NLopt
+    // orchestrator is queued as a follow-up commit (the fit.toml-driven
+    // path is what unblocks downstream work and lands first).
+    let algo_name = a.algorithm.as_deref().unwrap_or("if2");
+    let backend_name = a.backend.as_deref().unwrap_or("chain_binomial");
+    if let Err(msg) = crate::fit::methods::validate_combo(algo_name, backend_name) {
+        eprintln!("error: {}", msg);
+        std::process::exit(1);
+    }
+    if !(algo_name == "if2" && backend_name == "chain_binomial") {
+        eprintln!(
+            "error: --algorithm = \"{}\" --backend = \"{}\" passes the (algorithm, \
+             backend) registry check, but per-cell NLopt orchestration in \
+             `camdl profile` is queued as a follow-up to the Phase 1 \
+             schema migration. Use `algorithm = \"{}\"` + `backend = \"{}\"` \
+             inside a fit.toml stage and drive a per-cell sweep through \
+             that path until profile catches up.",
+            algo_name, backend_name, algo_name, backend_name,
+        );
+        std::process::exit(1);
+    }
+
     let ir_path = a.model.to_string_lossy().into_owned();
     let data_path = a.data.to_string_lossy().into_owned();
     let n_particles = a.inference.particles;
@@ -874,6 +897,7 @@ pub fn cmd_profile(a: &crate::args::ProfileArgs) {
                 fit_hash: String::new(),
                 stage: "if2".to_string(),
                 method: crate::run_meta::MethodKind::If2,
+                backend: crate::run_meta::Backend::ChainBinomial,
                 seed: job_seed,
                 n_chains: 1,
                 algorithm: serde_json::json!({

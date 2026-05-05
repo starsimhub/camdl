@@ -154,7 +154,8 @@ gamma = {{ bounds = [0.01, 1.0], start = 0.3 }}
 N0 = 1000
 
 [stages.scout]
-method     = "if2"
+algorithm     = "if2"
+backend     = "chain_binomial"
 chains     = 2
 particles  = 50
 iterations = 5
@@ -827,7 +828,8 @@ gamma = {{ bounds = [0.01, 1.0], start = 0.3 }}
 N0 = 1000
 
 [stages.scout]
-method     = "if2"
+algorithm     = "if2"
+backend     = "chain_binomial"
 chains     = 2
 particles  = 50
 iterations = 5

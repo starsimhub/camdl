@@ -219,7 +219,8 @@ fn starts_from_resolves_short_hash() {
         "version": "0.1.0+test","created_at": "2026-04-19T12:00:00Z",
         "argv": [],"status": {{"completed": {{"wall_time_seconds": 1.0}}}},
         "kind": {{"kind":"fit-stage","fit_hash":"f","stage":"scout",
-                 "method":"if2","seed":1,"n_chains":2}}
+                 "method":"if2","backend":"chain_binomial",
+                 "seed":1,"n_chains":2}}
     }}"#, target_hash);
     std::fs::write(stage.join("run.json"), run_json).unwrap();
 
@@ -265,7 +266,8 @@ beta = {{ bounds = [0.01, 2.0] }}
 [fixed]
 N0 = 1000
 [stages.refine]
-method = "if2"
+algorithm = "if2"
+backend = "chain_binomial"
 chains = 2
 particles = 50
 iterations = 3
@@ -342,7 +344,8 @@ N0 = 1000
 I0 = 10
 
 [stages.mle]
-method = "if2"
+algorithm = "if2"
+backend = "chain_binomial"
 chains = 2
 particles = 50
 iterations = 3
@@ -818,6 +821,7 @@ fn show_renders_fit_stage_metadata() {
             "fit_hash": "abc12345deadbeef0000000000000000000000000000000000000000abc12345",
             "stage": "scout",
             "method": "if2",
+            "backend": "chain_binomial",
             "seed": 42,
             "n_chains": 4,
             "best_loglik": -123.45,

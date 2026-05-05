@@ -622,13 +622,15 @@ camdl = "models/he2010.camdl"
 observations = { cases = "data/london.tsv" }
 
 [stages.scout]
-method = "if2"
+algorithm = "if2"
+backend = "chain_binomial"
 chains = 4
 particles = 1500
 iterations = 80
 
 [stages.refine]
-method = "if2"
+algorithm = "if2"
+backend = "chain_binomial"
 starts_from = "scout"
 chains = 8
 particles = 3000

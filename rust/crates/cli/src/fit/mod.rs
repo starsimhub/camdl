@@ -25,6 +25,15 @@ pub mod synthetic;
 pub mod gating;
 pub mod init;
 pub mod loglik_eval;
+pub mod methods;
+#[cfg(feature = "ode")]
+pub mod nlopt_stage;
+
+/// `camdl fit methods` — print the supported (algorithm, backend) pairs.
+/// Reads from `methods::METHODS`, the single source of truth.
+pub fn cmd_fit_methods() {
+    print!("{}", methods::render_matrix());
+}
 
 pub fn cmd_fit_status(a: &crate::args::FitStatusArgs) {
     let path_str = match &a.path {
@@ -1015,6 +1024,37 @@ pub fn cmd_fit_run_v2(a: &crate::args::FitRunArgs) {
                     stage_best_chain = Some(fs.best_chain);
                 }
             }
+            Stage::NlSbplx(_) | Stage::NlBobyqa(_) => {
+                #[cfg(feature = "ode")]
+                {
+                    nlopt_stage::run_stage(
+                        &sweep_config,
+                        stage_name,
+                        stage,
+                        &stage_dir,
+                        seed,
+                        effective_starts.as_deref(),
+                    ).unwrap_or_else(|e| {
+                        eprintln!("error running nlopt stage '{}': {}", stage_name, e);
+                        std::process::exit(1);
+                    });
+                    if let Ok(fs) = state::FitState::load(&stage_dir.to_string_lossy()) {
+                        stage_best_loglik = Some(fs.best_loglik);
+                        stage_best_chain = Some(fs.best_chain);
+                    }
+                }
+                #[cfg(not(feature = "ode"))]
+                {
+                    let _ = (stage_name, &sweep_config, &stage_dir, seed, effective_starts.as_deref());
+                    eprintln!(
+                        "error: this binary was built without --features ode, \
+                         which is required for algorithm = \"{}\". Rebuild \
+                         with `cargo build --features ode` (default).",
+                        stage.method_name()
+                    );
+                    std::process::exit(1);
+                }
+            }
             Stage::PFilter { particles, replicates, record_ancestry, record_prequential, .. } => {
                 let n_reps = replicates.unwrap_or(1);
                 // record_ancestry: CLI flag is a one-way override to true
@@ -1165,22 +1205,21 @@ pub fn cmd_fit_run_v2(a: &crate::args::FitRunArgs) {
             };
             crate::run_meta::StartsFromRef { stage: stage_name, stage_hash }
         });
+        let algo_tag = stage.method_name();
+        let backend_tag = stage.backend().as_str();
         let algo_json = match stage {
             Stage::IF2 { chains, particles, iterations, cooling, .. } =>
-                serde_json::json!({ "method": "if2", "chains": chains, "particles": particles, "iterations": iterations, "cooling": cooling }),
+                serde_json::json!({ "algorithm": algo_tag, "backend": backend_tag, "chains": chains, "particles": particles, "iterations": iterations, "cooling": cooling }),
             Stage::PGAS { chains, particles, sweeps, .. } =>
-                serde_json::json!({ "method": "pgas", "chains": chains, "particles": particles, "sweeps": sweeps }),
+                serde_json::json!({ "algorithm": algo_tag, "backend": backend_tag, "chains": chains, "particles": particles, "sweeps": sweeps }),
             Stage::PMMH { chains, particles, iterations, .. } =>
-                serde_json::json!({ "method": "pmmh", "chains": chains, "particles": particles, "iterations": iterations }),
+                serde_json::json!({ "algorithm": algo_tag, "backend": backend_tag, "chains": chains, "particles": particles, "iterations": iterations }),
             Stage::PFilter { particles, replicates, .. } =>
-                serde_json::json!({ "method": "pfilter", "particles": particles, "replicates": replicates }),
+                serde_json::json!({ "algorithm": algo_tag, "backend": backend_tag, "particles": particles, "replicates": replicates }),
+            Stage::NlSbplx(c) | Stage::NlBobyqa(c) =>
+                serde_json::json!({ "algorithm": algo_tag, "backend": backend_tag, "chains": c.chains, "tolerance": c.tolerance, "max_evals": c.max_evals }),
         };
-        let n_chains = match stage {
-            Stage::IF2  { chains, .. } => *chains,
-            Stage::PGAS { chains, .. } => *chains,
-            Stage::PMMH { chains, .. } => *chains,
-            Stage::PFilter { .. }      => 1,
-        };
+        let n_chains = stage.chains();
         let stage_inputs = crate::cas::fit_inputs::StageInputs {
             fit_stage_hash: config_hash.clone(),
             stage_dir: stage_dir.clone(),
@@ -1188,6 +1227,7 @@ pub fn cmd_fit_run_v2(a: &crate::args::FitRunArgs) {
                 fit_hash: parent_fit_hash.clone(),
                 stage: stage_name.to_string(),
                 method: stage.method_kind(),
+                backend: stage.backend(),
                 seed,
                 n_chains,
                 algorithm: algo_json,

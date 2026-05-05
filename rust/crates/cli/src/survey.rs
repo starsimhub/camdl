@@ -106,6 +106,16 @@ impl SurveyInputs {
         let seed_str = self.seed.to_string();
         let scenario_ref = self.scenario.as_deref().unwrap_or("");
         let estimated_canonical = self.estimated.join(",");
+        // Cache schema version. Bump when the survey computes a
+        // different statistical object than a prior release for the
+        // same inputs. Phase 1 of the ODE-inference proposal swaps
+        // `--eval simulate` from a 1-particle bootstrap PF
+        // (`p(y|θ)` under chain_binomial) to a true ODE deterministic
+        // eval (`p(y|θ, ODE_skeleton)`); the two agree to sub-nat at
+        // typhoid-class N but diverge in low-count regimes. Cached
+        // landscape.tsv files written before this bump are stale and
+        // must be re-run.
+        let schema_version = "v2-ode-eval-2026-05-04";
         hash_canonical(&[
             ("model",      &self.model_hash),
             ("data",       &data_canonical),
@@ -116,6 +126,7 @@ impl SurveyInputs {
             ("n_points",   &n_points_str),
             ("eval",       &eval_canonical),
             ("seed",       &seed_str),
+            ("schema",     schema_version),
         ])
     }
 }
@@ -427,6 +438,16 @@ pub fn cmd_survey(a: &crate::args::SurveyArgs) {
 
     eprintln!("survey: {} ({} points, eval={})",
         run_dir.display(), n_points, eval_method);
+    if eval_method == SurveyEvalMethod::Simulate {
+        eprintln!(
+            "  --eval simulate now computes p(y|θ, ODE_skeleton) via the ODE \
+             backend (Phase 1 of the ODE-inference proposal). Pre-2026-05-04 \
+             this flag ran a 1-particle bootstrap PF on chain_binomial; \
+             cached landscape.tsv files from the older schema have been \
+             invalidated. The two estimators agree to sub-nat at typhoid-\
+             class N but diverge in low-count regimes; prefer --eval pfilter \
+             when process noise is non-trivial.");
+    }
 
     let t0 = std::time::Instant::now();
 
@@ -454,10 +475,16 @@ pub fn cmd_survey(a: &crate::args::SurveyArgs) {
     let smc_dt = 1.0_f64;
     let t_start = resolved.compiled.model.simulation.t_start;
 
-    let obs_model: Arc<dyn ObservationModel<ParticleState> + Send + Sync> = {
-        let obs_times: Vec<f64> = resolved.per_stream_obs.first()
-            .map(|v| v.iter().map(|o| o.time).collect())
-            .unwrap_or_default();
+    // Concrete `Arc<MultiStreamObsModel>`: trait-typed obs models could
+    // also satisfy `eval_point_pfilter`, but `eval_point_simulate` (Phase 1
+    // — ODE-skeleton eval through `compute_ode_loglik`) needs the concrete
+    // type for `log_likelihood_from_flows_and_counts`. `&*obs_model`
+    // auto-coerces to `&dyn ObservationModel<ParticleState>` for the
+    // pfilter path.
+    let obs_times: Vec<f64> = resolved.per_stream_obs.first()
+        .map(|v| v.iter().map(|o| o.time).collect())
+        .unwrap_or_default();
+    let obs_model: Arc<MultiStreamObsModel> = {
         let mut stream_specs = Vec::with_capacity(resolved.obs_models.len());
         for (obs, stream_obs) in resolved.obs_models.iter().zip(resolved.per_stream_obs.iter()) {
             let projection = sim::inference::multi_stream_obs::StreamProjection::from_ir(
@@ -499,9 +526,9 @@ pub fn cmd_survey(a: &crate::args::SurveyArgs) {
                 SurveyEvalMethod::Auto => unreachable!(
                     "Auto resolved before parallel eval loop"),
                 SurveyEvalMethod::Simulate => eval_point_simulate(
-                    &process, obs_model.as_ref(),
+                    &resolved.compiled, &obs_model, &obs_times,
                     &params, &resolved.estimated, draw,
-                    smc_dt, t_start, a.seed, point_id,
+                    smc_dt, point_id,
                 ),
             };
             let done = progress.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
@@ -944,33 +971,30 @@ fn eval_point_pfilter(
 
 #[allow(clippy::too_many_arguments)]
 fn eval_point_simulate(
-    process: &ChainBinomialProcess,
-    obs_model: &(dyn ObservationModel<ParticleState> + Sync),
+    compiled: &sim::CompiledModel,
+    obs_model: &MultiStreamObsModel,
+    obs_times: &[f64],
     params: &[f64],
     estimated: &[EstimatedParam],
     draw: &[EstimatedParam],
     dt: f64,
-    t_start: f64,
-    seed_base: u64,
     point_id: usize,
 ) -> LandscapeRow {
-    // "Single deterministic trajectory" eval is implemented as a 1-particle
-    // bootstrap filter: cheap, exercises the same propensity machinery as
-    // the PF path, and degenerates to a single trajectory's loglik. SE
-    // is undefined (no replicates) — set to 0.0 per proposal §"TSV output".
-    let cfg = SMCConfig {
-        n_particles: 1,
-        dt,
-        t_start,
-        skip_first_obs_from_loglik: false,
-        record_ancestry: false,
-        record_prequential: false,
-    };
-    let seed = derive_point_seed(seed_base, point_id, 0);
-    let loglik = match bootstrap_filter(process, obs_model, params, &cfg, seed) {
-        Ok(r) => r.log_likelihood,
-        Err(_) => f64::NEG_INFINITY,
-    };
+    // Phase 1 of the ODE-inference proposal reroutes `--eval simulate`
+    // through `compute_ode_loglik`: pre-Phase 1 the path was a 1-particle
+    // bootstrap filter on `ChainBinomialProcess`, which returned a
+    // 1-sample MC estimate of `p(y|θ)` under the stochastic process
+    // kernel. The new path returns the deterministic-skeleton
+    // `p(y|θ, ODE_skeleton)` — a different statistical object that
+    // matches the flag's name. For typhoid-class N the two converge to
+    // sub-nat; for small populations the discrete-event vs continuous-
+    // trajectory difference is larger and the user should prefer
+    // `--eval pfilter`. SE remains undefined (single deterministic
+    // trajectory; no replicates) → reported as 0.0.
+    let loglik = crate::fit::runner::compute_ode_loglik(
+        compiled, obs_model, obs_times, dt, params,
+    )
+    .unwrap_or(f64::NEG_INFINITY);
     LandscapeRow {
         point_id,
         param_values: estimated.iter()

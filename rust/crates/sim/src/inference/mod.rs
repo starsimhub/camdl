@@ -31,6 +31,8 @@ pub mod nuts;
 pub mod linalg;
 pub mod diagnostic;
 pub mod prequential;
+#[cfg(feature = "ode")]
+pub mod deterministic;
 
 // Re-exports
 pub use types::{ParticleState, ParticleSwarm};

@@ -410,6 +410,7 @@ mod tests {
         let est: IndexMap<String, super::super::config_v2::EstimateSpecV2> = IndexMap::new();
         let fixed: IndexMap<String, f64> = IndexMap::new();
         let stage = super::super::config_v2::Stage::IF2 {
+            backend: crate::run_meta::Backend::ChainBinomial,
             chains: 4, particles: 1000, iterations: 50,
             cooling: 0.7,
             cooling_target_iters: 50,
@@ -431,6 +432,7 @@ mod tests {
         let est: IndexMap<String, super::super::config_v2::EstimateSpecV2> = IndexMap::new();
         let fixed: IndexMap<String, f64> = IndexMap::new();
         let stage = super::super::config_v2::Stage::IF2 {
+            backend: crate::run_meta::Backend::ChainBinomial,
             chains: 4, particles: 1000, iterations: 50,
             cooling: 0.7,
             cooling_target_iters: 50,
@@ -451,6 +453,7 @@ mod tests {
         let est: IndexMap<String, super::super::config_v2::EstimateSpecV2> = IndexMap::new();
         let fixed: IndexMap<String, f64> = IndexMap::new();
         let stage = super::super::config_v2::Stage::IF2 {
+            backend: crate::run_meta::Backend::ChainBinomial,
             chains: 4, particles: 1000, iterations: 50,
             cooling: 0.7,
             cooling_target_iters: 50,
@@ -471,6 +474,7 @@ mod tests {
         let est: IndexMap<String, super::super::config_v2::EstimateSpecV2> = IndexMap::new();
         let fixed: IndexMap<String, f64> = IndexMap::new();
         let stage1 = super::super::config_v2::Stage::IF2 {
+            backend: crate::run_meta::Backend::ChainBinomial,
             chains: 4, particles: 1000, iterations: 50,
             cooling: 0.7,
             cooling_target_iters: 50,
@@ -480,6 +484,7 @@ mod tests {
             gate: Default::default(),
         };
         let stage2 = super::super::config_v2::Stage::IF2 {
+            backend: crate::run_meta::Backend::ChainBinomial,
             chains: 8, particles: 1000, iterations: 50,
             cooling: 0.7,
             cooling_target_iters: 50,
@@ -505,6 +510,7 @@ mod tests {
         let est: IndexMap<String, super::super::config_v2::EstimateSpecV2> = IndexMap::new();
         let fixed: IndexMap<String, f64> = IndexMap::new();
         let stage = super::super::config_v2::Stage::IF2 {
+            backend: crate::run_meta::Backend::ChainBinomial,
             chains: 4, particles: 1000, iterations: 50,
             cooling: 0.7,
             cooling_target_iters: 50,

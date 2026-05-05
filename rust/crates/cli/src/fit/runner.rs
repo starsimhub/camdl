@@ -400,6 +400,105 @@ impl FitRunConfig {
     }
 }
 
+/// Evaluate `p(y | θ, ODE_skeleton)` — the deterministic marginal
+/// likelihood used by Phase 1 of the ODE-inference proposal
+/// (`docs/dev/proposals/2026-05-04-ode-inference-three-phase.md`).
+///
+/// Runs `OdeSim` once, then sums `MultiStreamObsModel::log_likelihood_*`
+/// over each obs time. Snapshot states are rounded to integer counts at
+/// snapshot time (per the ODE backend's standard `to_states` path) — at
+/// typhoid-class N the rounding-induced loglik change is sub-nat and
+/// well below NLopt's xtol; Phase 3 (NUTS) will revisit this with a
+/// real-valued obs eval to avoid integer-boundary discontinuities.
+///
+/// Callers pre-build `obs_model` and pass it in so the per-eval cost
+/// is one ODE solve + one obs scoring pass, with no per-call obs-model
+/// reconstruction. Used by:
+///   * `nlopt_stage::run_stage` — the NLopt per-chain closure
+///   * `cli::survey::eval_point_simulate` — `--eval simulate`
+///
+/// Returns `f64::NEG_INFINITY` if any obs likelihood evaluates to
+/// non-finite (NaN, -inf): callers (NLopt's user closure, survey
+/// landscape rendering) treat this as "model blew up at this θ" without
+/// crashing.
+pub fn compute_ode_loglik(
+    compiled: &CompiledModel,
+    obs_model: &sim::inference::MultiStreamObsModel,
+    obs_times: &[f64],
+    dt: f64,
+    params: &[f64],
+) -> Result<f64, sim::error::SimError> {
+    use sim::config::{OdeConfig, SimConfig};
+    use sim::ode::OdeSim;
+    use sim::Simulate;
+
+    let model_sim = &compiled.model.simulation;
+    let ode_cfg = OdeConfig {
+        t_start: model_sim.t_start,
+        t_end: model_sim.t_end,
+        dt,
+    };
+    let traj = OdeSim.run(
+        compiled,
+        params,
+        /* seed */ 0,
+        &SimConfig::Ode(ode_cfg),
+    )?;
+
+    // Walk obs_idx in order, finding the matching snapshot for each
+    // obs time. The simulator emits snapshots at the model's [output]
+    // times block, which the fit setup pins to the data's obs times,
+    // so we expect a strict 1-1 correspondence (modulo a possible
+    // initial-state snapshot at t_start).
+    let mut snap_iter = traj.snapshots.iter().peekable();
+    let mut total_ll = 0.0;
+    for (obs_idx, &obs_t) in obs_times.iter().enumerate() {
+        let snap = loop {
+            match snap_iter.peek() {
+                Some(s) if (s.t - obs_t).abs() < 1e-9 => {
+                    let s = snap_iter.next().unwrap();
+                    break s;
+                }
+                Some(s) if s.t < obs_t => {
+                    snap_iter.next();
+                }
+                _ => {
+                    return Err(sim::error::SimError::Validation(format!(
+                        "ODE trajectory missing snapshot at obs time {}; \
+                         the model's [output] times must include every \
+                         observation time. obs_idx = {}",
+                        obs_t, obs_idx
+                    )));
+                }
+            }
+        };
+        let ll = obs_model.log_likelihood_from_flows_and_counts(
+            &snap.flows.counts,
+            &snap.int_state.counts,
+            obs_idx,
+            params,
+        );
+        if !ll.is_finite() {
+            return Ok(f64::NEG_INFINITY);
+        }
+        total_ll += ll;
+    }
+    Ok(total_ll)
+}
+
+/// ODE step size for `compute_ode_loglik`: prefer `model.simulation.dt`,
+/// fall back to the IF2-config's dt (the CLI default of 1.0 unless
+/// otherwise set). Either way RK4 substeps are aligned to user-declared
+/// output times by the obs-time matching loop above.
+pub fn ode_step_dt(config: &FitRunConfig) -> f64 {
+    config
+        .compiled
+        .model
+        .simulation
+        .dt
+        .unwrap_or(config.if2_config.dt)
+}
+
 // load_model is now in util.rs
 
 /// Resolve top-level fit.toml `[[simplex_groups]]` entries (param
@@ -2526,7 +2625,8 @@ N0       = 1000
 I0       = 1
 
 [stages.scout]
-method     = "if2"
+algorithm     = "if2"
+backend     = "chain_binomial"
 chains     = 1
 particles  = 100
 iterations = 1
@@ -2620,7 +2720,8 @@ N0       = 1000
 beta     = 0.1
 
 [stages.scout]
-method     = "if2"
+algorithm     = "if2"
+backend     = "chain_binomial"
 chains     = 1
 particles  = 100
 iterations = 1
@@ -2873,7 +2974,8 @@ N0       = 1000
 I0       = 1
 
 [stages.scout]
-method     = "if2"
+algorithm     = "if2"
+backend     = "chain_binomial"
 chains     = 1
 particles  = 100
 iterations = 1

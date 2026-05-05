@@ -538,6 +538,7 @@ mod tests {
                 fit_hash: parent_hash.into(),
                 stage: "mle".into(),
                 method: crate::run_meta::MethodKind::If2,
+                backend: crate::run_meta::Backend::ChainBinomial,
                 seed: 1,
                 n_chains: 2,
                 algorithm: serde_json::json!({"iterations": 5}),

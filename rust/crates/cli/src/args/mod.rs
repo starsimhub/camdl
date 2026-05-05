@@ -946,6 +946,23 @@ pub struct ProfileArgs {
     /// applies to the umbrella; per-seed children remain unlabelled.
     #[arg(long, value_name = "TEXT")]
     pub label: Option<String>,
+
+    /// Per-cell inference algorithm. When omitted the per-cell runner
+    /// uses `if2` on `chain_binomial` (the historical default). Pass an
+    /// algorithm + backend pair from `camdl fit methods` to switch
+    /// (e.g. `--algorithm nl-sbplx --backend ode` for deterministic
+    /// per-cell MLE — typically 100×–1000× faster on equilibrium /
+    /// large-population fits where the PF is structurally redundant).
+    /// Validated against the methods registry at startup; invalid pairs
+    /// error with an actionable suggestion.
+    #[arg(long, value_name = "NAME")]
+    pub algorithm: Option<String>,
+
+    /// Simulation backend. Defaults to `chain_binomial`; pass
+    /// `--backend ode` together with an ODE-compatible algorithm
+    /// (`nl-sbplx`, `nl-bobyqa`) for deterministic per-cell MLE.
+    #[arg(long, value_name = "NAME")]
+    pub backend: Option<String>,
 }
 
 // ─── survey ───────────────────────────────────────────────────────────────────

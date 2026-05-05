@@ -1599,7 +1599,8 @@ N0 = 1000000
 I0 = 10
 
 [stages.mle]
-method = "if2"
+algorithm = "if2"
+backend = "chain_binomial"
 chains = 8
 particles = 1000
 iterations = 80
@@ -1630,7 +1631,8 @@ N0 = 1000000
 I0 = 10
 
 [stages.mle]
-method = "if2"
+algorithm = "if2"
+backend = "chain_binomial"
 chains = 4
 particles = 2000
 iterations = 60
@@ -1638,14 +1640,16 @@ cooling = 0.95
 starts_from = "results/fits/01_all_free/mle"
 
 [stages.posterior]
-method = "pgas"
+algorithm = "pgas"
+backend = "chain_binomial"
 chains = 4
 particles = 50
 sweeps = 5000
 starts_from = "mle"
 
 [stages.evaluate]
-method = "pfilter"
+algorithm = "pfilter"
+backend = "chain_binomial"
 particles = 10000
 replicates = 100
 starts_from = "mle"
@@ -1678,14 +1682,16 @@ from_file = "params/nigeria_fixed.toml"
 vacc_frac = 0.80
 
 [stages.mle]
-method = "if2"
+algorithm = "if2"
+backend = "chain_binomial"
 chains = 8
 particles = 2000
 iterations = 100
 cooling = 0.70
 
 [stages.posterior]
-method = "pgas"
+algorithm = "pgas"
+backend = "chain_binomial"
 chains = 6
 particles = 100
 sweeps = 10000
