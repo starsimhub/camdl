@@ -341,13 +341,14 @@ fn diff_stages(
     }
 }
 
-/// Project a `Stage` into a flat key→value settings map. Method-aware:
-/// keys differ across IF2/PGAS/PMMH/PFilter, and the `method` itself
-/// becomes a key so a stage that swapped methods produces a clean
-/// `method` row in `settings_changed`.
+/// Project a `Stage` into a flat key→value settings map. Algorithm-aware:
+/// keys differ across IF2/PGAS/PMMH/PFilter/Nl*, and the `algorithm` and
+/// `backend` keys are first-class so a stage that swapped either produces
+/// a clean row in `settings_changed`.
 fn stage_settings_map(stage: &Stage) -> BTreeMap<String, serde_json::Value> {
     let mut m = BTreeMap::new();
-    m.insert("method".into(), serde_json::Value::String(stage.method_name().into()));
+    m.insert("algorithm".into(), serde_json::Value::String(stage.method_name().into()));
+    m.insert("backend".into(), serde_json::Value::String(stage.backend().as_str().into()));
     match stage {
         Stage::IF2 {
             chains,
@@ -415,6 +416,16 @@ fn stage_settings_map(stage: &Stage) -> BTreeMap<String, serde_json::Value> {
             m.insert("particles".into(), serde_json::json!(particles));
             m.insert("replicates".into(), serde_json::json!(replicates));
         }
+        Stage::NlSbplx(c) | Stage::NlBobyqa(c) => {
+            m.insert("chains".into(), serde_json::json!(c.chains));
+            m.insert("tolerance".into(), serde_json::json!(c.tolerance));
+            m.insert("max_evals".into(), serde_json::json!(c.max_evals));
+            m.insert("gate.a_thresh".into(), serde_json::json!(c.gate.a_thresh));
+            m.insert(
+                "gate.decibans_thresh".into(),
+                serde_json::json!(c.gate.decibans_thresh),
+            );
+        }
     }
     m
 }
@@ -461,14 +472,16 @@ mod tests {
         N0 = 1000.0
 
         [stages.scout]
-        method = "if2"
+        algorithm = "if2"
+        backend = "chain_binomial"
         chains = 4
         particles = 500
         iterations = 50
         cooling = 0.7
 
         [stages.refine]
-        method = "if2"
+        algorithm = "if2"
+        backend = "chain_binomial"
         chains = 4
         particles = 1000
         iterations = 100
@@ -553,8 +566,8 @@ mod tests {
     fn detects_stage_added_and_settings_changed() {
         let baseline = parse(BASELINE_TOML);
         let variant_str = BASELINE_TOML.replace(
-            "[stages.refine]\n        method = \"if2\"\n        chains = 4\n        particles = 1000\n        iterations = 100\n        cooling = 0.5",
-            "[stages.refine]\n        method = \"if2\"\n        chains = 8\n        particles = 1000\n        iterations = 100\n        cooling = 0.5\n\n        [stages.validate]\n        method = \"if2\"\n        chains = 4\n        particles = 5000\n        iterations = 20\n        cooling = 0.9",
+            "[stages.refine]\n        algorithm = \"if2\"\n        backend = \"chain_binomial\"\n        chains = 4\n        particles = 1000\n        iterations = 100\n        cooling = 0.5",
+            "[stages.refine]\n        algorithm = \"if2\"\n        backend = \"chain_binomial\"\n        chains = 8\n        particles = 1000\n        iterations = 100\n        cooling = 0.5\n\n        [stages.validate]\n        algorithm = \"if2\"\n        backend = \"chain_binomial\"\n        chains = 4\n        particles = 5000\n        iterations = 20\n        cooling = 0.9",
         );
         let variant = parse(&variant_str);
         let diff = ConfigDiff::compare(

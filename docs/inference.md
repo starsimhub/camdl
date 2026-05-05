@@ -819,7 +819,8 @@ per-cell starts. Honoured by **IF2**, **PGAS**, **PMMH**, and
 
 ```toml
 [stages.scout]
-method      = "if2"
+algorithm      = "if2"
+backend      = "chain_binomial"
 chains      = 16
 init_method = "lhs"            # default is "uniform"
 ```

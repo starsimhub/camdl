@@ -377,7 +377,8 @@ gamma = 0.5
 N0    = 763
 
 [stages.mle]
-method     = "if2"
+algorithm     = "if2"
+backend     = "chain_binomial"
 chains     = 8
 particles  = 1000
 iterations = 100

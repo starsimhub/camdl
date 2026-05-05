@@ -339,6 +339,7 @@ mod tests {
                 fit_hash: parent_hash.into(),
                 stage: stage.into(),
                 method,
+                backend: crate::run_meta::Backend::ChainBinomial,
                 seed,
                 n_chains: 2,
                 algorithm: serde_json::Value::Null,

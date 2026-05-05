@@ -22,7 +22,7 @@ rayon = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
-sim = { path = "../sim" }
+sim = { path = "../sim", default-features = false }
 log = "0.4"
 env_logger = "0.11"
 # Terminal colors for `camdl list/show/cat` output. Zero-dep, zero-alloc,
@@ -36,6 +36,15 @@ tokio = { version = "1", features = ["rt-multi-thread", "net", "macros"] }
 toml = { version = "0.8", features = ["parse"] }
 clap = { version = "4", features = ["derive", "env"] }
 tower-http = { version = "0.5", features = ["fs", "cors"] }
+
+[features]
+default = ["ode"]
+# `ode` enables the deterministic-inference algorithms (nl-sbplx, nl-bobyqa
+# in Phase 1; mh, nuts in later phases) by turning on sim's `ode` feature
+# (which pulls in the `nlopt` C-FFI dep). Default-on so install scripts and
+# dev builds pick it up; `--no-default-features` produces a minimal binary
+# without those algorithms.
+ode = ["sim/ode"]
 
 [dev-dependencies]
 tempfile = "3"

@@ -25,13 +25,16 @@ use crate::run_meta::{Run, RunKind};
 
 /// One stage of a fit, typed by method. The variant carries the
 /// payload appropriate to its inference method (point estimate +
-/// gates for IF2; posterior summaries + R̂ for Bayesian).
+/// gates for IF2; posterior summaries + R̂ for Bayesian; status +
+/// per-chain spread for NLopt deterministic MLE).
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "method", rename_all = "lowercase")]
+#[serde(tag = "method", rename_all = "kebab-case")]
 pub enum MethodResult {
     If2(If2StageResult),
     Pgas(PgasStageResult),
     Pmmh(PmmhStageResult),
+    #[serde(rename = "nl-sbplx", alias = "nl-bobyqa")]
+    Nlopt(NloptStageResult),
 }
 
 /// Compound scout-convergence gate verdict (the IF2 "is this stage
@@ -115,6 +118,31 @@ pub struct PgasStageResult {
     pub n_chains: usize,
 }
 
+/// NLopt-stage result: deterministic MLE on the ODE skeleton (Phase 1
+/// of the ODE-inference proposal). Mirrors `If2StageResult`'s point-
+/// estimate shape, with NLopt-specific convergence info (status and
+/// per-param chain spread) replacing IF2's chain-agreement Â and
+/// PF-ESS columns.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NloptStageResult {
+    pub best_loglik: f64,
+    pub best_chain: usize,
+    /// Winner θ̂ — estimated parameters only. Fixed params live in
+    /// `mle_params.toml` (full vector with provenance).
+    pub theta_hat: BTreeMap<String, f64>,
+    /// Which NLopt algorithm produced this result: `"nl-sbplx"` or
+    /// `"nl-bobyqa"`.
+    pub algorithm: String,
+    /// Number of converged (`Success` / `XtolReached` / `FtolReached`)
+    /// chains. `n_chains - n_converged` includes both `MaxEvalReached`
+    /// (soft failure) and `Failed` (hard error).
+    pub n_converged: usize,
+    /// Maximum per-param relative range across chains (range / bound
+    /// width). NA when n_chains == 1.
+    pub max_rel_range: f64,
+    pub n_chains: usize,
+}
+
 /// PMMH-stage result: posterior approximation + scalar acceptance.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PmmhStageResult {
@@ -153,7 +181,8 @@ impl std::fmt::Display for MethodResultError {
         match self {
             MethodResultError::UnknownMethod { method, stage_dir } => write!(
                 f,
-                "unknown fit-stage method `{}` at {} (expected if2, pgas, or pmmh)",
+                "unknown fit-stage method `{}` at {} (expected if2, pgas, \
+                 pmmh, nl-sbplx, or nl-bobyqa)",
                 method,
                 stage_dir.display()
             ),
@@ -174,6 +203,9 @@ impl MethodResult {
             "if2" => Ok(MethodResult::If2(If2StageResult::load(stage_dir)?)),
             "pgas" => Ok(MethodResult::Pgas(PgasStageResult::load(stage_dir)?)),
             "pmmh" => Ok(MethodResult::Pmmh(PmmhStageResult::load(stage_dir)?)),
+            "nl-sbplx" | "nl-bobyqa" => Ok(MethodResult::Nlopt(
+                NloptStageResult::load(stage_dir, method)?,
+            )),
             unknown => Err(MethodResultError::UnknownMethod {
                 method: unknown.to_string(),
                 stage_dir: stage_dir.to_owned(),
@@ -192,6 +224,58 @@ fn read_run(stage_dir: &Path) -> Result<Run, MethodResultError> {
         stage_dir: stage_dir.to_owned(),
         message: format!("run.json: {}", e),
     })
+}
+
+// ── NloptStageResult ────────────────────────────────────────────────
+
+impl NloptStageResult {
+    pub fn load(stage_dir: &Path, method: &str) -> Result<Self, MethodResultError> {
+        let run = read_run(stage_dir)?;
+        let stage_meta = match &run.kind {
+            RunKind::FitStage(m) => m,
+            _ => {
+                return Err(MethodResultError::Io {
+                    stage_dir: stage_dir.to_owned(),
+                    message: "run.json is not a fit-stage".into(),
+                })
+            }
+        };
+        let state = FitState::load(&stage_dir.to_string_lossy()).map_err(|e| {
+            MethodResultError::Io {
+                stage_dir: stage_dir.to_owned(),
+                message: format!("fit_state.toml: {}", e),
+            }
+        })?;
+
+        // theta_hat: estimated parameters only. NLopt's tail_chain_agreement
+        // (per-param relative range) carries one entry per estimated param
+        // — same trick the IF2 loader uses to filter to the estimated set.
+        let theta_hat: BTreeMap<String, f64> = if state.tail_chain_agreement.is_empty() {
+            state.start_values.iter().map(|(k, v)| (k.clone(), *v)).collect()
+        } else {
+            state
+                .tail_chain_agreement
+                .keys()
+                .filter_map(|name| state.start_values.get(name).map(|v| (name.clone(), *v)))
+                .collect()
+        };
+
+        let max_rel_range = state
+            .tail_chain_agreement
+            .values()
+            .copied()
+            .fold(0.0_f64, f64::max);
+
+        Ok(NloptStageResult {
+            best_loglik: state.best_loglik,
+            best_chain: state.best_chain,
+            theta_hat,
+            algorithm: method.to_string(),
+            n_converged: state.n_good_chains.unwrap_or(stage_meta.n_chains),
+            max_rel_range,
+            n_chains: stage_meta.n_chains,
+        })
+    }
 }
 
 // ── If2StageResult ──────────────────────────────────────────────────
@@ -676,6 +760,7 @@ mod tests {
                 fit_hash: "f00d".repeat(16),
                 stage: "scout".into(),
                 method,
+                backend: crate::run_meta::Backend::ChainBinomial,
                 seed: 1,
                 n_chains,
                 algorithm,

@@ -246,6 +246,8 @@ pub(crate) enum FitCmd {
     New(args::FitNewArgs),
     /// Print the output directory path for a fit.toml
     Where(args::FitWhereArgs),
+    /// List supported (algorithm, backend) pairs and their descriptions
+    Methods,
 }
 
 #[derive(Subcommand)]
@@ -317,6 +319,7 @@ fn main() {
         Command::Fit(FitCmd::Table(a))  => fit::cmd_fit_table(&a),
         Command::Fit(FitCmd::New(a))    => fit::cmd_fit_new(&a),
         Command::Fit(FitCmd::Where(a))  => fit::cmd_fit_where(&a),
+        Command::Fit(FitCmd::Methods)   => fit::cmd_fit_methods(),
         Command::Label(a)               => fit::cmd_label(&a),
         Command::Pfilter(a)             => pfilter::cmd_pfilter(&a),
         Command::If2(a)                 => if2::cmd_if2(&a),

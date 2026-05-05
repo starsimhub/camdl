@@ -103,7 +103,8 @@ gamma = { bounds = [0.01, 1.0], start = 0.3 }
 N0 = 1000
 
 [stages.mle]
-method = "if2"
+algorithm = "if2"
+backend = "chain_binomial"
 chains = 2
 particles = 100
 iterations = 5
@@ -299,7 +300,8 @@ gamma = {{ bounds = [0.01, 1.0], start = 0.3 }}
 N0 = 1000
 
 [stages.mle]
-method     = "if2"
+algorithm     = "if2"
+backend     = "chain_binomial"
 chains     = 8
 particles  = 50
 iterations = 2

@@ -255,6 +255,36 @@ impl MethodView {
             MethodResult::If2(if2) => Self::from_if2(if2),
             MethodResult::Pgas(pgas) => Self::from_pgas(pgas),
             MethodResult::Pmmh(pmmh) => Self::from_pmmh(pmmh),
+            MethodResult::Nlopt(nl) => Self::from_nlopt(nl),
+        }
+    }
+
+    fn from_nlopt(r: &super::method_result::NloptStageResult) -> Self {
+        // Treat NLopt's two-leg gate as "all chains converged AND
+        // max_rel_range below the proposal's first-pass threshold."
+        // For single-chain runs the rel range is trivially 0.
+        let converged = r.n_converged == r.n_chains
+            && (r.n_chains < 2 || r.max_rel_range < 0.05);
+        Self {
+            converged,
+            gate_verdict: if converged {
+                "pass".into()
+            } else if r.n_converged == r.n_chains {
+                "fail_chain_agreement".into()
+            } else {
+                "fail_status".into()
+            },
+            best_loglik: Some(r.best_loglik),
+            max_chain_agreement: if r.n_chains > 1 {
+                Some(r.max_rel_range)
+            } else {
+                None
+            },
+            max_rhat: None,
+            acceptance_rate: None,
+            ess_at_mle: None,
+            ess_posterior: None,
+            params: r.theta_hat.clone(),
         }
     }
 

@@ -97,7 +97,8 @@ gamma = {{ bounds = [0.01, 1.0],  prior = {{ log_normal = {{ mu = -1.2, sigma = 
 [fixed]
 N0 = 1000
 [stages.post]
-method = "pgas"
+algorithm = "pgas"
+backend = "chain_binomial"
 chains = {chains}
 particles = 30
 sweeps = {sweeps}

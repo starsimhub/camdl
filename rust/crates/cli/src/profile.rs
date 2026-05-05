@@ -45,10 +45,8 @@ use sim::{
     compiled_model::CompiledModel,
     inference::{
         if2::{run_if2, IF2Config, Observation},
-        ParticleState,
         ChainBinomialProcess, MultiStreamObsModel,
         multi_stream_obs::StreamSpec,
-        traits::ObservationModel,
     },
 };
 use std::collections::HashMap;
@@ -62,6 +60,35 @@ use crate::run_meta::{FitStageMeta, GridAxis, ProfileMeta, Run, RunKind, RunStat
 use crate::run_paths::{
     output_root, profile_point_dir, profile_point_start_dir,
 };
+
+/// Per-cell optimizer choice. `--algorithm if2 --backend chain_binomial`
+/// (the default) keeps the historical PF-based per-cell MLE; the new
+/// `--algorithm nl-* --backend ode` paths run NLopt deterministic MLE
+/// against `compute_ode_loglik`. See gh#47 for the dispatch rationale
+/// and the proposal for the (algorithm, backend) matrix.
+#[derive(Debug, Clone, Copy)]
+enum ProfileAlgo {
+    If2,
+    Nlopt(sim::inference::deterministic::NloptAlgorithm),
+}
+
+impl ProfileAlgo {
+    fn method_kind(self) -> crate::run_meta::MethodKind {
+        match self {
+            ProfileAlgo::If2 => crate::run_meta::MethodKind::If2,
+            ProfileAlgo::Nlopt(sim::inference::deterministic::NloptAlgorithm::Sbplx) =>
+                crate::run_meta::MethodKind::NlSbplx,
+            ProfileAlgo::Nlopt(sim::inference::deterministic::NloptAlgorithm::Bobyqa) =>
+                crate::run_meta::MethodKind::NlBobyqa,
+        }
+    }
+    fn backend(self) -> crate::run_meta::Backend {
+        match self {
+            ProfileAlgo::If2     => crate::run_meta::Backend::ChainBinomial,
+            ProfileAlgo::Nlopt(_) => crate::run_meta::Backend::Ode,
+        }
+    }
+}
 
 // ─── Observation family resolution ───────────────────────────────────────────
 
@@ -274,6 +301,27 @@ impl CasInputs for ProfileInputs {
 }
 
 pub fn cmd_profile(a: &crate::args::ProfileArgs) {
+    // Validate (algorithm, backend) early, before any expensive setup.
+    let algo_name = a.algorithm.as_deref().unwrap_or("if2");
+    let backend_name = a.backend.as_deref().unwrap_or("chain_binomial");
+    if let Err(msg) = crate::fit::methods::validate_combo(algo_name, backend_name) {
+        eprintln!("error: {}", msg);
+        std::process::exit(1);
+    }
+    let profile_algo = match algo_name {
+        "if2"       => ProfileAlgo::If2,
+        "nl-sbplx"  => ProfileAlgo::Nlopt(sim::inference::deterministic::NloptAlgorithm::Sbplx),
+        "nl-bobyqa" => ProfileAlgo::Nlopt(sim::inference::deterministic::NloptAlgorithm::Bobyqa),
+        other => {
+            eprintln!(
+                "error: --algorithm = \"{}\" is not yet supported for `camdl profile`. \
+                 Currently supported: if2 (chain_binomial), nl-sbplx (ode), nl-bobyqa (ode).",
+                other
+            );
+            std::process::exit(1);
+        }
+    };
+
     let ir_path = a.model.to_string_lossy().into_owned();
     let data_path = a.data.to_string_lossy().into_owned();
     let n_particles = a.inference.particles;
@@ -341,6 +389,16 @@ pub fn cmd_profile(a: &crate::args::ProfileArgs) {
     let compiled = Arc::new(CompiledModel::new(model.clone())
         .unwrap_or_else(|e| { eprintln!("{:?}", e); std::process::exit(1); }));
     let base_params = compiled.default_params.clone();
+
+    // Reject overdispersed models on the ODE backend (and any other
+    // backend / model-capability mismatch). The `validate_combo` call
+    // above is structural-only; this check sees the actual model.
+    if let Err(msg) = crate::fit::methods::check_model_capabilities(
+        backend_name, &compiled,
+    ) {
+        eprintln!("error: {}", msg);
+        std::process::exit(1);
+    }
 
     // ── Resolve --obs against the IR's observation list ─────────────
     //
@@ -537,8 +595,13 @@ pub fn cmd_profile(a: &crate::args::ProfileArgs) {
     // for multi-stream we always use each stream's IR projection
     // (the `--flow` + multi-stream combination was already rejected
     // upstream).
-    let obs_model_obj: Arc<dyn ObservationModel<ParticleState> + Send + Sync> = {
-        let obs_times: Vec<f64> = observations.iter().map(|o| o.time).collect();
+    // Concrete `Arc<MultiStreamObsModel>` — the IF2 per-cell call site
+    // accepts `&dyn ObservationModel<ParticleState>` (auto-coerced from
+    // `&MultiStreamObsModel`); the NLopt path needs the concrete type
+    // for `optimize_cell` (`compute_ode_loglik` reads
+    // `log_likelihood_from_flows_and_counts` directly).
+    let obs_times_vec: Vec<f64> = observations.iter().map(|o| o.time).collect();
+    let obs_model_obj: Arc<MultiStreamObsModel> = {
         let mut stream_specs = Vec::with_capacity(resolved_obs.len());
         for (obs, stream_obs) in resolved_obs.iter().zip(per_stream_obs.iter()) {
             let projection = if resolved_obs.len() == 1 && flow_name.is_some() {
@@ -554,7 +617,7 @@ pub fn cmd_profile(a: &crate::args::ProfileArgs) {
                 projection,
                 ir_model: (*obs).clone(),
                 observations: stream_obs.iter().map(|o| o.value).collect(),
-                obs_times: obs_times.clone(),
+                obs_times: obs_times_vec.clone(),
             });
         }
         Arc::new(MultiStreamObsModel::new(stream_specs, compiled.clone())
@@ -808,16 +871,6 @@ pub fn cmd_profile(a: &crate::args::ProfileArgs) {
             params[idx] = val;
         }
 
-        let config = IF2Config {
-            n_particles, n_iterations,
-            cooling_fraction: cooling, cooling_target_iters: n_iterations, dt,
-            t_start: process.compiled.model.simulation.t_start,
-            simplex_groups: vec![],
-            skip_first_obs_from_loglik: false,
-        };
-        // job_seed derives from this REPLICATE's seed, not a global
-        // seed_base — different seeds in --seeds drive distinct IF2
-        // noise (the whole point of multi-seed sensitivity).
         let job_seed = seed ^ (grid_idx as u64 * 1000 + start_idx as u64);
         let job_t0 = std::time::Instant::now();
 
@@ -830,9 +883,86 @@ pub fn cmd_profile(a: &crate::args::ProfileArgs) {
             per_start_params.as_ref()
                 .map(|psp| psp[start_idx].as_slice())
                 .unwrap_or(if2_params.as_slice());
-        let result = run_if2(
-            &*process, &*obs_model_obj, &params, per_start_specs, &config, job_seed,
-        );
+
+        // Dispatch on algorithm. IF2 keeps the historical PF-driven
+        // per-cell MLE; NLopt branches into the deterministic-MLE path
+        // (gh#47) — same `compute_ode_loglik` closure that fit.toml
+        // stages call, with the focal grid value pinned in `params` and
+        // optimization confined to the non-focal estimated indices.
+        let (final_loglik, mle_params): (f64, Vec<f64>) = match profile_algo {
+            ProfileAlgo::If2 => {
+                let config = IF2Config {
+                    n_particles, n_iterations,
+                    cooling_fraction: cooling, cooling_target_iters: n_iterations, dt,
+                    t_start: process.compiled.model.simulation.t_start,
+                    simplex_groups: vec![],
+                    skip_first_obs_from_loglik: false,
+                };
+                let result = run_if2(
+                    &*process, &*obs_model_obj, &params, per_start_specs, &config, job_seed,
+                );
+                match result {
+                    Ok(r) => (r.final_loglik, r.mle),
+                    Err(_) => (f64::NEG_INFINITY, params.clone()),
+                }
+            }
+            ProfileAlgo::Nlopt(nlopt_algo) => {
+                // Per-cell starting point: copy `params` (focal pinned)
+                // and overwrite the non-focal estimated slots with the
+                // per-start LHS draws. `per_start_specs` contains only
+                // non-focal estimated specs, so the focal pin survives.
+                let mut full_start = params.clone();
+                for spec in per_start_specs {
+                    full_start[spec.index] = spec.initial;
+                }
+                let est_indices: Vec<usize> =
+                    per_start_specs.iter().map(|p| p.index).collect();
+                let bounds: Vec<(f64, f64)> =
+                    per_start_specs.iter().map(|p| (p.lower, p.upper)).collect();
+                let ode_dt = compiled.model.simulation.dt.unwrap_or(dt);
+                // Per-cell NLopt knobs: looser than fit.toml stages
+                // because profile is landscape exploration, not a
+                // single converged MLE. With 11+ free params on a
+                // typhoid-class model each ODE solve runs ~100ms-1s,
+                // so a 1500-eval budget is ~5 min per cell — fast
+                // enough for routine 1D profiles, expensive enough to
+                // converge on the ridge. Tunable later via dedicated
+                // `--nlopt-tolerance` / `--nlopt-max-evals` flags
+                // when downstream tuning surfaces a need.
+                let tolerance = 1e-4;
+                let max_evals = 1500;
+                match crate::fit::nlopt_stage::optimize_cell(
+                    nlopt_algo,
+                    &compiled,
+                    &obs_model_obj,
+                    &obs_times_vec,
+                    ode_dt,
+                    &bounds,
+                    &est_indices,
+                    &full_start,
+                    tolerance,
+                    max_evals,
+                ) {
+                    Ok(r) => {
+                        // Reproject the optimizer-space result back into
+                        // a full param vector (focal pinned, non-focal
+                        // optimized, fixed at base).
+                        let mut mle = full_start.clone();
+                        for (slot, &model_idx) in est_indices.iter().enumerate() {
+                            mle[model_idx] = r.params[slot];
+                        }
+                        (r.loglik, mle)
+                    }
+                    Err(e) => {
+                        eprintln!(
+                            "warning: nlopt optimize_cell failed at grid {}/start {}: {}",
+                            grid_idx, start_idx, e
+                        );
+                        (f64::NEG_INFINITY, params.clone())
+                    }
+                }
+            }
+        };
         let elapsed = job_t0.elapsed().as_secs_f64();
 
         let seed_dir = &seed_dirs[seed_idx];
@@ -841,11 +971,6 @@ pub fn cmd_profile(a: &crate::args::ProfileArgs) {
             eprintln!("warning: cannot create {}: {}", start_dir.display(), e);
             return;
         }
-
-        let (final_loglik, mle_params): (f64, Vec<f64>) = match result {
-            Ok(r) => (r.final_loglik, r.mle),
-            Err(_) => (f64::NEG_INFINITY, params.clone()),
-        };
 
         let mle_toml = render_mle_toml(&if2_params, &focal_values,
             &focal_grids.iter().map(|fg| fg.name.as_str()).collect::<Vec<_>>(),
@@ -872,16 +997,24 @@ pub fn cmd_profile(a: &crate::args::ProfileArgs) {
             label: None,
             kind: RunKind::FitStage(FitStageMeta {
                 fit_hash: String::new(),
-                stage: "if2".to_string(),
-                method: crate::run_meta::MethodKind::If2,
+                stage: profile_algo.method_kind().as_str().to_string(),
+                method: profile_algo.method_kind(),
+                backend: profile_algo.backend(),
                 seed: job_seed,
                 n_chains: 1,
-                algorithm: serde_json::json!({
-                    "particles":  n_particles,
-                    "iterations": n_iterations,
-                    "cooling":    cooling,
-                    "dt":         dt,
-                }),
+                algorithm: match profile_algo {
+                    ProfileAlgo::If2 => serde_json::json!({
+                        "particles":  n_particles,
+                        "iterations": n_iterations,
+                        "cooling":    cooling,
+                        "dt":         dt,
+                    }),
+                    ProfileAlgo::Nlopt(_) => serde_json::json!({
+                        "tolerance": 1e-4,
+                        "max_evals": 1500,
+                        "dt":        compiled.model.simulation.dt.unwrap_or(dt),
+                    }),
+                },
                 best_loglik: if final_loglik.is_finite() { Some(final_loglik) } else { None },
                 best_chain:  Some(0),
                 starts_from: None,
