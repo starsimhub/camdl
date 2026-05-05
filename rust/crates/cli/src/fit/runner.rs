@@ -164,30 +164,34 @@ impl FitRunConfig {
         //
         // gh#34: when [estimate] entry has no explicit `start =` AND
         // the model param has no value yet (no scenario default, no
-        // model-declared `value`), fall back to the bounds midpoint.
-        // Geometric mean for log-friendly bounds (both > 0); arithmetic
-        // otherwise. Picks a position that won't immediately bias IF2
-        // toward either bound — better than refusing to fit, much better
-        // than forcing every estimate entry to carry a redundant start.
+        // model-declared `value`), fall back to a Transform-aware
+        // uniform draw within bounds. Better than the prior bounds-
+        // midpoint heuristic, which gave every seed the same point and
+        // ignored the parameter's declared transform — Log-typed rates
+        // now get a draw in log space, others linear in [lo, hi]. Still
+        // deterministic per (seed, param_name) so reruns are
+        // reproducible.
         for (name, spec) in &fit.estimate {
             if let Some(p) = model.parameters.iter_mut().find(|p| p.name == *name) {
                 if p.value.is_none() {
-                    // For the start-midpoint fallback we need bounds.
+                    // For the start fallback we need bounds.
                     // Prefer fit.toml's `[estimate.X].bounds` when given
                     // (typically a tightening of model bounds); fall back
                     // to the model's `parameters { X : rate in [lo, hi] }`
                     // declaration when fit.toml omits. Skip the start
                     // computation entirely if neither has bounds — the
                     // downstream `validate_parameter_values` will surface
-                    // a clearer error than picking a midpoint of
+                    // a clearer error than picking a draw on
                     // `(0.0, +inf)`.
                     let resolved_bounds = spec.bounds.or(p.bounds);
                     let value = spec.start.or_else(|| resolved_bounds.map(|(lo, hi)| {
-                        if lo > 0.0 && hi > 0.0 {
-                            (lo * hi).sqrt()         // geometric mean
-                        } else {
-                            0.5 * (lo + hi)          // arithmetic mean
-                        }
+                        let transform = derive_transform_with_bounds(
+                            p,
+                            spec.transform.as_ref().map(|t| t.as_str()),
+                            (lo, hi),
+                        );
+                        let log_scale = matches!(transform, Transform::Log { .. });
+                        super::init::draw_start_in_bounds(lo, hi, log_scale, seed, name)
                     }));
                     if let Some(v) = value {
                         p.value = Some(v);
@@ -2986,11 +2990,15 @@ dt = 1.0
     }
 
     /// gh#34: when [estimate] entry omits `start =`, the run-config
-    /// builder fills in a value automatically. Geometric mean of
-    /// bounds for both-positive bounds; arithmetic mean otherwise. No
-    /// more "parameter 'foo' has no value" failure for forgetful users.
+    /// builder fills in a value automatically. The current rule is a
+    /// Transform-aware uniform draw within bounds (log-uniform for
+    /// Log-typed positive bounds, linear otherwise), seeded by
+    /// (run-seed, param-name). Verifies (i) build succeeds with no
+    /// explicit start and (ii) the assigned value is inside
+    /// `[estimate].bounds`. No more "parameter 'foo' has no value"
+    /// failure for forgetful users.
     #[test]
-    fn estimate_without_start_falls_back_to_bounds_midpoint() {
+    fn estimate_without_start_falls_back_within_bounds() {
         use crate::fit::config_v2::FitConfigV2;
 
         let manifest = std::env::var("CARGO_MANIFEST_DIR").unwrap();
@@ -3004,9 +3012,11 @@ dt = 1.0
         std::fs::write(&data_path,
             "time\tweekly_cases\n7\t1\n14\t2\n21\t3\n28\t4\n35\t5\n").unwrap();
 
-        // beta has bounds [0.01, 0.5] and NO `start =`. The geometric
-        // mean is sqrt(0.01 * 0.5) ≈ 0.0707. Pre-gh#34 this would fail
-        // with "parameter 'beta' has no value".
+        // beta has bounds [0.01, 0.5] and NO `start =`. The fallback
+        // is a log-uniform draw within (0.01, 0.5) — beta is param_kind
+        // = "rate" in the seir model, so derive_transform yields
+        // Transform::Log and the helper picks the log branch. Pre-gh#34
+        // this would fail with "parameter 'beta' has no value".
         let fit_toml_path = data_dir.join("fit.toml");
         let toml = format!(r#"
 output_dir = "{}"
@@ -3052,11 +3062,20 @@ dt = 1.0
 
         let beta_idx = config.compiled.param_index.get("beta").copied()
             .expect("beta present");
-        let expected = (0.01_f64 * 0.5).sqrt();
-        assert!((config.base_params[beta_idx] - expected).abs() < 1e-9,
-            "missing start should fall back to geometric mean of bounds \
-             — got {}, expected {} (sqrt(0.01 * 0.5))",
-            config.base_params[beta_idx], expected);
+        let beta = config.base_params[beta_idx];
+        assert!(beta > 0.01 && beta < 0.5,
+            "missing-start fallback should draw within bounds (0.01, 0.5) \
+             — got {}", beta);
+
+        // Determinism: rebuilding at the same seed must give the same
+        // base_params[beta] (Transform-aware uniform draw is hashed
+        // from (seed, param_name) — re-runs are reproducible).
+        let config2 = FitRunConfig::build(
+            &fit, None,
+            1, 100, 1, 0.5, 50, 1, false,
+        ).expect("rebuild");
+        assert_eq!(config2.base_params[beta_idx], beta,
+            "fallback draw must be deterministic per (seed, name)");
 
         std::fs::remove_dir_all(&data_dir).ok();
     }

@@ -809,6 +809,35 @@ camdl fit run    fit.toml --stage validate
 camdl fit status fit.toml
 ```
 
+### When `start =` is omitted in `[estimate]`
+
+Each `[estimate.X]` entry's `start =` field is optional. When you
+omit it (and the model file doesn't already declare a value for the
+parameter via `parameters { X : rate = 0.3 }` or a scenario), the
+runner draws a single Transform-aware uniform value within the
+parameter's bounds and uses that as the base point. From there the
+selected `init_method` perturbs per-chain as usual.
+
+The draw is:
+
+- **Log-uniform** for `Log`-typed parameters with strictly positive
+  bounds (rates, positive quantities) — equivalent to drawing
+  uniformly in `[ln(lo), ln(hi)]` and exponentiating, so a parameter
+  with bounds `[1e-6, 1.0]` doesn't collapse to a value near `0.5`.
+- **Linear-uniform** for `Logit`/`None` parameters and for any
+  parameter whose bounds aren't strictly positive.
+
+The draw is deterministic per `(seed, parameter_name)`: re-running
+with the same `--seed` gives the same fallback values, and two
+parameters with identical bounds at the same seed get *different*
+values (their names hash differently). Different seeds give
+different fallback points within bounds — useful when you want a
+seed sweep to also sweep over starting positions for the
+unspecified parameters.
+
+This replaces an earlier bounds-midpoint heuristic that gave the
+same point at every seed and ignored the parameter's transform.
+
 ### Per-chain init: `init_method`
 
 How chain (or per-cell) starting points are drawn. Set on each

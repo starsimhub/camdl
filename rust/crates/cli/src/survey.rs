@@ -685,10 +685,20 @@ fn resolve_survey_inputs(a: &crate::args::SurveyArgs)
                     // fall back to model bounds if fit.toml omits, leave
                     // the model param's value unset if neither has bounds
                     // so downstream validation surfaces a clearer error.
+                    // Transform-aware uniform draw replaces the legacy
+                    // bounds-midpoint heuristic — see fit::runner for
+                    // the rationale.
                     let resolved_bounds = spec.bounds.or(p.bounds);
                     let v = spec.start.or_else(|| resolved_bounds.map(|(lo, hi)| {
-                        if lo > 0.0 && hi > 0.0 { (lo * hi).sqrt() }
-                        else { 0.5 * (lo + hi) }
+                        let transform = crate::fit::runner::derive_transform_with_bounds(
+                            p,
+                            spec.transform.as_ref().map(|t| t.as_str()),
+                            (lo, hi),
+                        );
+                        let log_scale = matches!(
+                            transform, sim::inference::types::Transform::Log { .. }
+                        );
+                        crate::fit::init::draw_start_in_bounds(lo, hi, log_scale, a.seed, name)
                     }));
                     if let Some(value) = v {
                         p.value = Some(value);

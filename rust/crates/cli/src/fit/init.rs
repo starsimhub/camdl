@@ -5,17 +5,20 @@
 //!
 //! - **Single** — every chain starts at `config.estimated_params[*].initial`
 //!   (i.e. `[estimate].start =` or its fallback). Chains differ only by
-//!   IF2's per-chain RNG. Useful for refine stages and reproducibility.
-//! - **Uniform** — per-chain uniform random draw within natural-scale bounds.
-//!   Today's default for scout (`effective_starts.is_none() && chains > 1`).
-//!   Adequate when the parameter scale is linear and the basin is not too
-//!   pathological.
+//!   IF2's per-chain RNG. Useful for refine stages, single-chain runs,
+//!   reproducibility-critical tests, and deterministic NLopt at a known
+//!   seed point.
+//! - **Uniform** — per-chain uniform random draw within natural-scale
+//!   bounds. Legacy mode; equivalent to `Lhs` for `Logit`/`None`
+//!   parameters but worse for `Log`-typed parameters at low chain count
+//!   (clumps in linear space). Kept for reproducibility of pre-LHS results.
 //! - **Lhs** — Latin-hypercube stratified sampling, **scale-aware via
 //!   `Transform`**. For Log-typed params (rates, positive quantities) LHS
 //!   spans `[ln(lo), ln(hi)]` and exponentiates back, so a single LHS pass
 //!   covers orders of magnitude rather than concentrating mass near `hi`.
 //!   For Logit-typed params (probabilities) LHS spans `[lo, hi]` linearly.
-//!   For untransformed params LHS spans `[lo, hi]`.
+//!   For untransformed params LHS spans `[lo, hi]`. **This is the default**
+//!   across IF2 / PGAS / PMMH / NLopt multi-chain stages.
 //!
 //! Filed as gh#42. Motivation: downstream typhoid SIRC fit found
 //! 30 LHS-drawn chains at chain_binomial backend reach a basin
@@ -31,9 +34,7 @@ use crate::util::derive_chain_seed;
 
 /// How chain (or per-cell) starting points are drawn.
 ///
-/// Default `Uniform` matches today's scout behaviour (per-chain uniform
-/// random within natural-scale bounds), so existing fit.toml files
-/// without `init_method` set keep their current semantics.
+/// Default is `Lhs` — see the `Default` impl below for rationale.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, clap::ValueEnum)]
 #[serde(rename_all = "lowercase")]
 #[clap(rename_all = "lowercase")]
@@ -204,6 +205,50 @@ fn build_lhs_chain_starts(
     }).collect()
 }
 
+/// Draw a single Transform-aware value within `[lo, hi]`, suitable for
+/// the gh#34 start-fallback path: when an `[estimate]` entry has neither
+/// `start =` nor a model-declared parameter `value`, we still need a
+/// scalar to seed `model.parameters[i].value` with so that compile +
+/// `validate_parameter_values` succeed. Downstream chain init can then
+/// perturb from this base.
+///
+/// "Transform-aware" means: for `Log`-typed parameters with both bounds
+/// strictly positive, draw uniformly in *log space* and exponentiate;
+/// otherwise draw linearly in `[lo, hi]`. Replaces the legacy
+/// bounds-midpoint heuristic (`(lo*hi).sqrt()` or `(lo+hi)/2`), which
+/// was geometric-shape-aware via a positive-bounds proxy but ignored
+/// the parameter's declared transform and gave the same point at every
+/// seed.
+///
+/// Reproducibility: the per-parameter `u ∈ [0, 1]` is derived from
+/// `(seed, param_name)` via a 64-bit hash, so re-running with the same
+/// `seed` gives the same start, and two estimate entries with the same
+/// bounds at the same seed get *different* draws (their names hash
+/// differently). Same seed across runs ⇒ same fallback start; different
+/// seeds ⇒ different fallback starts within `[lo, hi]`.
+pub fn draw_start_in_bounds(
+    lo: f64,
+    hi: f64,
+    log_scale: bool,
+    seed: u64,
+    param_name: &str,
+) -> f64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    seed.hash(&mut h);
+    param_name.hash(&mut h);
+    // Map the 64-bit hash into u ∈ (0, 1) — open interval, so the
+    // log-scale branch's `(hi/lo).powf(u)` never lands exactly on a
+    // bound. 53-bit mantissa is plenty.
+    let u = ((h.finish() >> 11) as f64 + 0.5) / (1u64 << 53) as f64;
+
+    if log_scale && lo > 0.0 && hi > 0.0 {
+        lo * (hi / lo).powf(u)
+    } else {
+        lo + u * (hi - lo)
+    }
+}
+
 /// Map an LHS coordinate `u ∈ [0, 1]` to the natural-scale parameter
 /// value, respecting the parameter's transform.
 fn lhs_map_to_natural(spec: &EstimatedParam, u: f64) -> f64 {
@@ -363,5 +408,75 @@ mod tests {
                     spec.name, spec.initial, spec.lower, spec.upper);
             }
         }
+    }
+
+    // ── draw_start_in_bounds (gh#34 fallback) ────────────────────────
+
+    #[test]
+    fn draw_start_log_scale_lands_inside_positive_bounds() {
+        // Log-scale draw across six orders of magnitude: result must
+        // be strictly inside (lo, hi) and stay positive.
+        let v = draw_start_in_bounds(1e-6, 1.0, true, 42, "beta");
+        assert!(v > 1e-6 && v < 1.0, "{} not in (1e-6, 1.0)", v);
+        assert!(v.is_finite() && v > 0.0);
+    }
+
+    #[test]
+    fn draw_start_linear_scale_lands_inside_bounds() {
+        // Linear draw on a real-valued parameter (Logit/None analogue):
+        // negative-to-positive bounds, no log-scale possible.
+        let v = draw_start_in_bounds(-10.0, 10.0, false, 42, "drift");
+        assert!(v > -10.0 && v < 10.0, "{} not in (-10, 10)", v);
+    }
+
+    #[test]
+    fn draw_start_log_falls_back_to_linear_when_lo_nonpositive() {
+        // log_scale=true but lo=0 — helper must NOT call powf on zero
+        // (would yield 0 always or NaN); falls back to linear.
+        let v = draw_start_in_bounds(0.0, 1.0, true, 42, "p");
+        assert!(v > 0.0 && v < 1.0, "{} not in (0, 1)", v);
+    }
+
+    #[test]
+    fn draw_start_deterministic_per_seed_and_name() {
+        // Same (seed, name) ⇒ same draw.
+        let a = draw_start_in_bounds(1e-3, 1.0, true, 7, "beta");
+        let b = draw_start_in_bounds(1e-3, 1.0, true, 7, "beta");
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn draw_start_different_names_give_different_draws() {
+        // Two parameters with identical bounds at the same seed must
+        // not collide (would defeat the point of the per-name hash).
+        let a = draw_start_in_bounds(1e-3, 1.0, true, 7, "beta");
+        let b = draw_start_in_bounds(1e-3, 1.0, true, 7, "gamma");
+        assert_ne!(a, b);
+    }
+
+    #[test]
+    fn draw_start_different_seeds_give_different_draws() {
+        // Reseeding the run shifts the fallback (so users get spread
+        // across seed sweeps, unlike the old midpoint heuristic which
+        // gave the same point at every seed).
+        let a = draw_start_in_bounds(1e-3, 1.0, true, 1, "beta");
+        let b = draw_start_in_bounds(1e-3, 1.0, true, 2, "beta");
+        assert_ne!(a, b);
+    }
+
+    #[test]
+    fn draw_start_log_scale_spans_orders_of_magnitude() {
+        // Across many seeds, log-scale draws on (1e-6, 1.0) should
+        // populate at least three different decade buckets — the prior
+        // midpoint would have given 1e-3 at every seed.
+        use std::collections::HashSet;
+        let mut decades: HashSet<i32> = HashSet::new();
+        for seed in 0..64u64 {
+            let v = draw_start_in_bounds(1e-6, 1.0, true, seed, "beta");
+            decades.insert(v.log10().floor() as i32);
+        }
+        assert!(decades.len() >= 3,
+            "expected ≥3 decades populated across 64 seeds, got {}: {:?}",
+            decades.len(), decades);
     }
 }
