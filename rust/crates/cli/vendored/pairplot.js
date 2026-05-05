@@ -57,6 +57,29 @@
     if (opt) opt.disabled = true;
   }
 
+  // gh#46: disable loglik_se when the column carries no variation.
+  // For `--eval simulate` the SE column is structurally zero (one
+  // deterministic ODE solve, no replicate variance), so without
+  // this guard the linear-normalisation fallback maps every point
+  // to coord=0 → VIRIDIS_R[0] (yellow), which renders identically
+  // to "every point is the optimum" — visually misleading. Same
+  // pattern as mean_ess above; runs once at parse time, not on
+  // every render.
+  {
+    const seVals = D.rows
+      .map((r) => r.loglik_se)
+      .filter(Number.isFinite);
+    const seConstant = seVals.length === 0
+      || (Math.max(...seVals) - Math.min(...seVals) < 1e-12);
+    if (seConstant) {
+      const opt = colorBy.querySelector('option[value="loglik_se"]');
+      if (opt) {
+        opt.disabled = true;
+        opt.textContent = "loglik_se (no variation)";
+      }
+    }
+  }
+
   function clamp01(x) { return Math.max(0, Math.min(1, x)); }
 
   // ── Color scaling helpers ────────────────────────────────────────
@@ -72,43 +95,51 @@
 
   // Map a per-row scalar to a [0, 1] color coord. Normalisation is
   // computed over `displayedSet` only (the top-K subset that actually
-  // gets colored on off-diagonals) so the full viridis range maps onto
-  // the displayed points instead of being wasted on the gray-and-
-  // -not-displayed bottom of the distribution. Coords for rows
+  // gets colored on off-diagonals) so the full viridis range maps
+  // onto the displayed points instead of being wasted on the gray-
+  // and-not-displayed bottom of the distribution. Coords for rows
   // outside `displayedSet` are returned as 0 (unused — those rows
   // render as gray scatter, not viridis).
   //
-  //  - `loglik`: log-scale on |loglik − loglik_max|, floored at 0.5
-  //    nats so the very best point doesn't take log(0). Within the
-  //    top-K's actual abs_dll range, not capped at a fixed vmax.
+  //  - `loglik` (gh#46 fix): rank-based normalisation over the
+  //    displayed top-K. Best loglik → 0 (yellow), worst-of-top-K →
+  //    1 (purple), interior linearly by rank. Distribution-free; the
+  //    full viridis_r palette always exercises across the top-K
+  //    regardless of loglik distribution shape.
+  //
+  //    The previous log-of-|loglik − loglik_max| scheme broke on
+  //    long-tail surfaces with top-K spans of 4+ orders of magnitude:
+  //    median-of-top-K mapped to ~0.93 of the palette (dark purple),
+  //    so half the displayed set rendered visually identical and
+  //    only points within ~5 nats of best got yellow. Rank-based
+  //    sacrifices absolute-magnitude information to guarantee the
+  //    diagnostic always shows useful colour variation across the
+  //    displayed set, which is the right trade-off for an
+  //    identifiability diagnostic — the question is the *ranking*
+  //    of points across the box, not the absolute scale.
+  //
   //  - other keys (`loglik_se`, `mean_ess`): linear over the top-K
-  //    range. Long tails in the unselected gray points don't squish
-  //    the displayed gradient.
+  //    range. Constant columns (max == min) are detected upstream
+  //    and the dropdown option is disabled, so the (hi <= lo)
+  //    branch here is only hit on float-rounding edge cases at
+  //    runtime — defensive fallback only.
   function colorCoord(rowsArr, displayedSet, key) {
     if (!displayedSet || displayedSet.size === 0) return rowsArr.map(() => 0);
     const idxs = [...displayedSet];
     if (key === "loglik") {
-      // Best loglik over all rows (so abs_dll is anchored to the
-      // global best, not the displayed-set best).
-      const allLLs = rowsArr.map((r) => r.loglik).filter(Number.isFinite);
-      if (!allLLs.length) return rowsArr.map(() => 0);
-      const maxLL = Math.max(...allLLs);
-      const FLOOR = 0.5;
-      const topAbs = idxs.map((k) => {
-        const v = rowsArr[k].loglik;
-        return Number.isFinite(v) ? Math.max(maxLL - v, FLOOR) : null;
-      }).filter((d) => d !== null);
-      if (!topAbs.length) return rowsArr.map(() => 0);
-      const lo = Math.min(...topAbs);
-      const hi = Math.max(...topAbs);
-      if (hi <= lo) return rowsArr.map(() => 0);
-      const logLo = Math.log(lo);
-      const span = Math.log(hi) - logLo;
-      return rowsArr.map((r) => {
-        if (!Number.isFinite(r.loglik)) return 0;
-        const d = Math.max(maxLL - r.loglik, FLOOR);
-        return clamp01((Math.log(d) - logLo) / span);
-      });
+      // Build a list of (idx, loglik) for the displayed top-K and
+      // sort descending. The position in this sorted list is the
+      // rank coordinate.
+      const topRows = idxs
+        .map((k) => ({ k, ll: rowsArr[k].loglik }))
+        .filter((o) => Number.isFinite(o.ll))
+        .sort((a, b) => b.ll - a.ll);  // best first
+      if (topRows.length < 2) return rowsArr.map(() => 0);
+      const denom = topRows.length - 1;
+      const rankCoord = new Map();
+      topRows.forEach((o, r) => rankCoord.set(o.k, r / denom));
+      return rowsArr.map((_, k) =>
+        rankCoord.has(k) ? rankCoord.get(k) : 0);
     }
     // Linear normalisation over the displayed-set range.
     const topVals = idxs
