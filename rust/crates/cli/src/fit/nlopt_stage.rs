@@ -140,6 +140,13 @@ pub fn run_stage(
     let bounds_ref = bounds.clone();
     let est_indices_ref = est_indices.clone();
 
+    // Build the obs model + obs-time vector ONCE for the whole stage.
+    // The per-chain closures borrow these via Arc, so per-eval cost is
+    // one ODE solve + one obs scoring pass with no reconstruction.
+    let obs_model = Arc::new(arc_config.build_obs_model());
+    let obs_times: Vec<f64> = arc_config.observations.iter().map(|o| o.time).collect();
+    let dt = ode_step_dt(&arc_config);
+
     let t0 = std::time::Instant::now();
     let mut chain_outcomes: Vec<(usize, ChainOutcome)> = (0..n_chains)
         .into_par_iter()
@@ -147,7 +154,10 @@ pub fn run_stage(
             let outcome = run_one_chain(
                 algorithm,
                 knobs,
-                &arc_config,
+                &arc_config.compiled,
+                &obs_model,
+                &obs_times,
+                dt,
                 &bounds_ref,
                 &est_indices_ref,
                 &chain_starts[chain_idx],
@@ -311,52 +321,26 @@ struct ChainOutcome {
 fn run_one_chain(
     algorithm: NloptAlgorithm,
     knobs: &NloptStageConfig,
-    config: &Arc<FitRunConfig>,
+    compiled: &Arc<sim::CompiledModel>,
+    obs_model: &Arc<sim::inference::MultiStreamObsModel>,
+    obs_times: &[f64],
+    dt: f64,
     bounds: &[(f64, f64)],
     est_indices: &[usize],
     full_start: &[f64],
 ) -> ChainOutcome {
-    // Extract only the estimated-param slots from the chain's full
-    // starting vector — that's what NLopt sees.
-    let initial_est: Vec<f64> = est_indices.iter().map(|&i| full_start[i]).collect();
-
-    // Build the obs model + obs-time vector ONCE per chain. The NLopt
-    // closure runs hundreds of times; rebuilding inside the closure
-    // would re-resolve all stream likelihoods on every call. The shared
-    // FitRunConfig already paid for those resolutions.
-    let obs_model = config.build_obs_model();
-    let obs_times: Vec<f64> = config.observations.iter().map(|o| o.time).collect();
-    let dt = ode_step_dt(config);
-
-    // Closure must outlive every NLopt callback. Owns: full param vector
-    // (mutated in-place per call), the index list mapping optimizer
-    // slots to model indices, and the per-chain obs-eval handles.
-    let mut full_params = full_start.to_vec();
-    let est_indices_local = est_indices.to_vec();
-    let config_local = Arc::clone(config);
-    let objective = move |est: &[f64]| -> f64 {
-        for (slot, &model_idx) in est_indices_local.iter().enumerate() {
-            full_params[model_idx] = est[slot];
-        }
-        compute_ode_loglik(
-            &config_local.compiled,
-            &obs_model,
-            &obs_times,
-            dt,
-            &full_params,
-        )
-        .unwrap_or(f64::NEG_INFINITY)
-    };
-
-    let result: Result<OptResult, String> = optimize_det(
+    let result = optimize_cell(
         algorithm,
-        &initial_est,
+        compiled,
+        obs_model,
+        obs_times,
+        dt,
         bounds,
+        est_indices,
+        full_start,
         knobs.tolerance,
         knobs.max_evals,
-        objective,
     );
-
     match result {
         Ok(r) => ChainOutcome {
             params: r.params,
@@ -367,13 +351,76 @@ fn run_one_chain(
         Err(e) => {
             eprintln!("nlopt chain failed config: {e}");
             ChainOutcome {
-                params: initial_est,
+                params: est_indices.iter().map(|&i| full_start[i]).collect(),
                 loglik: f64::NEG_INFINITY,
                 status: OptStatus::Failed,
                 n_evals: 0,
             }
         }
     }
+}
+
+/// One NLopt cell-level optimization — shared by `nlopt_stage::run_stage`
+/// (multi-chain MLE for fit.toml stages) and `cli::profile` (per-cell MLE
+/// with focal params pinned). The cell is defined by `full_start`: every
+/// non-estimated index (focal pins, fixed params, model defaults) is read
+/// out of it verbatim; only the indices in `est_indices` are optimized.
+///
+/// `bounds` are the natural-scale (lower, upper) box for the slots in
+/// `est_indices`, in the same order. The closure builds a fresh full
+/// parameter vector per evaluation, calls `compute_ode_loglik`, and
+/// returns the loglik (or `f64::NEG_INFINITY` if the model blew up).
+///
+/// This function is the single source of truth for "deterministic-MLE
+/// optimization on the ODE skeleton given a focal pin." Both consumers
+/// pass an `Arc<MultiStreamObsModel>` and obs_times built once outside
+/// the loop, so per-eval cost is one ODE solve + one obs scoring pass.
+#[allow(clippy::too_many_arguments)]
+pub fn optimize_cell(
+    algorithm: NloptAlgorithm,
+    compiled: &Arc<sim::CompiledModel>,
+    obs_model: &Arc<sim::inference::MultiStreamObsModel>,
+    obs_times: &[f64],
+    dt: f64,
+    bounds: &[(f64, f64)],
+    est_indices: &[usize],
+    full_start: &[f64],
+    tolerance: f64,
+    max_evals: usize,
+) -> Result<OptResult, String> {
+    let initial_est: Vec<f64> = est_indices.iter().map(|&i| full_start[i]).collect();
+
+    // Closure-owned mutable state. NLopt's callback signature requires
+    // `Fn`; the user_data smuggle inside `optimize_det` lets `objective`
+    // be `FnMut`, so we mutate `full_params` in place per call (avoids
+    // a Vec alloc per eval).
+    let mut full_params = full_start.to_vec();
+    let est_indices_local = est_indices.to_vec();
+    let compiled_local = Arc::clone(compiled);
+    let obs_model_local = Arc::clone(obs_model);
+    let obs_times_local = obs_times.to_vec();
+    let objective = move |est: &[f64]| -> f64 {
+        for (slot, &model_idx) in est_indices_local.iter().enumerate() {
+            full_params[model_idx] = est[slot];
+        }
+        compute_ode_loglik(
+            &compiled_local,
+            &obs_model_local,
+            &obs_times_local,
+            dt,
+            &full_params,
+        )
+        .unwrap_or(f64::NEG_INFINITY)
+    };
+
+    optimize_det(
+        algorithm,
+        &initial_est,
+        bounds,
+        tolerance,
+        max_evals,
+        objective,
+    )
 }
 
 fn write_per_chain_files(
