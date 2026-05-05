@@ -566,6 +566,15 @@ transfer_kwarg:
   | k = IDENT EQ e = expr { (k, e) }
   | FROM EQ e = expr       { ("from", e) }
   | TO EQ e = expr         { ("to", e) }
+  (* gh#49: `count` lexes to the COUNT token (it's reserved as a
+     parameter type annotation, e.g. `S0 : count`), so the IDENT
+     fallthrough doesn't catch it. Without this clause,
+     `transfer(count = N, ...)` fails with E001 syntax error
+     pointing at the `count` keyword. The expander has handled the
+     "count" kwarg correctly since the IR was specced
+     (Ir.AbsoluteTransfer with cap-at-source semantics in the
+     runtime); only the parser was blocking. *)
+  | COUNT EQ e = expr      { ("count", e) }
 
 iv_kv:
   | AT_KW EQ LBRACKET ts = separated_list(COMMA, expr) RBRACKET

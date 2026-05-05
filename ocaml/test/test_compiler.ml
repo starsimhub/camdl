@@ -798,6 +798,73 @@ let test_intervention_expansion () =
        Alcotest.(check string) "dst=V" "V" ft.Ir.dst
      | _ -> Alcotest.fail "expected FractionTransfer action")
 
+(* gh#49: `transfer(count = N, ...)` was rejected by the parser even
+   though the spec, expander, and Rust runtime all supported it. The
+   `count` token is reserved as a parameter type annotation, so it
+   never matched the parser's `IDENT EQ expr` fallthrough. Verify the
+   added `COUNT EQ expr` clause in `transfer_kwarg` lets `count` reach
+   the expander, where it correctly emits `Ir.AbsoluteTransfer`. *)
+let test_intervention_transfer_count_kwarg () =
+  let src = {|
+    compartments { S, V, I, R }
+    parameters {
+      beta  : rate
+      gamma : rate
+      N0    : count
+      I0    : count
+      vrate : count
+    }
+    let N = S + V + I + R
+    transitions {
+      infection : S --> I  @ beta * S * I / N
+      recovery  : I --> R  @ gamma * I
+    }
+    init {
+      S = N0 - I0
+      I = I0
+    }
+    interventions {
+      routine_vax : transfer(count = vrate, from = S, to = V) at [30, 60, 90]
+    }
+    simulate { from = 0 'days  to = 120 'days }
+  |} in
+  match Compiler.compile ~name:"test_count_kwarg" src with
+  | Error e -> Alcotest.failf "compile failed: %s" e
+  | Ok m ->
+    Alcotest.(check int) "one intervention" 1 (List.length m.Ir.interventions);
+    let iv = List.hd m.Ir.interventions in
+    Alcotest.(check string) "intervention name" "routine_vax" iv.Ir.name;
+    Alcotest.(check int) "one action" 1 (List.length iv.Ir.actions);
+    (match List.hd iv.Ir.actions with
+     | Ir.AbsoluteTransfer at ->
+       Alcotest.(check string) "src=S" "S" at.Ir.src;
+       Alcotest.(check string) "dst=V" "V" at.Ir.dst
+     | Ir.FractionTransfer _ ->
+       Alcotest.fail "got FractionTransfer; expected AbsoluteTransfer \
+                      (count kwarg should not produce fraction-flavoured IR)"
+     | _ -> Alcotest.fail "expected AbsoluteTransfer action")
+
+(* gh#49 sibling check: the expander already validates `fraction` and
+   `count` are mutually exclusive (E261). Confirm the parser fix didn't
+   accidentally let both through. Uses the JSON-errors helper so the
+   E261 code surfaces in the returned string (otherwise diagnostics go
+   to stderr only). *)
+let test_intervention_transfer_count_and_fraction_rejected () =
+  let src = {|
+    compartments { S, V }
+    parameters {
+      N0 : count
+      I0 : count
+    }
+    transitions {}
+    init { S = N0 - I0 }
+    interventions {
+      bad : transfer(count = 100.0, fraction = 0.5, from = S, to = V) at [10]
+    }
+    simulate { from = 0 'days  to = 100 'days }
+  |} in
+  compile_expect_error_code ~code:"E261" ~contains:"mutually exclusive" src
+
 (* ── Recurring intervention block syntax ─────────────────────────────────
    transfer(...) { every = T, from = T0, until = T1 } — exists alongside
    the existing at [t1, t2, ...] form. *)
@@ -3568,6 +3635,10 @@ let () =
     ];
     "interventions", [
       Alcotest.test_case "intervention expansion" `Quick test_intervention_expansion;
+      Alcotest.test_case "transfer(count = N, ...) parses + emits AbsoluteTransfer (gh#49)"
+        `Quick test_intervention_transfer_count_kwarg;
+      Alcotest.test_case "transfer(count + fraction) rejected as mutually exclusive (gh#49)"
+        `Quick test_intervention_transfer_count_and_fraction_rejected;
     ];
     "recurring_interventions", [
       Alcotest.test_case "transfer(...) { every, from, until }"     `Quick test_recurring_block_transfer;
