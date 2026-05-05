@@ -814,36 +814,50 @@ camdl fit status fit.toml
 How chain (or per-cell) starting points are drawn. Set on each
 stage in `fit.toml` (or override per-stage on the CLI with
 `--init`); also available as `--init` on `camdl profile` for
-per-cell starts. Honoured by **IF2**, **PGAS**, **PMMH**, and
-**profile**.
+per-cell starts. Honoured by **IF2**, **PGAS**, **PMMH**, **NLopt**
+(`nl_sbplx`, `nl_bobyqa`), and **profile**.
 
 ```toml
 [stages.scout]
-algorithm      = "if2"
-backend      = "chain_binomial"
+algorithm   = "if2"
+backend     = "chain_binomial"
 chains      = 16
-init_method = "lhs"            # default is "uniform"
+init_method = "lhs"            # this is now the default; shown for clarity
 ```
 
 | Mode | Behaviour | When to use |
 |---|---|---|
-| `single` | Every chain at the seeded `[estimate].start` (or its bounds-midpoint fallback). Chains differ only by per-chain RNG. | Refine stages where chains should converge to the same basin from a known good point. |
-| `uniform` (default) | Per-chain uniform random within natural-scale bounds. Chain 0 keeps the seeded start. | Simple multi-chain runs where bounds are tight enough that uniform coverage is fine. |
-| `lhs` | Latin-hypercube stratified sampling, **scale-aware via the parameter's transform**: `Log`-typed rates are sampled in log space and exponentiated, so a single LHS pass spans orders of magnitude. `Logit`/`None`-typed parameters are sampled linearly in `[lo, hi]`. | Scout stages or profile cells where the likelihood surface is multi-basin. LHS gives stratified coverage at low chain count where uniform random clumps. |
+| `lhs` (default) | Latin-hypercube stratified sampling, **scale-aware via the parameter's transform**: `Log`-typed rates are sampled in log space and exponentiated, so a single LHS pass spans orders of magnitude. `Logit`/`None`-typed parameters are sampled linearly in `[lo, hi]`. | The default for every multi-chain stage. Stratified coverage at the chain counts we typically run; supersedes the legacy `uniform` default. |
+| `uniform` | Per-chain uniform random within natural-scale bounds. Chain 0 keeps the seeded start. | Legacy mode. Equivalent to LHS for `Logit`/`None` parameters, but worse for `Log`-typed parameters at low chain count (clumps in linear space). Kept for reproducibility of pre-LHS results. |
+| `single` | Every chain at the seeded `[estimate].start` (or its `Transform`-aware uniform fallback when `start` is omitted). Chains differ only by per-chain RNG. | See "When `single` is the right choice" below. |
 
 When a stage uses `starts_from = "<prior>"`, every chain starts from
 the prior stage's MLE regardless of `init_method` — that's the
 intent of the handoff.
 
-**Why it matters.** With single-point starts (or clumpy uniform
-starts at low chain counts), chains find one basin and miss the
-rest. On a stratified epi model with multiple modes, LHS-drawn
-starts can reach a basin that single-point starts never see —
-empirically, large nat-level gaps between the LHS-found and
-single-start MLE on multi-modal likelihoods.
+**Why LHS is the default.** With single-point starts (or clumpy
+uniform starts at low chain counts), chains find one basin and miss
+the rest. On stratified epi models with multiple modes, LHS-drawn
+starts reach basins that single-point starts never see — on the
+typhoid stratified scout, 30 LHS chains beat 8 uniform-random
+chains by ~80,000 nats, holding everything else equal.
+
+**When `single` is the right choice.** Four legitimate cases:
+1. **Refine stages with `starts_from = "<prior>"`** — all chains start
+   from the prior stage's MLE anyway; `single` is redundant but harmless.
+2. **Single-chain runs (`chains = 1`)** — there's no per-chain spread to
+   draw, so the three modes collapse to the same draw.
+3. **Reproducibility-critical tests** — `single` gives byte-identical
+   chain starts across runs at the same seed; LHS/uniform draws shift
+   if the RNG order changes upstream.
+4. **Deterministic NLopt with no spread desired** — `nl_sbplx` and
+   `nl_bobyqa` are deterministic, so `single` + `chains > 1` gives N
+   identical optimisations and the chain-agreement gate is uninformative;
+   only use this when you explicitly want a single optimisation from a
+   known seeded point.
 
 **Per-stage independence.** Scout and refine can use different
-`init_method` (LHS in scout for basin-finding, `single` in refine
+`init_method` (LHS for basin-finding in scout, `single` in refine
 to converge from scout's MLE). The CLI `--init` flag requires
 `--stage` for the same reason — it's stage-scoped.
 

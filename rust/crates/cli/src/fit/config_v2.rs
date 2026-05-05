@@ -861,23 +861,25 @@ pub struct NloptStageConfig {
     pub max_evals: usize,
     #[serde(default)]
     pub starts_from: StartsFrom,
-    /// Per-chain init draws (gh#42). Default `single` — every chain
-    /// starts at the user's seeded `[estimate.X].start` values, then
-    /// runs an independent NLopt optimization (the runs differ only if
-    /// the optimizer itself is non-deterministic, which Sbplx/BOBYQA
-    /// aren't, so single-start with chains > 1 is wasteful and the
-    /// chain-agreement gate is uninformative).
+    /// Per-chain init draws. Default `lhs` — Latin-hypercube
+    /// stratified sampling, scale-aware via the parameter's
+    /// `Transform`. Sbplx/BOBYQA are deterministic optimisers, so
+    /// `chains > 1` is only meaningful when chains start from
+    /// different points; LHS gives the right coverage for that.
     ///
-    /// Set `init_method = "lhs"` when the [estimate] bounds are tight
-    /// enough that LHS-spread starts all evaluate to a finite
-    /// likelihood. Wide bounds spanning regions where transmission
-    /// collapses (e.g. R0 < 1 in any setting) produce
-    /// `Poisson(rate=0) | obs > 0 = -inf` and NLopt's xtol-reached
-    /// signal lies (every neighbouring point is also -inf). For such
-    /// models, prefer `single` at the user's seeded values, or
-    /// pre-validate the LHS-spread points with a quick `camdl pfilter`
-    /// loglik check.
-    #[serde(default = "default_nlopt_init_method")]
+    /// `init_method = "single"` defeats multi-start (every chain at
+    /// the seeded values converges to the same MLE); use it only for
+    /// `chains = 1` runs or when you want pure reproducibility from a
+    /// known starting point.
+    ///
+    /// Caveat for very wide bounds: if `[estimate]` bounds span
+    /// regions where transmission collapses (e.g. R0 < 1 in any
+    /// setting), some LHS draws may evaluate to
+    /// `Poisson(rate=0) | obs > 0 = -inf`. NLopt's xtol-reached
+    /// signal can lie there (every neighbouring point also -inf).
+    /// For such models, narrow the bounds or pre-validate the LHS
+    /// points with a quick `camdl pfilter` loglik check.
+    #[serde(default)]
     pub init_method: super::init::InitMethod,
     /// Convergence-gate thresholds. Two-leg version of IF2's gate
     /// (chain-agreement + decibans-spread); see proposal §"Convergence
@@ -888,9 +890,6 @@ pub struct NloptStageConfig {
 
 fn default_nlopt_tolerance() -> f64 { 1e-6 }
 fn default_nlopt_max_evals() -> usize { 5000 }
-fn default_nlopt_init_method() -> super::init::InitMethod {
-    super::init::InitMethod::Single
-}
 
 impl Stage {
     pub fn starts_from(&self) -> &StartsFrom {

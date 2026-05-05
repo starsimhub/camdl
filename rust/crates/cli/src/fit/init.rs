@@ -44,7 +44,16 @@ pub enum InitMethod {
 }
 
 impl Default for InitMethod {
-    fn default() -> Self { InitMethod::Uniform }
+    /// LHS — Latin-hypercube stratified sampling, scale-aware via the
+    /// parameter's `Transform`. Strictly better basin coverage than
+    /// `Uniform` at the chain counts we typically run (gh#42 typhoid
+    /// evidence: 30 LHS-drawn chains reach a basin 80,542 nats better
+    /// than 8 uniform-random-start chains, holding everything else
+    /// equal). The legacy `Uniform` default existed for backward
+    /// compat with v1 scout's inline random-start loop; LHS supersedes
+    /// it and is now the default across IF2 / PGAS / PMMH / NLopt
+    /// multi-chain stages.
+    fn default() -> Self { InitMethod::Lhs }
 }
 
 impl std::str::FromStr for InitMethod {
@@ -237,8 +246,11 @@ mod tests {
     }
 
     #[test]
-    fn init_method_default_is_uniform() {
-        assert_eq!(InitMethod::default(), InitMethod::Uniform);
+    fn init_method_default_is_lhs() {
+        // LHS by default for all multi-chain stages — see
+        // Default impl in init.rs for the rationale (gh#42 typhoid
+        // evidence + the supersession of the legacy Uniform default).
+        assert_eq!(InitMethod::default(), InitMethod::Lhs);
     }
 
     #[test]
