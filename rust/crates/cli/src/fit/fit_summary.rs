@@ -254,6 +254,28 @@ fn format_text(dir: &str, args: &FitSummaryArgs, stages: &[ResolvedStage], stric
                 prev_loglik = Some(pmmh.map_loglik);
                 prev_stage_name = Some(resolved.stage.clone());
             }
+            MethodResult::Nlopt(r) => {
+                // NLopt stages are point-estimate (like IF2) but with no
+                // FitState-rendered IF2 gate to display. Print a compact
+                // headline + the theta_hat table from the typed payload.
+                println!("\n  stage: {} (algorithm = {})", resolved.stage, r.algorithm);
+                println!(
+                    "    loglik:   {:.2}     converged chains: {}/{}",
+                    r.best_loglik, r.n_converged, r.n_chains
+                );
+                if r.n_chains > 1 {
+                    println!(
+                        "    chain-agreement: max rel range = {:.2}% bound",
+                        r.max_rel_range * 100.0
+                    );
+                }
+                println!("    θ̂ ({} estimated params):", r.theta_hat.len());
+                for (k, v) in &r.theta_hat {
+                    println!("      {:<14} = {}", k, v);
+                }
+                prev_loglik = Some(r.best_loglik);
+                prev_stage_name = Some(resolved.stage.clone());
+            }
         }
     }
 

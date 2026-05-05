@@ -24,10 +24,12 @@ use crate::fit::config_v2::{FitConfigV2, GateConfig, NloptStageConfig, Stage};
 use crate::fit::init::{build_chain_param_vecs, InitMethod};
 use crate::fit::runner::{compute_ode_loglik, ode_step_dt, FitRunConfig};
 use crate::fit::state::FitState;
+use crate::fit::provenance;
 
 /// Run a single NLopt-flavoured `Stage` (`Stage::NlSbplx` or
 /// `Stage::NlBobyqa`). Errors with a clear message if `stage` is anything
 /// else — caller's job to dispatch correctly.
+#[allow(clippy::too_many_arguments)]
 pub fn run_stage(
     fit: &FitConfigV2,
     stage_name: &str,
@@ -35,6 +37,9 @@ pub fn run_stage(
     stage_dir: &Path,
     seed: u64,
     starts_from: Option<&str>,
+    parent_fit_hash: &str,
+    model_hash: &str,
+    data_hashes: &[(String, String)],
 ) -> Result<(), String> {
     let (algorithm, knobs) = extract_nlopt_config(stage)?;
 
@@ -95,23 +100,37 @@ pub fn run_stage(
         .map(|p| p.name.clone())
         .collect();
 
-    // Default to LHS-spread starts even when the user didn't set
-    // init_method explicitly — deterministic optimizers from a single
-    // starting point find one basin, and the chain-agreement gate has
-    // nothing to disagree about.
-    let init_method = if knobs.init_method == InitMethod::default() {
-        InitMethod::Lhs
+    // Honour `init_method` as written. Default for NLopt stages is
+    // `single` (every chain starts at the user's seeded values) so the
+    // runs land in a finite-likelihood region by construction. For
+    // models with tight bounds the user can set `init_method = "lhs"`
+    // to get spread starts; the chain-agreement gate then becomes
+    // informative. With Single + chains > 1, every chain's outcome is
+    // identical (Sbplx/BOBYQA are deterministic), so we run just one
+    // chain and skip the wasted compute.
+    let effective_chains = if knobs.init_method == InitMethod::Single {
+        1
     } else {
-        knobs.init_method
+        n_chains
     };
+    if effective_chains < n_chains {
+        eprintln!(
+            "  init_method=single with chains={}: collapsing to 1 chain \
+             (Sbplx/BOBYQA are deterministic, redundant chains would \
+             produce identical output). Set `init_method = \"lhs\"` for \
+             multi-start basin exploration.",
+            n_chains
+        );
+    }
     let chain_starts: Vec<Vec<f64>> = build_chain_param_vecs(
-        init_method,
+        knobs.init_method,
         &run_config.estimated_params,
         &run_config.base_params,
-        n_chains,
+        effective_chains,
         seed,
     )
-    .unwrap_or_else(|| vec![run_config.base_params.clone(); n_chains]);
+    .unwrap_or_else(|| vec![run_config.base_params.clone(); effective_chains]);
+    let n_chains = effective_chains;
 
     std::fs::create_dir_all(stage_dir).map_err(|e| {
         format!("creating {}: {}", stage_dir.display(), e)
@@ -226,6 +245,42 @@ pub fn run_stage(
     fit_state
         .save(&stage_dir.to_string_lossy())
         .map_err(|e| format!("writing fit_state.toml: {e}"))?;
+
+    // Write mle_params.toml — full parameter vector at the winner with
+    // a [provenance] block. Downstream `camdl fit summary` / grid_summary
+    // walk this file to render per-cell MLE rows.
+    let mut all_params = std::collections::HashMap::new();
+    for (i, name) in arc_config.param_names.iter().enumerate() {
+        all_params.insert(name.clone(), arc_config.base_params[i]);
+    }
+    // Overlay the optimized estimated-param values on top of base_params.
+    for (slot, name) in est_names.iter().enumerate() {
+        all_params.insert(name.clone(), winner.params[slot]);
+    }
+    let mle_path = stage_dir.join("mle_params.toml");
+    let mle_meta = provenance::MleMetadata {
+        input_hash: parent_fit_hash.to_string(),
+        model_path: fit.model.camdl.clone(),
+        model_hash: model_hash.to_string(),
+        data_hashes: data_hashes.to_vec(),
+        seed,
+        stage: stage_name.to_string(),
+        best_chain: winner_idx,
+        // NLopt stages always run on the ODE backend (validated by
+        // methods::validate_combo); use Backend::Ode for provenance.
+        backend: crate::args::types::Backend::Ode,
+        dt: ode_step_dt(&arc_config),
+        loglik: winner.loglik,
+        loglik_sd: 0.0,
+        n_particles: 0,
+        ess_at_mle: None,
+        timestamp: fit_state.timestamp.clone(),
+    };
+    if let Err(e) = provenance::write_mle_params(
+        &mle_path.to_string_lossy(), &all_params, &mle_meta,
+    ) {
+        eprintln!("warning: writing mle_params.toml failed: {e}");
+    }
 
     Ok(())
 }

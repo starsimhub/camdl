@@ -854,10 +854,22 @@ pub struct NloptStageConfig {
     pub max_evals: usize,
     #[serde(default)]
     pub starts_from: StartsFrom,
-    /// Per-chain init draws (gh#42). NLopt stages default to `lhs` —
-    /// deterministic optimizers from a single starting point find one
-    /// basin; multi-start LHS gives the chain-agreement leg of the
-    /// convergence gate something to disagree about.
+    /// Per-chain init draws (gh#42). Default `single` — every chain
+    /// starts at the user's seeded `[estimate.X].start` values, then
+    /// runs an independent NLopt optimization (the runs differ only if
+    /// the optimizer itself is non-deterministic, which Sbplx/BOBYQA
+    /// aren't, so single-start with chains > 1 is wasteful and the
+    /// chain-agreement gate is uninformative).
+    ///
+    /// Set `init_method = "lhs"` when the [estimate] bounds are tight
+    /// enough that LHS-spread starts all evaluate to a finite
+    /// likelihood. Wide bounds spanning regions where transmission
+    /// collapses (e.g. R0 < 1 in any setting) produce
+    /// `Poisson(rate=0) | obs > 0 = -inf` and NLopt's xtol-reached
+    /// signal lies (every neighbouring point is also -inf). For such
+    /// models, prefer `single` at the user's seeded values, or
+    /// pre-validate the LHS-spread points with a quick `camdl pfilter`
+    /// loglik check.
     #[serde(default = "default_nlopt_init_method")]
     pub init_method: super::init::InitMethod,
     /// Convergence-gate thresholds. Two-leg version of IF2's gate
@@ -870,7 +882,7 @@ pub struct NloptStageConfig {
 fn default_nlopt_tolerance() -> f64 { 1e-6 }
 fn default_nlopt_max_evals() -> usize { 5000 }
 fn default_nlopt_init_method() -> super::init::InitMethod {
-    super::init::InitMethod::Lhs
+    super::init::InitMethod::Single
 }
 
 impl Stage {

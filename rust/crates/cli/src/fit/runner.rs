@@ -445,43 +445,83 @@ pub fn compute_ode_loglik(
         &SimConfig::Ode(ode_cfg),
     )?;
 
-    // Walk obs_idx in order, finding the matching snapshot for each
-    // obs time. The simulator emits snapshots at the model's [output]
-    // times block, which the fit setup pins to the data's obs times,
-    // so we expect a strict 1-1 correspondence (modulo a possible
-    // initial-state snapshot at t_start).
-    let mut snap_iter = traj.snapshots.iter().peekable();
+    // Snapshot semantics: each snapshot's `flows` are accumulated since the
+    // *previous* snapshot, with reset on every output time in
+    // `model.output.times`. For a model with a fine output grid (e.g.
+    // typhoid's daily `regular(0, 1, 18250)`) the per-snapshot flow is one
+    // step's worth — NOT cumulative-since-last-obs.
+    //
+    // The chain_binomial PF avoids this by accumulating flows internally
+    // between obs times. We do the same here: walk every snapshot, sum
+    // flows into a running cumulative vector, and at each obs time hand
+    // the running cumulative to the obs likelihood (then reset for the
+    // next obs interval). This makes `incidence(infect[s,a])` =
+    // "cumulative flow since the last obs" regardless of how fine the
+    // model's output schedule is.
+    let n_transitions = traj
+        .snapshots
+        .first()
+        .map(|s| s.flows.counts.len())
+        .unwrap_or(0);
+    let mut cum_flows: Vec<u64> = vec![0; n_transitions];
+    let mut next_obs_idx = 0;
+    let n_obs = obs_times.len();
     let mut total_ll = 0.0;
-    for (obs_idx, &obs_t) in obs_times.iter().enumerate() {
-        let snap = loop {
-            match snap_iter.peek() {
-                Some(s) if (s.t - obs_t).abs() < 1e-9 => {
-                    let s = snap_iter.next().unwrap();
-                    break s;
-                }
-                Some(s) if s.t < obs_t => {
-                    snap_iter.next();
-                }
-                _ => {
-                    return Err(sim::error::SimError::Validation(format!(
-                        "ODE trajectory missing snapshot at obs time {}; \
-                         the model's [output] times must include every \
-                         observation time. obs_idx = {}",
-                        obs_t, obs_idx
-                    )));
-                }
+
+    for (snap_idx, snap) in traj.snapshots.iter().enumerate() {
+        // The simulator emits a snapshot at t_start with zero flow; from
+        // index 1 onward the flow vector is the per-interval accumulation.
+        if snap_idx > 0 {
+            for (i, &f) in snap.flows.counts.iter().enumerate() {
+                cum_flows[i] += f;
             }
-        };
-        let ll = obs_model.log_likelihood_from_flows_and_counts(
-            &snap.flows.counts,
-            &snap.int_state.counts,
-            obs_idx,
-            params,
-        );
-        if !ll.is_finite() {
-            return Ok(f64::NEG_INFINITY);
         }
-        total_ll += ll;
+
+        // Drain any obs times that match this snapshot. (`while` rather
+        // than `if` so a degenerate model with two obs at identical t
+        // — they shouldn't, but defensively — doesn't drop one.)
+        while next_obs_idx < n_obs
+            && (snap.t - obs_times[next_obs_idx]).abs() < 1e-9
+        {
+            let ll = obs_model.log_likelihood_from_flows_and_counts(
+                &cum_flows,
+                &snap.int_state.counts,
+                next_obs_idx,
+                params,
+            );
+            if !ll.is_finite() {
+                return Ok(f64::NEG_INFINITY);
+            }
+            total_ll += ll;
+            // Reset cumulative for the next obs interval. After reset,
+            // subsequent snapshots' flows accumulate fresh.
+            cum_flows.fill(0);
+            next_obs_idx += 1;
+        }
+
+        // If we've already overshot the next obs time without matching,
+        // the model's output schedule doesn't include it — bail with a
+        // clear diagnostic.
+        if next_obs_idx < n_obs && snap.t > obs_times[next_obs_idx] + 1e-9 {
+            return Err(sim::error::SimError::Validation(format!(
+                "ODE trajectory has no snapshot at obs time {} (snap.t = \
+                 {} overshot it). The model's [output] schedule must \
+                 include every observation time; declare an explicit \
+                 `output {{ at = [...] }}` block aligned to the data, or \
+                 ensure the regular schedule's step divides obs intervals.",
+                obs_times[next_obs_idx], snap.t,
+            )));
+        }
+    }
+
+    if next_obs_idx < n_obs {
+        return Err(sim::error::SimError::Validation(format!(
+            "ODE trajectory ended at t = {} before reaching obs time {}; \
+             the model's simulate.to must extend at least to the last \
+             obs time",
+            traj.snapshots.last().map(|s| s.t).unwrap_or(f64::NAN),
+            obs_times[next_obs_idx],
+        )));
     }
     Ok(total_ll)
 }

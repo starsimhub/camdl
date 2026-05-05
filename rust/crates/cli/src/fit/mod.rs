@@ -1027,6 +1027,33 @@ pub fn cmd_fit_run_v2(a: &crate::args::FitRunArgs) {
             Stage::NlSbplx(_) | Stage::NlBobyqa(_) => {
                 #[cfg(feature = "ode")]
                 {
+                    // Hash data + model for the mle_params.toml provenance
+                    // block (same shape as the IF2 path uses below).
+                    let model_ir_json = std::fs::read_to_string(&sweep_config.model.camdl)
+                        .ok()
+                        .and_then(|_| {
+                            // The fit runner has already loaded + compiled
+                            // the model; ask `util::load_model` for the
+                            // canonical IR JSON used to compute the hash.
+                            crate::util::load_model(&sweep_config.model.camdl).ok()
+                        })
+                        .map(|(_, ir_json)| ir_json)
+                        .unwrap_or_default();
+                    let model_hash_for_prov = crate::hashing::model_hash(&model_ir_json);
+                    let data_hashes_for_prov: Vec<(String, String)> = sweep_config
+                        .data_spec()
+                        .map(|d| d.observations.iter()
+                            .map(|(name, path)| {
+                                let bytes = std::fs::read(path).unwrap_or_default();
+                                let hash = {
+                                    use sha2::{Sha256, Digest};
+                                    let result = Sha256::digest(&bytes);
+                                    hex::encode(&result[..4])
+                                };
+                                (format!("{} ({})", name, path), hash)
+                            })
+                            .collect())
+                        .unwrap_or_default();
                     nlopt_stage::run_stage(
                         &sweep_config,
                         stage_name,
@@ -1034,6 +1061,9 @@ pub fn cmd_fit_run_v2(a: &crate::args::FitRunArgs) {
                         &stage_dir,
                         seed,
                         effective_starts.as_deref(),
+                        &parent_fit_hash,
+                        &model_hash_for_prov,
+                        &data_hashes_for_prov,
                     ).unwrap_or_else(|e| {
                         eprintln!("error running nlopt stage '{}': {}", stage_name, e);
                         std::process::exit(1);
