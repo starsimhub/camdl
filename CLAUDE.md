@@ -124,6 +124,41 @@ Other logging channels worth knowing about:
 Before inventing new logging, check the existing paths above. They
 already cover most per-step/per-iteration diagnostics.
 
+## Coordinating with camdl-book after a fit.toml schema change
+
+The Phase 1 ODE-inference work (2026-05-04) replaced the
+`method = "..."` smuggling in fit.toml stages with explicit
+`algorithm = "..."` + `backend = "..."` fields. Every fit.toml under
+`/Users/vsb/projects/work/camdl-book/` was migrated in lock-step on this
+branch's worktree, but the camdl-book agent is independent — when this
+branch lands, the book's working tree must pull the same change set.
+
+To hand off to the camdl-book agent:
+
+1. Confirm the migration is committed here and in the
+   `/Users/vsb/projects/work/camdl-book` worktree (look for the
+   bulk-rewrite commit titled "fit.toml: rename method → algorithm +
+   backend (Phase 1 ODE-inference)").
+2. Tell the book agent: "Phase 1 of the ODE-inference proposal landed
+   in compartmental@<sha>; pull and re-render. Every fit.toml's
+   `method = "X"` line is now `algorithm = "X"\nbackend =
+   "chain_binomial"`; the book's TOMLs already migrated mechanically,
+   but Quarto chunks that hard-code the old syntax inside string
+   literals (Python tutorials, .qmd code blocks rendering fit.toml
+   examples) need eye-balling. Also surface the new
+   `algorithm = "nl-sbplx"` + `backend = "ode"` deterministic-MLE
+   path in the relevant fitting chapter once the typhoid diagnostic
+   experiment confirms the two-likelihoods convergence claim."
+3. Surface the new `camdl fit methods` subcommand as the canonical
+   place to learn what's supported; book chapters should reference it
+   rather than maintaining a parallel matrix.
+
+The diagnostic experiment (typhoid SIRC: nl-sbplx vs if2 MLE on the
+smallest stratum cell, gating Phase 1 merge) lives in camdl-book per
+the proposal — not here. Don't run it from this worktree; the book
+agent owns calibrating the convergence-gate thresholds against the
+observed typhoid spread.
+
 ## Architecture
 
 ### The IR as contract
