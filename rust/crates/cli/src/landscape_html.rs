@@ -248,8 +248,8 @@ fn build_html(
 </div>
 <div id=\"controls\">
   <label>top-K cutoff
-    <input type=\"range\" id=\"top-pct\" min=\"0.001\" max=\"0.5\" step=\"0.001\" value=\"0.10\">
-    <span id=\"top-pct-display\">10.0%</span>
+    <input type=\"range\" id=\"top-pct\" min=\"0.001\" max=\"0.5\" step=\"0.001\" value=\"0.05\">
+    <span id=\"top-pct-display\">5.0%</span>
   </label>
   <label>color by
     <select id=\"color-by\">

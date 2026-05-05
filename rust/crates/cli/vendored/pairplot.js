@@ -303,7 +303,7 @@
           traces.push({
             type: "scattergl", mode: "markers",
             x: grayPts.x, y: grayPts.y, text: grayPts.text,
-            marker: { color: COLORS.GREY_HIST, size: 4, opacity: 0.4,
+            marker: { color: COLORS.GREY_HIST, size: 3, opacity: 0.4,
               line: { width: 0 } },
             hoverinfo: "text",
             xaxis: xkey, yaxis: ykey, showlegend: false,
@@ -311,7 +311,7 @@
           traces.push({
             type: "scattergl", mode: "markers",
             x: topPts.x, y: topPts.y, text: topPts.text,
-            marker: { color: topPts.color, size: 7, opacity: 0.85,
+            marker: { color: topPts.color, size: 5, opacity: 0.85,
               line: { color: "#000", width: 0.3 } },
             hoverinfo: "text",
             xaxis: xkey, yaxis: ykey, showlegend: false,
@@ -319,7 +319,7 @@
           traces.push({
             type: "scattergl", mode: "markers",
             x: starPts.x, y: starPts.y, text: starPts.text,
-            marker: { color: COLORS.TOP1_RED, size: 12, symbol: "star",
+            marker: { color: COLORS.TOP1_RED, size: 10, symbol: "star",
               line: { color: "#000", width: 1 } },
             hoverinfo: "text",
             xaxis: xkey, yaxis: ykey, showlegend: false,
