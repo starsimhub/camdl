@@ -680,12 +680,19 @@ fn resolve_survey_inputs(a: &crate::args::SurveyArgs)
         for (name, spec) in &config.estimate {
             if let Some(p) = model.parameters.iter_mut().find(|p| p.name == *name) {
                 if p.value.is_none() {
-                    let v = spec.start.unwrap_or_else(|| {
-                        let (lo, hi) = spec.bounds;
+                    // Same fit.toml > model > skip resolution as in
+                    // FitRunConfig::build (gh#34 + bounds-optional fix):
+                    // fall back to model bounds if fit.toml omits, leave
+                    // the model param's value unset if neither has bounds
+                    // so downstream validation surfaces a clearer error.
+                    let resolved_bounds = spec.bounds.or(p.bounds);
+                    let v = spec.start.or_else(|| resolved_bounds.map(|(lo, hi)| {
                         if lo > 0.0 && hi > 0.0 { (lo * hi).sqrt() }
                         else { 0.5 * (lo + hi) }
-                    });
-                    p.value = Some(v);
+                    }));
+                    if let Some(value) = v {
+                        p.value = Some(value);
+                    }
                 }
             }
         }
@@ -721,7 +728,9 @@ fn resolve_survey_inputs(a: &crate::args::SurveyArgs)
                 rw_sd: spec.rw_sd,
                 transform: spec.transform.as_ref().map(|t| t.as_str().to_string()),
                 ivp: spec.ivp,
-                bounds: Some(spec.bounds),
+                // Pass through Option as-is; build_if2_params_from_specs
+                // resolves fit.toml > model > unbounded.
+                bounds: spec.bounds,
             })
             .collect();
         let estimated = build_if2_params_from_specs(&model, &compiled, &base_params, &specs)?;

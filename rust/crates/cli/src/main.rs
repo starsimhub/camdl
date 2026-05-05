@@ -1380,7 +1380,14 @@ fn generate_prior_draws(
                 }
                 PriorDist::Fixed(v) => *v,
             };
-            let clamped = value.clamp(spec.bounds.0, spec.bounds.1);
+            // Bounds-optional: clamp to fit.toml's [estimate.X].bounds
+            // when present; otherwise pass the raw prior draw through
+            // (the model file's parameters block bounds will catch
+            // out-of-range draws downstream during validation).
+            let clamped = match spec.bounds {
+                Some((lo, hi)) => value.clamp(lo, hi),
+                None => value,
+            };
             row.insert(name.clone(), clamped);
         }
         for (name, val) in &fixed {

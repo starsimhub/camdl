@@ -1614,12 +1614,23 @@ pub fn cmd_fit_diff(args: &crate::args::FitDiffArgs) {
             param_changes = true;
         }
     }
-    // Bounds changed
+    // Bounds changed (Option-aware after bounds became optional in
+    // [estimate.X]: a present↔omit transition is a real change because
+    // omit means "fall back to model file's parameters block bounds").
     for name in a_est.intersection(&b_est) {
         let ab = a.estimate[*name].bounds;
         let bb = b.estimate[*name].bounds;
-        if (ab.0 - bb.0).abs() > 1e-15 || (ab.1 - bb.1).abs() > 1e-15 {
-            println!("  {}: bounds [{}, {}] → [{}, {}]", name, ab.0, ab.1, bb.0, bb.1);
+        let render = |o: Option<(f64, f64)>| match o {
+            Some((lo, hi)) => format!("[{}, {}]", lo, hi),
+            None => "(from model)".to_string(),
+        };
+        let differ = match (ab, bb) {
+            (None, None) => false,
+            (Some(a), Some(b)) => (a.0 - b.0).abs() > 1e-15 || (a.1 - b.1).abs() > 1e-15,
+            _ => true,
+        };
+        if differ {
+            println!("  {}: bounds {} → {}", name, render(ab), render(bb));
             param_changes = true;
         }
     }

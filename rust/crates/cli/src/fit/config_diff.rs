@@ -62,8 +62,12 @@ pub struct ConfigDiff {
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct BoundsChange {
     pub param: String,
-    pub from: (f64, f64),
-    pub to: (f64, f64),
+    /// `None` means the previous fit.toml omitted explicit bounds and
+    /// fell back to the model file's parameters block. After bounds
+    /// became optional in `[estimate.X]`, omit-vs-explicit is itself
+    /// a meaningful change (e.g. omit → explicit narrowing).
+    pub from: Option<(f64, f64)>,
+    pub to: Option<(f64, f64)>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -177,7 +181,14 @@ impl ConfigDiff {
         for name in this_est.intersection(&base_est) {
             let tb = this.estimate[*name].bounds;
             let bb = baseline.estimate[*name].bounds;
-            if (tb.0 - bb.0).abs() > 0.0 || (tb.1 - bb.1).abs() > 0.0 {
+            // Bounds Option-equality: omit↔omit unchanged; explicit↔omit
+            // is a change; explicit↔explicit compares exact tuple.
+            let differ = match (tb, bb) {
+                (None, None) => false,
+                (Some(t), Some(b)) => (t.0 - b.0).abs() > 0.0 || (t.1 - b.1).abs() > 0.0,
+                _ => true,
+            };
+            if differ {
                 bounds_changed.push(BoundsChange {
                     param: (*name).to_string(),
                     from: bb,
@@ -536,8 +547,8 @@ mod tests {
         assert_eq!(diff.bounds_changed.len(), 1);
         let bc = &diff.bounds_changed[0];
         assert_eq!(bc.param, "R0");
-        assert_eq!(bc.from, (1.0, 100.0));
-        assert_eq!(bc.to, (40.0, 80.0));
+        assert_eq!(bc.from, Some((1.0, 100.0)));
+        assert_eq!(bc.to, Some((40.0, 80.0)));
     }
 
     #[test]

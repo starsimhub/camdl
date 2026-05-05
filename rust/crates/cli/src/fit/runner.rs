@@ -172,15 +172,26 @@ impl FitRunConfig {
         for (name, spec) in &fit.estimate {
             if let Some(p) = model.parameters.iter_mut().find(|p| p.name == *name) {
                 if p.value.is_none() {
-                    let value = spec.start.unwrap_or_else(|| {
-                        let (lo, hi) = spec.bounds;
+                    // For the start-midpoint fallback we need bounds.
+                    // Prefer fit.toml's `[estimate.X].bounds` when given
+                    // (typically a tightening of model bounds); fall back
+                    // to the model's `parameters { X : rate in [lo, hi] }`
+                    // declaration when fit.toml omits. Skip the start
+                    // computation entirely if neither has bounds — the
+                    // downstream `validate_parameter_values` will surface
+                    // a clearer error than picking a midpoint of
+                    // `(0.0, +inf)`.
+                    let resolved_bounds = spec.bounds.or(p.bounds);
+                    let value = spec.start.or_else(|| resolved_bounds.map(|(lo, hi)| {
                         if lo > 0.0 && hi > 0.0 {
                             (lo * hi).sqrt()         // geometric mean
                         } else {
                             0.5 * (lo + hi)          // arithmetic mean
                         }
-                    });
-                    p.value = Some(value);
+                    }));
+                    if let Some(v) = value {
+                        p.value = Some(v);
+                    }
                 }
             }
         }
@@ -616,7 +627,12 @@ fn build_if2_params(
             rw_sd,
             transform: est.transform.as_ref().map(|t| t.as_str().to_string()),
             ivp: est.ivp,
-            bounds: Some(est.bounds),
+            // Bounds plumbing (gh#42-followup + bounds-optional fix):
+            // pass through the Option as-is. `build_if2_params_from_specs`
+            // resolves fit.toml > model > unbounded fallback. None now
+            // means "no bounds in fit.toml — use model's"; previously it
+            // could only mean "non-fit caller (profile/pfilter)".
+            bounds: est.bounds,
         }
     }).collect();
 
@@ -2561,7 +2577,7 @@ mod tests {
         let est_with_normal = |name: &str, mean: f64, sd: f64| {
             let mut m: IndexMap<String, EstimateSpecV2> = IndexMap::new();
             m.insert(name.to_string(), EstimateSpecV2 {
-                bounds: (0.01, 2.0), transform: None,
+                bounds: Some((0.01, 2.0)), transform: None,
                 prior: Some(PriorDist::Normal(NormalPrior { mean, sd })),
                 ivp: false, rw_sd: None, start: None,
             });
@@ -2897,7 +2913,7 @@ dt = 1.0
         // Override beta with a much narrower normal prior; leave gamma alone.
         let mut estimate: IndexMap<String, EstimateSpecV2> = IndexMap::new();
         estimate.insert("beta".to_string(), EstimateSpecV2 {
-            bounds: (0.01, 5.0), transform: None,
+            bounds: Some((0.01, 5.0)), transform: None,
             prior: Some(PriorDist::Normal(NormalPrior { mean: 0.25, sd: 0.05 })),
             ivp: false, rw_sd: None, start: None,
         });

@@ -396,8 +396,15 @@ pub enum FitStarts {
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct EstimateSpecV2 {
-    /// Search bounds. Required.
-    pub bounds: (f64, f64),
+    /// Search bounds. When `None`, the model file's
+    /// `parameters { foo : rate in [lo, hi] }` declaration is the source
+    /// of truth — `build_if2_params_from_specs` already handles the
+    /// fit-toml-bounds-tighten-but-not-loosen rule and falls back to
+    /// model bounds when the toml side is absent. Set explicitly in
+    /// fit.toml only when you want to *narrow* the search relative
+    /// to the model's declared range.
+    #[serde(default)]
+    pub bounds: Option<(f64, f64)>,
 
     /// Transform for inference. If omitted, inferred from the parameter's
     /// declared type in the .camdl file.
@@ -1479,14 +1486,19 @@ impl FitConfigV2 {
         // Validate stage DAG: starts_from references must be valid
         self.validate_stage_dag()?;
 
-        // Validate bounds
+        // Validate bounds. Only check entries that supply explicit
+        // fit.toml bounds — entries that omit `bounds = [...]` will
+        // resolve to the model's parameters block bounds at
+        // build_if2_params_from_specs time, and those have already
+        // been validated by the dim-check phase.
         for (name, spec) in &self.estimate {
-            let (lo, hi) = spec.bounds;
-            if lo >= hi {
-                return Err(format!(
-                    "estimate.{}: bounds [{}, {}] are empty (lo must be < hi)",
-                    name, lo, hi
-                ));
+            if let Some((lo, hi)) = spec.bounds {
+                if lo >= hi {
+                    return Err(format!(
+                        "estimate.{}: bounds [{}, {}] are empty (lo must be < hi)",
+                        name, lo, hi
+                    ));
+                }
             }
         }
 
@@ -1540,7 +1552,12 @@ impl FitConfigV2 {
                          barycentric perturbation for spread.",
                         gi, name));
                 }
-                let (lo, _hi) = spec.bounds;
+                // Skip when fit.toml omits bounds — model bounds get
+                // resolved later, and the simplex non-negativity is
+                // also enforced at the model level by the dim-check
+                // phase. Validating here would force users to mirror
+                // bounds in fit.toml just to silence this check.
+                let lo = spec.bounds.map(|(lo, _)| lo).unwrap_or(0.0);
                 if lo < 0.0 {
                     return Err(format!(
                         "simplex_groups[{}]: member '{}' has bounds \
@@ -3751,5 +3768,141 @@ decibans_thresh = 100.0
             gate: GateConfig::default(),
         };
         assert_ne!(s50.identity_payload(), s_diff_target.identity_payload());
+    }
+
+    // ── bounds-optional in [estimate.X] ──────────────────────────────
+
+    #[test]
+    fn estimate_bounds_optional_serde_default() {
+        // gh#NN-followup: bounds was previously a required (f64, f64);
+        // omitting it produced a parse error. Now it's Option<(f64, f64)>
+        // with #[serde(default)], so an [estimate.X] block with no
+        // explicit bounds should deserialize cleanly to None and let
+        // build_if2_params_from_specs fall back to the model file.
+        let toml_str = r#"
+[model]
+camdl = "models/sir.camdl"
+
+[data.observations]
+weekly_cases = "data/cases.tsv"
+
+[estimate.beta]
+# bounds intentionally omitted — should resolve from model file
+
+[fixed]
+N0 = 1000
+I0 = 10
+
+[stages.mle]
+algorithm = "if2"
+backend = "chain_binomial"
+chains = 4
+particles = 100
+iterations = 50
+cooling = 0.7
+"#;
+        let config: FitConfigV2 = toml::from_str(toml_str)
+            .expect("bounds must be optional");
+        assert!(config.estimate.contains_key("beta"));
+        assert_eq!(config.estimate["beta"].bounds, None,
+            "omitted bounds must deserialize to None, not a default tuple");
+    }
+
+    #[test]
+    fn estimate_bounds_explicit_still_parses() {
+        // Backwards compat: existing fit.toml files that DO supply
+        // bounds = [lo, hi] continue to parse and the value lands as
+        // Some((lo, hi)) — the gh#42-followup `tighten-but-not-loosen`
+        // logic in build_if2_params_from_specs reads this Some.
+        let toml_str = r#"
+[model]
+camdl = "models/sir.camdl"
+
+[data.observations]
+weekly_cases = "data/cases.tsv"
+
+[estimate.beta]
+bounds = [0.01, 2.0]
+
+[fixed]
+N0 = 1000
+I0 = 10
+
+[stages.mle]
+algorithm = "if2"
+backend = "chain_binomial"
+chains = 4
+particles = 100
+iterations = 50
+cooling = 0.7
+"#;
+        let config: FitConfigV2 = toml::from_str(toml_str).unwrap();
+        assert_eq!(config.estimate["beta"].bounds, Some((0.01, 2.0)));
+    }
+
+    #[test]
+    fn validate_bounds_skips_none_entries() {
+        // bounds = None must not trigger the lo < hi validation;
+        // model-file bounds are validated upstream (dim check).
+        let toml_str = r#"
+[model]
+camdl = "models/sir.camdl"
+
+[data.observations]
+weekly_cases = "data/cases.tsv"
+
+[estimate.beta]
+# bounds omitted
+
+[fixed]
+N0 = 1000
+I0 = 10
+
+[stages.mle]
+algorithm = "if2"
+backend = "chain_binomial"
+chains = 4
+particles = 100
+iterations = 50
+cooling = 0.7
+"#;
+        let config: FitConfigV2 = toml::from_str(toml_str).unwrap();
+        let model_params = vec!["beta".to_string(), "N0".to_string(), "I0".to_string()];
+        config.validate(&model_params).expect("validation must pass with omitted bounds");
+    }
+
+    #[test]
+    fn validate_bounds_still_rejects_inverted_explicit_bounds() {
+        // Even with bounds optional, when the user DOES supply bounds
+        // and they're inverted (lo >= hi), the validator must still
+        // refuse. Regression guard for the Option-aware check.
+        let toml_str = r#"
+[model]
+camdl = "models/sir.camdl"
+
+[data.observations]
+weekly_cases = "data/cases.tsv"
+
+[estimate.beta]
+bounds = [2.0, 0.01]
+
+[fixed]
+N0 = 1000
+I0 = 10
+
+[stages.mle]
+algorithm = "if2"
+backend = "chain_binomial"
+chains = 4
+particles = 100
+iterations = 50
+cooling = 0.7
+"#;
+        let config: FitConfigV2 = toml::from_str(toml_str).unwrap();
+        let model_params = vec!["beta".to_string(), "N0".to_string(), "I0".to_string()];
+        let err = config.validate(&model_params)
+            .expect_err("inverted explicit bounds must error");
+        assert!(err.contains("are empty") || err.contains("lo must be < hi"),
+            "error must name the lo/hi violation; got: {err}");
     }
 }
