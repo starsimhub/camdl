@@ -1057,30 +1057,71 @@ pub fn run_chains_with_per_chain_params(
             logliks.iter().map(|l| format!("{:.1}", l)).collect::<Vec<_>>().join(", "));
     }
 
-    // Report Â (chain agreement) with diagnostic warnings
+    // Report Â (chain agreement) with diagnostic warnings.
+    //
+    // gh#45: filter NaN entries — these come from degenerate-W param
+    // chains (typically refine under cold cooling, where the
+    // perturbation has cooled out and per-iteration filter means stop
+    // moving). For those params the G-R formula has no diagnostic
+    // meaning; the compound gate's Δ_dB leg carries the verdict.
     if config.n_chains > 1 {
-        let max_chain_agreement = chain_agreement.values().cloned().fold(0.0_f64, f64::max);
+        let finite_agreements: Vec<(String, f64)> = chain_agreement.iter()
+            .filter(|(_, &r)| r.is_finite())
+            .map(|(k, &v)| (k.clone(), v))
+            .collect();
+        let n_total = chain_agreement.len();
+        let n_finite = finite_agreements.len();
         let logliks: Vec<f64> = results.iter().map(|(_, r)| r.final_loglik).collect();
         let ll_spread = logliks.iter().cloned().fold(f64::NEG_INFINITY, f64::max)
             - logliks.iter().cloned().fold(f64::INFINITY, f64::min);
 
-        // Â = chain agreement (renamed from Rhat: this is not a posterior
-        // mixing statistic; it measures IF2 optimizer chain agreement).
-        eprintln!("\nÂ:");
-        for spec in &config.estimated_params {
-            if let Some(&r) = chain_agreement.get(&spec.name) {
-                let status = if r < 1.1 { "\x1b[32m✓\x1b[0m" } else if r < 1.5 { "\x1b[33m~\x1b[0m" } else { "\x1b[31m✗\x1b[0m" };
-                eprintln!("  {:12} Â={:.3} {}", spec.name, r, status);
+        // Â = chain agreement (renamed from Rhat: this is not a
+        // posterior mixing statistic; it measures IF2 optimizer chain
+        // agreement). Suppress the leg entirely when every param's W
+        // collapsed; print per-param "n/a (W ≈ 0)" alongside finite
+        // entries when only some collapsed.
+        if n_finite == 0 {
+            eprintln!("\nÂ: suppressed — within-chain variance below numerical \
+                       threshold for all estimated params (typical for refine \
+                       under cold cooling). Rely on Δ_dB leg of the compound \
+                       gate above for the convergence verdict.");
+        } else {
+            eprintln!("\nÂ:");
+            for spec in &config.estimated_params {
+                match chain_agreement.get(&spec.name) {
+                    Some(&r) if r.is_finite() => {
+                        let status = if r < 1.1 { "\x1b[32m✓\x1b[0m" }
+                            else if r < 1.5 { "\x1b[33m~\x1b[0m" }
+                            else { "\x1b[31m✗\x1b[0m" };
+                        eprintln!("  {:12} Â={:.3} {}", spec.name, r, status);
+                    }
+                    Some(_) => {
+                        eprintln!("  {:12} Â=n/a (W ≈ 0; rely on Δ_dB)", spec.name);
+                    }
+                    None => {}
+                }
             }
         }
 
-        // Diagnostic: high Â + large loglik spread → chains in different basins
-        if max_chain_agreement > 1.5 && ll_spread > 50.0 {
-            collector.push(DiagnosticKind::MultimodalLikelihood { ll_spread, max_chain_agreement });
-        } else if max_chain_agreement > 1.1 {
-            let n_unconverged = chain_agreement.values().filter(|&&r| r > 1.1).count();
-            let n_total = chain_agreement.len();
-            collector.push(DiagnosticKind::ConvergenceIncomplete { max_chain_agreement, n_unconverged, n_total });
+        // Diagnostics fire only when at least one finite Â value
+        // exists AND it crosses the threshold. NaN entries can't
+        // contribute (the compound gate's Δ_dB leg already covers
+        // the all-suppressed case).
+        if n_finite > 0 {
+            let max_chain_agreement = finite_agreements.iter()
+                .map(|(_, r)| *r)
+                .fold(0.0_f64, f64::max);
+            if max_chain_agreement > 1.5 && ll_spread > 50.0 {
+                collector.push(DiagnosticKind::MultimodalLikelihood {
+                    ll_spread, max_chain_agreement,
+                });
+            } else if max_chain_agreement > 1.1 {
+                let n_unconverged = finite_agreements.iter()
+                    .filter(|(_, r)| *r > 1.1).count();
+                collector.push(DiagnosticKind::ConvergenceIncomplete {
+                    max_chain_agreement, n_unconverged, n_total,
+                });
+            }
         }
     }
 
@@ -1199,9 +1240,32 @@ pub fn compute_chain_agreement(
         let between = chain_means.iter().map(|&m| (m - grand_mean).powi(2)).sum::<f64>()
             * min_tail / (n_chains - 1).max(1) as f64;
         let within = chain_vars.iter().sum::<f64>() / n_chains as f64;
-        let agreement = if within > 0.0 {
+
+        // gh#45: under cold cooling (refine default cf=0.05) the
+        // within-chain variance W collapses to ~0 by mid-tail —
+        // perturbations are cooled out and per-iteration filter
+        // means stop moving. The G-R formula Â = √(V̂/W) then blows
+        // up regardless of actual between-chain agreement, emitting
+        // misleading ✗ verdicts on fits the compound gate's Δ_dB
+        // leg correctly identifies as converged.
+        //
+        // Detect numerically-degenerate W relative to the parameter
+        // scale and return NaN; the printing/diagnostic layer
+        // recognises NaN and suppresses the chain_agreement leg
+        // for that param (or the whole leg if all params suppress).
+        // Threshold: within-chain SD < 1e-6 of grand_mean (i.e.
+        // chain has flatlined to within parts-per-million of its
+        // tail mean). Parameters near zero use an absolute floor
+        // to avoid division-by-zero pathology.
+        let scale = grand_mean.abs().max(1e-15);
+        let degenerate_w_threshold = (1e-6 * scale).powi(2);
+        let agreement = if within > degenerate_w_threshold {
             (((min_tail - 1.0) / min_tail * within + between / min_tail) / within).sqrt()
-        } else { f64::NAN };
+        } else {
+            // W is numerically zero relative to the parameter scale;
+            // Â would diverge with no diagnostic meaning.
+            f64::NAN
+        };
 
         agreement_map.insert(spec.name.clone(), agreement);
     }
@@ -2999,5 +3063,113 @@ dt = 1.0
         assert!(log_sd_tight < log_sd_wide,
             "tighter bounds must yield smaller log-scale rw_sd \
              (wide_log_sd={}, tight_log_sd={})", log_sd_wide, log_sd_tight);
+    }
+
+    // ── Cold-cooling Â suppression (gh#45) ───────────────────────────
+
+    /// Build a synthetic IF2Result with `n_iters` iterations, where
+    /// each iteration's `param_means[idx]` is `start + drift_per_iter ×
+    /// iter` (deterministic chain trajectory). Used to construct
+    /// degenerate-W (drift_per_iter ≈ 0) and non-degenerate-W
+    /// (drift_per_iter > 0) test fixtures for `compute_chain_agreement`.
+    fn synthetic_if2_result(
+        n_params: usize,
+        n_iters: usize,
+        starts: &[f64],
+        drifts: &[f64],
+    ) -> sim::inference::if2::IF2Result {
+        use sim::inference::if2::{IF2IterResult, IF2Result};
+        assert_eq!(starts.len(), n_params);
+        assert_eq!(drifts.len(), n_params);
+        let iterations = (0..n_iters).map(|it| IF2IterResult {
+            iteration: it,
+            loglik: 0.0,
+            if2_perturbed_loglik: 0.0,
+            param_means: (0..n_params).map(|p|
+                starts[p] + drifts[p] * (it as f64)).collect(),
+            param_diag: vec![],
+        }).collect();
+        IF2Result {
+            iterations,
+            mle: starts.to_vec(),
+            final_loglik: 0.0,
+            last_loglik: 0.0,
+        }
+    }
+
+    fn ep_simple(name: &str, idx: usize) -> EstimatedParam {
+        EstimatedParam {
+            name: name.into(), index: idx, initial: 1.0,
+            rw_sd: 0.1, transform: Transform::None,
+            lower: 0.0, upper: 10.0,
+            ivp: false, rw_sd_auto: false,
+        }
+    }
+
+    #[test]
+    fn chain_agreement_returns_finite_under_normal_within_chain_variance() {
+        // Two chains with non-trivial drift across iterations → W is
+        // meaningful → Â computed normally.
+        let if2_params = vec![ep_simple("a", 0)];
+        let chain_a = synthetic_if2_result(1, 50, &[1.00], &[0.01]);
+        let chain_b = synthetic_if2_result(1, 50, &[1.05], &[0.01]);
+        let results = vec![(0, chain_a), (1, chain_b)];
+        let agreement = compute_chain_agreement(&results, &if2_params, 50);
+        let r = agreement.get("a").copied().expect("entry present");
+        assert!(r.is_finite(),
+            "Â must be finite when within-chain variance is non-trivial; got {}", r);
+    }
+
+    #[test]
+    fn chain_agreement_suppressed_under_cold_cooling_degenerate_w() {
+        // Two chains that flatlined to constant tail values (zero
+        // drift) → within-chain variance is exactly 0 → Â would
+        // blow up → must return NaN.
+        let if2_params = vec![ep_simple("a", 0)];
+        let chain_a = synthetic_if2_result(1, 50, &[1.00], &[0.0]);
+        let chain_b = synthetic_if2_result(1, 50, &[1.05], &[0.0]);
+        let results = vec![(0, chain_a), (1, chain_b)];
+        let agreement = compute_chain_agreement(&results, &if2_params, 50);
+        let r = agreement.get("a").copied().expect("entry present");
+        assert!(r.is_nan(),
+            "Â must be NaN (suppressed) when within-chain variance ≈ 0; got {}", r);
+    }
+
+    #[test]
+    fn chain_agreement_suppressed_below_relative_scale_threshold() {
+        // Within-chain SD = 1e-9 of grand_mean — well below the
+        // 1e-6 relative threshold → suppress. This is the He-measles-
+        // refine regime where cooling has shrunk perturbations to
+        // essentially numerical zero relative to parameter scale.
+        let if2_params = vec![ep_simple("a", 0)];
+        // grand_mean ≈ 1.025; within-chain SD ≈ 1e-9 (drift × √(n/12) ≈
+        // 2e-11 × √(50/12) ≈ 4e-11 well below threshold).
+        let chain_a = synthetic_if2_result(1, 50, &[1.000], &[2e-11]);
+        let chain_b = synthetic_if2_result(1, 50, &[1.050], &[2e-11]);
+        let results = vec![(0, chain_a), (1, chain_b)];
+        let agreement = compute_chain_agreement(&results, &if2_params, 50);
+        let r = agreement.get("a").copied().expect("entry present");
+        assert!(r.is_nan(),
+            "Â must be NaN when within-chain variance is below the 1e-6 \
+             relative-scale threshold; got {}", r);
+    }
+
+    #[test]
+    fn chain_agreement_per_param_independence_some_degenerate_some_not() {
+        // Real-world case: some params flatlined under cooling, others
+        // didn't. The non-degenerate ones still get a finite Â; the
+        // degenerate ones return NaN.
+        let if2_params = vec![ep_simple("flat", 0), ep_simple("active", 1)];
+        // chain_a/b: param 0 flatlined (zero drift), param 1 still moving
+        let chain_a = synthetic_if2_result(2, 50, &[1.0, 1.0], &[0.0, 0.01]);
+        let chain_b = synthetic_if2_result(2, 50, &[1.05, 1.1], &[0.0, 0.01]);
+        let results = vec![(0, chain_a), (1, chain_b)];
+        let agreement = compute_chain_agreement(&results, &if2_params, 50);
+        let r_flat   = agreement.get("flat").copied().expect("entry present");
+        let r_active = agreement.get("active").copied().expect("entry present");
+        assert!(r_flat.is_nan(),
+            "flatlined-W param must yield NaN Â; got {}", r_flat);
+        assert!(r_active.is_finite(),
+            "moving-param Â must be finite; got {}", r_active);
     }
 }
