@@ -611,3 +611,186 @@ fn print_verdict(
     );
     eprintln!("  wall: {:.2}s ({} chains)", wall_secs, n_chains);
 }
+
+// ─── Tests ───────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::fit::config_v2::{
+        GateConfig, NloptStageConfig, Stage, StartsFrom,
+    };
+    use crate::fit::init::InitMethod;
+    use crate::run_meta::Backend;
+    use sim::inference::deterministic::SuccessState;
+
+    fn nlopt_config() -> NloptStageConfig {
+        NloptStageConfig {
+            backend: Backend::Ode,
+            chains: 4,
+            tolerance: 1e-6,
+            max_evals: 5000,
+            starts_from: StartsFrom::default(),
+            init_method: InitMethod::Single,
+            gate: GateConfig::default(),
+        }
+    }
+
+    fn outcome(loglik: f64, params: Vec<f64>, status: OptStatus) -> ChainOutcome {
+        ChainOutcome { loglik, params, status, n_evals: 1 }
+    }
+
+    fn names(n: usize) -> Vec<String> {
+        (0..n).map(|i| format!("p{i}")).collect()
+    }
+
+    // ── extract_nlopt_config ─────────────────────────────────────────
+
+    #[test]
+    fn extract_nlopt_config_sbplx_returns_sbplx_algorithm() {
+        let stage = Stage::NlSbplx(nlopt_config());
+        let (algo, cfg) = extract_nlopt_config(&stage).expect("ok");
+        assert_eq!(algo, NloptAlgorithm::Sbplx);
+        assert_eq!(cfg.chains, 4);
+        assert_eq!(cfg.tolerance, 1e-6);
+    }
+
+    #[test]
+    fn extract_nlopt_config_bobyqa_returns_bobyqa_algorithm() {
+        let stage = Stage::NlBobyqa(nlopt_config());
+        let (algo, cfg) = extract_nlopt_config(&stage).expect("ok");
+        assert_eq!(algo, NloptAlgorithm::Bobyqa);
+        assert_eq!(cfg.chains, 4);
+    }
+
+    #[test]
+    fn extract_nlopt_config_rejects_non_nlopt_stage() {
+        // PFilter is the simplest non-nlopt variant to construct.
+        let stage = Stage::PFilter {
+            backend: Backend::ChainBinomial,
+            particles: 100,
+            replicates: None,
+            starts_from: StartsFrom::default(),
+            record_ancestry: false,
+            record_prequential: false,
+        };
+        let err = extract_nlopt_config(&stage).expect_err("must reject");
+        assert!(err.contains("expected nl-sbplx or nl-bobyqa"),
+            "error must name the expected variants; got: {err}");
+        assert!(err.contains("pfilter"),
+            "error must name the actual variant; got: {err}");
+    }
+
+    // ── check_convergence two-number gate ────────────────────────────
+
+    #[test]
+    fn convergence_passes_when_chains_agree_tightly_and_loglik_clusters() {
+        // Two chains converge to nearly-identical params with nearly-
+        // identical loglik. Both legs of the gate should pass.
+        let chains = vec![
+            (0, outcome(-100.0, vec![0.5, 1.0], OptStatus::Converged(SuccessState::XtolReached))),
+            (1, outcome(-100.1, vec![0.501, 1.001], OptStatus::Converged(SuccessState::XtolReached))),
+        ];
+        let bounds = vec![(0.0, 1.0), (0.0, 2.0)];
+        let v = check_convergence(&chains, &names(2), &bounds, &GateConfig::default(), 1e-6);
+        assert!(!v.chain_agreement_failed,
+            "tight agreement on each param must pass the chain-agreement leg; \
+             max_rel_range={}, max_abs_range={}", v.max_rel_range, v.max_abs_range);
+        assert!(!v.decibans_failed,
+            "0.1-nat loglik delta is well under default decibans_thresh");
+        assert_eq!(v.n_converged, 2);
+        assert_eq!(v.n_maxeval, 0);
+        assert_eq!(v.n_failed, 0);
+    }
+
+    #[test]
+    fn convergence_fails_when_chains_spread_widely_on_wide_bound() {
+        // Chains land at opposite ends of a wide bound — both rel- and
+        // abs-range exceed thresholds. Two-number gate fails.
+        let chains = vec![
+            (0, outcome(-100.0, vec![0.05], OptStatus::Converged(SuccessState::XtolReached))),
+            (1, outcome(-100.5, vec![0.95], OptStatus::Converged(SuccessState::XtolReached))),
+        ];
+        let bounds = vec![(0.0, 1.0)];
+        let v = check_convergence(&chains, &names(1), &bounds, &GateConfig::default(), 1e-6);
+        assert!(v.chain_agreement_failed,
+            "rel_range = 90% of bound width must fail chain-agreement; \
+             max_rel_range = {}", v.max_rel_range);
+    }
+
+    #[test]
+    fn convergence_passes_when_rel_range_high_but_abs_range_under_optimizer_floor() {
+        // Per the proposal's two-number rule: rel_range > 5% bound BUT
+        // abs_range < 2 * tolerance * |val| means the spread is within
+        // optimizer numerical noise. Should NOT fail the gate (otherwise
+        // tight bounds with wide-tolerance optimizers always look bad).
+        let chains = vec![
+            // 1e-5 spread on a 2e-4 bound is 5% rel, but abs 1e-5 is
+            // below 2 * 1e-6 * |1.0| = 2e-6 floor (val = 1.0). Expected:
+            // both legs would fail individually but gate passes (both
+            // must fail to refuse).
+            (0, outcome(-100.0, vec![1.0],     OptStatus::Converged(SuccessState::XtolReached))),
+            (1, outcome(-100.0, vec![1.0001],  OptStatus::Converged(SuccessState::XtolReached))),
+        ];
+        let bounds = vec![(0.99995, 1.00015)];  // 2e-4 wide; spread is 50% of that
+        let tolerance = 0.1; // wide tolerance — abs floor = 0.2 * 1.0 = 0.2 nat units
+        let v = check_convergence(&chains, &names(1), &bounds, &GateConfig::default(), tolerance);
+        assert!(!v.chain_agreement_failed,
+            "rel_range high but abs_range under optimizer numerical floor \
+             must pass — proposal's two-number rule (both legs must fail). \
+             max_rel_range={}, max_abs_range={}",
+            v.max_rel_range, v.max_abs_range);
+    }
+
+    #[test]
+    fn convergence_fails_decibans_leg_on_large_loglik_spread() {
+        // Default decibans_thresh ≈ 30 nats * NATS_TO_DB. Two chains
+        // 200 nats apart fail the loglik-spread leg regardless of
+        // parameter agreement.
+        let chains = vec![
+            (0, outcome(  -50.0, vec![0.5], OptStatus::Converged(SuccessState::XtolReached))),
+            (1, outcome(-2050.0, vec![0.5], OptStatus::Converged(SuccessState::XtolReached))),
+        ];
+        let bounds = vec![(0.0, 1.0)];
+        let v = check_convergence(&chains, &names(1), &bounds, &GateConfig::default(), 1e-6);
+        assert!(v.decibans_failed,
+            "2000-nat loglik spread must fail the decibans leg; \
+             delta_loglik = {}", v.delta_loglik);
+    }
+
+    #[test]
+    fn convergence_counts_status_categories_correctly() {
+        // Mixed outcomes: 2 converged, 1 hit max_evals, 1 hard failed.
+        let chains = vec![
+            (0, outcome(-100.0, vec![0.5], OptStatus::Converged(SuccessState::XtolReached))),
+            (1, outcome(-100.1, vec![0.5], OptStatus::Converged(SuccessState::FtolReached))),
+            (2, outcome(-110.0, vec![0.4], OptStatus::MaxEvalReached)),
+            (3, outcome(f64::NEG_INFINITY, vec![0.5], OptStatus::Failed)),
+        ];
+        let bounds = vec![(0.0, 1.0)];
+        let v = check_convergence(&chains, &names(1), &bounds, &GateConfig::default(), 1e-6);
+        assert_eq!(v.n_converged, 2);
+        assert_eq!(v.n_maxeval,   1);
+        assert_eq!(v.n_failed,    1);
+        // delta_loglik computed only over converged chains (excludes
+        // MaxEvalReached and Failed) — so 0.1 nat, well under threshold.
+        assert!(v.delta_loglik < 1.0,
+            "delta_loglik must use converged chains only; got {}", v.delta_loglik);
+    }
+
+    #[test]
+    fn convergence_skips_chain_agreement_when_only_one_chain() {
+        // Single-chain runs can't compute between-chain spread; the
+        // gate should not fire and the agreement map should be empty.
+        let chains = vec![
+            (0, outcome(-100.0, vec![0.5], OptStatus::Converged(SuccessState::XtolReached))),
+        ];
+        let bounds = vec![(0.0, 1.0)];
+        let v = check_convergence(&chains, &names(1), &bounds, &GateConfig::default(), 1e-6);
+        assert!(!v.chain_agreement_failed);
+        assert!(v.chain_agreement.is_empty(),
+            "single-chain runs should not populate per-param agreement; \
+             got {} entries", v.chain_agreement.len());
+        assert_eq!(v.delta_loglik, 0.0);
+    }
+}

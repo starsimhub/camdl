@@ -9,7 +9,14 @@
 //! This module is pure: it knows nothing about ODE solves, observation
 //! models, or fit.toml schemas. The caller wires those into the closure.
 
-use nlopt::{Algorithm, Nlopt, SuccessState, Target};
+use nlopt::{Algorithm, Nlopt, Target};
+
+// Re-export so downstream crates (`cli::fit::nlopt_stage`) can pattern-
+// match on the `OptStatus::Converged(SuccessState)` variant without
+// taking a direct dep on the nlopt crate. The variant already leaks
+// `SuccessState` as part of its public API; the re-export just makes
+// that fact callable.
+pub use nlopt::SuccessState;
 
 /// Which NLopt algorithm to run. Phase 1 surfaces two — `Sbplx` is the default
 /// for compartmental likelihoods (smooth interior, possibly non-smooth at
