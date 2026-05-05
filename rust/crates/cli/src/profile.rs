@@ -390,6 +390,16 @@ pub fn cmd_profile(a: &crate::args::ProfileArgs) {
         .unwrap_or_else(|e| { eprintln!("{:?}", e); std::process::exit(1); }));
     let base_params = compiled.default_params.clone();
 
+    // Reject overdispersed models on the ODE backend (and any other
+    // backend / model-capability mismatch). The `validate_combo` call
+    // above is structural-only; this check sees the actual model.
+    if let Err(msg) = crate::fit::methods::check_model_capabilities(
+        backend_name, &compiled,
+    ) {
+        eprintln!("error: {}", msg);
+        std::process::exit(1);
+    }
+
     // ── Resolve --obs against the IR's observation list ─────────────
     //
     // gh#38: profile must walk the *full* indexed observation family

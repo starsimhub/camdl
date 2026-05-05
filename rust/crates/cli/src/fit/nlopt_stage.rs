@@ -22,6 +22,7 @@ use sim::inference::deterministic::{
 
 use crate::fit::config_v2::{FitConfigV2, GateConfig, NloptStageConfig, Stage};
 use crate::fit::init::{build_chain_param_vecs, InitMethod};
+use crate::fit::methods::check_model_capabilities;
 use crate::fit::runner::{compute_ode_loglik, ode_step_dt, FitRunConfig};
 use crate::fit::state::FitState;
 use crate::fit::provenance;
@@ -83,6 +84,12 @@ pub fn run_stage(
         seed,
         /* random_starts */ prior_state.is_none(),
     )?;
+
+    // Reject models the ODE backend can't represent (e.g. `overdispersed`
+    // transitions whose σ² noise the deterministic skeleton ignores).
+    // Without this, NLopt happily fits the wrong likelihood — the same
+    // silent-fail `camdl simulate --backend ode` already gates against.
+    check_model_capabilities("ode", &run_config.compiled)?;
 
     let bounds: Vec<(f64, f64)> = run_config
         .estimated_params

@@ -304,6 +304,65 @@ fn render_invalid_combo(algorithm: &str, backend: &str) -> String {
     out
 }
 
+/// Verify the compiled model's required capabilities are supported by
+/// the requested backend. Returns a structured error pointing at the
+/// right alternative when the model needs more than the backend
+/// provides.
+///
+/// `validate_combo` is structural-only — it knows the (algorithm,
+/// backend) registry but not the model. This helper closes the
+/// model-capability gap: a model with `overdispersed(rate, σ²)`
+/// transitions running on the deterministic ODE backend silently
+/// produces the deterministic-skeleton likelihood (ignoring σ²)
+/// and was the bug that motivated this check (see `camdl simulate
+/// --backend ode` which already enforces the same gate via
+/// `util::run_simulation`).
+///
+/// Call from every dispatch site that resolves a (algorithm, backend,
+/// model) triple. For backends whose capability set covers everything
+/// the model needs, this is a no-op.
+pub fn check_model_capabilities(
+    backend: &str,
+    compiled: &sim::CompiledModel,
+) -> Result<(), String> {
+    use sim::Capabilities;
+    let backend_caps = match backend {
+        "chain_binomial" => Capabilities::OVERDISPERSION | Capabilities::REAL_COMPARTMENTS,
+        "ode"            => Capabilities::REAL_COMPARTMENTS,
+        other            => return Err(format!(
+            "check_model_capabilities: unknown backend '{}'", other
+        )),
+    };
+    let required = compiled.required_capabilities();
+    let unsupported = required - backend_caps;
+    if unsupported.is_empty() {
+        return Ok(());
+    }
+    let mut features = Vec::new();
+    if unsupported.contains(Capabilities::OVERDISPERSION) {
+        features.push(
+            "OVERDISPERSION: the model has `overdispersed(...)` transitions \
+             whose process noise (σ²) the deterministic ODE skeleton \
+             ignores. Switch to backend = \"chain_binomial\" (algorithms \
+             if2 / pgas / pmmh) for stochastic-process inference, or \
+             remove the overdispersed wrapper if the noise isn't \
+             load-bearing for your inference question.",
+        );
+    }
+    if unsupported.contains(Capabilities::REAL_COMPARTMENTS) {
+        features.push(
+            "REAL_COMPARTMENTS: the model has real-valued compartments \
+             with explicit ODE equations. Use backend = \"ode\" — the \
+             chain_binomial backend doesn't support continuous state.",
+        );
+    }
+    Err(format!(
+        "model requires capabilities not supported by backend '{}':\n  - {}",
+        backend,
+        features.join("\n  - "),
+    ))
+}
+
 /// Render the registry as a user-facing reference table.
 /// Output goes to `camdl fit methods` and is also embedded in `--help`.
 pub fn render_matrix() -> String {

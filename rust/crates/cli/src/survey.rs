@@ -314,6 +314,29 @@ pub fn cmd_survey(a: &crate::args::SurveyArgs) {
         explicit => explicit,
     };
 
+    // Phase 1 of the ODE-inference proposal rewired `--eval simulate`
+    // through `compute_ode_loglik` (the deterministic skeleton). For
+    // overdispersed models that's a silent semantic mismatch — the
+    // skeleton ignores σ². Auto-resolution above already steers
+    // overdispersed models to Pfilter; a *user-explicit*
+    // `--eval simulate` on an overdispersed model bypassed the gate
+    // entirely (the same class as the profile / fit-run nl-sbplx silent-
+    // fail). Fail fast with the same actionable message
+    // `methods::check_model_capabilities` produces elsewhere.
+    if eval_method == SurveyEvalMethod::Simulate {
+        if let Err(msg) = crate::fit::methods::check_model_capabilities(
+            "ode", &resolved.compiled,
+        ) {
+            eprintln!("error: {}", msg);
+            eprintln!(
+                "  (drop `--eval simulate` to use `--eval auto`, which \
+                 routes overdispersed models through the particle filter \
+                 automatically.)"
+            );
+            std::process::exit(1);
+        }
+    }
+
     // Curse-of-dim warnings + n_points auto-resolution
     // (proposal §"Runtime warnings"; gh43 follow-up).
     //
