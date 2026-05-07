@@ -42,6 +42,17 @@ pub enum InitMethod {
     Single,
     Uniform,
     Lhs,
+    /// Pull per-chain starts from the top-K rows of a `camdl survey`
+    /// landscape. Requires sibling fields `survey_path` (CAS dir) and
+    /// `survey_top_k_n` (defaults to `chains`) on the same stage. The
+    /// reader cross-checks the survey's `run.json` against the fit's
+    /// resolved inputs (model_hash, data_hashes, [fixed] superset,
+    /// estimate-set subset) and filters the landscape rows to fit's
+    /// bounds before ranking. See gh#51 +
+    /// `docs/dev/proposals/2026-05-07-survey-top-k-init.md`.
+    #[serde(rename = "survey_top_k")]
+    #[clap(name = "survey_top_k")]
+    SurveyTopK,
 }
 
 impl Default for InitMethod {
@@ -61,11 +72,13 @@ impl std::str::FromStr for InitMethod {
     type Err = String;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.to_ascii_lowercase().as_str() {
-            "single"  => Ok(InitMethod::Single),
-            "uniform" => Ok(InitMethod::Uniform),
-            "lhs"     => Ok(InitMethod::Lhs),
+            "single"        => Ok(InitMethod::Single),
+            "uniform"       => Ok(InitMethod::Uniform),
+            "lhs"           => Ok(InitMethod::Lhs),
+            "survey_top_k"  => Ok(InitMethod::SurveyTopK),
             other => Err(format!(
-                "unknown init_method '{}': expected one of single, uniform, lhs",
+                "unknown init_method '{}': expected one of \
+                 single, uniform, lhs, survey_top_k",
                 other)),
         }
     }
@@ -74,9 +87,10 @@ impl std::str::FromStr for InitMethod {
 impl std::fmt::Display for InitMethod {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(match self {
-            InitMethod::Single  => "single",
-            InitMethod::Uniform => "uniform",
-            InitMethod::Lhs     => "lhs",
+            InitMethod::Single      => "single",
+            InitMethod::Uniform     => "uniform",
+            InitMethod::Lhs         => "lhs",
+            InitMethod::SurveyTopK  => "survey_top_k",
         })
     }
 }
@@ -104,6 +118,18 @@ pub fn build_chain_starts(
         InitMethod::Lhs => {
             if n_chains < 2 { return None; }
             Some(build_lhs_chain_starts(base, n_chains, seed))
+        }
+        InitMethod::SurveyTopK => {
+            // Routed through `build_chain_starts_from_survey` at the
+            // stage callsite, where the fit-level cross-check context
+            // is in scope. Reaching this branch is a wiring bug, not
+            // a user-input problem — panic in debug, return None in
+            // release so the caller falls back to base specs (rather
+            // than mid-fit panicking on a dispatch oversight).
+            debug_assert!(false,
+                "InitMethod::SurveyTopK reached build_chain_starts; \
+                 callsite must dispatch via build_chain_starts_from_survey");
+            None
         }
     }
 }
@@ -300,12 +326,20 @@ mod tests {
 
     #[test]
     fn init_method_from_str_round_trip() {
-        for m in [InitMethod::Single, InitMethod::Uniform, InitMethod::Lhs] {
+        for m in [
+            InitMethod::Single,
+            InitMethod::Uniform,
+            InitMethod::Lhs,
+            InitMethod::SurveyTopK,
+        ] {
             let s = m.to_string();
             let parsed: InitMethod = s.parse().unwrap();
             assert_eq!(parsed, m);
         }
         assert!("unknown".parse::<InitMethod>().is_err());
+        // The TOML-on-the-wire form is the snake_case variant, not
+        // hyphenated — survey_top_k, not survey-top-k.
+        assert!("survey-top-k".parse::<InitMethod>().is_err());
     }
 
     #[test]
