@@ -418,6 +418,14 @@ impl Formatter {
             }
         }
 
+        // Richardson dt-convergence verdict (gh#52). Rendered when
+        // populated (every IF2 stage post-§Proposal-1 where dt_check
+        // is enabled); legacy fit_state.toml or `enabled = false`
+        // skips the block.
+        if let Some(dt_check) = &state.dt_check {
+            s.push_str(&self.dt_check_block(dt_check));
+        }
+
         // Provenance cross-check (#16 fixture, every read)
         let prov = self.provenance_block(stage_dir, state);
         let provenance_failed = prov.failed;
@@ -425,6 +433,46 @@ impl Formatter {
 
         s.push('\n');
         StageBlock { text: s, provenance_failed }
+    }
+
+    /// Render the gh#52 Richardson dt-convergence verdict line +
+    /// optional ladder. Pass case is one line; fail/marginal includes
+    /// the ladder rows for context.
+    fn dt_check_block(&self, dt_check: &super::dt_check::DtCheckResult) -> String {
+        use super::dt_check::DtCheckVerdict;
+        let mut s = String::new();
+        s.push_str(&format!("  {}\n", self.bold("dt-convergence at θ̂ (Richardson)")));
+        let label = match dt_check.verdict {
+            DtCheckVerdict::Pass     => self.ok("PASS"),
+            DtCheckVerdict::Marginal => self.warn("MARGINAL"),
+            DtCheckVerdict::Fail     => self.err("FAIL"),
+            DtCheckVerdict::Skipped  => "skipped".to_string(),
+        };
+        s.push_str(&format!("    verdict: {}    ({})\n", label, dt_check.notes));
+        // Ladder rows for non-pass verdicts; the pass case's
+        // numbers are already in `notes` and the ladder is noise.
+        if !matches!(dt_check.verdict, DtCheckVerdict::Pass | DtCheckVerdict::Skipped) {
+            s.push_str(&format!(
+                "    threshold τ = {:.2} nats  (SE-aware floor 4·σ_max = {:.2})\n",
+                dt_check.threshold_nats, dt_check.threshold_se_aware_nats));
+            for (i, rung) in dt_check.ladder.iter().enumerate() {
+                let tag = if i == 0 { "(fit)" } else { "" };
+                s.push_str(&format!(
+                    "    dt = {:>7.4}   ll = {:>9.2} ± {:.2}   {}\n",
+                    rung.dt, rung.loglik, rung.se, tag));
+            }
+            if dt_check.pf_se_inflation {
+                s.push_str(&format!(
+                    "    {} PF-SE inflated as dt halved (auxiliary signal).\n",
+                    self.warn("⚠")));
+            }
+            if matches!(dt_check.verdict, DtCheckVerdict::Fail) {
+                s.push_str("    Note: synthetic recovery shares this dt and \
+                    cannot detect dt bias by itself.\n");
+            }
+        }
+        s.push('\n');
+        s
     }
 
     fn gate_verdict_block(&self, state: &FitState) -> String {
@@ -1965,5 +2013,47 @@ mod tests {
         let err = dump_params_only(&dir.to_string_lossy(), None, &stages).unwrap_err();
         assert!(err.contains("no completed fit-stage runs"));
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    // ── dt-check verdict rendering (gh#52) ───────────────────────────
+
+    fn dt_check_pass() -> super::super::dt_check::DtCheckResult {
+        use super::super::dt_check::{compute_verdict, LadderEntry};
+        compute_verdict(&[
+            LadderEntry { dt: 0.1,  loglik: -58.7, se: 0.07 },
+            LadderEntry { dt: 0.05, loglik: -59.3, se: 0.07 },
+        ], 2.0)
+    }
+
+    fn dt_check_fail() -> super::super::dt_check::DtCheckResult {
+        use super::super::dt_check::{compute_verdict, LadderEntry};
+        compute_verdict(&[
+            LadderEntry { dt: 1.0,  loglik: -62.6, se: 0.07 },
+            LadderEntry { dt: 0.5,  loglik: -65.7, se: 0.24 },
+            LadderEntry { dt: 0.25, loglik: -73.9, se: 0.63 },
+        ], 2.0)
+    }
+
+    #[test]
+    fn dt_check_pass_renders_one_line() {
+        let fmt = Formatter { use_color: false };
+        let block = fmt.dt_check_block(&dt_check_pass());
+        assert!(block.contains("PASS"), "must call out pass verdict: {}", block);
+        // No ladder rows on PASS — keep summary terse.
+        assert!(!block.contains("dt = 0.0500"),
+            "should not include ladder rows on pass: {}", block);
+    }
+
+    #[test]
+    fn dt_check_fail_includes_ladder_and_synth_recovery_note() {
+        let fmt = Formatter { use_color: false };
+        let block = fmt.dt_check_block(&dt_check_fail());
+        assert!(block.contains("FAIL"), "must call out fail: {}", block);
+        // Ladder rows present so the user can see the drift.
+        assert!(block.contains("dt = "), "ladder rendered: {}", block);
+        // The load-bearing teaching point: synth recovery cannot
+        // detect dt bias by itself.
+        assert!(block.contains("synthetic recovery"),
+            "must surface the synth-recovery note on FAIL: {}", block);
     }
 }
