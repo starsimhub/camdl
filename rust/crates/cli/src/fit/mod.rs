@@ -194,6 +194,8 @@ pub fn cmd_fit_run_v2(a: &crate::args::FitRunArgs) {
     let cli_loglik_eval_reps      = a.loglik_eval_reps;
     let cli_decibans_thresh      = a.decibans_thresh;
     let cli_init_method          = a.init_method;
+    let cli_survey_path          = a.survey_path.clone();
+    let cli_survey_top_k         = a.survey_top_k;
     let sweep_specs: Vec<(String, Vec<f64>)> = a.sweep.iter()
         .map(|s| (s.name.clone(), s.grid.expand()))
         .collect();
@@ -777,14 +779,22 @@ pub fn cmd_fit_run_v2(a: &crate::args::FitRunArgs) {
                 // when a single stage is selected (clap requires --stage
                 // with --init).
                 let effective_init = cli_init_method.unwrap_or(*init_method);
+                // CLI overrides for survey_top_k siblings (require
+                // --stage; clap enforces). When the stage TOML sets
+                // them too, CLI wins.
+                let effective_survey_path: Option<std::path::PathBuf> =
+                    cli_survey_path.clone().or_else(|| survey_path.clone());
+                let effective_survey_top_k_n: Option<usize> =
+                    cli_survey_top_k.or(*survey_top_k_n);
                 let per_chain_params = if effective_starts.is_some() {
                     None
                 } else if effective_init == init::InitMethod::SurveyTopK {
-                    let path = survey_path.as_deref().unwrap_or_else(|| {
+                    let path = effective_survey_path.as_deref().unwrap_or_else(|| {
                         eprintln!("error: stage `{}`: init_method = \
-                            \"survey_top_k\" requires the sibling \
-                            `survey_path = \"<survey CAS dir>\"` field on \
-                            this stage (see gh#51).", stage_name);
+                            \"survey_top_k\" requires `survey_path = \
+                            \"<survey CAS dir>\"` (set on the stage in \
+                            fit.toml or via CLI `--survey-path`). See \
+                            gh#51.", stage_name);
                         std::process::exit(1);
                     });
                     let model_hash_str = crate::hashing::model_hash(&model_json);
@@ -801,7 +811,7 @@ pub fn cmd_fit_run_v2(a: &crate::args::FitRunArgs) {
                         estimate_names: &estimate_names,
                     };
                     Some(init::build_chain_starts_from_survey(
-                        path, *survey_top_k_n, *chains,
+                        path, effective_survey_top_k_n, *chains,
                         &run_config.estimated_params, &ctx,
                     ).unwrap_or_else(|e| { eprintln!("error: {}", e); std::process::exit(1); }))
                 } else {

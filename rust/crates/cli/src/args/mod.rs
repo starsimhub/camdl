@@ -342,6 +342,21 @@ pub struct FitRunArgs {
     #[arg(long, value_name = "MODE", requires = "stage")]
     pub init_method: Option<crate::fit::init::InitMethod>,
 
+    /// Survey CAS directory consumed when `--init survey_top_k` is in
+    /// effect (gh#51). Must contain `run.json` (RunKind::Survey) and
+    /// `landscape.tsv`. Overrides any `survey_path` set on the stage
+    /// in fit.toml. Requires --stage; ignored unless the effective
+    /// init mode is `survey_top_k`.
+    #[arg(long, value_name = "DIR", requires = "stage")]
+    pub survey_path: Option<std::path::PathBuf>,
+
+    /// Top-K count for `--init survey_top_k` (gh#51). Defaults to the
+    /// stage's `chains` when omitted; in v1 must equal `chains`
+    /// (strict K=chains; K > chains stratified sub-sampling deferred
+    /// to v2). Requires --stage.
+    #[arg(long, value_name = "N", requires = "stage")]
+    pub survey_top_k: Option<usize>,
+
     /// User-supplied display label for this fit (1–64 chars after
     /// trim; allowed: letters, digits, spaces, commas, dot,
     /// underscore, hyphen). Surfaced in `camdl fit list` and
