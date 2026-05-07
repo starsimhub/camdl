@@ -282,7 +282,8 @@ pub fn run_stage(
             &config.base_params,
             n_chains,
             seed,
-        ).unwrap_or_else(|| vec![config.base_params.clone(); n_chains])
+        ).map_err(|e| format!("pgas: {}", e))?
+        .unwrap_or_else(|| vec![config.base_params.clone(); n_chains])
     };
 
     eprintln!("\npgas: {} chains × {} sweeps × {} particles, burn_in={}, thin={}",

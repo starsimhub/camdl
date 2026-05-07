@@ -583,6 +583,13 @@ pub fn cmd_profile(a: &crate::args::ProfileArgs) {
     // same draw across cells (lets the per-start TSV rows be compared
     // cell-to-cell). `None` → every start uses `if2_params` directly
     // (Single mode; or `--starts 1`).
+    if a.init == crate::fit::init::InitMethod::SurveyTopK {
+        eprintln!("error: --init survey_top_k is not yet supported on \
+            `camdl profile`; v1 supports it on IF2 fit stages only \
+            (see gh#51 §\"Stage scope — v1 vs v2\"). Workaround: use \
+            --init lhs.");
+        std::process::exit(1);
+    }
     let per_start_params: Option<Arc<Vec<Vec<sim::inference::if2::EstimatedParam>>>> =
         crate::fit::init::build_chain_starts(
             a.init, &if2_params, n_starts, seed_base,

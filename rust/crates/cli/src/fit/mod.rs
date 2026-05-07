@@ -645,7 +645,7 @@ pub fn cmd_fit_run_v2(a: &crate::args::FitRunArgs) {
         let mut stage_best_chain: Option<usize> = None;
 
         match stage {
-            Stage::IF2 { chains, particles, iterations, cooling, cooling_target_iters, init_method, loglik_eval, gate, .. } => {
+            Stage::IF2 { chains, particles, iterations, cooling, cooling_target_iters, init_method, survey_path, survey_top_k_n, loglik_eval, gate, .. } => {
                 // Resolve effective clean_eval / gate: stage TOML, then CLI
                 // override (per Step 4 — overrides are stage-scoped because
                 // clap requires --stage). CLI flags pass `requires = "stage"`
@@ -779,6 +779,31 @@ pub fn cmd_fit_run_v2(a: &crate::args::FitRunArgs) {
                 let effective_init = cli_init_method.unwrap_or(*init_method);
                 let per_chain_params = if effective_starts.is_some() {
                     None
+                } else if effective_init == init::InitMethod::SurveyTopK {
+                    let path = survey_path.as_deref().unwrap_or_else(|| {
+                        eprintln!("error: stage `{}`: init_method = \
+                            \"survey_top_k\" requires the sibling \
+                            `survey_path = \"<survey CAS dir>\"` field on \
+                            this stage (see gh#51).", stage_name);
+                        std::process::exit(1);
+                    });
+                    let model_hash_str = crate::hashing::model_hash(&model_json);
+                    let data_hashes = init::compute_data_hashes(&effective_obs)
+                        .unwrap_or_else(|e| { eprintln!("error: {}", e); std::process::exit(1); });
+                    let estimate_names: Vec<String> =
+                        sweep_config.estimate.keys().cloned().collect();
+                    let fixed_hashmap: std::collections::HashMap<String, f64> =
+                        fixed_resolved.iter().map(|(k, v)| (k.clone(), *v)).collect();
+                    let ctx = init::SurveyFitContext {
+                        model_hash: &model_hash_str,
+                        data_hashes: &data_hashes,
+                        fixed: &fixed_hashmap,
+                        estimate_names: &estimate_names,
+                    };
+                    Some(init::build_chain_starts_from_survey(
+                        path, *survey_top_k_n, *chains,
+                        &run_config.estimated_params, &ctx,
+                    ).unwrap_or_else(|e| { eprintln!("error: {}", e); std::process::exit(1); }))
                 } else {
                     init::build_chain_starts(
                         effective_init, &run_config.estimated_params, *chains, seed)

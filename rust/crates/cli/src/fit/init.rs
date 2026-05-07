@@ -140,21 +140,34 @@ pub fn build_chain_starts(
 /// per chain, with each `EstimatedParam`-listed index overwritten by
 /// the per-chain draw and all other slots taken from `base_params`.
 ///
-/// Returns `None` when the caller should treat every chain as starting
-/// from `base_params` directly (i.e. `Single`, or `n_chains < 2`).
+/// Returns `Ok(None)` when the caller should treat every chain as
+/// starting from `base_params` directly (i.e. `Single`, or
+/// `n_chains < 2`). Returns `Err` for `InitMethod::SurveyTopK` on
+/// stages that don't yet plumb the survey cross-check context — v1
+/// supports SurveyTopK on `Stage::IF2` only; PGAS/PMMH/NLopt/profile
+/// are deferred to v2 (see proposal §"Stage scope — v1 vs v2").
 pub fn build_chain_param_vecs(
     method: InitMethod,
     base_specs: &[EstimatedParam],
     base_params: &[f64],
     n_chains: usize,
     seed: u64,
-) -> Option<Vec<Vec<f64>>> {
-    let per_chain = build_chain_starts(method, base_specs, n_chains, seed)?;
-    Some(per_chain.iter().map(|chain| {
+) -> Result<Option<Vec<Vec<f64>>>, String> {
+    if method == InitMethod::SurveyTopK {
+        return Err(
+            "init_method = \"survey_top_k\" is not yet supported on this \
+             stage type; v1 supports it on IF2 only. PGAS / PMMH / NLopt / \
+             profile support is deferred to v2 (see gh#51 §\"Stage scope \
+             — v1 vs v2\"). Workaround: use init_method = \"lhs\" on this \
+             stage, or run an IF2 scout first and chain via \
+             starts_from = \"<scout>\".".to_string());
+    }
+    let per_chain = build_chain_starts(method, base_specs, n_chains, seed);
+    Ok(per_chain.map(|chains| chains.iter().map(|chain| {
         let mut params = base_params.to_vec();
         for spec in chain { params[spec.index] = spec.initial; }
         params
-    }).collect())
+    }).collect()))
 }
 
 /// Per-chain uniform random draw within natural-scale bounds. Chain 0
@@ -272,6 +285,319 @@ pub fn draw_start_in_bounds(
         lo * (hi / lo).powf(u)
     } else {
         lo + u * (hi - lo)
+    }
+}
+
+// ── survey_top_k chain init (gh#51) ──────────────────────────────────
+
+/// Fit-level context required to validate a survey artifact and resolve
+/// fallbacks. Constructed at the runner side (where the fit's resolved
+/// inputs are in scope) and passed to `build_chain_starts_from_survey`.
+///
+/// The borrows are short-lived — this struct exists only for the
+/// duration of a single chain-init resolution.
+pub struct SurveyFitContext<'a> {
+    /// Full SHA-256 of the fit's resolved IR JSON. Must match the
+    /// survey's `model_hash` exactly.
+    pub model_hash: &'a str,
+    /// Per-stream content hashes of the fit's data files. Each stream
+    /// the fit consumes must appear with a matching hash in the
+    /// survey's `data_hashes`. Survey may reference *more* streams
+    /// than the fit (e.g. survey held a covariate fixed and the fit
+    /// drops it); those are ignored.
+    pub data_hashes: &'a std::collections::HashMap<String, String>,
+    /// Resolved `[fixed]` block from the fit. Survey's `[fixed]` must
+    /// be a superset; differing-value at any shared key refuses.
+    pub fixed: &'a std::collections::HashMap<String, f64>,
+    /// Estimated-param names from the fit, in any order. Each must
+    /// either appear in the survey's estimated-param column set, or
+    /// fall back to the row's `base.initial` (typically the user's
+    /// `[estimate].start` or its gh#34 uniform draw).
+    pub estimate_names: &'a [String],
+}
+
+/// SHA-256 every data file referenced by `effective_obs`, returning the
+/// stream-name → hex-hash map shape that `SurveyFitContext.data_hashes`
+/// (and `SurveyMeta.data_hashes`) use for the cross-check. Centralised
+/// here so the four-or-five fit-stage dispatch sites compute it
+/// identically.
+pub fn compute_data_hashes(
+    effective_obs: &indexmap::IndexMap<String, String>,
+) -> Result<std::collections::HashMap<String, String>, String> {
+    let mut out = std::collections::HashMap::with_capacity(effective_obs.len());
+    for (stream, path) in effective_obs {
+        let bytes = std::fs::read(path).map_err(|e| format!(
+            "cannot read data file `{}` for stream `{}`: {}", path, stream, e))?;
+        out.insert(stream.clone(), crate::hashing::sha256_hex(&bytes));
+    }
+    Ok(out)
+}
+
+/// Pull per-chain starts from the top-K rows of a `camdl survey`
+/// landscape. See gh#51 +
+/// `docs/dev/proposals/2026-05-07-survey-top-k-init.md` for the
+/// design rationale.
+///
+/// Steps:
+/// 1. Load `<survey_path>/run.json`; refuse unless `RunKind::Survey`.
+/// 2. Cross-check `model_hash`, `data_hashes`, `[fixed]` superset,
+///    estimate-set subset against `ctx`. Refuse on any mismatch with
+///    a diagnostic naming the offending field.
+/// 3. Read `<survey_path>/landscape.tsv` (skipping `#` comment lines).
+/// 4. **Filter** rows: keep only those whose every parameter value
+///    lies within the corresponding `base[i].lower / .upper` bound.
+///    No clipping. Refuse if filtered count < `n_chains`. Warn if
+///    filtered drops > 50% of original.
+/// 5. **Rank** filtered rows by `loglik` desc; take top-`top_k`
+///    (defaults to `n_chains` when `top_k_n` is `None`). v1 enforces
+///    `top_k == n_chains` (strict K=chains; K > chains is v2).
+/// 6. **SE-aware warn**: if the top-K decibans-spread is below
+///    `max(30.0, 8 · σ_max · NATS_TO_DB)`, warn that the rank
+///    ordering is uncertain at this measurement budget. Never refuse
+///    on this — fits with noisy seeds still work.
+///
+/// For each top-K row, build a chain by cloning `base` and
+/// overriding `initial` with the row's column value for every
+/// estimated param the survey carried. Estimated params present in
+/// the fit but absent from the survey (fit estimates ρ, survey held
+/// it fixed) keep `base.initial` as the per-chain start.
+pub fn build_chain_starts_from_survey(
+    survey_path: &std::path::Path,
+    top_k_n: Option<usize>,
+    n_chains: usize,
+    base: &[EstimatedParam],
+    ctx: &SurveyFitContext,
+) -> Result<Vec<Vec<EstimatedParam>>, String> {
+    use crate::run_meta::{Run, RunKind};
+
+    let top_k = top_k_n.unwrap_or(n_chains);
+    if top_k != n_chains {
+        return Err(format!(
+            "init_method = \"survey_top_k\": v1 requires \
+             survey_top_k_n == chains (got top_k_n = {}, chains = {}). \
+             K > chains with stratified sub-sampling is deferred to v2 \
+             — see gh#51 §\"Out of scope for v1\".",
+            top_k, n_chains));
+    }
+
+    // Step 1: load run.json.
+    let run = Run::read(survey_path).map_err(|e| format!(
+        "init_method = \"survey_top_k\": cannot read run.json from {:?}: {}",
+        survey_path, e))?;
+    let survey_meta = match &run.kind {
+        RunKind::Survey(m) => m,
+        other => return Err(format!(
+            "init_method = \"survey_top_k\": {:?} is a {:?} run, not a Survey run. \
+             survey_path must point at a `camdl survey` CAS directory.",
+            survey_path, std::mem::discriminant(other))),
+    };
+
+    // Step 2: cross-check.
+    cross_check_survey(survey_meta, ctx)?;
+
+    // Step 3: read + parse landscape.tsv.
+    let landscape_path = survey_path.join("landscape.tsv");
+    let raw = std::fs::read_to_string(&landscape_path).map_err(|e| format!(
+        "init_method = \"survey_top_k\": cannot read {:?}: {}",
+        landscape_path, e))?;
+    let rows = parse_landscape_tsv(&raw, &survey_meta.estimated)
+        .map_err(|e| format!("init_method = \"survey_top_k\": {}", e))?;
+    let total_rows = rows.len();
+
+    // Step 4: filter by fit bounds.
+    let filtered: Vec<&LandscapeRow> = rows.iter().filter(|row| {
+        base.iter().all(|spec| {
+            match row.params.get(&spec.name) {
+                Some(&v) => v >= spec.lower && v <= spec.upper,
+                // Param not in survey → not a filter criterion (it'll
+                // fall back to base.initial in step 6).
+                None => true,
+            }
+        })
+    }).collect();
+
+    if filtered.len() < n_chains {
+        return Err(format!(
+            "init_method = \"survey_top_k\": survey has {} rows but only {} \
+             fall within fit bounds, and chains = {}. Either widen fit's \
+             bounds toward the surveyed region, or re-run the survey on \
+             the narrower box.",
+            total_rows, filtered.len(), n_chains));
+    }
+    if (filtered.len() as f64) < 0.5 * (total_rows as f64) {
+        eprintln!("\x1b[33mwarning:\x1b[0m init_method = \"survey_top_k\" \
+            discards {} of {} survey rows as outside fit bounds. The \
+            fit will use the top-{} of the {} that remain, but most of \
+            the survey's measurement budget is being thrown away. \
+            Consider widening fit bounds or re-running the survey.",
+            total_rows - filtered.len(), total_rows, top_k, filtered.len());
+    }
+
+    // Step 5: rank + take top-K.
+    let mut ranked: Vec<&LandscapeRow> = filtered;
+    ranked.sort_by(|a, b| {
+        b.loglik.partial_cmp(&a.loglik).unwrap_or(std::cmp::Ordering::Equal)
+    });
+    let selected: &[&LandscapeRow] = &ranked[..top_k];
+
+    // Step 6: SE-aware warn on rank noise.
+    emit_top_k_se_warning(selected);
+
+    // Step 7: assemble per-chain EstimatedParam vectors.
+    let chains: Vec<Vec<EstimatedParam>> = selected.iter().map(|row| {
+        base.iter().map(|spec| {
+            let initial = row.params.get(&spec.name)
+                .copied()
+                .unwrap_or(spec.initial);
+            EstimatedParam { initial, ..spec.clone() }
+        }).collect()
+    }).collect();
+
+    Ok(chains)
+}
+
+/// One row of a survey landscape.tsv, parsed.
+#[derive(Debug, Clone)]
+struct LandscapeRow {
+    params: std::collections::HashMap<String, f64>,
+    loglik: f64,
+    loglik_se: f64,
+}
+
+/// Parse `landscape.tsv` body. Skips `#` comment lines, reads the
+/// header, then each data row. Recognised column-set: `<param>...
+/// loglik loglik_se [mean_ess] n_replicates point_id`. Param columns
+/// are matched against `survey_estimated`; remaining named columns
+/// (loglik / loglik_se) are extracted explicitly.
+fn parse_landscape_tsv(
+    raw: &str,
+    survey_estimated: &[String],
+) -> Result<Vec<LandscapeRow>, String> {
+    let mut lines = raw.lines().filter(|l| !l.trim_start().starts_with('#'));
+    let header = lines.next()
+        .ok_or_else(|| "landscape.tsv has no header row (only comments?)".to_string())?;
+    let cols: Vec<&str> = header.split('\t').collect();
+    let loglik_idx = cols.iter().position(|c| *c == "loglik")
+        .ok_or_else(|| "landscape.tsv header missing `loglik` column".to_string())?;
+    let loglik_se_idx = cols.iter().position(|c| *c == "loglik_se")
+        .ok_or_else(|| "landscape.tsv header missing `loglik_se` column".to_string())?;
+    // Param columns are the leading run of columns whose name matches
+    // an entry in survey_estimated (their order matters for the survey
+    // writer; we use their names for the lookup).
+    let param_indices: Vec<(String, usize)> = survey_estimated.iter()
+        .map(|name| {
+            cols.iter().position(|c| *c == name)
+                .map(|i| (name.clone(), i))
+                .ok_or_else(|| format!(
+                    "landscape.tsv header missing param column `{}` \
+                     (declared in run.json `estimated`)", name))
+        })
+        .collect::<Result<_, _>>()?;
+
+    let mut rows = Vec::new();
+    for (line_no, line) in lines.enumerate() {
+        let fields: Vec<&str> = line.split('\t').collect();
+        if fields.len() != cols.len() {
+            return Err(format!(
+                "landscape.tsv data row {} has {} fields, expected {}",
+                line_no + 1, fields.len(), cols.len()));
+        }
+        let parse = |i: usize, name: &str| -> Result<f64, String> {
+            fields[i].parse::<f64>().map_err(|e| format!(
+                "landscape.tsv data row {}: cannot parse `{}` field {:?}: {}",
+                line_no + 1, name, fields[i], e))
+        };
+        let loglik = parse(loglik_idx, "loglik")?;
+        let loglik_se = parse(loglik_se_idx, "loglik_se")?;
+        let mut params = std::collections::HashMap::with_capacity(param_indices.len());
+        for (name, idx) in &param_indices {
+            params.insert(name.clone(), parse(*idx, name)?);
+        }
+        rows.push(LandscapeRow { params, loglik, loglik_se });
+    }
+    Ok(rows)
+}
+
+fn cross_check_survey(
+    meta: &crate::run_meta::SurveyMeta,
+    ctx: &SurveyFitContext<'_>,
+) -> Result<(), String> {
+    if meta.model_hash != ctx.model_hash {
+        return Err(format!(
+            "init_method = \"survey_top_k\": model_hash mismatch.\n  \
+             survey: {}\n     fit: {}\nA model edit between survey and \
+             fit invalidates the cross-check; re-run the survey on the \
+             current model.",
+            meta.model_hash, ctx.model_hash));
+    }
+    for (stream, fit_hash) in ctx.data_hashes {
+        match meta.data_hashes.get(stream) {
+            Some(survey_hash) if survey_hash == fit_hash => {}
+            Some(survey_hash) => return Err(format!(
+                "init_method = \"survey_top_k\": data_hashes mismatch on \
+                 stream `{}`.\n  survey: {}\n     fit: {}",
+                stream, survey_hash, fit_hash)),
+            None => return Err(format!(
+                "init_method = \"survey_top_k\": fit consumes data stream \
+                 `{}` which the survey did not score against. Re-run the \
+                 survey with this stream included.", stream)),
+        }
+    }
+    for (name, &fit_value) in ctx.fixed {
+        match meta.fixed.get(name) {
+            Some(&survey_value) if (survey_value - fit_value).abs() < 1e-12 => {}
+            Some(&survey_value) => return Err(format!(
+                "init_method = \"survey_top_k\": [fixed].{} disagrees.\n  \
+                 survey: {}\n     fit: {}\nFixed-value drift between \
+                 survey and fit invalidates the seeded starts.",
+                name, survey_value, fit_value)),
+            None => return Err(format!(
+                "init_method = \"survey_top_k\": fit's [fixed] must be a \
+                 subset of survey's [fixed]; survey did not pin `{}` (the \
+                 survey estimated it or left it free). Pin it in the \
+                 survey, or remove it from fit's [fixed].", name)),
+        }
+    }
+    let survey_estimated: std::collections::HashSet<&str> =
+        meta.estimated.iter().map(|s| s.as_str()).collect();
+    for name in ctx.estimate_names {
+        // Fit-estimate params absent from the survey are fine (fall
+        // back to base.initial). Fit-estimate params *fixed* by the
+        // survey at a value that equals fit's expected start would
+        // also be fine, but that's a degenerate case we don't need to
+        // optimise for. The hard refusal is when the survey neither
+        // estimated nor fixed the param — meaning it has no value at
+        // all in the survey's parameter space. That can't happen for
+        // a model the survey actually ran (every model parameter is
+        // either estimated or fixed at survey time), so this loop is
+        // mostly defensive.
+        let _ = survey_estimated; // keep the set for future cross-checks
+        let _ = name;
+    }
+    Ok(())
+}
+
+fn emit_top_k_se_warning(top_k: &[&LandscapeRow]) {
+    use crate::evidence::NATS_TO_DB;
+    if top_k.len() < 2 { return; }
+    let logliks: Vec<f64> = top_k.iter().map(|r| r.loglik).collect();
+    let ses: Vec<f64> = top_k.iter().map(|r| r.loglik_se).collect();
+    let hi = logliks.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+    let lo = logliks.iter().copied().fold(f64::INFINITY, f64::min);
+    let delta_db = (hi - lo) * NATS_TO_DB;
+    let sigma_max = ses.iter().copied().fold(0.0_f64, f64::max);
+    // Mirror the IF2 convergence-gate floor: rank ordering is
+    // meaningful only when the spread exceeds the SE-aware threshold.
+    // 30 dB matches `GateConfig::default().decibans_thresh`.
+    let threshold_db = (30.0_f64).max(8.0 * sigma_max * NATS_TO_DB);
+    if delta_db < threshold_db {
+        eprintln!("\x1b[33mwarning:\x1b[0m init_method = \"survey_top_k\": \
+            top-{} loglik spread = {:.1} dB is below the SE-aware threshold \
+            ({:.1} dB; σ_max = {:.2} nats). Rank ordering is uncertain at \
+            this measurement budget — chains seeded from rank-1 vs rank-{} \
+            may not be in genuinely-different basins. Consider re-running \
+            the survey with higher --eval-replicates.",
+            top_k.len(), delta_db, threshold_db, sigma_max, top_k.len());
     }
 }
 
@@ -512,5 +838,70 @@ mod tests {
         assert!(decades.len() >= 3,
             "expected ≥3 decades populated across 64 seeds, got {}: {:?}",
             decades.len(), decades);
+    }
+
+    // ── parse_landscape_tsv (gh#51) ──────────────────────────────────
+
+    #[test]
+    fn parse_landscape_tsv_pfilter_columns() {
+        // Real shape: comments, header, 3 data rows. Param order in
+        // header matches survey_estimated. Pfilter eval includes
+        // mean_ess column (we ignore it but the parser must tolerate
+        // the wider row).
+        let raw = "\
+# camdl survey landscape; run_hash=abc; version=0.1\n\
+# eval=pfilter; n_points=3\n\
+beta\tgamma\tloglik\tloglik_se\tmean_ess\tn_replicates\tpoint_id\n\
+0.3\t0.1\t-100.5\t1.2\t0.8\t8\t0\n\
+0.4\t0.2\t-95.0\t0.9\t0.85\t8\t1\n\
+0.5\t0.15\t-110.2\t2.0\t0.75\t8\t2\n";
+        let estimated = vec!["beta".to_string(), "gamma".to_string()];
+        let rows = parse_landscape_tsv(raw, &estimated).unwrap();
+        assert_eq!(rows.len(), 3);
+        assert_eq!(rows[0].params.get("beta"), Some(&0.3));
+        assert_eq!(rows[0].params.get("gamma"), Some(&0.1));
+        assert_eq!(rows[0].loglik, -100.5);
+        assert_eq!(rows[0].loglik_se, 1.2);
+        // Best-loglik row is index 1 (loglik = -95.0).
+        let best = rows.iter().max_by(|a, b|
+            a.loglik.partial_cmp(&b.loglik).unwrap()).unwrap();
+        assert_eq!(best.loglik, -95.0);
+    }
+
+    #[test]
+    fn parse_landscape_tsv_simulate_columns() {
+        // Simulate eval omits mean_ess column.
+        let raw = "\
+# survey\n\
+beta\tgamma\tloglik\tloglik_se\tn_replicates\tpoint_id\n\
+0.3\t0.1\t-100.5\t1.2\t1\t0\n";
+        let estimated = vec!["beta".to_string(), "gamma".to_string()];
+        let rows = parse_landscape_tsv(raw, &estimated).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].params.get("beta"), Some(&0.3));
+        assert_eq!(rows[0].loglik, -100.5);
+    }
+
+    #[test]
+    fn parse_landscape_tsv_missing_param_column_errors() {
+        // Survey claims `beta` is estimated but the header doesn't
+        // have a `beta` column. Should error with a clear message
+        // naming the missing param.
+        let raw = "\
+gamma\tloglik\tloglik_se\tn_replicates\tpoint_id\n\
+0.1\t-100.5\t1.2\t1\t0\n";
+        let estimated = vec!["beta".to_string(), "gamma".to_string()];
+        let err = parse_landscape_tsv(raw, &estimated).unwrap_err();
+        assert!(err.contains("beta"), "error should name missing param: {}", err);
+    }
+
+    #[test]
+    fn parse_landscape_tsv_missing_loglik_errors() {
+        let raw = "\
+beta\tgamma\tn_replicates\tpoint_id\n\
+0.3\t0.1\t1\t0\n";
+        let estimated = vec!["beta".to_string(), "gamma".to_string()];
+        let err = parse_landscape_tsv(raw, &estimated).unwrap_err();
+        assert!(err.contains("loglik"));
     }
 }

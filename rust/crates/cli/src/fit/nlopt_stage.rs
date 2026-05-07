@@ -135,7 +135,7 @@ pub fn run_stage(
         &run_config.base_params,
         effective_chains,
         seed,
-    )
+    )?
     .unwrap_or_else(|| vec![run_config.base_params.clone(); effective_chains]);
     let n_chains = effective_chains;
 

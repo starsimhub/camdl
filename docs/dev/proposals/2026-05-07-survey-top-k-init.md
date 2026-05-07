@@ -75,16 +75,35 @@ generic `from_file`.
 CLI errors out cleanly when `--init survey_top_k` is passed without
 `--survey-path` (rather than silently falling back to LHS).
 
-## Stage scope
+## Stage scope — v1 vs v2
 
-`init_method = "survey_top_k"` is honoured everywhere `init_method`
-already is: **IF2, PGAS, PMMH, NLopt (sbplx/bobyqa), profile**.
-Survey rows are MLE-shaped point estimates and equally useful as
-seeds for MCMC chains (which still sample from the prior — the seed
-sets only the chain's starting state, not its stationary
-distribution) and for deterministic NLopt multi-start (where
-spatially-spread starts are the entire point of `chains > 1`). No
-special-casing per stage type.
+**v1: IF2 only.** The immediate downstream consumer
+(`camdl-book/vignettes/he2010-pomp/`) is IF2-context, the 80,542-nat
+gh#42 lever was measured on IF2, and the IF2 dispatch site already
+has the fit-level cross-check inputs (model_json, effective_obs,
+fixed_resolved, estimate names) in scope at the per-stage loop. v1
+ships `init_method = "survey_top_k"` working end-to-end on `Stage::IF2`
+and refuses cleanly with a "v2 work" diagnostic at the four other
+dispatch sites.
+
+**v2: PGAS / PMMH / NLopt / profile.** These are mechanically the same
+shape but require plumbing the cross-check context through each stage
+launcher (`pgas::run_stage`, `pmmh::run_stage`, `run_nlopt_stage`,
+`profile::run_profile`) — a multi-file refactor that the
+inference-touch risk profile (CLAUDE.md "Conservatively scoped")
+argues for splitting into a follow-up issue once v1 has settled.
+The marginal value is genuine but smaller: PGAS/PMMH posteriors mix
+past burn-in regardless of seed (the chain's stationary distribution
+is set by the prior, not the start), and NLopt's existing
+deterministic LHS multi-start already covers the same multi-start
+use-case for Sbplx/BOBYQA.
+
+Until v2 lands, every non-IF2 stage with `init_method = "survey_top_k"`
+fails fast with `error: init_method = "survey_top_k" is not yet
+supported on <stage> stages; v1 supports it on IF2 only — see gh#51`.
+Silent fallback to LHS would be the wrong behaviour: the user's
+fit.toml asks for survey-seeded chains, and getting LHS instead is a
+correctness regression masked as success.
 
 ## Validation: the `run.json` cross-check
 

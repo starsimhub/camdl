@@ -151,7 +151,8 @@ pub fn run_stage(
             &base,
             n_chains,
             seed,
-        ).unwrap_or_else(|| vec![base.clone(); n_chains])
+        ).map_err(|e| format!("pmmh: {}", e))?
+        .unwrap_or_else(|| vec![base.clone(); n_chains])
     };
 
     let logliks: Vec<f64> = (0..20)
