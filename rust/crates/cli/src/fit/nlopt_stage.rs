@@ -258,6 +258,10 @@ pub fn run_stage(
         chain_eval_ses: Vec::new(),
         resolved_gate: Some(knobs.gate.clone()),
         resolved_loglik_eval: None,
+        // gh#51: chain init provenance. NLopt SurveyTopK is v2; record
+        // the user-set init_method verbatim. SurveyTopK refuses
+        // upstream in build_chain_param_vecs.
+        chain_init_source: Some(format!("{}", knobs.init_method)),
     };
     fit_state
         .save(&stage_dir.to_string_lossy())

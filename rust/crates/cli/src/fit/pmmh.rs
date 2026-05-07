@@ -592,6 +592,10 @@ pub fn run_stage(
         // Bayesian path — compound gate doesn't apply to PMMH.
         resolved_gate: None,
         resolved_loglik_eval: None,
+        // gh#51: chain init provenance. PMMH SurveyTopK is v2; record
+        // the user-set init_method verbatim. SurveyTopK refuses
+        // upstream in build_chain_param_vecs.
+        chain_init_source: Some(format!("{}", pmmh_opts.init_method)),
     };
     state.save(&stage_dir.to_string_lossy())?;
 

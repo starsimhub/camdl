@@ -354,6 +354,7 @@ mod tests {
             chain_eval_ses: vec![],
             resolved_gate: None,
             resolved_loglik_eval: None,
+            chain_init_source: None,
         }
     }
 

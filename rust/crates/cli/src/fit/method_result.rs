@@ -806,6 +806,7 @@ mod tests {
             chain_eval_ses: vec![1.0, 1.0, 1.0, 1.0],
             resolved_gate: Some(GateConfig::default()),
             resolved_loglik_eval: Some(LoglikEvalConfig::default()),
+            chain_init_source: Some("lhs".into()),
         }
     }
 

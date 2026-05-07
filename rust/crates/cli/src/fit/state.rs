@@ -100,6 +100,20 @@ pub struct FitState {
     /// reproduce the clean-eval exactly. See proposal §Phase 3.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resolved_loglik_eval: Option<LoglikEvalConfig>,
+
+    /// Provenance of this stage's chain starts (gh#51). One of:
+    /// `single`, `uniform`, `lhs`, or `survey:<full-hash>:top-<K>`
+    /// when `init_method = "survey_top_k"`. Surfaced as a one-line
+    /// header in `camdl fit summary` ("seeded from: <source>") so
+    /// the survey → fit linkage is visible without parsing
+    /// `chain_starts.tsv`.
+    ///
+    /// `None` on legacy fit_state.toml files written before this
+    /// field existed; summary renders such fits with `seeded from:
+    /// unknown` rather than substituting a default that would
+    /// silently misrepresent provenance.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chain_init_source: Option<String>,
 }
 
 impl FitState {
@@ -151,6 +165,7 @@ mod tests {
             chain_eval_ses: vec![1.5, 0.8],
             resolved_gate: Some(GateConfig::default()),
             resolved_loglik_eval: Some(LoglikEvalConfig::default()),
+            chain_init_source: Some("lhs".into()),
         }
     }
 

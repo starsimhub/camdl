@@ -786,6 +786,12 @@ pub fn cmd_fit_run_v2(a: &crate::args::FitRunArgs) {
                     cli_survey_path.clone().or_else(|| survey_path.clone());
                 let effective_survey_top_k_n: Option<usize> =
                     cli_survey_top_k.or(*survey_top_k_n);
+                // For survey_top_k we need to keep the SurveyTopKResult
+                // around (not just the per-chain `chains`) so the
+                // chain_init_source / chain_starts.tsv writers can pull
+                // the survey's full hash out of it. Plain Lhs / Uniform
+                // / Single produce no such result.
+                let mut survey_top_k_result: Option<init::SurveyTopKResult> = None;
                 let per_chain_params = if effective_starts.is_some() {
                     None
                 } else if effective_init == init::InitMethod::SurveyTopK {
@@ -810,14 +816,33 @@ pub fn cmd_fit_run_v2(a: &crate::args::FitRunArgs) {
                         fixed: &fixed_hashmap,
                         estimate_names: &estimate_names,
                     };
-                    Some(init::build_chain_starts_from_survey(
+                    let result = init::build_chain_starts_from_survey(
                         path, effective_survey_top_k_n, *chains,
                         &run_config.estimated_params, &ctx,
-                    ).unwrap_or_else(|e| { eprintln!("error: {}", e); std::process::exit(1); }))
+                    ).unwrap_or_else(|e| { eprintln!("error: {}", e); std::process::exit(1); });
+                    let chains_out = result.chains.clone();
+                    survey_top_k_result = Some(result);
+                    Some(chains_out)
                 } else {
                     init::build_chain_starts(
                         effective_init, &run_config.estimated_params, *chains, seed)
                 };
+
+                // Write chain_starts.tsv sidecar for audit (gh#51).
+                // Best-effort; failure logs but doesn't abort the fit.
+                if let Err(e) = init::write_chain_starts_tsv(
+                    &stage_dir,
+                    &run_config.estimated_params,
+                    per_chain_params.as_deref(),
+                    *chains,
+                    effective_init,
+                    survey_top_k_result.as_ref(),
+                ) {
+                    eprintln!("warning: could not write chain_starts.tsv: {}", e);
+                }
+                let chain_init_source = init::format_chain_init_source(
+                    effective_init, survey_top_k_result.as_ref(),
+                );
                 let stage_dir_str = stage_dir.to_string_lossy();
                 let chain_results = runner::run_chains_with_per_chain_params(
                     &run_config, per_chain_params.as_deref(), &collector,
@@ -929,6 +954,7 @@ pub fn cmd_fit_run_v2(a: &crate::args::FitRunArgs) {
                     // See proposal §Phase 3.
                     resolved_gate: Some(effective_gate.clone()),
                     resolved_loglik_eval: Some(effective_loglik_eval.clone()),
+                    chain_init_source: Some(chain_init_source.clone()),
                 };
                 fit_state.save(&stage_dir.to_string_lossy()).unwrap_or_else(|e| {
                     eprintln!("warning: could not save fit_state: {}", e);

@@ -333,6 +333,23 @@ pub fn compute_data_hashes(
     Ok(out)
 }
 
+/// Result of `build_chain_starts_from_survey` — bundles the per-chain
+/// `EstimatedParam` overrides with provenance info the caller needs
+/// to populate `fit_state.toml.chain_init_source` and
+/// `chain_starts.tsv`. Each chain's rank in the survey is its index
+/// in `chains` plus 1 (chain 0 = rank-1, chain 1 = rank-2, ...).
+pub struct SurveyTopKResult {
+    pub chains: Vec<Vec<EstimatedParam>>,
+    /// Full content hash of the survey CAS dir (`run.json.hash`).
+    /// Embedded into provenance strings as
+    /// `survey:<survey_hash>:top-<K>` (one per fit) and
+    /// `survey:<survey_hash>:rank-<N>` (one per chain in
+    /// `chain_starts.tsv`). Full hash, not short — short hashes
+    /// collide and audit-survivable links must point at exactly one
+    /// CAS dir.
+    pub survey_hash: String,
+}
+
 /// Pull per-chain starts from the top-K rows of a `camdl survey`
 /// landscape. See gh#51 +
 /// `docs/dev/proposals/2026-05-07-survey-top-k-init.md` for the
@@ -367,7 +384,7 @@ pub fn build_chain_starts_from_survey(
     n_chains: usize,
     base: &[EstimatedParam],
     ctx: &SurveyFitContext,
-) -> Result<Vec<Vec<EstimatedParam>>, String> {
+) -> Result<SurveyTopKResult, String> {
     use crate::run_meta::{Run, RunKind};
 
     let top_k = top_k_n.unwrap_or(n_chains);
@@ -453,7 +470,10 @@ pub fn build_chain_starts_from_survey(
         }).collect()
     }).collect();
 
-    Ok(chains)
+    Ok(SurveyTopKResult {
+        chains,
+        survey_hash: run.hash,
+    })
 }
 
 /// One row of a survey landscape.tsv, parsed.
@@ -599,6 +619,94 @@ fn emit_top_k_se_warning(top_k: &[&LandscapeRow]) {
             the survey with higher --eval-replicates.",
             top_k.len(), delta_db, threshold_db, sigma_max, top_k.len());
     }
+}
+
+/// Format `chain_init_source` for `fit_state.toml` — one line of
+/// provenance describing where this stage's chain starts came from.
+/// `lhs` / `single` / `uniform` for the in-process samplers,
+/// `survey:<full-hash>:top-<K>` for the survey reader.
+pub fn format_chain_init_source(
+    method: InitMethod,
+    survey_top_k: Option<&SurveyTopKResult>,
+) -> String {
+    if let Some(res) = survey_top_k {
+        return format!("survey:{}:top-{}", res.survey_hash, res.chains.len());
+    }
+    match method {
+        InitMethod::Single => "single".into(),
+        InitMethod::Uniform => "uniform".into(),
+        InitMethod::Lhs => "lhs".into(),
+        InitMethod::SurveyTopK => {
+            // SurveyTopKResult should have been provided. Defensive
+            // fallback so a wiring bug doesn't write a corrupt
+            // provenance string into fit_state.toml.
+            "survey:<missing-result>:top-?".into()
+        }
+    }
+}
+
+/// Write `chain_starts.tsv` — sidecar audit-only artifact recording
+/// the per-chain starting parameter vector and its provenance source
+/// (e.g. `survey:<hash>:rank-1`, `lhs:chain-0`). Lives next to
+/// `chain_evaluations.tsv` at the stage root. Emitted for every
+/// init mode so an auditor can re-derive any chain's exact start
+/// from a single TSV without reading inference-engine internals.
+///
+/// `per_chain_starts` is `None` for `InitMethod::Single` (every
+/// chain at `base`) — that case writes one row per chain with the
+/// base values and `source = "single"`. For ranked-survey mode the
+/// caller supplies `survey_top_k` so each chain's source carries
+/// `:rank-N` (1-indexed).
+pub fn write_chain_starts_tsv(
+    stage_dir: &std::path::Path,
+    base: &[EstimatedParam],
+    per_chain_starts: Option<&[Vec<EstimatedParam>]>,
+    n_chains: usize,
+    method: InitMethod,
+    survey_top_k: Option<&SurveyTopKResult>,
+) -> std::io::Result<()> {
+    use std::io::Write as _;
+    let path = stage_dir.join("chain_starts.tsv");
+    let tmp = path.with_extension("tsv.tmp");
+    {
+        let mut f = std::fs::File::create(&tmp)?;
+        // Comment header — stable, machine-parseable.
+        writeln!(f, "# camdl chain_starts; method={}; chains={}",
+            method, n_chains)?;
+        if let Some(res) = survey_top_k {
+            writeln!(f, "# survey_hash={}", res.survey_hash)?;
+        }
+        // Header row.
+        let mut cols = vec!["chain_id".to_string(), "source".to_string()];
+        for spec in base { cols.push(spec.name.clone()); }
+        writeln!(f, "{}", cols.join("\t"))?;
+        for chain_id in 0..n_chains {
+            let source = match (method, survey_top_k) {
+                (InitMethod::SurveyTopK, Some(res)) =>
+                    format!("survey:{}:rank-{}", res.survey_hash, chain_id + 1),
+                _ => format!("{}:chain-{}", method, chain_id),
+            };
+            let mut fields = vec![chain_id.to_string(), source];
+            for (i, spec) in base.iter().enumerate() {
+                let initial = per_chain_starts
+                    .and_then(|chains| chains.get(chain_id))
+                    .and_then(|c| c.get(i))
+                    .map(|s| s.initial)
+                    .unwrap_or(spec.initial);
+                fields.push(format_float_for_tsv(initial));
+            }
+            writeln!(f, "{}", fields.join("\t"))?;
+        }
+    }
+    std::fs::rename(&tmp, &path)?;
+    Ok(())
+}
+
+fn format_float_for_tsv(v: f64) -> String {
+    if v.is_nan() { "NaN".into() }
+    else if v == f64::INFINITY  { "Inf".into() }
+    else if v == f64::NEG_INFINITY { "-Inf".into() }
+    else { format!("{}", v) }
 }
 
 /// Map an LHS coordinate `u ∈ [0, 1]` to the natural-scale parameter

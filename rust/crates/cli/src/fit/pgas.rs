@@ -580,6 +580,12 @@ pub fn run_stage(
         // Bayesian path — compound gate doesn't apply to PGAS.
         resolved_gate: None,
         resolved_loglik_eval: None,
+        // gh#51: chain init provenance. PGAS doesn't yet plumb the
+        // SurveyTopK reader (deferred to v2 — see proposal §"Stage
+        // scope — v1 vs v2"); record the user-set init_method
+        // verbatim. SurveyTopK on a PGAS stage refuses upstream in
+        // build_chain_param_vecs, so this branch never sees it.
+        chain_init_source: Some(format!("{}", pgas_opts.init_method)),
     };
     state.save(&stage_dir.to_string_lossy())?;
 

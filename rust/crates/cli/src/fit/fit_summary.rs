@@ -1613,6 +1613,7 @@ mod tests {
             chain_eval_ses: vec![1.5, 1.2, 1.8, 1.4, 1.1, 1.6, 1.3, 1.5],
             resolved_gate: Some(GateConfig::default()),
             resolved_loglik_eval: Some(LoglikEvalConfig::default()),
+            chain_init_source: Some("lhs".into()),
         }
     }
 

@@ -2722,6 +2722,7 @@ dt = 1.0
             chain_eval_ses: Vec::new(),
             resolved_gate: None,
             resolved_loglik_eval: None,
+            chain_init_source: None,
         };
 
         let config = FitRunConfig::build(
