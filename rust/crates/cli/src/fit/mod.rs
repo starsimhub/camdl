@@ -932,13 +932,24 @@ pub fn cmd_fit_run_v2(a: &crate::args::FitRunArgs) {
                 // where coarse dt creates a fake basin that synth-
                 // recovery can't detect (it shares the same dt).
                 // See docs/dev/proposals/2026-05-07-richardson-dt-check.md.
+                // Apply CLI overrides on top of the stage TOML.
+                // --no-dt-check forces enabled=false; --dt-check-halvings
+                // overrides n_halvings; --dt-check-strict bumps the
+                // backend default down to the strict threshold.
+                let mut effective_dt_check = dt_check.clone();
+                if a.no_dt_check {
+                    effective_dt_check.enabled = false;
+                }
+                if let Some(n) = a.dt_check_halvings {
+                    effective_dt_check.n_halvings = n;
+                }
                 let dt_check_seed = seed.wrapping_add(0xd7c4ec_5eed); // "dtchec seed"
                 let dt_check_result = dt_check::run_richardson_ladder(
                     &run_config,
                     winner_theta,
-                    dt_check,
+                    &effective_dt_check,
                     *backend,
-                    /* strict */ false,  // CLI --dt-check-strict plumbing in next commit
+                    a.dt_check_strict,
                     &dt_check::DtCheckInherits {
                         n_particles:  effective_loglik_eval.n_particles,
                         n_replicates: effective_loglik_eval.n_replicates,

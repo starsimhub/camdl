@@ -366,6 +366,30 @@ pub struct FitRunArgs {
     #[arg(long, value_name = "TEXT")]
     pub label: Option<String>,
 
+    // ── Richardson dt-convergence check (gh#52) ─────────────────────
+
+    /// Skip the post-fit Richardson dt-convergence check at θ̂.
+    /// Default: the check runs on every IF2 stage. Use this for CI
+    /// smoke fits or known-converged-dt rerenders where the audit
+    /// cost is unwelcome.
+    #[arg(long)]
+    pub no_dt_check: bool,
+
+    /// Drop the dt-check warning threshold to the strict default
+    /// (0.5 nats for chain_binomial, 0.1 nats for ode_rk4). Targets
+    /// research-quality fits where sub-nat differences matter for
+    /// paper-grade conclusions; the routine default (2.0 / 0.5)
+    /// allows more give before flagging.
+    #[arg(long)]
+    pub dt_check_strict: bool,
+
+    /// Override `n_halvings` on the dt-check (gh#52). Default 2
+    /// (evaluates at dt_fit, dt_fit/2, dt_fit/4 — 7× the
+    /// loglik-eval cost). Use 3 for ambiguous cases at 15×.
+    /// Requires --stage when running in fit run.
+    #[arg(long, value_name = "N")]
+    pub dt_check_halvings: Option<usize>,
+
     // ── IF2-specific algorithm overrides (require --stage) ───────────
 
     /// Override [stages.<stage>.cooling_target_iters]. Iterations
