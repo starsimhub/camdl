@@ -317,6 +317,44 @@ the per-rung loglik combination already.
    - Boarding-school SIR at dt=1.0 — verify verdict = "fail"; same
      fit at dt=0.1 → verdict = "pass".
 
+## v1 ship status (post-implementation)
+
+Shipped 2026-05-07 across three commits:
+
+- **Foundation + IF2 wiring** (`df30e9f`): module + types + verdict
+  logic + Richardson runner + dispatch wiring at IF2 stages +
+  `FitState.dt_check` field + 17 unit tests.
+- **CLI flag overrides** (`5e4eaae`): `--no-dt-check`,
+  `--dt-check-strict`, `--dt-check-halvings`.
+- **`fit summary` integration** (`e36b348`): verdict block in IF2
+  stage formatter; pass case is one line, fail/marginal includes
+  ladder + synth-recovery warning text. 2 new unit tests.
+
+Deferred to follow-up issues (do not block alpha):
+
+- **Standalone `camdl fit dt-check <fit_dir>` subcommand**.
+  Reconstructing a `FitRunConfig` from a saved fit dir without the
+  original `fit.toml` path requires plumbing the fit.toml
+  reference through the run.json provenance, which is its own
+  surface change. Auto-run on every IF2 fit covers the primary
+  use case for new fits; legacy fits can re-run by re-invoking
+  `camdl fit run` against the same fit.toml. File a follow-up
+  issue when a real consumer hits the gap.
+- **L9 external-validation case** (He2010 measles SEIR at the
+  published dt = 2/365 weeks → verdict = "pass" at default τ).
+  Calibration of the ode_rk4 default needs a real measles-scale
+  fit; this lands when `camdl-book/vignettes/he2010-pomp/` runs
+  the check end-to-end.
+- **End-to-end integration test** at the binary level (real fit
+  at coarse dt → assert `fit_state.toml.dt_check.verdict ==
+  "fail"`). Same dependency on the L9 fixture; defer alongside.
+- **PGAS / PMMH / NLopt stage support**. Each launcher would need
+  the FitRunConfig + backend in scope at the post-fit point;
+  in-scope plumbing is mechanical but multi-file. The marginal
+  value is real but smaller (PGAS/PMMH posteriors mix past
+  burn-in regardless of seed → dt-bias mostly bounds the
+  point-estimate accuracy, not the posterior shape). v2 issue.
+
 ## Out of scope for v1
 
 Per the issue's "Out of scope" section + my recommendations:
