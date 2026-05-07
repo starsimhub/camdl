@@ -338,6 +338,7 @@ pub fn compute_data_hashes(
 /// to populate `fit_state.toml.chain_init_source` and
 /// `chain_starts.tsv`. Each chain's rank in the survey is its index
 /// in `chains` plus 1 (chain 0 = rank-1, chain 1 = rank-2, ...).
+#[derive(Debug)]
 pub struct SurveyTopKResult {
     pub chains: Vec<Vec<EstimatedParam>>,
     /// Full content hash of the survey CAS dir (`run.json.hash`).
@@ -1011,5 +1012,367 @@ beta\tgamma\tn_replicates\tpoint_id\n\
         let estimated = vec!["beta".to_string(), "gamma".to_string()];
         let err = parse_landscape_tsv(raw, &estimated).unwrap_err();
         assert!(err.contains("loglik"));
+    }
+
+    // ── cross_check_survey (gh#51) ───────────────────────────────────
+
+    fn make_survey_meta(
+        model_hash: &str,
+        data_hashes: &[(&str, &str)],
+        fixed: &[(&str, f64)],
+        estimated: &[&str],
+    ) -> crate::run_meta::SurveyMeta {
+        crate::run_meta::SurveyMeta {
+            model: "model.camdl".into(),
+            model_hash: model_hash.into(),
+            data_hashes: data_hashes.iter()
+                .map(|(k, v)| (k.to_string(), v.to_string())).collect(),
+            bounds: std::collections::HashMap::new(),
+            n_points: 100,
+            eval_method: crate::run_meta::SurveyEvalMethod::Pfilter,
+            eval_particles: 200,
+            eval_replicates: 4,
+            seed: 1,
+            fixed: fixed.iter().map(|(k, v)| (k.to_string(), *v)).collect(),
+            scenario: None,
+            estimated: estimated.iter().map(|s| s.to_string()).collect(),
+        }
+    }
+
+    #[test]
+    fn cross_check_refuses_model_hash_mismatch() {
+        let meta = make_survey_meta("aaa", &[("cases", "h1")], &[], &["beta"]);
+        let dh: std::collections::HashMap<String, String> =
+            [("cases".to_string(), "h1".to_string())].into_iter().collect();
+        let fx: std::collections::HashMap<String, f64> = std::collections::HashMap::new();
+        let names = vec!["beta".to_string()];
+        let ctx = SurveyFitContext {
+            model_hash: "bbb",  // ← mismatch
+            data_hashes: &dh,
+            fixed: &fx,
+            estimate_names: &names,
+        };
+        let err = cross_check_survey(&meta, &ctx).unwrap_err();
+        assert!(err.contains("model_hash"));
+        assert!(err.contains("aaa") && err.contains("bbb"),
+            "diagnostic should print both hashes: {}", err);
+    }
+
+    #[test]
+    fn cross_check_refuses_data_hash_mismatch_on_fit_stream() {
+        let meta = make_survey_meta("aaa", &[("cases", "h1")], &[], &["beta"]);
+        let dh: std::collections::HashMap<String, String> =
+            [("cases".to_string(), "h2".to_string())].into_iter().collect();  // ← differs
+        let fx: std::collections::HashMap<String, f64> = std::collections::HashMap::new();
+        let names = vec!["beta".to_string()];
+        let ctx = SurveyFitContext {
+            model_hash: "aaa", data_hashes: &dh, fixed: &fx, estimate_names: &names,
+        };
+        let err = cross_check_survey(&meta, &ctx).unwrap_err();
+        assert!(err.contains("data_hashes"));
+        assert!(err.contains("cases"));
+    }
+
+    #[test]
+    fn cross_check_refuses_fit_stream_absent_from_survey() {
+        // Fit consumes a stream the survey didn't score.
+        let meta = make_survey_meta("aaa", &[("cases", "h1")], &[], &["beta"]);
+        let dh: std::collections::HashMap<String, String> =
+            [("deaths".to_string(), "h3".to_string())].into_iter().collect();
+        let fx: std::collections::HashMap<String, f64> = std::collections::HashMap::new();
+        let names = vec!["beta".to_string()];
+        let ctx = SurveyFitContext {
+            model_hash: "aaa", data_hashes: &dh, fixed: &fx, estimate_names: &names,
+        };
+        let err = cross_check_survey(&meta, &ctx).unwrap_err();
+        assert!(err.contains("deaths"));
+    }
+
+    #[test]
+    fn cross_check_refuses_fixed_disagreement() {
+        let meta = make_survey_meta("aaa", &[], &[("rho", 0.5)], &["beta"]);
+        let dh: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+        let fx: std::collections::HashMap<String, f64> =
+            [("rho".to_string(), 0.7)].into_iter().collect();   // ← differs
+        let names = vec!["beta".to_string()];
+        let ctx = SurveyFitContext {
+            model_hash: "aaa", data_hashes: &dh, fixed: &fx, estimate_names: &names,
+        };
+        let err = cross_check_survey(&meta, &ctx).unwrap_err();
+        assert!(err.contains("rho"));
+        assert!(err.contains("[fixed]"));
+    }
+
+    #[test]
+    fn cross_check_refuses_fit_fixed_absent_from_survey() {
+        // Fit pins `rho`; survey didn't (estimated or free).
+        let meta = make_survey_meta("aaa", &[], &[], &["beta", "rho"]);
+        let dh: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+        let fx: std::collections::HashMap<String, f64> =
+            [("rho".to_string(), 0.5)].into_iter().collect();
+        let names = vec!["beta".to_string()];
+        let ctx = SurveyFitContext {
+            model_hash: "aaa", data_hashes: &dh, fixed: &fx, estimate_names: &names,
+        };
+        let err = cross_check_survey(&meta, &ctx).unwrap_err();
+        assert!(err.contains("rho"));
+        assert!(err.contains("subset"));
+    }
+
+    #[test]
+    fn cross_check_passes_when_survey_pins_more_than_fit() {
+        // Survey pinned `extra_param` at 1.0; fit doesn't fix or
+        // estimate it. The "[fixed] superset" rule says survey ⊇ fit,
+        // so survey-extras are fine.
+        let meta = make_survey_meta(
+            "aaa", &[("cases", "h1")], &[("rho", 0.5), ("extra_param", 1.0)],
+            &["beta"],
+        );
+        let dh: std::collections::HashMap<String, String> =
+            [("cases".to_string(), "h1".to_string())].into_iter().collect();
+        let fx: std::collections::HashMap<String, f64> =
+            [("rho".to_string(), 0.5)].into_iter().collect();
+        let names = vec!["beta".to_string()];
+        let ctx = SurveyFitContext {
+            model_hash: "aaa", data_hashes: &dh, fixed: &fx, estimate_names: &names,
+        };
+        cross_check_survey(&meta, &ctx).expect("survey-pins-more should pass");
+    }
+
+    // ── format_chain_init_source (gh#51) ────────────────────────────
+
+    #[test]
+    fn chain_init_source_format_for_each_method() {
+        assert_eq!(format_chain_init_source(InitMethod::Single, None), "single");
+        assert_eq!(format_chain_init_source(InitMethod::Uniform, None), "uniform");
+        assert_eq!(format_chain_init_source(InitMethod::Lhs, None), "lhs");
+
+        let result = SurveyTopKResult {
+            chains: vec![Vec::new(); 20],   // 20 chains
+            survey_hash: "deadbeefcafe1234deadbeefcafe1234deadbeefcafe1234deadbeefcafe1234".into(),
+        };
+        let s = format_chain_init_source(InitMethod::SurveyTopK, Some(&result));
+        // Full hash, not short — the audit-survivability invariant.
+        assert!(s.starts_with("survey:deadbeefcafe1234deadbeefcafe1234"),
+            "should embed full hash: {}", s);
+        assert!(s.ends_with(":top-20"),
+            "should include K from chain count: {}", s);
+    }
+
+    #[test]
+    fn chain_init_source_falls_back_when_survey_result_missing() {
+        // Defensive: should never happen in practice, but a wiring
+        // bug must not write a corrupt provenance string.
+        let s = format_chain_init_source(InitMethod::SurveyTopK, None);
+        assert!(s.contains("missing"),
+            "fallback string should flag the wiring bug: {}", s);
+    }
+
+    // ── build_chain_starts_from_survey end-to-end (gh#51) ────────────
+
+    /// Write a minimal but real survey CAS dir to disk, point
+    /// `build_chain_starts_from_survey` at it, and verify the round-
+    /// trip: top-K rows by loglik come back as per-chain
+    /// EstimatedParam vectors with the right `initial` values pulled
+    /// from the landscape TSV.
+    #[test]
+    fn build_chain_starts_from_survey_end_to_end_happy_path() {
+        use crate::run_meta::{Run, RunKind, RunStatus, SurveyMeta, SurveyEvalMethod};
+        use std::collections::HashMap;
+
+        let dir = std::env::temp_dir().join(format!(
+            "camdl_survey_top_k_e2e_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let model_hash = "model-hash-aaa";
+        let mut data_hashes = HashMap::new();
+        data_hashes.insert("cases".to_string(), "data-hash-bbb".to_string());
+
+        let run = Run {
+            kind: RunKind::Survey(SurveyMeta {
+                model: "m.camdl".into(),
+                model_hash: model_hash.into(),
+                data_hashes: data_hashes.clone(),
+                bounds: HashMap::new(),
+                n_points: 5,
+                eval_method: SurveyEvalMethod::Pfilter,
+                eval_particles: 200,
+                eval_replicates: 4,
+                seed: 1,
+                fixed: HashMap::new(),
+                scenario: None,
+                estimated: vec!["beta".into(), "gamma".into()],
+            }),
+            hash: "survey-hash-cafef00dcafef00dcafef00dcafef00d".into(),
+            argv: vec!["camdl".into(), "survey".into()],
+            status: RunStatus::Completed { wall_time_seconds: 0.0 },
+            version: "test".into(),
+            created_at: "2026-05-07T00:00:00Z".into(),
+            label: None,
+        };
+        run.write(&dir).unwrap();
+
+        // Landscape: 5 rows, loglik increasing from -100 to -90 in the
+        // sorted-desc order rank-1 = -90 (best). Within bounds
+        // beta∈[0.1, 1.0], gamma∈[0.05, 0.5].
+        let landscape = "\
+# camdl survey landscape\n\
+# eval=pfilter\n\
+beta\tgamma\tloglik\tloglik_se\tmean_ess\tn_replicates\tpoint_id\n\
+0.30\t0.10\t-100.0\t1.0\t0.8\t4\t0\n\
+0.40\t0.15\t-95.0\t1.0\t0.8\t4\t1\n\
+0.50\t0.20\t-90.0\t1.0\t0.8\t4\t2\n\
+0.60\t0.25\t-99.0\t1.0\t0.8\t4\t3\n\
+0.70\t0.30\t-98.0\t1.0\t0.8\t4\t4\n";
+        std::fs::write(dir.join("landscape.tsv"), landscape).unwrap();
+
+        let names = vec!["beta".to_string(), "gamma".to_string()];
+        let ctx = SurveyFitContext {
+            model_hash, data_hashes: &data_hashes,
+            fixed: &HashMap::new(),
+            estimate_names: &names,
+        };
+        let base = vec![
+            ep("beta",  0.1, 1.0,  Transform::Log { lo: 0.1, hi: 1.0 }, 0.5),
+            ep("gamma", 0.05, 0.5, Transform::Log { lo: 0.05, hi: 0.5 }, 0.2),
+        ];
+
+        let result = build_chain_starts_from_survey(&dir, Some(3), 3, &base, &ctx)
+            .expect("happy path should succeed");
+        assert_eq!(result.chains.len(), 3);
+        assert_eq!(result.survey_hash, "survey-hash-cafef00dcafef00dcafef00dcafef00d");
+
+        // rank-1 by loglik (best = -90) is row 2: beta=0.50, gamma=0.20.
+        assert!((result.chains[0][0].initial - 0.50).abs() < 1e-9);
+        assert!((result.chains[0][1].initial - 0.20).abs() < 1e-9);
+        // rank-2 (loglik=-95) is row 1: beta=0.40, gamma=0.15.
+        assert!((result.chains[1][0].initial - 0.40).abs() < 1e-9);
+        assert!((result.chains[1][1].initial - 0.15).abs() < 1e-9);
+        // rank-3 (loglik=-98) is row 4: beta=0.70, gamma=0.30.
+        assert!((result.chains[2][0].initial - 0.70).abs() < 1e-9);
+        assert!((result.chains[2][1].initial - 0.30).abs() < 1e-9);
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// When fit's bounds exclude rows that the survey scored, those
+    /// rows are filtered (no clipping). Refusal fires when the
+    /// filtered count drops below `n_chains`.
+    #[test]
+    fn build_chain_starts_from_survey_filter_then_rank_refuses() {
+        use crate::run_meta::{Run, RunKind, RunStatus, SurveyMeta, SurveyEvalMethod};
+        use std::collections::HashMap;
+
+        let dir = std::env::temp_dir().join(format!(
+            "camdl_survey_top_k_filter_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let run = Run {
+            kind: RunKind::Survey(SurveyMeta {
+                model: "m.camdl".into(),
+                model_hash: "h".into(),
+                data_hashes: HashMap::new(),
+                bounds: HashMap::new(),
+                n_points: 5,
+                eval_method: SurveyEvalMethod::Pfilter,
+                eval_particles: 100,
+                eval_replicates: 1,
+                seed: 1, fixed: HashMap::new(), scenario: None,
+                estimated: vec!["beta".into()],
+            }),
+            hash: "survey-hash".into(),
+            argv: vec![],
+            status: RunStatus::Completed { wall_time_seconds: 0.0 },
+            version: "test".into(),
+            created_at: "2026-05-07T00:00:00Z".into(),
+            label: None,
+        };
+        run.write(&dir).unwrap();
+
+        // Survey ranged over beta∈[0.0, 1.0]. Fit narrows to [0.6, 0.8].
+        // Only one row (beta=0.7) falls within fit's bounds.
+        let landscape = "\
+beta\tloglik\tloglik_se\tmean_ess\tn_replicates\tpoint_id\n\
+0.10\t-100.0\t1.0\t0.8\t1\t0\n\
+0.30\t-95.0\t1.0\t0.8\t1\t1\n\
+0.50\t-90.0\t1.0\t0.8\t1\t2\n\
+0.70\t-92.0\t1.0\t0.8\t1\t3\n\
+0.90\t-99.0\t1.0\t0.8\t1\t4\n";
+        std::fs::write(dir.join("landscape.tsv"), landscape).unwrap();
+
+        let names = vec!["beta".to_string()];
+        let ctx = SurveyFitContext {
+            model_hash: "h", data_hashes: &HashMap::new(),
+            fixed: &HashMap::new(), estimate_names: &names,
+        };
+        // Tight fit bounds: only row beta=0.70 survives.
+        let base = vec![ep("beta", 0.6, 0.8, Transform::None, 0.7)];
+
+        // Asking for 3 chains when only 1 row survives → refuse.
+        let err = build_chain_starts_from_survey(&dir, Some(3), 3, &base, &ctx)
+            .unwrap_err();
+        assert!(err.contains("only 1") || err.contains("survey has"),
+            "diagnostic should name the filtered count: {}", err);
+
+        // Asking for 1 chain (matches filtered count) → succeeds with
+        // the surviving row.
+        let res = build_chain_starts_from_survey(&dir, Some(1), 1, &base, &ctx)
+            .expect("single-chain happy path");
+        assert_eq!(res.chains.len(), 1);
+        assert!((res.chains[0][0].initial - 0.70).abs() < 1e-9);
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn build_chain_starts_from_survey_v1_strict_k_equals_chains() {
+        // top_k_n must equal n_chains in v1; K > chains is deferred.
+        use crate::run_meta::{Run, RunKind, RunStatus, SurveyMeta, SurveyEvalMethod};
+        use std::collections::HashMap;
+
+        let dir = std::env::temp_dir().join(format!(
+            "camdl_survey_top_k_strict_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let run = Run {
+            kind: RunKind::Survey(SurveyMeta {
+                model: "m".into(), model_hash: "h".into(),
+                data_hashes: HashMap::new(), bounds: HashMap::new(),
+                n_points: 1, eval_method: SurveyEvalMethod::Pfilter,
+                eval_particles: 1, eval_replicates: 1, seed: 1,
+                fixed: HashMap::new(), scenario: None,
+                estimated: vec!["beta".into()],
+            }),
+            hash: "h".into(), argv: vec![],
+            status: RunStatus::Completed { wall_time_seconds: 0.0 },
+            version: "v".into(), created_at: "t".into(), label: None,
+        };
+        run.write(&dir).unwrap();
+        std::fs::write(dir.join("landscape.tsv"),
+            "beta\tloglik\tloglik_se\tn_replicates\tpoint_id\n\
+             0.5\t-100.0\t1.0\t1\t0\n").unwrap();
+
+        let names = vec!["beta".to_string()];
+        let ctx = SurveyFitContext {
+            model_hash: "h", data_hashes: &HashMap::new(),
+            fixed: &HashMap::new(), estimate_names: &names,
+        };
+        let base = vec![ep("beta", 0.0, 1.0, Transform::None, 0.5)];
+
+        // top_k=2, n_chains=1 → refuse with v1-scope diagnostic.
+        let err = build_chain_starts_from_survey(&dir, Some(2), 1, &base, &ctx)
+            .unwrap_err();
+        assert!(err.contains("v1") && err.contains("top_k"),
+            "v1 strict-K diagnostic should mention v1: {}", err);
+
+        std::fs::remove_dir_all(&dir).ok();
     }
 }
