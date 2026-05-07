@@ -681,16 +681,26 @@ pub enum Stage {
         cooling_target_iters: usize,
         #[serde(default)]
         starts_from: StartsFrom,
-        /// How per-chain starting points are drawn (gh#42). Default
-        /// `"uniform"` matches v1 scout: per-chain uniform random within
-        /// natural-scale bounds. `"single"` keeps every chain at the
-        /// seeded `[estimate].start` (refine-style). `"lhs"` uses
-        /// Latin-hypercube stratified sampling, scale-aware via the
-        /// parameter's transform — log-typed rates LHS in log space,
-        /// linear otherwise. LHS gives stratified coverage at low
-        /// chain counts where uniform random is clumpy.
+        /// How per-chain starting points are drawn. Default `"lhs"`
+        /// (Latin-hypercube stratified, scale-aware via Transform).
+        /// Other modes: `"single"` (every chain at seeded start),
+        /// `"uniform"` (legacy uniform random), `"survey_top_k"` (pull
+        /// from top-K rows of a `camdl survey` landscape — requires
+        /// `survey_path` + optional `survey_top_k_n` siblings; see
+        /// gh#51).
         #[serde(default)]
         init_method: super::init::InitMethod,
+        /// Survey CAS directory consumed when `init_method =
+        /// "survey_top_k"`. Must contain `run.json` (RunKind::Survey)
+        /// and `landscape.tsv`. Ignored otherwise.
+        #[serde(default)]
+        survey_path: Option<std::path::PathBuf>,
+        /// Number of top-K rows to pull from the survey landscape.
+        /// Defaults to `chains` when omitted; in v1 must equal
+        /// `chains` (strict K=chains). Ignored when `init_method !=
+        /// "survey_top_k"`.
+        #[serde(default)]
+        survey_top_k_n: Option<usize>,
         /// Clean-evaluation re-scoring of candidate parameter points after
         /// IF2 finishes. See proposal §Proposal 1. Defaults give 4000
         /// particles × 8 replicates combined via logmeanexp.
@@ -711,14 +721,22 @@ pub enum Stage {
         sweeps: usize,
         #[serde(default)]
         starts_from: StartsFrom,
-        /// Per-chain init draws (gh#42). See `Stage::IF2::init_method`
-        /// for the full enum description. Default `uniform` matches
-        /// PGAS's prior behaviour (per-chain uniform random within
-        /// natural-scale bounds — overdispersed initialisation, standard
-        /// MCMC practice). LHS gives stratified posterior coverage at
-        /// low chain counts.
+        /// Per-chain init draws. See `Stage::IF2::init_method` for the
+        /// full enum description. Default `lhs`. PGAS also supports
+        /// `survey_top_k` (sibling fields `survey_path` /
+        /// `survey_top_k_n`); survey rows are usable as MCMC chain
+        /// seeds because the seed sets only the chain's starting state,
+        /// not its stationary distribution (which the prior governs).
         #[serde(default)]
         init_method: super::init::InitMethod,
+        /// Survey CAS directory for `init_method = "survey_top_k"`.
+        /// See `Stage::IF2::survey_path`.
+        #[serde(default)]
+        survey_path: Option<std::path::PathBuf>,
+        /// Top-K count for `init_method = "survey_top_k"`. See
+        /// `Stage::IF2::survey_top_k_n`.
+        #[serde(default)]
+        survey_top_k_n: Option<usize>,
         #[serde(default)]
         burn_in: Option<usize>,
         #[serde(default)]
@@ -774,12 +792,20 @@ pub enum Stage {
         iterations: usize,
         #[serde(default)]
         starts_from: StartsFrom,
-        /// Per-chain init draws (gh#42). See `Stage::IF2::init_method`
-        /// for the full enum description. Default `uniform` (per-chain
-        /// uniform random within bounds). LHS gives stratified
-        /// posterior coverage at low chain counts.
+        /// Per-chain init draws. See `Stage::IF2::init_method` for the
+        /// full enum description. Default `lhs`. PMMH also supports
+        /// `survey_top_k` (sibling fields `survey_path` /
+        /// `survey_top_k_n`).
         #[serde(default)]
         init_method: super::init::InitMethod,
+        /// Survey CAS directory for `init_method = "survey_top_k"`.
+        /// See `Stage::IF2::survey_path`.
+        #[serde(default)]
+        survey_path: Option<std::path::PathBuf>,
+        /// Top-K count for `init_method = "survey_top_k"`. See
+        /// `Stage::IF2::survey_top_k_n`.
+        #[serde(default)]
+        survey_top_k_n: Option<usize>,
         #[serde(default)]
         burn_in: Option<usize>,
         #[serde(default)]
@@ -881,6 +907,14 @@ pub struct NloptStageConfig {
     /// points with a quick `camdl pfilter` loglik check.
     #[serde(default)]
     pub init_method: super::init::InitMethod,
+    /// Survey CAS directory for `init_method = "survey_top_k"` (gh#51).
+    /// See `Stage::IF2::survey_path` for the cross-check rules.
+    #[serde(default)]
+    pub survey_path: Option<std::path::PathBuf>,
+    /// Top-K count for `init_method = "survey_top_k"`. Defaults to
+    /// `chains` when omitted.
+    #[serde(default)]
+    pub survey_top_k_n: Option<usize>,
     /// Convergence-gate thresholds. Two-leg version of IF2's gate
     /// (chain-agreement + decibans-spread); see proposal §"Convergence
     /// diagnostics for NLopt chains".
@@ -3559,6 +3593,8 @@ decibans_thresh = 100.0
             chains: 4, particles: 100, sweeps,
             starts_from: StartsFrom::default(),
             init_method: Default::default(),
+            survey_path: None,
+            survey_top_k_n: None,
             burn_in: Some(200), thin: Some(2),
             tempering: vec![1.0],
             max_tree_depth: 10,
@@ -3577,6 +3613,8 @@ decibans_thresh = 100.0
             chains: 4, particles: 100, iterations,
             starts_from: StartsFrom::default(),
             init_method: Default::default(),
+            survey_path: None,
+            survey_top_k_n: None,
             burn_in: Some(200), thin: Some(2),
             adapt: true, adapt_start: 300, rho: None,
         }
@@ -3593,10 +3631,14 @@ decibans_thresh = 100.0
 
         // Changing any *other* PGAS field must change the payload.
         let s_more_chains = match make_pgas_stage(1000) {
-            Stage::PGAS { backend, particles, sweeps, starts_from, init_method, burn_in, thin,
+            Stage::PGAS { backend, particles, sweeps, starts_from, init_method,
+                survey_path, survey_top_k_n,
+                burn_in, thin,
                 tempering, max_tree_depth, trajectory_warmup, csmc_sweeps_per_nuts,
                 n_trajectories, dense_mass, use_nuts, .. } =>
-                Stage::PGAS { backend, chains: 8, particles, sweeps, starts_from, init_method, burn_in, thin,
+                Stage::PGAS { backend, chains: 8, particles, sweeps, starts_from, init_method,
+                    survey_path, survey_top_k_n,
+                    burn_in, thin,
                     tempering, max_tree_depth, trajectory_warmup, csmc_sweeps_per_nuts,
                     n_trajectories, dense_mass, use_nuts },
             _ => unreachable!(),
@@ -3731,6 +3773,8 @@ decibans_thresh = 100.0
             starts_from: StartsFrom::default(),
             loglik_eval: LoglikEvalConfig::default(),
             init_method: Default::default(),
+            survey_path: None,
+            survey_top_k_n: None,
             gate: GateConfig::default(),
         };
         let s100 = Stage::IF2 {
@@ -3740,6 +3784,8 @@ decibans_thresh = 100.0
             starts_from: StartsFrom::default(),
             loglik_eval: LoglikEvalConfig::default(),
             init_method: Default::default(),
+            survey_path: None,
+            survey_top_k_n: None,
             gate: GateConfig::default(),
         };
         assert_ne!(s50.identity_payload(), s100.identity_payload());
@@ -3751,6 +3797,8 @@ decibans_thresh = 100.0
             starts_from: StartsFrom::default(),
             loglik_eval: LoglikEvalConfig::default(),
             init_method: Default::default(),
+            survey_path: None,
+            survey_top_k_n: None,
             gate: GateConfig::default(),
         };
         assert_ne!(s50.identity_payload(), s_diff_cooling.identity_payload());
@@ -3764,6 +3812,8 @@ decibans_thresh = 100.0
             starts_from: StartsFrom::default(),
             loglik_eval: LoglikEvalConfig::default(),
             init_method: Default::default(),
+            survey_path: None,
+            survey_top_k_n: None,
             gate: GateConfig::default(),
         };
         assert_ne!(s50.identity_payload(), s_diff_target.identity_payload());

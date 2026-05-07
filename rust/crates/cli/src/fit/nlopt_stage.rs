@@ -632,6 +632,8 @@ mod tests {
             max_evals: 5000,
             starts_from: StartsFrom::default(),
             init_method: InitMethod::Single,
+            survey_path: None,
+            survey_top_k_n: None,
             gate: GateConfig::default(),
         }
     }

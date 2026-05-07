@@ -417,6 +417,8 @@ mod tests {
             starts_from: super::super::config_v2::StartsFrom::Random,
             loglik_eval: Default::default(),
             init_method: Default::default(),
+            survey_path: None,
+            survey_top_k_n: None,
             gate: Default::default(),
         };
         let h1 = fit_stage_hash("model", &obs, &est, &fixed, &[], "mle", &stage, 1).unwrap();
@@ -439,6 +441,8 @@ mod tests {
             starts_from: super::super::config_v2::StartsFrom::Random,
             loglik_eval: Default::default(),
             init_method: Default::default(),
+            survey_path: None,
+            survey_top_k_n: None,
             gate: Default::default(),
         };
         let h1 = fit_stage_hash("model_a", &obs, &est, &fixed, &[], "mle", &stage, 1).unwrap();
@@ -460,6 +464,8 @@ mod tests {
             starts_from: super::super::config_v2::StartsFrom::Random,
             loglik_eval: Default::default(),
             init_method: Default::default(),
+            survey_path: None,
+            survey_top_k_n: None,
             gate: Default::default(),
         };
         let h1 = fit_stage_hash("model", &obs, &est, &fixed, &[], "mle", &stage, 1).unwrap();
@@ -481,6 +487,8 @@ mod tests {
             starts_from: super::super::config_v2::StartsFrom::Random,
             loglik_eval: Default::default(),
             init_method: Default::default(),
+            survey_path: None,
+            survey_top_k_n: None,
             gate: Default::default(),
         };
         let stage2 = super::super::config_v2::Stage::IF2 {
@@ -491,6 +499,8 @@ mod tests {
             starts_from: super::super::config_v2::StartsFrom::Random,
             loglik_eval: Default::default(),
             init_method: Default::default(),
+            survey_path: None,
+            survey_top_k_n: None,
             gate: Default::default(),
         };
         let h1 = fit_stage_hash("model", &obs, &est, &fixed, &[], "mle", &stage1, 1).unwrap();
@@ -517,6 +527,8 @@ mod tests {
             starts_from: super::super::config_v2::StartsFrom::Random,
             loglik_eval: Default::default(),
             init_method: Default::default(),
+            survey_path: None,
+            survey_top_k_n: None,
             gate: Default::default(),
         };
         let no_groups: Vec<super::super::config_v2::SimplexGroup> = vec![];

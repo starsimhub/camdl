@@ -704,6 +704,8 @@ mod tests {
             chains: 1, particles: 10, sweeps: 10,
             starts_from: StartsFrom::default(),
             init_method: Default::default(),
+            survey_path: None,
+            survey_top_k_n: None,
             burn_in: Some(2), thin: Some(1),
             tempering,
             max_tree_depth: 10,
