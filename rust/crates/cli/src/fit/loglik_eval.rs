@@ -292,7 +292,7 @@ where
 /// SE formula matches the combine mode — `logmeanexp_with_se` for
 /// `LogMeanExp`, `sample_sd / √M` for `Mean` — so the reported SE is
 /// always the SE of the reported point estimate.
-fn combine_with_se(xs: &[f64], mode: CombineMode) -> (f64, f64) {
+pub fn combine_with_se(xs: &[f64], mode: CombineMode) -> (f64, f64) {
     match mode {
         CombineMode::LogMeanExp => evidence::logmeanexp_with_se(xs),
         CombineMode::Mean => {

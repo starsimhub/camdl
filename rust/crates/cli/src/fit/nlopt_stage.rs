@@ -262,6 +262,10 @@ pub fn run_stage(
         // the user-set init_method verbatim. SurveyTopK refuses
         // upstream in build_chain_param_vecs.
         chain_init_source: Some(format!("{}", knobs.init_method)),
+        // gh#52: Richardson dt-check is wired only on IF2 stages in
+        // v1. NLopt-on-ODE has dt and would benefit from this check
+        // too — deferred to v2 alongside the launcher refactor.
+        dt_check: None,
     };
     fit_state
         .save(&stage_dir.to_string_lossy())

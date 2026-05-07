@@ -420,6 +420,7 @@ mod tests {
             survey_path: None,
             survey_top_k_n: None,
             gate: Default::default(),
+            dt_check: Default::default(),
         };
         let h1 = fit_stage_hash("model", &obs, &est, &fixed, &[], "mle", &stage, 1).unwrap();
         let h2 = fit_stage_hash("model", &obs, &est, &fixed, &[], "mle", &stage, 1).unwrap();
@@ -444,6 +445,7 @@ mod tests {
             survey_path: None,
             survey_top_k_n: None,
             gate: Default::default(),
+            dt_check: Default::default(),
         };
         let h1 = fit_stage_hash("model_a", &obs, &est, &fixed, &[], "mle", &stage, 1).unwrap();
         let h2 = fit_stage_hash("model_b", &obs, &est, &fixed, &[], "mle", &stage, 1).unwrap();
@@ -467,6 +469,7 @@ mod tests {
             survey_path: None,
             survey_top_k_n: None,
             gate: Default::default(),
+            dt_check: Default::default(),
         };
         let h1 = fit_stage_hash("model", &obs, &est, &fixed, &[], "mle", &stage, 1).unwrap();
         let h2 = fit_stage_hash("model", &obs, &est, &fixed, &[], "mle", &stage, 2).unwrap();
@@ -490,6 +493,7 @@ mod tests {
             survey_path: None,
             survey_top_k_n: None,
             gate: Default::default(),
+            dt_check: Default::default(),
         };
         let stage2 = super::super::config_v2::Stage::IF2 {
             backend: crate::run_meta::Backend::ChainBinomial,
@@ -502,6 +506,7 @@ mod tests {
             survey_path: None,
             survey_top_k_n: None,
             gate: Default::default(),
+            dt_check: Default::default(),
         };
         let h1 = fit_stage_hash("model", &obs, &est, &fixed, &[], "mle", &stage1, 1).unwrap();
         let h2 = fit_stage_hash("model", &obs, &est, &fixed, &[], "mle", &stage2, 1).unwrap();
@@ -530,6 +535,7 @@ mod tests {
             survey_path: None,
             survey_top_k_n: None,
             gate: Default::default(),
+            dt_check: Default::default(),
         };
         let no_groups: Vec<super::super::config_v2::SimplexGroup> = vec![];
         let with_group = vec![super::super::config_v2::SimplexGroup {

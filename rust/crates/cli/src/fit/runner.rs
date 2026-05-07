@@ -691,10 +691,26 @@ pub fn run_quick_pfilter_full(
     n_particles: usize,
     seed: u64,
 ) -> (f64, super::loglik_eval::FilterStats) {
+    run_quick_pfilter_with_dt(config, params, n_particles, None, seed)
+}
+
+/// As `run_quick_pfilter_full` but lets the caller override the
+/// integrator step `dt`. `dt_override = None` keeps the fit's
+/// `if2_config.dt`. Used by the gh#52 Richardson dt-convergence
+/// check at θ̂ to evaluate `loglik(θ̂; dt)` on a halving ladder
+/// without rebuilding the run config.
+pub fn run_quick_pfilter_with_dt(
+    config: &FitRunConfig,
+    params: &[f64],
+    n_particles: usize,
+    dt_override: Option<f64>,
+    seed: u64,
+) -> (f64, super::loglik_eval::FilterStats) {
     let process = config.build_process();
     let obs_model = config.build_obs_model();
     let smc_config = sim::inference::traits::SMCConfig {
         n_particles,
+        dt: dt_override.unwrap_or(config.if2_config.dt),
         ..config.smc_config()
     };
 
@@ -2723,6 +2739,7 @@ dt = 1.0
             resolved_gate: None,
             resolved_loglik_eval: None,
             chain_init_source: None,
+            dt_check: None,
         };
 
         let config = FitRunConfig::build(

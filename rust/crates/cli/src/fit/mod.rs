@@ -23,6 +23,7 @@ pub mod pgas;
 pub mod trace_writer;
 pub mod synthetic;
 pub mod gating;
+pub mod dt_check;
 pub mod init;
 pub mod loglik_eval;
 pub mod methods;
@@ -647,7 +648,7 @@ pub fn cmd_fit_run_v2(a: &crate::args::FitRunArgs) {
         let mut stage_best_chain: Option<usize> = None;
 
         match stage {
-            Stage::IF2 { chains, particles, iterations, cooling, cooling_target_iters, init_method, survey_path, survey_top_k_n, loglik_eval, gate, .. } => {
+            Stage::IF2 { backend, chains, particles, iterations, cooling, cooling_target_iters, init_method, survey_path, survey_top_k_n, loglik_eval, gate, dt_check, .. } => {
                 // Resolve effective clean_eval / gate: stage TOML, then CLI
                 // override (per Step 4 — overrides are stage-scoped because
                 // clap requires --stage). CLI flags pass `requires = "stage"`
@@ -922,6 +923,30 @@ pub fn cmd_fit_run_v2(a: &crate::args::FitRunArgs) {
                         .map(|s| (s.name.clone(), s.rw_sd * 0.5))
                         .collect(),
                 };
+
+                // Post-fit Richardson dt-convergence check at θ̂
+                // (gh#52). Auto-runs when `dt_check.enabled = true`
+                // (default); evaluates loglik(θ̂; dt) on a halving
+                // ladder and warns when the MLE is discretization-
+                // dependent. Catches the silent-wrong-answer mode
+                // where coarse dt creates a fake basin that synth-
+                // recovery can't detect (it shares the same dt).
+                // See docs/dev/proposals/2026-05-07-richardson-dt-check.md.
+                let dt_check_seed = seed.wrapping_add(0xd7c4ec_5eed); // "dtchec seed"
+                let dt_check_result = dt_check::run_richardson_ladder(
+                    &run_config,
+                    winner_theta,
+                    dt_check,
+                    *backend,
+                    /* strict */ false,  // CLI --dt-check-strict plumbing in next commit
+                    &dt_check::DtCheckInherits {
+                        n_particles:  effective_loglik_eval.n_particles,
+                        n_replicates: effective_loglik_eval.n_replicates,
+                        combine:      effective_loglik_eval.combine,
+                    },
+                    dt_check_seed,
+                );
+                dt_check::print_terminal_report(&dt_check_result);
                 let fit_state = state::FitState {
                     stage: stage_name.to_string(),
                     seed,
@@ -955,6 +980,13 @@ pub fn cmd_fit_run_v2(a: &crate::args::FitRunArgs) {
                     resolved_gate: Some(effective_gate.clone()),
                     resolved_loglik_eval: Some(effective_loglik_eval.clone()),
                     chain_init_source: Some(chain_init_source.clone()),
+                    dt_check: if matches!(dt_check_result.verdict,
+                        dt_check::DtCheckVerdict::Skipped)
+                    {
+                        None  // skipped → omit the block, mirroring legacy semantics
+                    } else {
+                        Some(dt_check_result.clone())
+                    },
                 };
                 fit_state.save(&stage_dir.to_string_lossy()).unwrap_or_else(|e| {
                     eprintln!("warning: could not save fit_state: {}", e);

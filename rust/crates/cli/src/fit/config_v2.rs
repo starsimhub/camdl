@@ -711,6 +711,13 @@ pub enum Stage {
         /// §Proposal 3.
         #[serde(default)]
         gate: GateConfig,
+        /// Post-fit Richardson dt-convergence check at θ̂ (gh#52).
+        /// Auto-runs at end-of-final-stage; halving-ladder pfilter
+        /// eval that warns when the MLE is discretization-dependent.
+        /// Defaults to `enabled = true`. Set `enabled = false` on
+        /// scout / smoke fits where the check is unnecessary.
+        #[serde(default)]
+        dt_check: DtCheckConfig,
     },
 
     #[serde(rename = "pgas")]
@@ -1156,6 +1163,74 @@ impl Default for GateConfig {
         Self {
             a_thresh: default_a_thresh(),
             decibans_thresh: default_decibans_thresh(),
+        }
+    }
+}
+
+// ─── Richardson dt-convergence check (gh#52) ─────────────────────────
+
+/// Configuration for the post-fit Richardson dt-convergence check.
+/// Auto-runs at the end of `camdl fit run`'s final stage (after the
+/// compound gate); evaluates `loglik(θ̂; dt)` on a halving ladder
+/// `{dt_fit, dt_fit/2, ..., dt_fit/2^n}` and warns when the loglik
+/// is still drifting. See `docs/dev/proposals/2026-05-07-richardson-dt-check.md`.
+///
+/// Defaults are backend-dependent at the *threshold* level (see
+/// `effective_threshold_for_backend` in `dt_check.rs`); the struct
+/// fields here are pre-resolution.
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+pub struct DtCheckConfig {
+    /// Master toggle. Default `true` — every fit gets the audit.
+    /// Set `false` to opt out (CI smoke fits, known-converged-dt
+    /// rerenders).
+    #[serde(default = "default_dt_check_enabled")]
+    pub enabled: bool,
+    /// Number of halvings beyond `dt_fit`. `n_halvings = 2` evaluates
+    /// at `{dt_fit, dt_fit/2, dt_fit/4}` (3 ladder rungs total).
+    /// Cost grows like `Σ 2^k = 2^(n+1) − 1` because finer dt has
+    /// more sub-steps; default 2 keeps cost ≤ 7× the loglik_eval at
+    /// θ̂. `--extended` (n_halvings=3) adds dt_fit/8 for ambiguous
+    /// cases.
+    #[serde(default = "default_dt_check_halvings")]
+    pub n_halvings: usize,
+    /// Particle count per ladder-rung evaluation. Default `None` →
+    /// inherit from the stage's `loglik_eval.n_particles` (so the
+    /// dt-check matches the gate's clean-eval budget).
+    #[serde(default)]
+    pub n_particles: Option<usize>,
+    /// Replicate count per ladder-rung evaluation, combined via
+    /// `combine`. Default `None` → inherit from the stage's
+    /// `loglik_eval.n_replicates`.
+    #[serde(default)]
+    pub n_replicates: Option<usize>,
+    /// User-set warning threshold floor in nats. The effective
+    /// threshold is `max(threshold_nats, 4·σ_max)` so noisy
+    /// evaluations don't trip spuriously (mirrors the compound
+    /// gate's `8·σ_max·NATS_TO_DB` shape, halved because this is a
+    /// per-evaluation comparison rather than a chain-level spread).
+    /// Default `None` → backend-specific (2.0 for chain_binomial /
+    /// tau_leap / euler_*, 0.5 for ode_rk4).
+    #[serde(default)]
+    pub threshold_nats: Option<f64>,
+    /// Combiner for replicate logliks. Default `None` → inherit
+    /// from the stage's `loglik_eval.combine`. Almost always
+    /// `LogMeanExp` (unbiased on the likelihood scale).
+    #[serde(default)]
+    pub combine: Option<CombineMode>,
+}
+
+fn default_dt_check_enabled() -> bool { true }
+fn default_dt_check_halvings() -> usize { 2 }
+
+impl Default for DtCheckConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_dt_check_enabled(),
+            n_halvings: default_dt_check_halvings(),
+            n_particles: None,
+            n_replicates: None,
+            threshold_nats: None,
+            combine: None,
         }
     }
 }
@@ -3776,6 +3851,7 @@ decibans_thresh = 100.0
             survey_path: None,
             survey_top_k_n: None,
             gate: GateConfig::default(),
+            dt_check: DtCheckConfig::default(),
         };
         let s100 = Stage::IF2 {
             backend: crate::run_meta::Backend::ChainBinomial,
@@ -3787,6 +3863,7 @@ decibans_thresh = 100.0
             survey_path: None,
             survey_top_k_n: None,
             gate: GateConfig::default(),
+            dt_check: DtCheckConfig::default(),
         };
         assert_ne!(s50.identity_payload(), s100.identity_payload());
 
@@ -3800,6 +3877,7 @@ decibans_thresh = 100.0
             survey_path: None,
             survey_top_k_n: None,
             gate: GateConfig::default(),
+            dt_check: DtCheckConfig::default(),
         };
         assert_ne!(s50.identity_payload(), s_diff_cooling.identity_payload());
 
@@ -3815,6 +3893,7 @@ decibans_thresh = 100.0
             survey_path: None,
             survey_top_k_n: None,
             gate: GateConfig::default(),
+            dt_check: DtCheckConfig::default(),
         };
         assert_ne!(s50.identity_payload(), s_diff_target.identity_payload());
     }

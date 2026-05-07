@@ -596,6 +596,8 @@ pub fn run_stage(
         // the user-set init_method verbatim. SurveyTopK refuses
         // upstream in build_chain_param_vecs.
         chain_init_source: Some(format!("{}", pmmh_opts.init_method)),
+        // gh#52: Richardson dt-check IF2-only in v1.
+        dt_check: None,
     };
     state.save(&stage_dir.to_string_lossy())?;
 

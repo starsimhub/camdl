@@ -114,6 +114,14 @@ pub struct FitState {
     /// silently misrepresent provenance.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub chain_init_source: Option<String>,
+
+    /// Post-fit Richardson dt-convergence check at θ̂ (gh#52).
+    /// `None` on legacy fit_state.toml files or stages where
+    /// `dt_check.enabled = false`. `Some(_)` carries the full
+    /// ladder + verdict + notes; `camdl fit summary` reads this and
+    /// renders the verdict line.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dt_check: Option<crate::fit::dt_check::DtCheckResult>,
 }
 
 impl FitState {
@@ -166,6 +174,7 @@ mod tests {
             resolved_gate: Some(GateConfig::default()),
             resolved_loglik_eval: Some(LoglikEvalConfig::default()),
             chain_init_source: Some("lhs".into()),
+            dt_check: None,
         }
     }
 

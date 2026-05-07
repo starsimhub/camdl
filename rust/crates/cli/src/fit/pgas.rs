@@ -586,6 +586,10 @@ pub fn run_stage(
         // verbatim. SurveyTopK on a PGAS stage refuses upstream in
         // build_chain_param_vecs, so this branch never sees it.
         chain_init_source: Some(format!("{}", pgas_opts.init_method)),
+        // gh#52: Richardson dt-check is wired only on IF2 stages in
+        // v1 (the inference math is shared but the dispatch site
+        // refactor across PGAS/PMMH/NLopt is out of scope here).
+        dt_check: None,
     };
     state.save(&stage_dir.to_string_lossy())?;
 
