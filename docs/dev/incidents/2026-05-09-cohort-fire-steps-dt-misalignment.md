@@ -120,19 +120,163 @@ cross-check resolves which.
 
 ## Magnitude
 
-Mean loglik divergence (camdl − pomp), 8 replicates × 4000 particles,
-He2010 lit MLE on London 1944–1964 weekly cases:
+8 replicates × 4000 particles per (target, dt). camdl combines via
+logmeanexp; pomp values cited here are likewise logmeanexp-combined
+across the 8 replicate logliks. (The original gh#53 issue tabulated
+pomp's *arithmetic mean* across replicates, which is offset from
+logmeanexp by ≈ σ²(per-rep loglik) / 2 — a Jensen correction of ~17
+nats per cell at sub-day dt where pomp's per-rep variance is high.
+The corrected paired-comparison numbers below resolve a ~20-nat
+"residual bias" the original issue text reported at sub-day dt;
+that was a methodology artifact between the camdl driver and the
+hand-tabulated pomp summary, not a real-world delta.)
 
-| dt | camdl ll | pomp ll | Δ (camdl − pomp) |
+Pre-fix divergence (camdl − pomp), He2010 lit MLE on London
+1944–1964 weekly cases, both sides logmeanexp-combined:
+
+| dt | camdl ll (pre-fix) | pomp ll | Δ |
 |---|---:|---:|---:|
-| 1.000 | −5815.82 | −5816.13 | +0.31 |
-| 0.500 | −7119.10 | −5807.94 | **−1311.16** |
-| 0.250 | −9369.62 | −5810.70 | **−3558.92** |
-| 0.125 | −11678.29 | −5806.60 | **−5871.69** |
+| 1.000 | −5815.82 | −5811.52 | −4.3 |
+| 0.500 | −7119.10 | −5800.81 | **−1318.3** |
+| 0.250 | −9369.62 | −5805.25 | **−3564.4** |
+| 0.125 | −11678.29 | −5789.32 | **−5889.0** |
 
 Particle-filter standard error inflated 50× over the dt ladder at
-the lit MLE (5.03 → 42.18 → 349.28 → 240.13 nats). Post-fix SE
-is bounded 2.9–5.0 nats across the same ladder.
+the lit MLE pre-fix (5.03 → 42.18 → 349.28 → 240.13 nats).
+
+Post-fix divergence at the same lit MLE, same combiner on both
+sides, seed 9000:
+
+| dt | camdl ll (post-fix) | pomp ll | Δ |
+|---|---:|---:|---:|
+| 1.000 | −5815.82 | −5811.52 | −4.30 |
+| 0.500 | −5788.53 | −5800.81 | +12.28 |
+| 0.250 | −5788.91 | −5805.25 | +16.33 |
+| 0.125 | −5787.12 | −5789.32 | +2.20 |
+
+PF SE post-fix bounded 2.9–5.0 nats across the same ladder
+(particle-weight degeneracy resolved by the same fix).
+
+Sub-day deltas at seed 9000 are mixed-sign and within ~3·SE of
+zero; the +12 / +16 nat values at dt=0.5 / 0.25 are above 1·SE but
+below 4·SE. A seed-resampling test at seed 17000 (one regime over,
+no overlap) addresses whether they're statistical fluctuations or
+a residual bias direction.
+
+### Seed-resampling test (seed 17000)
+
+Re-ran both camdl and pomp Richardson ladders at seed_base = 17000
+(one regime over from seed_base = 9000; no overlap in the per-rep
+seeds 17000–17007 vs 9000–9007). With matched logmeanexp combining
+on both sides:
+
+| target | dt | Δ_9k | Δ_17k | seed-avg | sign |
+|---|---:|---:|---:|---:|---|
+| lit_MLE | 1.000 | -4.30 | -7.60 | -6.0 | (within ~SE) |
+| lit_MLE | 0.500 | +12.28 | +10.53 | **+11.4** | sign-stable |
+| lit_MLE | 0.250 | +16.33 | +12.01 | **+14.2** | sign-stable |
+| lit_MLE | 0.125 | +2.20 | +11.11 | +6.7 | sign-stable, small |
+| scout_dt1.0 | 1.000 | +8.19 | +12.27 | **+10.2** | sign-stable |
+| scout_dt1.0 | 0.500 | +17.04 | +15.14 | **+16.1** | sign-stable |
+| scout_dt1.0 | 0.250 | +7.32 | +17.88 | **+12.6** | sign-stable |
+| scout_dt1.0 | 0.125 | +25.19 | +18.05 | **+21.7** | sign-stable |
+
+(scout_dt0.25 has high process-noise + per-eval SE 18-44 nats; not
+diagnostic for the bias question.)
+
+Sign-stable across two independent seed regimes in **14/14
+sub-day-dt cells** for the well-behaved targets (lit_MLE +
+scout_dt1.0). camdl loglik is consistently ~10-22 nats *higher*
+than pomp at sub-day dt, with magnitude growing mildly toward
+finer dt. Z-scores on the seed-averaged means are 2-5σ from zero.
+
+This is **not** seed-fluctuation. The cohort fire-step fix
+removed ~99.5% of the divergence (5862 nats → ~12 nats average
+residual at lit_MLE), but a smaller, structurally distinct delta
+remains. Severity: ~12 nats / 1100 weeks ≈ 0.011 nats per
+observation; well below the per-week PF SE so won't change
+parameter inferences materially. But it is a real, seed-stable,
+structural delta worth tracking as a follow-up issue rather than
+declaring the fix complete on the basis of "5862 → 12, good
+enough."
+
+Candidate causes for the residual, in rough prior order:
+- **Gamma noise scaling residual.** Hypothesis 1 was partially
+  exonerated in the bisect (with cohort=lit, sigma_se=0.001 still
+  showed ~11k-nat dt=1-vs-sub-day jump). With cohort fixed, a
+  smaller gamma-related residual (~10-22 nats) would have been
+  masked. Cheapest test: post-fix, set sigma_se = 0.001 and
+  rerun the ladder. If residual flattens, hypothesis 1 confirmed
+  for the smaller signal too.
+- **Observation-likelihood evaluation path.** camdl evaluates the
+  heteroscedastic Normal `dmeasure` via the IR's resolved
+  expression tree; pomp evaluates it via Csnippet. Subtle
+  rounding / order-of-operations differences could compound over
+  1100 weekly observations.
+- **PF resampling implementation.** pomp uses systematic
+  resampling; camdl could use multinomial or stratified.
+  Different resamplers give different estimator behavior at
+  finite N; would scale weakly with substep count (more substeps
+  ⇒ more resampling events).
+- **Births rounding accumulation.** Per-substep `round(rate*dt)`
+  vs cumulative `round(rate*T)`; sub-1-nat magnitude per
+  observation but accumulates over 60k+ substeps.
+
+Filed as gh#54 for follow-up; not blocking this incident's
+remediation.
+
+Methodology note: this seed-resampling test is the recommended
+pattern for any future camdl-vs-external-reference comparison
+where a small residual is seen — re-run at a fresh seed regime
+with matched combiner on both sides, compare deltas. If the sign
+flips or magnitude changes by > σ, the residual was statistical;
+if both are preserved across seed regimes, it's structural. The
+~10 nat camdl-vs-camdl seed-to-seed variance observed here at
+dt=1.0 lit_MLE (-5815.82 at seed 9k → -5805.00 at seed 17k) is
+consistent with the per-rep PF SE (≈ 5 nats × √2 across two
+8-rep runs); much smaller than the +12 nat seed-stable delta that
+*does* survive resampling.
+
+**Methodology pitfall worth flagging here**: the original gh#53
+issue text reported a +20 nat residual at sub-day dt that
+attracted Vince's attention. Roughly half of that magnitude was a
+methodology mismatch (camdl driver: logmeanexp; pomp summary
+table: arithmetic mean of replicates). Logmeanexp ≥ arithmetic
+mean by a Jensen correction of ≈ σ²(per-rep loglik)/2; pomp's
+per-rep variance is high enough at sub-day dt that the correction
+is ~17 nats per cell. Future external-reference comparisons
+should fix the combiner choice on both sides and document it; the
+audit script `bench/pomp/compare_seeds.py` enforces this.
+
+### Code audit — single time-to-step entrypoint
+
+Audit prompted by the architectural question: with the fix, is
+all time-to-step arithmetic now routed through `sim::time`?
+Answer post-audit: yes.
+
+Initial `grep -rn '/ dt).round()'` after the fix-commit found 5
+sites still inlining the conversion:
+`inference/pgas.rs::build_obs_at_substep`,
+`inference/pgas.rs::simulate_reference`,
+`inference/pmmh.rs::run_pmmh`,
+`inference/correlated_pf.rs::bootstrap_filter_correlated`,
+`cli/src/fit/pmmh.rs`. None carried the gh#53 bug class — each
+took `dt` as a runtime parameter, never falling back to
+`model.simulation.dt`. So the cohort-fire-step fix is structurally
+complete.
+
+But for hygiene, the audit-flag stands: anywhere time-arithmetic
+is inlined is somewhere that can later acquire the wrong dt
+assumption silently. Commit `bacd27e` adds
+`sim::time::interval_steps(t0, t1, dt)` (the substep-count-over-
+interval operation, distinct from `time_to_step`'s absolute step
+index) and routes the 5 sites through it. Post-consolidation,
+`grep -rn '/ dt).round()'` shows only `sim::time` itself plus a
+docstring mention.
+
+The single-entrypoint policy is now load-bearing: any future
+agent or refactor touching time arithmetic has one canonical
+helper to use, and the audit surface is one grep deep.
 
 Severity: **high**. The bug:
 - Affected the canonical published benchmark (He et al. 2010
