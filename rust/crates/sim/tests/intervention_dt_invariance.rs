@@ -204,6 +204,116 @@ fn at_times_intervention_fire_count_dt_invariant() {
 }
 
 #[test]
+fn periodic_intervention_fires_at_absolute_wall_time_independent_of_t_start() {
+    // gh#53 follow-up audit: the cohort schedule `at_day 258, every
+    // 365.25 days` is in absolute calendar-day terms. Whether the
+    // simulator starts at t_start = 0 or t_start = 100, the
+    // intervention should fire at the SAME absolute wall times — the
+    // schedule is independent of t_start.
+    //
+    // This catches a cousin class of the gh#53 bug: any place where
+    // the runtime confuses absolute time (used for fire_steps lookup)
+    // with sim-relative time (advanced by the integrator from
+    // t_start). Pre-fix, fire_steps was baked at compile dt and
+    // checked against runtime step counter; post-fix, both sides use
+    // absolute step indices, so a t_start shift should be a no-op on
+    // intervention timing.
+
+    let model_at_zero = CompiledModel::new(periodic_xfer_model(
+        258.0, 365.25, 365.25, Some(1.0),
+    )).unwrap();
+
+    // Walk from t_start=0 to t=300 at dt=0.5. Cohort fires at t=258
+    // → V counter should be 1 by t=300.
+    let fire_steps = model_at_zero.resolve_fire_steps(0.5);
+    let mut int_s = IntState::from_vec(vec![100, 0]);
+    let mut real_s = RealState::new(0);
+    let mut t = 0.0;
+    while t <= 300.0 + 1e-9 {
+        apply_interventions_at(t, &model_at_zero, &fire_steps, 0.5,
+            &mut int_s, &mut real_s, &[], 1e-10).unwrap();
+        t += 0.5;
+    }
+    assert_eq!(int_s.counts[1], 1,
+        "t_start=0 walk to t=300 should fire cohort once at t=258");
+
+    // Now walk from t_start=100 to t=300 at dt=0.5. Cohort still
+    // fires at absolute wall time 258 → V should still be 1.
+    let mut int_s = IntState::from_vec(vec![100, 0]);
+    let mut real_s = RealState::new(0);
+    let mut t = 100.0;
+    while t <= 300.0 + 1e-9 {
+        apply_interventions_at(t, &model_at_zero, &fire_steps, 0.5,
+            &mut int_s, &mut real_s, &[], 1e-10).unwrap();
+        t += 0.5;
+    }
+    assert_eq!(int_s.counts[1], 1,
+        "t_start=100 walk to t=300 should still fire cohort once at \
+         t=258 (absolute wall time, independent of t_start)");
+
+    // And walk from t_start=200 to t=300 — wall time 258 is in
+    // range, cohort should still fire.
+    let mut int_s = IntState::from_vec(vec![100, 0]);
+    let mut real_s = RealState::new(0);
+    let mut t = 200.0;
+    while t <= 300.0 + 1e-9 {
+        apply_interventions_at(t, &model_at_zero, &fire_steps, 0.5,
+            &mut int_s, &mut real_s, &[], 1e-10).unwrap();
+        t += 0.5;
+    }
+    assert_eq!(int_s.counts[1], 1,
+        "t_start=200 walk to t=300 should fire cohort once at \
+         t=258 (in-range)");
+
+    // Finally walk from t_start=300 to t=400 — wall time 258 is in
+    // the PAST, cohort should NOT fire (no future fires in this
+    // single-period model).
+    let mut int_s = IntState::from_vec(vec![100, 0]);
+    let mut real_s = RealState::new(0);
+    let mut t = 300.0;
+    while t <= 400.0 + 1e-9 {
+        apply_interventions_at(t, &model_at_zero, &fire_steps, 0.5,
+            &mut int_s, &mut real_s, &[], 1e-10).unwrap();
+        t += 0.5;
+    }
+    assert_eq!(int_s.counts[1], 0,
+        "t_start=300 walk to t=400 should fire cohort 0 times — its \
+         wall time 258 is in the past relative to sim window");
+}
+
+#[test]
+fn periodic_intervention_period_sweep_dt_invariant() {
+    // gh#53 follow-up audit: vary the intervention period across a
+    // wide range and confirm fire counts are exact + dt-invariant.
+    // The cohort fix made fire-step resolution use the runtime dt;
+    // this test sweeps the period to catch any period-dependent
+    // rounding or alignment bug at the extremes (very fast / very
+    // slow periodic schedules).
+    // (period, at_day, sim_end, expected_fires) — sim_end is set
+    // ≥ 1 dt past the last expected fire so end-of-sim rounding
+    // can't drop the last fire on the away-from-zero half-step.
+    // The recurring schedule produces fires at at_day, at_day+period,
+    // at_day+2*period, ... while ≤ end. Counting carefully so the
+    // expected value is exact:
+    for &(period_days, at_day, sim_end, expected_fires) in &[
+        (7.0,    1.0,  30.0,            5),  // 1, 8, 15, 22, 29 → 5
+        (30.0,   5.0,  100.0,           4),  // 5, 35, 65, 95 → 4
+        (365.25, 100.0, 365.25 * 5.0,   5),  // 100, 465.25, 830.5, 1195.75, 1561 → 5
+        (1.0,    0.5,  10.0,            10), // 0.5, 1.5, …, 9.5 → 10
+    ] {
+        let model = CompiledModel::new(periodic_xfer_model(
+            at_day, period_days, sim_end, Some(1.0),
+        )).unwrap();
+        for &dt in &[1.0, 0.5, 0.25] {
+            let fires = simulate_and_count_fires(&model, dt, 0.0, sim_end, 1000);
+            assert_eq!(fires, expected_fires,
+                "period={} days, at_day={}, dt={}: expected {} fires; got {}",
+                period_days, at_day, dt, expected_fires, fires);
+        }
+    }
+}
+
+#[test]
 fn periodic_intervention_fires_at_correct_wall_time_under_sub_day_dt() {
     // The original gh#53 wall-time signature: at_day 258 must fire
     // when wall time is near 258 days, NOT near 129 days (the
