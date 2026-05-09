@@ -630,6 +630,11 @@ pub fn simulate_reference(
     let t_start = model.model.simulation.t_start;
     let n_substeps = ((t_end - t_start) / dt).round() as usize;
 
+    // gh#53: resolve fire_steps once at the runtime dt; passed into
+    // step_one rather than read off `model.fire_steps` (which no
+    // longer exists — see the field's docstring).
+    let fire_steps = model.resolve_fire_steps(dt);
+
     let mut counts = init_int.counts.clone();
     let mut scratch = StepScratch::new(model);
     let mut substeps = Vec::with_capacity(n_substeps);
@@ -640,7 +645,7 @@ pub fn simulate_reference(
         scratch.gamma_used.clear();
 
         let counts_before = counts.clone();
-        step_one(model, &mut counts, &mut flows, params, t, dt, rng, &mut scratch)?;
+        step_one(model, &mut counts, &mut flows, params, t, dt, rng, &mut scratch, &fire_steps)?;
 
         // Verify: density evaluation of this record won't produce k > n.
         // This catches state/flow mismatches before they cause -inf later.
@@ -694,6 +699,10 @@ pub fn csmc_as(
     let n_substeps = reference.substeps.len();
     let n_tr = model.model.transitions.len();
     let j_ref = n_particles - 1; // reference particle is the last slot
+
+    // gh#53: resolve fire_steps once at the runtime dt for the
+    // free-particle propagation step_one calls below.
+    let fire_steps = model.resolve_fire_steps(dt);
 
     // Initialize particles with stochastic initial states for IVP compartments.
     // Each free particle draws S₀ ~ Binom(N₀, s0) independently, giving the
@@ -830,6 +839,7 @@ pub fn csmc_as(
             step_one(
                 model, &mut counts[j], &mut substep_flows[j],
                 params, t, dt, &mut rngs[j], &mut scratches[j],
+                &fire_steps,
             )?;
 
             std::mem::swap(&mut substep_gammas[j], &mut scratches[j].gamma_used);

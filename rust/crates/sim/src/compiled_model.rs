@@ -315,12 +315,22 @@ pub struct CompiledModel {
     /// to satisfy a population conservation expression.
     pub balance: Option<ResolvedBalance>,
 
-    /// Precomputed fire steps for each intervention/event, snapped to
-    /// the integer timestep grid. Key = intervention index, value = set
-    /// of step numbers where the event fires. Eliminates floating-point
-    /// tolerance issues (double-fires, zero-fires) by rounding fire times
-    /// to the nearest integer step at model init.
-    pub fire_steps: Vec<std::collections::BTreeSet<i64>>,
+    /// Continuous fire **times** for each intervention/event, in the
+    /// model's `time_unit`. Indexed by intervention position; per-
+    /// intervention vector lists every wall time at which that
+    /// intervention fires (sorted, dt-invariant).
+    ///
+    /// Backends derive the runtime view (step indices) by calling
+    /// [`CompiledModel::resolve_fire_steps`] with their integrator's
+    /// `dt`. This split is load-bearing: prior to gh#53 the
+    /// CompiledModel stored fire **steps** baked at compile time
+    /// using `model.simulation.dt`, which silently went wrong any
+    /// time the runtime integrator's dt differed (every
+    /// `camdl pfilter --dt 0.5` against a model declared at
+    /// `dt = 1.0`). Storing the dt-invariant times here and
+    /// resolving on the simulator side keeps the compile/runtime
+    /// seam honest.
+    pub fire_times: Vec<Vec<f64>>,
 
     /// Pre-resolved expression trees for all hot-path evaluations.
     pub resolved: ResolvedModel,
@@ -357,6 +367,23 @@ pub struct ResolvedModel {
 }
 
 impl CompiledModel {
+    /// Derive per-intervention sets of step indices for a given
+    /// integrator step `dt`. The returned view is a runtime
+    /// projection of `self.fire_times`; backends call this once at
+    /// sim start with `cfg.dt` and use the local result for the
+    /// duration of the run. See `crate::time::time_to_step` for the
+    /// rounding semantics, and gh#53 for the architectural
+    /// motivation (don't bake dt-dependent indices on the dt-
+    /// invariant CompiledModel).
+    pub fn resolve_fire_steps(
+        &self,
+        dt: f64,
+    ) -> Vec<std::collections::BTreeSet<i64>> {
+        self.fire_times.iter()
+            .map(|times| crate::time::fire_times_to_steps(times, dt))
+            .collect()
+    }
+
     pub fn new(model: Model) -> Result<Self, SimError> {
         let n_comps = model.compartments.len();
 
@@ -555,16 +582,16 @@ impl CompiledModel {
             time_func_cache.push(CompiledTimeFunc { kind });
         }
 
-        // Precompute fire steps (integer grid) for all interventions/events
-        let fire_steps: Vec<std::collections::BTreeSet<i64>> = {
+        // Precompute fire **times** (continuous, dt-invariant) for all
+        // interventions/events. The runtime view (step indices) is
+        // derived per-simulation via `CompiledModel::resolve_fire_steps`
+        // — see the field docstring and gh#53 for why this split is
+        // load-bearing.
+        let fire_times: Vec<Vec<f64>> = {
             use crate::intervention::intervention_fire_times;
-            let dt = model.simulation.dt.unwrap_or(1.0);
-            model.interventions.iter().map(|iv| {
-                let times = intervention_fire_times(&iv.schedule);
-                times.iter()
-                    .map(|&ft| (ft / dt).round() as i64)
-                    .collect()
-            }).collect()
+            model.interventions.iter()
+                .map(|iv| intervention_fire_times(&iv.schedule))
+                .collect()
         };
 
         // ── Pre-resolve all expression trees ─────────────────────────────
@@ -707,7 +734,7 @@ impl CompiledModel {
             comp_to_transitions,
             time_dep_transitions,
             balance,
-            fire_steps,
+            fire_times,
             resolved,
         })
     }

@@ -49,6 +49,11 @@ fn run_tau_leap(
     let n_transitions = model.model.transitions.len();
     let n_real = real_s.values.len();
 
+    // gh#53: resolve fire_steps using the runtime cfg.dt, not the
+    // compile-time model.simulation.dt. See chain_binomial.rs for the
+    // full explanation.
+    let fire_steps = model.resolve_fire_steps(cfg.dt);
+
     let mut rng = StatefulRng::new(seed);
     let mut propensities = Vec::with_capacity(n_transitions);
 
@@ -85,7 +90,7 @@ fn run_tau_leap(
             // At a boundary — handle it
             // Apply intervention if due
             if iv_times.get(iv_idx).copied().is_some_and(|iv| (iv - t).abs() < 1e-10) {
-                apply_interventions_at(t, model, &mut int_s, &mut real_s, params, 1e-10)?;
+                apply_interventions_at(t, model, &fire_steps, cfg.dt, &mut int_s, &mut real_s, params, 1e-10)?;
                 while iv_idx < iv_times.len() && iv_times[iv_idx] <= t + 1e-10 { iv_idx += 1; }
             }
             // Record output if due
@@ -227,7 +232,7 @@ fn run_tau_leap(
 
         // Apply intervention if now at that time
         if iv_times.get(iv_idx).copied().is_some_and(|iv| (iv - t).abs() < 1e-10) {
-            apply_interventions_at(t, model, &mut int_s, &mut real_s, params, 1e-10)?;
+            apply_interventions_at(t, model, &fire_steps, cfg.dt, &mut int_s, &mut real_s, params, 1e-10)?;
             while iv_idx < iv_times.len() && iv_times[iv_idx] <= t + 1e-10 { iv_idx += 1; }
         }
 

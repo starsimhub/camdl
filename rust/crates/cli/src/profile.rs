@@ -595,7 +595,7 @@ pub fn cmd_profile(a: &crate::args::ProfileArgs) {
             a.init, &if2_params, n_starts, seed_base,
         ).map(Arc::new);
 
-    let process = Arc::new(ChainBinomialProcess::new(compiled.clone()));
+    let process = Arc::new(ChainBinomialProcess::new(compiled.clone(), dt));
     // Build one StreamSpec per resolved IR observation. For
     // single-stream profiles `--flow <name>` overrides the IR
     // projection (forces incidence over the named transition family);

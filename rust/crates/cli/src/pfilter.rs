@@ -155,7 +155,7 @@ pub fn cmd_pfilter(a: &crate::args::PfilterArgs) {
 
     // Build process + observation model via traits
     let compiled = std::sync::Arc::new(compiled);
-    let process = ChainBinomialProcess::new(compiled.clone());
+    let process = ChainBinomialProcess::new(compiled.clone(), dt);
 
     let obs_times: Vec<f64> = observations.iter().map(|o| o.time).collect();
     let obs_values: Vec<f64> = observations.iter().map(|o| o.value).collect();

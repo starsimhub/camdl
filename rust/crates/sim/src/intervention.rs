@@ -35,15 +35,23 @@ pub fn intervention_fire_times(sched: &InterventionSchedule) -> Vec<f64> {
 }
 
 /// Apply all interventions scheduled at time `t` (in document order).
+///
+/// `dt` is the **runtime** integrator step (not `model.simulation.dt`,
+/// which the compiled model carries only as a default — the runtime
+/// can override it via `SimConfig.dt`). `fire_steps` is the runtime-
+/// resolved view of `model.fire_times` for that dt; callers obtain it
+/// once per sim run via `model.resolve_fire_steps(dt)` and pass it
+/// in. See gh#53 for why the compile/runtime split is load-bearing.
 pub fn apply_interventions_at(
     t: f64,
     model: &CompiledModel,
+    fire_steps: &[std::collections::BTreeSet<i64>],
+    dt: f64,
     int_s: &mut IntState,
     real_s: &mut RealState,
     params: &[f64],
     _tolerance: f64,
 ) -> Result<bool, SimError> {
-    let dt = model.model.simulation.dt.unwrap_or(1.0);
     // Rm4 in 2026-04-19 engine review: guard against NaN t silently
     // rounding to step 0. NaN `as i64` is 0 on current rustc, which
     // would make every intervention match step 0 if an upstream bug
@@ -53,11 +61,11 @@ pub fn apply_interventions_at(
             "apply_interventions_at: non-finite t = {}", t
         )));
     }
-    let current_step = (t / dt).round() as i64;
+    let current_step = crate::time::time_to_step(t, dt);
     let mut any_fired = false;
     for (iv_idx, iv) in model.model.interventions.iter().enumerate() {
         if iv.always_active { continue; }
-        if model.fire_steps[iv_idx].contains(&current_step) {
+        if fire_steps[iv_idx].contains(&current_step) {
             apply_intervention(iv, iv_idx, model, int_s, real_s, params, t)?;
             any_fired = true;
         }
@@ -76,6 +84,7 @@ pub fn apply_interventions_at(
 /// are applied atomically with transitions, matching pomp's ordering.
 pub fn inject_event_deltas(
     model: &CompiledModel,
+    fire_steps: &[std::collections::BTreeSet<i64>],
     snapshot: &IntState,
     real_s: &RealState,
     params: &[f64],
@@ -87,10 +96,10 @@ pub fn inject_event_deltas(
     let ctx = EvalCtx {
         model, int_s: snapshot, real_s, params, t: t_end, projected: None, int_float_override: None,
     };
-    let current_step = (t_end / dt).round() as i64;
+    let current_step = crate::time::time_to_step(t_end, dt);
     for (iv_idx, iv) in model.model.interventions.iter().enumerate() {
         if !iv.always_active { continue; }
-        if !model.fire_steps[iv_idx].contains(&current_step) { continue; }
+        if !fire_steps[iv_idx].contains(&current_step) { continue; }
         for (action_idx, action) in iv.actions.iter().enumerate() {
             let resolved_val = eval_resolved(&model.resolved.intervention_exprs[iv_idx][action_idx], &ctx);
             match action {

@@ -491,11 +491,11 @@ pub fn cmd_survey(a: &crate::args::SurveyArgs) {
     });
 
     // ── Parallel evaluation loop ────────────────────────────────────
-    let process = Arc::new(ChainBinomialProcess::new(resolved.compiled.clone()));
-    let dt = resolved.compiled.model.simulation.t_start;
-    let dt = if dt.is_finite() { 1.0 } else { 1.0 };
-    let _ = dt; // dt is configured via SMCConfig below; survey doesn't expose it.
+    // Survey hardcodes dt=1.0 for the SMCConfig (it doesn't expose a
+    // user-tunable dt knob). gh#53: process must be built at the same
+    // dt so its internal fire_steps resolves correctly.
     let smc_dt = 1.0_f64;
+    let process = Arc::new(ChainBinomialProcess::new(resolved.compiled.clone(), smc_dt));
     let t_start = resolved.compiled.model.simulation.t_start;
 
     // Concrete `Arc<MultiStreamObsModel>`: trait-typed obs models could

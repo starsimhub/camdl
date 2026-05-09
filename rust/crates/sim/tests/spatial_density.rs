@@ -420,10 +420,11 @@ fn test_step_one_zero_infection_flow() {
 
     // Run 100 substeps, check that infection_p5 NEVER fires
     let mut rng = StatefulRng::new(42);
+    let fire_steps = compiled.resolve_fire_steps(1.0);
     for step in 0..100 {
         let mut flows = vec![0u64; n_tr];
         scratch.gamma_used.clear();
-        step_one(&compiled, &mut counts, &mut flows, &params, step as f64, 1.0, &mut rng, &mut scratch).unwrap();
+        step_one(&compiled, &mut counts, &mut flows, &params, step as f64, 1.0, &mut rng, &mut scratch, &fire_steps).unwrap();
 
         if flows[inf_p5_idx] > 0 {
             eprintln!("  STEP {}: infection_p5 has {} flows but I_p5 was {}",

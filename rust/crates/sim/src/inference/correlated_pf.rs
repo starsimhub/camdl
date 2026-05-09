@@ -338,6 +338,7 @@ pub fn bootstrap_filter_correlated(
                     crate::chain_binomial::step_one(
                         model, &mut state.counts, &mut state.flow_accumulators,
                         params, t_local, step_dt, rng, scratch,
+                        &process.fire_steps,
                     )?;
                     t_local += step_dt;
                     substep += 1;

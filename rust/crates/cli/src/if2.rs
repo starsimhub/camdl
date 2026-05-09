@@ -314,7 +314,7 @@ pub fn cmd_if2(a: &crate::args::If2Args) {
     };
 
     // Build process + observation model via traits
-    let process = ChainBinomialProcess::new(compiled.clone());
+    let process = ChainBinomialProcess::new(compiled.clone(), dt);
     let obs_times: Vec<f64> = observations.iter().map(|o| o.time).collect();
     let obs_values: Vec<f64> = observations.iter().map(|o| o.value).collect();
 

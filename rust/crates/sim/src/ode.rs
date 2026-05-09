@@ -166,6 +166,11 @@ fn run_ode(
     let iv_times = all_intervention_times(model);
     let mut iv_idx = 0;
 
+    // gh#53: fire_steps depend on the runtime cfg.dt, not the
+    // compile-time model.simulation.dt. See chain_binomial.rs for the
+    // architectural rationale.
+    let fire_steps = model.resolve_fire_steps(cfg.dt);
+
     let mut traj = Trajectory::new();
     // Accumulated continuous flows (rate × dt); rounded to u64 at each snapshot.
     let mut flow_acc: Vec<f64> = vec![0.0; n_transitions];
@@ -200,7 +205,7 @@ fn run_ode(
             // At a boundary — apply intervention or record output
             if iv_times.get(iv_idx).copied().is_some_and(|iv| (iv - t).abs() < 1e-10) {
                 let (mut is, mut rs) = to_states(&int_vals, &real_vals);
-                apply_interventions_at(t, model, &mut is, &mut rs, params, 1e-10)?;
+                apply_interventions_at(t, model, &fire_steps, cfg.dt, &mut is, &mut rs, params, 1e-10)?;
                 int_vals = is.counts.iter().map(|&c| c as f64).collect();
                 real_vals = rs.values.clone();
                 while iv_idx < iv_times.len() && iv_times[iv_idx] <= t + 1e-10 { iv_idx += 1; }
@@ -236,7 +241,7 @@ fn run_ode(
         // Apply intervention if now at that time
         if iv_times.get(iv_idx).copied().is_some_and(|iv| (iv - t).abs() < 1e-10) {
             let (mut is, mut rs) = to_states(&int_vals, &real_vals);
-            apply_interventions_at(t, model, &mut is, &mut rs, params, 1e-10)?;
+            apply_interventions_at(t, model, &fire_steps, cfg.dt, &mut is, &mut rs, params, 1e-10)?;
             int_vals = is.counts.iter().map(|&c| c as f64).collect();
             real_vals = rs.values.clone();
             while iv_idx < iv_times.len() && iv_times[iv_idx] <= t + 1e-10 { iv_idx += 1; }

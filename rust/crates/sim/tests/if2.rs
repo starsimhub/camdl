@@ -147,7 +147,7 @@ fn generate_data(compiled: &CompiledModel, params: &[f64]) -> (Vec<f64>, Vec<f64
     let mut t = 0.0;
     while t < 77.0 {
         for _ in 0..7 {
-            step_one(compiled, &mut state.counts, &mut state.flow_accumulators, params, t, 1.0, &mut rng, &mut scratch).unwrap();
+            step_one(compiled, &mut state.counts, &mut state.flow_accumulators, params, t, 1.0, &mut rng, &mut scratch, &compiled.resolve_fire_steps(1.0)).unwrap();
             t += 1.0;
         }
         // Project: recovery flow (index 1)
@@ -165,7 +165,7 @@ fn test_if2_converges_from_dispersed_start() {
     let (obs_times, obs_values) = generate_data(&compiled, &true_params);
 
     let compiled = Arc::new(compiled);
-    let process = ChainBinomialProcess::new(compiled.clone());
+    let process = ChainBinomialProcess::new(compiled.clone(), 1.0);
     let obs_model = NegBinFlowObs {
         observations: obs_values,
         obs_times,
@@ -238,7 +238,7 @@ fn test_if2_respects_bounds() {
     let (obs_times, obs_values) = generate_data(&compiled, &true_params);
 
     let compiled = Arc::new(compiled);
-    let process = ChainBinomialProcess::new(compiled.clone());
+    let process = ChainBinomialProcess::new(compiled.clone(), 1.0);
     let obs_model = NegBinFlowObs {
         observations: obs_values,
         obs_times,
@@ -290,7 +290,7 @@ fn test_if2_no_cooling_explores() {
     let (obs_times, obs_values) = generate_data(&compiled, &true_params);
 
     let compiled = Arc::new(compiled);
-    let process = ChainBinomialProcess::new(compiled.clone());
+    let process = ChainBinomialProcess::new(compiled.clone(), 1.0);
     let obs_model = NegBinFlowObs {
         observations: obs_values,
         obs_times,

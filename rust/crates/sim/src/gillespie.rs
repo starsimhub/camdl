@@ -84,6 +84,16 @@ fn run_gillespie(
     let iv_times = all_intervention_times(model);
     let mut iv_idx = 0;
 
+    // gh#53: resolve fire_steps using the model's compile-time dt.
+    // Gillespie has no runtime dt of its own (continuous-time SSA); the
+    // fire_steps lookup uses model.simulation.dt as a step-rounding
+    // resolution. Pre-gh#53 this was implicit inside
+    // apply_interventions_at; making it explicit means gillespie shares
+    // the same call signature as the dt-parameterised backends without
+    // changing observed semantics.
+    let iv_resolution_dt = model.model.simulation.dt.unwrap_or(1.0);
+    let fire_steps = model.resolve_fire_steps(iv_resolution_dt);
+
     let mut t = cfg.t_start;
     let mut traj = Trajectory::new();
     let mut current_flows = FlowVec::new(n_transitions);
@@ -126,7 +136,7 @@ fn run_gillespie(
             if let Some(iv_t) = next_iv(t, iv_idx, &iv_times) {
                 if iv_t <= cfg.t_end {
                     t = iv_t;
-                    apply_interventions_at(t, model, &mut int_s, &mut real_s, params, 1e-10)?;
+                    apply_interventions_at(t, model, &fire_steps, iv_resolution_dt, &mut int_s, &mut real_s, params, 1e-10)?;
                     while iv_idx < iv_times.len() && iv_times[iv_idx] <= t + 1e-10 {
                         iv_idx += 1;
                     }
@@ -169,7 +179,7 @@ fn run_gillespie(
             // Apply intervention if at intervention boundary
             let at_iv = next_iv_t.is_some_and(|iv_t| (iv_t - t).abs() < 1e-10);
             if at_iv {
-                apply_interventions_at(t, model, &mut int_s, &mut real_s, params, 1e-10)?;
+                apply_interventions_at(t, model, &fire_steps, iv_resolution_dt, &mut int_s, &mut real_s, params, 1e-10)?;
                 while iv_idx < iv_times.len() && iv_times[iv_idx] <= t + 1e-10 {
                     iv_idx += 1;
                 }

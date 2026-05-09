@@ -1,0 +1,241 @@
+//! gh#53 regression test: integrated intervention fire count over a
+//! fixed wall-time interval must be **dt-invariant**.
+//!
+//! Pre-fix, `CompiledModel.fire_steps` was a baked step-index set
+//! computed at compile time using `model.simulation.dt`. At runtime,
+//! a different `dt` (e.g. via `camdl pfilter --dt 0.5` against a
+//! model declared at `dt = 1.0`) walked the integrator at that
+//! finer dt while still checking against the compile-time step
+//! indices. The cohort impulse on He et al. 2010 measles fired at
+//! the wrong wall times and (because `every 365.25 days` was
+//! interpreted as steps not days) at the wrong period — fired
+//! roughly twice per year, half a year early. Visible only against
+//! pomp on the He2010 reproducer; gh#52 Richardson ladder caught it.
+//!
+//! These tests pin the structural invariant: for any model with a
+//! periodic intervention, the **count of fires over a fixed wall-
+//! time interval** must equal the count any other dt would produce.
+//! That's the property the bug violated, regardless of the exact
+//! mechanism (step-baking vs runtime-rescaling).
+
+use std::collections::HashMap;
+
+use ir::{
+    expr::{ConstExpr, Expr},
+    intervention::{Action, AbsoluteTransfer, Intervention, InterventionSchedule, RecurringSchedule},
+    model::{Compartment, CompartmentKind, InitialConditions, OutputConfig, OutputSchedule, SimulationConfig},
+    Model,
+};
+use sim::{
+    compiled_model::CompiledModel,
+    intervention::apply_interventions_at,
+    state::{IntState, RealState},
+};
+
+fn int_comp(name: &str) -> Compartment {
+    Compartment { name: name.into(), kind: CompartmentKind::Integer }
+}
+
+/// Two compartments S, V, and a single periodic intervention
+/// `transfer S → V` of 1 unit, every `period` time units, starting
+/// at `at_day`. No transitions; the only state change is the
+/// intervention firing.
+fn periodic_xfer_model(at_day: f64, period: f64, end: f64, model_dt: Option<f64>) -> Model {
+    let intervention = Intervention {
+        name: "periodic_xfer".into(),
+        base_name: None,
+        schedule: InterventionSchedule::Recurring(RecurringSchedule {
+            at_day: Some(at_day),
+            start: 0.0,
+            end,
+            period,
+        }),
+        always_active: false,
+        actions: vec![
+            Action::AbsoluteTransfer(AbsoluteTransfer {
+                src: "S".into(),
+                dst: "V".into(),
+                count: Expr::Const(ConstExpr { value: 1.0 }),
+            }),
+        ],
+    };
+
+    Model {
+        name: "test".into(),
+        version: "0.3".into(),
+        time_unit: "days".into(),
+        description: None,
+        origin: None,
+        compartments: vec![int_comp("S"), int_comp("V")],
+        transitions: vec![],
+        ode_equations: vec![],
+        time_functions: vec![],
+        tables: vec![],
+        interventions: vec![intervention],
+        observations: vec![],
+        parameters: vec![],
+        initial_conditions: InitialConditions::Parameterized(HashMap::new()),
+        output: OutputConfig {
+            times: OutputSchedule::AtTimes(vec![0.0]),
+            format: "tsv".into(),
+            trajectory: true,
+            observations: false,
+        },
+        simulation: SimulationConfig {
+            t_start: 0.0,
+            t_end: end,
+            time_semantics: "continuous".into(),
+            dt: model_dt,
+            rng_seed: Some(42),
+        },
+        presets: vec![],
+        model_structure: None, balance: None,
+    }
+}
+
+/// Walk an integer-step grid at `runtime_dt` from `t_start` to
+/// `t_end`, calling `apply_interventions_at` at each step's wall
+/// time. Returns the number of times the intervention fired
+/// (= total `S → V` transfers, since each fire transfers 1 unit
+/// and S starts at `n_fires_max`).
+fn simulate_and_count_fires(
+    model: &CompiledModel,
+    runtime_dt: f64,
+    t_start: f64,
+    t_end: f64,
+    initial_s: i64,
+) -> i64 {
+    let fire_steps = model.resolve_fire_steps(runtime_dt);
+    let mut int_s = IntState::from_vec(vec![initial_s, 0]);
+    let mut real_s = RealState::new(0);
+
+    let mut t = t_start;
+    while t <= t_end + 1e-9 {
+        apply_interventions_at(
+            t, model, &fire_steps, runtime_dt,
+            &mut int_s, &mut real_s, &[], 1e-10,
+        ).unwrap();
+        t += runtime_dt;
+    }
+
+    int_s.counts[1]  // V count = number of fires
+}
+
+#[test]
+fn periodic_intervention_fire_count_dt_invariant_at_compile_dt_1() {
+    // Cohort-style: at_day 258, every 365.25 days, simulate 5 years.
+    // Expect exactly 5 fires regardless of runtime dt.
+    // Compile-time dt = 1.0 (the He2010 model's declared dt).
+    let model = CompiledModel::new(periodic_xfer_model(
+        258.0, 365.25, 365.25 * 5.0, Some(1.0),
+    )).unwrap();
+
+    for dt in [1.0, 0.5, 0.25, 0.125] {
+        let fires = simulate_and_count_fires(&model, dt, 0.0, 365.25 * 5.0, 100);
+        assert_eq!(fires, 5,
+            "runtime_dt={}: expected exactly 5 cohort fires over 5 \
+             years; got {}. This is the gh#53 regression test — \
+             pre-fix, runtime_dt < compile_dt fired multiple times \
+             per year due to fire_steps being baked at compile dt.",
+            dt, fires);
+    }
+}
+
+#[test]
+fn periodic_intervention_fire_count_dt_invariant_with_compile_dt_unset() {
+    // Compile-time dt unset (defaults to 1.0). Same expected count
+    // at every runtime dt.
+    let model = CompiledModel::new(periodic_xfer_model(
+        258.0, 365.25, 365.25 * 5.0, None,
+    )).unwrap();
+
+    for dt in [1.0, 0.5, 0.25, 0.125] {
+        let fires = simulate_and_count_fires(&model, dt, 0.0, 365.25 * 5.0, 100);
+        assert_eq!(fires, 5,
+            "runtime_dt={}: expected 5 fires; got {}", dt, fires);
+    }
+}
+
+#[test]
+fn periodic_intervention_fire_count_dt_invariant_with_compile_dt_smaller() {
+    // The opposite mismatch: model declared at dt = 0.5, runtime
+    // walks at dt = 1.0. Pre-fix this would also misfire (the bug
+    // is bidirectional: fire_steps baked at compile dt 0.5, runtime
+    // walks at dt 1.0 → fires at half the expected wall times).
+    let model = CompiledModel::new(periodic_xfer_model(
+        258.0, 365.25, 365.25 * 5.0, Some(0.5),
+    )).unwrap();
+
+    for dt in [1.0, 0.5, 0.25] {
+        let fires = simulate_and_count_fires(&model, dt, 0.0, 365.25 * 5.0, 100);
+        assert_eq!(fires, 5,
+            "runtime_dt={} (compile dt=0.5): expected 5 fires; got {}",
+            dt, fires);
+    }
+}
+
+#[test]
+fn at_times_intervention_fire_count_dt_invariant() {
+    // Schedule at exact wall times, not periodic. Same invariant:
+    // count of fires = count of times in the schedule, regardless
+    // of runtime dt.
+    let intervention = Intervention {
+        name: "at_times_xfer".into(),
+        base_name: None,
+        schedule: InterventionSchedule::AtTimes(vec![10.0, 20.0, 30.0, 40.0, 50.0]),
+        always_active: false,
+        actions: vec![
+            Action::AbsoluteTransfer(AbsoluteTransfer {
+                src: "S".into(),
+                dst: "V".into(),
+                count: Expr::Const(ConstExpr { value: 1.0 }),
+            }),
+        ],
+    };
+    let mut model_def = periodic_xfer_model(0.0, 1.0, 100.0, Some(1.0));
+    model_def.interventions = vec![intervention];
+    let model = CompiledModel::new(model_def).unwrap();
+
+    for dt in [1.0, 0.5, 0.25, 0.125] {
+        let fires = simulate_and_count_fires(&model, dt, 0.0, 100.0, 100);
+        assert_eq!(fires, 5,
+            "runtime_dt={}: expected 5 at-time fires; got {}", dt, fires);
+    }
+}
+
+#[test]
+fn periodic_intervention_fires_at_correct_wall_time_under_sub_day_dt() {
+    // The original gh#53 wall-time signature: at_day 258 must fire
+    // when wall time is near 258 days, NOT near 129 days (the
+    // pre-fix bug, where step 258 at runtime dt 0.5 = wall 129).
+    let model = CompiledModel::new(periodic_xfer_model(
+        258.0, 365.25, 365.25, Some(1.0),
+    )).unwrap();
+
+    // Drive to t = 130.0 at dt = 0.5 — pre-fix, the intervention
+    // would have fired at wall time 129 (step 258 × dt 0.5), so by
+    // t = 130 the V count would be 1. Post-fix it must be 0.
+    let fire_steps = model.resolve_fire_steps(0.5);
+    let mut int_s = IntState::from_vec(vec![100, 0]);
+    let mut real_s = RealState::new(0);
+    let mut t = 0.0;
+    while t <= 130.0 + 1e-9 {
+        apply_interventions_at(t, &model, &fire_steps, 0.5,
+            &mut int_s, &mut real_s, &[], 1e-10).unwrap();
+        t += 0.5;
+    }
+    assert_eq!(int_s.counts[1], 0,
+        "intervention should not have fired by t=130 (target wall \
+         time 258); pre-fix it fired at wall 129 due to fire_steps \
+         baked at compile dt 1.0 being misinterpreted as runtime \
+         dt 0.5 step indices.");
+
+    // Continue past wall time 258. After t = 258 it must have fired.
+    while t <= 260.0 + 1e-9 {
+        apply_interventions_at(t, &model, &fire_steps, 0.5,
+            &mut int_s, &mut real_s, &[], 1e-10).unwrap();
+        t += 0.5;
+    }
+    assert_eq!(int_s.counts[1], 1,
+        "intervention should have fired exactly once by t=260");
+}

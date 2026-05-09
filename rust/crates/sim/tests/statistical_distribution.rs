@@ -320,7 +320,7 @@ fn test_fraction_transfer_edge_cases() {
         let (model, _) = make_model(1.0);
         let mut int_s = sim::state::IntState::from_vec(vec![100, 0]);
         let mut real_s = sim::state::RealState::new(0);
-        sim::intervention::apply_interventions_at(1.0, &model, &mut int_s, &mut real_s, &[], 0.1).unwrap();
+        sim::intervention::apply_interventions_at(1.0, &model, &model.resolve_fire_steps(1.0), 1.0, &mut int_s, &mut real_s, &[], 0.1).unwrap();
         assert_eq!(int_s.counts[0], 0, "frac=1.0: S should be 0");
         assert_eq!(int_s.counts[1], 100, "frac=1.0: V should be 100");
     }
@@ -330,7 +330,7 @@ fn test_fraction_transfer_edge_cases() {
         let (model, _) = make_model(0.0);
         let mut int_s = sim::state::IntState::from_vec(vec![100, 0]);
         let mut real_s = sim::state::RealState::new(0);
-        sim::intervention::apply_interventions_at(1.0, &model, &mut int_s, &mut real_s, &[], 0.1).unwrap();
+        sim::intervention::apply_interventions_at(1.0, &model, &model.resolve_fire_steps(1.0), 1.0, &mut int_s, &mut real_s, &[], 0.1).unwrap();
         assert_eq!(int_s.counts[0], 100, "frac=0.0: S should stay 100");
         assert_eq!(int_s.counts[1], 0, "frac=0.0: V should stay 0");
     }
@@ -340,7 +340,7 @@ fn test_fraction_transfer_edge_cases() {
         let (model, _) = make_model(0.8);
         let mut int_s = sim::state::IntState::from_vec(vec![1, 0]);
         let mut real_s = sim::state::RealState::new(0);
-        sim::intervention::apply_interventions_at(1.0, &model, &mut int_s, &mut real_s, &[], 0.1).unwrap();
+        sim::intervention::apply_interventions_at(1.0, &model, &model.resolve_fire_steps(1.0), 1.0, &mut int_s, &mut real_s, &[], 0.1).unwrap();
         assert_eq!(int_s.counts[0], 1, "frac=0.8, S=1: floor(0.8)=0, no transfer");
         assert_eq!(int_s.counts[1], 0);
     }
@@ -350,7 +350,7 @@ fn test_fraction_transfer_edge_cases() {
         let (model, _) = make_model(0.8);
         let mut int_s = sim::state::IntState::from_vec(vec![0, 0]);
         let mut real_s = sim::state::RealState::new(0);
-        sim::intervention::apply_interventions_at(1.0, &model, &mut int_s, &mut real_s, &[], 0.1).unwrap();
+        sim::intervention::apply_interventions_at(1.0, &model, &model.resolve_fire_steps(1.0), 1.0, &mut int_s, &mut real_s, &[], 0.1).unwrap();
         assert_eq!(int_s.counts[0], 0, "frac=0.8, S=0: no crash");
         assert_eq!(int_s.counts[1], 0);
     }

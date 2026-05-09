@@ -363,9 +363,10 @@ fn snapshot_reads_post_intervention_state() {
     let mut rng = StatefulRng::new(42);
     let mut scratch = StepScratch::new(&compiled);
 
+    let fire_steps = compiled.resolve_fire_steps(1.0);
     for k in 0..5 {
         let t = k as f64;
-        step_one(&compiled, &mut counts, &mut flows, &params, t, 1.0, &mut rng, &mut scratch)
+        step_one(&compiled, &mut counts, &mut flows, &params, t, 1.0, &mut rng, &mut scratch, &fire_steps)
             .unwrap();
     }
 

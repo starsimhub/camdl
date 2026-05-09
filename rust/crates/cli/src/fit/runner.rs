@@ -387,7 +387,15 @@ impl FitRunConfig {
     }
 
     pub fn build_process(&self) -> sim::inference::ChainBinomialProcess {
-        sim::inference::ChainBinomialProcess::new(self.compiled.clone())
+        self.build_process_with_dt(self.if2_config.dt)
+    }
+    /// Build a Process with an explicit `dt` override — used by the
+    /// gh#52 Richardson dt-check, where each ladder rung evaluates
+    /// `loglik(θ̂; dt)` at a different dt and therefore needs a
+    /// process whose internal `fire_steps` is resolved at the rung's
+    /// dt, not the fit's. gh#53.
+    pub fn build_process_with_dt(&self, dt: f64) -> sim::inference::ChainBinomialProcess {
+        sim::inference::ChainBinomialProcess::new(self.compiled.clone(), dt)
     }
     pub fn build_obs_model(&self) -> sim::inference::MultiStreamObsModel {
         sim::inference::MultiStreamObsModel::new(
@@ -706,11 +714,15 @@ pub fn run_quick_pfilter_with_dt(
     dt_override: Option<f64>,
     seed: u64,
 ) -> (f64, super::loglik_eval::FilterStats) {
-    let process = config.build_process();
+    let dt = dt_override.unwrap_or(config.if2_config.dt);
+    // gh#53: Process must be built with the same dt the SMCConfig
+    // will use, so its internal fire_steps resolves correctly for
+    // dt-override calls (gh#52 Richardson ladder).
+    let process = config.build_process_with_dt(dt);
     let obs_model = config.build_obs_model();
     let smc_config = sim::inference::traits::SMCConfig {
         n_particles,
-        dt: dt_override.unwrap_or(config.if2_config.dt),
+        dt,
         ..config.smc_config()
     };
 

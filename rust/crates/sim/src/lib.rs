@@ -1,6 +1,7 @@
 pub mod config;
 pub mod error;
 pub mod state;
+pub mod time;
 pub mod compiled_model;
 pub mod propensity;
 pub mod resolved_expr;

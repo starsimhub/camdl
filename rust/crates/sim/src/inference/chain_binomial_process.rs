@@ -18,11 +18,26 @@ use super::types::ParticleState;
 /// (for PGAS). The only process backend that supports PGAS.
 pub struct ChainBinomialProcess {
     pub compiled: Arc<CompiledModel>,
+    /// Runtime view of intervention/event fire steps, resolved once
+    /// at construction using the integrator's `dt`. gh#53 — the
+    /// CompiledModel stores dt-invariant `fire_times`; the per-run
+    /// `fire_steps` view depends on the runtime dt and must be
+    /// resolved with that value, not the compile-time
+    /// `model.simulation.dt`.
+    pub(crate) fire_steps: Vec<std::collections::BTreeSet<i64>>,
 }
 
 impl ChainBinomialProcess {
-    pub fn new(compiled: Arc<CompiledModel>) -> Self {
-        ChainBinomialProcess { compiled }
+    /// Construct a process for a model with integrator step `dt`.
+    /// `dt` is required because `fire_steps` (the runtime view of
+    /// the model's intervention schedule) must be resolved with it
+    /// (see gh#53). Reusing the same process across runs at
+    /// different dts is unsupported — build a fresh process per
+    /// dt; the gh#52 Richardson ladder already does this via
+    /// `run_quick_pfilter_with_dt`'s per-rung config rebuild.
+    pub fn new(compiled: Arc<CompiledModel>, dt: f64) -> Self {
+        let fire_steps = compiled.resolve_fire_steps(dt);
+        ChainBinomialProcess { compiled, fire_steps }
     }
 }
 
@@ -61,6 +76,7 @@ impl ProcessModel for ChainBinomialProcess {
             &mut state.counts,
             &mut state.flow_accumulators,
             params, t, dt, rng, scratch,
+            &self.fire_steps,
         )
     }
 

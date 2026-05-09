@@ -112,6 +112,11 @@ fn run_chain_binomial(
     let n_transitions = model.model.transitions.len();
     let n_real = real_s.values.len();
 
+    // gh#53: fire-step indices depend on the runtime integrator's dt
+    // (not the compile-time `model.simulation.dt`). Resolve once per
+    // sim run from the dt-invariant `fire_times` on CompiledModel.
+    let fire_steps = model.resolve_fire_steps(cfg.dt);
+
     let mut rng = StatefulRng::new(seed);
     let mut scratch = StepScratch::new(model);
     let mut flows = vec![0u64; n_transitions];
@@ -150,7 +155,7 @@ fn run_chain_binomial(
         // (once at t_end inside step_one, once at the new t here).
         // See docs/dev/incidents/2026-04-17-chain-binomial-double-fire.md.
         flows.fill(0);
-        step_one(model, &mut int_s.counts, &mut flows, params, t, dt, &mut rng, &mut scratch)?;
+        step_one(model, &mut int_s.counts, &mut flows, params, t, dt, &mut rng, &mut scratch, &fire_steps)?;
 
         // Accumulate flows into output FlowVec
         for (i, &f) in flows.iter().enumerate() {
@@ -216,6 +221,7 @@ pub fn step_one(
     dt: f64,
     rng: &mut StatefulRng,
     scratch: &mut StepScratch,
+    fire_steps: &[std::collections::BTreeSet<i64>],
 ) -> Result<(), SimError> {
     // Copy current counts into scratch IntState for propensity evaluation.
     // This is a memcpy into pre-allocated memory, not a heap allocation.
@@ -361,7 +367,7 @@ pub fn step_one(
 
     // Inject always_active event deltas (evaluated from snapshot, applied atomically)
     crate::intervention::inject_event_deltas(
-        model, &scratch.int_s, &scratch.real_s, params, t, dt,
+        model, fire_steps, &scratch.int_s, &scratch.real_s, params, t, dt,
         &mut scratch.pending_deltas,
     )?;
 
@@ -414,7 +420,7 @@ pub fn step_one(
         let t_end = t + dt;
         scratch.int_s.counts.copy_from_slice(counts);
         let fired = apply_interventions_at(
-            t_end, model, &mut scratch.int_s, &mut scratch.real_s, params, dt * 0.5,
+            t_end, model, fire_steps, dt, &mut scratch.int_s, &mut scratch.real_s, params, dt * 0.5,
         )?;
         if fired {
             counts.copy_from_slice(&scratch.int_s.counts);
