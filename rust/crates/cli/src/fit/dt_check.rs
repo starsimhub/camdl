@@ -338,6 +338,27 @@ pub fn print_terminal_report(result: &DtCheckResult) {
             "    MLE is discretization-dependent. Re-fit at dt ≤ {:.3} \
              before interpreting θ̂.",
             result.ladder.last().map(|r| r.dt).unwrap_or(f64::NAN));
+        // gh#53: high-magnitude failures (≫ 100·τ) often indicate an
+        // integrator-side bug rather than a too-coarse fit. Surface
+        // this caveat so users don't immediately re-fit at finer dt
+        // and trust the result without external cross-checking.
+        let leg2_abs = result.leg2_delta_nats.abs();
+        if leg2_abs > 100.0 * result.threshold_se_aware_nats {
+            let _ = writeln!(w);
+            let _ = writeln!(w,
+                "    \x1b[33m⚠ For failures of this magnitude (≥ 100·τ; here {:.0}×),\x1b[0m",
+                leg2_abs / result.threshold_se_aware_nats);
+            let _ = writeln!(w,
+                "    the discretization itself may be the issue — i.e. the");
+            let _ = writeln!(w,
+                "    integrator may be exhibiting a sub-step numerical bug,");
+            let _ = writeln!(w,
+                "    not just a too-coarse fit dt. Cross-check against an");
+            let _ = writeln!(w,
+                "    independent reference (e.g. pomp's pfilter at the same θ̂");
+            let _ = writeln!(w,
+                "    and finer delta.t) before re-fitting. See gh#53.");
+        }
         let _ = writeln!(w);
         let _ = writeln!(w,
             "    Note: synthetic recovery at the same dt cannot detect this");
