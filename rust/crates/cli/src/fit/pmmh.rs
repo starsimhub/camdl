@@ -182,7 +182,7 @@ pub fn run_stage(
             let obs_spacing = if config.observations.len() >= 2 {
                 config.observations[1].time - config.observations[0].time
             } else { 7.0 };
-            let steps_per_obs = (obs_spacing / dt).round() as usize;
+            let steps_per_obs = sim::time::interval_steps(0.0, obs_spacing, dt);
             let mut corr_rng = sim::rng::StatefulRng::new(seed + 999);
 
             let process = config.build_process();

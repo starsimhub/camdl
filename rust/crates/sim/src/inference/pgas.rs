@@ -209,7 +209,7 @@ pub fn build_obs_at_substep(
 ) -> ObsAtSubstep {
     let mut map = ObsAtSubstep::new();
     for (obs_idx, obs) in observations.iter().enumerate() {
-        let s = ((obs.time - t_start) / dt).round() as usize;
+        let s = crate::time::interval_steps(t_start, obs.time, dt);
         if s > 0 { map.insert(s - 1, obs_idx); }
     }
     map
@@ -628,7 +628,7 @@ pub fn simulate_reference(
     let (init_int, _) = model.initial_state(params)?;
     let n_tr = model.model.transitions.len();
     let t_start = model.model.simulation.t_start;
-    let n_substeps = ((t_end - t_start) / dt).round() as usize;
+    let n_substeps = crate::time::interval_steps(t_start, t_end, dt);
 
     // gh#53: resolve fire_steps once at the runtime dt; passed into
     // step_one rather than read off `model.fire_steps` (which no

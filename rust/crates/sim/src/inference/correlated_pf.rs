@@ -181,7 +181,7 @@ pub fn bootstrap_filter_correlated(
     } else {
         1.0
     };
-    let steps_per_obs = (obs_dt / dt).round() as usize;
+    let steps_per_obs = crate::time::interval_steps(0.0, obs_dt, dt);
 
     // Validate uniform spacing
     if n_obs > 2 {

@@ -42,6 +42,24 @@ pub fn fire_times_to_steps(times: &[f64], dt: f64) -> std::collections::BTreeSet
     times.iter().map(|&t| time_to_step(t, dt)).collect()
 }
 
+/// Number of `dt`-sized substeps spanning the interval `[t0, t1]`.
+/// Distinct operation from [`time_to_step`]: this is a *count*
+/// (relative substep span), not an absolute step index. Used for
+/// substep-loop bounds and observation-spacing arithmetic in the
+/// PGAS / PMMH / correlated-PF inner loops.
+///
+/// `t1 ≥ t0` and `dt > 0` are caller responsibilities (debug_asserts).
+/// Returns `usize` because every consumer wants a loop bound.
+#[inline]
+pub fn interval_steps(t0: f64, t1: f64, dt: f64) -> usize {
+    debug_assert!(t1.is_finite() && t0.is_finite(),
+        "interval_steps: non-finite t (t0={}, t1={})", t0, t1);
+    debug_assert!(dt > 0.0, "interval_steps: non-positive dt = {}", dt);
+    debug_assert!(t1 >= t0,
+        "interval_steps: t1 ({}) < t0 ({})", t1, t0);
+    ((t1 - t0) / dt).round() as usize
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -132,6 +150,34 @@ mod tests {
                     dt, orig, rec);
             }
         }
+    }
+
+    #[test]
+    fn interval_steps_basic() {
+        assert_eq!(interval_steps(0.0, 7.0, 1.0), 7);
+        assert_eq!(interval_steps(0.0, 7.0, 0.5), 14);
+        assert_eq!(interval_steps(0.0, 7.0, 0.25), 28);
+        // t_start ≠ 0 — relative count, not absolute index.
+        assert_eq!(interval_steps(100.0, 107.0, 1.0), 7);
+        assert_eq!(interval_steps(100.0, 107.0, 0.5), 14);
+    }
+
+    #[test]
+    fn interval_steps_at_zero_t0_t1_returns_zero() {
+        assert_eq!(interval_steps(5.0, 5.0, 1.0), 0);
+    }
+
+    #[test]
+    fn interval_steps_rounds_to_nearest() {
+        // Same banker's-rounding semantics as time_to_step.
+        assert_eq!(interval_steps(0.0, 7.4, 1.0), 7);
+        assert_eq!(interval_steps(0.0, 7.6, 1.0), 8);
+    }
+
+    #[test]
+    fn interval_steps_panics_on_inverted_interval() {
+        let result = std::panic::catch_unwind(|| interval_steps(7.0, 0.0, 1.0));
+        assert!(result.is_err());
     }
 
     #[test]

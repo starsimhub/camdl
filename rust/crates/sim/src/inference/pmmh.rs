@@ -284,7 +284,7 @@ pub fn run_pmmh(
     // CPM sizing: derived from observation times and dt rather than config fields.
     let n_obs = observations.len();
     let steps_per_obs = if observations.len() >= 2 {
-        ((observations[1].time - observations[0].time) / config.dt).round() as usize
+        crate::time::interval_steps(observations[0].time, observations[1].time, config.dt)
     } else {
         1
     };
