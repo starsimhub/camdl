@@ -111,7 +111,7 @@ fn run_gillespie(
     }
 
     // Initial full propensity evaluation — maintained incrementally from here on.
-    eval_propensities(model, &int_s, &real_s, params, t, &mut propensities)?;
+    eval_propensities(model, &int_s, &real_s, params, t, model.model.simulation.dt.unwrap_or(1.0), &mut propensities)?;
     let mut lambda_total: f64 = propensities.iter().sum();
     let mut event_count: usize = 0;
 
@@ -121,7 +121,7 @@ fn run_gillespie(
         // If lambda_total looks zero (from incremental drift or genuine absorbing state),
         // do a full recompute to verify before treating as absorbing.
         if lambda_total <= 0.0 {
-            eval_propensities(model, &int_s, &real_s, params, t, &mut propensities)?;
+            eval_propensities(model, &int_s, &real_s, params, t, model.model.simulation.dt.unwrap_or(1.0), &mut propensities)?;
             lambda_total = propensities.iter().sum();
         }
 
@@ -141,7 +141,7 @@ fn run_gillespie(
                         iv_idx += 1;
                     }
                     // Full recompute after intervention
-                    eval_propensities(model, &int_s, &real_s, params, t, &mut propensities)?;
+                    eval_propensities(model, &int_s, &real_s, params, t, model.model.simulation.dt.unwrap_or(1.0), &mut propensities)?;
                     lambda_total = propensities.iter().sum();
                     // Propensities might become non-zero again after intervention
                     continue;
@@ -184,11 +184,11 @@ fn run_gillespie(
                     iv_idx += 1;
                 }
                 // Full recompute after intervention (integer state changed)
-                eval_propensities(model, &int_s, &real_s, params, t, &mut propensities)?;
+                eval_propensities(model, &int_s, &real_s, params, t, model.model.simulation.dt.unwrap_or(1.0), &mut propensities)?;
                 lambda_total = propensities.iter().sum();
             } else {
                 // Time advanced but no state change: re-evaluate time-dependent transitions
-                let ctx = EvalCtx { model, int_s: &int_s, real_s: &real_s, params, t , projected: None, int_float_override: None };
+                let ctx = EvalCtx { model, int_s: &int_s, real_s: &real_s, params, t, dt: model.model.simulation.dt.unwrap_or(1.0), projected: None, int_float_override: None };
                 for &tr_idx in &model.time_dep_transitions {
                     let old = propensities[tr_idx];
                     let new_p = eval_one(tr_idx, &ctx);
@@ -266,7 +266,7 @@ fn run_gillespie(
         event_count += 1;
         if event_count.is_multiple_of(FULL_RECOMPUTE_INTERVAL) {
             // Periodic full recompute prevents floating-point drift in lambda_total
-            eval_propensities(model, &int_s, &real_s, params, t, &mut propensities)?;
+            eval_propensities(model, &int_s, &real_s, params, t, model.model.simulation.dt.unwrap_or(1.0), &mut propensities)?;
             lambda_total = propensities.iter().sum();
         } else {
             // Incremental update: only recompute transitions whose dependencies changed.
@@ -274,7 +274,7 @@ fn run_gillespie(
             // avoid evaluating the same transition twice when multiple stoich entries
             // share a dependent transition (e.g., N[p] = S[p] + E[p] + ...).
             let mut updated: Vec<usize> = Vec::with_capacity(16);
-            let ctx = EvalCtx { model, int_s: &int_s, real_s: &real_s, params, t , projected: None, int_float_override: None };
+            let ctx = EvalCtx { model, int_s: &int_s, real_s: &real_s, params, t, dt: model.model.simulation.dt.unwrap_or(1.0), projected: None, int_float_override: None };
 
             // Compartment-dependent transitions
             for &(local, _) in &model.transition_stoich[fired_idx] {

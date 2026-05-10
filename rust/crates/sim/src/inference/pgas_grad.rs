@@ -73,10 +73,10 @@ pub fn log_transition_density_grad(
     let real_s = RealState::new(model.real_local_to_global.len());
 
     let mut propensities = vec![0.0; n_tr];
-    eval_propensities(model, &int_s, &real_s, params, t, &mut propensities)?;
+    eval_propensities(model, &int_s, &real_s, params, t, dt, &mut propensities)?;
 
     let ctx = EvalCtx {
-        model, int_s: &int_s, real_s: &real_s, params, t, projected: None, int_float_override: None,
+        model, int_s: &int_s, real_s: &real_s, params, t, dt, projected: None, int_float_override: None,
     };
 
     let mut log_p = 0.0;

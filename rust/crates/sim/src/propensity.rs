@@ -15,6 +15,15 @@ pub struct EvalCtx<'a> {
     pub real_s: &'a RealState,
     pub params: &'a [f64],
     pub t:      f64,
+    /// Runtime integrator step (gh#54). Read by `Expr::Dt` to expose
+    /// the dt the simulator is advancing at — distinct from any
+    /// compile-time time literal in the model. Without this, model
+    /// authors had to hardcode a fixed time literal in
+    /// discretization-correction expressions like
+    /// `(1 - exp(-(γ+μ) * 1 'days))`, valid only at dt=1 day. With
+    /// `dt` exposed, models match pomp's `(1-exp(-(γ+μ)*dt))/dt`
+    /// formulation and stay dt-invariant in effective R0.
+    pub dt:     f64,
     /// Projected observation value — only set when evaluating likelihood Exprs.
     /// `Expr::Projected` returns this value; errors if None.
     pub projected: Option<f64>,
@@ -75,6 +84,8 @@ pub fn eval_expr(expr: &Expr, ctx: &EvalCtx<'_>) -> Result<f64, SimError> {
         }
 
         Expr::Time(_) => Ok(ctx.t),
+
+        Expr::Dt(_) => Ok(ctx.dt),
 
         Expr::BinOp(w) => {
             let a = eval_expr(&w.bin_op.left, ctx)?;
@@ -191,7 +202,7 @@ pub fn eval_expr_deriv(expr: &Expr, wrt: usize, ctx: &EvalCtx<'_>) -> f64 {
             if idx == wrt { 1.0 } else { 0.0 }
         }
         Expr::Const(_) | Expr::Pop(_) | Expr::PopSum(_)
-        | Expr::Time(_) | Expr::Projected(_)
+        | Expr::Time(_) | Expr::Dt(_) | Expr::Projected(_)
         | Expr::TimeFunc(_) | Expr::TableLookup(_) => 0.0,
 
         Expr::BinOp(w) => {
@@ -335,9 +346,10 @@ pub fn eval_propensities(
     real_s: &RealState,
     params: &[f64],
     t: f64,
+    dt: f64,
     out: &mut Vec<f64>,
 ) -> Result<(), SimError> {
-    let ctx = EvalCtx { model, int_s, real_s, params, t , projected: None, int_float_override: None };
+    let ctx = EvalCtx { model, int_s, real_s, params, t, dt, projected: None, int_float_override: None };
     out.clear();
     for (i, tr) in model.model.transitions.iter().enumerate() {
         let p = eval_resolved(&model.resolved.rates[i], &ctx);

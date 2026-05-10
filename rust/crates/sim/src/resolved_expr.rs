@@ -38,6 +38,7 @@ pub enum ResolvedExpr {
         real_indices: Vec<usize>,
     },
     Time,
+    Dt,  // gh#54: runtime integrator step
     BinOp {
         op: BinOp,
         left: Box<ResolvedExpr>,
@@ -152,6 +153,7 @@ pub fn resolve_expr(expr: &Expr, ctx: &ResolveCtx<'_>) -> Result<ResolvedExpr, S
         }
 
         Expr::Time(_) => Ok(ResolvedExpr::Time),
+        Expr::Dt(_)   => Ok(ResolvedExpr::Dt),
 
         Expr::BinOp(w) => {
             let left = resolve_expr(&w.bin_op.left, ctx)?;
@@ -249,6 +251,7 @@ pub fn eval_resolved(expr: &ResolvedExpr, ctx: &EvalCtx<'_>) -> f64 {
         }
 
         ResolvedExpr::Time => ctx.t,
+        ResolvedExpr::Dt   => ctx.dt,
 
         ResolvedExpr::BinOp { op, left, right } => {
             let a = eval_resolved(left, ctx);
@@ -427,6 +430,7 @@ pub fn eval_resolved_deriv(expr: &ResolvedExpr, wrt: usize, ctx: &EvalCtx<'_>) -
         | ResolvedExpr::IntPopSum(_)
         | ResolvedExpr::MixedPopSum { .. }
         | ResolvedExpr::Time
+        | ResolvedExpr::Dt
         | ResolvedExpr::Projected
         | ResolvedExpr::TimeFunc(_)
         | ResolvedExpr::TableLookup { .. } => 0.0,

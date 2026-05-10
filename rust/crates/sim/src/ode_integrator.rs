@@ -52,28 +52,28 @@ fn rk4_step_raw(
     if n == 0 { return Ok(()); }
 
     // k1
-    let k1 = eval_ode_derivs(model, int_s, real_s, params, t)?;
+    let k1 = eval_ode_derivs(model, int_s, real_s, params, t, dt)?;
 
     // k2
     let mut s2 = RealState::from_vec(
         real_s.values.iter().zip(&k1).map(|(x, k)| x + 0.5 * dt * k).collect()
     );
     s2.clamp_nonneg();
-    let k2 = eval_ode_derivs(model, int_s, &s2, params, t + 0.5 * dt)?;
+    let k2 = eval_ode_derivs(model, int_s, &s2, params, t + 0.5 * dt, dt)?;
 
     // k3
     let mut s3 = RealState::from_vec(
         real_s.values.iter().zip(&k2).map(|(x, k)| x + 0.5 * dt * k).collect()
     );
     s3.clamp_nonneg();
-    let k3 = eval_ode_derivs(model, int_s, &s3, params, t + 0.5 * dt)?;
+    let k3 = eval_ode_derivs(model, int_s, &s3, params, t + 0.5 * dt, dt)?;
 
     // k4
     let mut s4 = RealState::from_vec(
         real_s.values.iter().zip(&k3).map(|(x, k)| x + dt * k).collect()
     );
     s4.clamp_nonneg();
-    let k4 = eval_ode_derivs(model, int_s, &s4, params, t + dt)?;
+    let k4 = eval_ode_derivs(model, int_s, &s4, params, t + dt, dt)?;
 
     // Combine
     for i in 0..n {
@@ -88,8 +88,9 @@ fn eval_ode_derivs(
     real_s: &RealState,
     params: &[f64],
     t: f64,
+    dt: f64,
 ) -> Result<Vec<f64>, SimError> {
-    let ctx = EvalCtx { model, int_s, real_s, params, t , projected: None, int_float_override: None };
+    let ctx = EvalCtx { model, int_s, real_s, params, t, dt, projected: None, int_float_override: None };
     let mut derivs = vec![0.0; model.ode_real_indices.len()];
     for (i, _eq) in model.model.ode_equations.iter().enumerate() {
         derivs[i] = eval_resolved(&model.resolved.ode_derivatives[i], &ctx);

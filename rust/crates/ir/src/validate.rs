@@ -174,7 +174,7 @@ struct RefCtx<'a> {
 
 fn check_expr(expr: &Expr, ctx: &RefCtx<'_>, allow_projected: bool, errors: &mut Vec<ValidationError>) {
     match expr {
-        Expr::Const(_) | Expr::Time(_) => {}
+        Expr::Const(_) | Expr::Time(_) | Expr::Dt(_) => {}
         Expr::Projected(_) => {
             // Allow in likelihood context; validate at call-site via allow_projected
             // (we pass allow_projected=true from check_likelihood_exprs)

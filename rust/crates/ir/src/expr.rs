@@ -96,6 +96,14 @@ pub struct TimeExpr {
     pub time: (),
 }
 
+/// `{"dt": null}` — runtime integrator step. Has dimension `T` (same
+/// as `time`). Evaluator reads from `EvalCtx.dt` (populated from
+/// `SMCConfig.dt` or backend `cfg.dt` at substep level). gh#54.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DtExpr {
+    pub dt: (),
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct BinOpWrap {
     pub bin_op: BinOpExpr,
@@ -160,6 +168,7 @@ pub enum Expr {
     Pop(PopExpr),
     PopSum(PopSumExpr),
     Time(TimeExpr),
+    Dt(DtExpr),
     BinOp(BinOpWrap),
     UnOp(UnOpWrap),
     Cond(CondWrap),
@@ -186,6 +195,9 @@ impl Expr {
     }
     pub fn time() -> Self {
         Expr::Time(TimeExpr { time: () })
+    }
+    pub fn dt() -> Self {
+        Expr::Dt(DtExpr { dt: () })
     }
     pub fn bin_op(op: BinOp, left: Expr, right: Expr) -> Self {
         Expr::BinOp(BinOpWrap {

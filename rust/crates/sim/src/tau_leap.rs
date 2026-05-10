@@ -109,13 +109,13 @@ fn run_tau_leap(
         }
 
         // Evaluate propensities at current state
-        eval_propensities(model, &int_s, &real_s, params, t, &mut propensities)?;
+        eval_propensities(model, &int_s, &real_s, params, t, cfg.dt, &mut propensities)?;
 
         // Pre-evaluate draw method for each transition (resolves overdispersion
         // σ² expressions from start-of-step state before any mutations).
         enum ResolvedDraw { Poisson, Deterministic, Overdispersed(f64) }
         let draws: Vec<ResolvedDraw> = {
-            let ctx = EvalCtx { model, int_s: &int_s, real_s: &real_s, params, t , projected: None, int_float_override: None };
+            let ctx = EvalCtx { model, int_s: &int_s, real_s: &real_s, params, t, dt: cfg.dt, projected: None, int_float_override: None };
             model.model.transitions.iter().enumerate()
                 .map(|(i, tr)| match &tr.draw_method {
                     ir::transition::DrawMethod::Poisson => ResolvedDraw::Poisson,

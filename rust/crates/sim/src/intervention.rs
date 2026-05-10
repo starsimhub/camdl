@@ -66,7 +66,7 @@ pub fn apply_interventions_at(
     for (iv_idx, iv) in model.model.interventions.iter().enumerate() {
         if iv.always_active { continue; }
         if fire_steps[iv_idx].contains(&current_step) {
-            apply_intervention(iv, iv_idx, model, int_s, real_s, params, t)?;
+            apply_intervention(iv, iv_idx, model, int_s, real_s, params, t, dt)?;
             any_fired = true;
         }
     }
@@ -94,7 +94,7 @@ pub fn inject_event_deltas(
 ) -> Result<(), SimError> {
     let t_end = t + dt;
     let ctx = EvalCtx {
-        model, int_s: snapshot, real_s, params, t: t_end, projected: None, int_float_override: None,
+        model, int_s: snapshot, real_s, params, t: t_end, dt, projected: None, int_float_override: None,
     };
     let current_step = crate::time::time_to_step(t_end, dt);
     for (iv_idx, iv) in model.model.interventions.iter().enumerate() {
@@ -179,11 +179,12 @@ fn apply_intervention(
     real_s: &mut RealState,
     params: &[f64],
     t: f64,
+    dt: f64,
 ) -> Result<(), SimError> {
     for (action_idx, action) in iv.actions.iter().enumerate() {
         let resolved_val = eval_resolved(
             &model.resolved.intervention_exprs[iv_idx][action_idx],
-            &EvalCtx { model, int_s, real_s, params, t, projected: None, int_float_override: None },
+            &EvalCtx { model, int_s, real_s, params, t, dt, projected: None, int_float_override: None },
         );
         match action {
             Action::FractionTransfer(ft) => {

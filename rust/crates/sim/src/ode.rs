@@ -51,6 +51,7 @@ fn ode_derivs(
     real_vals: &[f64],
     params: &[f64],
     t: f64,
+    dt: f64,
     d_int: &mut [f64],
     d_real: &mut [f64],
 ) -> Result<(), SimError> {
@@ -59,7 +60,7 @@ fn ode_derivs(
     let real_s = RealState::from_vec(real_vals.to_vec());
 
     let ctx = EvalCtx {
-        model, int_s: &int_s, real_s: &real_s, params, t,
+        model, int_s: &int_s, real_s: &real_s, params, t, dt,
         projected: None,
         int_float_override: Some(int_vals),
     };
@@ -105,28 +106,28 @@ fn rk4_step(
     let mut dr = vec![0.0f64; nr];
 
     // k1
-    ode_derivs(model, int_vals, real_vals, params, t, &mut di, &mut dr)?;
+    ode_derivs(model, int_vals, real_vals, params, t, dt, &mut di, &mut dr)?;
     let k1i: Vec<f64> = di.clone();
     let k1r: Vec<f64> = dr.clone();
 
     // k2
     let s2i: Vec<f64> = int_vals.iter().zip(&k1i).map(|(x, k)| x + 0.5 * dt * k).collect();
     let s2r: Vec<f64> = real_vals.iter().zip(&k1r).map(|(x, k)| x + 0.5 * dt * k).collect();
-    ode_derivs(model, &s2i, &s2r, params, t + 0.5 * dt, &mut di, &mut dr)?;
+    ode_derivs(model, &s2i, &s2r, params, t + 0.5 * dt, dt, &mut di, &mut dr)?;
     let k2i: Vec<f64> = di.clone();
     let k2r: Vec<f64> = dr.clone();
 
     // k3
     let s3i: Vec<f64> = int_vals.iter().zip(&k2i).map(|(x, k)| x + 0.5 * dt * k).collect();
     let s3r: Vec<f64> = real_vals.iter().zip(&k2r).map(|(x, k)| x + 0.5 * dt * k).collect();
-    ode_derivs(model, &s3i, &s3r, params, t + 0.5 * dt, &mut di, &mut dr)?;
+    ode_derivs(model, &s3i, &s3r, params, t + 0.5 * dt, dt, &mut di, &mut dr)?;
     let k3i: Vec<f64> = di.clone();
     let k3r: Vec<f64> = dr.clone();
 
     // k4
     let s4i: Vec<f64> = int_vals.iter().zip(&k3i).map(|(x, k)| x + dt * k).collect();
     let s4r: Vec<f64> = real_vals.iter().zip(&k3r).map(|(x, k)| x + dt * k).collect();
-    ode_derivs(model, &s4i, &s4r, params, t + dt, &mut di, &mut dr)?;
+    ode_derivs(model, &s4i, &s4r, params, t + dt, dt, &mut di, &mut dr)?;
     let k4i = &di;
     let k4r = &dr;
 
@@ -229,7 +230,7 @@ fn run_ode(
         {
             let (is, rs) = to_states(&int_vals, &real_vals);
             let mut propensities = Vec::with_capacity(n_transitions);
-            eval_propensities(model, &is, &rs, params, t, &mut propensities)?;
+            eval_propensities(model, &is, &rs, params, t, cfg.dt, &mut propensities)?;
             for (i, &p) in propensities.iter().enumerate() {
                 flow_acc[i] += p * dt;
             }

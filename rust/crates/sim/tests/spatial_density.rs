@@ -259,7 +259,7 @@ fn test_density_seir_spatial_5_vignette_regression() {
             let int_s = sim::state::IntState { counts: counts_before.to_vec() };
             let real_s = sim::state::RealState::new(compiled.real_local_to_global.len());
             sim::propensity::eval_propensities(
-                &compiled, &int_s, &real_s, &params, t, &mut propensities
+                &compiled, &int_s, &real_s, &params, t, 1.0, &mut propensities
             ).unwrap();
 
             for &(src_local, ref group) in &compiled.source_groups {
@@ -341,7 +341,7 @@ fn test_density_downstream_multi_seed() {
                     let int_s = sim::state::IntState { counts: counts_before.to_vec() };
                     let real_s = sim::state::RealState::new(compiled.real_local_to_global.len());
                     sim::propensity::eval_propensities(
-                        &compiled, &int_s, &real_s, &params, t, &mut propensities
+                        &compiled, &int_s, &real_s, &params, t, 1.0, &mut propensities
                     ).unwrap();
 
                     for &(src_local, ref group) in &compiled.source_groups {

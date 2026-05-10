@@ -195,7 +195,9 @@ pub fn eval_stream_projection(
             with_scratch_int_from_counts(counts, |scratch| {
                 let ctx = EvalCtx {
                     model: compiled, int_s: scratch, real_s, params,
-                    t, projected: None, int_float_override: None,
+                    // dt: 0.0 — observation projection runs at obs
+                    // boundaries with no integrator step in scope.
+                    t, dt: 0.0, projected: None, int_float_override: None,
                 };
                 eval_resolved(expr, &ctx)
             })

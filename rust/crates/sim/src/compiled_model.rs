@@ -782,7 +782,10 @@ impl CompiledModel {
                 }
             }
             InitialConditions::Parameterized(map) => {
-                let ctx = EvalCtx { model: self, int_s: &zero_int, real_s: &zero_real, params, t: 0.0 , projected: None, int_float_override: None };
+                // dt: 0.0 — initial-condition expressions don't have
+                // access to a meaningful integrator step (init runs once,
+                // before stepping). Users referencing `dt` here get 0.0.
+                let ctx = EvalCtx { model: self, int_s: &zero_int, real_s: &zero_real, params, t: 0.0, dt: 0.0, projected: None, int_float_override: None };
                 for (name, expr) in map {
                     let global = self.comp_index.get(name.as_str())
                         .copied()

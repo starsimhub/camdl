@@ -355,10 +355,10 @@ pub fn log_transition_density_substep(
     let real_s = RealState::new(model.real_local_to_global.len());
 
     let mut propensities = vec![0.0; n_tr];
-    eval_propensities(model, &int_s, &real_s, params, t, &mut propensities)?;
+    eval_propensities(model, &int_s, &real_s, params, t, dt, &mut propensities)?;
 
     let ctx = EvalCtx {
-        model, int_s: &int_s, real_s: &real_s, params, t, projected: None, int_float_override: None,
+        model, int_s: &int_s, real_s: &real_s, params, t, dt, projected: None, int_float_override: None,
     };
 
     // Per-transition: is it deterministic? What's its sigma_sq?
@@ -529,7 +529,7 @@ pub fn complete_data_loglik(
             let real_s_local = RealState::new(model.real_local_to_global.len());
             let ctx = EvalCtx {
                 model, int_s: &int_s_local, real_s: &real_s_local,
-                params, t: model.model.simulation.t_start + s as f64 * dt,
+                params, t: model.model.simulation.t_start + s as f64 * dt, dt,
                 projected: None, int_float_override: None,
             };
             let mut gamma_idx_local = 0;
@@ -542,7 +542,7 @@ pub fn complete_data_loglik(
                     let mut s = IntState::new(n_int_local);
                     s.counts.copy_from_slice(&rec.counts_before);
                     s
-                }, &real_s_local, params, ctx.t, &mut local_props);
+                }, &real_s_local, params, ctx.t, dt, &mut local_props);
                 for &tr_idx in group {
                     let rate = local_props[tr_idx];
                     if rate <= RATE_EPSILON { continue; }
