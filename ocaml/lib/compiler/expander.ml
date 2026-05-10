@@ -379,7 +379,7 @@ let diag_loc_of_ast_ctx ctx (l : Ast.loc) : Diagnostics.loc =
   { Diagnostics.file; line = l.line; col = l.col;
     end_line = l.end_line; end_col = l.end_col }
 
-let reserved_time_names = ["t"; "t_start"; "t_end"]
+let reserved_time_names = ["t"; "t_start"; "t_end"; "dt"]
 
 let check_reserved ?(loc = Diagnostics.no_loc) ctx name kind =
   if List.mem name reserved_time_names then
@@ -1234,6 +1234,11 @@ and resolve_ident_name ctx name ~loc =
     Ir.TimeFunc name
   else if name = "t" then
     Ir.Time
+  else if name = "dt" then
+    (* gh#54: runtime integrator step. Has dimension T (same as `t`).
+       Backend evaluates against `EvalCtx.dt` populated from
+       SMCConfig / ChainBinomialConfig at substep level. *)
+    Ir.Dt
   else if name = "projected" then
     (* Special keyword in likelihood expressions: refers to the observation projection output. *)
     Ir.Projected
@@ -1885,7 +1890,7 @@ let classify_and_resolve_prior_spec ?(loc = Diagnostics.no_loc) ctx ~pname
                    `%s` is not a declared parameter."
           ~hint:"Check spelling, or declare the hyperparameter first."
           ()
-      | Ir.Param _ | Ir.Const _ | Ir.Projected | Ir.Time -> ()
+      | Ir.Param _ | Ir.Const _ | Ir.Projected | Ir.Time | Ir.Dt -> ()
       | Ir.BinOp b -> check_refs b.left; check_refs b.right
       | Ir.UnOp  u -> check_refs u.arg
       | Ir.Cond  c -> check_refs c.pred; check_refs c.then_; check_refs c.else_
@@ -2250,6 +2255,7 @@ let resolve_comp_name ctx env e =
       | Ir.TimeFunc _ -> "a time-function reference"
       | Ir.TableLookup _ -> "a table lookup"
       | Ir.Time       -> "the time symbol"
+      | Ir.Dt         -> "the integrator step `dt`"
       | Ir.Projected  -> "a projected value"
       | Ir.Pop _      -> "a compartment" (* unreachable by pattern *)
       | Ir.UncheckedDim _ -> "a dimensional-escape expression"
@@ -3401,7 +3407,7 @@ let build_model_structure ctx expanded_trs =
         c.else_
     | Ir.TableLookup (_, args) ->
       List.fold_left collect_numerator_pops acc args
-    | Ir.Const _ | Ir.Param _ | Ir.Time | Ir.Projected | Ir.TimeFunc _ -> acc
+    | Ir.Const _ | Ir.Param _ | Ir.Time | Ir.Dt | Ir.Projected | Ir.TimeFunc _ -> acc
     | Ir.UncheckedDim u -> collect_numerator_pops acc u.inner
   in
   let seen_tr  = Hashtbl.create 4 in

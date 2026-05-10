@@ -587,7 +587,7 @@ let test_table_cell_type_ir_round_trips_through_serde () =
 
 (** Walk an Ir.expr and collect all Pop compartment names. *)
 let rec collect_pops = function
-  | Ir.Const _ | Ir.Param _ | Ir.Time | Ir.Projected -> []
+  | Ir.Const _ | Ir.Param _ | Ir.Time | Ir.Dt | Ir.Projected -> []
   | Ir.Pop name -> [name]
   | Ir.PopSum names -> names
   | Ir.BinOp b -> collect_pops b.left @ collect_pops b.right

@@ -44,7 +44,7 @@ let uniq_check name_of xs constructor errors =
 
 let check_expr_refs ~comps ~params ~tables ~tfs errors e =
   let rec go = function
-    | Const _ | Time | Projected -> ()
+    | Const _ | Time | Dt | Projected -> ()
     | Param p -> if not (SS.mem p params) then errors := UnknownParameter p :: !errors
     | Pop   c -> if not (SS.mem c comps)  then errors := UnknownCompartment c :: !errors
     | PopSum cs -> List.iter (fun c -> if not (SS.mem c comps) then errors := UnknownCompartment c :: !errors) cs

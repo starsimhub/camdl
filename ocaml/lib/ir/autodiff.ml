@@ -19,6 +19,7 @@ let rec differentiate (e : expr) (param : string) : expr =
   | Pop _         -> Const 0.0
   | PopSum _      -> Const 0.0
   | Time          -> Const 0.0
+  | Dt            -> Const 0.0
   | TimeFunc _    -> Const 0.0
   | TableLookup _ -> Const 0.0
   | Projected     -> Const 0.0
@@ -93,7 +94,7 @@ let rec differentiate (e : expr) (param : string) : expr =
     | Mod ->
       let rec mentions p = function
         | Param n       -> n = p
-        | Const _ | Pop _ | Time | Projected -> false
+        | Const _ | Pop _ | Time | Dt | Projected -> false
         | PopSum _      -> false
         | BinOp bb      -> mentions p bb.left || mentions p bb.right
         | UnOp uu       -> mentions p uu.arg

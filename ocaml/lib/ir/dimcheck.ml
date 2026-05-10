@@ -246,6 +246,7 @@ let rec infer st ~ctx (e : expr) : dim =
      | None -> fresh_var st)
   | Pop _ | PopSum _ -> Known population
   | Time -> Known (make 0 1)
+  | Dt   -> Known (make 0 1)  (* gh#54: dt has dimension T, same as t *)
   | TimeFunc name ->
     (match Hashtbl.find_opt st.tf_dims name with
      | Some d -> resolve st d
@@ -380,7 +381,7 @@ let rec propagate st ~ctx (e : expr) (expected : dim_vec) : unit =
         | Unknown id -> bind st id expected
         | _ -> ())
      | None -> ())
-  | Pop _ | PopSum _ | Time | Projected -> ()
+  | Pop _ | PopSum _ | Time | Dt | Projected -> ()
   | UncheckedDim _ ->
     (* The escape stops dim-propagation at this boundary — the inner
        is explicitly exempted from checker-driven dimensional
@@ -537,6 +538,7 @@ let rec read_dim st (e : expr) : dim =
      | None -> Unknown (-1))  (* sentinel: unknown, but don't allocate *)
   | Pop _ | PopSum _ -> Known population
   | Time -> Known (make 0 1)
+  | Dt   -> Known (make 0 1)
   | TimeFunc name ->
     (match Hashtbl.find_opt st.tf_dims name with
      | Some d -> resolve st d
@@ -624,6 +626,7 @@ let rec expr_to_short_string (e : expr) : string =
   | Pop s -> s
   | PopSum ss -> String.concat " + " ss
   | Time -> "t"
+  | Dt   -> "dt"
   | TimeFunc s -> Printf.sprintf "%s(t)" s
   | TableLookup (s, _) -> Printf.sprintf "%s[...]" s
   | Projected -> "projected"

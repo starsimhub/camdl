@@ -17,6 +17,7 @@ and expr =
   | Pop    of string
   | PopSum of string list
   | Time
+  | Dt                            (* runtime integrator step (gh#54) *)
   | BinOp  of bin_op_expr
   | UnOp   of un_op_expr
   | Cond   of cond_expr
