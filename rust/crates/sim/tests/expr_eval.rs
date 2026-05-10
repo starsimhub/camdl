@@ -5,7 +5,7 @@ use ir::{
     expr::{
         BinOp, BinOpExpr, BinOpWrap,
         CondExpr, CondWrap,
-        ConstExpr, Expr,
+        ConstExpr, DtExpr, Expr,
         ParamExpr, PopExpr, PopSumExpr,
         TimeExpr,
         UnOp, UnOpExpr, UnOpWrap,
@@ -126,6 +126,30 @@ fn test_time() {
     let ctx = EvalCtx { model: &model, int_s: &int_s, real_s: &real_s, params: &[], t: 7.5, dt: 1.0, projected: None, int_float_override: None };
     let result = eval_expr(&expr, &ctx).unwrap();
     assert!((result - 7.5).abs() < 1e-12);
+}
+
+#[test]
+fn test_dt_evaluates_to_ctx_dt() {
+    // gh#54: Expr::Dt should read EvalCtx.dt at runtime.
+    let model = CompiledModel::new(minimal_model(vec![int_comp("S")], vec![])).unwrap();
+    let int_s = IntState::new(1);
+    let real_s = RealState::new(0);
+    let expr = Expr::Dt(DtExpr { dt: () });
+    for &dt in &[1.0_f64, 0.5, 0.25, 0.1, 7.0] {
+        let ctx = EvalCtx { model: &model, int_s: &int_s, real_s: &real_s, params: &[], t: 0.0, dt, projected: None, int_float_override: None };
+        let result = eval_expr(&expr, &ctx).unwrap();
+        assert!((result - dt).abs() < 1e-12, "dt={} got {}", dt, result);
+    }
+}
+
+#[test]
+fn test_dt_serde_roundtrip() {
+    // gh#54: {"dt": null} ↔ Expr::Dt(DtExpr { dt: () }).
+    let original = Expr::dt();
+    let json = serde_json::to_string(&original).unwrap();
+    assert_eq!(json, r#"{"dt":null}"#);
+    let parsed: Expr = serde_json::from_str(&json).unwrap();
+    assert_eq!(original, parsed);
 }
 
 #[test]

@@ -1298,7 +1298,28 @@ let test_l401_no_fire_when_dt_used () =
   | Error e -> Alcotest.failf "should compile cleanly: %s" e
   | Ok d ->
     let n = count_diags_with_code d.ctx.diags.diags "L401" in
-    Alcotest.(check int) "no L401 when dt is used" 0 n
+    Alcotest.(check int) "no L401 when dt is used" 0 n;
+    (* Confirm the parse + expansion produced an actual Ir.Dt node. *)
+    let rec contains_dt = function
+      | Ir.Dt -> true
+      | Ir.BinOp { left; right; _ } -> contains_dt left || contains_dt right
+      | Ir.UnOp { arg; _ } -> contains_dt arg
+      | Ir.Cond { pred; then_; else_ } ->
+        contains_dt pred || contains_dt then_ || contains_dt else_
+      | Ir.UncheckedDim u -> contains_dt u.inner
+      | Ir.TableLookup (_, args) -> List.exists contains_dt args
+      | Ir.Const _ | Ir.Param _ | Ir.Pop _ | Ir.PopSum _
+      | Ir.Time | Ir.Projected | Ir.TimeFunc _ -> false
+    in
+    let any_tr_uses_dt = List.exists (fun (t : Ir.transition) ->
+      contains_dt t.rate
+    ) d.model.transitions in
+    Alcotest.(check bool) "Ir.Dt appears in expanded rate" true any_tr_uses_dt;
+    (* Round-trip through serde: serialize, parse back, structural equality. *)
+    let json   = Serde.model_to_json d.model in
+    let model' = Serde.model_of_json json in
+    Alcotest.(check bool) "model survives serde round-trip"
+      true (d.model = model')
 
 let test_l401_no_fire_on_unit_conversion () =
   (* Pure unit conversion without exp() — must not fire. *)
