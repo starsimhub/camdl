@@ -1248,6 +1248,83 @@ let test_extends_w310_on_enable_dedup () =
     in
     Alcotest.(check bool) "W310 warning was emitted" true has_w310
 
+(* ── L401: Euler-correction with fixed time literal (gh#54) ────────────────── *)
+
+let count_diags_with_code (diags : Diagnostics.diagnostic list) code =
+  List.length (List.filter (fun (d : Diagnostics.diagnostic) -> d.code = code) diags)
+
+let test_l401_fires_on_fixed_time_literal () =
+  let src = {|
+    time_unit = 'days
+    compartments { S, I }
+    parameters {
+      R0    : rate  in [0.1, 5.0]
+      gamma : rate  in [0.1, 1.0]
+    }
+    transitions {
+      bad : S --> I @ R0 * (1 - exp(-(gamma) * 1 'days)) * S
+      ok  : I --> S @ gamma * I
+    }
+    init { S = 100 }
+    simulate { from = 0 'days  to = 1 'days }
+  |} in
+  Diagnostics.json_errors_mode := true;
+  let r = Compiler.compile_detail_result ~name:"l401_test" src in
+  Diagnostics.json_errors_mode := false;
+  match r with
+  | Error e -> Alcotest.failf "should compile despite L401: %s" e
+  | Ok d ->
+    let n = count_diags_with_code d.ctx.diags.diags "L401" in
+    Alcotest.(check int) "L401 fires once on the bad transition" 1 n
+
+let test_l401_no_fire_when_dt_used () =
+  let src = {|
+    time_unit = 'days
+    compartments { S, I }
+    parameters {
+      R0    : rate  in [0.1, 5.0]
+      gamma : rate  in [0.1, 1.0]
+    }
+    transitions {
+      good : I --> S @ (1 - exp(-gamma * dt)) / dt * I
+    }
+    init { I = 1 }
+    simulate { from = 0 'days  to = 1 'days }
+  |} in
+  Diagnostics.json_errors_mode := true;
+  let r = Compiler.compile_detail_result ~name:"l401_dt_test" src in
+  Diagnostics.json_errors_mode := false;
+  match r with
+  | Error e -> Alcotest.failf "should compile cleanly: %s" e
+  | Ok d ->
+    let n = count_diags_with_code d.ctx.diags.diags "L401" in
+    Alcotest.(check int) "no L401 when dt is used" 0 n
+
+let test_l401_no_fire_on_unit_conversion () =
+  (* Pure unit conversion without exp() — must not fire. *)
+  let src = {|
+    time_unit = 'days
+    compartments { S, I }
+    parameters {
+      mu    : rate  in [0.001, 1.0]
+      gamma : rate  in [0.1, 1.0]
+    }
+    let mu_per_day = mu / 1 'days
+    transitions {
+      good : I --> S @ gamma * I
+    }
+    init { S = 1 }
+    simulate { from = 0 'days  to = 1 'days }
+  |} in
+  Diagnostics.json_errors_mode := true;
+  let r = Compiler.compile_detail_result ~name:"l401_unit_test" src in
+  Diagnostics.json_errors_mode := false;
+  match r with
+  | Error _ -> ()  (* compile may fail for other reasons; we only care L401 wasn't tripped if it did succeed *)
+  | Ok d ->
+    let n = count_diags_with_code d.ctx.diags.diags "L401" in
+    Alcotest.(check int) "no L401 on unit conversion (no exp)" 0 n
+
 (* ── Phase D (BUG-4): Time function expansion ────────────────────────────────
    Compile a model with a sinusoidal forcing function.
    1. The time_functions list must be non-empty.
@@ -3662,6 +3739,11 @@ let () =
       Alcotest.test_case "E25y unknown parent + edit-distance hint"  `Quick test_extends_e25y_unknown_with_suggestion;
       Alcotest.test_case "E25z chain depth > 5 errors"               `Quick test_extends_e25z_depth_exceeds;
       Alcotest.test_case "W310 fires on append-dedup collision"      `Quick test_extends_w310_on_enable_dedup;
+    ];
+    "l401_lint", [
+      Alcotest.test_case "L401 fires on fixed time literal"          `Quick test_l401_fires_on_fixed_time_literal;
+      Alcotest.test_case "L401 quiet when dt primitive used"         `Quick test_l401_no_fire_when_dt_used;
+      Alcotest.test_case "L401 quiet on unit conversion (no exp)"    `Quick test_l401_no_fire_on_unit_conversion;
     ];
     "time_functions", [
       Alcotest.test_case "sinusoidal compiles to TimeFunc"       `Quick test_sinusoidal_time_func;

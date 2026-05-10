@@ -3441,6 +3441,113 @@ let build_model_structure ctx expanded_trs =
     Ir.infectious_compartments  = List.rev !infectious_compartments;
   }
 
+(* ── L401 lint: discretization-correction with fixed time literal ──
+   Catches the AST shape `(1 - exp(-RATE * Const c))` (or with `c * RATE`).
+   The user almost always meant `dt` instead of the literal — pinning to
+   a specific time literal makes the rate correct only when the runtime
+   `--dt` matches that literal. See docs/dev/warning-catalog.md §L401. *)
+
+let rec expr_contains_param_or_pop = function
+  | Ir.Param _ | Ir.Pop _ | Ir.PopSum _ -> true
+  | Ir.BinOp { left; right; _ } ->
+    expr_contains_param_or_pop left || expr_contains_param_or_pop right
+  | Ir.UnOp { arg; _ } -> expr_contains_param_or_pop arg
+  | Ir.Cond { pred; then_; else_ } ->
+    expr_contains_param_or_pop pred
+    || expr_contains_param_or_pop then_
+    || expr_contains_param_or_pop else_
+  | Ir.UncheckedDim u -> expr_contains_param_or_pop u.inner
+  | Ir.TableLookup (_, args) -> List.exists expr_contains_param_or_pop args
+  | Ir.Const _ | Ir.Time | Ir.Dt | Ir.Projected | Ir.TimeFunc _ -> false
+
+(* Treat `UncheckedDim { inner = Const c; ... }` (the IR form of unit
+   literals like `1 'days`) as a constant for L401 matching. *)
+let as_const = function
+  | Ir.Const c -> Some c
+  | Ir.UncheckedDim { inner = Ir.Const c; _ } -> Some c
+  | _ -> None
+
+(* Strip an outer UnOp Neg if present, returning the inner expr. *)
+let strip_neg = function
+  | Ir.UnOp { op = Ir.Neg; arg } -> arg
+  | e -> e
+
+(* Detect `exp(arg)` where arg = -(RATE * Const) under some normalization:
+     - UnOp Neg around a Mul of RATE and Const
+     - Mul where one operand is `-RATE` (Neg around param-bearing) and the
+       other is a Const (or UncheckedDim Const).
+   RATE must contain a Param or Pop (i.e. not be purely constant). *)
+let exp_arg_matches_neg_rate_times_const arg =
+  let try_mul l r =
+    (* Try: l is rate-bearing (possibly negated) and r is constant. *)
+    let l_inner = strip_neg l in
+    let r_inner = strip_neg r in
+    match as_const l_inner, expr_contains_param_or_pop r_inner,
+          as_const r_inner, expr_contains_param_or_pop l_inner with
+    | Some c, true, _, _ -> Some c
+    | _, _, Some c, true -> Some c
+    | _ -> None
+  in
+  match arg with
+  | Ir.UnOp { op = Ir.Neg; arg = Ir.BinOp { op = Ir.Mul; left; right } } ->
+    try_mul left right
+  | Ir.BinOp { op = Ir.Mul; left; right } ->
+    (* Match `(-RATE) * Const` or `Const * (-RATE)` (Neg absorbed). *)
+    let neg_left =
+      match left with Ir.UnOp { op = Ir.Neg; _ } -> true | _ -> false in
+    let neg_right =
+      match right with Ir.UnOp { op = Ir.Neg; _ } -> true | _ -> false in
+    if neg_left || neg_right then try_mul left right else None
+  | _ -> None
+
+(* Detect the canonical `1 - exp(-RATE * Const)` shape at this node. *)
+let detect_l401_at_node = function
+  | Ir.BinOp { op = Ir.Sub;
+               left = Ir.Const c;
+               right = Ir.UnOp { op = Ir.Exp; arg } }
+    when c = 1.0 -> exp_arg_matches_neg_rate_times_const arg
+  | _ -> None
+
+let rec walk_expr_for_l401 ~on_match e =
+  (match detect_l401_at_node e with
+   | Some lit -> on_match lit
+   | None -> ());
+  match e with
+  | Ir.BinOp { left; right; _ } ->
+    walk_expr_for_l401 ~on_match left;
+    walk_expr_for_l401 ~on_match right
+  | Ir.UnOp { arg; _ } -> walk_expr_for_l401 ~on_match arg
+  | Ir.Cond { pred; then_; else_ } ->
+    walk_expr_for_l401 ~on_match pred;
+    walk_expr_for_l401 ~on_match then_;
+    walk_expr_for_l401 ~on_match else_
+  | Ir.UncheckedDim u -> walk_expr_for_l401 ~on_match u.inner
+  | Ir.TableLookup (_, args) ->
+    List.iter (walk_expr_for_l401 ~on_match) args
+  | Ir.Const _ | Ir.Param _ | Ir.Pop _ | Ir.PopSum _
+  | Ir.Time | Ir.Dt | Ir.Projected | Ir.TimeFunc _ -> ()
+
+let lint_l401 ctx (expanded_trs : Ir.transition list) =
+  (* Avoid duplicate emits when the same expanded transition rate fires
+     the pattern more than once (e.g. β-correction used twice in a sum). *)
+  let seen = Hashtbl.create 4 in
+  List.iter (fun (t : Ir.transition) ->
+    walk_expr_for_l401 t.rate ~on_match:(fun _lit ->
+      if not (Hashtbl.mem seen t.name) then begin
+        Hashtbl.add seen t.name ();
+        Diagnostics.warning ctx.diags ~code:"L401" ~loc:Diagnostics.no_loc
+          ~message:(Printf.sprintf
+            "transition '%s' rate uses a fixed time literal inside an Euler-correction \
+             pattern `(1 - exp(-RATE * <literal>))` — likely meant `dt`"
+            t.name)
+          ~hint:("the canonical discretization-correct form is "
+                 ^ "`(1 - exp(-RATE * dt)) / dt`; pinning to a literal "
+                 ^ "makes the rate correct only when the runtime --dt "
+                 ^ "matches that literal. See docs/dev/warning-catalog.md §L401.")
+          ()
+      end)
+  ) expanded_trs
+
 let expand_detail ?(source_dir = "") ?(filename = "<input>") (name : string) (decls : declaration list)
     : Ir.model * context * model_summary =
   let ctx = empty_context ~source_dir ~filename () in
@@ -3459,6 +3566,7 @@ let expand_detail ?(source_dir = "") ?(filename = "<input>") (name : string) (de
   ctx.orig_transitions <- ctx.transitions;
   let expanded_comps = expand_compartments ctx in
   let (expanded_trs, filtered_n) = expand_transitions_counted ctx in
+  lint_l401 ctx expanded_trs;
   let ms = build_model_structure ctx expanded_trs in
   let model = {
     Ir.name               = name;
