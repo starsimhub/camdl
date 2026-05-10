@@ -216,17 +216,46 @@ the path forward is discoverable.
   model with `dt` doesn't; the dt-aware version's Richardson ladder
   (post-fix) lands within ~5 nats of pomp at every dt.
 
-## v1 ship status placeholder
+## v1 ship status
 
-(filled in after each commit):
+- [x] OCaml IR `Ir.Dt`               — c5fb2d7
+- [x] Rust IR `Expr::Dt`             — eb565f1
+- [x] OCaml expander resolves `dt`   — c5fb2d7
+- [x] Rust evaluator                 — eb565f1
+- [x] L401 lint                      — 6b7b61c
+- [x] Warning catalog                — 606f08b
+- [x] Round-trip + runtime tests     — 5033f63
+- [x] gh#55 (per-site suppression) filed
+- [x] gh#56 (CLI lint-policy knobs) filed
+- [ ] He2010 model file fix (cross-repo to camdl-book)
+      — owned by the camdl-book agent. Four model files use the
+        `let beta_base = R0 * (1.0 - exp(-(gamma + mu) * 1 'days))`
+        pattern: `vignettes/he2010-paper`, `he2010-pomp`, `he2010`,
+        `he2010-v0`. The L401 lint will fire on each. Replace with the
+        canonical form (note the explicit `/dt` on the multiplier
+        side and the post-correction continuous-time normalization;
+        see warning-catalog.md §L401):
+        `let beta_base = R0 * (gamma + mu)`
+        and absorb `(1.0 - exp(-(gamma+mu)*dt)) / ((gamma+mu)*dt)`
+        into the seasonal forcing or transition rate as needed.
+        Pomp's csnippet uses the equivalent form internally.
 
-- [ ] OCaml IR `Ir.Dt`
-- [ ] Rust IR `Expr::Dt`
-- [ ] OCaml expander resolves `dt`
-- [ ] Rust evaluator
-- [ ] L401 lint
-- [ ] Warning catalog
-- [ ] He2010 model file fix (cross-repo)
+## Empirical verification
+
+End-to-end smoke test with chain_binomial backend (commit eb565f1):
+
+| dt    | Final S | Final I | Final R |
+|-------|---------|---------|---------|
+| 1.0   | 45      | 16      | 939     |
+| 0.5   | 63      | 16      | 921     |
+
+Different trajectories at different dt is expected — the chain-binomial
+discrete-time correction `(1 - exp(-γ·dt))/dt` evaluates to different
+effective rates per substep at different dt. The point is not byte-
+identity but that **the formula uses the runtime dt**, so paired-seed
+CRN scenarios (and pomp comparisons) keep the discretization aligned.
+Without the primitive, users had to hardcode a literal time, which only
+works at one specific dt.
 
 ## Forward-looking notes
 
