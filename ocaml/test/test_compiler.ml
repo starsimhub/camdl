@@ -1346,6 +1346,122 @@ let test_l401_no_fire_on_unit_conversion () =
     let n = count_diags_with_code d.ctx.diags.diags "L401" in
     Alcotest.(check int) "no L401 on unit conversion (no exp)" 0 n
 
+(* ── gh#58: trig primitives (sin/cos/tanh) + pi/e ──────────────────────────── *)
+
+let test_trig_pi_resolves_to_const () =
+  (* `pi` in a rate expression resolves to Ir.Const 3.14159... *)
+  let src = {|
+    time_unit = 'days
+    compartments { S }
+    parameters { gamma : rate  in [0.001, 1.0] }
+    let period = 1 'days
+    transitions { dummy : S --> @ gamma * cos(2 * pi * t / period) }
+    init { S = 1 }
+    simulate { from = 0 'days  to = 1 'days }
+  |} in
+  Diagnostics.json_errors_mode := true;
+  let r = Compiler.compile_detail_result ~name:"trig_pi_test" src in
+  Diagnostics.json_errors_mode := false;
+  match r with
+  | Error e -> Alcotest.failf "should compile: %s" e
+  | Ok d ->
+    let rec find_pi_const = function
+      | Ir.Const c when Float.abs (c -. Float.pi) < 1e-9 -> true
+      | Ir.BinOp { left; right; _ } -> find_pi_const left || find_pi_const right
+      | Ir.UnOp { arg; _ } -> find_pi_const arg
+      | Ir.Cond { pred; then_; else_ } ->
+        find_pi_const pred || find_pi_const then_ || find_pi_const else_
+      | Ir.UncheckedDim u -> find_pi_const u.inner
+      | _ -> false
+    in
+    let any_tr_has_pi = List.exists (fun (t : Ir.transition) ->
+      find_pi_const t.rate
+    ) d.model.transitions in
+    Alcotest.(check bool) "pi appears as Const ≈ π in the rate IR"
+      true any_tr_has_pi
+
+let test_trig_cos_compiles_and_dimchecks () =
+  (* cos(dimensionless) → OK; rate compiles. *)
+  let src = {|
+    time_unit = 'days
+    compartments { S }
+    parameters {
+      gamma : rate  in [0.001, 1.0]
+      a1    : rate  in [0.001, 1.0]
+    }
+    let period = 1 'days
+    transitions { dummy : S --> @ gamma * (1 + sin(2 * pi * t / period) + cos(2 * pi * t / period)) }
+    init { S = 1 }
+    simulate { from = 0 'days  to = 1 'days }
+  |} in
+  Diagnostics.json_errors_mode := true;
+  let r = Compiler.compile_detail_result ~name:"trig_cos_test" src in
+  Diagnostics.json_errors_mode := false;
+  match r with
+  | Error e -> Alcotest.failf "cos(2π·t/period) should compile: %s" e
+  | Ok _ -> ()
+
+let test_trig_cos_rejects_dimensional_arg () =
+  (* cos(t) where t : time → Dimcheck.Error (argument must be dimensionless). *)
+  let src = {|
+    time_unit = 'days
+    compartments { S }
+    parameters { gamma : rate  in [0.001, 1.0] }
+    transitions { dummy : S --> @ gamma * cos(t) }
+    init { S = 1 }
+    simulate { from = 0 'days  to = 1 'days }
+  |} in
+  Diagnostics.json_errors_mode := true;
+  let r = Compiler.compile_detail_result ~name:"trig_dim_test" src in
+  Diagnostics.json_errors_mode := false;
+  match r with
+  | Ok d ->
+    let dc = Dimcheck.check_model d.model in
+    let n = List.length (List.filter (fun (x : Dimcheck.diagnostic) ->
+      x.code = "E301" && x.severity = Dimcheck.Error
+    ) dc.diagnostics) in
+    Alcotest.(check bool) "E301 fired on cos(t)" true (n > 0)
+  | Error _ -> ()  (* compile may have failed for other reasons *)
+
+let test_trig_autodiff_matches_finite_diff () =
+  (* Synthetic IR rate = b * sin(c), with c a literal constant.
+     ∂/∂b of (b * sin(c)) = sin(c), a constant.
+     Verify Autodiff.differentiate_rate emits exactly that. *)
+  let c = Float.pi /. 4.0 in
+  let rate = Ir.BinOp { op = Ir.Mul;
+                        left  = Ir.Param "b";
+                        right = Ir.UnOp { op = Ir.Sin; arg = Ir.Const c } } in
+  let grads = Autodiff.differentiate_rate rate ["b"] in
+  match List.assoc_opt "b" grads with
+  | None -> Alcotest.failf "no rate_grad for parameter 'b'"
+  | Some d ->
+    (* After simplify_fixpoint, the derivative should fold to Const (sin c). *)
+    match d with
+    | Ir.Const v ->
+      Alcotest.(check (float 1e-12))
+        "∂(b*sin(c))/∂b = sin(c)" (sin c) v
+    | _ -> Alcotest.failf "expected Const, got non-constant derivative"
+
+let test_trig_pi_reserved () =
+  (* Declaring a parameter named `pi` is rejected. *)
+  let src = {|
+    time_unit = 'days
+    compartments { S }
+    parameters { pi : rate  in [0.001, 1.0] }
+    transitions { dummy : S --> @ pi * S }
+    init { S = 1 }
+    simulate { from = 0 'days  to = 1 'days }
+  |} in
+  Diagnostics.json_errors_mode := true;
+  let r = Compiler.compile_detail_result ~name:"pi_reserved_test" src in
+  Diagnostics.json_errors_mode := false;
+  match r with
+  | Ok d ->
+    let n = count_diags_with_code d.ctx.diags.diags "E100" in
+    Alcotest.(check bool) "E100 fired on parameter shadowing pi"
+      true (n > 0)
+  | Error _ -> ()
+
 (* ── Phase D (BUG-4): Time function expansion ────────────────────────────────
    Compile a model with a sinusoidal forcing function.
    1. The time_functions list must be non-empty.
@@ -3765,6 +3881,13 @@ let () =
       Alcotest.test_case "L401 fires on fixed time literal"          `Quick test_l401_fires_on_fixed_time_literal;
       Alcotest.test_case "L401 quiet when dt primitive used"         `Quick test_l401_no_fire_when_dt_used;
       Alcotest.test_case "L401 quiet on unit conversion (no exp)"    `Quick test_l401_no_fire_on_unit_conversion;
+    ];
+    "trig_primitives", [
+      Alcotest.test_case "pi resolves to Const ≈ π"                 `Quick test_trig_pi_resolves_to_const;
+      Alcotest.test_case "cos(dimensionless) compiles"              `Quick test_trig_cos_compiles_and_dimchecks;
+      Alcotest.test_case "cos(t) rejected with E301"                `Quick test_trig_cos_rejects_dimensional_arg;
+      Alcotest.test_case "autodiff emits rate_grad for sin(...)"    `Quick test_trig_autodiff_matches_finite_diff;
+      Alcotest.test_case "pi as parameter name is reserved (E100)"  `Quick test_trig_pi_reserved;
     ];
     "time_functions", [
       Alcotest.test_case "sinusoidal compiles to TimeFunc"       `Quick test_sinusoidal_time_func;

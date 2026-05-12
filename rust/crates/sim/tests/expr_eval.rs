@@ -152,6 +152,53 @@ fn test_dt_serde_roundtrip() {
     assert_eq!(original, parsed);
 }
 
+// gh#58: trig primitives
+
+fn eval_unop(op: UnOp, arg: f64) -> f64 {
+    let model = CompiledModel::new(minimal_model(vec![int_comp("S")], vec![])).unwrap();
+    let int_s = IntState::new(1);
+    let real_s = RealState::new(0);
+    let expr = Expr::UnOp(UnOpWrap {
+        un_op: UnOpExpr { op, arg: Box::new(Expr::Const(ConstExpr { value: arg })) },
+    });
+    let ctx = EvalCtx { model: &model, int_s: &int_s, real_s: &real_s, params: &[], t: 0.0, dt: 0.0, projected: None, int_float_override: None };
+    eval_expr(&expr, &ctx).unwrap()
+}
+
+#[test]
+fn test_sin_known_points() {
+    assert!((eval_unop(UnOp::Sin, 0.0) - 0.0).abs() < 1e-12);
+    assert!((eval_unop(UnOp::Sin, std::f64::consts::FRAC_PI_2) - 1.0).abs() < 1e-12);
+    assert!((eval_unop(UnOp::Sin, std::f64::consts::PI) - 0.0).abs() < 1e-12);
+}
+
+#[test]
+fn test_cos_known_points() {
+    assert!((eval_unop(UnOp::Cos, 0.0) - 1.0).abs() < 1e-12);
+    assert!((eval_unop(UnOp::Cos, std::f64::consts::FRAC_PI_2) - 0.0).abs() < 1e-12);
+    assert!((eval_unop(UnOp::Cos, std::f64::consts::PI) - (-1.0)).abs() < 1e-12);
+}
+
+#[test]
+fn test_tanh_known_points() {
+    assert!((eval_unop(UnOp::Tanh, 0.0) - 0.0).abs() < 1e-12);
+    // tanh(∞) → 1; large finite arg approximates well
+    assert!((eval_unop(UnOp::Tanh, 100.0) - 1.0).abs() < 1e-12);
+    assert!((eval_unop(UnOp::Tanh, -100.0) - (-1.0)).abs() < 1e-12);
+}
+
+#[test]
+fn test_trig_serde_roundtrip() {
+    for op in [UnOp::Sin, UnOp::Cos, UnOp::Tanh] {
+        let original = Expr::UnOp(UnOpWrap {
+            un_op: UnOpExpr { op: op.clone(), arg: Box::new(Expr::Const(ConstExpr { value: 1.5 })) },
+        });
+        let json = serde_json::to_string(&original).unwrap();
+        let parsed: Expr = serde_json::from_str(&json).unwrap();
+        assert_eq!(original, parsed, "round-trip failed for {:?}", op);
+    }
+}
+
 #[test]
 fn test_binop_add() {
     let model = CompiledModel::new(minimal_model(vec![int_comp("S")], vec![])).unwrap();
