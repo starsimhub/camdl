@@ -332,10 +332,13 @@ and infer_unop st ~ctx (u : un_op_expr) : dim =
   let da = infer st ~ctx u.arg in
   match u.op with
   | Neg | Abs | Floor | Ceil -> da
-  | Exp | Log ->
+  | Exp | Log | Sin | Cos | Tanh ->
     constrain_known st ~code:"E301"
       ~message:(Printf.sprintf "argument to %s in '%s' must be dimensionless"
-                  (match u.op with Exp -> "exp" | _ -> "log") ctx)
+                  (match u.op with
+                   | Exp -> "exp" | Log -> "log"
+                   | Sin -> "sin" | Cos -> "cos" | Tanh -> "tanh"
+                   | _ -> "log") ctx)
       da dimensionless;
     Known dimensionless
   | Sqrt ->
@@ -405,7 +408,7 @@ let rec propagate st ~ctx (e : expr) (expected : dim_vec) : unit =
   | UnOp u ->
     (match u.op with
      | Neg | Abs | Floor | Ceil -> propagate st ~ctx u.arg expected
-     | Exp | Log -> propagate st ~ctx u.arg dimensionless
+     | Exp | Log | Sin | Cos | Tanh -> propagate st ~ctx u.arg dimensionless
      | Sqrt -> propagate st ~ctx u.arg (dim_scale 2 expected))
   | BinOp b ->
     (match b.op with
@@ -605,7 +608,7 @@ and read_dim_unop st (u : un_op_expr) : dim =
   let da = read_dim st u.arg in
   match u.op with
   | Neg | Abs | Floor | Ceil -> da
-  | Exp | Log -> Known dimensionless
+  | Exp | Log | Sin | Cos | Tanh -> Known dimensionless
   | Sqrt ->
     (match resolve st da with
      | Any -> Any
@@ -645,6 +648,7 @@ let rec expr_to_short_string (e : expr) : string =
     let op_str = match u.op with
       | Neg -> "-" | Exp -> "exp" | Log -> "log" | Sqrt -> "sqrt"
       | Abs -> "abs" | Floor -> "floor" | Ceil -> "ceil"
+      | Sin -> "sin" | Cos -> "cos" | Tanh -> "tanh"
     in
     Printf.sprintf "%s(%s)" op_str (expr_to_short_string u.arg)
   | Cond c ->

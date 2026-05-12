@@ -233,6 +233,9 @@ fn eval_table_expr(
                 UnOp::Abs   => a.abs(),
                 UnOp::Floor => a.floor(),
                 UnOp::Ceil  => a.ceil(),
+                UnOp::Sin   => a.sin(),
+                UnOp::Cos   => a.cos(),
+                UnOp::Tanh  => a.tanh(),
             };
             Ok(if r.is_nan() { 0.0 } else { r })
         }

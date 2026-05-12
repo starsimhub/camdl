@@ -295,6 +295,9 @@ pub fn eval_resolved(expr: &ResolvedExpr, ctx: &EvalCtx<'_>) -> f64 {
                 UnOp::Abs   => a.abs(),
                 UnOp::Floor => a.floor(),
                 UnOp::Ceil  => a.ceil(),
+                UnOp::Sin   => a.sin(),
+                UnOp::Cos   => a.cos(),
+                UnOp::Tanh  => a.tanh(),
             };
             if result.is_nan() {
                 crate::eval_stats::inc_unop_nan();
@@ -468,7 +471,10 @@ pub fn eval_resolved_deriv(expr: &ResolvedExpr, wrt: usize, ctx: &EvalCtx<'_>) -
                 UnOp::Neg  => -da,
                 UnOp::Sqrt => if a > 0.0 { da / (2.0 * a.sqrt()) } else { 0.0 },
                 UnOp::Abs  => da * a.signum(),
-                _ => 0.0, // Floor, Ceil
+                UnOp::Sin  => a.cos() * da,                   // gh#58
+                UnOp::Cos  => -a.sin() * da,                  // gh#58
+                UnOp::Tanh => (1.0 - a.tanh().powi(2)) * da,  // gh#58
+                UnOp::Floor | UnOp::Ceil => 0.0,
             }
         }
 

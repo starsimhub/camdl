@@ -51,6 +51,9 @@ let un_op_str = function
   | Ir.Abs   -> "abs"
   | Ir.Floor -> "floor"
   | Ir.Ceil  -> "ceil"
+  | Ir.Sin   -> "sin"
+  | Ir.Cos   -> "cos"
+  | Ir.Tanh  -> "tanh"
 
 (* ── Pop name rendering ──────────────────────────────────────────────────── *)
 

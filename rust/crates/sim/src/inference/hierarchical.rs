@@ -113,6 +113,9 @@ pub fn eval_prior_arg<E: ParamEnv>(expr: &Expr, env: &E) -> f64 {
                 UnOp::Abs   => a.abs(),
                 UnOp::Floor => a.floor(),
                 UnOp::Ceil  => a.ceil(),
+                UnOp::Sin   => a.sin(),
+                UnOp::Cos   => a.cos(),
+                UnOp::Tanh  => a.tanh(),
             }
         }
         Expr::Cond(c) => {

@@ -32,6 +32,7 @@ type bin_op =
   | Eq | Neq | Lt | Gt | Le | Ge
 
 type un_op = Neg | Exp | Log | Sqrt | Abs | Floor | Ceil
+           | Sin | Cos | Tanh                                  (* gh#58 *)
 
 (** A positional or named index in S[child] or S[age = child] *)
 type index_item =

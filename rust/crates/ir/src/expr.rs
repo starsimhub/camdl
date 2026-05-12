@@ -31,6 +31,9 @@ pub enum UnOp {
     Abs,
     Floor,
     Ceil,
+    Sin,    // gh#58
+    Cos,    // gh#58
+    Tanh,   // gh#58
 }
 
 // ── Inner structs for compound variants ───────────────────────────────────────

@@ -101,6 +101,7 @@ let bin_op_str = function
 let un_op_str = function
   | Neg -> "neg" | Exp -> "exp" | Log -> "log"
   | Sqrt -> "sqrt" | Abs -> "abs" | Floor -> "floor" | Ceil -> "ceil"
+  | Sin -> "sin" | Cos -> "cos" | Tanh -> "tanh"
 
 let rec expr_to_json (e : expr) : Yojson.Safe.t =
   match e with
@@ -152,6 +153,7 @@ let bin_op_of_str = function
 let un_op_of_str = function
   | "neg" -> Neg | "exp" -> Exp   | "log" -> Log
   | "sqrt" -> Sqrt | "abs" -> Abs | "floor" -> Floor | "ceil" -> Ceil
+  | "sin" -> Sin | "cos" -> Cos | "tanh" -> Tanh
   | s -> fail "unknown un_op '%s'" s
 
 let rec expr_of_json (j : Yojson.Safe.t) : expr =

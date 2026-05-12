@@ -6,6 +6,7 @@
 type bin_op = Add | Sub | Mul | Div | Pow | Mod | Min | Max | Eq | Neq | Lt | Gt | Le | Ge
 
 type un_op = Neg | Exp | Log | Sqrt | Abs | Floor | Ceil
+           | Sin | Cos | Tanh                    (* gh#58 *)
 
 type bin_op_expr = { op: bin_op; left: expr; right: expr }
 and un_op_expr   = { op: un_op;  arg:  expr }

@@ -380,11 +380,16 @@ let diag_loc_of_ast_ctx ctx (l : Ast.loc) : Diagnostics.loc =
     end_line = l.end_line; end_col = l.end_col }
 
 let reserved_time_names = ["t"; "t_start"; "t_end"; "dt"]
+let reserved_math_names = ["pi"; "e"]                       (* gh#58 *)
 
 let check_reserved ?(loc = Diagnostics.no_loc) ctx name kind =
   if List.mem name reserved_time_names then
     Diagnostics.error ctx.diags ~code:"E100" ~loc
       ~message:(Printf.sprintf "%s name '%s' is reserved for simulation time" kind name)
+      ~hint:"choose a different name" ()
+  else if List.mem name reserved_math_names then
+    Diagnostics.error ctx.diags ~code:"E100" ~loc
+      ~message:(Printf.sprintf "%s name '%s' is reserved (math constant)" kind name)
       ~hint:"choose a different name" ()
 
 let collect_declarations ctx decls =
@@ -818,6 +823,7 @@ let ir_un_op = function
   | Ast.Neg   -> Ir.Neg  | Ast.Exp   -> Ir.Exp  | Ast.Log  -> Ir.Log
   | Ast.Sqrt  -> Ir.Sqrt | Ast.Abs   -> Ir.Abs  | Ast.Floor -> Ir.Floor
   | Ast.Ceil  -> Ir.Ceil
+  | Ast.Sin   -> Ir.Sin  | Ast.Cos   -> Ir.Cos  | Ast.Tanh -> Ir.Tanh  (* gh#58 *)
 
 (* ── Indexed parameter helpers ────────────────────────────────────────────── *)
 
@@ -912,6 +918,7 @@ let shape_index ctx shape items env =
 (* Pure math functions that are safe to evaluate at compile time. *)
 let is_const_func = function
   | "exp" | "log" | "sqrt" | "abs" | "floor" | "ceil" -> true
+  | "sin" | "cos" | "tanh" -> true  (* gh#58 *)
   | _ -> false
 
 let rec is_const_expr = function
@@ -1150,6 +1157,7 @@ let rec resolve_expr ctx (env : (string * string) list) (e : expr) : Ir.expr =
     let builtin_un_op = match fname with
       | "exp" -> Some Ir.Exp | "log" -> Some Ir.Log | "sqrt" -> Some Ir.Sqrt
       | "abs" -> Some Ir.Abs | "floor" -> Some Ir.Floor | "ceil" -> Some Ir.Ceil
+      | "sin" -> Some Ir.Sin | "cos" -> Some Ir.Cos | "tanh" -> Some Ir.Tanh  (* gh#58 *)
       | _ -> None in
     if Option.is_some builtin_un_op then begin
       let op = Option.get builtin_un_op in
@@ -1242,6 +1250,12 @@ and resolve_ident_name ctx name ~loc =
   else if name = "projected" then
     (* Special keyword in likelihood expressions: refers to the observation projection output. *)
     Ir.Projected
+  else if name = "pi" then
+    (* gh#58: mathematical constant. Resolves to Ir.Const at expand time —
+       no new IR variant. *)
+    Ir.Const Float.pi
+  else if name = "e" then
+    Ir.Const (Float.exp 1.0)
   else begin
     Diagnostics.error ctx.diags
       ~code:"E100"
@@ -1647,6 +1661,9 @@ let rec eval_const_expr ctx = function
   | EUnOp (Abs, e) -> abs_float (eval_const_expr ctx e)
   | EUnOp (Floor, e) -> floor (eval_const_expr ctx e)
   | EUnOp (Ceil, e) -> ceil (eval_const_expr ctx e)
+  | EUnOp (Sin, e)  -> sin (eval_const_expr ctx e)
+  | EUnOp (Cos, e)  -> cos (eval_const_expr ctx e)
+  | EUnOp (Tanh, e) -> tanh (eval_const_expr ctx e)
   | EBinOp (Add, l, r) -> eval_const_expr ctx l +. eval_const_expr ctx r
   | EBinOp (Sub, l, r) -> eval_const_expr ctx l -. eval_const_expr ctx r
   | EBinOp (Mul, l, r) -> eval_const_expr ctx l *. eval_const_expr ctx r
@@ -1661,6 +1678,9 @@ let rec eval_const_expr ctx = function
      | "abs"   -> abs_float v
      | "floor" -> floor v
      | "ceil"  -> ceil v
+     | "sin"   -> sin v
+     | "cos"   -> cos v
+     | "tanh"  -> tanh v
      | _       -> 0.0 (* unreachable — is_const_func filters these *))
   | _ -> 0.0  (* unreachable — guarded by is_const_expr *)
 
@@ -2138,6 +2158,9 @@ let eval_const ctx e =
     | Ir.UnOp  { op = Ir.Abs;   arg } -> abs_float (eval arg)
     | Ir.UnOp  { op = Ir.Floor; arg } -> floor (eval arg)
     | Ir.UnOp  { op = Ir.Ceil;  arg } -> ceil (eval arg)
+    | Ir.UnOp  { op = Ir.Sin;   arg } -> sin (eval arg)
+    | Ir.UnOp  { op = Ir.Cos;   arg } -> cos (eval arg)
+    | Ir.UnOp  { op = Ir.Tanh;  arg } -> tanh (eval arg)
     | _ ->
       Diagnostics.error ctx.diags ~code:"E402" ~loc:Diagnostics.no_loc
         ~message:"initial condition value is not a constant expression"

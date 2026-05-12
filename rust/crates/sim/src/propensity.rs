@@ -131,6 +131,9 @@ pub fn eval_expr(expr: &Expr, ctx: &EvalCtx<'_>) -> Result<f64, SimError> {
                 UnOp::Abs   => a.abs(),
                 UnOp::Floor => a.floor(),
                 UnOp::Ceil  => a.ceil(),
+                UnOp::Sin   => a.sin(),
+                UnOp::Cos   => a.cos(),
+                UnOp::Tanh  => a.tanh(),
             };
             if result.is_nan() {
                 log::warn!("eval_expr: NaN from {:?}({}) at t={}", w.un_op.op, a, ctx.t);
@@ -238,7 +241,10 @@ pub fn eval_expr_deriv(expr: &Expr, wrt: usize, ctx: &EvalCtx<'_>) -> f64 {
                 UnOp::Neg => -da,
                 UnOp::Sqrt => if a > 0.0 { da / (2.0 * a.sqrt()) } else { 0.0 },
                 UnOp::Abs => da * a.signum(),
-                _ => 0.0, // Floor, Ceil
+                UnOp::Sin => a.cos() * da,                   // gh#58
+                UnOp::Cos => -a.sin() * da,                  // gh#58
+                UnOp::Tanh => (1.0 - a.tanh().powi(2)) * da, // gh#58
+                UnOp::Floor | UnOp::Ceil => 0.0,
             }
         }
 

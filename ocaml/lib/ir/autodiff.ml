@@ -158,6 +158,26 @@ let rec differentiate (e : expr) (param : string) : expr =
     (* Floor/Ceil: piecewise constant, derivative = 0 *)
     | Floor -> Const 0.0
     | Ceil  -> Const 0.0
+
+    (* d sin(f) = cos(f) * f'  (gh#58) *)
+    | Sin -> BinOp { op = Mul;
+                left  = UnOp { op = Cos; arg = u.arg };
+                right = differentiate u.arg param }
+
+    (* d cos(f) = -sin(f) * f'  (gh#58) *)
+    | Cos -> BinOp { op = Mul;
+                left  = UnOp { op = Neg;
+                          arg = UnOp { op = Sin; arg = u.arg } };
+                right = differentiate u.arg param }
+
+    (* d tanh(f) = (1 - tanh(f)^2) * f'  (gh#58) *)
+    | Tanh ->
+      let t = UnOp { op = Tanh; arg = u.arg } in
+      BinOp { op = Mul;
+        left  = BinOp { op = Sub;
+                  left  = Const 1.0;
+                  right = BinOp { op = Mul; left = t; right = t } };
+        right = differentiate u.arg param }
     end
 
   (* Conditional: differentiate both branches, leave predicate alone *)
@@ -212,6 +232,9 @@ let rec simplify (e : expr) : expr =
       | Log, Const c when c > 0.0 -> Const (log c)
       | Sqrt, Const c when c >= 0.0 -> Const (sqrt c)
       | Abs, Const c   -> Const (abs_float c)
+      | Sin, Const c   -> Const (sin c)
+      | Cos, Const c   -> Const (cos c)
+      | Tanh, Const c  -> Const (tanh c)
       | _ -> UnOp { op = u.op; arg = a }
       end
 
