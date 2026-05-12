@@ -86,12 +86,21 @@ type sinusoidal = { amplitude: expr; period: expr; phase: expr; baseline: expr }
 type piecewise  = { breakpoints: expr list; values: expr list }
 type interpolated = { times: expr list; values: expr list; method_: string }
 type periodic   = { period: expr; values: expr list }
+(* gh#59: finite Fourier series with N estimable cos/sin pairs.
+   `harmonics[k] = (a_k, b_k)` for k = 1, 2, ... — k=0 is the
+   baseline (caller modulates as `1 + sum_k a_k cos + b_k sin`). *)
+type fourier = { period: expr; harmonics: (expr * expr) list }
+(* gh#59: periodic cubic B-spline. Knots are in [0, period); strictly
+   increasing. Coefs have length = #knots. *)
+type periodic_spline = { period: expr; knots: expr list; coefs: expr list }
 
 type time_func_kind =
-  | Sinusoidal  of sinusoidal
-  | Piecewise   of piecewise
-  | Interpolated of interpolated
-  | Periodic    of periodic
+  | Sinusoidal    of sinusoidal
+  | Piecewise     of piecewise
+  | Interpolated  of interpolated
+  | Periodic      of periodic
+  | Fourier       of fourier            (* gh#59 *)
+  | PeriodicSpline of periodic_spline   (* gh#59 *)
 
 type time_function = {
   name: string;

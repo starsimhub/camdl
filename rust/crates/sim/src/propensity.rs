@@ -338,6 +338,28 @@ pub fn eval_time_func(kind: &CompiledTimeFuncKind, t: f64) -> f64 {
             let i = (phase / step).floor() as usize;
             values[i.min(n - 1)]
         }
+        CompiledTimeFuncKind::Fourier { period_inv, harmonics } => {
+            // gh#59: sum_k (a_k cos(2π k t/period) + b_k sin(2π k t/period)).
+            // No baseline added here — caller is expected to write
+            // `1 + fourier(t)` in the rate expression, matching the
+            // sinusoidal kind's convention of leaving baseline composition
+            // to the model author.
+            let phase = 2.0 * std::f64::consts::PI * t * period_inv;
+            let mut sum = 0.0;
+            for (k, (a, b)) in harmonics.iter().enumerate() {
+                let arg = phase * (k as f64 + 1.0);
+                sum += a * arg.cos() + b * arg.sin();
+            }
+            sum
+        }
+        CompiledTimeFuncKind::PeriodicSpline { period, spline } => {
+            // gh#59: wrap t into [knots[0], knots[0] + period) and evaluate.
+            if *period <= 0.0 { return 0.0; }
+            // CubicSpline.xs[0] is the first knot we set up at compile time.
+            let knot0 = *spline.xs.first().unwrap_or(&0.0);
+            let phase = knot0 + (t - knot0).rem_euclid(*period);
+            spline.eval(phase)
+        }
     }
 }
 

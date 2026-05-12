@@ -36,6 +36,24 @@ pub struct Periodic {
     pub values: Vec<Expr>,
 }
 
+/// gh#59: finite Fourier series with N estimable cos/sin pairs.
+/// `harmonics[k]` is the (a_k, b_k) pair for harmonic k = 1, 2, …
+/// (k=0 baseline is the caller's responsibility: `1 + sum_k a_k cos + b_k sin`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Fourier {
+    pub period:    Expr,
+    pub harmonics: Vec<(Expr, Expr)>,
+}
+
+/// gh#59: periodic cubic B-spline with K estimable coefficients
+/// over fixed knots in [0, period).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PeriodicSpline {
+    pub period: Expr,
+    pub knots:  Vec<Expr>,
+    pub coefs:  Vec<Expr>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TimeFuncKind {
@@ -43,6 +61,8 @@ pub enum TimeFuncKind {
     Piecewise(Piecewise),
     Interpolated(Interpolated),
     Periodic(Periodic),
+    Fourier(Fourier),                  // gh#59
+    PeriodicSpline(PeriodicSpline),    // gh#59
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

@@ -334,6 +334,18 @@ let time_func_kind_to_json (k : time_func_kind) : Yojson.Safe.t =
       ("period", expr_to_json p.period);
       ("values", arr (List.map expr_to_json p.values));
     ])]
+  | Fourier f ->
+    obj [("fourier", obj [
+      ("period", expr_to_json f.period);
+      ("harmonics", arr (List.map (fun (a, b) ->
+        arr [expr_to_json a; expr_to_json b]) f.harmonics));
+    ])]
+  | PeriodicSpline ps ->
+    obj [("periodic_spline", obj [
+      ("period", expr_to_json ps.period);
+      ("knots",  arr (List.map expr_to_json ps.knots));
+      ("coefs",  arr (List.map expr_to_json ps.coefs));
+    ])]
 
 let time_func_kind_of_json j =
   match j with
@@ -361,6 +373,21 @@ let time_func_kind_of_json j =
       Periodic {
         period = expr_of_json (member "period" v);
         values = List.map expr_of_json (as_list (member "values" v));
+      }
+    | "fourier" ->
+      let harm_pair = function
+        | `List [a; b] -> (expr_of_json a, expr_of_json b)
+        | _ -> fail "fourier harmonic must be a 2-element array [a, b]"
+      in
+      Fourier {
+        period    = expr_of_json (member "period" v);
+        harmonics = List.map harm_pair (as_list (member "harmonics" v));
+      }
+    | "periodic_spline" ->
+      PeriodicSpline {
+        period = expr_of_json (member "period" v);
+        knots  = List.map expr_of_json (as_list (member "knots" v));
+        coefs  = List.map expr_of_json (as_list (member "coefs" v));
       }
     | k -> fail "unknown time_func_kind '%s'" k
   )

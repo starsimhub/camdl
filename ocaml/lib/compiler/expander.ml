@@ -2520,11 +2520,57 @@ let expand_time_function_one ctx fname (env : (string * string) list) fkind (fun
           get_kw_list "values"
       in
       Ir.Periodic { period = period_expr; values }
+    | "fourier" ->
+      (* gh#59: harmonics = [(a_1, b_1), (a_2, b_2), ...].
+         Accepts a list-of-pairs encoded as `[(a, b), ...]` in the
+         DSL — the parser produces EList of E2-tuples / lists. *)
+      let period_expr = get_kw "period" in
+      let harm_arg = match List.assoc_opt "harmonics" fargs with
+        | Some e -> e
+        | None ->
+          Diagnostics.error ctx.diags ~code:"E408" ~loc:Diagnostics.no_loc
+            ~message:(Printf.sprintf "fourier forcing '%s' requires 'harmonics'" fname)
+            ~hint:"Add 'harmonics = [(a1, b1), (a2, b2), ...]'"
+            ();
+          EList []
+      in
+      let pair_of = function
+        | EList [a; b] -> (resolve_expr ctx env a, resolve_expr ctx env b)
+        | _ ->
+          Diagnostics.error ctx.diags ~code:"E408" ~loc:Diagnostics.no_loc
+            ~message:(Printf.sprintf "fourier '%s': each harmonic must be a 2-element list [a, b]" fname)
+            ~hint:"Use harmonics = [(a1, b1), (a2, b2), ...]"
+            ();
+          (Ir.Const 0.0, Ir.Const 0.0)
+      in
+      let harmonics = match harm_arg with
+        | EList items -> List.map pair_of items
+        | _ ->
+          Diagnostics.error ctx.diags ~code:"E408" ~loc:Diagnostics.no_loc
+            ~message:(Printf.sprintf "fourier '%s': 'harmonics' must be a list of pairs" fname)
+            ~hint:"Use harmonics = [(a1, b1), (a2, b2), ...]"
+            ();
+          []
+      in
+      Ir.Fourier { period = period_expr; harmonics }
+    | "periodic_spline" ->
+      (* gh#59: knots and coefs must be same-length lists. *)
+      let period_expr = get_kw "period" in
+      let knots = get_kw_list "knots" in
+      let coefs = get_kw_list "coefs" in
+      if List.length knots <> List.length coefs then
+        Diagnostics.error ctx.diags ~code:"E408" ~loc:Diagnostics.no_loc
+          ~message:(Printf.sprintf
+            "periodic_spline '%s': knots (%d) and coefs (%d) must have the same length"
+            fname (List.length knots) (List.length coefs))
+          ~hint:"Each coef corresponds to one knot in the periodic B-spline basis."
+          ();
+      Ir.PeriodicSpline { period = period_expr; knots; coefs }
     | k ->
       Diagnostics.error ctx.diags ~code:"E408" ~loc:Diagnostics.no_loc
         ~message:(Printf.sprintf "unknown time function kind '%s' in '%s'" k fname)
-        ~detail:"Supported kinds: sinusoidal, piecewise, interpolated, periodic."
-        ~hint:(Printf.sprintf "Change the kind to one of: sinusoidal, piecewise, interpolated, periodic.")
+        ~detail:"Supported kinds: sinusoidal, piecewise, interpolated, periodic, fourier, periodic_spline."
+        ~hint:(Printf.sprintf "Change the kind to one of: sinusoidal, piecewise, interpolated, periodic, fourier, periodic_spline.")
         ();
       Ir.Piecewise { breakpoints = []; values = [] }
   in
@@ -2551,6 +2597,13 @@ let expand_time_function_one ctx fname (env : (string * string) list) fkind (fun
       Ir.Interpolated { i with Ir.values = List.map scale_expr i.values }
     | Ir.Periodic p ->
       Ir.Periodic { p with Ir.values = List.map scale_expr p.values }
+    | Ir.Fourier _ ->
+      (* gh#59: fourier harmonics are dimensionless modulators; scale
+         applies to the declared forcing dim, not the coef values. *)
+      kind
+    | Ir.PeriodicSpline ps ->
+      (* gh#59: scale applies to the coefficient values, like periodic. *)
+      Ir.PeriodicSpline { ps with Ir.coefs = List.map scale_expr ps.coefs }
   in
   let dim = unit_lit_to_dim funit in
   { Ir.name = fname; Ir.kind; Ir.dim }

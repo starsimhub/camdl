@@ -17,6 +17,16 @@ pub enum CompiledTimeFuncKind {
     Constant { times: Vec<f64>, values: Vec<f64> },
     CubicSpline(CubicSpline),
     Periodic    { period: f64, values: Vec<f64> },
+    /// gh#59: finite Fourier series. `period_inv = 1.0 / period`
+    /// precomputed; harmonics is a flat `[(a_1, b_1), (a_2, b_2), …]`.
+    Fourier { period_inv: f64, harmonics: Vec<(f64, f64)> },
+    /// gh#59: periodic cubic B-spline evaluated at `t mod period`.
+    /// For v1 we use the natural-cubic-spline representation as a
+    /// proxy (lifted from `CubicSpline`), with the input wrapped to
+    /// `[0, period)` and the knot table extended by one period to
+    /// preserve C² continuity at the wraparound. Knot count must
+    /// match coef count.
+    PeriodicSpline { period: f64, spline: CubicSpline },
 }
 
 /// Natural cubic spline with precomputed coefficients.
@@ -580,6 +590,56 @@ impl CompiledModel {
                         .map(|e| eval_table_expr(e, &param_index, &default_params))
                         .collect();
                     CompiledTimeFuncKind::Periodic { period, values: vals? }
+                }
+                TimeFuncKind::Fourier(f) => {
+                    let period = eval_table_expr(&f.period, &param_index, &default_params)?;
+                    if period <= 0.0 {
+                        return Err(SimError::Validation(format!(
+                            "fourier forcing period must be positive, got {}", period)));
+                    }
+                    let harmonics: Result<Vec<(f64, f64)>, SimError> = f.harmonics.iter()
+                        .map(|(a, b)| Ok((
+                            eval_table_expr(a, &param_index, &default_params)?,
+                            eval_table_expr(b, &param_index, &default_params)?,
+                        )))
+                        .collect();
+                    CompiledTimeFuncKind::Fourier {
+                        period_inv: 1.0 / period,
+                        harmonics: harmonics?,
+                    }
+                }
+                TimeFuncKind::PeriodicSpline(ps) => {
+                    let period = eval_table_expr(&ps.period, &param_index, &default_params)?;
+                    if period <= 0.0 {
+                        return Err(SimError::Validation(format!(
+                            "periodic_spline period must be positive, got {}", period)));
+                    }
+                    let knots: Result<Vec<f64>, SimError> = ps.knots.iter()
+                        .map(|e| eval_table_expr(e, &param_index, &default_params))
+                        .collect();
+                    let coefs: Result<Vec<f64>, SimError> = ps.coefs.iter()
+                        .map(|e| eval_table_expr(e, &param_index, &default_params))
+                        .collect();
+                    let ks = knots?;
+                    let cs = coefs?;
+                    if ks.len() != cs.len() {
+                        return Err(SimError::Validation(format!(
+                            "periodic_spline knots ({}) and coefs ({}) must match",
+                            ks.len(), cs.len())));
+                    }
+                    // Extend by one period so the natural cubic spline
+                    // stays smooth across the wraparound (proxy for true
+                    // periodic basis — adequate for v1, refine if a
+                    // user model exposes the C² boundary discontinuity).
+                    let mut xs = ks.clone();
+                    let mut ys = cs.clone();
+                    let first_knot = ks[0];
+                    xs.push(first_knot + period);
+                    ys.push(cs[0]);
+                    CompiledTimeFuncKind::PeriodicSpline {
+                        period,
+                        spline: CubicSpline::new(&xs, &ys),
+                    }
                 }
             };
             time_func_cache.push(CompiledTimeFunc { kind });
