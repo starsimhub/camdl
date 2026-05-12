@@ -342,9 +342,10 @@ let time_func_kind_to_json (k : time_func_kind) : Yojson.Safe.t =
     ])]
   | PeriodicSpline ps ->
     obj [("periodic_spline", obj [
-      ("period", expr_to_json ps.period);
-      ("knots",  arr (List.map expr_to_json ps.knots));
-      ("coefs",  arr (List.map expr_to_json ps.coefs));
+      ("period",  expr_to_json ps.period);
+      ("n_basis", int ps.n_basis);
+      ("degree",  int ps.degree);
+      ("coefs",   arr (List.map expr_to_json ps.coefs));
     ])]
 
 let time_func_kind_of_json j =
@@ -385,9 +386,10 @@ let time_func_kind_of_json j =
       }
     | "periodic_spline" ->
       PeriodicSpline {
-        period = expr_of_json (member "period" v);
-        knots  = List.map expr_of_json (as_list (member "knots" v));
-        coefs  = List.map expr_of_json (as_list (member "coefs" v));
+        period  = expr_of_json (member "period" v);
+        n_basis = as_int (member "n_basis" v);
+        degree  = as_int (member "degree" v);
+        coefs   = List.map expr_of_json (as_list (member "coefs" v));
       }
     | k -> fail "unknown time_func_kind '%s'" k
   )

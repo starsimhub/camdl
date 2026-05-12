@@ -2554,18 +2554,58 @@ let expand_time_function_one ctx fname (env : (string * string) list) fkind (fun
       in
       Ir.Fourier { period = period_expr; harmonics }
     | "periodic_spline" ->
-      (* gh#59: knots and coefs must be same-length lists. *)
+      (* gh#59 v2 (2026-05-12): uniform knots — user gives n_basis count
+         and optional degree (default 3); the evaluator derives knot
+         positions from period/n_basis. See proposal at
+         docs/dev/proposals/2026-05-12-periodic-bspline-algorithm.md. *)
       let period_expr = get_kw "period" in
-      let knots = get_kw_list "knots" in
+      let unwrap_int_const expr label default =
+        let ir = resolve_expr ctx env expr in
+        let unwrap = function
+          | Ir.Const f -> Some f
+          | Ir.UncheckedDim { inner = Ir.Const f; _ } -> Some f
+          | _ -> None
+        in
+        match unwrap ir with
+        | Some f when Float.is_integer f && f >= 0.0 -> int_of_float f
+        | _ ->
+          Diagnostics.error ctx.diags ~code:"E408" ~loc:Diagnostics.no_loc
+            ~message:(Printf.sprintf
+              "periodic_spline '%s': '%s' must be a non-negative integer constant"
+              fname label)
+            ~hint:"Use a numeric integer literal, e.g. n_basis = 6"
+            ();
+          default
+      in
+      let n_basis = match List.assoc_opt "n_basis" fargs with
+        | None ->
+          Diagnostics.error ctx.diags ~code:"E408" ~loc:Diagnostics.no_loc
+            ~message:(Printf.sprintf "periodic_spline '%s' missing 'n_basis'" fname)
+            ~hint:"Add 'n_basis = <int>' (number of basis functions, e.g. 6)"
+            ();
+          1
+        | Some e -> unwrap_int_const e "n_basis" 1
+      in
+      let degree = match List.assoc_opt "degree" fargs with
+        | None -> 3
+        | Some e -> unwrap_int_const e "degree" 3
+      in
       let coefs = get_kw_list "coefs" in
-      if List.length knots <> List.length coefs then
+      if n_basis <= degree then
         Diagnostics.error ctx.diags ~code:"E408" ~loc:Diagnostics.no_loc
           ~message:(Printf.sprintf
-            "periodic_spline '%s': knots (%d) and coefs (%d) must have the same length"
-            fname (List.length knots) (List.length coefs))
-          ~hint:"Each coef corresponds to one knot in the periodic B-spline basis."
+            "periodic_spline '%s': n_basis (%d) must be greater than degree (%d)"
+            fname n_basis degree)
+          ~hint:"Increase n_basis or lower degree."
           ();
-      Ir.PeriodicSpline { period = period_expr; knots; coefs }
+      if List.length coefs <> n_basis then
+        Diagnostics.error ctx.diags ~code:"E408" ~loc:Diagnostics.no_loc
+          ~message:(Printf.sprintf
+            "periodic_spline '%s': coefs has length %d but n_basis = %d"
+            fname (List.length coefs) n_basis)
+          ~hint:"Provide exactly n_basis coefficient values."
+          ();
+      Ir.PeriodicSpline { period = period_expr; n_basis; degree; coefs }
     | k ->
       Diagnostics.error ctx.diags ~code:"E408" ~loc:Diagnostics.no_loc
         ~message:(Printf.sprintf "unknown time function kind '%s' in '%s'" k fname)
@@ -2602,7 +2642,8 @@ let expand_time_function_one ctx fname (env : (string * string) list) fkind (fun
          applies to the declared forcing dim, not the coef values. *)
       kind
     | Ir.PeriodicSpline ps ->
-      (* gh#59: scale applies to the coefficient values, like periodic. *)
+      (* gh#59 v2: scale applies to the coefficient values (n_basis/
+         degree are integers, period is dimensional and unchanged). *)
       Ir.PeriodicSpline { ps with Ir.coefs = List.map scale_expr ps.coefs }
   in
   let dim = unit_lit_to_dim funit in

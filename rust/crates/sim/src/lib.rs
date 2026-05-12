@@ -3,6 +3,7 @@ pub mod error;
 pub mod state;
 pub mod time;
 pub mod compiled_model;
+pub mod periodic_bspline;  // gh#59 v2 — de Boor evaluator
 pub mod propensity;
 pub mod resolved_expr;
 pub mod eval_stats;

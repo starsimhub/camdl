@@ -352,13 +352,14 @@ pub fn eval_time_func(kind: &CompiledTimeFuncKind, t: f64) -> f64 {
             }
             sum
         }
-        CompiledTimeFuncKind::PeriodicSpline { period, spline } => {
-            // gh#59: wrap t into [knots[0], knots[0] + period) and evaluate.
-            if *period <= 0.0 { return 0.0; }
-            // CubicSpline.xs[0] is the first knot we set up at compile time.
-            let knot0 = *spline.xs.first().unwrap_or(&0.0);
-            let phase = knot0 + (t - knot0).rem_euclid(*period);
-            spline.eval(phase)
+        CompiledTimeFuncKind::PeriodicSpline { period, n_basis, degree, coefs } => {
+            // gh#59 v2: de Boor recurrence + periodic wrap-fold + centering
+            // shift. See `crates/sim/src/periodic_bspline.rs` for the
+            // algorithm and its primary-source citations; cross-validated
+            // against scipy and pomp via the oracle fixtures in
+            // `tests/fixtures/periodic_bspline_*.tsv`.
+            crate::periodic_bspline::eval_periodic_bspline(
+                t, *period, *n_basis, *degree, coefs)
         }
     }
 }

@@ -45,13 +45,20 @@ pub struct Fourier {
     pub harmonics: Vec<(Expr, Expr)>,
 }
 
-/// gh#59: periodic cubic B-spline with K estimable coefficients
-/// over fixed knots in [0, period).
+/// gh#59 v2 (2026-05-12): periodic B-spline with uniform knots.
+///
+/// Knots are implicit: `dx = period / n_basis`, knots at `k * dx`
+/// for `k = -degree..n_basis+degree`. `coefs` has length `n_basis`.
+/// Standard de Boor recurrence + periodic wrap-fold + (degree-1)/2
+/// centering shift; algorithm from de Boor 1978 §X, Eilers & Marx
+/// 1996, Wand & Ormerod 2008. See proposal at
+/// `docs/dev/proposals/2026-05-12-periodic-bspline-algorithm.md`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PeriodicSpline {
-    pub period: Expr,
-    pub knots:  Vec<Expr>,
-    pub coefs:  Vec<Expr>,
+    pub period:  Expr,
+    pub n_basis: u32,
+    pub degree:  u32,
+    pub coefs:   Vec<Expr>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

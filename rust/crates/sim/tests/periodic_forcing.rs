@@ -225,39 +225,40 @@ fn test_fourier_zero_harmonics_returns_zero() {
 }
 
 #[test]
-fn test_periodic_spline_passes_through_coefs_at_knots() {
-    // 4-knot periodic spline with coefs [1, 2, 3, 4] over period 4.
-    // At each knot, the spline value equals the coef (natural-cubic
-    // spline interpolation property).
+fn test_periodic_spline_partition_of_unity() {
+    // gh#59 v2: with all coefs = 1, the B-spline sums to 1 everywhere
+    // (partition of unity is preserved by the periodic wrap-fold).
     let cm = model_with_kind(TimeFuncKind::PeriodicSpline(PeriodicSpline {
-        period: ec(4.0),
-        knots:  vec![ec(0.0), ec(1.0), ec(2.0), ec(3.0)],
-        coefs:  vec![ec(1.0), ec(2.0), ec(3.0), ec(4.0)],
+        period:  ec(4.0),
+        n_basis: 6,
+        degree:  3,
+        coefs:   vec![ec(1.0); 6],
     }));
     let tf = &cm.time_func_cache[0].kind;
-    for (t, c) in [(0.0, 1.0), (1.0, 2.0), (2.0, 3.0), (3.0, 4.0)] {
-        let actual: f64 = eval_time_func(tf, t);
+    for t in [0.0_f64, 0.5, 1.0, 1.7, 2.0, 3.3, 3.99] {
+        let v = eval_time_func(tf, t);
         assert!(
-            (actual - c).abs() < 1e-9,
-            "periodic_spline at knot t={}: {}, expected {}", t, actual, c
+            (v - 1.0).abs() < 1e-12,
+            "partition-of-unity violated at t={}: {}", t, v
         );
     }
 }
 
 #[test]
 fn test_periodic_spline_wraps() {
-    // Same as above; check that t + period returns the same value.
+    // gh#59 v2: f(t) == f(t + period).
     let cm = model_with_kind(TimeFuncKind::PeriodicSpline(PeriodicSpline {
-        period: ec(4.0),
-        knots:  vec![ec(0.0), ec(1.0), ec(2.0), ec(3.0)],
-        coefs:  vec![ec(1.0), ec(2.0), ec(3.0), ec(4.0)],
+        period:  ec(4.0),
+        n_basis: 6,
+        degree:  3,
+        coefs:   vec![ec(0.7), ec(1.2), ec(0.9), ec(0.5), ec(1.1), ec(0.8)],
     }));
     let tf = &cm.time_func_cache[0].kind;
-    for t in [0.5_f64, 1.5, 2.5, 3.5] {
+    for t in [0.123_f64, 1.5, 2.9, 3.6] {
         let a = eval_time_func(tf, t);
         let b = eval_time_func(tf, t + 4.0);
         let c = eval_time_func(tf, t - 4.0);
-        assert!((a - b).abs() < 1e-9, "periodicity at t={}: a={} vs t+P b={}", t, a, b);
-        assert!((a - c).abs() < 1e-9, "periodicity at t={}: a={} vs t-P c={}", t, a, c);
+        assert!((a - b).abs() < 1e-12, "periodicity at t={}: a={} t+P={}", t, a, b);
+        assert!((a - c).abs() < 1e-12, "periodicity at t={}: a={} t-P={}", t, a, c);
     }
 }

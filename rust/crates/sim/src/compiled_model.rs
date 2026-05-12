@@ -20,13 +20,13 @@ pub enum CompiledTimeFuncKind {
     /// gh#59: finite Fourier series. `period_inv = 1.0 / period`
     /// precomputed; harmonics is a flat `[(a_1, b_1), (a_2, b_2), …]`.
     Fourier { period_inv: f64, harmonics: Vec<(f64, f64)> },
-    /// gh#59: periodic cubic B-spline evaluated at `t mod period`.
-    /// For v1 we use the natural-cubic-spline representation as a
-    /// proxy (lifted from `CubicSpline`), with the input wrapped to
-    /// `[0, period)` and the knot table extended by one period to
-    /// preserve C² continuity at the wraparound. Knot count must
-    /// match coef count.
-    PeriodicSpline { period: f64, spline: CubicSpline },
+    /// gh#59 v2 (2026-05-12): periodic B-spline forcing with uniform
+    /// knots and standard de Boor recurrence. Evaluated by
+    /// `periodic_bspline::eval_periodic_bspline` — see proposal at
+    /// `docs/dev/proposals/2026-05-12-periodic-bspline-algorithm.md`
+    /// for algorithm provenance (de Boor 1978 §X, Eilers & Marx
+    /// 1996, Wand & Ormerod 2008).
+    PeriodicSpline { period: f64, n_basis: u32, degree: u32, coefs: Vec<f64> },
 }
 
 /// Natural cubic spline with precomputed coefficients.
@@ -614,31 +614,25 @@ impl CompiledModel {
                         return Err(SimError::Validation(format!(
                             "periodic_spline period must be positive, got {}", period)));
                     }
-                    let knots: Result<Vec<f64>, SimError> = ps.knots.iter()
-                        .map(|e| eval_table_expr(e, &param_index, &default_params))
-                        .collect();
+                    if ps.n_basis <= ps.degree {
+                        return Err(SimError::Validation(format!(
+                            "periodic_spline: n_basis ({}) must exceed degree ({})",
+                            ps.n_basis, ps.degree)));
+                    }
                     let coefs: Result<Vec<f64>, SimError> = ps.coefs.iter()
                         .map(|e| eval_table_expr(e, &param_index, &default_params))
                         .collect();
-                    let ks = knots?;
                     let cs = coefs?;
-                    if ks.len() != cs.len() {
+                    if cs.len() != ps.n_basis as usize {
                         return Err(SimError::Validation(format!(
-                            "periodic_spline knots ({}) and coefs ({}) must match",
-                            ks.len(), cs.len())));
+                            "periodic_spline: coefs length ({}) must equal n_basis ({})",
+                            cs.len(), ps.n_basis)));
                     }
-                    // Extend by one period so the natural cubic spline
-                    // stays smooth across the wraparound (proxy for true
-                    // periodic basis — adequate for v1, refine if a
-                    // user model exposes the C² boundary discontinuity).
-                    let mut xs = ks.clone();
-                    let mut ys = cs.clone();
-                    let first_knot = ks[0];
-                    xs.push(first_knot + period);
-                    ys.push(cs[0]);
                     CompiledTimeFuncKind::PeriodicSpline {
                         period,
-                        spline: CubicSpline::new(&xs, &ys),
+                        n_basis: ps.n_basis,
+                        degree: ps.degree,
+                        coefs: cs,
                     }
                 }
             };
