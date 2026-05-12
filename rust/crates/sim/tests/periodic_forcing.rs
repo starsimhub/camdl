@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use ir::{
     expr::{ConstExpr, Expr},
     model::{Compartment, CompartmentKind, InitialConditions, OutputConfig, OutputSchedule, SimulationConfig},
-    time_func::{Periodic, TimeFuncKind, TimeFunction},
+    time_func::{Fourier, Periodic, PeriodicSpline, TimeFuncKind, TimeFunction},
     Model,
 };
 use sim::{
@@ -131,4 +131,133 @@ fn test_periodic_boundary_no_out_of_bounds() {
     assert_eq!(eval_time_func(tf, 5.0), 2.0);
     // t=4.99999 → bin 0
     assert_eq!(eval_time_func(tf, 4.999), 1.0);
+}
+
+// ── gh#59: Fourier + PeriodicSpline ──────────────────────────────────────────
+
+fn model_with_kind(kind: TimeFuncKind) -> CompiledModel {
+    let tf = TimeFunction { name: "f".into(), kind, dim: (0, 0) };
+    let model = Model {
+        name: "test".into(),
+        version: "0.3".into(),
+        time_unit: "days".into(),
+        description: None,
+        origin: None,
+        compartments: vec![Compartment { name: "S".into(), kind: CompartmentKind::Integer }],
+        transitions: vec![],
+        ode_equations: vec![],
+        time_functions: vec![tf],
+        tables: vec![],
+        interventions: vec![],
+        observations: vec![],
+        parameters: vec![],
+        initial_conditions: InitialConditions::Parameterized(HashMap::new()),
+        output: OutputConfig {
+            times: OutputSchedule::AtTimes(vec![0.0]),
+            format: "tsv".into(),
+            trajectory: true,
+            observations: false,
+        },
+        simulation: SimulationConfig {
+            t_start: 0.0, t_end: 1.0,
+            time_semantics: "continuous".into(),
+            dt: None, rng_seed: Some(42),
+        },
+        presets: vec![],
+        model_structure: None, balance: None,
+    };
+    CompiledModel::new(model).unwrap()
+}
+
+fn ec(v: f64) -> Expr { Expr::Const(ConstExpr { value: v }) }
+
+#[test]
+fn test_fourier_pure_cos_first_harmonic() {
+    // (a_1, b_1) = (1, 0), period = 1.0:
+    // f(t) = cos(2π t).
+    //   t = 0    → 1
+    //   t = 0.25 → 0
+    //   t = 0.5  → -1
+    //   t = 0.75 → 0
+    //   t = 1.0  → 1   (periodicity)
+    let cm = model_with_kind(TimeFuncKind::Fourier(Fourier {
+        period: ec(1.0),
+        harmonics: vec![(ec(1.0), ec(0.0))],
+    }));
+    let tf = &cm.time_func_cache[0].kind;
+    let cases = [(0.0_f64, 1.0), (0.25, 0.0), (0.5, -1.0), (0.75, 0.0), (1.0, 1.0)];
+    for (t, expected) in cases {
+        let actual = eval_time_func(tf, t);
+        assert!(
+            (actual - expected).abs() < 1e-9,
+            "fourier cos(2π·{}) = {}, expected {}", t, actual, expected
+        );
+    }
+}
+
+#[test]
+fn test_fourier_pure_sin_second_harmonic() {
+    // (a_1, b_1) = (0, 0), (a_2, b_2) = (0, 1), period = 1.0:
+    // f(t) = sin(4π t).
+    //   t = 0.125 → sin(π/2) = 1
+    //   t = 0.25  → sin(π)   = 0
+    //   t = 0.375 → sin(3π/2)= -1
+    let cm = model_with_kind(TimeFuncKind::Fourier(Fourier {
+        period: ec(1.0),
+        harmonics: vec![(ec(0.0), ec(0.0)), (ec(0.0), ec(1.0))],
+    }));
+    let tf = &cm.time_func_cache[0].kind;
+    assert!((eval_time_func(tf, 0.125) - 1.0).abs() < 1e-9);
+    assert!((eval_time_func(tf, 0.25)  - 0.0).abs() < 1e-9);
+    assert!((eval_time_func(tf, 0.375) + 1.0).abs() < 1e-9);
+}
+
+#[test]
+fn test_fourier_zero_harmonics_returns_zero() {
+    let cm = model_with_kind(TimeFuncKind::Fourier(Fourier {
+        period: ec(365.25),
+        harmonics: vec![],
+    }));
+    let tf = &cm.time_func_cache[0].kind;
+    for &t in &[0.0_f64, 1.0, 100.0, -50.0] {
+        assert_eq!(eval_time_func(tf, t), 0.0);
+    }
+}
+
+#[test]
+fn test_periodic_spline_passes_through_coefs_at_knots() {
+    // 4-knot periodic spline with coefs [1, 2, 3, 4] over period 4.
+    // At each knot, the spline value equals the coef (natural-cubic
+    // spline interpolation property).
+    let cm = model_with_kind(TimeFuncKind::PeriodicSpline(PeriodicSpline {
+        period: ec(4.0),
+        knots:  vec![ec(0.0), ec(1.0), ec(2.0), ec(3.0)],
+        coefs:  vec![ec(1.0), ec(2.0), ec(3.0), ec(4.0)],
+    }));
+    let tf = &cm.time_func_cache[0].kind;
+    for (t, c) in [(0.0, 1.0), (1.0, 2.0), (2.0, 3.0), (3.0, 4.0)] {
+        let actual: f64 = eval_time_func(tf, t);
+        assert!(
+            (actual - c).abs() < 1e-9,
+            "periodic_spline at knot t={}: {}, expected {}", t, actual, c
+        );
+    }
+}
+
+#[test]
+fn test_periodic_spline_wraps() {
+    // Same as above; check that t + period returns the same value.
+    let cm = model_with_kind(TimeFuncKind::PeriodicSpline(PeriodicSpline {
+        period: ec(4.0),
+        knots:  vec![ec(0.0), ec(1.0), ec(2.0), ec(3.0)],
+        coefs:  vec![ec(1.0), ec(2.0), ec(3.0), ec(4.0)],
+    }));
+    let tf = &cm.time_func_cache[0].kind;
+    for t in [0.5_f64, 1.5, 2.5, 3.5] {
+        let a = eval_time_func(tf, t);
+        let b = eval_time_func(tf, t + 4.0);
+        let c = eval_time_func(tf, t - 4.0);
+        assert!((a - b).abs() < 1e-9, "periodicity at t={}: a={} vs t+P b={}", t, a, b);
+        assert!((a - c).abs() < 1e-9, "periodicity at t={}: a={} vs t-P c={}", t, a, c);
+    }
 }
