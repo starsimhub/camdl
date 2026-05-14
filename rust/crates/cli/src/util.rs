@@ -19,6 +19,21 @@ pub const SEED_MIX_OBS: u64 = 0xa5a5a5a5a5a5;
 
 // ─── Small helpers shared across subcommands ────────────────────────────────
 
+/// gh#audit-H5. RAII guard that snapshots `EvalStats` on construction
+/// and prints the per-counter diff on Drop. Constructed at the top of
+/// each `cmd_*` entry that runs simulation or inference; silent when
+/// no fallback path was hit, otherwise emits a stderr summary that
+/// localises attribution to this command invocation. Drop runs on the
+/// normal return path; std::process::exit bypasses Drop, but those
+/// paths are already error-printed so missing the summary is fine.
+pub struct EvalStatsReportGuard(sim::eval_stats::EvalStats);
+impl EvalStatsReportGuard {
+    pub fn start() -> Self { Self(sim::eval_stats::EvalStats::snapshot()) }
+}
+impl Drop for EvalStatsReportGuard {
+    fn drop(&mut self) { sim::eval_stats::report_if_nonzero(&self.0); }
+}
+
 /// Derive an independent RNG seed for chain `id` from a base seed.
 /// XOR with `id * 2^64 * φ` (golden-ratio fractional bits) decorrelates
 /// consecutive-chain streams cheaply. Canonical helper for PGAS/PMMH/IF2;

@@ -65,3 +65,30 @@ pub fn inc_unop_nan()          { UNOP_NAN.fetch_add(1, Ordering::Relaxed); }
 pub fn inc_neg_binomial_pois() { NEG_BINOMIAL_POIS.fetch_add(1, Ordering::Relaxed); }
 #[inline]
 pub fn inc_binomial_fallback() { BINOMIAL_FALLBACK.fetch_add(1, Ordering::Relaxed); }
+
+impl std::fmt::Display for EvalStats {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "eval-stats summary (counts of fallback paths hit during this run):")?;
+        if self.div_by_zero       > 0 { writeln!(f, "  div_by_zero:       {}", self.div_by_zero)?; }
+        if self.pow_nan_inf       > 0 { writeln!(f, "  pow_nan_inf:       {}", self.pow_nan_inf)?; }
+        if self.unop_nan          > 0 { writeln!(f, "  unop_nan:          {}", self.unop_nan)?; }
+        if self.neg_binomial_pois > 0 { writeln!(f, "  neg_binomial_pois: {}", self.neg_binomial_pois)?; }
+        if self.binomial_fallback > 0 { writeln!(f, "  binomial_fallback: {}", self.binomial_fallback)?; }
+        Ok(())
+    }
+}
+
+/// gh#audit-H5. Convenience helper used by every CLI entry point that
+/// runs simulation or inference. Snapshot at the start of `cmd_*`, call
+/// `report_if_nonzero(start)` at the end. Prints a compact summary to
+/// stderr if any counter incremented during the run; silent otherwise.
+/// Does not write JSON — `eval_stats.json` was the audit's recommendation
+/// for fit runs with a results dir; left as future work for now.
+pub fn report_if_nonzero(start: &EvalStats) {
+    let end  = EvalStats::snapshot();
+    let diff = end.diff_since(start);
+    if diff.total() > 0 {
+        eprintln!();
+        eprint!("{}", diff);
+    }
+}

@@ -182,6 +182,7 @@ fn print_stage_status(name: &str, stage_dir: &str) {
 pub fn cmd_fit_run_v2(a: &crate::args::FitRunArgs) {
     use config_v2::{FitConfigV2, Stage, StartsFrom};
 
+    let _eval_stats_guard = crate::util::EvalStatsReportGuard::start();  // gh#audit-H5
     let fit_path              = a.config.to_string_lossy().into_owned();
     let base_seed             = a.seed.unwrap_or(1);
     let force                 = a.force;

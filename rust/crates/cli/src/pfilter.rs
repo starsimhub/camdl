@@ -23,6 +23,7 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 pub fn cmd_pfilter(a: &crate::args::PfilterArgs) {
+    let _eval_stats_guard = crate::util::EvalStatsReportGuard::start();  // gh#audit-H5
     let ir_path = a.model.to_string_lossy().into_owned();
     let data_path = a.data.to_string_lossy().into_owned();
     let n_particles = a.inference.particles;

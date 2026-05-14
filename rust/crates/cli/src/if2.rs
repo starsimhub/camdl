@@ -93,6 +93,7 @@ fn run_one_chain(
 }
 
 pub fn cmd_if2(a: &crate::args::If2Args) {
+    let _eval_stats_guard = crate::util::EvalStatsReportGuard::start();  // gh#audit-H5
     let ir_path = a.model.to_string_lossy().into_owned();
     let data_path = a.data.to_string_lossy().into_owned();
     let dt = a.inference.dt;

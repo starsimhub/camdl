@@ -366,6 +366,7 @@ const SEED_MIX_UNIFORM: u64 = 0xd4a5_b1ce;      // uniform draws RNG
 const SEED_MIX_PRIOR: u64  = 0x0014_b1ce;      // prior draws RNG
 
 fn run_simulate(a: &args::SimulateArgs) {
+    let _eval_stats_guard = crate::util::EvalStatsReportGuard::start();
     // ── Extract typed args into locals that match the rest of the function ─
     let ir_path          = a.model.to_string_lossy().into_owned();
     // Track explicit vs default flags for the backend-provenance guardrail.
