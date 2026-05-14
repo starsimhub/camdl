@@ -26,6 +26,18 @@ impl IntState {
         clamped
     }
 
+    /// gh#audit-C5 / S2. Detect a negative count and return the
+    /// (local_idx, value) pair without modifying state. Caller
+    /// converts to SimError::NegativeCount with the appropriate
+    /// cause discriminator. Used by tau_leap / gillespie / chain-
+    /// binomial to replace the previous "warn + silently clamp"
+    /// anti-pattern.
+    pub fn first_negative(&self) -> Option<(usize, i64)> {
+        self.counts.iter()
+            .enumerate()
+            .find_map(|(i, &v)| if v < 0 { Some((i, v)) } else { None })
+    }
+
     pub fn total(&self) -> i64 {
         self.counts.iter().sum()
     }

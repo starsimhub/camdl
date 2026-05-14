@@ -401,17 +401,32 @@ pub fn step_one(
         eprintln!();
     }
 
-    // Clamp non-negative (skip balance target — it may legitimately go negative
-    // when the constraint expression yields a negative value, signaling a broken
-    // model that the particle filter should penalize via bad trajectories).
-    if let Some(ref bal) = model.balance {
-        for (i, c) in counts.iter_mut().enumerate() {
-            if i == bal.local_int_idx { continue; }
-            if *c < 0 { *c = 0; }
-        }
-    } else {
-        for c in counts.iter_mut() {
-            if *c < 0 { *c = 0; }
+    // gh#audit-C5 / S2. Negative compartment count after the binomial
+    // split → BinomialOvershoot (rate·dt → 1, expected during inference
+    // exploration). Previously silently clamped to 0; now returns
+    // SimError::NegativeCount{BinomialOvershoot, ...}. Inference layers
+    // catch this via SimError::is_per_particle_recoverable() and convert
+    // to −Inf for the offending particle; forward sim halts. The balance
+    // target is exempted because its negativity is a separate signal
+    // (constraint-expression-yielded-negative) handled by the balance
+    // block at lines 432-446.
+    let bal_idx = model.balance.as_ref().map(|b| b.local_int_idx);
+    for (i, c) in counts.iter_mut().enumerate() {
+        if Some(i) == bal_idx { continue; }
+        if *c < 0 {
+            // Look up the compartment name by walking comp_index for
+            // the matching local int slot. This is O(n) but only
+            // executed in the error path.
+            let name = model.comp_index.iter()
+                .find(|(_, &g)| model.global_to_int.get(g).copied().flatten() == Some(i))
+                .map(|(n, _)| n.clone())
+                .unwrap_or_else(|| format!("(local-int-{i})"));
+            return Err(crate::error::SimError::NegativeCount {
+                compartment: name,
+                attempted_value: *c,
+                t: t + dt,
+                cause: crate::error::NegativeCountCause::BinomialOvershoot,
+            });
         }
     }
 

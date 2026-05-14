@@ -243,24 +243,26 @@ fn run_gillespie(
             int_s.counts[local] += delta;
         }
 
-        // Clamp non-negativity
-        let clamped = int_s.clamp_nonneg();
-        if clamped > 0 {
-            log::warn!("Gillespie: clamped {} negative integer compartments at t={}", clamped, t);
+        // gh#audit-C5 / S2. Gillespie's source compartment has at least
+        // one individual when a transition fires — by construction. So
+        // a negative count post-stoichiometry is a real model bug
+        // worth surfacing. Returns SimError::NegativeCount; inference
+        // layers catch and recover per-particle (though for Gillespie
+        // this should be a structural error, not particle-recoverable).
+        if let Some((local, val)) = int_s.first_negative() {
+            return Err(SimError::NegativeCount {
+                compartment: model.comp_index.iter()
+                    .find(|(_, &g)| model.global_to_int.get(g).copied().flatten() == Some(local))
+                    .map(|(n, _)| n.clone())
+                    .unwrap_or_else(|| format!("(local-int-{local})")),
+                attempted_value: val,
+                t,
+                cause: crate::error::NegativeCountCause::BinomialOvershoot,
+            });
         }
 
         // Track flow
         current_flows.add(fired_idx, 1);
-
-        // RM10 in 2026-04-19 engine review: the earlier assert fired
-        // only AFTER clamp, so it always passed — useless. This one
-        // fires when the pre-clamp state would have been negative,
-        // i.e. when the stoichiometry actually tried to drive a
-        // compartment below zero. In Gillespie that can legitimately
-        // never happen (the firing transition's source has at least
-        // one individual), so this is a real invariant check.
-        debug_assert_eq!(clamped, 0,
-            "Gillespie: stoichiometry drove state negative pre-clamp at t={}", t);
 
         // --- Sparse propensity update ---
         event_count += 1;

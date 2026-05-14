@@ -210,17 +210,22 @@ fn run_tau_leap(
             int_s.counts[local] += delta;
         }
 
-        let clamped = int_s.clamp_nonneg();
-        if clamped > 0 {
-            log::warn!("tau-leap: clamped {} negative compartments at t={}", clamped, t);
+        // gh#audit-C5 / S2. Negative count after stoichiometry → hard
+        // error (BinomialOvershoot cause). The multinomial invariant
+        // (RM10 / 2026-04-19 review) says this shouldn't happen on
+        // tau-leap; if it does, the user wants to know. Inference
+        // layers catch and recover per-particle.
+        if let Some((local, val)) = int_s.first_negative() {
+            return Err(crate::error::SimError::NegativeCount {
+                compartment: model.comp_index.iter()
+                    .find(|(_, &g)| model.global_to_int.get(g).copied().flatten() == Some(local))
+                    .map(|(n, _)| n.clone())
+                    .unwrap_or_else(|| format!("(local-int-{local})")),
+                attempted_value: val,
+                t,
+                cause: crate::error::NegativeCountCause::BinomialOvershoot,
+            });
         }
-        // RM10 in 2026-04-19 engine review: with the RM1 multinomial
-        // fix landed, tau-leap's competing-exits path shouldn't drive
-        // any source below zero. If it ever does, the Poisson
-        // approximation failed, which is a bug worth panicking on in
-        // debug builds.
-        debug_assert_eq!(clamped, 0,
-            "tau-leap: state went negative pre-clamp at t={} (multinomial invariant broken)", t);
 
         // RK4 for real compartments (integer state now at end-of-step)
         if n_real > 0 {

@@ -250,8 +250,19 @@ fn apply_intervention(
                 let n = resolved_val;
                 let count = n.round() as i64;
                 if count < 0 {
-                    log::warn!("event '{}' adding negative count ({}) to '{}'",
-                        iv.name, count, aa.compartment);
+                    // gh#audit-C5 / S2. Action::Add resolving to a
+                    // negative value is a config bug — the user wrote
+                    // a fit.toml or DSL expression that produces a
+                    // negative add. There's no inference scenario
+                    // where you "discover" that an intervention should
+                    // remove individuals via Add. Always hard error,
+                    // regardless of caller (forward-sim or inference).
+                    return Err(SimError::NegativeCount {
+                        compartment: aa.compartment.clone(),
+                        attempted_value: count,
+                        t: 0.0, // intervention t not in scope here; see fire_steps for actual time
+                        cause: crate::error::NegativeCountCause::InterventionAddNegative,
+                    });
                 }
                 let global = *model.comp_index.get(aa.compartment.as_str())
                     .ok_or_else(|| SimError::UnknownCompartment(aa.compartment.clone()))?;
