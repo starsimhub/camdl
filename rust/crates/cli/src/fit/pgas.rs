@@ -149,10 +149,32 @@ pub fn run_stage(
 
     let dt = config.if2_config.dt;
 
-    // Resolve priors: fit.toml override → model IR → Flat
-    let priors: Vec<Prior> = config.estimated_params.iter()
-        .map(|spec| super::runner::resolve_prior(&spec.name, estimate, &config.model).0)
+    // gh#audit-C4. PGAS produces Bayesian posteriors. Reporting a
+    // credible interval as "Bayesian" when the prior is silently
+    // improper-uniform (Prior::Flat) means we've reported a
+    // likelihood profile rescaled. For polio decision support, that
+    // is the worst-case communication failure (per the audit /
+    // proposal). Resolve priors with their source labels so we can
+    // refuse to run when any estimated parameter has no prior.
+    let resolved: Vec<(Prior, &'static str)> = config.estimated_params.iter()
+        .map(|spec| super::runner::resolve_prior(&spec.name, estimate, &config.model))
         .collect();
+    let missing_priors: Vec<&str> = config.estimated_params.iter()
+        .zip(&resolved)
+        .filter(|(_, (_, src))| *src == "flat (default)")
+        .map(|(spec, _)| spec.name.as_str())
+        .collect();
+    if !missing_priors.is_empty() {
+        return Err(format!(
+            "pgas refuses to run with implicit improper-uniform priors. \
+             The following estimated parameters have no prior: {}. \
+             Add a `[estimate.<name>.prior]` block in fit.toml or a `~` \
+             prior in the model. To opt into uniform priors explicitly, \
+             use `prior = {{ uniform = {{ lower = ..., upper = ... }} }}`.",
+            missing_priors.join(", ")
+        ));
+    }
+    let priors: Vec<Prior> = resolved.into_iter().map(|(p, _)| p).collect();
 
     // Active interventions + events — makes the scenario/enable default
     // visible before sampling, so a forgotten `scenario = "..."` doesn't
