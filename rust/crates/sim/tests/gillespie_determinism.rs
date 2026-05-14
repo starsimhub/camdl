@@ -19,7 +19,7 @@ fn load_model(name: &str) -> ir::Model {
     let path = golden_dir().join(format!("{}.ir.json", name));
     let contents = std::fs::read_to_string(&path)
         .unwrap_or_else(|_| panic!("could not read {}", name));
-    serde_json::from_str(&contents)
+    ir::from_str(&contents)
         .unwrap_or_else(|e| panic!("failed to parse {}: {}", name, e))
 }
 

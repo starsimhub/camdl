@@ -43,7 +43,7 @@ fn load_golden(name: &str) -> ir::Model {
         .join(format!("{}.ir.json", name));
     let contents = std::fs::read_to_string(&path)
         .unwrap_or_else(|_| panic!("could not read {:?}", path));
-    serde_json::from_str(&contents).unwrap()
+    ir::from_str(&contents).unwrap()
 }
 
 /// Set up the seir_erlang golden for a clean Erlang-decay measurement:

@@ -12,7 +12,7 @@ use sim::rng::StatefulRng;
 fn load_model(path: &str) -> ir::Model {
     let json = std::fs::read_to_string(path)
         .unwrap_or_else(|e| panic!("cannot read {}: {}", path, e));
-    serde_json::from_str(&json)
+    ir::from_str(&json)
         .unwrap_or_else(|e| panic!("cannot parse {}: {}", path, e))
 }
 

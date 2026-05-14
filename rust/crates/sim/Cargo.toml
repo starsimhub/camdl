@@ -7,6 +7,11 @@ edition = "2021"
 bincode = "1"
 bitflags = "2"
 ir = { path = "../ir" }
+# gh#audit-H2. libm provides high-precision erfc for the discretized-
+# normal CDF tail accuracy fix (replaces the A&S 7.1.26 rational
+# approximation with max abs error ~1.5e-7, which dominated tail
+# probabilities for AFP-style rare-event surveillance).
+libm = "0.2"
 log = "0.4"
 nlopt = { version = "0.8", optional = true }
 rand = "0.8"

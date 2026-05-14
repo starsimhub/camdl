@@ -22,7 +22,7 @@ fn load_golden(name: &str) -> ir::Model {
         .join(format!("{}.ir.json", name));
     let contents = std::fs::read_to_string(&path)
         .unwrap_or_else(|_| panic!("could not read {:?}", path));
-    serde_json::from_str(&contents).unwrap()
+    ir::from_str(&contents).unwrap()
 }
 
 /// Pure death process: I(t=10) should follow Binomial(100, exp(-0.1*10)) = Binomial(100, exp(-1)).

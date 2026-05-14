@@ -157,25 +157,20 @@ pub fn normal_logpdf(y: f64, mu: f64, sigma: f64) -> f64 {
     -0.5 * ((y - mu) / sigma).powi(2) - sigma.ln() - 0.5 * (2.0 * PI).ln()
 }
 
-/// Standard normal CDF via the error function.
+/// Standard normal CDF via libm::erfc (gh#audit-H2).
 ///
-/// Φ(x) = 0.5 × (1 + erf(x / √2))
+/// Φ(x) = 0.5 × erfc(-x / √2)
 ///
-/// Uses a rational approximation to erf (Abramowitz & Stegun 7.1.26,
-/// max error < 1.5e-7). No external dependencies.
+/// Uses libm::erfc (full f64 precision, ~ULP) instead of the prior
+/// Abramowitz & Stegun 7.1.26 rational approximation (max abs error
+/// ~1.5e-7). The A&S form was fine far from the tails but dominated
+/// the tail probability when both Φ values were within 1e-7 of 0 or 1
+/// — the regime where polio AFP surveillance and other rare-event
+/// inference operates. Particle weights at tail observations were
+/// being determined by 1e-7-scale noise rather than the model's
+/// predicted incidence.
 pub fn normal_cdf(x: f64) -> f64 {
-    // Φ(x) = 0.5 × (1 + erf(x / √2))
-    // erf approximation: Abramowitz & Stegun 7.1.26, max error < 1.5e-7
-    let z = x / std::f64::consts::SQRT_2;
-    let t = 1.0 / (1.0 + 0.3275911 * z.abs());
-    let poly = t * (0.254829592
-        + t * (-0.284496736
-        + t * (1.421413741
-        + t * (-1.453152027
-        + t * 1.061405429))));
-    let erf_abs = 1.0 - poly * (-z * z).exp();
-    let erf_val = if z >= 0.0 { erf_abs } else { -erf_abs };
-    0.5 * (1.0 + erf_val)
+    0.5 * libm::erfc(-x / std::f64::consts::SQRT_2)
 }
 
 /// Discretized Normal log-PMF (He et al. 2010 observation model).
@@ -214,10 +209,30 @@ pub fn discretized_normal_logpmf_tol(y: f64, mean: f64, variance: f64, tol: f64)
     let sd = variance.max(1e-30).sqrt();
     let y = y.round().max(0.0);
 
+    // gh#audit-H2. erfc-based interval that avoids subtracting two
+    // near-1 values when both endpoints are in the upper tail (or
+    // two near-0 values when both are in the lower tail). For
+    // z_lo = (y - 0.5 - μ) / σ and z_hi = (y + 0.5 - μ) / σ:
+    //   * if z_lo + z_hi ≥ 0 (upper tail): use 0.5*(erfc(-z_hi/√2) - erfc(-z_lo/√2))
+    //     equivalently 0.5*(erfc(a) - erfc(b)) with a < b in upper tail
+    //   * if z_lo + z_hi < 0 (lower tail): use 0.5*(erfc(z_lo/√2) - erfc(z_hi/√2))
+    // Either form subtracts two small numbers rather than two near-
+    // 1 values. The Φ_hi - Φ_lo formulation collapses to noise when
+    // both Φ values are within 1e-7 of 0 or 1 (audit example: AFP
+    // surveillance).
     let prob = if y > 0.0 {
-        let upper = normal_cdf((y + 0.5 - mean) / sd);
-        let lower = normal_cdf((y - 0.5 - mean) / sd);
-        (upper - lower).max(tol)
+        let z_lo = (y - 0.5 - mean) / sd;
+        let z_hi = (y + 0.5 - mean) / sd;
+        let p = if z_lo + z_hi >= 0.0 {
+            // Upper tail — both Φ values near 1. Use erfc(positive args).
+            0.5 * (libm::erfc(-z_hi / std::f64::consts::SQRT_2)
+                 - libm::erfc(-z_lo / std::f64::consts::SQRT_2))
+        } else {
+            // Lower tail — both Φ values near 0. Use erfc(negative args).
+            0.5 * (libm::erfc(z_lo / std::f64::consts::SQRT_2)
+                 - libm::erfc(z_hi / std::f64::consts::SQRT_2))
+        };
+        p.max(tol)
     } else {
         normal_cdf((0.5 - mean) / sd).max(tol)
     };

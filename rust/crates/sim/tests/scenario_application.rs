@@ -12,7 +12,7 @@ fn load_model(filename: &str) -> ir::Model {
     let path = ocaml_golden_dir().join(filename);
     let src = std::fs::read_to_string(&path)
         .unwrap_or_else(|e| panic!("cannot read {}: {}", path.display(), e));
-    serde_json::from_str(&src)
+    ir::from_str(&src)
         .unwrap_or_else(|e| panic!("IR parse error in {}: {}", filename, e))
 }
 
