@@ -805,6 +805,12 @@ impl CompiledModel {
         if !self.real_comp_indices.is_empty() {
             caps |= crate::Capabilities::REAL_COMPARTMENTS;
         }
+        if self.balance.is_some() {
+            // gh#audit-C3. balance{} is chain-binomial-only; declaring
+            // the requirement makes other backends fail dispatch
+            // rather than silently drop it.
+            caps |= crate::Capabilities::BALANCE;
+        }
         caps
     }
 

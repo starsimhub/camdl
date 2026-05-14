@@ -43,5 +43,15 @@ bitflags::bitflags! {
         const OVERDISPERSION    = 1 << 0;
         /// Real-valued compartments with explicit ODE equations (PDMP).
         const REAL_COMPARTMENTS = 1 << 1;
+        /// gh#audit-C3. `balance { ... }` compartment-residual fix.
+        /// Defined as "the residual compartment after all transitions
+        /// and events have fired"; the firing semantics differ across
+        /// backends (Gillespie has no substep, ODE conserves
+        /// algebraically), so balance is a chain-binomial-only
+        /// construct rather than a portable feature. Previously
+        /// silently dropped on tau_leap / gillespie / ode — a
+        /// model with `balance{}` produced a different trajectory on
+        /// each backend with no warning.
+        const BALANCE           = 1 << 2;
     }
 }
