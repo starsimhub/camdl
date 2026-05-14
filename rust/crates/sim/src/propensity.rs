@@ -1,6 +1,7 @@
 use crate::{
     compiled_model::{CompiledModel, CompiledTimeFuncKind},
-    error::SimError,
+    error::{SimError, CollapseKind},
+    eval_stats::allow_degenerate_rates,
     resolved_expr::eval_resolved,
     state::{IntState, RealState},
 };
@@ -90,44 +91,68 @@ pub fn eval_expr(expr: &Expr, ctx: &EvalCtx<'_>) -> Result<f64, SimError> {
         Expr::BinOp(w) => {
             let a = eval_expr(&w.bin_op.left, ctx)?;
             let b = eval_expr(&w.bin_op.right, ctx)?;
-            Ok(match w.bin_op.op {
-                BinOp::Add => a + b,
-                BinOp::Sub => a - b,
-                BinOp::Mul => a * b,
+            // gh#audit-C6 / S1. Numerical-collapse paths used to wrap
+            // a sentinel 0.0 in Ok(_) — the signature looked like
+            // proper error handling but the bodies silently masked
+            // failures. Now: increment the EvalStats counter, then
+            // either return a typed error (default) or keep the
+            // legacy 0.0 if `--allow-degenerate-rates` was set.
+            match w.bin_op.op {
+                BinOp::Add => Ok(a + b),
+                BinOp::Sub => Ok(a - b),
+                BinOp::Mul => Ok(a * b),
                 BinOp::Div => {
                     if b == 0.0 {
-                        log::debug!("eval_expr: Div by zero suppressed at t={}, returning 0.0", ctx.t);
-                        0.0
-                    } else {
-                        a / b
-                    }
+                        crate::eval_stats::inc_div_by_zero();
+                        if allow_degenerate_rates() { Ok(0.0) }
+                        else { Err(SimError::NumericalCollapse {
+                            kind: CollapseKind::DivByZero, t: ctx.t }) }
+                    } else { Ok(a / b) }
                 }
                 BinOp::Pow => {
                     let r = a.powf(b);
                     if r.is_nan() || r.is_infinite() {
-                        log::warn!("eval_expr: {}^{} = {} at t={}, returning 0.0", a, b, r, ctx.t);
-                        0.0
-                    } else { r }
+                        crate::eval_stats::inc_pow_nan_inf();
+                        if allow_degenerate_rates() { Ok(0.0) }
+                        else { Err(SimError::NumericalCollapse {
+                            kind: CollapseKind::PowNanInf, t: ctx.t }) }
+                    } else { Ok(r) }
                 }
-                BinOp::Mod => if b == 0.0 { 0.0 } else { a.rem_euclid(b) },
-                BinOp::Min => a.min(b),
-                BinOp::Max => a.max(b),
-                BinOp::Eq  => if a == b { 1.0 } else { 0.0 },
-                BinOp::Neq => if a != b { 1.0 } else { 0.0 },
-                BinOp::Lt  => if a <  b { 1.0 } else { 0.0 },
-                BinOp::Gt  => if a >  b { 1.0 } else { 0.0 },
-                BinOp::Le  => if a <= b { 1.0 } else { 0.0 },
-                BinOp::Ge  => if a >= b { 1.0 } else { 0.0 },
-            })
+                BinOp::Mod => {
+                    if b == 0.0 {
+                        crate::eval_stats::inc_div_by_zero();
+                        if allow_degenerate_rates() { Ok(0.0) }
+                        else { Err(SimError::NumericalCollapse {
+                            kind: CollapseKind::ModByZero, t: ctx.t }) }
+                    } else { Ok(a.rem_euclid(b)) }
+                }
+                BinOp::Min => Ok(a.min(b)),
+                BinOp::Max => Ok(a.max(b)),
+                BinOp::Eq  => Ok(if a == b { 1.0 } else { 0.0 }),
+                BinOp::Neq => Ok(if a != b { 1.0 } else { 0.0 }),
+                BinOp::Lt  => Ok(if a <  b { 1.0 } else { 0.0 }),
+                BinOp::Gt  => Ok(if a >  b { 1.0 } else { 0.0 }),
+                BinOp::Le  => Ok(if a <= b { 1.0 } else { 0.0 }),
+                BinOp::Ge  => Ok(if a >= b { 1.0 } else { 0.0 }),
+            }
         }
 
         Expr::UnOp(w) => {
             let a = eval_expr(&w.un_op.arg, ctx)?;
+            // Sqrt of negative is a domain error (no real result), not
+            // an IEEE-754 NaN cascade — flag it specifically so the
+            // user sees "Sqrt of negative" instead of a generic NaN.
+            if matches!(w.un_op.op, UnOp::Sqrt) && a < 0.0 {
+                crate::eval_stats::inc_unop_nan();
+                return if allow_degenerate_rates() { Ok(0.0) }
+                else { Err(SimError::NumericalCollapse {
+                    kind: CollapseKind::SqrtNegative, t: ctx.t }) };
+            }
             let result = match w.un_op.op {
                 UnOp::Neg   => -a,
                 UnOp::Exp   => a.exp(),
                 UnOp::Log   => if a > 0.0 { a.ln() } else { f64::NEG_INFINITY },
-                UnOp::Sqrt  => if a >= 0.0 { a.sqrt() } else { 0.0 },
+                UnOp::Sqrt  => a.sqrt(),  // a ≥ 0 guaranteed by check above
                 UnOp::Abs   => a.abs(),
                 UnOp::Floor => a.floor(),
                 UnOp::Ceil  => a.ceil(),
@@ -136,8 +161,10 @@ pub fn eval_expr(expr: &Expr, ctx: &EvalCtx<'_>) -> Result<f64, SimError> {
                 UnOp::Tanh  => a.tanh(),
             };
             if result.is_nan() {
-                log::warn!("eval_expr: NaN from {:?}({}) at t={}", w.un_op.op, a, ctx.t);
-                Ok(0.0)
+                crate::eval_stats::inc_unop_nan();
+                if allow_degenerate_rates() { Ok(0.0) }
+                else { Err(SimError::NumericalCollapse {
+                    kind: CollapseKind::UnOpNan, t: ctx.t }) }
             } else {
                 Ok(result)
             }
@@ -382,6 +409,18 @@ pub fn eval_propensities(
     out.clear();
     for (i, tr) in model.model.transitions.iter().enumerate() {
         let p = eval_resolved(&model.resolved.rates[i], &ctx);
+        // gh#audit-C6 / S1. eval_resolved returns NaN under hard-fail
+        // mode when a degenerate path was hit (Div-by-zero, Pow → NaN,
+        // Sqrt of negative, etc.); convert to typed error so the
+        // inference layer's per-particle recovery (PF: line 188+) can
+        // decide whether to kill the particle (recoverable) or
+        // propagate (forward-sim CLI).
+        if p.is_nan() {
+            return Err(SimError::NumericalCollapse {
+                kind: crate::error::CollapseKind::DivByZero, // generic; eval_stats counter has the specific kind
+                t,
+            });
+        }
         if p < 0.0 {
             return Err(SimError::NegativePropensity {
                 transition: tr.name.clone(),

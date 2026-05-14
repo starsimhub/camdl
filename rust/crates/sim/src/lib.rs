@@ -20,7 +20,7 @@ pub mod transition_diagnostics;
 pub mod inference;
 
 pub use config::{GillespieConfig, TauLeapConfig, ChainBinomialConfig, OdeConfig, SimConfig};
-pub use error::SimError;
+pub use error::{SimError, CollapseKind, NegativeCountCause};
 pub use state::{IntState, RealState, FlowVec, Snapshot, Trajectory};
 pub use compiled_model::CompiledModel;
 pub use simulate::Simulate;

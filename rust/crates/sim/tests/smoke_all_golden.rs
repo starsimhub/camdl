@@ -59,6 +59,15 @@ fn check_invariants(label: &str, traj: &sim::state::Trajectory) {
 
 #[test]
 fn test_smoke_all_ocaml_golden() {
+    // gh#audit-C6 / S1: existing goldens (e.g. sir_five_age) include
+    // rate expressions that divide by an empty stratum's population
+    // at t=0, relying on the legacy silent-zero. Smoke test asserts
+    // simulator round-trip / invariants, not numerical-collapse
+    // semantics — opt into legacy mode here. Models that want the
+    // new strict-mode behaviour should add explicit Cond guards
+    // (e.g. `cond(N > 0, I/N, 0)`); the audit's S2 cleanup will
+    // sweep production goldens for these patterns over time.
+    sim::eval_stats::set_allow_degenerate_rates(true);
     let models = discover_models();
     assert!(!models.is_empty(), "no *.ir.json files found in ocaml/golden/");
 

@@ -367,6 +367,7 @@ const SEED_MIX_PRIOR: u64  = 0x0014_b1ce;      // prior draws RNG
 
 fn run_simulate(a: &args::SimulateArgs) {
     let _eval_stats_guard = crate::util::EvalStatsReportGuard::start();
+    sim::eval_stats::set_allow_degenerate_rates(a.allow_degenerate_rates);  // gh#audit-C6
     // ── Extract typed args into locals that match the rest of the function ─
     let ir_path          = a.model.to_string_lossy().into_owned();
     // Track explicit vs default flags for the backend-provenance guardrail.

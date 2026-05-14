@@ -63,6 +63,12 @@ fn test_density_matches_step_one_sir() {
 /// should be finite at its own params.
 #[test]
 fn test_density_matches_step_one_sir_demography() {
+    // gh#audit-C6 / S1: model contains rate expressions with stratum-
+    // empty divisors (legacy silent-zero); test asserts density-vs-
+    // step_one parity, not numerical-collapse semantics — keep
+    // legacy mode here. expr_eval.rs::test_*_errors_by_default
+    // covers the strict-mode contract.
+    sim::eval_stats::set_allow_degenerate_rates(true);
     let model = load_model("../../../ocaml/golden/sir_demography.ir.json");
     let mut model = model;
     for p in &mut model.parameters {
@@ -136,6 +142,10 @@ fn test_density_matches_step_one_two_patch() {
 /// This is the exact pattern that caused -inf when testing camdl-vignettes.
 #[test]
 fn test_density_matches_step_one_polio_spatial_5() {
+    // gh#audit-C6 / S1: spatial model with empty patches; legacy
+    // silent-zero needed for parity assertion. See companion comment
+    // on test_density_matches_step_one_sir_demography.
+    sim::eval_stats::set_allow_degenerate_rates(true);
     let path = "../../../ocaml/golden/polio_spatial_5.ir.json";
     let model = match std::fs::read_to_string(path) {
         Ok(json) => match serde_json::from_str::<ir::Model>(&json) {

@@ -256,6 +256,15 @@ pub fn eval_resolved(expr: &ResolvedExpr, ctx: &EvalCtx<'_>) -> f64 {
         ResolvedExpr::BinOp { op, left, right } => {
             let a = eval_resolved(left, ctx);
             let b = eval_resolved(right, ctx);
+            // gh#audit-C6 / S1. eval_resolved is infallible by
+            // contract — it returns f64. To mirror eval_expr's typed
+            // error behaviour without breaking the signature, the
+            // collapse paths return NaN under hard-fail mode (default);
+            // eval_propensities detects NaN downstream and converts
+            // to SimError::NumericalCollapse. Under
+            // --allow-degenerate-rates the legacy 0.0 sentinel is
+            // returned so existing models work as before.
+            let allow = crate::eval_stats::allow_degenerate_rates();
             match op {
                 BinOp::Add => a + b,
                 BinOp::Sub => a - b,
@@ -263,17 +272,22 @@ pub fn eval_resolved(expr: &ResolvedExpr, ctx: &EvalCtx<'_>) -> f64 {
                 BinOp::Div => {
                     if b == 0.0 {
                         crate::eval_stats::inc_div_by_zero();
-                        0.0
+                        if allow { 0.0 } else { f64::NAN }
                     } else { a / b }
                 }
                 BinOp::Pow => {
                     let r = a.powf(b);
                     if r.is_nan() || r.is_infinite() {
                         crate::eval_stats::inc_pow_nan_inf();
-                        0.0
+                        if allow { 0.0 } else { f64::NAN }
                     } else { r }
                 }
-                BinOp::Mod => if b == 0.0 { 0.0 } else { a.rem_euclid(b) },
+                BinOp::Mod => {
+                    if b == 0.0 {
+                        crate::eval_stats::inc_div_by_zero();
+                        if allow { 0.0 } else { f64::NAN }
+                    } else { a.rem_euclid(b) }
+                }
                 BinOp::Min => a.min(b),
                 BinOp::Max => a.max(b),
                 BinOp::Eq  => if a == b { 1.0 } else { 0.0 },
@@ -287,11 +301,12 @@ pub fn eval_resolved(expr: &ResolvedExpr, ctx: &EvalCtx<'_>) -> f64 {
 
         ResolvedExpr::UnOp { op, arg } => {
             let a = eval_resolved(arg, ctx);
+            let allow = crate::eval_stats::allow_degenerate_rates();
             let result = match op {
                 UnOp::Neg   => -a,
                 UnOp::Exp   => a.exp(),
                 UnOp::Log   => if a > 0.0 { a.ln() } else { f64::NEG_INFINITY },
-                UnOp::Sqrt  => if a >= 0.0 { a.sqrt() } else { 0.0 },
+                UnOp::Sqrt  => if a >= 0.0 { a.sqrt() } else if allow { 0.0 } else { f64::NAN },
                 UnOp::Abs   => a.abs(),
                 UnOp::Floor => a.floor(),
                 UnOp::Ceil  => a.ceil(),
@@ -301,7 +316,7 @@ pub fn eval_resolved(expr: &ResolvedExpr, ctx: &EvalCtx<'_>) -> f64 {
             };
             if result.is_nan() {
                 crate::eval_stats::inc_unop_nan();
-                0.0
+                if allow { 0.0 } else { f64::NAN }
             } else { result }
         }
 

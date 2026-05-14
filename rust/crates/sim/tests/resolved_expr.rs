@@ -86,13 +86,30 @@ fn resolve_ctx_from(model: &CompiledModel) -> ResolveCtx<'_> {
     }
 }
 
+/// gh#audit-C6 / S1: ALLOW_DEGENERATE_RATES is process-global atomic
+/// state. Tests that toggle it must serialize via this mutex so a
+/// parallel test doesn't see the flag in the wrong state mid-eval.
+static EVAL_FLAG_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 /// Assert eval_resolved(resolve(expr)) == eval_expr(expr) for given context.
+///
+/// Enables --allow-degenerate-rates so the degenerate-arithmetic test
+/// cases (div-by-zero etc.) take the legacy silent-zero path on both
+/// sides. Without the flag, eval_expr returns
+/// SimError::NumericalCollapse and eval_resolved returns NaN — they
+/// agree on degenerate-handling semantics, but the comparison shape
+/// (Result<f64> vs f64) makes equivalence assertion awkward. The
+/// comparison test isn't the right place to assert hard-fail behavior;
+/// expr_eval.rs::test_*_errors_by_default carries that load.
 fn assert_resolved_matches(expr: &Expr, model: &CompiledModel, int_s: &IntState, real_s: &RealState, params: &[f64], t: f64) {
+    let _guard = EVAL_FLAG_LOCK.lock().unwrap();
+    sim::eval_stats::set_allow_degenerate_rates(true);
     let rctx = resolve_ctx_from(model);
     let resolved = resolve_expr(expr, &rctx).expect("resolve_expr failed");
     let ctx = EvalCtx { model, int_s, real_s, params, t, dt: 1.0, projected: None, int_float_override: None };
     let expected = eval_expr(expr, &ctx).expect("eval_expr failed");
     let actual = eval_resolved(&resolved, &ctx);
+    sim::eval_stats::set_allow_degenerate_rates(false);
     assert!(
         (expected - actual).abs() < 1e-12,
         "mismatch: eval_expr={}, eval_resolved={}", expected, actual

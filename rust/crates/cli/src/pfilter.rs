@@ -24,6 +24,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 pub fn cmd_pfilter(a: &crate::args::PfilterArgs) {
     let _eval_stats_guard = crate::util::EvalStatsReportGuard::start();  // gh#audit-H5
+    sim::eval_stats::set_allow_degenerate_rates(a.inference.allow_degenerate_rates);  // gh#audit-C6
     let ir_path = a.model.to_string_lossy().into_owned();
     let data_path = a.data.to_string_lossy().into_owned();
     let n_particles = a.inference.particles;

@@ -77,6 +77,17 @@ pub struct InferenceCore {
     /// Rayon thread count (0 = all available cores)
     #[arg(long, default_value_t = 0, env = "CAMDL_PARALLEL")]
     pub parallel: usize,
+
+    /// gh#audit-C6 / S1. Restore the legacy silent-zero behaviour for
+    /// numerical-collapse paths (Div-by-zero, Pow → NaN, Sqrt of
+    /// negative, etc.) in rate evaluation. Default: hard error
+    /// (SimError::NumericalCollapse). Use only when a model
+    /// legitimately needs the legacy behaviour, e.g. spatial models
+    /// where a stratum-empty divisor is explicitly meant to produce
+    /// zero rate. Counters under EvalStats still increment under
+    /// either mode so you can see how often the path fired.
+    #[arg(long, default_value_t = false)]
+    pub allow_degenerate_rates: bool,
 }
 
 /// `--obs NAME` + `--flow NAME`
@@ -118,6 +129,13 @@ Examples:
 pub struct SimulateArgs {
     /// IR JSON or .camdl model file
     pub model: PathBuf,
+
+    /// gh#audit-C6 / S1. See InferenceCore.allow_degenerate_rates.
+    /// Forward sim is the most likely user of this flag — if a model
+    /// has a known empty-stratum-divisor and the user wants to keep
+    /// the legacy zero-rate behaviour rather than fix the model.
+    #[arg(long, default_value_t = false)]
+    pub allow_degenerate_rates: bool,
 
     #[command(flatten)]
     pub model_overrides: ModelOverrides,
@@ -290,6 +308,15 @@ pub struct FitRunArgs {
     /// RNG seed (default: 1)
     #[arg(long)]
     pub seed: Option<u64>,
+
+    /// gh#audit-C6 / S1. See InferenceCore.allow_degenerate_rates.
+    /// Inference runs that explore parameter regions where rate
+    /// expressions hit numerical-collapse paths can use this to keep
+    /// running (per-particle recovery in PF still kills NaN-rate
+    /// particles even under hard-fail mode, so the flag is rarely
+    /// needed for fits — present mainly for forward-sim parity).
+    #[arg(long, default_value_t = false)]
+    pub allow_degenerate_rates: bool,
 
     /// Re-run and overwrite stale cache
     #[arg(long)]

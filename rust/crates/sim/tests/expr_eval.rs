@@ -251,8 +251,12 @@ fn test_binop_div() {
 }
 
 #[test]
-fn test_div_by_zero_returns_zero() {
-    // Division by zero is guarded: 0/0 = 0 (matches Cond usage pattern in propensity expressions)
+fn test_div_by_zero_errors_by_default() {
+    // gh#audit-C6 / S1: division by zero used to silently return 0.0
+    // (wrapped in Ok(_)) — masking malformed rate expressions. Now
+    // it returns SimError::NumericalCollapse{DivByZero} by default;
+    // the legacy Ok(0.0) is only opt-in via --allow-degenerate-rates.
+    use sim::{CollapseKind, SimError};
     let model = CompiledModel::new(minimal_model(vec![int_comp("S")], vec![])).unwrap();
     let int_s = IntState::new(1);
     let real_s = RealState::new(0);
@@ -264,8 +268,16 @@ fn test_div_by_zero_returns_zero() {
         },
     });
     let ctx = EvalCtx { model: &model, int_s: &int_s, real_s: &real_s, params: &[], t: 0.0, dt: 1.0, projected: None, int_float_override: None };
-    let result = eval_expr(&expr, &ctx).unwrap();
-    assert_eq!(result, 0.0);
+    sim::eval_stats::set_allow_degenerate_rates(false);
+    let err = eval_expr(&expr, &ctx).unwrap_err();
+    assert!(matches!(err, SimError::NumericalCollapse { kind: CollapseKind::DivByZero, .. }),
+        "Div by zero must produce NumericalCollapse{{DivByZero}}, got {:?}", err);
+
+    // Legacy silent-zero behaviour is still available under opt-in.
+    sim::eval_stats::set_allow_degenerate_rates(true);
+    let r = eval_expr(&expr, &ctx).unwrap();
+    assert_eq!(r, 0.0, "with --allow-degenerate-rates, div-by-zero returns 0.0");
+    sim::eval_stats::set_allow_degenerate_rates(false); // reset for other tests
 }
 
 #[test]
@@ -513,7 +525,9 @@ fn test_log_negative_returns_neg_inf() {
 }
 
 #[test]
-fn test_sqrt_negative_returns_zero() {
+fn test_sqrt_negative_errors_by_default() {
+    // gh#audit-C6 / S1.
+    use sim::{CollapseKind, SimError};
     let model = CompiledModel::new(minimal_model(vec![int_comp("S")], vec![])).unwrap();
     let int_s = IntState::new(1);
     let real_s = RealState::new(0);
@@ -521,12 +535,19 @@ fn test_sqrt_negative_returns_zero() {
         un_op: UnOpExpr { op: UnOp::Sqrt, arg: Box::new(Expr::Const(ConstExpr { value: -4.0 })) },
     });
     let ctx = EvalCtx { model: &model, int_s: &int_s, real_s: &real_s, params: &[], t: 0.0, dt: 1.0, projected: None, int_float_override: None };
-    let result = eval_expr(&expr, &ctx).unwrap();
-    assert_eq!(result, 0.0, "sqrt(-4) should be guarded to 0, got {}", result);
+    sim::eval_stats::set_allow_degenerate_rates(false);
+    let err = eval_expr(&expr, &ctx).unwrap_err();
+    assert!(matches!(err, SimError::NumericalCollapse { kind: CollapseKind::SqrtNegative, .. }),
+        "Sqrt of negative must produce NumericalCollapse{{SqrtNegative}}, got {:?}", err);
+    sim::eval_stats::set_allow_degenerate_rates(true);
+    assert_eq!(eval_expr(&expr, &ctx).unwrap(), 0.0);
+    sim::eval_stats::set_allow_degenerate_rates(false);
 }
 
 #[test]
-fn test_pow_negative_base_fractional_exp_returns_zero() {
+fn test_pow_negative_base_fractional_exp_errors_by_default() {
+    // gh#audit-C6 / S1.
+    use sim::{CollapseKind, SimError};
     let model = CompiledModel::new(minimal_model(vec![int_comp("S")], vec![])).unwrap();
     let int_s = IntState::new(1);
     let real_s = RealState::new(0);
@@ -538,12 +559,19 @@ fn test_pow_negative_base_fractional_exp_returns_zero() {
         },
     });
     let ctx = EvalCtx { model: &model, int_s: &int_s, real_s: &real_s, params: &[], t: 0.0, dt: 1.0, projected: None, int_float_override: None };
-    let result = eval_expr(&expr, &ctx).unwrap();
-    assert_eq!(result, 0.0, "(-2)^0.5 should be guarded to 0, got {}", result);
+    sim::eval_stats::set_allow_degenerate_rates(false);
+    let err = eval_expr(&expr, &ctx).unwrap_err();
+    assert!(matches!(err, SimError::NumericalCollapse { kind: CollapseKind::PowNanInf, .. }),
+        "(-2)^0.5 must produce NumericalCollapse{{PowNanInf}}, got {:?}", err);
+    sim::eval_stats::set_allow_degenerate_rates(true);
+    assert_eq!(eval_expr(&expr, &ctx).unwrap(), 0.0);
+    sim::eval_stats::set_allow_degenerate_rates(false);
 }
 
 #[test]
-fn test_pow_zero_to_negative_returns_zero() {
+fn test_pow_zero_to_negative_errors_by_default() {
+    // gh#audit-C6 / S1.
+    use sim::{CollapseKind, SimError};
     let model = CompiledModel::new(minimal_model(vec![int_comp("S")], vec![])).unwrap();
     let int_s = IntState::new(1);
     let real_s = RealState::new(0);
@@ -555,6 +583,11 @@ fn test_pow_zero_to_negative_returns_zero() {
         },
     });
     let ctx = EvalCtx { model: &model, int_s: &int_s, real_s: &real_s, params: &[], t: 0.0, dt: 1.0, projected: None, int_float_override: None };
-    let result = eval_expr(&expr, &ctx).unwrap();
-    assert_eq!(result, 0.0, "0^(-1) should be guarded to 0, got {}", result);
+    sim::eval_stats::set_allow_degenerate_rates(false);
+    let err = eval_expr(&expr, &ctx).unwrap_err();
+    assert!(matches!(err, SimError::NumericalCollapse { kind: CollapseKind::PowNanInf, .. }),
+        "0^(-1) must produce NumericalCollapse{{PowNanInf}}, got {:?}", err);
+    sim::eval_stats::set_allow_degenerate_rates(true);
+    assert_eq!(eval_expr(&expr, &ctx).unwrap(), 0.0);
+    sim::eval_stats::set_allow_degenerate_rates(false);
 }

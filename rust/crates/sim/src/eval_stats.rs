@@ -11,13 +11,33 @@
 //! Counters are process-global. Callers that care about per-sim
 //! isolation should snapshot at start and diff at end.
 
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 pub static DIV_BY_ZERO:       AtomicU64 = AtomicU64::new(0);
 pub static POW_NAN_INF:       AtomicU64 = AtomicU64::new(0);
 pub static UNOP_NAN:          AtomicU64 = AtomicU64::new(0);
 pub static NEG_BINOMIAL_POIS: AtomicU64 = AtomicU64::new(0);
 pub static BINOMIAL_FALLBACK: AtomicU64 = AtomicU64::new(0);
+
+/// gh#audit-C6 / S1. Process-global opt-in for the legacy silent-zero
+/// behaviour in eval_expr. Default false → numerical-collapse paths
+/// produce SimError::NumericalCollapse; the CLI sets this true if
+/// `--allow-degenerate-rates` is present. Counters above still
+/// increment under either mode so the user sees how often the
+/// fallback fired. Process-global mirrors the surrounding atomic-
+/// counter pattern; tests that exercise both modes must save / restore
+/// or run serially.
+pub static ALLOW_DEGENERATE_RATES: AtomicBool = AtomicBool::new(false);
+
+#[inline]
+pub fn allow_degenerate_rates() -> bool {
+    ALLOW_DEGENERATE_RATES.load(Ordering::Relaxed)
+}
+
+#[inline]
+pub fn set_allow_degenerate_rates(allow: bool) {
+    ALLOW_DEGENERATE_RATES.store(allow, Ordering::Relaxed);
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct EvalStats {

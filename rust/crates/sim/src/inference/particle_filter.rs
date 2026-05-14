@@ -173,25 +173,45 @@ pub fn bootstrap_filter<P: ProcessModel<State = ParticleState>>(
         Vec::with_capacity(n_obs)
     } else { Vec::new() };
 
+    // gh#audit-C5 / C6. Particles that hit a per-particle-recoverable
+    // SimError (NumericalCollapse, NegativeCount{BinomialOvershoot})
+    // get marked dead; their log-weight is set to −Inf so resampling
+    // kills them. Hard errors (UnknownCompartment, config bugs, etc.)
+    // still propagate immediately — they are not particle-specific.
+    let mut particle_dead: Vec<bool> = vec![false; n_particles];
+
     for obs_idx in 0..n_obs {
         let obs_time = obs_model.obs_time(obs_idx);
 
         // Propagate all particles from t to obs_time.
         let t_start_interval = t;
-        let errors: Vec<Result<(), SimError>> = swarm.states.par_iter_mut()
+        let outcomes: Vec<Result<bool, SimError>> = swarm.states.par_iter_mut()
             .zip(rngs.par_iter_mut())
             .zip(scratches.par_iter_mut())
-            .map(|((state, rng), scratch)| {
+            .zip(particle_dead.par_iter())
+            .map(|(((state, rng), scratch), &dead)| {
+                if dead { return Ok(true); }  // already dead; skip
                 let mut t_local = t_start_interval;
                 while t_local < obs_time - 1e-10 {
                     let step_dt = dt.min(obs_time - t_local);
-                    process.step(state, params, t_local, step_dt, rng, scratch)?;
+                    match process.step(state, params, t_local, step_dt, rng, scratch) {
+                        Ok(()) => {}
+                        Err(e) if e.is_per_particle_recoverable() => {
+                            // Mark dead, advance t_local to break out
+                            // — the caller folds this into the dead vec
+                            // and the outer loop sets log_weight = −∞.
+                            return Ok(true);
+                        }
+                        Err(e) => return Err(e),
+                    }
                     t_local += step_dt;
                 }
-                Ok(())
+                Ok(false)
             })
             .collect();
-        for r in errors { r?; }
+        for (i, r) in outcomes.into_iter().enumerate() {
+            if r? { particle_dead[i] = true; }
+        }
         while t < obs_time - 1e-10 { t += dt.min(obs_time - t); }
 
         // Prediction diagnostics
@@ -214,9 +234,14 @@ pub fn bootstrap_filter<P: ProcessModel<State = ParticleState>>(
             });
         }
 
-        // Compute log-weights via observation model
+        // Compute log-weights via observation model. Dead particles
+        // (gh#audit-C5/C6) get −Inf so resampling discards them.
         for (i, state) in swarm.states.iter().enumerate() {
-            swarm.log_weights[i] = obs_model.log_likelihood(state, obs_idx, params);
+            swarm.log_weights[i] = if particle_dead[i] {
+                f64::NEG_INFINITY
+            } else {
+                obs_model.log_likelihood(state, obs_idx, params)
+            };
         }
 
         // Record prequential ingredients BEFORE resampling. Particles
@@ -291,6 +316,13 @@ pub fn bootstrap_filter<P: ProcessModel<State = ParticleState>>(
             states_buf[i].flow_accumulators.copy_from_slice(&swarm.states[src].flow_accumulators);
         }
         std::mem::swap(&mut swarm.states, &mut states_buf);
+
+        // gh#audit-C5/C6: clear particle_dead after resampling. Any
+        // particle that survived the systematic resample had finite
+        // weight, so it can't be dead. Clearing is correct because
+        // resampling shuffles particles by index, invalidating the
+        // pre-resample dead vector anyway.
+        for d in &mut particle_dead { *d = false; }
 
         // Record the resampling indices as the ancestor map for the
         // NEXT step. Not needed after the last observation (no step
