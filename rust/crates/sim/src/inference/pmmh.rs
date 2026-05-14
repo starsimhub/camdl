@@ -300,6 +300,7 @@ pub fn run_pmmh(
     let mut map_loglik: f64;
     let mut adaptive: Option<AdaptiveProposal>;
     let mut n_accepted: usize;
+    let mut n_accepted_post_burn: usize = 0;  // gh#audit-M4
     let mut rng: StatefulRng;
 
     if let Some(state) = resume_from {
@@ -466,6 +467,13 @@ pub fn run_pmmh(
                 current_randoms = proposed_randoms;
             }
             n_accepted += 1;
+            // gh#audit-M4. Track post-burn-in acceptances separately
+            // so the reported acceptance_rate excludes the warm-up
+            // exploration phase. Bare n_accepted / n_steps reports
+            // the wrong rate when burn_in is large.
+            if step >= config.burn_in {
+                n_accepted_post_burn += 1;
+            }
 
             let log_posterior = current_ll + current_log_prior;
             if log_posterior > map_log_posterior {
@@ -497,9 +505,14 @@ pub fn run_pmmh(
         }
     }
 
-    let total_steps = config.n_steps - start_step;
-    let acceptance_rate = if total_steps > 0 {
-        n_accepted as f64 / config.n_steps as f64
+    // gh#audit-M4. acceptance_rate now divides by post-burn-in step
+    // count so it reports the rate over the *sampling* phase, not
+    // the exploration phase. The struct field name is unchanged so
+    // downstream readers don't need to migrate, but the semantics
+    // are now Stan-canonical (post-warmup acceptance).
+    let post_burn_steps = config.n_steps.saturating_sub(config.burn_in);
+    let acceptance_rate = if post_burn_steps > 0 {
+        n_accepted_post_burn as f64 / post_burn_steps as f64
     } else {
         0.0
     };

@@ -249,15 +249,14 @@ pub fn run_if2_with_progress<P: ProcessModel<State = ParticleState>>(
     // Per-step factor: c = cooling_fraction ^ (2 / (target_iters × n_obs))
     // The "2" makes the fraction apply at the midpoint, not the endpoint.
     //
-    // IM5 in 2026-04-19 inference review: each iteration actually
-    // consumes (1 + n_obs) `global_step` ticks — one for the t=0
-    // perturbation and one per observation. The formula approximates
-    // this by `n_obs`, which is tight for n_obs ≳ 10 and loose for
-    // small n_obs. Rule of thumb: for n_obs = 1 the effective cooling
-    // is doubled, for n_obs = 10 it is ~10% stronger than advertised.
-    // If this matters for a particular fit, bump `cooling_target_iters`
-    // accordingly.
-    let total_target_steps = config.cooling_target_iters as f64 * n_obs as f64;
+    // gh#audit-M2. Each IF2 iteration consumes (1 + n_obs) global_step
+    // ticks — one for the t=0 perturbation and one per observation.
+    // The previous formula `n_obs` made cooling fire 2x as fast for
+    // n_obs = 1 and ~10% stronger than advertised for n_obs = 10.
+    // The (1 + n_obs) form matches the actual tick count exactly.
+    // (IM5 in the 2026-04-19 inference review noted this but didn't
+    // fix it; landing here as part of the audit M2 cleanup.)
+    let total_target_steps = config.cooling_target_iters as f64 * (1 + n_obs) as f64;
     let per_step_cooling = config.cooling_fraction.powf(2.0 / total_target_steps);
 
     let mut iterations = Vec::with_capacity(config.n_iterations);
