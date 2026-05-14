@@ -261,6 +261,13 @@ pub struct BatchArgs {
     /// Re-run even if output exists
     #[arg(long)]
     pub force: bool,
+
+    /// gh#audit-C6. See InferenceCore.allow_degenerate_rates. Batch
+    /// runs that orchestrate many simulate-style invocations need
+    /// the same opt-in for legacy silent-zero behaviour on rate
+    /// collapse paths.
+    #[arg(long, default_value_t = false)]
+    pub allow_degenerate_rates: bool,
 }
 
 /// `camdl batch status FILE`

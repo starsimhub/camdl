@@ -27,47 +27,53 @@ fn skip_if_missing_binary() -> Option<PathBuf> {
 /// 50% of S → V at t=10. No transitions → S never decays via natural
 /// dynamics, so any change is observable as a pure state jump.
 fn mixed_model_ir() -> String {
+    // gh#audit-C8. Wrap in IR envelope so the binary's
+    // envelope-aware deserializer (ir::from_str) accepts it.
     r#"{
-      "name": "mixed", "version": "0.3", "time_unit": "days",
-      "description": null, "origin": null,
-      "compartments": [
-        { "name": "S", "kind": "integer" },
-        { "name": "V", "kind": "integer" }
-      ],
-      "transitions": [],
-      "ode_equations": [], "time_functions": [], "tables": [],
-      "observations": [],
-      "parameters": [],
-      "initial_conditions": { "explicit": { "S": 1000.0, "V": 0.0 } },
-      "output": {
-        "times": { "regular": { "start": 0.0, "step": 1.0, "end": 20.0 } },
-        "format": "tsv", "trajectory": true, "observations": false
-      },
-      "simulation": {
-        "t_start": 0.0, "t_end": 20.0,
-        "time_semantics": "continuous", "dt": 1.0, "rng_seed": null
-      },
-      "scenarios": [
-        { "name": "with_sia", "label": "with sia",
-          "params": {}, "scale": {}, "enable": ["sia"], "disable": [], "compose": [] }
-      ],
-      "interventions": [
-        {
-          "name": "bump",
-          "schedule": { "at_times": [5.0] },
-          "actions": [ { "add": { "compartment": "S", "count": { "const": 100.0 } } } ],
-          "always_active": true
+      "ir_version": "0.4",
+      "validated_by": "test-fixture",
+      "model": {
+        "name": "mixed", "version": "0.3", "time_unit": "days",
+        "description": null, "origin": null,
+        "compartments": [
+          { "name": "S", "kind": "integer" },
+          { "name": "V", "kind": "integer" }
+        ],
+        "transitions": [],
+        "ode_equations": [], "time_functions": [], "tables": [],
+        "observations": [],
+        "parameters": [],
+        "initial_conditions": { "explicit": { "S": 1000.0, "V": 0.0 } },
+        "output": {
+          "times": { "regular": { "start": 0.0, "step": 1.0, "end": 20.0 } },
+          "format": "tsv", "trajectory": true, "observations": false
         },
-        {
-          "name": "sia",
-          "schedule": { "at_times": [10.0] },
-          "actions": [ { "fraction_transfer": {
-            "src": "S", "dst": "V", "fraction": { "const": 0.5 }
-          } } ],
-          "always_active": false
-        }
-      ],
-      "model_structure": null, "balance": null
+        "simulation": {
+          "t_start": 0.0, "t_end": 20.0,
+          "time_semantics": "continuous", "dt": 1.0, "rng_seed": null
+        },
+        "scenarios": [
+          { "name": "with_sia", "label": "with sia",
+            "params": {}, "scale": {}, "enable": ["sia"], "disable": [], "compose": [] }
+        ],
+        "interventions": [
+          {
+            "name": "bump",
+            "schedule": { "at_times": [5.0] },
+            "actions": [ { "add": { "compartment": "S", "count": { "const": 100.0 } } } ],
+            "always_active": true
+          },
+          {
+            "name": "sia",
+            "schedule": { "at_times": [10.0] },
+            "actions": [ { "fraction_transfer": {
+              "src": "S", "dst": "V", "fraction": { "const": 0.5 }
+            } } ],
+            "always_active": false
+          }
+        ],
+        "model_structure": null, "balance": null
+      }
     }"#.to_string()
 }
 

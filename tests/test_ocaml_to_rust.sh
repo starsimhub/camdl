@@ -26,7 +26,11 @@ for camdl in "$GOLDEN"/*.camdl; do
     else
         first_scenario=$(python3 -c "
 import json, sys
-m = json.load(open('$tmpir'))
+# gh#audit-C8: IR is now wrapped in { ir_version, validated_by, model }.
+# Descend into envelope.model when present; fall back to top-level
+# for any future bare-Model JSON.
+env = json.load(open('$tmpir'))
+m = env.get('model', env)
 s = m.get('scenarios', [])
 print(s[0]['name'] if s else '')
 " 2>/dev/null || echo "")
@@ -40,8 +44,17 @@ print(s[0]['name'] if s else '')
     ok=1
     for backend in gillespie tau_leap chain_binomial; do
         tmperr=$(mktemp /tmp/camdl_err_XXXXXX)
+        # gh#audit-C6: --allow-degenerate-rates restores the legacy
+        # silent-zero on rate-eval collapse. The integration test
+        # asserts backend dispatch + IR round-trip work for every
+        # golden — not that every golden has explicit Cond guards
+        # against empty-stratum dividers (sir_five_age in particular
+        # legitimately produces 0/0 in the inner age sum at t=0).
+        # Keep legacy mode here; the strict-mode contract is asserted
+        # by sim/tests/expr_eval.rs::test_*_errors_by_default.
         # shellcheck disable=SC2086
-        if ! "$CAMDL" simulate "$tmpir" $params_flag --backend "$backend" --seed 42 > /dev/null 2>"$tmperr"; then
+        if ! "$CAMDL" simulate "$tmpir" $params_flag --backend "$backend" \
+                --seed 42 --allow-degenerate-rates > /dev/null 2>"$tmperr"; then
             if grep -q "requires capabilities" "$tmperr"; then
                 # Expected: model needs features this backend doesn't support
                 rm -f "$tmperr"
@@ -79,7 +92,11 @@ run_batch_test() {
     trap "rm -rf '$outdir'" RETURN
 
     # run
-    if ! "$CAMDL" batch run "$fixture" --output-dir "$outdir" --parallel 2 > /dev/null; then
+    # gh#audit-C6: --allow-degenerate-rates for the same reason as the
+    # per-backend simulate loop above (sir_five_age has empty-stratum
+    # divisors that the new strict-mode would reject).
+    if ! "$CAMDL" batch run "$fixture" --output-dir "$outdir" --parallel 2 \
+            --allow-degenerate-rates > /dev/null; then
         echo "FAIL [batch run] $name"; FAIL=$((FAIL+1)); return
     fi
 
@@ -92,7 +109,8 @@ run_batch_test() {
     fi
 
     # resume is a no-op (re-run without --force, check it succeeds)
-    if ! "$CAMDL" batch run "$fixture" --output-dir "$outdir" --parallel 2 > /dev/null; then
+    if ! "$CAMDL" batch run "$fixture" --output-dir "$outdir" --parallel 2 \
+            --allow-degenerate-rates > /dev/null; then
         echo "FAIL [resume] $name"; FAIL=$((FAIL+1)); return
     fi
 

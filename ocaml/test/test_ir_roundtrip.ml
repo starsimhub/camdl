@@ -115,11 +115,20 @@ let prior_xor_hierarchical_test () =
     ("param_kind",    `Null);
     ("param_dim",     `Null);
   ] in
+  (* gh#audit-C8: golden files now wrap the model in an IR envelope:
+     { "ir_version": "...", "validated_by": "...", "model": { ... } }.
+     Splice into envelope.model.parameters, not the top level. *)
+  let splice_into_params kvs =
+    `Assoc (List.map (fun (k, v) ->
+      if String.equal k "parameters" then
+        (k, match v with `List xs -> `List (xs @ [bad_param]) | _ -> v)
+      else (k, v)) kvs)
+  in
   let j' = match j with
     | `Assoc kvs ->
       `Assoc (List.map (fun (k, v) ->
-        if String.equal k "parameters" then
-          (k, match v with `List xs -> `List (xs @ [bad_param]) | _ -> v)
+        if String.equal k "model" then
+          (k, match v with `Assoc inner -> splice_into_params inner | _ -> v)
         else (k, v)) kvs)
     | _ -> failwith "sir_basic.ir.json is not a top-level object"
   in

@@ -367,6 +367,8 @@ struct Manifest {
 // ─── cmd_batch_run ──────────────────────────────────────────────────────
 
 pub fn cmd_batch_run(a: &crate::args::BatchArgs) {
+    let _eval_stats_guard = crate::util::EvalStatsReportGuard::start();  // gh#audit-H5
+    sim::eval_stats::set_allow_degenerate_rates(a.allow_degenerate_rates);  // gh#audit-C6
     let toml_path = a.file.to_string_lossy().into_owned();
 
     let toml_src = std::fs::read_to_string(&toml_path).unwrap_or_else(|e| {
