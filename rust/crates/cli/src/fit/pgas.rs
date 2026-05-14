@@ -312,6 +312,20 @@ pub fn run_stage(
     let t0 = std::time::Instant::now();
     let _is_tty = std::io::IsTerminal::is_terminal(&std::io::stderr());
 
+    // gh#audit-C7. Per-chain NUTS / tempering diagnostics surfaced from
+    // PGASResult. Indexed by chain_id, populated inside the parallel
+    // closure via Mutex (only written once per chain). Consumed after
+    // the loop to wire DiagnosticKind::DivergentTransitions /
+    // MaxTreeDepthHits / LowSwapRate.
+    #[derive(Clone, Default)]
+    struct ChainNutsDiag {
+        n_divergent_post_burn:    usize,
+        n_max_treedepth_post_burn: usize,
+        swap_acceptance_rates:    Vec<f64>,
+    }
+    let chain_nuts: std::sync::Mutex<Vec<ChainNutsDiag>> =
+        std::sync::Mutex::new(vec![ChainNutsDiag::default(); n_chains]);
+
     // Run chains in parallel (each chain is independent: own seed, own
     // trajectory, own RNG). Same pattern as PMMH.
     use rayon::prelude::*;
@@ -461,6 +475,19 @@ pub fn run_stage(
                     .map(|(p, &r)| format!("{}={:.0}%", p.name, r * 100.0))
                     .collect::<Vec<_>>().join(", "));
 
+            // gh#audit-C7. Surface per-chain NUTS / tempering diagnostics so the
+            // post-loop diagnostic-collector pass can construct
+            // DivergentTransitions / MaxTreeDepthHits / LowSwapRate variants.
+            // Mutex contention is negligible (n_chains writes total).
+            {
+                let mut nd = chain_nuts.lock().unwrap();
+                nd[chain_id] = ChainNutsDiag {
+                    n_divergent_post_burn:    result.n_divergent_post_burn,
+                    n_max_treedepth_post_burn: result.n_max_treedepth_post_burn,
+                    swap_acceptance_rates:    result.swap_acceptance_rates.clone(),
+                };
+            }
+
             Ok((chain_id, result.sweeps, result.acceptance_rates))
         })
         .collect();
@@ -512,6 +539,50 @@ pub fn run_stage(
             }
         }
     }
+
+    // gh#audit-C7 + audit-H4. NUTS / tempering diagnostics surfaced from
+    // PGASResult fields. Thresholds:
+    //   - DivergentTransitions: ANY post-burn-in divergence (Stan
+    //     convention). Matters for posterior validity, not just
+    //     adaptation.
+    //   - MaxTreeDepthHits: > 5% of post-burn-in sweeps (Stan).
+    //   - LowSwapRate: any adjacent-rung pair with rate < 0.10 over
+    //     the whole run (audit M18). Indicates the temperature ladder
+    //     is too sparse — chains aren't mixing across rungs.
+    let n_post_burn = n_sweeps.saturating_sub(burn_in);
+    let nuts_diag = chain_nuts.lock().unwrap();
+    for chain_id in 0..n_chains {
+        let nd = &nuts_diag[chain_id];
+        if nd.n_divergent_post_burn > 0 {
+            collector.push(DiagnosticKind::DivergentTransitions {
+                n_divergent: nd.n_divergent_post_burn,
+                n_sweeps:    n_post_burn,
+            });
+        }
+        if n_post_burn > 0 {
+            let pct = nd.n_max_treedepth_post_burn as f64 / n_post_burn as f64 * 100.0;
+            if pct > 5.0 {
+                collector.push(DiagnosticKind::MaxTreeDepthHits {
+                    n_hits:    nd.n_max_treedepth_post_burn,
+                    n_sweeps:  n_post_burn,
+                    pct,
+                    max_depth: pgas_opts.max_tree_depth,
+                });
+            }
+        }
+        for (i, &rate) in nd.swap_acceptance_rates.iter().enumerate() {
+            if rate < 0.10 {
+                collector.push(DiagnosticKind::LowSwapRate {
+                    rung_i: i,
+                    rung_j: i + 1,
+                    beta_i: pgas_opts.tempering[i],
+                    beta_j: pgas_opts.tempering[i + 1],
+                    rate,
+                });
+            }
+        }
+    }
+    drop(nuts_diag);
 
     // Write summary JSON
     write_summary(stage_dir, &all_results, &config, &diagnostics)?;

@@ -160,6 +160,25 @@ pub struct PGASResult {
     pub acceptance_rates: Vec<f64>,
     /// Resume state for chain continuation. Populated at end of every run.
     pub resume_state: ChainResumeState,
+    /// gh#audit-C7. NUTS divergent transitions across the full run
+    /// (burn-in + sampling). Stan-style diagnostic: any post-burn-in
+    /// divergence is a correctness signal worth gating on.
+    pub n_divergent_total: usize,
+    /// gh#audit-C7. NUTS divergent transitions accumulated only over
+    /// post-burn-in sweeps. The Stan-canonical surface — burn-in
+    /// divergences are expected during step-size adaptation.
+    pub n_divergent_post_burn: usize,
+    /// gh#audit-C7. Sweeps that hit max_treedepth across the full run.
+    pub n_max_treedepth_total: usize,
+    /// gh#audit-C7. Sweeps that hit max_treedepth post-burn-in.
+    pub n_max_treedepth_post_burn: usize,
+    /// gh#audit-C7 / M18. Per-adjacent-rung swap acceptance rates
+    /// (length n_rungs - 1; empty when n_rungs == 1). Adjacent-pair
+    /// rate `swap_acceptance_rates[i]` = accepted_{i,i+1} /
+    /// proposed_{i,i+1}. Used to wire DiagnosticKind::LowSwapRate
+    /// (audit H4): rate < 0.10 on tempered chains is a sign the
+    /// temperature ladder is too sparse.
+    pub swap_acceptance_rates: Vec<f64>,
 }
 
 /// Serializable chain state for `--resume`. Saved to `chain_N/resume_state.bin`
@@ -1390,6 +1409,10 @@ pub fn run_pgas(
     let mut swap_proposed: Vec<usize> = vec![0; n_rungs.saturating_sub(1)];
     let mut n_max_treedepth: usize = 0;
     let mut n_divergent: usize = 0;
+    // gh#audit-C7. Post-burn-in counters (Stan-canonical surface;
+    // burn-in counts are expected during step-size adaptation).
+    let mut n_max_treedepth_post_burn: usize = 0;
+    let mut n_divergent_post_burn: usize = 0;
     let mut swap_accepted: Vec<usize> = vec![0; n_rungs.saturating_sub(1)];
 
     if start_sweep >= config.n_sweeps {
@@ -1526,9 +1549,15 @@ pub fn run_pgas(
                 if rung == 0 {
                     if result.tree_depth >= config.max_tree_depth {
                         n_max_treedepth += 1;
+                        if sweep >= config.burn_in {
+                            n_max_treedepth_post_burn += 1;
+                        }
                     }
                     if result.divergent {
                         n_divergent += 1;
+                        if sweep >= config.burn_in {
+                            n_divergent_post_burn += 1;
+                        }
                     }
                 }
 
@@ -1804,10 +1833,23 @@ pub fn run_pgas(
         current_ll: rungs[0].ll,
     };
 
+    // gh#audit-C7 / M18. Compute swap acceptance rates as a final
+    // surface; n_rungs == 1 → empty vec, no diagnostic to fire.
+    let swap_acceptance_rates: Vec<f64> = (0..n_rungs.saturating_sub(1))
+        .map(|i| if swap_proposed[i] > 0 {
+            swap_accepted[i] as f64 / swap_proposed[i] as f64
+        } else { 0.0 })
+        .collect();
+
     Ok(PGASResult {
         sweeps,
         final_trajectory: rungs[0].trajectory.clone(),
         acceptance_rates,
         resume_state,
+        n_divergent_total: n_divergent,
+        n_divergent_post_burn,
+        n_max_treedepth_total: n_max_treedepth,
+        n_max_treedepth_post_burn,
+        swap_acceptance_rates,
     })
 }
