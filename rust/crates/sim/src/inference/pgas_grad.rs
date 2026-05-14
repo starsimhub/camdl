@@ -162,7 +162,12 @@ pub fn log_transition_density_grad(
         // sampler would hit NaN and ICE; with it the sampler sees
         // a huge-but-finite number, rejects the leapfrog step,
         // and adapts step size down. Tolerated behavior.
-        let p_total = (1.0 - (-total_rate * dt).exp()).clamp(1e-15, 1.0 - 1e-15);
+        // gh#audit-H3: stable (p, q) primitive (clamped for the
+        // gradient form; q would be the right partner for the future
+        // (n-k)/q gradient term but the current code computes
+        // (n-k)/(1-p), which we keep — the clamp at least avoids the
+        // worst cancellation).
+        let (p_total, _q) = super::numerics::prob_q_from_rate_dt_clamped(total_rate, dt, 1e-15);
         let n_exit: u64 = probs.iter().map(|&(tr_idx, _, _)| flows[tr_idx]).sum();
         log_p += binom_logpmf(n_exit, n_src as u64, p_total);
 

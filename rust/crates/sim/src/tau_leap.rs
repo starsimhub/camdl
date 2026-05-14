@@ -166,7 +166,9 @@ fn run_tau_leap(
                 effective.push((tr_idx, eff));
             }
             if total_rate <= 0.0 || effective.is_empty() { continue; }
-            let p_total = (1.0 - (-total_rate * dt).exp()).clamp(0.0, 1.0);
+            // gh#audit-H3: stable (p, q) primitive (q discarded here).
+            let (p_total, _q) = crate::inference::numerics::prob_q_from_rate_dt(total_rate, dt);
+            let p_total = p_total.clamp(0.0, 1.0);
             let mut n_events = rng.binomial(n_src as u64, p_total);
             let n_competing = effective.len();
             let mut rate_remaining = total_rate;

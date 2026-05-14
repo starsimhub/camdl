@@ -301,7 +301,9 @@ pub fn step_one(
         if total_rate <= 0.0 || scratch.probs.is_empty() { continue; }
 
         // Step 2: draw total exits (pomp's first rbinom)
-        let p_total = (1.0 - (-total_rate * dt).exp()).clamp(0.0, 1.0);
+        // gh#audit-H3: stable (p, q) primitive (q discarded here).
+        let (p_total, _q) = crate::inference::numerics::prob_q_from_rate_dt(total_rate, dt);
+        let p_total = p_total.clamp(0.0, 1.0);
         let mut n_events = if scratch.binomial_z_idx < scratch.binomial_z_values.len() {
             // CPM: use pre-drawn z-value for correlated binomial
             let z = scratch.binomial_z_values[scratch.binomial_z_idx];

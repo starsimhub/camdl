@@ -336,7 +336,10 @@ fn exit_and_split_log_density(
     flows: &[u64],
     src_local: usize,
 ) -> f64 {
-    let p_total = (1.0 - (-total_rate * dt).exp()).clamp(1e-15, 1.0 - 1e-15);
+    // gh#audit-H3: stable (p, q) primitive with the clamped variant
+    // (PGAS hot path needs strict-interior p for the binomial density
+    // / NUTS gradient).
+    let (p_total, _q) = super::numerics::prob_q_from_rate_dt_clamped(total_rate, dt, 1e-15);
     let binom_total = binom_logpmf(n_exit, n_src as u64, p_total);
 
     if !binom_total.is_finite() {
