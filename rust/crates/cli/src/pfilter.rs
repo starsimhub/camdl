@@ -7,6 +7,7 @@
 //! Output: log-likelihood estimate to stdout.
 //! With --trace: per-observation TSV (time, ll_increment, ESS).
 
+use rayon::prelude::*;
 use sim::{
     compiled_model::CompiledModel,
     inference::{
@@ -19,6 +20,7 @@ use sim::{
     },
 };
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 pub fn cmd_pfilter(a: &crate::args::PfilterArgs) {
     let ir_path = a.model.to_string_lossy().into_owned();
@@ -199,14 +201,32 @@ pub fn cmd_pfilter(a: &crate::args::PfilterArgs) {
 
     // ── Replicates mode: run N independent pfilters, output loglik summary ──
     if n_replicates > 1 {
-        eprintln!("pfilter: {} replicates × {} particles", n_replicates, n_particles);
+        // gh#audit-H13: --parallel / CAMDL_PARALLEL was previously declared
+        // on InferenceCore (args/mod.rs) but never read by cmd_pfilter, so
+        // `camdl pfilter --parallel 16 --replicates 100` ran single-
+        // threaded. Build a rayon pool from a.inference.parallel before
+        // the replicate loop, mirroring profile.rs:849-853 / if2.rs:369-374.
+        let parallel = a.inference.parallel;
+        if parallel > 0 {
+            // build_global is idempotent across processes; ignore the
+            // "already initialised" Err so re-entry from tests is safe.
+            let _ = rayon::ThreadPoolBuilder::new()
+                .num_threads(parallel)
+                .build_global();
+        }
+        eprintln!("pfilter: {} replicates × {} particles{}",
+            n_replicates, n_particles,
+            if parallel > 0 { format!(" (parallel = {})", parallel) }
+            else { String::new() });
         // Im20 in 2026-04-19 inference review batch 3: replicate
         // seeding was `seed + rep`, which gives highly correlated
         // ChaCha8 initial states across replicates. Use the
         // golden-ratio multiplier to decorrelate low bits.
         const SEED_STRIDE: u64 = 0x9e3779b97f4a7c15;
-        let mut logliks = Vec::with_capacity(n_replicates);
-        for rep in 0..n_replicates {
+        // Atomic progress counter — par_iter has no natural ordering, so
+        // print at every-10-completed boundary.
+        let done = AtomicUsize::new(0);
+        let logliks: Vec<f64> = (0..n_replicates).into_par_iter().map(|rep| {
             let rep_seed = seed.wrapping_add((rep as u64).wrapping_mul(SEED_STRIDE));
             let result = bootstrap_filter(
                 &process, &obs_model, &params, &smc_config, rep_seed,
@@ -214,11 +234,12 @@ pub fn cmd_pfilter(a: &crate::args::PfilterArgs) {
                 eprintln!("pfilter replicate {} error: {:?}", rep + 1, e);
                 std::process::exit(1);
             });
-            logliks.push(result.log_likelihood);
-            if (rep + 1) % 10 == 0 || rep + 1 == n_replicates {
-                eprint!("\r  {}/{} replicates", rep + 1, n_replicates);
+            let n = done.fetch_add(1, Ordering::Relaxed) + 1;
+            if n % 10 == 0 || n == n_replicates {
+                eprint!("\r  {}/{} replicates", n, n_replicates);
             }
-        }
+            result.log_likelihood
+        }).collect();
         eprintln!();
 
         let mean_ll = logliks.iter().sum::<f64>() / n_replicates as f64;

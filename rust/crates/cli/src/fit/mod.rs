@@ -312,6 +312,34 @@ pub fn cmd_fit_run_v2(a: &crate::args::FitRunArgs) {
         config.stages.iter().map(|(k, v)| (k.as_str(), v)).collect()
     };
 
+    // gh#audit-H12: --record-prequential and --record-ancestry only have
+    // effect inside the Stage::PFilter arm of the stage match. clap
+    // enforces `requires = "stage"`, but doesn't validate that the named
+    // stage *resolves* to a PFilter — so before this check, passing the
+    // flags with `--stage scout` (or any non-PFilter stage) silently
+    // dropped them. List the available PFilter stages on error so the
+    // user knows what they should have passed.
+    if a.record_prequential || a.record_ancestry {
+        let on_pfilter = stages_to_run.iter()
+            .all(|(_, s)| matches!(s, Stage::PFilter { .. }));
+        if !on_pfilter {
+            let pf_stages: Vec<&str> = config.stages.iter()
+                .filter(|(_, s)| matches!(s, Stage::PFilter { .. }))
+                .map(|(k, _)| k.as_str())
+                .collect();
+            let flag = if a.record_prequential { "--record-prequential" } else { "--record-ancestry" };
+            if pf_stages.is_empty() {
+                eprintln!("error: {} requires --stage <pfilter-stage>, \
+                    but this fit config has no PFilter stages.", flag);
+            } else {
+                eprintln!("error: {} requires --stage <pfilter-stage>. \
+                    Available PFilter stages in this config: {}",
+                    flag, pf_stages.join(", "));
+            }
+            std::process::exit(1);
+        }
+    }
+
     let fit_dir = config.fit_dir(&fit_path).unwrap_or_else(|e| {
         eprintln!("error: {}", e);
         std::process::exit(1);
