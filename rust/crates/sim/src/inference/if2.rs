@@ -523,14 +523,22 @@ pub fn run_if2_with_progress<P: ProcessModel<State = ParticleState>>(
     }
 
     let last_iter = iterations.last().expect("n_iterations ≥ 1 enforced at FitConfigV2::validate");
-    let best_iter = iterations.iter()
-        .filter(|it| it.if2_perturbed_loglik.is_finite())
-        .max_by(|a, b| a.if2_perturbed_loglik.total_cmp(&b.if2_perturbed_loglik))
-        .unwrap_or(last_iter);
 
+    // IF2 cooling drives the perturbed-particle swarm to a delta at the MLE
+    // asymptotically, so the LAST iteration's filter mean is the MLE by
+    // construction. Selecting an earlier iteration whose perturbed-loglik
+    // happened to score higher (audit C2) picks a wider, less-converged
+    // swarm — the perturbed-loglik field's own docstring (lines 125-129)
+    // says "NOT useful for model assessment or convergence."
+    //
+    // The caller (cli/src/fit/runner.rs ~1183) re-scores per iteration with
+    // a clean PF and runs a separate loglik_eval pass; that pass is the
+    // authority on cross-chain winner selection (`select_winner_summary`).
+    // This struct's `mle` field is now just "the MLE per IF2 theory" rather
+    // than "argmax over a deliberately noisy diagnostic field."
     Ok(IF2Result {
-        mle: best_iter.param_means.clone(),
-        final_loglik: best_iter.if2_perturbed_loglik,
+        mle: last_iter.param_means.clone(),
+        final_loglik: last_iter.if2_perturbed_loglik,
         last_loglik: last_iter.if2_perturbed_loglik,
         iterations,
     })
