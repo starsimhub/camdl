@@ -117,6 +117,3 @@ impl Trajectory {
     }
 }
 
-impl Default for Trajectory {
-    fn default() -> Self { Self::new() }
-}
