@@ -72,11 +72,23 @@ pub struct TableLookupExpr {
 
 // ── Wrapper structs (each has one uniquely-named field → untagged works) ──────
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConstExpr {
     #[serde(rename = "const")]
     pub value: f64,
 }
+
+// Bitwise PartialEq/Eq so that `Expr::Const(NaN) == Expr::Const(NaN)` (when bit
+// patterns match) and `Const(0.0) != Const(-0.0)`. Derived PartialEq would
+// inherit IEEE 754 float semantics (NaN != NaN, 0.0 == -0.0), neither of which
+// is correct for IR-equality purposes — two ASTs that differ only in NaN
+// payload or zero sign should be observably distinct.
+impl PartialEq for ConstExpr {
+    fn eq(&self, other: &Self) -> bool {
+        self.value.to_bits() == other.value.to_bits()
+    }
+}
+impl Eq for ConstExpr {}
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ParamExpr {
