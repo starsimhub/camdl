@@ -2653,7 +2653,7 @@ cooling = 0.9
         let manifest = std::env::var("CARGO_MANIFEST_DIR").unwrap();
         let golden = format!("{}/../../../ir/golden/sir_basic.ir.json", manifest);
         let s = std::fs::read_to_string(&golden).unwrap();
-        let mut model: ir::Model = serde_json::from_str(&s).unwrap();
+        let mut model: ir::Model = ir::from_str(&s).unwrap();  // gh#audit-C8
         let mut p = HashMap::new();
         for (k, v) in params { p.insert((*k).to_string(), *v); }
         model.presets.push(ir::model::Preset {

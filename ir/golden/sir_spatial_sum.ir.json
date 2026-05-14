@@ -1,2483 +1,1654 @@
 {
-  "name": "sir_spatial_sum",
-  "version": "0.3",
-  "time_unit": "days",
-  "description": null,
-  "compartments": [
-    {
-      "name": "S_p0",
-      "kind": "integer"
-    },
-    {
-      "name": "S_p1",
-      "kind": "integer"
-    },
-    {
-      "name": "S_p2",
-      "kind": "integer"
-    },
-    {
-      "name": "S_p3",
-      "kind": "integer"
-    },
-    {
-      "name": "I_p0",
-      "kind": "integer"
-    },
-    {
-      "name": "I_p1",
-      "kind": "integer"
-    },
-    {
-      "name": "I_p2",
-      "kind": "integer"
-    },
-    {
-      "name": "I_p3",
-      "kind": "integer"
-    },
-    {
-      "name": "R_p0",
-      "kind": "integer"
-    },
-    {
-      "name": "R_p1",
-      "kind": "integer"
-    },
-    {
-      "name": "R_p2",
-      "kind": "integer"
-    },
-    {
-      "name": "R_p3",
-      "kind": "integer"
-    }
-  ],
-  "transitions": [
-    {
-      "name": "infection_p0",
-      "stoichiometry": [
-        [
-          "S_p0",
-          -1
-        ],
-        [
-          "I_p0",
-          1
-        ]
-      ],
-      "rate": {
-        "bin_op": {
-          "op": "mul",
-          "left": {
-            "bin_op": {
-              "op": "mul",
-              "left": {
-                "param": "beta"
-              },
-              "right": {
-                "pop": "S_p0"
-              }
-            }
-          },
-          "right": {
-            "bin_op": {
-              "op": "add",
-              "left": {
-                "bin_op": {
-                  "op": "div",
-                  "left": {
-                    "pop": "I_p0"
-                  },
-                  "right": {
-                    "pop_sum": [
-                      "S_p0",
-                      "I_p0",
-                      "R_p0"
-                    ]
-                  }
-                }
-              },
-              "right": {
-                "bin_op": {
-                  "op": "mul",
-                  "left": {
-                    "param": "rho"
-                  },
-                  "right": {
-                    "bin_op": {
-                      "op": "add",
-                      "left": {
-                        "bin_op": {
-                          "op": "add",
-                          "left": {
-                            "bin_op": {
-                              "op": "add",
-                              "left": {
-                                "bin_op": {
-                                  "op": "div",
-                                  "left": {
-                                    "bin_op": {
-                                      "op": "mul",
-                                      "left": {
-                                        "table_lookup": {
-                                          "table": "w",
-                                          "indices": [
-                                            {
-                                              "const": 0.0
-                                            }
-                                          ]
-                                        }
-                                      },
-                                      "right": {
-                                        "pop": "I_p0"
-                                      }
-                                    }
-                                  },
-                                  "right": {
-                                    "pop_sum": [
-                                      "S_p0",
-                                      "I_p0",
-                                      "R_p0"
-                                    ]
-                                  }
-                                }
-                              },
-                              "right": {
-                                "bin_op": {
-                                  "op": "div",
-                                  "left": {
-                                    "bin_op": {
-                                      "op": "mul",
-                                      "left": {
-                                        "table_lookup": {
-                                          "table": "w",
-                                          "indices": [
-                                            {
-                                              "const": 1.0
-                                            }
-                                          ]
-                                        }
-                                      },
-                                      "right": {
-                                        "pop": "I_p1"
-                                      }
-                                    }
-                                  },
-                                  "right": {
-                                    "pop_sum": [
-                                      "S_p1",
-                                      "I_p1",
-                                      "R_p1"
-                                    ]
-                                  }
-                                }
-                              }
-                            }
-                          },
-                          "right": {
-                            "bin_op": {
-                              "op": "div",
-                              "left": {
-                                "bin_op": {
-                                  "op": "mul",
-                                  "left": {
-                                    "table_lookup": {
-                                      "table": "w",
-                                      "indices": [
-                                        {
-                                          "const": 2.0
-                                        }
-                                      ]
-                                    }
-                                  },
-                                  "right": {
-                                    "pop": "I_p2"
-                                  }
-                                }
-                              },
-                              "right": {
-                                "pop_sum": [
-                                  "S_p2",
-                                  "I_p2",
-                                  "R_p2"
-                                ]
-                              }
-                            }
-                          }
-                        }
-                      },
-                      "right": {
-                        "bin_op": {
-                          "op": "div",
-                          "left": {
-                            "bin_op": {
-                              "op": "mul",
-                              "left": {
-                                "table_lookup": {
-                                  "table": "w",
-                                  "indices": [
-                                    {
-                                      "const": 3.0
-                                    }
-                                  ]
-                                }
-                              },
-                              "right": {
-                                "pop": "I_p3"
-                              }
-                            }
-                          },
-                          "right": {
-                            "pop_sum": [
-                              "S_p3",
-                              "I_p3",
-                              "R_p3"
-                            ]
-                          }
-                        }
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
-      },
-      "metadata": {
-        "origin_kind": "transmission",
-        "source_compartment": "S_p0",
-        "dest_compartment": "I_p0"
-      },
-      "rate_grad": {
-        "beta": {
-          "bin_op": {
-            "op": "mul",
-            "left": {
-              "pop": "S_p0"
-            },
-            "right": {
-              "bin_op": {
-                "op": "add",
-                "left": {
-                  "bin_op": {
-                    "op": "div",
-                    "left": {
-                      "pop": "I_p0"
-                    },
-                    "right": {
-                      "pop_sum": [
-                        "S_p0",
-                        "I_p0",
-                        "R_p0"
-                      ]
-                    }
-                  }
-                },
-                "right": {
-                  "bin_op": {
-                    "op": "mul",
-                    "left": {
-                      "param": "rho"
-                    },
-                    "right": {
-                      "bin_op": {
-                        "op": "add",
-                        "left": {
-                          "bin_op": {
-                            "op": "add",
-                            "left": {
-                              "bin_op": {
-                                "op": "add",
-                                "left": {
-                                  "bin_op": {
-                                    "op": "div",
-                                    "left": {
-                                      "bin_op": {
-                                        "op": "mul",
-                                        "left": {
-                                          "table_lookup": {
-                                            "table": "w",
-                                            "indices": [
-                                              {
-                                                "const": 0.0
-                                              }
-                                            ]
-                                          }
-                                        },
-                                        "right": {
-                                          "pop": "I_p0"
-                                        }
-                                      }
-                                    },
-                                    "right": {
-                                      "pop_sum": [
-                                        "S_p0",
-                                        "I_p0",
-                                        "R_p0"
-                                      ]
-                                    }
-                                  }
-                                },
-                                "right": {
-                                  "bin_op": {
-                                    "op": "div",
-                                    "left": {
-                                      "bin_op": {
-                                        "op": "mul",
-                                        "left": {
-                                          "table_lookup": {
-                                            "table": "w",
-                                            "indices": [
-                                              {
-                                                "const": 1.0
-                                              }
-                                            ]
-                                          }
-                                        },
-                                        "right": {
-                                          "pop": "I_p1"
-                                        }
-                                      }
-                                    },
-                                    "right": {
-                                      "pop_sum": [
-                                        "S_p1",
-                                        "I_p1",
-                                        "R_p1"
-                                      ]
-                                    }
-                                  }
-                                }
-                              }
-                            },
-                            "right": {
-                              "bin_op": {
-                                "op": "div",
-                                "left": {
-                                  "bin_op": {
-                                    "op": "mul",
-                                    "left": {
-                                      "table_lookup": {
-                                        "table": "w",
-                                        "indices": [
-                                          {
-                                            "const": 2.0
-                                          }
-                                        ]
-                                      }
-                                    },
-                                    "right": {
-                                      "pop": "I_p2"
-                                    }
-                                  }
-                                },
-                                "right": {
-                                  "pop_sum": [
-                                    "S_p2",
-                                    "I_p2",
-                                    "R_p2"
-                                  ]
-                                }
-                              }
-                            }
-                          }
-                        },
-                        "right": {
-                          "bin_op": {
-                            "op": "div",
-                            "left": {
-                              "bin_op": {
-                                "op": "mul",
-                                "left": {
-                                  "table_lookup": {
-                                    "table": "w",
-                                    "indices": [
-                                      {
-                                        "const": 3.0
-                                      }
-                                    ]
-                                  }
-                                },
-                                "right": {
-                                  "pop": "I_p3"
-                                }
-                              }
-                            },
-                            "right": {
-                              "pop_sum": [
-                                "S_p3",
-                                "I_p3",
-                                "R_p3"
-                              ]
-                            }
-                          }
-                        }
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          }
-        },
-        "rho": {
-          "bin_op": {
-            "op": "mul",
-            "left": {
-              "bin_op": {
-                "op": "mul",
-                "left": {
-                  "param": "beta"
-                },
-                "right": {
-                  "pop": "S_p0"
-                }
-              }
-            },
-            "right": {
-              "bin_op": {
-                "op": "add",
-                "left": {
-                  "bin_op": {
-                    "op": "add",
-                    "left": {
-                      "bin_op": {
-                        "op": "add",
-                        "left": {
-                          "bin_op": {
-                            "op": "div",
-                            "left": {
-                              "bin_op": {
-                                "op": "mul",
-                                "left": {
-                                  "table_lookup": {
-                                    "table": "w",
-                                    "indices": [
-                                      {
-                                        "const": 0.0
-                                      }
-                                    ]
-                                  }
-                                },
-                                "right": {
-                                  "pop": "I_p0"
-                                }
-                              }
-                            },
-                            "right": {
-                              "pop_sum": [
-                                "S_p0",
-                                "I_p0",
-                                "R_p0"
-                              ]
-                            }
-                          }
-                        },
-                        "right": {
-                          "bin_op": {
-                            "op": "div",
-                            "left": {
-                              "bin_op": {
-                                "op": "mul",
-                                "left": {
-                                  "table_lookup": {
-                                    "table": "w",
-                                    "indices": [
-                                      {
-                                        "const": 1.0
-                                      }
-                                    ]
-                                  }
-                                },
-                                "right": {
-                                  "pop": "I_p1"
-                                }
-                              }
-                            },
-                            "right": {
-                              "pop_sum": [
-                                "S_p1",
-                                "I_p1",
-                                "R_p1"
-                              ]
-                            }
-                          }
-                        }
-                      }
-                    },
-                    "right": {
-                      "bin_op": {
-                        "op": "div",
-                        "left": {
-                          "bin_op": {
-                            "op": "mul",
-                            "left": {
-                              "table_lookup": {
-                                "table": "w",
-                                "indices": [
-                                  {
-                                    "const": 2.0
-                                  }
-                                ]
-                              }
-                            },
-                            "right": {
-                              "pop": "I_p2"
-                            }
-                          }
-                        },
-                        "right": {
-                          "pop_sum": [
-                            "S_p2",
-                            "I_p2",
-                            "R_p2"
-                          ]
-                        }
-                      }
-                    }
-                  }
-                },
-                "right": {
-                  "bin_op": {
-                    "op": "div",
-                    "left": {
-                      "bin_op": {
-                        "op": "mul",
-                        "left": {
-                          "table_lookup": {
-                            "table": "w",
-                            "indices": [
-                              {
-                                "const": 3.0
-                              }
-                            ]
-                          }
-                        },
-                        "right": {
-                          "pop": "I_p3"
-                        }
-                      }
-                    },
-                    "right": {
-                      "pop_sum": [
-                        "S_p3",
-                        "I_p3",
-                        "R_p3"
-                      ]
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    {
-      "name": "infection_p1",
-      "stoichiometry": [
-        [
-          "S_p1",
-          -1
-        ],
-        [
-          "I_p1",
-          1
-        ]
-      ],
-      "rate": {
-        "bin_op": {
-          "op": "mul",
-          "left": {
-            "bin_op": {
-              "op": "mul",
-              "left": {
-                "param": "beta"
-              },
-              "right": {
-                "pop": "S_p1"
-              }
-            }
-          },
-          "right": {
-            "bin_op": {
-              "op": "add",
-              "left": {
-                "bin_op": {
-                  "op": "div",
-                  "left": {
-                    "pop": "I_p1"
-                  },
-                  "right": {
-                    "pop_sum": [
-                      "S_p1",
-                      "I_p1",
-                      "R_p1"
-                    ]
-                  }
-                }
-              },
-              "right": {
-                "bin_op": {
-                  "op": "mul",
-                  "left": {
-                    "param": "rho"
-                  },
-                  "right": {
-                    "bin_op": {
-                      "op": "add",
-                      "left": {
-                        "bin_op": {
-                          "op": "add",
-                          "left": {
-                            "bin_op": {
-                              "op": "add",
-                              "left": {
-                                "bin_op": {
-                                  "op": "div",
-                                  "left": {
-                                    "bin_op": {
-                                      "op": "mul",
-                                      "left": {
-                                        "table_lookup": {
-                                          "table": "w",
-                                          "indices": [
-                                            {
-                                              "const": 4.0
-                                            }
-                                          ]
-                                        }
-                                      },
-                                      "right": {
-                                        "pop": "I_p0"
-                                      }
-                                    }
-                                  },
-                                  "right": {
-                                    "pop_sum": [
-                                      "S_p0",
-                                      "I_p0",
-                                      "R_p0"
-                                    ]
-                                  }
-                                }
-                              },
-                              "right": {
-                                "bin_op": {
-                                  "op": "div",
-                                  "left": {
-                                    "bin_op": {
-                                      "op": "mul",
-                                      "left": {
-                                        "table_lookup": {
-                                          "table": "w",
-                                          "indices": [
-                                            {
-                                              "const": 5.0
-                                            }
-                                          ]
-                                        }
-                                      },
-                                      "right": {
-                                        "pop": "I_p1"
-                                      }
-                                    }
-                                  },
-                                  "right": {
-                                    "pop_sum": [
-                                      "S_p1",
-                                      "I_p1",
-                                      "R_p1"
-                                    ]
-                                  }
-                                }
-                              }
-                            }
-                          },
-                          "right": {
-                            "bin_op": {
-                              "op": "div",
-                              "left": {
-                                "bin_op": {
-                                  "op": "mul",
-                                  "left": {
-                                    "table_lookup": {
-                                      "table": "w",
-                                      "indices": [
-                                        {
-                                          "const": 6.0
-                                        }
-                                      ]
-                                    }
-                                  },
-                                  "right": {
-                                    "pop": "I_p2"
-                                  }
-                                }
-                              },
-                              "right": {
-                                "pop_sum": [
-                                  "S_p2",
-                                  "I_p2",
-                                  "R_p2"
-                                ]
-                              }
-                            }
-                          }
-                        }
-                      },
-                      "right": {
-                        "bin_op": {
-                          "op": "div",
-                          "left": {
-                            "bin_op": {
-                              "op": "mul",
-                              "left": {
-                                "table_lookup": {
-                                  "table": "w",
-                                  "indices": [
-                                    {
-                                      "const": 7.0
-                                    }
-                                  ]
-                                }
-                              },
-                              "right": {
-                                "pop": "I_p3"
-                              }
-                            }
-                          },
-                          "right": {
-                            "pop_sum": [
-                              "S_p3",
-                              "I_p3",
-                              "R_p3"
-                            ]
-                          }
-                        }
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
-      },
-      "metadata": {
-        "origin_kind": "transmission",
-        "source_compartment": "S_p1",
-        "dest_compartment": "I_p1"
-      },
-      "rate_grad": {
-        "beta": {
-          "bin_op": {
-            "op": "mul",
-            "left": {
-              "pop": "S_p1"
-            },
-            "right": {
-              "bin_op": {
-                "op": "add",
-                "left": {
-                  "bin_op": {
-                    "op": "div",
-                    "left": {
-                      "pop": "I_p1"
-                    },
-                    "right": {
-                      "pop_sum": [
-                        "S_p1",
-                        "I_p1",
-                        "R_p1"
-                      ]
-                    }
-                  }
-                },
-                "right": {
-                  "bin_op": {
-                    "op": "mul",
-                    "left": {
-                      "param": "rho"
-                    },
-                    "right": {
-                      "bin_op": {
-                        "op": "add",
-                        "left": {
-                          "bin_op": {
-                            "op": "add",
-                            "left": {
-                              "bin_op": {
-                                "op": "add",
-                                "left": {
-                                  "bin_op": {
-                                    "op": "div",
-                                    "left": {
-                                      "bin_op": {
-                                        "op": "mul",
-                                        "left": {
-                                          "table_lookup": {
-                                            "table": "w",
-                                            "indices": [
-                                              {
-                                                "const": 4.0
-                                              }
-                                            ]
-                                          }
-                                        },
-                                        "right": {
-                                          "pop": "I_p0"
-                                        }
-                                      }
-                                    },
-                                    "right": {
-                                      "pop_sum": [
-                                        "S_p0",
-                                        "I_p0",
-                                        "R_p0"
-                                      ]
-                                    }
-                                  }
-                                },
-                                "right": {
-                                  "bin_op": {
-                                    "op": "div",
-                                    "left": {
-                                      "bin_op": {
-                                        "op": "mul",
-                                        "left": {
-                                          "table_lookup": {
-                                            "table": "w",
-                                            "indices": [
-                                              {
-                                                "const": 5.0
-                                              }
-                                            ]
-                                          }
-                                        },
-                                        "right": {
-                                          "pop": "I_p1"
-                                        }
-                                      }
-                                    },
-                                    "right": {
-                                      "pop_sum": [
-                                        "S_p1",
-                                        "I_p1",
-                                        "R_p1"
-                                      ]
-                                    }
-                                  }
-                                }
-                              }
-                            },
-                            "right": {
-                              "bin_op": {
-                                "op": "div",
-                                "left": {
-                                  "bin_op": {
-                                    "op": "mul",
-                                    "left": {
-                                      "table_lookup": {
-                                        "table": "w",
-                                        "indices": [
-                                          {
-                                            "const": 6.0
-                                          }
-                                        ]
-                                      }
-                                    },
-                                    "right": {
-                                      "pop": "I_p2"
-                                    }
-                                  }
-                                },
-                                "right": {
-                                  "pop_sum": [
-                                    "S_p2",
-                                    "I_p2",
-                                    "R_p2"
-                                  ]
-                                }
-                              }
-                            }
-                          }
-                        },
-                        "right": {
-                          "bin_op": {
-                            "op": "div",
-                            "left": {
-                              "bin_op": {
-                                "op": "mul",
-                                "left": {
-                                  "table_lookup": {
-                                    "table": "w",
-                                    "indices": [
-                                      {
-                                        "const": 7.0
-                                      }
-                                    ]
-                                  }
-                                },
-                                "right": {
-                                  "pop": "I_p3"
-                                }
-                              }
-                            },
-                            "right": {
-                              "pop_sum": [
-                                "S_p3",
-                                "I_p3",
-                                "R_p3"
-                              ]
-                            }
-                          }
-                        }
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          }
-        },
-        "rho": {
-          "bin_op": {
-            "op": "mul",
-            "left": {
-              "bin_op": {
-                "op": "mul",
-                "left": {
-                  "param": "beta"
-                },
-                "right": {
-                  "pop": "S_p1"
-                }
-              }
-            },
-            "right": {
-              "bin_op": {
-                "op": "add",
-                "left": {
-                  "bin_op": {
-                    "op": "add",
-                    "left": {
-                      "bin_op": {
-                        "op": "add",
-                        "left": {
-                          "bin_op": {
-                            "op": "div",
-                            "left": {
-                              "bin_op": {
-                                "op": "mul",
-                                "left": {
-                                  "table_lookup": {
-                                    "table": "w",
-                                    "indices": [
-                                      {
-                                        "const": 4.0
-                                      }
-                                    ]
-                                  }
-                                },
-                                "right": {
-                                  "pop": "I_p0"
-                                }
-                              }
-                            },
-                            "right": {
-                              "pop_sum": [
-                                "S_p0",
-                                "I_p0",
-                                "R_p0"
-                              ]
-                            }
-                          }
-                        },
-                        "right": {
-                          "bin_op": {
-                            "op": "div",
-                            "left": {
-                              "bin_op": {
-                                "op": "mul",
-                                "left": {
-                                  "table_lookup": {
-                                    "table": "w",
-                                    "indices": [
-                                      {
-                                        "const": 5.0
-                                      }
-                                    ]
-                                  }
-                                },
-                                "right": {
-                                  "pop": "I_p1"
-                                }
-                              }
-                            },
-                            "right": {
-                              "pop_sum": [
-                                "S_p1",
-                                "I_p1",
-                                "R_p1"
-                              ]
-                            }
-                          }
-                        }
-                      }
-                    },
-                    "right": {
-                      "bin_op": {
-                        "op": "div",
-                        "left": {
-                          "bin_op": {
-                            "op": "mul",
-                            "left": {
-                              "table_lookup": {
-                                "table": "w",
-                                "indices": [
-                                  {
-                                    "const": 6.0
-                                  }
-                                ]
-                              }
-                            },
-                            "right": {
-                              "pop": "I_p2"
-                            }
-                          }
-                        },
-                        "right": {
-                          "pop_sum": [
-                            "S_p2",
-                            "I_p2",
-                            "R_p2"
-                          ]
-                        }
-                      }
-                    }
-                  }
-                },
-                "right": {
-                  "bin_op": {
-                    "op": "div",
-                    "left": {
-                      "bin_op": {
-                        "op": "mul",
-                        "left": {
-                          "table_lookup": {
-                            "table": "w",
-                            "indices": [
-                              {
-                                "const": 7.0
-                              }
-                            ]
-                          }
-                        },
-                        "right": {
-                          "pop": "I_p3"
-                        }
-                      }
-                    },
-                    "right": {
-                      "pop_sum": [
-                        "S_p3",
-                        "I_p3",
-                        "R_p3"
-                      ]
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    {
-      "name": "infection_p2",
-      "stoichiometry": [
-        [
-          "S_p2",
-          -1
-        ],
-        [
-          "I_p2",
-          1
-        ]
-      ],
-      "rate": {
-        "bin_op": {
-          "op": "mul",
-          "left": {
-            "bin_op": {
-              "op": "mul",
-              "left": {
-                "param": "beta"
-              },
-              "right": {
-                "pop": "S_p2"
-              }
-            }
-          },
-          "right": {
-            "bin_op": {
-              "op": "add",
-              "left": {
-                "bin_op": {
-                  "op": "div",
-                  "left": {
-                    "pop": "I_p2"
-                  },
-                  "right": {
-                    "pop_sum": [
-                      "S_p2",
-                      "I_p2",
-                      "R_p2"
-                    ]
-                  }
-                }
-              },
-              "right": {
-                "bin_op": {
-                  "op": "mul",
-                  "left": {
-                    "param": "rho"
-                  },
-                  "right": {
-                    "bin_op": {
-                      "op": "add",
-                      "left": {
-                        "bin_op": {
-                          "op": "add",
-                          "left": {
-                            "bin_op": {
-                              "op": "add",
-                              "left": {
-                                "bin_op": {
-                                  "op": "div",
-                                  "left": {
-                                    "bin_op": {
-                                      "op": "mul",
-                                      "left": {
-                                        "table_lookup": {
-                                          "table": "w",
-                                          "indices": [
-                                            {
-                                              "const": 8.0
-                                            }
-                                          ]
-                                        }
-                                      },
-                                      "right": {
-                                        "pop": "I_p0"
-                                      }
-                                    }
-                                  },
-                                  "right": {
-                                    "pop_sum": [
-                                      "S_p0",
-                                      "I_p0",
-                                      "R_p0"
-                                    ]
-                                  }
-                                }
-                              },
-                              "right": {
-                                "bin_op": {
-                                  "op": "div",
-                                  "left": {
-                                    "bin_op": {
-                                      "op": "mul",
-                                      "left": {
-                                        "table_lookup": {
-                                          "table": "w",
-                                          "indices": [
-                                            {
-                                              "const": 9.0
-                                            }
-                                          ]
-                                        }
-                                      },
-                                      "right": {
-                                        "pop": "I_p1"
-                                      }
-                                    }
-                                  },
-                                  "right": {
-                                    "pop_sum": [
-                                      "S_p1",
-                                      "I_p1",
-                                      "R_p1"
-                                    ]
-                                  }
-                                }
-                              }
-                            }
-                          },
-                          "right": {
-                            "bin_op": {
-                              "op": "div",
-                              "left": {
-                                "bin_op": {
-                                  "op": "mul",
-                                  "left": {
-                                    "table_lookup": {
-                                      "table": "w",
-                                      "indices": [
-                                        {
-                                          "const": 10.0
-                                        }
-                                      ]
-                                    }
-                                  },
-                                  "right": {
-                                    "pop": "I_p2"
-                                  }
-                                }
-                              },
-                              "right": {
-                                "pop_sum": [
-                                  "S_p2",
-                                  "I_p2",
-                                  "R_p2"
-                                ]
-                              }
-                            }
-                          }
-                        }
-                      },
-                      "right": {
-                        "bin_op": {
-                          "op": "div",
-                          "left": {
-                            "bin_op": {
-                              "op": "mul",
-                              "left": {
-                                "table_lookup": {
-                                  "table": "w",
-                                  "indices": [
-                                    {
-                                      "const": 11.0
-                                    }
-                                  ]
-                                }
-                              },
-                              "right": {
-                                "pop": "I_p3"
-                              }
-                            }
-                          },
-                          "right": {
-                            "pop_sum": [
-                              "S_p3",
-                              "I_p3",
-                              "R_p3"
-                            ]
-                          }
-                        }
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
-      },
-      "metadata": {
-        "origin_kind": "transmission",
-        "source_compartment": "S_p2",
-        "dest_compartment": "I_p2"
-      },
-      "rate_grad": {
-        "beta": {
-          "bin_op": {
-            "op": "mul",
-            "left": {
-              "pop": "S_p2"
-            },
-            "right": {
-              "bin_op": {
-                "op": "add",
-                "left": {
-                  "bin_op": {
-                    "op": "div",
-                    "left": {
-                      "pop": "I_p2"
-                    },
-                    "right": {
-                      "pop_sum": [
-                        "S_p2",
-                        "I_p2",
-                        "R_p2"
-                      ]
-                    }
-                  }
-                },
-                "right": {
-                  "bin_op": {
-                    "op": "mul",
-                    "left": {
-                      "param": "rho"
-                    },
-                    "right": {
-                      "bin_op": {
-                        "op": "add",
-                        "left": {
-                          "bin_op": {
-                            "op": "add",
-                            "left": {
-                              "bin_op": {
-                                "op": "add",
-                                "left": {
-                                  "bin_op": {
-                                    "op": "div",
-                                    "left": {
-                                      "bin_op": {
-                                        "op": "mul",
-                                        "left": {
-                                          "table_lookup": {
-                                            "table": "w",
-                                            "indices": [
-                                              {
-                                                "const": 8.0
-                                              }
-                                            ]
-                                          }
-                                        },
-                                        "right": {
-                                          "pop": "I_p0"
-                                        }
-                                      }
-                                    },
-                                    "right": {
-                                      "pop_sum": [
-                                        "S_p0",
-                                        "I_p0",
-                                        "R_p0"
-                                      ]
-                                    }
-                                  }
-                                },
-                                "right": {
-                                  "bin_op": {
-                                    "op": "div",
-                                    "left": {
-                                      "bin_op": {
-                                        "op": "mul",
-                                        "left": {
-                                          "table_lookup": {
-                                            "table": "w",
-                                            "indices": [
-                                              {
-                                                "const": 9.0
-                                              }
-                                            ]
-                                          }
-                                        },
-                                        "right": {
-                                          "pop": "I_p1"
-                                        }
-                                      }
-                                    },
-                                    "right": {
-                                      "pop_sum": [
-                                        "S_p1",
-                                        "I_p1",
-                                        "R_p1"
-                                      ]
-                                    }
-                                  }
-                                }
-                              }
-                            },
-                            "right": {
-                              "bin_op": {
-                                "op": "div",
-                                "left": {
-                                  "bin_op": {
-                                    "op": "mul",
-                                    "left": {
-                                      "table_lookup": {
-                                        "table": "w",
-                                        "indices": [
-                                          {
-                                            "const": 10.0
-                                          }
-                                        ]
-                                      }
-                                    },
-                                    "right": {
-                                      "pop": "I_p2"
-                                    }
-                                  }
-                                },
-                                "right": {
-                                  "pop_sum": [
-                                    "S_p2",
-                                    "I_p2",
-                                    "R_p2"
-                                  ]
-                                }
-                              }
-                            }
-                          }
-                        },
-                        "right": {
-                          "bin_op": {
-                            "op": "div",
-                            "left": {
-                              "bin_op": {
-                                "op": "mul",
-                                "left": {
-                                  "table_lookup": {
-                                    "table": "w",
-                                    "indices": [
-                                      {
-                                        "const": 11.0
-                                      }
-                                    ]
-                                  }
-                                },
-                                "right": {
-                                  "pop": "I_p3"
-                                }
-                              }
-                            },
-                            "right": {
-                              "pop_sum": [
-                                "S_p3",
-                                "I_p3",
-                                "R_p3"
-                              ]
-                            }
-                          }
-                        }
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          }
-        },
-        "rho": {
-          "bin_op": {
-            "op": "mul",
-            "left": {
-              "bin_op": {
-                "op": "mul",
-                "left": {
-                  "param": "beta"
-                },
-                "right": {
-                  "pop": "S_p2"
-                }
-              }
-            },
-            "right": {
-              "bin_op": {
-                "op": "add",
-                "left": {
-                  "bin_op": {
-                    "op": "add",
-                    "left": {
-                      "bin_op": {
-                        "op": "add",
-                        "left": {
-                          "bin_op": {
-                            "op": "div",
-                            "left": {
-                              "bin_op": {
-                                "op": "mul",
-                                "left": {
-                                  "table_lookup": {
-                                    "table": "w",
-                                    "indices": [
-                                      {
-                                        "const": 8.0
-                                      }
-                                    ]
-                                  }
-                                },
-                                "right": {
-                                  "pop": "I_p0"
-                                }
-                              }
-                            },
-                            "right": {
-                              "pop_sum": [
-                                "S_p0",
-                                "I_p0",
-                                "R_p0"
-                              ]
-                            }
-                          }
-                        },
-                        "right": {
-                          "bin_op": {
-                            "op": "div",
-                            "left": {
-                              "bin_op": {
-                                "op": "mul",
-                                "left": {
-                                  "table_lookup": {
-                                    "table": "w",
-                                    "indices": [
-                                      {
-                                        "const": 9.0
-                                      }
-                                    ]
-                                  }
-                                },
-                                "right": {
-                                  "pop": "I_p1"
-                                }
-                              }
-                            },
-                            "right": {
-                              "pop_sum": [
-                                "S_p1",
-                                "I_p1",
-                                "R_p1"
-                              ]
-                            }
-                          }
-                        }
-                      }
-                    },
-                    "right": {
-                      "bin_op": {
-                        "op": "div",
-                        "left": {
-                          "bin_op": {
-                            "op": "mul",
-                            "left": {
-                              "table_lookup": {
-                                "table": "w",
-                                "indices": [
-                                  {
-                                    "const": 10.0
-                                  }
-                                ]
-                              }
-                            },
-                            "right": {
-                              "pop": "I_p2"
-                            }
-                          }
-                        },
-                        "right": {
-                          "pop_sum": [
-                            "S_p2",
-                            "I_p2",
-                            "R_p2"
-                          ]
-                        }
-                      }
-                    }
-                  }
-                },
-                "right": {
-                  "bin_op": {
-                    "op": "div",
-                    "left": {
-                      "bin_op": {
-                        "op": "mul",
-                        "left": {
-                          "table_lookup": {
-                            "table": "w",
-                            "indices": [
-                              {
-                                "const": 11.0
-                              }
-                            ]
-                          }
-                        },
-                        "right": {
-                          "pop": "I_p3"
-                        }
-                      }
-                    },
-                    "right": {
-                      "pop_sum": [
-                        "S_p3",
-                        "I_p3",
-                        "R_p3"
-                      ]
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    {
-      "name": "infection_p3",
-      "stoichiometry": [
-        [
-          "S_p3",
-          -1
-        ],
-        [
-          "I_p3",
-          1
-        ]
-      ],
-      "rate": {
-        "bin_op": {
-          "op": "mul",
-          "left": {
-            "bin_op": {
-              "op": "mul",
-              "left": {
-                "param": "beta"
-              },
-              "right": {
-                "pop": "S_p3"
-              }
-            }
-          },
-          "right": {
-            "bin_op": {
-              "op": "add",
-              "left": {
-                "bin_op": {
-                  "op": "div",
-                  "left": {
-                    "pop": "I_p3"
-                  },
-                  "right": {
-                    "pop_sum": [
-                      "S_p3",
-                      "I_p3",
-                      "R_p3"
-                    ]
-                  }
-                }
-              },
-              "right": {
-                "bin_op": {
-                  "op": "mul",
-                  "left": {
-                    "param": "rho"
-                  },
-                  "right": {
-                    "bin_op": {
-                      "op": "add",
-                      "left": {
-                        "bin_op": {
-                          "op": "add",
-                          "left": {
-                            "bin_op": {
-                              "op": "add",
-                              "left": {
-                                "bin_op": {
-                                  "op": "div",
-                                  "left": {
-                                    "bin_op": {
-                                      "op": "mul",
-                                      "left": {
-                                        "table_lookup": {
-                                          "table": "w",
-                                          "indices": [
-                                            {
-                                              "const": 12.0
-                                            }
-                                          ]
-                                        }
-                                      },
-                                      "right": {
-                                        "pop": "I_p0"
-                                      }
-                                    }
-                                  },
-                                  "right": {
-                                    "pop_sum": [
-                                      "S_p0",
-                                      "I_p0",
-                                      "R_p0"
-                                    ]
-                                  }
-                                }
-                              },
-                              "right": {
-                                "bin_op": {
-                                  "op": "div",
-                                  "left": {
-                                    "bin_op": {
-                                      "op": "mul",
-                                      "left": {
-                                        "table_lookup": {
-                                          "table": "w",
-                                          "indices": [
-                                            {
-                                              "const": 13.0
-                                            }
-                                          ]
-                                        }
-                                      },
-                                      "right": {
-                                        "pop": "I_p1"
-                                      }
-                                    }
-                                  },
-                                  "right": {
-                                    "pop_sum": [
-                                      "S_p1",
-                                      "I_p1",
-                                      "R_p1"
-                                    ]
-                                  }
-                                }
-                              }
-                            }
-                          },
-                          "right": {
-                            "bin_op": {
-                              "op": "div",
-                              "left": {
-                                "bin_op": {
-                                  "op": "mul",
-                                  "left": {
-                                    "table_lookup": {
-                                      "table": "w",
-                                      "indices": [
-                                        {
-                                          "const": 14.0
-                                        }
-                                      ]
-                                    }
-                                  },
-                                  "right": {
-                                    "pop": "I_p2"
-                                  }
-                                }
-                              },
-                              "right": {
-                                "pop_sum": [
-                                  "S_p2",
-                                  "I_p2",
-                                  "R_p2"
-                                ]
-                              }
-                            }
-                          }
-                        }
-                      },
-                      "right": {
-                        "bin_op": {
-                          "op": "div",
-                          "left": {
-                            "bin_op": {
-                              "op": "mul",
-                              "left": {
-                                "table_lookup": {
-                                  "table": "w",
-                                  "indices": [
-                                    {
-                                      "const": 15.0
-                                    }
-                                  ]
-                                }
-                              },
-                              "right": {
-                                "pop": "I_p3"
-                              }
-                            }
-                          },
-                          "right": {
-                            "pop_sum": [
-                              "S_p3",
-                              "I_p3",
-                              "R_p3"
-                            ]
-                          }
-                        }
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
-      },
-      "metadata": {
-        "origin_kind": "transmission",
-        "source_compartment": "S_p3",
-        "dest_compartment": "I_p3"
-      },
-      "rate_grad": {
-        "beta": {
-          "bin_op": {
-            "op": "mul",
-            "left": {
-              "pop": "S_p3"
-            },
-            "right": {
-              "bin_op": {
-                "op": "add",
-                "left": {
-                  "bin_op": {
-                    "op": "div",
-                    "left": {
-                      "pop": "I_p3"
-                    },
-                    "right": {
-                      "pop_sum": [
-                        "S_p3",
-                        "I_p3",
-                        "R_p3"
-                      ]
-                    }
-                  }
-                },
-                "right": {
-                  "bin_op": {
-                    "op": "mul",
-                    "left": {
-                      "param": "rho"
-                    },
-                    "right": {
-                      "bin_op": {
-                        "op": "add",
-                        "left": {
-                          "bin_op": {
-                            "op": "add",
-                            "left": {
-                              "bin_op": {
-                                "op": "add",
-                                "left": {
-                                  "bin_op": {
-                                    "op": "div",
-                                    "left": {
-                                      "bin_op": {
-                                        "op": "mul",
-                                        "left": {
-                                          "table_lookup": {
-                                            "table": "w",
-                                            "indices": [
-                                              {
-                                                "const": 12.0
-                                              }
-                                            ]
-                                          }
-                                        },
-                                        "right": {
-                                          "pop": "I_p0"
-                                        }
-                                      }
-                                    },
-                                    "right": {
-                                      "pop_sum": [
-                                        "S_p0",
-                                        "I_p0",
-                                        "R_p0"
-                                      ]
-                                    }
-                                  }
-                                },
-                                "right": {
-                                  "bin_op": {
-                                    "op": "div",
-                                    "left": {
-                                      "bin_op": {
-                                        "op": "mul",
-                                        "left": {
-                                          "table_lookup": {
-                                            "table": "w",
-                                            "indices": [
-                                              {
-                                                "const": 13.0
-                                              }
-                                            ]
-                                          }
-                                        },
-                                        "right": {
-                                          "pop": "I_p1"
-                                        }
-                                      }
-                                    },
-                                    "right": {
-                                      "pop_sum": [
-                                        "S_p1",
-                                        "I_p1",
-                                        "R_p1"
-                                      ]
-                                    }
-                                  }
-                                }
-                              }
-                            },
-                            "right": {
-                              "bin_op": {
-                                "op": "div",
-                                "left": {
-                                  "bin_op": {
-                                    "op": "mul",
-                                    "left": {
-                                      "table_lookup": {
-                                        "table": "w",
-                                        "indices": [
-                                          {
-                                            "const": 14.0
-                                          }
-                                        ]
-                                      }
-                                    },
-                                    "right": {
-                                      "pop": "I_p2"
-                                    }
-                                  }
-                                },
-                                "right": {
-                                  "pop_sum": [
-                                    "S_p2",
-                                    "I_p2",
-                                    "R_p2"
-                                  ]
-                                }
-                              }
-                            }
-                          }
-                        },
-                        "right": {
-                          "bin_op": {
-                            "op": "div",
-                            "left": {
-                              "bin_op": {
-                                "op": "mul",
-                                "left": {
-                                  "table_lookup": {
-                                    "table": "w",
-                                    "indices": [
-                                      {
-                                        "const": 15.0
-                                      }
-                                    ]
-                                  }
-                                },
-                                "right": {
-                                  "pop": "I_p3"
-                                }
-                              }
-                            },
-                            "right": {
-                              "pop_sum": [
-                                "S_p3",
-                                "I_p3",
-                                "R_p3"
-                              ]
-                            }
-                          }
-                        }
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          }
-        },
-        "rho": {
-          "bin_op": {
-            "op": "mul",
-            "left": {
-              "bin_op": {
-                "op": "mul",
-                "left": {
-                  "param": "beta"
-                },
-                "right": {
-                  "pop": "S_p3"
-                }
-              }
-            },
-            "right": {
-              "bin_op": {
-                "op": "add",
-                "left": {
-                  "bin_op": {
-                    "op": "add",
-                    "left": {
-                      "bin_op": {
-                        "op": "add",
-                        "left": {
-                          "bin_op": {
-                            "op": "div",
-                            "left": {
-                              "bin_op": {
-                                "op": "mul",
-                                "left": {
-                                  "table_lookup": {
-                                    "table": "w",
-                                    "indices": [
-                                      {
-                                        "const": 12.0
-                                      }
-                                    ]
-                                  }
-                                },
-                                "right": {
-                                  "pop": "I_p0"
-                                }
-                              }
-                            },
-                            "right": {
-                              "pop_sum": [
-                                "S_p0",
-                                "I_p0",
-                                "R_p0"
-                              ]
-                            }
-                          }
-                        },
-                        "right": {
-                          "bin_op": {
-                            "op": "div",
-                            "left": {
-                              "bin_op": {
-                                "op": "mul",
-                                "left": {
-                                  "table_lookup": {
-                                    "table": "w",
-                                    "indices": [
-                                      {
-                                        "const": 13.0
-                                      }
-                                    ]
-                                  }
-                                },
-                                "right": {
-                                  "pop": "I_p1"
-                                }
-                              }
-                            },
-                            "right": {
-                              "pop_sum": [
-                                "S_p1",
-                                "I_p1",
-                                "R_p1"
-                              ]
-                            }
-                          }
-                        }
-                      }
-                    },
-                    "right": {
-                      "bin_op": {
-                        "op": "div",
-                        "left": {
-                          "bin_op": {
-                            "op": "mul",
-                            "left": {
-                              "table_lookup": {
-                                "table": "w",
-                                "indices": [
-                                  {
-                                    "const": 14.0
-                                  }
-                                ]
-                              }
-                            },
-                            "right": {
-                              "pop": "I_p2"
-                            }
-                          }
-                        },
-                        "right": {
-                          "pop_sum": [
-                            "S_p2",
-                            "I_p2",
-                            "R_p2"
-                          ]
-                        }
-                      }
-                    }
-                  }
-                },
-                "right": {
-                  "bin_op": {
-                    "op": "div",
-                    "left": {
-                      "bin_op": {
-                        "op": "mul",
-                        "left": {
-                          "table_lookup": {
-                            "table": "w",
-                            "indices": [
-                              {
-                                "const": 15.0
-                              }
-                            ]
-                          }
-                        },
-                        "right": {
-                          "pop": "I_p3"
-                        }
-                      }
-                    },
-                    "right": {
-                      "pop_sum": [
-                        "S_p3",
-                        "I_p3",
-                        "R_p3"
-                      ]
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    {
-      "name": "recovery_p0",
-      "stoichiometry": [
-        [
-          "I_p0",
-          -1
-        ],
-        [
-          "R_p0",
-          1
-        ]
-      ],
-      "rate": {
-        "bin_op": {
-          "op": "mul",
-          "left": {
-            "param": "gamma"
-          },
-          "right": {
-            "pop": "I_p0"
-          }
-        }
-      },
-      "metadata": {
-        "origin_kind": "intrinsic",
-        "source_compartment": "I_p0",
-        "dest_compartment": "R_p0"
-      },
-      "rate_grad": {
-        "gamma": {
-          "pop": "I_p0"
-        }
-      }
-    },
-    {
-      "name": "recovery_p1",
-      "stoichiometry": [
-        [
-          "I_p1",
-          -1
-        ],
-        [
-          "R_p1",
-          1
-        ]
-      ],
-      "rate": {
-        "bin_op": {
-          "op": "mul",
-          "left": {
-            "param": "gamma"
-          },
-          "right": {
-            "pop": "I_p1"
-          }
-        }
-      },
-      "metadata": {
-        "origin_kind": "intrinsic",
-        "source_compartment": "I_p1",
-        "dest_compartment": "R_p1"
-      },
-      "rate_grad": {
-        "gamma": {
-          "pop": "I_p1"
-        }
-      }
-    },
-    {
-      "name": "recovery_p2",
-      "stoichiometry": [
-        [
-          "I_p2",
-          -1
-        ],
-        [
-          "R_p2",
-          1
-        ]
-      ],
-      "rate": {
-        "bin_op": {
-          "op": "mul",
-          "left": {
-            "param": "gamma"
-          },
-          "right": {
-            "pop": "I_p2"
-          }
-        }
-      },
-      "metadata": {
-        "origin_kind": "intrinsic",
-        "source_compartment": "I_p2",
-        "dest_compartment": "R_p2"
-      },
-      "rate_grad": {
-        "gamma": {
-          "pop": "I_p2"
-        }
-      }
-    },
-    {
-      "name": "recovery_p3",
-      "stoichiometry": [
-        [
-          "I_p3",
-          -1
-        ],
-        [
-          "R_p3",
-          1
-        ]
-      ],
-      "rate": {
-        "bin_op": {
-          "op": "mul",
-          "left": {
-            "param": "gamma"
-          },
-          "right": {
-            "pop": "I_p3"
-          }
-        }
-      },
-      "metadata": {
-        "origin_kind": "intrinsic",
-        "source_compartment": "I_p3",
-        "dest_compartment": "R_p3"
-      },
-      "rate_grad": {
-        "gamma": {
-          "pop": "I_p3"
-        }
-      }
-    }
-  ],
-  "ode_equations": [],
-  "time_functions": [],
-  "tables": [
-    {
-      "name": "w",
-      "values": [
-        {
-          "const": 0.0
-        },
-        {
-          "const": 1.0
-        },
-        {
-          "const": 0.5
-        },
-        {
-          "const": 0.1
-        },
-        {
-          "const": 1.0
-        },
-        {
-          "const": 0.0
-        },
-        {
-          "const": 1.0
-        },
-        {
-          "const": 0.5
-        },
-        {
-          "const": 0.5
-        },
-        {
-          "const": 1.0
-        },
-        {
-          "const": 0.0
-        },
-        {
-          "const": 1.0
-        },
-        {
-          "const": 0.1
-        },
-        {
-          "const": 0.5
-        },
-        {
-          "const": 1.0
-        },
-        {
-          "const": 0.0
-        }
-      ],
-      "out_of_bounds": "error"
-    }
-  ],
-  "interventions": [],
-  "observations": [],
-  "parameters": [
-    {
-      "name": "beta",
-      "value": null,
-      "bounds": [
-        0.0,
-        2.0
-      ],
-      "prior": null,
-      "hierarchical": null,
-      "transform": null,
-      "initial_value": null,
-      "param_kind": "rate",
-      "param_dim": null
-    },
-    {
-      "name": "gamma",
-      "value": null,
-      "bounds": [
-        0.0,
-        1.0
-      ],
-      "prior": null,
-      "hierarchical": null,
-      "transform": null,
-      "initial_value": null,
-      "param_kind": "rate",
-      "param_dim": null
-    },
-    {
-      "name": "rho",
-      "value": null,
-      "bounds": [
-        0.0,
-        1.0
-      ],
-      "prior": null,
-      "hierarchical": null,
-      "transform": null,
-      "initial_value": null,
-      "param_kind": "probability",
-      "param_dim": null
-    }
-  ],
-  "initial_conditions": {
-    "explicit": {
-      "S_p0": 4999.0,
-      "I_p0": 1.0,
-      "S_p1": 10000.0,
-      "S_p2": 8000.0,
-      "S_p3": 3000.0
-    }
-  },
-  "output": {
-    "times": {
-      "regular": {
-        "start": 0.0,
-        "step": 1.0,
-        "end": 200.0
-      }
-    },
-    "format": "tsv",
-    "trajectory": true,
-    "observations": true
-  },
-  "simulation": {
-    "t_start": 0.0,
-    "t_end": 200.0,
-    "time_semantics": "continuous",
-    "dt": null,
-    "rng_seed": null
-  },
-  "scenarios": [
-    {
-      "name": "no_coupling",
-      "label": "independent patches (rho = 0)",
-      "params": {
-        "beta": 0.3,
-        "gamma": 0.1,
-        "rho": 0.0
-      },
-      "enable": [],
-      "disable": [],
-      "t_end": null
-    },
-    {
-      "name": "weak_coupling",
-      "label": "weak spatial coupling (rho = 0.01)",
-      "params": {
-        "beta": 0.3,
-        "gamma": 0.1,
-        "rho": 0.01
-      },
-      "enable": [],
-      "disable": [],
-      "t_end": null
-    },
-    {
-      "name": "strong_coupling",
-      "label": "strong spatial coupling (rho = 0.1)",
-      "params": {
-        "beta": 0.3,
-        "gamma": 0.1,
-        "rho": 0.1
-      },
-      "enable": [],
-      "disable": [],
-      "t_end": null
-    }
-  ],
-  "model_structure": {
-    "dimensions": [
+  "ir_version": "0.4",
+  "validated_by": "ocaml-compiler-v0.4",
+  "model": {
+    "name": "sir_spatial_sum",
+    "version": "0.3",
+    "time_unit": "days",
+    "description": null,
+    "compartments": [
+      { "name": "S_p0", "kind": "integer" },
+      { "name": "S_p1", "kind": "integer" },
+      { "name": "S_p2", "kind": "integer" },
+      { "name": "S_p3", "kind": "integer" },
+      { "name": "I_p0", "kind": "integer" },
+      { "name": "I_p1", "kind": "integer" },
+      { "name": "I_p2", "kind": "integer" },
+      { "name": "I_p3", "kind": "integer" },
+      { "name": "R_p0", "kind": "integer" },
+      { "name": "R_p1", "kind": "integer" },
+      { "name": "R_p2", "kind": "integer" },
+      { "name": "R_p3", "kind": "integer" }
+    ],
+    "transitions": [
       {
-        "name": "patch",
-        "values": [
-          "p0",
-          "p1",
-          "p2",
-          "p3"
-        ]
+        "name": "infection_p0",
+        "stoichiometry": [ [ "S_p0", -1 ], [ "I_p0", 1 ] ],
+        "rate": {
+          "bin_op": {
+            "op": "mul",
+            "left": {
+              "bin_op": {
+                "op": "mul",
+                "left": { "param": "beta" },
+                "right": { "pop": "S_p0" }
+              }
+            },
+            "right": {
+              "bin_op": {
+                "op": "add",
+                "left": {
+                  "bin_op": {
+                    "op": "div",
+                    "left": { "pop": "I_p0" },
+                    "right": { "pop_sum": [ "S_p0", "I_p0", "R_p0" ] }
+                  }
+                },
+                "right": {
+                  "bin_op": {
+                    "op": "mul",
+                    "left": { "param": "rho" },
+                    "right": {
+                      "bin_op": {
+                        "op": "add",
+                        "left": {
+                          "bin_op": {
+                            "op": "add",
+                            "left": {
+                              "bin_op": {
+                                "op": "add",
+                                "left": {
+                                  "bin_op": {
+                                    "op": "div",
+                                    "left": {
+                                      "bin_op": {
+                                        "op": "mul",
+                                        "left": {
+                                          "table_lookup": {
+                                            "table": "w",
+                                            "indices": [ { "const": 0.0 } ]
+                                          }
+                                        },
+                                        "right": { "pop": "I_p0" }
+                                      }
+                                    },
+                                    "right": {
+                                      "pop_sum": [ "S_p0", "I_p0", "R_p0" ]
+                                    }
+                                  }
+                                },
+                                "right": {
+                                  "bin_op": {
+                                    "op": "div",
+                                    "left": {
+                                      "bin_op": {
+                                        "op": "mul",
+                                        "left": {
+                                          "table_lookup": {
+                                            "table": "w",
+                                            "indices": [ { "const": 1.0 } ]
+                                          }
+                                        },
+                                        "right": { "pop": "I_p1" }
+                                      }
+                                    },
+                                    "right": {
+                                      "pop_sum": [ "S_p1", "I_p1", "R_p1" ]
+                                    }
+                                  }
+                                }
+                              }
+                            },
+                            "right": {
+                              "bin_op": {
+                                "op": "div",
+                                "left": {
+                                  "bin_op": {
+                                    "op": "mul",
+                                    "left": {
+                                      "table_lookup": {
+                                        "table": "w",
+                                        "indices": [ { "const": 2.0 } ]
+                                      }
+                                    },
+                                    "right": { "pop": "I_p2" }
+                                  }
+                                },
+                                "right": {
+                                  "pop_sum": [ "S_p2", "I_p2", "R_p2" ]
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "right": {
+                          "bin_op": {
+                            "op": "div",
+                            "left": {
+                              "bin_op": {
+                                "op": "mul",
+                                "left": {
+                                  "table_lookup": {
+                                    "table": "w",
+                                    "indices": [ { "const": 3.0 } ]
+                                  }
+                                },
+                                "right": { "pop": "I_p3" }
+                              }
+                            },
+                            "right": {
+                              "pop_sum": [ "S_p3", "I_p3", "R_p3" ]
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "metadata": {
+          "origin_kind": "transmission",
+          "source_compartment": "S_p0",
+          "dest_compartment": "I_p0"
+        },
+        "rate_grad": {
+          "beta": {
+            "bin_op": {
+              "op": "mul",
+              "left": { "pop": "S_p0" },
+              "right": {
+                "bin_op": {
+                  "op": "add",
+                  "left": {
+                    "bin_op": {
+                      "op": "div",
+                      "left": { "pop": "I_p0" },
+                      "right": { "pop_sum": [ "S_p0", "I_p0", "R_p0" ] }
+                    }
+                  },
+                  "right": {
+                    "bin_op": {
+                      "op": "mul",
+                      "left": { "param": "rho" },
+                      "right": {
+                        "bin_op": {
+                          "op": "add",
+                          "left": {
+                            "bin_op": {
+                              "op": "add",
+                              "left": {
+                                "bin_op": {
+                                  "op": "add",
+                                  "left": {
+                                    "bin_op": {
+                                      "op": "div",
+                                      "left": {
+                                        "bin_op": {
+                                          "op": "mul",
+                                          "left": {
+                                            "table_lookup": {
+                                              "table": "w",
+                                              "indices": [ { "const": 0.0 } ]
+                                            }
+                                          },
+                                          "right": { "pop": "I_p0" }
+                                        }
+                                      },
+                                      "right": {
+                                        "pop_sum": [ "S_p0", "I_p0", "R_p0" ]
+                                      }
+                                    }
+                                  },
+                                  "right": {
+                                    "bin_op": {
+                                      "op": "div",
+                                      "left": {
+                                        "bin_op": {
+                                          "op": "mul",
+                                          "left": {
+                                            "table_lookup": {
+                                              "table": "w",
+                                              "indices": [ { "const": 1.0 } ]
+                                            }
+                                          },
+                                          "right": { "pop": "I_p1" }
+                                        }
+                                      },
+                                      "right": {
+                                        "pop_sum": [ "S_p1", "I_p1", "R_p1" ]
+                                      }
+                                    }
+                                  }
+                                }
+                              },
+                              "right": {
+                                "bin_op": {
+                                  "op": "div",
+                                  "left": {
+                                    "bin_op": {
+                                      "op": "mul",
+                                      "left": {
+                                        "table_lookup": {
+                                          "table": "w",
+                                          "indices": [ { "const": 2.0 } ]
+                                        }
+                                      },
+                                      "right": { "pop": "I_p2" }
+                                    }
+                                  },
+                                  "right": {
+                                    "pop_sum": [ "S_p2", "I_p2", "R_p2" ]
+                                  }
+                                }
+                              }
+                            }
+                          },
+                          "right": {
+                            "bin_op": {
+                              "op": "div",
+                              "left": {
+                                "bin_op": {
+                                  "op": "mul",
+                                  "left": {
+                                    "table_lookup": {
+                                      "table": "w",
+                                      "indices": [ { "const": 3.0 } ]
+                                    }
+                                  },
+                                  "right": { "pop": "I_p3" }
+                                }
+                              },
+                              "right": {
+                                "pop_sum": [ "S_p3", "I_p3", "R_p3" ]
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "rho": {
+            "bin_op": {
+              "op": "mul",
+              "left": {
+                "bin_op": {
+                  "op": "mul",
+                  "left": { "param": "beta" },
+                  "right": { "pop": "S_p0" }
+                }
+              },
+              "right": {
+                "bin_op": {
+                  "op": "add",
+                  "left": {
+                    "bin_op": {
+                      "op": "add",
+                      "left": {
+                        "bin_op": {
+                          "op": "add",
+                          "left": {
+                            "bin_op": {
+                              "op": "div",
+                              "left": {
+                                "bin_op": {
+                                  "op": "mul",
+                                  "left": {
+                                    "table_lookup": {
+                                      "table": "w",
+                                      "indices": [ { "const": 0.0 } ]
+                                    }
+                                  },
+                                  "right": { "pop": "I_p0" }
+                                }
+                              },
+                              "right": {
+                                "pop_sum": [ "S_p0", "I_p0", "R_p0" ]
+                              }
+                            }
+                          },
+                          "right": {
+                            "bin_op": {
+                              "op": "div",
+                              "left": {
+                                "bin_op": {
+                                  "op": "mul",
+                                  "left": {
+                                    "table_lookup": {
+                                      "table": "w",
+                                      "indices": [ { "const": 1.0 } ]
+                                    }
+                                  },
+                                  "right": { "pop": "I_p1" }
+                                }
+                              },
+                              "right": {
+                                "pop_sum": [ "S_p1", "I_p1", "R_p1" ]
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "right": {
+                        "bin_op": {
+                          "op": "div",
+                          "left": {
+                            "bin_op": {
+                              "op": "mul",
+                              "left": {
+                                "table_lookup": {
+                                  "table": "w",
+                                  "indices": [ { "const": 2.0 } ]
+                                }
+                              },
+                              "right": { "pop": "I_p2" }
+                            }
+                          },
+                          "right": { "pop_sum": [ "S_p2", "I_p2", "R_p2" ] }
+                        }
+                      }
+                    }
+                  },
+                  "right": {
+                    "bin_op": {
+                      "op": "div",
+                      "left": {
+                        "bin_op": {
+                          "op": "mul",
+                          "left": {
+                            "table_lookup": {
+                              "table": "w",
+                              "indices": [ { "const": 3.0 } ]
+                            }
+                          },
+                          "right": { "pop": "I_p3" }
+                        }
+                      },
+                      "right": { "pop_sum": [ "S_p3", "I_p3", "R_p3" ] }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        "name": "infection_p1",
+        "stoichiometry": [ [ "S_p1", -1 ], [ "I_p1", 1 ] ],
+        "rate": {
+          "bin_op": {
+            "op": "mul",
+            "left": {
+              "bin_op": {
+                "op": "mul",
+                "left": { "param": "beta" },
+                "right": { "pop": "S_p1" }
+              }
+            },
+            "right": {
+              "bin_op": {
+                "op": "add",
+                "left": {
+                  "bin_op": {
+                    "op": "div",
+                    "left": { "pop": "I_p1" },
+                    "right": { "pop_sum": [ "S_p1", "I_p1", "R_p1" ] }
+                  }
+                },
+                "right": {
+                  "bin_op": {
+                    "op": "mul",
+                    "left": { "param": "rho" },
+                    "right": {
+                      "bin_op": {
+                        "op": "add",
+                        "left": {
+                          "bin_op": {
+                            "op": "add",
+                            "left": {
+                              "bin_op": {
+                                "op": "add",
+                                "left": {
+                                  "bin_op": {
+                                    "op": "div",
+                                    "left": {
+                                      "bin_op": {
+                                        "op": "mul",
+                                        "left": {
+                                          "table_lookup": {
+                                            "table": "w",
+                                            "indices": [ { "const": 4.0 } ]
+                                          }
+                                        },
+                                        "right": { "pop": "I_p0" }
+                                      }
+                                    },
+                                    "right": {
+                                      "pop_sum": [ "S_p0", "I_p0", "R_p0" ]
+                                    }
+                                  }
+                                },
+                                "right": {
+                                  "bin_op": {
+                                    "op": "div",
+                                    "left": {
+                                      "bin_op": {
+                                        "op": "mul",
+                                        "left": {
+                                          "table_lookup": {
+                                            "table": "w",
+                                            "indices": [ { "const": 5.0 } ]
+                                          }
+                                        },
+                                        "right": { "pop": "I_p1" }
+                                      }
+                                    },
+                                    "right": {
+                                      "pop_sum": [ "S_p1", "I_p1", "R_p1" ]
+                                    }
+                                  }
+                                }
+                              }
+                            },
+                            "right": {
+                              "bin_op": {
+                                "op": "div",
+                                "left": {
+                                  "bin_op": {
+                                    "op": "mul",
+                                    "left": {
+                                      "table_lookup": {
+                                        "table": "w",
+                                        "indices": [ { "const": 6.0 } ]
+                                      }
+                                    },
+                                    "right": { "pop": "I_p2" }
+                                  }
+                                },
+                                "right": {
+                                  "pop_sum": [ "S_p2", "I_p2", "R_p2" ]
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "right": {
+                          "bin_op": {
+                            "op": "div",
+                            "left": {
+                              "bin_op": {
+                                "op": "mul",
+                                "left": {
+                                  "table_lookup": {
+                                    "table": "w",
+                                    "indices": [ { "const": 7.0 } ]
+                                  }
+                                },
+                                "right": { "pop": "I_p3" }
+                              }
+                            },
+                            "right": {
+                              "pop_sum": [ "S_p3", "I_p3", "R_p3" ]
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "metadata": {
+          "origin_kind": "transmission",
+          "source_compartment": "S_p1",
+          "dest_compartment": "I_p1"
+        },
+        "rate_grad": {
+          "beta": {
+            "bin_op": {
+              "op": "mul",
+              "left": { "pop": "S_p1" },
+              "right": {
+                "bin_op": {
+                  "op": "add",
+                  "left": {
+                    "bin_op": {
+                      "op": "div",
+                      "left": { "pop": "I_p1" },
+                      "right": { "pop_sum": [ "S_p1", "I_p1", "R_p1" ] }
+                    }
+                  },
+                  "right": {
+                    "bin_op": {
+                      "op": "mul",
+                      "left": { "param": "rho" },
+                      "right": {
+                        "bin_op": {
+                          "op": "add",
+                          "left": {
+                            "bin_op": {
+                              "op": "add",
+                              "left": {
+                                "bin_op": {
+                                  "op": "add",
+                                  "left": {
+                                    "bin_op": {
+                                      "op": "div",
+                                      "left": {
+                                        "bin_op": {
+                                          "op": "mul",
+                                          "left": {
+                                            "table_lookup": {
+                                              "table": "w",
+                                              "indices": [ { "const": 4.0 } ]
+                                            }
+                                          },
+                                          "right": { "pop": "I_p0" }
+                                        }
+                                      },
+                                      "right": {
+                                        "pop_sum": [ "S_p0", "I_p0", "R_p0" ]
+                                      }
+                                    }
+                                  },
+                                  "right": {
+                                    "bin_op": {
+                                      "op": "div",
+                                      "left": {
+                                        "bin_op": {
+                                          "op": "mul",
+                                          "left": {
+                                            "table_lookup": {
+                                              "table": "w",
+                                              "indices": [ { "const": 5.0 } ]
+                                            }
+                                          },
+                                          "right": { "pop": "I_p1" }
+                                        }
+                                      },
+                                      "right": {
+                                        "pop_sum": [ "S_p1", "I_p1", "R_p1" ]
+                                      }
+                                    }
+                                  }
+                                }
+                              },
+                              "right": {
+                                "bin_op": {
+                                  "op": "div",
+                                  "left": {
+                                    "bin_op": {
+                                      "op": "mul",
+                                      "left": {
+                                        "table_lookup": {
+                                          "table": "w",
+                                          "indices": [ { "const": 6.0 } ]
+                                        }
+                                      },
+                                      "right": { "pop": "I_p2" }
+                                    }
+                                  },
+                                  "right": {
+                                    "pop_sum": [ "S_p2", "I_p2", "R_p2" ]
+                                  }
+                                }
+                              }
+                            }
+                          },
+                          "right": {
+                            "bin_op": {
+                              "op": "div",
+                              "left": {
+                                "bin_op": {
+                                  "op": "mul",
+                                  "left": {
+                                    "table_lookup": {
+                                      "table": "w",
+                                      "indices": [ { "const": 7.0 } ]
+                                    }
+                                  },
+                                  "right": { "pop": "I_p3" }
+                                }
+                              },
+                              "right": {
+                                "pop_sum": [ "S_p3", "I_p3", "R_p3" ]
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "rho": {
+            "bin_op": {
+              "op": "mul",
+              "left": {
+                "bin_op": {
+                  "op": "mul",
+                  "left": { "param": "beta" },
+                  "right": { "pop": "S_p1" }
+                }
+              },
+              "right": {
+                "bin_op": {
+                  "op": "add",
+                  "left": {
+                    "bin_op": {
+                      "op": "add",
+                      "left": {
+                        "bin_op": {
+                          "op": "add",
+                          "left": {
+                            "bin_op": {
+                              "op": "div",
+                              "left": {
+                                "bin_op": {
+                                  "op": "mul",
+                                  "left": {
+                                    "table_lookup": {
+                                      "table": "w",
+                                      "indices": [ { "const": 4.0 } ]
+                                    }
+                                  },
+                                  "right": { "pop": "I_p0" }
+                                }
+                              },
+                              "right": {
+                                "pop_sum": [ "S_p0", "I_p0", "R_p0" ]
+                              }
+                            }
+                          },
+                          "right": {
+                            "bin_op": {
+                              "op": "div",
+                              "left": {
+                                "bin_op": {
+                                  "op": "mul",
+                                  "left": {
+                                    "table_lookup": {
+                                      "table": "w",
+                                      "indices": [ { "const": 5.0 } ]
+                                    }
+                                  },
+                                  "right": { "pop": "I_p1" }
+                                }
+                              },
+                              "right": {
+                                "pop_sum": [ "S_p1", "I_p1", "R_p1" ]
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "right": {
+                        "bin_op": {
+                          "op": "div",
+                          "left": {
+                            "bin_op": {
+                              "op": "mul",
+                              "left": {
+                                "table_lookup": {
+                                  "table": "w",
+                                  "indices": [ { "const": 6.0 } ]
+                                }
+                              },
+                              "right": { "pop": "I_p2" }
+                            }
+                          },
+                          "right": { "pop_sum": [ "S_p2", "I_p2", "R_p2" ] }
+                        }
+                      }
+                    }
+                  },
+                  "right": {
+                    "bin_op": {
+                      "op": "div",
+                      "left": {
+                        "bin_op": {
+                          "op": "mul",
+                          "left": {
+                            "table_lookup": {
+                              "table": "w",
+                              "indices": [ { "const": 7.0 } ]
+                            }
+                          },
+                          "right": { "pop": "I_p3" }
+                        }
+                      },
+                      "right": { "pop_sum": [ "S_p3", "I_p3", "R_p3" ] }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        "name": "infection_p2",
+        "stoichiometry": [ [ "S_p2", -1 ], [ "I_p2", 1 ] ],
+        "rate": {
+          "bin_op": {
+            "op": "mul",
+            "left": {
+              "bin_op": {
+                "op": "mul",
+                "left": { "param": "beta" },
+                "right": { "pop": "S_p2" }
+              }
+            },
+            "right": {
+              "bin_op": {
+                "op": "add",
+                "left": {
+                  "bin_op": {
+                    "op": "div",
+                    "left": { "pop": "I_p2" },
+                    "right": { "pop_sum": [ "S_p2", "I_p2", "R_p2" ] }
+                  }
+                },
+                "right": {
+                  "bin_op": {
+                    "op": "mul",
+                    "left": { "param": "rho" },
+                    "right": {
+                      "bin_op": {
+                        "op": "add",
+                        "left": {
+                          "bin_op": {
+                            "op": "add",
+                            "left": {
+                              "bin_op": {
+                                "op": "add",
+                                "left": {
+                                  "bin_op": {
+                                    "op": "div",
+                                    "left": {
+                                      "bin_op": {
+                                        "op": "mul",
+                                        "left": {
+                                          "table_lookup": {
+                                            "table": "w",
+                                            "indices": [ { "const": 8.0 } ]
+                                          }
+                                        },
+                                        "right": { "pop": "I_p0" }
+                                      }
+                                    },
+                                    "right": {
+                                      "pop_sum": [ "S_p0", "I_p0", "R_p0" ]
+                                    }
+                                  }
+                                },
+                                "right": {
+                                  "bin_op": {
+                                    "op": "div",
+                                    "left": {
+                                      "bin_op": {
+                                        "op": "mul",
+                                        "left": {
+                                          "table_lookup": {
+                                            "table": "w",
+                                            "indices": [ { "const": 9.0 } ]
+                                          }
+                                        },
+                                        "right": { "pop": "I_p1" }
+                                      }
+                                    },
+                                    "right": {
+                                      "pop_sum": [ "S_p1", "I_p1", "R_p1" ]
+                                    }
+                                  }
+                                }
+                              }
+                            },
+                            "right": {
+                              "bin_op": {
+                                "op": "div",
+                                "left": {
+                                  "bin_op": {
+                                    "op": "mul",
+                                    "left": {
+                                      "table_lookup": {
+                                        "table": "w",
+                                        "indices": [ { "const": 10.0 } ]
+                                      }
+                                    },
+                                    "right": { "pop": "I_p2" }
+                                  }
+                                },
+                                "right": {
+                                  "pop_sum": [ "S_p2", "I_p2", "R_p2" ]
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "right": {
+                          "bin_op": {
+                            "op": "div",
+                            "left": {
+                              "bin_op": {
+                                "op": "mul",
+                                "left": {
+                                  "table_lookup": {
+                                    "table": "w",
+                                    "indices": [ { "const": 11.0 } ]
+                                  }
+                                },
+                                "right": { "pop": "I_p3" }
+                              }
+                            },
+                            "right": {
+                              "pop_sum": [ "S_p3", "I_p3", "R_p3" ]
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "metadata": {
+          "origin_kind": "transmission",
+          "source_compartment": "S_p2",
+          "dest_compartment": "I_p2"
+        },
+        "rate_grad": {
+          "beta": {
+            "bin_op": {
+              "op": "mul",
+              "left": { "pop": "S_p2" },
+              "right": {
+                "bin_op": {
+                  "op": "add",
+                  "left": {
+                    "bin_op": {
+                      "op": "div",
+                      "left": { "pop": "I_p2" },
+                      "right": { "pop_sum": [ "S_p2", "I_p2", "R_p2" ] }
+                    }
+                  },
+                  "right": {
+                    "bin_op": {
+                      "op": "mul",
+                      "left": { "param": "rho" },
+                      "right": {
+                        "bin_op": {
+                          "op": "add",
+                          "left": {
+                            "bin_op": {
+                              "op": "add",
+                              "left": {
+                                "bin_op": {
+                                  "op": "add",
+                                  "left": {
+                                    "bin_op": {
+                                      "op": "div",
+                                      "left": {
+                                        "bin_op": {
+                                          "op": "mul",
+                                          "left": {
+                                            "table_lookup": {
+                                              "table": "w",
+                                              "indices": [ { "const": 8.0 } ]
+                                            }
+                                          },
+                                          "right": { "pop": "I_p0" }
+                                        }
+                                      },
+                                      "right": {
+                                        "pop_sum": [ "S_p0", "I_p0", "R_p0" ]
+                                      }
+                                    }
+                                  },
+                                  "right": {
+                                    "bin_op": {
+                                      "op": "div",
+                                      "left": {
+                                        "bin_op": {
+                                          "op": "mul",
+                                          "left": {
+                                            "table_lookup": {
+                                              "table": "w",
+                                              "indices": [ { "const": 9.0 } ]
+                                            }
+                                          },
+                                          "right": { "pop": "I_p1" }
+                                        }
+                                      },
+                                      "right": {
+                                        "pop_sum": [ "S_p1", "I_p1", "R_p1" ]
+                                      }
+                                    }
+                                  }
+                                }
+                              },
+                              "right": {
+                                "bin_op": {
+                                  "op": "div",
+                                  "left": {
+                                    "bin_op": {
+                                      "op": "mul",
+                                      "left": {
+                                        "table_lookup": {
+                                          "table": "w",
+                                          "indices": [ { "const": 10.0 } ]
+                                        }
+                                      },
+                                      "right": { "pop": "I_p2" }
+                                    }
+                                  },
+                                  "right": {
+                                    "pop_sum": [ "S_p2", "I_p2", "R_p2" ]
+                                  }
+                                }
+                              }
+                            }
+                          },
+                          "right": {
+                            "bin_op": {
+                              "op": "div",
+                              "left": {
+                                "bin_op": {
+                                  "op": "mul",
+                                  "left": {
+                                    "table_lookup": {
+                                      "table": "w",
+                                      "indices": [ { "const": 11.0 } ]
+                                    }
+                                  },
+                                  "right": { "pop": "I_p3" }
+                                }
+                              },
+                              "right": {
+                                "pop_sum": [ "S_p3", "I_p3", "R_p3" ]
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "rho": {
+            "bin_op": {
+              "op": "mul",
+              "left": {
+                "bin_op": {
+                  "op": "mul",
+                  "left": { "param": "beta" },
+                  "right": { "pop": "S_p2" }
+                }
+              },
+              "right": {
+                "bin_op": {
+                  "op": "add",
+                  "left": {
+                    "bin_op": {
+                      "op": "add",
+                      "left": {
+                        "bin_op": {
+                          "op": "add",
+                          "left": {
+                            "bin_op": {
+                              "op": "div",
+                              "left": {
+                                "bin_op": {
+                                  "op": "mul",
+                                  "left": {
+                                    "table_lookup": {
+                                      "table": "w",
+                                      "indices": [ { "const": 8.0 } ]
+                                    }
+                                  },
+                                  "right": { "pop": "I_p0" }
+                                }
+                              },
+                              "right": {
+                                "pop_sum": [ "S_p0", "I_p0", "R_p0" ]
+                              }
+                            }
+                          },
+                          "right": {
+                            "bin_op": {
+                              "op": "div",
+                              "left": {
+                                "bin_op": {
+                                  "op": "mul",
+                                  "left": {
+                                    "table_lookup": {
+                                      "table": "w",
+                                      "indices": [ { "const": 9.0 } ]
+                                    }
+                                  },
+                                  "right": { "pop": "I_p1" }
+                                }
+                              },
+                              "right": {
+                                "pop_sum": [ "S_p1", "I_p1", "R_p1" ]
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "right": {
+                        "bin_op": {
+                          "op": "div",
+                          "left": {
+                            "bin_op": {
+                              "op": "mul",
+                              "left": {
+                                "table_lookup": {
+                                  "table": "w",
+                                  "indices": [ { "const": 10.0 } ]
+                                }
+                              },
+                              "right": { "pop": "I_p2" }
+                            }
+                          },
+                          "right": { "pop_sum": [ "S_p2", "I_p2", "R_p2" ] }
+                        }
+                      }
+                    }
+                  },
+                  "right": {
+                    "bin_op": {
+                      "op": "div",
+                      "left": {
+                        "bin_op": {
+                          "op": "mul",
+                          "left": {
+                            "table_lookup": {
+                              "table": "w",
+                              "indices": [ { "const": 11.0 } ]
+                            }
+                          },
+                          "right": { "pop": "I_p3" }
+                        }
+                      },
+                      "right": { "pop_sum": [ "S_p3", "I_p3", "R_p3" ] }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        "name": "infection_p3",
+        "stoichiometry": [ [ "S_p3", -1 ], [ "I_p3", 1 ] ],
+        "rate": {
+          "bin_op": {
+            "op": "mul",
+            "left": {
+              "bin_op": {
+                "op": "mul",
+                "left": { "param": "beta" },
+                "right": { "pop": "S_p3" }
+              }
+            },
+            "right": {
+              "bin_op": {
+                "op": "add",
+                "left": {
+                  "bin_op": {
+                    "op": "div",
+                    "left": { "pop": "I_p3" },
+                    "right": { "pop_sum": [ "S_p3", "I_p3", "R_p3" ] }
+                  }
+                },
+                "right": {
+                  "bin_op": {
+                    "op": "mul",
+                    "left": { "param": "rho" },
+                    "right": {
+                      "bin_op": {
+                        "op": "add",
+                        "left": {
+                          "bin_op": {
+                            "op": "add",
+                            "left": {
+                              "bin_op": {
+                                "op": "add",
+                                "left": {
+                                  "bin_op": {
+                                    "op": "div",
+                                    "left": {
+                                      "bin_op": {
+                                        "op": "mul",
+                                        "left": {
+                                          "table_lookup": {
+                                            "table": "w",
+                                            "indices": [ { "const": 12.0 } ]
+                                          }
+                                        },
+                                        "right": { "pop": "I_p0" }
+                                      }
+                                    },
+                                    "right": {
+                                      "pop_sum": [ "S_p0", "I_p0", "R_p0" ]
+                                    }
+                                  }
+                                },
+                                "right": {
+                                  "bin_op": {
+                                    "op": "div",
+                                    "left": {
+                                      "bin_op": {
+                                        "op": "mul",
+                                        "left": {
+                                          "table_lookup": {
+                                            "table": "w",
+                                            "indices": [ { "const": 13.0 } ]
+                                          }
+                                        },
+                                        "right": { "pop": "I_p1" }
+                                      }
+                                    },
+                                    "right": {
+                                      "pop_sum": [ "S_p1", "I_p1", "R_p1" ]
+                                    }
+                                  }
+                                }
+                              }
+                            },
+                            "right": {
+                              "bin_op": {
+                                "op": "div",
+                                "left": {
+                                  "bin_op": {
+                                    "op": "mul",
+                                    "left": {
+                                      "table_lookup": {
+                                        "table": "w",
+                                        "indices": [ { "const": 14.0 } ]
+                                      }
+                                    },
+                                    "right": { "pop": "I_p2" }
+                                  }
+                                },
+                                "right": {
+                                  "pop_sum": [ "S_p2", "I_p2", "R_p2" ]
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "right": {
+                          "bin_op": {
+                            "op": "div",
+                            "left": {
+                              "bin_op": {
+                                "op": "mul",
+                                "left": {
+                                  "table_lookup": {
+                                    "table": "w",
+                                    "indices": [ { "const": 15.0 } ]
+                                  }
+                                },
+                                "right": { "pop": "I_p3" }
+                              }
+                            },
+                            "right": {
+                              "pop_sum": [ "S_p3", "I_p3", "R_p3" ]
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "metadata": {
+          "origin_kind": "transmission",
+          "source_compartment": "S_p3",
+          "dest_compartment": "I_p3"
+        },
+        "rate_grad": {
+          "beta": {
+            "bin_op": {
+              "op": "mul",
+              "left": { "pop": "S_p3" },
+              "right": {
+                "bin_op": {
+                  "op": "add",
+                  "left": {
+                    "bin_op": {
+                      "op": "div",
+                      "left": { "pop": "I_p3" },
+                      "right": { "pop_sum": [ "S_p3", "I_p3", "R_p3" ] }
+                    }
+                  },
+                  "right": {
+                    "bin_op": {
+                      "op": "mul",
+                      "left": { "param": "rho" },
+                      "right": {
+                        "bin_op": {
+                          "op": "add",
+                          "left": {
+                            "bin_op": {
+                              "op": "add",
+                              "left": {
+                                "bin_op": {
+                                  "op": "add",
+                                  "left": {
+                                    "bin_op": {
+                                      "op": "div",
+                                      "left": {
+                                        "bin_op": {
+                                          "op": "mul",
+                                          "left": {
+                                            "table_lookup": {
+                                              "table": "w",
+                                              "indices": [
+                                                { "const": 12.0 }
+                                              ]
+                                            }
+                                          },
+                                          "right": { "pop": "I_p0" }
+                                        }
+                                      },
+                                      "right": {
+                                        "pop_sum": [ "S_p0", "I_p0", "R_p0" ]
+                                      }
+                                    }
+                                  },
+                                  "right": {
+                                    "bin_op": {
+                                      "op": "div",
+                                      "left": {
+                                        "bin_op": {
+                                          "op": "mul",
+                                          "left": {
+                                            "table_lookup": {
+                                              "table": "w",
+                                              "indices": [
+                                                { "const": 13.0 }
+                                              ]
+                                            }
+                                          },
+                                          "right": { "pop": "I_p1" }
+                                        }
+                                      },
+                                      "right": {
+                                        "pop_sum": [ "S_p1", "I_p1", "R_p1" ]
+                                      }
+                                    }
+                                  }
+                                }
+                              },
+                              "right": {
+                                "bin_op": {
+                                  "op": "div",
+                                  "left": {
+                                    "bin_op": {
+                                      "op": "mul",
+                                      "left": {
+                                        "table_lookup": {
+                                          "table": "w",
+                                          "indices": [ { "const": 14.0 } ]
+                                        }
+                                      },
+                                      "right": { "pop": "I_p2" }
+                                    }
+                                  },
+                                  "right": {
+                                    "pop_sum": [ "S_p2", "I_p2", "R_p2" ]
+                                  }
+                                }
+                              }
+                            }
+                          },
+                          "right": {
+                            "bin_op": {
+                              "op": "div",
+                              "left": {
+                                "bin_op": {
+                                  "op": "mul",
+                                  "left": {
+                                    "table_lookup": {
+                                      "table": "w",
+                                      "indices": [ { "const": 15.0 } ]
+                                    }
+                                  },
+                                  "right": { "pop": "I_p3" }
+                                }
+                              },
+                              "right": {
+                                "pop_sum": [ "S_p3", "I_p3", "R_p3" ]
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "rho": {
+            "bin_op": {
+              "op": "mul",
+              "left": {
+                "bin_op": {
+                  "op": "mul",
+                  "left": { "param": "beta" },
+                  "right": { "pop": "S_p3" }
+                }
+              },
+              "right": {
+                "bin_op": {
+                  "op": "add",
+                  "left": {
+                    "bin_op": {
+                      "op": "add",
+                      "left": {
+                        "bin_op": {
+                          "op": "add",
+                          "left": {
+                            "bin_op": {
+                              "op": "div",
+                              "left": {
+                                "bin_op": {
+                                  "op": "mul",
+                                  "left": {
+                                    "table_lookup": {
+                                      "table": "w",
+                                      "indices": [ { "const": 12.0 } ]
+                                    }
+                                  },
+                                  "right": { "pop": "I_p0" }
+                                }
+                              },
+                              "right": {
+                                "pop_sum": [ "S_p0", "I_p0", "R_p0" ]
+                              }
+                            }
+                          },
+                          "right": {
+                            "bin_op": {
+                              "op": "div",
+                              "left": {
+                                "bin_op": {
+                                  "op": "mul",
+                                  "left": {
+                                    "table_lookup": {
+                                      "table": "w",
+                                      "indices": [ { "const": 13.0 } ]
+                                    }
+                                  },
+                                  "right": { "pop": "I_p1" }
+                                }
+                              },
+                              "right": {
+                                "pop_sum": [ "S_p1", "I_p1", "R_p1" ]
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "right": {
+                        "bin_op": {
+                          "op": "div",
+                          "left": {
+                            "bin_op": {
+                              "op": "mul",
+                              "left": {
+                                "table_lookup": {
+                                  "table": "w",
+                                  "indices": [ { "const": 14.0 } ]
+                                }
+                              },
+                              "right": { "pop": "I_p2" }
+                            }
+                          },
+                          "right": { "pop_sum": [ "S_p2", "I_p2", "R_p2" ] }
+                        }
+                      }
+                    }
+                  },
+                  "right": {
+                    "bin_op": {
+                      "op": "div",
+                      "left": {
+                        "bin_op": {
+                          "op": "mul",
+                          "left": {
+                            "table_lookup": {
+                              "table": "w",
+                              "indices": [ { "const": 15.0 } ]
+                            }
+                          },
+                          "right": { "pop": "I_p3" }
+                        }
+                      },
+                      "right": { "pop_sum": [ "S_p3", "I_p3", "R_p3" ] }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        "name": "recovery_p0",
+        "stoichiometry": [ [ "I_p0", -1 ], [ "R_p0", 1 ] ],
+        "rate": {
+          "bin_op": {
+            "op": "mul",
+            "left": { "param": "gamma" },
+            "right": { "pop": "I_p0" }
+          }
+        },
+        "metadata": {
+          "origin_kind": "intrinsic",
+          "source_compartment": "I_p0",
+          "dest_compartment": "R_p0"
+        },
+        "rate_grad": { "gamma": { "pop": "I_p0" } }
+      },
+      {
+        "name": "recovery_p1",
+        "stoichiometry": [ [ "I_p1", -1 ], [ "R_p1", 1 ] ],
+        "rate": {
+          "bin_op": {
+            "op": "mul",
+            "left": { "param": "gamma" },
+            "right": { "pop": "I_p1" }
+          }
+        },
+        "metadata": {
+          "origin_kind": "intrinsic",
+          "source_compartment": "I_p1",
+          "dest_compartment": "R_p1"
+        },
+        "rate_grad": { "gamma": { "pop": "I_p1" } }
+      },
+      {
+        "name": "recovery_p2",
+        "stoichiometry": [ [ "I_p2", -1 ], [ "R_p2", 1 ] ],
+        "rate": {
+          "bin_op": {
+            "op": "mul",
+            "left": { "param": "gamma" },
+            "right": { "pop": "I_p2" }
+          }
+        },
+        "metadata": {
+          "origin_kind": "intrinsic",
+          "source_compartment": "I_p2",
+          "dest_compartment": "R_p2"
+        },
+        "rate_grad": { "gamma": { "pop": "I_p2" } }
+      },
+      {
+        "name": "recovery_p3",
+        "stoichiometry": [ [ "I_p3", -1 ], [ "R_p3", 1 ] ],
+        "rate": {
+          "bin_op": {
+            "op": "mul",
+            "left": { "param": "gamma" },
+            "right": { "pop": "I_p3" }
+          }
+        },
+        "metadata": {
+          "origin_kind": "intrinsic",
+          "source_compartment": "I_p3",
+          "dest_compartment": "R_p3"
+        },
+        "rate_grad": { "gamma": { "pop": "I_p3" } }
       }
     ],
-    "compartment_dims": {
-      "S": [
-        "patch"
-      ],
-      "I": [
-        "patch"
-      ],
-      "R": [
-        "patch"
-      ]
+    "ode_equations": [],
+    "time_functions": [],
+    "tables": [
+      {
+        "name": "w",
+        "values": [
+          { "const": 0.0 },
+          { "const": 1.0 },
+          { "const": 0.5 },
+          { "const": 0.1 },
+          { "const": 1.0 },
+          { "const": 0.0 },
+          { "const": 1.0 },
+          { "const": 0.5 },
+          { "const": 0.5 },
+          { "const": 1.0 },
+          { "const": 0.0 },
+          { "const": 1.0 },
+          { "const": 0.1 },
+          { "const": 0.5 },
+          { "const": 1.0 },
+          { "const": 0.0 }
+        ],
+        "out_of_bounds": "error"
+      }
+    ],
+    "interventions": [],
+    "observations": [],
+    "parameters": [
+      {
+        "name": "beta",
+        "value": null,
+        "bounds": [ 0.0, 2.0 ],
+        "prior": null,
+        "hierarchical": null,
+        "transform": null,
+        "initial_value": null,
+        "param_kind": "rate",
+        "param_dim": null
+      },
+      {
+        "name": "gamma",
+        "value": null,
+        "bounds": [ 0.0, 1.0 ],
+        "prior": null,
+        "hierarchical": null,
+        "transform": null,
+        "initial_value": null,
+        "param_kind": "rate",
+        "param_dim": null
+      },
+      {
+        "name": "rho",
+        "value": null,
+        "bounds": [ 0.0, 1.0 ],
+        "prior": null,
+        "hierarchical": null,
+        "transform": null,
+        "initial_value": null,
+        "param_kind": "probability",
+        "param_dim": null
+      }
+    ],
+    "initial_conditions": {
+      "explicit": {
+        "S_p0": 4999.0,
+        "I_p0": 1.0,
+        "S_p1": 10000.0,
+        "S_p2": 8000.0,
+        "S_p3": 3000.0
+      }
     },
-    "base_compartments": [
-      "S",
-      "I",
-      "R"
+    "output": {
+      "times": { "regular": { "start": 0.0, "step": 1.0, "end": 200.0 } },
+      "format": "tsv",
+      "trajectory": true,
+      "observations": true
+    },
+    "simulation": {
+      "t_start": 0.0,
+      "t_end": 200.0,
+      "time_semantics": "continuous",
+      "dt": null,
+      "rng_seed": null
+    },
+    "scenarios": [
+      {
+        "name": "no_coupling",
+        "label": "independent patches (rho = 0)",
+        "params": { "beta": 0.3, "gamma": 0.1, "rho": 0.0 },
+        "enable": [],
+        "disable": [],
+        "t_end": null
+      },
+      {
+        "name": "weak_coupling",
+        "label": "weak spatial coupling (rho = 0.01)",
+        "params": { "beta": 0.3, "gamma": 0.1, "rho": 0.01 },
+        "enable": [],
+        "disable": [],
+        "t_end": null
+      },
+      {
+        "name": "strong_coupling",
+        "label": "strong spatial coupling (rho = 0.1)",
+        "params": { "beta": 0.3, "gamma": 0.1, "rho": 0.1 },
+        "enable": [],
+        "disable": [],
+        "t_end": null
+      }
     ],
-    "transmission_transitions": [
-      "infection"
-    ],
-    "infectious_compartments": [
-      "I"
-    ]
+    "model_structure": {
+      "dimensions": [
+        { "name": "patch", "values": [ "p0", "p1", "p2", "p3" ] }
+      ],
+      "compartment_dims": {
+        "S": [ "patch" ],
+        "I": [ "patch" ],
+        "R": [ "patch" ]
+      },
+      "base_compartments": [ "S", "I", "R" ],
+      "transmission_transitions": [ "infection" ],
+      "infectious_compartments": [ "I" ]
+    }
   }
 }

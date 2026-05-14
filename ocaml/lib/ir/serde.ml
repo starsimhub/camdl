@@ -1009,23 +1009,56 @@ let model_of_json (j : Yojson.Safe.t) : model =
         });
   }
 
+(* gh#audit-C8. IR schema version. Must stay in sync with the
+   `ir/VERSION` file at the repo root; the Rust side reads that file
+   via `include_str!`. Bump this in lock-step with any breaking IR
+   change (see CLAUDE.md "Changing the IR schema"). *)
+let ir_version = "0.4"
+
+(* gh#audit-C8. Producer marker emitted in the IR envelope. Rust's
+   validate.rs checks the marker; if present, can skip OCaml-mirrored
+   structural checks (audit H14). *)
+let validated_by = "ocaml-compiler-v" ^ ir_version
+
+(* gh#audit-C8. Wrap the model in an envelope: { ir_version,
+   validated_by, model: <existing> }. The Rust deserializer
+   (rust/crates/ir/src/lib.rs) requires the wrapper and rejects
+   mismatched ir_version with IrError::VersionMismatch. *)
+let envelope_to_json (m : model) : Yojson.Safe.t =
+  obj [
+    ("ir_version",   str ir_version);
+    ("validated_by", str validated_by);
+    ("model",        model_to_json m);
+  ]
+
+(* gh#audit-C8. Parse an envelope and verify the version handshake.
+   On mismatch returns Error with a hint pointing the user at the
+   right rebuild target. *)
+let model_of_envelope_json (j : Yojson.Safe.t) : (model, string) result =
+  match member_opt "ir_version" j with
+  | Some (`String v) when v = ir_version ->
+      (match member_opt "model" j with
+       | Some mj -> (try Ok (model_of_json mj) with DeserError msg -> Error msg)
+       | None -> Error "IR envelope missing `model` field")
+  | Some (`String v) ->
+      Error (Printf.sprintf
+        "IR version mismatch: this OCaml compiler emits %s, found %s in JSON. \
+         Rebuild OCaml side (`make build-ocaml`) and re-emit any persisted IR JSON."
+        ir_version v)
+  | _ ->
+      Error (Printf.sprintf
+        "IR JSON missing `ir_version` field (expected wrapped envelope: \
+         {ir_version, validated_by, model}). Re-emit IR with `make update-golden`.")
+
 let model_to_string (m : model) : string =
-  Yojson.Safe.pretty_to_string (model_to_json m)
+  Yojson.Safe.pretty_to_string (envelope_to_json m)
 
 let model_of_string (s : string) : (model, string) result =
   match Yojson.Safe.from_string s with
   | exception exn -> Error (Printexc.to_string exn)
-  | j -> (
-    match model_of_json j with
-    | exception DeserError msg -> Error msg
-    | m -> Ok m
-  )
+  | j -> model_of_envelope_json j
 
 let model_of_file (path : string) : (model, string) result =
   match Yojson.Safe.from_file path with
   | exception exn -> Error (Printexc.to_string exn)
-  | j -> (
-    match model_of_json j with
-    | exception DeserError msg -> Error msg
-    | m -> Ok m
-  )
+  | j -> model_of_envelope_json j

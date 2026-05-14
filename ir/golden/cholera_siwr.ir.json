@@ -1,311 +1,315 @@
 {
-  "name": "cholera_siwr",
-  "version": "0.3",
-  "time_unit": "days",
-  "description": "SIWR cholera model: integer S/I/R + real-valued water reservoir W. PDMP coupling.",
-  "compartments": [
-    {
-      "name": "S",
-      "kind": "integer"
-    },
-    {
-      "name": "I",
-      "kind": "integer"
-    },
-    {
-      "name": "R",
-      "kind": "integer"
-    },
-    {
-      "name": "W",
-      "kind": "real"
-    }
-  ],
-  "transitions": [
-    {
-      "name": "infection",
-      "stoichiometry": [
-        [
-          "S",
-          -1
+  "ir_version": "0.4",
+  "validated_by": "hand-curated-ir-golden",
+  "model": {
+    "name": "cholera_siwr",
+    "version": "0.3",
+    "time_unit": "days",
+    "description": "SIWR cholera model: integer S/I/R + real-valued water reservoir W. PDMP coupling.",
+    "compartments": [
+      {
+        "name": "S",
+        "kind": "integer"
+      },
+      {
+        "name": "I",
+        "kind": "integer"
+      },
+      {
+        "name": "R",
+        "kind": "integer"
+      },
+      {
+        "name": "W",
+        "kind": "real"
+      }
+    ],
+    "transitions": [
+      {
+        "name": "infection",
+        "stoichiometry": [
+          [
+            "S",
+            -1
+          ],
+          [
+            "I",
+            1
+          ]
         ],
-        [
-          "I",
-          1
-        ]
-      ],
-      "rate": {
-        "bin_op": {
-          "op": "mul",
-          "left": {
-            "pop": "S"
-          },
-          "right": {
-            "bin_op": {
-              "op": "add",
-              "left": {
-                "bin_op": {
-                  "op": "mul",
-                  "left": {
-                    "param": "beta_I"
-                  },
-                  "right": {
-                    "bin_op": {
-                      "op": "div",
-                      "left": {
-                        "pop": "I"
-                      },
-                      "right": {
-                        "pop_sum": [
-                          "S",
-                          "I",
-                          "R"
-                        ]
+        "rate": {
+          "bin_op": {
+            "op": "mul",
+            "left": {
+              "pop": "S"
+            },
+            "right": {
+              "bin_op": {
+                "op": "add",
+                "left": {
+                  "bin_op": {
+                    "op": "mul",
+                    "left": {
+                      "param": "beta_I"
+                    },
+                    "right": {
+                      "bin_op": {
+                        "op": "div",
+                        "left": {
+                          "pop": "I"
+                        },
+                        "right": {
+                          "pop_sum": [
+                            "S",
+                            "I",
+                            "R"
+                          ]
+                        }
+                      }
+                    }
+                  }
+                },
+                "right": {
+                  "bin_op": {
+                    "op": "div",
+                    "left": {
+                      "bin_op": {
+                        "op": "mul",
+                        "left": {
+                          "param": "beta_W"
+                        },
+                        "right": {
+                          "pop": "W"
+                        }
+                      }
+                    },
+                    "right": {
+                      "bin_op": {
+                        "op": "add",
+                        "left": {
+                          "pop": "W"
+                        },
+                        "right": {
+                          "param": "kappa"
+                        }
                       }
                     }
                   }
                 }
-              },
-              "right": {
-                "bin_op": {
-                  "op": "div",
-                  "left": {
-                    "bin_op": {
-                      "op": "mul",
-                      "left": {
-                        "param": "beta_W"
-                      },
-                      "right": {
-                        "pop": "W"
-                      }
-                    }
-                  },
-                  "right": {
-                    "bin_op": {
-                      "op": "add",
-                      "left": {
-                        "pop": "W"
-                      },
-                      "right": {
-                        "param": "kappa"
-                      }
-                    }
-                  }
+              }
+            }
+          }
+        },
+        "metadata": {
+          "origin_kind": "transmission",
+          "source_compartment": "S",
+          "dest_compartment": "I"
+        }
+      },
+      {
+        "name": "recovery",
+        "stoichiometry": [
+          [
+            "I",
+            -1
+          ],
+          [
+            "R",
+            1
+          ]
+        ],
+        "rate": {
+          "bin_op": {
+            "op": "mul",
+            "left": {
+              "param": "gamma"
+            },
+            "right": {
+              "pop": "I"
+            }
+          }
+        },
+        "metadata": {
+          "origin_kind": "intrinsic",
+          "source_compartment": "I",
+          "dest_compartment": "R"
+        }
+      },
+      {
+        "name": "waning",
+        "stoichiometry": [
+          [
+            "R",
+            -1
+          ],
+          [
+            "S",
+            1
+          ]
+        ],
+        "rate": {
+          "bin_op": {
+            "op": "mul",
+            "left": {
+              "param": "omega_R"
+            },
+            "right": {
+              "pop": "R"
+            }
+          }
+        },
+        "metadata": {
+          "origin_kind": "transfer",
+          "source_compartment": "R",
+          "dest_compartment": "S"
+        }
+      }
+    ],
+    "ode_equations": [
+      {
+        "compartment": "W",
+        "derivative": {
+          "bin_op": {
+            "op": "sub",
+            "left": {
+              "bin_op": {
+                "op": "mul",
+                "left": {
+                  "param": "xi"
+                },
+                "right": {
+                  "pop": "I"
+                }
+              }
+            },
+            "right": {
+              "bin_op": {
+                "op": "mul",
+                "left": {
+                  "param": "omega_W"
+                },
+                "right": {
+                  "pop": "W"
                 }
               }
             }
           }
         }
-      },
-      "metadata": {
-        "origin_kind": "transmission",
-        "source_compartment": "S",
-        "dest_compartment": "I"
       }
-    },
-    {
-      "name": "recovery",
-      "stoichiometry": [
-        [
-          "I",
-          -1
-        ],
-        [
-          "R",
-          1
-        ]
-      ],
-      "rate": {
-        "bin_op": {
-          "op": "mul",
-          "left": {
-            "param": "gamma"
-          },
-          "right": {
-            "pop": "I"
+    ],
+    "time_functions": [],
+    "tables": [],
+    "interventions": [],
+    "observations": [
+      {
+        "name": "reported_cases",
+        "data_stream": "cases",
+        "schedule": {
+          "regular": {
+            "start": 7.0,
+            "step": 7.0,
+            "end": 365.0
           }
-        }
-      },
-      "metadata": {
-        "origin_kind": "intrinsic",
-        "source_compartment": "I",
-        "dest_compartment": "R"
-      }
-    },
-    {
-      "name": "waning",
-      "stoichiometry": [
-        [
-          "R",
-          -1
-        ],
-        [
-          "S",
-          1
-        ]
-      ],
-      "rate": {
-        "bin_op": {
-          "op": "mul",
-          "left": {
-            "param": "omega_R"
-          },
-          "right": {
-            "pop": "R"
-          }
-        }
-      },
-      "metadata": {
-        "origin_kind": "transfer",
-        "source_compartment": "R",
-        "dest_compartment": "S"
-      }
-    }
-  ],
-  "ode_equations": [
-    {
-      "compartment": "W",
-      "derivative": {
-        "bin_op": {
-          "op": "sub",
-          "left": {
-            "bin_op": {
-              "op": "mul",
-              "left": {
-                "param": "xi"
-              },
-              "right": {
-                "pop": "I"
-              }
-            }
-          },
-          "right": {
-            "bin_op": {
-              "op": "mul",
-              "left": {
-                "param": "omega_W"
-              },
-              "right": {
-                "pop": "W"
-              }
+        },
+        "projection": {
+          "cumulative_flow": "infection"
+        },
+        "likelihood": {
+          "neg_binomial": {
+            "mean": {
+              "projected": null
+            },
+            "dispersion": {
+              "param": "rho"
             }
           }
         }
       }
-    }
-  ],
-  "time_functions": [],
-  "tables": [],
-  "interventions": [],
-  "observations": [
-    {
-      "name": "reported_cases",
-      "data_stream": "cases",
-      "schedule": {
+    ],
+    "parameters": [
+      {
+        "name": "beta_I",
+        "value": 0.5,
+        "prior": null,
+        "transform": null,
+        "initial_value": null
+      },
+      {
+        "name": "beta_W",
+        "value": 0.3,
+        "prior": null,
+        "transform": null,
+        "initial_value": null
+      },
+      {
+        "name": "kappa",
+        "value": 0.0001,
+        "prior": null,
+        "transform": null,
+        "initial_value": null
+      },
+      {
+        "name": "gamma",
+        "value": 0.25,
+        "prior": null,
+        "transform": null,
+        "initial_value": null
+      },
+      {
+        "name": "omega_R",
+        "value": 0.02,
+        "prior": null,
+        "transform": null,
+        "initial_value": null
+      },
+      {
+        "name": "xi",
+        "value": 1.0,
+        "prior": null,
+        "transform": null,
+        "initial_value": null
+      },
+      {
+        "name": "omega_W",
+        "value": 0.5,
+        "prior": null,
+        "transform": null,
+        "initial_value": null
+      },
+      {
+        "name": "rho",
+        "value": 5.0,
+        "prior": null,
+        "transform": null,
+        "initial_value": null
+      }
+    ],
+    "initial_conditions": {
+      "explicit": {
+        "S": 990,
+        "I": 10,
+        "R": 0,
+        "W": 0.0
+      }
+    },
+    "output": {
+      "times": {
         "regular": {
-          "start": 7.0,
+          "start": 0.0,
           "step": 7.0,
           "end": 365.0
         }
       },
-      "projection": {
-        "cumulative_flow": "infection"
-      },
-      "likelihood": {
-        "neg_binomial": {
-          "mean": {
-            "projected": null
-          },
-          "dispersion": {
-            "param": "rho"
-          }
-        }
-      }
+      "format": "tsv",
+      "trajectory": true,
+      "observations": true
+    },
+    "simulation": {
+      "t_start": 0.0,
+      "t_end": 365.0,
+      "time_semantics": "continuous",
+      "dt": null,
+      "rng_seed": 42
     }
-  ],
-  "parameters": [
-    {
-      "name": "beta_I",
-      "value": 0.5,
-      "prior": null,
-      "transform": null,
-      "initial_value": null
-    },
-    {
-      "name": "beta_W",
-      "value": 0.3,
-      "prior": null,
-      "transform": null,
-      "initial_value": null
-    },
-    {
-      "name": "kappa",
-      "value": 0.0001,
-      "prior": null,
-      "transform": null,
-      "initial_value": null
-    },
-    {
-      "name": "gamma",
-      "value": 0.25,
-      "prior": null,
-      "transform": null,
-      "initial_value": null
-    },
-    {
-      "name": "omega_R",
-      "value": 0.02,
-      "prior": null,
-      "transform": null,
-      "initial_value": null
-    },
-    {
-      "name": "xi",
-      "value": 1.0,
-      "prior": null,
-      "transform": null,
-      "initial_value": null
-    },
-    {
-      "name": "omega_W",
-      "value": 0.5,
-      "prior": null,
-      "transform": null,
-      "initial_value": null
-    },
-    {
-      "name": "rho",
-      "value": 5.0,
-      "prior": null,
-      "transform": null,
-      "initial_value": null
-    }
-  ],
-  "initial_conditions": {
-    "explicit": {
-      "S": 990,
-      "I": 10,
-      "R": 0,
-      "W": 0.0
-    }
-  },
-  "output": {
-    "times": {
-      "regular": {
-        "start": 0.0,
-        "step": 7.0,
-        "end": 365.0
-      }
-    },
-    "format": "tsv",
-    "trajectory": true,
-    "observations": true
-  },
-  "simulation": {
-    "t_start": 0.0,
-    "t_end": 365.0,
-    "time_semantics": "continuous",
-    "dt": null,
-    "rng_seed": 42
   }
 }

@@ -31,7 +31,7 @@ fn golden_path(name: &str) -> String {
 fn load_bimolecular() -> (ir::Model, CompiledModel) {
     let contents = std::fs::read_to_string(golden_path("bimolecular"))
         .expect("read bimolecular.ir.json");
-    let mut model: ir::Model = serde_json::from_str(&contents).unwrap();
+    let mut model: ir::Model = ir::from_str(&contents).unwrap();  // gh#audit-C8
     if let Some(preset) = model.presets.first() {
         for p in &mut model.parameters {
             if let Some(&v) = preset.params.get(&p.name) {

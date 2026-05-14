@@ -1,47 +1,31 @@
 {
-  "name": "sir_reservoir",
-  "version": "0.3",
-  "time_unit": "days",
-  "description": null,
-  "compartments": [
-    { "name": "S", "kind": "integer" },
-    { "name": "I", "kind": "integer" },
-    { "name": "R", "kind": "integer" },
-    { "name": "W", "kind": "real" }
-  ],
-  "transitions": [
-    {
-      "name": "infection",
-      "stoichiometry": [ [ "S", -1 ], [ "I", 1 ] ],
-      "rate": {
-        "bin_op": {
-          "op": "mul",
-          "left": {
-            "bin_op": {
-              "op": "mul",
-              "left": { "param": "beta" },
-              "right": { "pop": "S" }
-            }
-          },
-          "right": {
-            "bin_op": {
-              "op": "div",
-              "left": { "pop": "I" },
-              "right": { "pop_sum": [ "S", "I", "R" ] }
-            }
-          }
-        }
-      },
-      "metadata": {
-        "origin_kind": "transmission",
-        "source_compartment": "S",
-        "dest_compartment": "I"
-      },
-      "rate_grad": {
-        "beta": {
+  "ir_version": "0.4",
+  "validated_by": "ocaml-compiler-v0.4",
+  "model": {
+    "name": "sir_reservoir",
+    "version": "0.3",
+    "time_unit": "days",
+    "description": null,
+    "compartments": [
+      { "name": "S", "kind": "integer" },
+      { "name": "I", "kind": "integer" },
+      { "name": "R", "kind": "integer" },
+      { "name": "W", "kind": "real" }
+    ],
+    "transitions": [
+      {
+        "name": "infection",
+        "stoichiometry": [ [ "S", -1 ], [ "I", 1 ] ],
+        "rate": {
           "bin_op": {
             "op": "mul",
-            "left": { "pop": "S" },
+            "left": {
+              "bin_op": {
+                "op": "mul",
+                "left": { "param": "beta" },
+                "right": { "pop": "S" }
+              }
+            },
             "right": {
               "bin_op": {
                 "op": "div",
@@ -50,171 +34,191 @@
               }
             }
           }
-        }
-      }
-    },
-    {
-      "name": "recovery",
-      "stoichiometry": [ [ "I", -1 ], [ "R", 1 ] ],
-      "rate": {
-        "bin_op": {
-          "op": "mul",
-          "left": { "param": "gamma" },
-          "right": { "pop": "I" }
-        }
-      },
-      "metadata": {
-        "origin_kind": "intrinsic",
-        "source_compartment": "I",
-        "dest_compartment": "R"
-      },
-      "rate_grad": { "gamma": { "pop": "I" } }
-    }
-  ],
-  "ode_equations": [
-    {
-      "compartment": "W",
-      "derivative": {
-        "bin_op": {
-          "op": "sub",
-          "left": {
+        },
+        "metadata": {
+          "origin_kind": "transmission",
+          "source_compartment": "S",
+          "dest_compartment": "I"
+        },
+        "rate_grad": {
+          "beta": {
             "bin_op": {
               "op": "mul",
-              "left": { "param": "xi" },
-              "right": { "pop": "I" }
+              "left": { "pop": "S" },
+              "right": {
+                "bin_op": {
+                  "op": "div",
+                  "left": { "pop": "I" },
+                  "right": { "pop_sum": [ "S", "I", "R" ] }
+                }
+              }
             }
-          },
-          "right": {
-            "bin_op": {
-              "op": "mul",
-              "left": { "param": "delta" },
-              "right": { "pop": "W" }
+          }
+        }
+      },
+      {
+        "name": "recovery",
+        "stoichiometry": [ [ "I", -1 ], [ "R", 1 ] ],
+        "rate": {
+          "bin_op": {
+            "op": "mul",
+            "left": { "param": "gamma" },
+            "right": { "pop": "I" }
+          }
+        },
+        "metadata": {
+          "origin_kind": "intrinsic",
+          "source_compartment": "I",
+          "dest_compartment": "R"
+        },
+        "rate_grad": { "gamma": { "pop": "I" } }
+      }
+    ],
+    "ode_equations": [
+      {
+        "compartment": "W",
+        "derivative": {
+          "bin_op": {
+            "op": "sub",
+            "left": {
+              "bin_op": {
+                "op": "mul",
+                "left": { "param": "xi" },
+                "right": { "pop": "I" }
+              }
+            },
+            "right": {
+              "bin_op": {
+                "op": "mul",
+                "left": { "param": "delta" },
+                "right": { "pop": "W" }
+              }
             }
           }
         }
       }
-    }
-  ],
-  "time_functions": [],
-  "tables": [],
-  "interventions": [],
-  "observations": [],
-  "parameters": [
-    {
-      "name": "beta",
-      "value": null,
-      "bounds": [ 0.001, 2.0 ],
-      "prior": null,
-      "hierarchical": null,
-      "transform": null,
-      "initial_value": null,
-      "param_kind": "rate",
-      "param_dim": null
-    },
-    {
-      "name": "gamma",
-      "value": null,
-      "bounds": [ 0.001, 1.0 ],
-      "prior": null,
-      "hierarchical": null,
-      "transform": null,
-      "initial_value": null,
-      "param_kind": "rate",
-      "param_dim": null
-    },
-    {
-      "name": "xi",
-      "value": null,
-      "bounds": [ 0.001, 10.0 ],
-      "prior": null,
-      "hierarchical": null,
-      "transform": null,
-      "initial_value": null,
-      "param_kind": "rate",
-      "param_dim": null
-    },
-    {
-      "name": "delta",
-      "value": null,
-      "bounds": [ 0.001, 5.0 ],
-      "prior": null,
-      "hierarchical": null,
-      "transform": null,
-      "initial_value": null,
-      "param_kind": "rate",
-      "param_dim": null
-    },
-    {
-      "name": "N0",
-      "value": null,
-      "bounds": [ 100.0, 100000.0 ],
-      "prior": null,
-      "hierarchical": null,
-      "transform": null,
-      "initial_value": null,
-      "param_kind": "count",
-      "param_dim": null
-    },
-    {
-      "name": "I0",
-      "value": null,
-      "bounds": [ 1.0, 1000.0 ],
-      "prior": null,
-      "hierarchical": null,
-      "transform": null,
-      "initial_value": null,
-      "param_kind": "count",
-      "param_dim": null
-    }
-  ],
-  "initial_conditions": {
-    "parameterized": {
-      "S": {
-        "bin_op": {
-          "op": "sub",
-          "left": { "param": "N0" },
-          "right": { "param": "I0" }
-        }
+    ],
+    "time_functions": [],
+    "tables": [],
+    "interventions": [],
+    "observations": [],
+    "parameters": [
+      {
+        "name": "beta",
+        "value": null,
+        "bounds": [ 0.001, 2.0 ],
+        "prior": null,
+        "hierarchical": null,
+        "transform": null,
+        "initial_value": null,
+        "param_kind": "rate",
+        "param_dim": null
       },
-      "I": { "param": "I0" },
-      "W": { "const": 0.0 }
-    }
-  },
-  "output": {
-    "times": { "regular": { "start": 0.0, "step": 1.0, "end": 60.0 } },
-    "format": "tsv",
-    "trajectory": true,
-    "observations": true
-  },
-  "simulation": {
-    "t_start": 0.0,
-    "t_end": 60.0,
-    "time_semantics": "continuous",
-    "dt": null,
-    "rng_seed": null
-  },
-  "scenarios": [
-    {
-      "name": "baseline",
-      "label": "SIWR baseline",
-      "params": {
-        "beta": 0.3,
-        "gamma": 0.1,
-        "xi": 1.0,
-        "delta": 0.5,
-        "N0": 1000.0,
-        "I0": 10.0
+      {
+        "name": "gamma",
+        "value": null,
+        "bounds": [ 0.001, 1.0 ],
+        "prior": null,
+        "hierarchical": null,
+        "transform": null,
+        "initial_value": null,
+        "param_kind": "rate",
+        "param_dim": null
       },
-      "enable": [],
-      "disable": [],
-      "t_end": null
+      {
+        "name": "xi",
+        "value": null,
+        "bounds": [ 0.001, 10.0 ],
+        "prior": null,
+        "hierarchical": null,
+        "transform": null,
+        "initial_value": null,
+        "param_kind": "rate",
+        "param_dim": null
+      },
+      {
+        "name": "delta",
+        "value": null,
+        "bounds": [ 0.001, 5.0 ],
+        "prior": null,
+        "hierarchical": null,
+        "transform": null,
+        "initial_value": null,
+        "param_kind": "rate",
+        "param_dim": null
+      },
+      {
+        "name": "N0",
+        "value": null,
+        "bounds": [ 100.0, 100000.0 ],
+        "prior": null,
+        "hierarchical": null,
+        "transform": null,
+        "initial_value": null,
+        "param_kind": "count",
+        "param_dim": null
+      },
+      {
+        "name": "I0",
+        "value": null,
+        "bounds": [ 1.0, 1000.0 ],
+        "prior": null,
+        "hierarchical": null,
+        "transform": null,
+        "initial_value": null,
+        "param_kind": "count",
+        "param_dim": null
+      }
+    ],
+    "initial_conditions": {
+      "parameterized": {
+        "S": {
+          "bin_op": {
+            "op": "sub",
+            "left": { "param": "N0" },
+            "right": { "param": "I0" }
+          }
+        },
+        "I": { "param": "I0" },
+        "W": { "const": 0.0 }
+      }
+    },
+    "output": {
+      "times": { "regular": { "start": 0.0, "step": 1.0, "end": 60.0 } },
+      "format": "tsv",
+      "trajectory": true,
+      "observations": true
+    },
+    "simulation": {
+      "t_start": 0.0,
+      "t_end": 60.0,
+      "time_semantics": "continuous",
+      "dt": null,
+      "rng_seed": null
+    },
+    "scenarios": [
+      {
+        "name": "baseline",
+        "label": "SIWR baseline",
+        "params": {
+          "beta": 0.3,
+          "gamma": 0.1,
+          "xi": 1.0,
+          "delta": 0.5,
+          "N0": 1000.0,
+          "I0": 10.0
+        },
+        "enable": [],
+        "disable": [],
+        "t_end": null
+      }
+    ],
+    "model_structure": {
+      "dimensions": [],
+      "compartment_dims": { "S": [], "I": [], "R": [], "W": [] },
+      "base_compartments": [ "S", "I", "R", "W" ],
+      "transmission_transitions": [ "infection" ],
+      "infectious_compartments": [ "I" ]
     }
-  ],
-  "model_structure": {
-    "dimensions": [],
-    "compartment_dims": { "S": [], "I": [], "R": [], "W": [] },
-    "base_compartments": [ "S", "I", "R", "W" ],
-    "transmission_transitions": [ "infection" ],
-    "infectious_compartments": [ "I" ]
   }
 }

@@ -1,99 +1,103 @@
 {
-  "name": "pure_death",
-  "version": "0.3",
-  "time_unit": "days",
-  "description": "Single-compartment pure death process: N \u2192 \u2205 at rate mu*N. Analytic: N(t) = N0*exp(-mu*t).",
-  "compartments": [
-    {
-      "name": "N",
-      "kind": "integer"
-    }
-  ],
-  "transitions": [
-    {
-      "name": "death",
-      "stoichiometry": [
-        [
-          "N",
-          -1
-        ]
-      ],
-      "rate": {
-        "bin_op": {
-          "op": "mul",
-          "left": {
-            "param": "mu"
-          },
-          "right": {
-            "pop": "N"
+  "ir_version": "0.4",
+  "validated_by": "hand-curated-ir-golden",
+  "model": {
+    "name": "pure_death",
+    "version": "0.3",
+    "time_unit": "days",
+    "description": "Single-compartment pure death process: N → ∅ at rate mu*N. Analytic: N(t) = N0*exp(-mu*t).",
+    "compartments": [
+      {
+        "name": "N",
+        "kind": "integer"
+      }
+    ],
+    "transitions": [
+      {
+        "name": "death",
+        "stoichiometry": [
+          [
+            "N",
+            -1
+          ]
+        ],
+        "rate": {
+          "bin_op": {
+            "op": "mul",
+            "left": {
+              "param": "mu"
+            },
+            "right": {
+              "pop": "N"
+            }
+          }
+        },
+        "metadata": {
+          "origin_kind": "outflow",
+          "source_compartment": "N",
+          "dest_compartment": null
+        }
+      }
+    ],
+    "ode_equations": [],
+    "time_functions": [],
+    "tables": [],
+    "interventions": [],
+    "observations": [
+      {
+        "name": "population",
+        "data_stream": "N_obs",
+        "schedule": {
+          "regular": {
+            "start": 1.0,
+            "step": 1.0,
+            "end": 20.0
+          }
+        },
+        "projection": {
+          "current_pop": "N"
+        },
+        "likelihood": {
+          "poisson": {
+            "rate": {
+              "projected": null
+            }
           }
         }
-      },
-      "metadata": {
-        "origin_kind": "outflow",
-        "source_compartment": "N",
-        "dest_compartment": null
       }
-    }
-  ],
-  "ode_equations": [],
-  "time_functions": [],
-  "tables": [],
-  "interventions": [],
-  "observations": [
-    {
-      "name": "population",
-      "data_stream": "N_obs",
-      "schedule": {
+    ],
+    "parameters": [
+      {
+        "name": "mu",
+        "value": 0.1,
+        "prior": null,
+        "transform": null,
+        "initial_value": null
+      }
+    ],
+    "initial_conditions": {
+      "explicit": {
+        "N": 1000
+      }
+    },
+    "output": {
+      "times": {
         "regular": {
-          "start": 1.0,
+          "start": 0.0,
           "step": 1.0,
           "end": 20.0
         }
       },
-      "projection": {
-        "current_pop": "N"
-      },
-      "likelihood": {
-        "poisson": {
-          "rate": {
-            "projected": null
-          }
-        }
-      }
-    }
-  ],
-  "parameters": [
-    {
-      "name": "mu",
-      "value": 0.1,
-      "prior": null,
-      "transform": null,
-      "initial_value": null
-    }
-  ],
-  "initial_conditions": {
-    "explicit": {
-      "N": 1000
-    }
-  },
-  "output": {
-    "times": {
-      "regular": {
-        "start": 0.0,
-        "step": 1.0,
-        "end": 20.0
-      }
+      "format": "tsv",
+      "trajectory": true,
+      "observations": true
     },
-    "format": "tsv",
-    "trajectory": true,
-    "observations": true
-  },
-  "simulation": {
-    "t_start": 0.0,
-    "t_end": 20.0,
-    "time_semantics": "continuous",
-    "dt": null,
-    "rng_seed": 42
+    "simulation": {
+      "t_start": 0.0,
+      "t_end": 20.0,
+      "time_semantics": "continuous",
+      "dt": null,
+      "rng_seed": 42
+    }
   }
 }

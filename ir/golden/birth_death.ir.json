@@ -1,131 +1,135 @@
 {
-  "name": "birth_death",
-  "version": "0.3",
-  "time_unit": "days",
-  "description": "Linear birth-death process: \u2205 \u2192 X at lambda*X, X \u2192 \u2205 at mu*X. Poisson steady state when lambda < mu.",
-  "compartments": [
-    {
-      "name": "X",
-      "kind": "integer"
-    }
-  ],
-  "transitions": [
-    {
-      "name": "birth",
-      "stoichiometry": [
-        [
-          "X",
-          1
-        ]
-      ],
-      "rate": {
-        "bin_op": {
-          "op": "mul",
-          "left": {
-            "param": "lambda"
-          },
-          "right": {
-            "pop": "X"
+  "ir_version": "0.4",
+  "validated_by": "hand-curated-ir-golden",
+  "model": {
+    "name": "birth_death",
+    "version": "0.3",
+    "time_unit": "days",
+    "description": "Linear birth-death process: ∅ → X at lambda*X, X → ∅ at mu*X. Poisson steady state when lambda < mu.",
+    "compartments": [
+      {
+        "name": "X",
+        "kind": "integer"
+      }
+    ],
+    "transitions": [
+      {
+        "name": "birth",
+        "stoichiometry": [
+          [
+            "X",
+            1
+          ]
+        ],
+        "rate": {
+          "bin_op": {
+            "op": "mul",
+            "left": {
+              "param": "lambda"
+            },
+            "right": {
+              "pop": "X"
+            }
           }
+        },
+        "metadata": {
+          "origin_kind": "inflow",
+          "source_compartment": null,
+          "dest_compartment": "X"
         }
       },
-      "metadata": {
-        "origin_kind": "inflow",
-        "source_compartment": null,
-        "dest_compartment": "X"
+      {
+        "name": "death",
+        "stoichiometry": [
+          [
+            "X",
+            -1
+          ]
+        ],
+        "rate": {
+          "bin_op": {
+            "op": "mul",
+            "left": {
+              "param": "mu"
+            },
+            "right": {
+              "pop": "X"
+            }
+          }
+        },
+        "metadata": {
+          "origin_kind": "outflow",
+          "source_compartment": "X",
+          "dest_compartment": null
+        }
+      }
+    ],
+    "ode_equations": [],
+    "time_functions": [],
+    "tables": [],
+    "interventions": [],
+    "observations": [
+      {
+        "name": "count",
+        "data_stream": "X_obs",
+        "schedule": {
+          "regular": {
+            "start": 1.0,
+            "step": 1.0,
+            "end": 50.0
+          }
+        },
+        "projection": {
+          "current_pop": "X"
+        },
+        "likelihood": {
+          "poisson": {
+            "rate": {
+              "projected": null
+            }
+          }
+        }
+      }
+    ],
+    "parameters": [
+      {
+        "name": "lambda",
+        "value": 0.1,
+        "prior": null,
+        "transform": null,
+        "initial_value": null
+      },
+      {
+        "name": "mu",
+        "value": 0.15,
+        "prior": null,
+        "transform": null,
+        "initial_value": null
+      }
+    ],
+    "initial_conditions": {
+      "explicit": {
+        "X": 100
       }
     },
-    {
-      "name": "death",
-      "stoichiometry": [
-        [
-          "X",
-          -1
-        ]
-      ],
-      "rate": {
-        "bin_op": {
-          "op": "mul",
-          "left": {
-            "param": "mu"
-          },
-          "right": {
-            "pop": "X"
-          }
-        }
-      },
-      "metadata": {
-        "origin_kind": "outflow",
-        "source_compartment": "X",
-        "dest_compartment": null
-      }
-    }
-  ],
-  "ode_equations": [],
-  "time_functions": [],
-  "tables": [],
-  "interventions": [],
-  "observations": [
-    {
-      "name": "count",
-      "data_stream": "X_obs",
-      "schedule": {
+    "output": {
+      "times": {
         "regular": {
-          "start": 1.0,
+          "start": 0.0,
           "step": 1.0,
           "end": 50.0
         }
       },
-      "projection": {
-        "current_pop": "X"
-      },
-      "likelihood": {
-        "poisson": {
-          "rate": {
-            "projected": null
-          }
-        }
-      }
-    }
-  ],
-  "parameters": [
-    {
-      "name": "lambda",
-      "value": 0.1,
-      "prior": null,
-      "transform": null,
-      "initial_value": null
+      "format": "tsv",
+      "trajectory": true,
+      "observations": true
     },
-    {
-      "name": "mu",
-      "value": 0.15,
-      "prior": null,
-      "transform": null,
-      "initial_value": null
+    "simulation": {
+      "t_start": 0.0,
+      "t_end": 50.0,
+      "time_semantics": "continuous",
+      "dt": null,
+      "rng_seed": 42
     }
-  ],
-  "initial_conditions": {
-    "explicit": {
-      "X": 100
-    }
-  },
-  "output": {
-    "times": {
-      "regular": {
-        "start": 0.0,
-        "step": 1.0,
-        "end": 50.0
-      }
-    },
-    "format": "tsv",
-    "trajectory": true,
-    "observations": true
-  },
-  "simulation": {
-    "t_start": 0.0,
-    "t_end": 50.0,
-    "time_semantics": "continuous",
-    "dt": null,
-    "rng_seed": 42
   }
 }

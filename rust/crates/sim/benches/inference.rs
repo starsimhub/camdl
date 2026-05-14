@@ -21,7 +21,7 @@ use sim::propensity::eval_propensities;
 /// Applies the "baseline" scenario params so the model compiles.
 fn load_seir_age() -> (CompiledModel, Vec<f64>) {
     let json = include_str!("../../../../ir/golden/seir_age.ir.json");
-    let mut model: ir::Model = serde_json::from_str(json).expect("parse seir_age");
+    let mut model: ir::Model = ir::from_str(json).expect("parse seir_age");  // gh#audit-C8
 
     // Apply baseline scenario values to parameter defaults before compilation
     let scenario_params: &[(&str, f64)] = &[

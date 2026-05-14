@@ -32,7 +32,7 @@ fn load_and_apply_baseline(name: &str) -> ir::Model {
     let path = ocaml_golden_dir().join(format!("{}.ir.json", name));
     let contents = std::fs::read_to_string(&path)
         .unwrap_or_else(|e| panic!("could not read {:?}: {}", path, e));
-    let mut model: ir::Model = serde_json::from_str(&contents)
+    let mut model: ir::Model = ir::from_str(&contents)
         .unwrap_or_else(|e| panic!("failed to parse {}: {}", name, e));
 
     if let Some(preset) = model.presets.first().cloned() {

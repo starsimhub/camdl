@@ -1026,8 +1026,9 @@ fn prepare_cas_ctx(
     let (ir_path_resolved, _tmp) = util::resolve_ir_path(&run.ir_path)?;
     let src = std::fs::read_to_string(&ir_path_resolved)
         .map_err(|e| format!("cannot read {}: {}", ir_path_resolved, e))?;
-    let mut model: ir::Model = serde_json::from_str(&src)
-        .map_err(|e| format!("IR parse error: {}", e))?;
+    // gh#audit-C8. Envelope-aware load (see util::load_model).
+    let mut model: ir::Model = ir::from_str(&src)
+        .map_err(|e| format!("IR load error from {}: {}", ir_path_resolved, e))?;
 
     // Apply --params files and --param overrides to collect base_params
     // (scenario deltas are the other side of the cache key — don't apply here).
@@ -1974,9 +1975,13 @@ mod tests {
 
     /// Minimal IR with a single scalar parameter carrying the supplied
     /// bounds and prior JSON. Used by the bounds-rejection and scenario
-    /// tests that need tight control over the IR.
+    /// tests that need tight control over the IR. gh#audit-C8: wrapped
+    /// in IR envelope so it parses through the new ir::from_str path.
     fn ir_with_prior(name: &str, bounds: &str, prior_json: &str, extras: &str) -> String {
         format!(r#"{{
+          "ir_version": "0.4",
+          "validated_by": "test-fixture",
+          "model": {{
             "name": "t", "version": "0.3", "time_unit": "days",
             "description": null, "origin": null,
             "compartments": [{{ "name": "S", "kind": "integer" }}],
@@ -1994,6 +1999,7 @@ mod tests {
             "simulation": {{ "t_start": 0.0, "t_end": 1.0, "time_semantics": "continuous",
                              "dt": null, "rng_seed": null }},
             "presets": [], "model_structure": null, "balance": null
+          }}
         }}"#)
     }
 
@@ -2049,7 +2055,11 @@ mod tests {
         // beta has a prior; N0 has no prior and no default — but a scenario
         // called 'baseline' sets N0. With --scenario baseline, the draws
         // should succeed (sampled beta + fixed N0).
+        // gh#audit-C8: wrap in IR envelope.
         let json = r#"{
+          "ir_version": "0.4",
+          "validated_by": "test-fixture",
+          "model": {
             "name": "t", "version": "0.3", "time_unit": "days",
             "description": null, "origin": null,
             "compartments": [{ "name": "S", "kind": "integer" }],
@@ -2075,6 +2085,7 @@ mod tests {
                 "scale": {}, "enable": [], "disable": [], "compose": [] }
             ],
             "model_structure": null, "balance": null
+          }
         }"#;
         let (_dir, path) = write_ir_fixture(json);
 

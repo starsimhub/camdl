@@ -1,46 +1,24 @@
 {
-  "name": "seir_erlang_staged",
-  "version": "0.3",
-  "time_unit": "days",
-  "description": null,
-  "compartments": [
-    { "name": "S", "kind": "integer" },
-    { "name": "E_e1", "kind": "integer" },
-    { "name": "E_e2", "kind": "integer" },
-    { "name": "E_e3", "kind": "integer" },
-    { "name": "I", "kind": "integer" },
-    { "name": "R", "kind": "integer" }
-  ],
-  "transitions": [
-    {
-      "name": "infection",
-      "stoichiometry": [ [ "S", -1 ], [ "E_e1", 1 ] ],
-      "rate": {
-        "bin_op": {
-          "op": "div",
-          "left": {
-            "bin_op": {
-              "op": "mul",
-              "left": {
-                "bin_op": {
-                  "op": "mul",
-                  "left": { "param": "beta" },
-                  "right": { "pop": "S" }
-                }
-              },
-              "right": { "pop": "I" }
-            }
-          },
-          "right": { "pop_sum": [ "S", "E_e1", "E_e2", "E_e3", "I", "R" ] }
-        }
-      },
-      "metadata": {
-        "origin_kind": "transmission",
-        "source_compartment": "S",
-        "dest_compartment": "E_e1"
-      },
-      "rate_grad": {
-        "beta": {
+  "ir_version": "0.4",
+  "validated_by": "ocaml-compiler-v0.4",
+  "model": {
+    "name": "seir_erlang_staged",
+    "version": "0.3",
+    "time_unit": "days",
+    "description": null,
+    "compartments": [
+      { "name": "S", "kind": "integer" },
+      { "name": "E_e1", "kind": "integer" },
+      { "name": "E_e2", "kind": "integer" },
+      { "name": "E_e3", "kind": "integer" },
+      { "name": "I", "kind": "integer" },
+      { "name": "R", "kind": "integer" }
+    ],
+    "transitions": [
+      {
+        "name": "infection",
+        "stoichiometry": [ [ "S", -1 ], [ "E_e1", 1 ] ],
+        "rate": {
           "bin_op": {
             "op": "div",
             "left": {
@@ -49,225 +27,253 @@
                 "left": {
                   "bin_op": {
                     "op": "mul",
-                    "left": { "pop": "S" },
-                    "right": { "pop": "I" }
+                    "left": { "param": "beta" },
+                    "right": { "pop": "S" }
                   }
                 },
-                "right": {
-                  "pop_sum": [ "S", "E_e1", "E_e2", "E_e3", "I", "R" ]
-                }
+                "right": { "pop": "I" }
               }
             },
-            "right": {
-              "bin_op": {
-                "op": "mul",
-                "left": {
-                  "pop_sum": [ "S", "E_e1", "E_e2", "E_e3", "I", "R" ]
-                },
-                "right": {
-                  "pop_sum": [ "S", "E_e1", "E_e2", "E_e3", "I", "R" ]
+            "right": { "pop_sum": [ "S", "E_e1", "E_e2", "E_e3", "I", "R" ] }
+          }
+        },
+        "metadata": {
+          "origin_kind": "transmission",
+          "source_compartment": "S",
+          "dest_compartment": "E_e1"
+        },
+        "rate_grad": {
+          "beta": {
+            "bin_op": {
+              "op": "div",
+              "left": {
+                "bin_op": {
+                  "op": "mul",
+                  "left": {
+                    "bin_op": {
+                      "op": "mul",
+                      "left": { "pop": "S" },
+                      "right": { "pop": "I" }
+                    }
+                  },
+                  "right": {
+                    "pop_sum": [ "S", "E_e1", "E_e2", "E_e3", "I", "R" ]
+                  }
+                }
+              },
+              "right": {
+                "bin_op": {
+                  "op": "mul",
+                  "left": {
+                    "pop_sum": [ "S", "E_e1", "E_e2", "E_e3", "I", "R" ]
+                  },
+                  "right": {
+                    "pop_sum": [ "S", "E_e1", "E_e2", "E_e3", "I", "R" ]
+                  }
                 }
               }
             }
           }
         }
-      }
-    },
-    {
-      "name": "latent_e1",
-      "stoichiometry": [ [ "E_e1", -1 ], [ "E_e2", 1 ] ],
-      "rate": {
-        "bin_op": {
-          "op": "mul",
-          "left": {
-            "table_lookup": {
-              "table": "sigma_stage",
-              "indices": [ { "const": 0.0 } ]
-            }
-          },
-          "right": { "pop": "E_e1" }
+      },
+      {
+        "name": "latent_e1",
+        "stoichiometry": [ [ "E_e1", -1 ], [ "E_e2", 1 ] ],
+        "rate": {
+          "bin_op": {
+            "op": "mul",
+            "left": {
+              "table_lookup": {
+                "table": "sigma_stage",
+                "indices": [ { "const": 0.0 } ]
+              }
+            },
+            "right": { "pop": "E_e1" }
+          }
+        },
+        "metadata": {
+          "origin_kind": "intrinsic",
+          "source_compartment": "E_e1",
+          "dest_compartment": "E_e2"
         }
       },
-      "metadata": {
-        "origin_kind": "intrinsic",
-        "source_compartment": "E_e1",
-        "dest_compartment": "E_e2"
-      }
-    },
-    {
-      "name": "latent_e2",
-      "stoichiometry": [ [ "E_e2", -1 ], [ "E_e3", 1 ] ],
-      "rate": {
-        "bin_op": {
-          "op": "mul",
-          "left": {
-            "table_lookup": {
-              "table": "sigma_stage",
-              "indices": [ { "const": 1.0 } ]
-            }
-          },
-          "right": { "pop": "E_e2" }
+      {
+        "name": "latent_e2",
+        "stoichiometry": [ [ "E_e2", -1 ], [ "E_e3", 1 ] ],
+        "rate": {
+          "bin_op": {
+            "op": "mul",
+            "left": {
+              "table_lookup": {
+                "table": "sigma_stage",
+                "indices": [ { "const": 1.0 } ]
+              }
+            },
+            "right": { "pop": "E_e2" }
+          }
+        },
+        "metadata": {
+          "origin_kind": "intrinsic",
+          "source_compartment": "E_e2",
+          "dest_compartment": "E_e3"
         }
       },
-      "metadata": {
-        "origin_kind": "intrinsic",
-        "source_compartment": "E_e2",
-        "dest_compartment": "E_e3"
-      }
-    },
-    {
-      "name": "onset",
-      "stoichiometry": [ [ "E_e3", -1 ], [ "I", 1 ] ],
-      "rate": {
-        "bin_op": {
-          "op": "mul",
-          "left": {
-            "table_lookup": {
-              "table": "sigma_stage",
-              "indices": [ { "const": 2.0 } ]
-            }
-          },
-          "right": { "pop": "E_e3" }
+      {
+        "name": "onset",
+        "stoichiometry": [ [ "E_e3", -1 ], [ "I", 1 ] ],
+        "rate": {
+          "bin_op": {
+            "op": "mul",
+            "left": {
+              "table_lookup": {
+                "table": "sigma_stage",
+                "indices": [ { "const": 2.0 } ]
+              }
+            },
+            "right": { "pop": "E_e3" }
+          }
+        },
+        "metadata": {
+          "origin_kind": "intrinsic",
+          "source_compartment": "E_e3",
+          "dest_compartment": "I"
         }
       },
-      "metadata": {
-        "origin_kind": "intrinsic",
-        "source_compartment": "E_e3",
-        "dest_compartment": "I"
+      {
+        "name": "recovery",
+        "stoichiometry": [ [ "I", -1 ], [ "R", 1 ] ],
+        "rate": {
+          "bin_op": {
+            "op": "mul",
+            "left": { "param": "gamma" },
+            "right": { "pop": "I" }
+          }
+        },
+        "metadata": {
+          "origin_kind": "intrinsic",
+          "source_compartment": "I",
+          "dest_compartment": "R"
+        },
+        "rate_grad": { "gamma": { "pop": "I" } }
       }
-    },
-    {
-      "name": "recovery",
-      "stoichiometry": [ [ "I", -1 ], [ "R", 1 ] ],
-      "rate": {
-        "bin_op": {
-          "op": "mul",
-          "left": { "param": "gamma" },
-          "right": { "pop": "I" }
-        }
-      },
-      "metadata": {
-        "origin_kind": "intrinsic",
-        "source_compartment": "I",
-        "dest_compartment": "R"
-      },
-      "rate_grad": { "gamma": { "pop": "I" } }
-    }
-  ],
-  "ode_equations": [],
-  "time_functions": [],
-  "tables": [
-    {
-      "name": "sigma_stage",
-      "values": [
-        { "param": "sigma_e1" },
-        { "param": "sigma_e2" },
-        { "param": "sigma_e3" }
-      ],
-      "out_of_bounds": "error"
-    }
-  ],
-  "interventions": [],
-  "observations": [],
-  "parameters": [
-    {
-      "name": "beta",
-      "value": null,
-      "bounds": [ 0.001, 2.0 ],
-      "prior": null,
-      "hierarchical": null,
-      "transform": null,
-      "initial_value": null,
-      "param_kind": "rate",
-      "param_dim": null
-    },
-    {
-      "name": "gamma",
-      "value": null,
-      "bounds": [ 0.01, 1.0 ],
-      "prior": null,
-      "hierarchical": null,
-      "transform": null,
-      "initial_value": null,
-      "param_kind": "rate",
-      "param_dim": null
-    },
-    {
-      "name": "sigma_e1",
-      "value": null,
-      "bounds": [ 0.01, 2.0 ],
-      "prior": null,
-      "hierarchical": null,
-      "transform": null,
-      "initial_value": null,
-      "param_kind": "rate",
-      "param_dim": null
-    },
-    {
-      "name": "sigma_e2",
-      "value": null,
-      "bounds": [ 0.01, 2.0 ],
-      "prior": null,
-      "hierarchical": null,
-      "transform": null,
-      "initial_value": null,
-      "param_kind": "rate",
-      "param_dim": null
-    },
-    {
-      "name": "sigma_e3",
-      "value": null,
-      "bounds": [ 0.01, 2.0 ],
-      "prior": null,
-      "hierarchical": null,
-      "transform": null,
-      "initial_value": null,
-      "param_kind": "rate",
-      "param_dim": null
-    }
-  ],
-  "initial_conditions": { "explicit": { "S": 990.0, "E_e1": 5.0, "I": 5.0 } },
-  "output": {
-    "times": { "regular": { "start": 0.0, "step": 1.0, "end": 100.0 } },
-    "format": "tsv",
-    "trajectory": true,
-    "observations": true
-  },
-  "simulation": {
-    "t_start": 0.0,
-    "t_end": 100.0,
-    "time_semantics": "continuous",
-    "dt": null,
-    "rng_seed": null
-  },
-  "scenarios": [
-    {
-      "name": "baseline",
-      "label": "default",
-      "params": {
-        "beta": 0.3,
-        "gamma": 0.1,
-        "sigma_e1": 0.6,
-        "sigma_e2": 0.6,
-        "sigma_e3": 0.6
-      },
-      "enable": [],
-      "disable": [],
-      "t_end": 100.0
-    }
-  ],
-  "model_structure": {
-    "dimensions": [
-      { "name": "latent_stage", "values": [ "e1", "e2", "e3" ] }
     ],
-    "compartment_dims": {
-      "S": [],
-      "E": [ "latent_stage" ],
-      "I": [],
-      "R": []
+    "ode_equations": [],
+    "time_functions": [],
+    "tables": [
+      {
+        "name": "sigma_stage",
+        "values": [
+          { "param": "sigma_e1" },
+          { "param": "sigma_e2" },
+          { "param": "sigma_e3" }
+        ],
+        "out_of_bounds": "error"
+      }
+    ],
+    "interventions": [],
+    "observations": [],
+    "parameters": [
+      {
+        "name": "beta",
+        "value": null,
+        "bounds": [ 0.001, 2.0 ],
+        "prior": null,
+        "hierarchical": null,
+        "transform": null,
+        "initial_value": null,
+        "param_kind": "rate",
+        "param_dim": null
+      },
+      {
+        "name": "gamma",
+        "value": null,
+        "bounds": [ 0.01, 1.0 ],
+        "prior": null,
+        "hierarchical": null,
+        "transform": null,
+        "initial_value": null,
+        "param_kind": "rate",
+        "param_dim": null
+      },
+      {
+        "name": "sigma_e1",
+        "value": null,
+        "bounds": [ 0.01, 2.0 ],
+        "prior": null,
+        "hierarchical": null,
+        "transform": null,
+        "initial_value": null,
+        "param_kind": "rate",
+        "param_dim": null
+      },
+      {
+        "name": "sigma_e2",
+        "value": null,
+        "bounds": [ 0.01, 2.0 ],
+        "prior": null,
+        "hierarchical": null,
+        "transform": null,
+        "initial_value": null,
+        "param_kind": "rate",
+        "param_dim": null
+      },
+      {
+        "name": "sigma_e3",
+        "value": null,
+        "bounds": [ 0.01, 2.0 ],
+        "prior": null,
+        "hierarchical": null,
+        "transform": null,
+        "initial_value": null,
+        "param_kind": "rate",
+        "param_dim": null
+      }
+    ],
+    "initial_conditions": {
+      "explicit": { "S": 990.0, "E_e1": 5.0, "I": 5.0 }
     },
-    "base_compartments": [ "S", "E", "I", "R" ],
-    "transmission_transitions": [ "infection" ],
-    "infectious_compartments": [ "I" ]
+    "output": {
+      "times": { "regular": { "start": 0.0, "step": 1.0, "end": 100.0 } },
+      "format": "tsv",
+      "trajectory": true,
+      "observations": true
+    },
+    "simulation": {
+      "t_start": 0.0,
+      "t_end": 100.0,
+      "time_semantics": "continuous",
+      "dt": null,
+      "rng_seed": null
+    },
+    "scenarios": [
+      {
+        "name": "baseline",
+        "label": "default",
+        "params": {
+          "beta": 0.3,
+          "gamma": 0.1,
+          "sigma_e1": 0.6,
+          "sigma_e2": 0.6,
+          "sigma_e3": 0.6
+        },
+        "enable": [],
+        "disable": [],
+        "t_end": 100.0
+      }
+    ],
+    "model_structure": {
+      "dimensions": [
+        { "name": "latent_stage", "values": [ "e1", "e2", "e3" ] }
+      ],
+      "compartment_dims": {
+        "S": [],
+        "E": [ "latent_stage" ],
+        "I": [],
+        "R": []
+      },
+      "base_compartments": [ "S", "E", "I", "R" ],
+      "transmission_transitions": [ "infection" ],
+      "infectious_compartments": [ "I" ]
+    }
   }
 }

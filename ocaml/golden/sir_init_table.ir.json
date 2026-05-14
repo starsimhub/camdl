@@ -1,362 +1,366 @@
 {
-  "name": "sir_init_table",
-  "version": "0.3",
-  "time_unit": "days",
-  "description": null,
-  "compartments": [
-    { "name": "S_north", "kind": "integer" },
-    { "name": "S_south", "kind": "integer" },
-    { "name": "S_east", "kind": "integer" },
-    { "name": "I_north", "kind": "integer" },
-    { "name": "I_south", "kind": "integer" },
-    { "name": "I_east", "kind": "integer" },
-    { "name": "R_north", "kind": "integer" },
-    { "name": "R_south", "kind": "integer" },
-    { "name": "R_east", "kind": "integer" }
-  ],
-  "transitions": [
-    {
-      "name": "infection_north",
-      "stoichiometry": [ [ "S_north", -1 ], [ "I_north", 1 ] ],
-      "rate": {
-        "bin_op": {
-          "op": "div",
-          "left": {
-            "bin_op": {
-              "op": "mul",
-              "left": {
-                "bin_op": {
-                  "op": "mul",
-                  "left": { "param": "beta" },
-                  "right": { "pop": "S_north" }
-                }
-              },
-              "right": { "pop": "I_north" }
-            }
-          },
-          "right": { "pop_sum": [ "S_north", "I_north", "R_north" ] }
-        }
-      },
-      "metadata": {
-        "origin_kind": "transmission",
-        "source_compartment": "S_north",
-        "dest_compartment": "I_north"
-      },
-      "rate_grad": {
-        "beta": {
-          "bin_op": {
-            "op": "div",
-            "left": {
-              "bin_op": {
-                "op": "mul",
-                "left": {
-                  "bin_op": {
-                    "op": "mul",
-                    "left": { "pop": "S_north" },
-                    "right": { "pop": "I_north" }
-                  }
-                },
-                "right": { "pop_sum": [ "S_north", "I_north", "R_north" ] }
-              }
-            },
-            "right": {
-              "bin_op": {
-                "op": "mul",
-                "left": { "pop_sum": [ "S_north", "I_north", "R_north" ] },
-                "right": { "pop_sum": [ "S_north", "I_north", "R_north" ] }
-              }
-            }
-          }
-        }
-      }
-    },
-    {
-      "name": "infection_south",
-      "stoichiometry": [ [ "S_south", -1 ], [ "I_south", 1 ] ],
-      "rate": {
-        "bin_op": {
-          "op": "div",
-          "left": {
-            "bin_op": {
-              "op": "mul",
-              "left": {
-                "bin_op": {
-                  "op": "mul",
-                  "left": { "param": "beta" },
-                  "right": { "pop": "S_south" }
-                }
-              },
-              "right": { "pop": "I_south" }
-            }
-          },
-          "right": { "pop_sum": [ "S_south", "I_south", "R_south" ] }
-        }
-      },
-      "metadata": {
-        "origin_kind": "transmission",
-        "source_compartment": "S_south",
-        "dest_compartment": "I_south"
-      },
-      "rate_grad": {
-        "beta": {
-          "bin_op": {
-            "op": "div",
-            "left": {
-              "bin_op": {
-                "op": "mul",
-                "left": {
-                  "bin_op": {
-                    "op": "mul",
-                    "left": { "pop": "S_south" },
-                    "right": { "pop": "I_south" }
-                  }
-                },
-                "right": { "pop_sum": [ "S_south", "I_south", "R_south" ] }
-              }
-            },
-            "right": {
-              "bin_op": {
-                "op": "mul",
-                "left": { "pop_sum": [ "S_south", "I_south", "R_south" ] },
-                "right": { "pop_sum": [ "S_south", "I_south", "R_south" ] }
-              }
-            }
-          }
-        }
-      }
-    },
-    {
-      "name": "infection_east",
-      "stoichiometry": [ [ "S_east", -1 ], [ "I_east", 1 ] ],
-      "rate": {
-        "bin_op": {
-          "op": "div",
-          "left": {
-            "bin_op": {
-              "op": "mul",
-              "left": {
-                "bin_op": {
-                  "op": "mul",
-                  "left": { "param": "beta" },
-                  "right": { "pop": "S_east" }
-                }
-              },
-              "right": { "pop": "I_east" }
-            }
-          },
-          "right": { "pop_sum": [ "S_east", "I_east", "R_east" ] }
-        }
-      },
-      "metadata": {
-        "origin_kind": "transmission",
-        "source_compartment": "S_east",
-        "dest_compartment": "I_east"
-      },
-      "rate_grad": {
-        "beta": {
-          "bin_op": {
-            "op": "div",
-            "left": {
-              "bin_op": {
-                "op": "mul",
-                "left": {
-                  "bin_op": {
-                    "op": "mul",
-                    "left": { "pop": "S_east" },
-                    "right": { "pop": "I_east" }
-                  }
-                },
-                "right": { "pop_sum": [ "S_east", "I_east", "R_east" ] }
-              }
-            },
-            "right": {
-              "bin_op": {
-                "op": "mul",
-                "left": { "pop_sum": [ "S_east", "I_east", "R_east" ] },
-                "right": { "pop_sum": [ "S_east", "I_east", "R_east" ] }
-              }
-            }
-          }
-        }
-      }
-    },
-    {
-      "name": "recovery_north",
-      "stoichiometry": [ [ "I_north", -1 ], [ "R_north", 1 ] ],
-      "rate": {
-        "bin_op": {
-          "op": "mul",
-          "left": { "param": "gamma" },
-          "right": { "pop": "I_north" }
-        }
-      },
-      "metadata": {
-        "origin_kind": "intrinsic",
-        "source_compartment": "I_north",
-        "dest_compartment": "R_north"
-      },
-      "rate_grad": { "gamma": { "pop": "I_north" } }
-    },
-    {
-      "name": "recovery_south",
-      "stoichiometry": [ [ "I_south", -1 ], [ "R_south", 1 ] ],
-      "rate": {
-        "bin_op": {
-          "op": "mul",
-          "left": { "param": "gamma" },
-          "right": { "pop": "I_south" }
-        }
-      },
-      "metadata": {
-        "origin_kind": "intrinsic",
-        "source_compartment": "I_south",
-        "dest_compartment": "R_south"
-      },
-      "rate_grad": { "gamma": { "pop": "I_south" } }
-    },
-    {
-      "name": "recovery_east",
-      "stoichiometry": [ [ "I_east", -1 ], [ "R_east", 1 ] ],
-      "rate": {
-        "bin_op": {
-          "op": "mul",
-          "left": { "param": "gamma" },
-          "right": { "pop": "I_east" }
-        }
-      },
-      "metadata": {
-        "origin_kind": "intrinsic",
-        "source_compartment": "I_east",
-        "dest_compartment": "R_east"
-      },
-      "rate_grad": { "gamma": { "pop": "I_east" } }
-    }
-  ],
-  "ode_equations": [],
-  "time_functions": [],
-  "tables": [
-    {
-      "name": "N0",
-      "values": [
-        { "const": 50000.0 }, { "const": 30000.0 }, { "const": 20000.0 }
-      ],
-      "out_of_bounds": "error"
-    }
-  ],
-  "interventions": [],
-  "observations": [],
-  "parameters": [
-    {
-      "name": "beta",
-      "value": null,
-      "bounds": [ 0.001, 1.0 ],
-      "prior": null,
-      "hierarchical": null,
-      "transform": null,
-      "initial_value": null,
-      "param_kind": "rate",
-      "param_dim": null
-    },
-    {
-      "name": "gamma",
-      "value": null,
-      "bounds": [ 0.01, 1.0 ],
-      "prior": null,
-      "hierarchical": null,
-      "transform": null,
-      "initial_value": null,
-      "param_kind": "rate",
-      "param_dim": null
-    },
-    {
-      "name": "I0",
-      "value": null,
-      "bounds": [ 1.0, 1000.0 ],
-      "prior": null,
-      "hierarchical": null,
-      "transform": null,
-      "initial_value": null,
-      "param_kind": "count",
-      "param_dim": null
-    }
-  ],
-  "initial_conditions": {
-    "parameterized": {
-      "S_north": {
-        "bin_op": {
-          "op": "sub",
-          "left": {
-            "table_lookup": {
-              "table": "N0",
-              "indices": [ { "const": 0.0 } ]
-            }
-          },
-          "right": { "param": "I0" }
-        }
-      },
-      "S_south": {
-        "bin_op": {
-          "op": "sub",
-          "left": {
-            "table_lookup": {
-              "table": "N0",
-              "indices": [ { "const": 1.0 } ]
-            }
-          },
-          "right": { "param": "I0" }
-        }
-      },
-      "S_east": {
-        "bin_op": {
-          "op": "sub",
-          "left": {
-            "table_lookup": {
-              "table": "N0",
-              "indices": [ { "const": 2.0 } ]
-            }
-          },
-          "right": { "param": "I0" }
-        }
-      },
-      "I_north": { "param": "I0" },
-      "I_south": { "param": "I0" },
-      "I_east": { "param": "I0" }
-    }
-  },
-  "output": {
-    "times": { "regular": { "start": 0.0, "step": 1.0, "end": 365.0 } },
-    "format": "tsv",
-    "trajectory": true,
-    "observations": true
-  },
-  "simulation": {
-    "t_start": 0.0,
-    "t_end": 365.0,
-    "time_semantics": "continuous",
-    "dt": null,
-    "rng_seed": null
-  },
-  "scenarios": [
-    {
-      "name": "baseline",
-      "label": "baseline",
-      "params": { "beta": 0.3, "gamma": 0.1, "I0": 5.0 },
-      "enable": [],
-      "disable": [],
-      "t_end": null
-    }
-  ],
-  "model_structure": {
-    "dimensions": [
-      { "name": "patch", "values": [ "north", "south", "east" ] }
+  "ir_version": "0.4",
+  "validated_by": "ocaml-compiler-v0.4",
+  "model": {
+    "name": "sir_init_table",
+    "version": "0.3",
+    "time_unit": "days",
+    "description": null,
+    "compartments": [
+      { "name": "S_north", "kind": "integer" },
+      { "name": "S_south", "kind": "integer" },
+      { "name": "S_east", "kind": "integer" },
+      { "name": "I_north", "kind": "integer" },
+      { "name": "I_south", "kind": "integer" },
+      { "name": "I_east", "kind": "integer" },
+      { "name": "R_north", "kind": "integer" },
+      { "name": "R_south", "kind": "integer" },
+      { "name": "R_east", "kind": "integer" }
     ],
-    "compartment_dims": {
-      "S": [ "patch" ],
-      "I": [ "patch" ],
-      "R": [ "patch" ]
+    "transitions": [
+      {
+        "name": "infection_north",
+        "stoichiometry": [ [ "S_north", -1 ], [ "I_north", 1 ] ],
+        "rate": {
+          "bin_op": {
+            "op": "div",
+            "left": {
+              "bin_op": {
+                "op": "mul",
+                "left": {
+                  "bin_op": {
+                    "op": "mul",
+                    "left": { "param": "beta" },
+                    "right": { "pop": "S_north" }
+                  }
+                },
+                "right": { "pop": "I_north" }
+              }
+            },
+            "right": { "pop_sum": [ "S_north", "I_north", "R_north" ] }
+          }
+        },
+        "metadata": {
+          "origin_kind": "transmission",
+          "source_compartment": "S_north",
+          "dest_compartment": "I_north"
+        },
+        "rate_grad": {
+          "beta": {
+            "bin_op": {
+              "op": "div",
+              "left": {
+                "bin_op": {
+                  "op": "mul",
+                  "left": {
+                    "bin_op": {
+                      "op": "mul",
+                      "left": { "pop": "S_north" },
+                      "right": { "pop": "I_north" }
+                    }
+                  },
+                  "right": { "pop_sum": [ "S_north", "I_north", "R_north" ] }
+                }
+              },
+              "right": {
+                "bin_op": {
+                  "op": "mul",
+                  "left": { "pop_sum": [ "S_north", "I_north", "R_north" ] },
+                  "right": { "pop_sum": [ "S_north", "I_north", "R_north" ] }
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        "name": "infection_south",
+        "stoichiometry": [ [ "S_south", -1 ], [ "I_south", 1 ] ],
+        "rate": {
+          "bin_op": {
+            "op": "div",
+            "left": {
+              "bin_op": {
+                "op": "mul",
+                "left": {
+                  "bin_op": {
+                    "op": "mul",
+                    "left": { "param": "beta" },
+                    "right": { "pop": "S_south" }
+                  }
+                },
+                "right": { "pop": "I_south" }
+              }
+            },
+            "right": { "pop_sum": [ "S_south", "I_south", "R_south" ] }
+          }
+        },
+        "metadata": {
+          "origin_kind": "transmission",
+          "source_compartment": "S_south",
+          "dest_compartment": "I_south"
+        },
+        "rate_grad": {
+          "beta": {
+            "bin_op": {
+              "op": "div",
+              "left": {
+                "bin_op": {
+                  "op": "mul",
+                  "left": {
+                    "bin_op": {
+                      "op": "mul",
+                      "left": { "pop": "S_south" },
+                      "right": { "pop": "I_south" }
+                    }
+                  },
+                  "right": { "pop_sum": [ "S_south", "I_south", "R_south" ] }
+                }
+              },
+              "right": {
+                "bin_op": {
+                  "op": "mul",
+                  "left": { "pop_sum": [ "S_south", "I_south", "R_south" ] },
+                  "right": { "pop_sum": [ "S_south", "I_south", "R_south" ] }
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        "name": "infection_east",
+        "stoichiometry": [ [ "S_east", -1 ], [ "I_east", 1 ] ],
+        "rate": {
+          "bin_op": {
+            "op": "div",
+            "left": {
+              "bin_op": {
+                "op": "mul",
+                "left": {
+                  "bin_op": {
+                    "op": "mul",
+                    "left": { "param": "beta" },
+                    "right": { "pop": "S_east" }
+                  }
+                },
+                "right": { "pop": "I_east" }
+              }
+            },
+            "right": { "pop_sum": [ "S_east", "I_east", "R_east" ] }
+          }
+        },
+        "metadata": {
+          "origin_kind": "transmission",
+          "source_compartment": "S_east",
+          "dest_compartment": "I_east"
+        },
+        "rate_grad": {
+          "beta": {
+            "bin_op": {
+              "op": "div",
+              "left": {
+                "bin_op": {
+                  "op": "mul",
+                  "left": {
+                    "bin_op": {
+                      "op": "mul",
+                      "left": { "pop": "S_east" },
+                      "right": { "pop": "I_east" }
+                    }
+                  },
+                  "right": { "pop_sum": [ "S_east", "I_east", "R_east" ] }
+                }
+              },
+              "right": {
+                "bin_op": {
+                  "op": "mul",
+                  "left": { "pop_sum": [ "S_east", "I_east", "R_east" ] },
+                  "right": { "pop_sum": [ "S_east", "I_east", "R_east" ] }
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        "name": "recovery_north",
+        "stoichiometry": [ [ "I_north", -1 ], [ "R_north", 1 ] ],
+        "rate": {
+          "bin_op": {
+            "op": "mul",
+            "left": { "param": "gamma" },
+            "right": { "pop": "I_north" }
+          }
+        },
+        "metadata": {
+          "origin_kind": "intrinsic",
+          "source_compartment": "I_north",
+          "dest_compartment": "R_north"
+        },
+        "rate_grad": { "gamma": { "pop": "I_north" } }
+      },
+      {
+        "name": "recovery_south",
+        "stoichiometry": [ [ "I_south", -1 ], [ "R_south", 1 ] ],
+        "rate": {
+          "bin_op": {
+            "op": "mul",
+            "left": { "param": "gamma" },
+            "right": { "pop": "I_south" }
+          }
+        },
+        "metadata": {
+          "origin_kind": "intrinsic",
+          "source_compartment": "I_south",
+          "dest_compartment": "R_south"
+        },
+        "rate_grad": { "gamma": { "pop": "I_south" } }
+      },
+      {
+        "name": "recovery_east",
+        "stoichiometry": [ [ "I_east", -1 ], [ "R_east", 1 ] ],
+        "rate": {
+          "bin_op": {
+            "op": "mul",
+            "left": { "param": "gamma" },
+            "right": { "pop": "I_east" }
+          }
+        },
+        "metadata": {
+          "origin_kind": "intrinsic",
+          "source_compartment": "I_east",
+          "dest_compartment": "R_east"
+        },
+        "rate_grad": { "gamma": { "pop": "I_east" } }
+      }
+    ],
+    "ode_equations": [],
+    "time_functions": [],
+    "tables": [
+      {
+        "name": "N0",
+        "values": [
+          { "const": 50000.0 }, { "const": 30000.0 }, { "const": 20000.0 }
+        ],
+        "out_of_bounds": "error"
+      }
+    ],
+    "interventions": [],
+    "observations": [],
+    "parameters": [
+      {
+        "name": "beta",
+        "value": null,
+        "bounds": [ 0.001, 1.0 ],
+        "prior": null,
+        "hierarchical": null,
+        "transform": null,
+        "initial_value": null,
+        "param_kind": "rate",
+        "param_dim": null
+      },
+      {
+        "name": "gamma",
+        "value": null,
+        "bounds": [ 0.01, 1.0 ],
+        "prior": null,
+        "hierarchical": null,
+        "transform": null,
+        "initial_value": null,
+        "param_kind": "rate",
+        "param_dim": null
+      },
+      {
+        "name": "I0",
+        "value": null,
+        "bounds": [ 1.0, 1000.0 ],
+        "prior": null,
+        "hierarchical": null,
+        "transform": null,
+        "initial_value": null,
+        "param_kind": "count",
+        "param_dim": null
+      }
+    ],
+    "initial_conditions": {
+      "parameterized": {
+        "S_north": {
+          "bin_op": {
+            "op": "sub",
+            "left": {
+              "table_lookup": {
+                "table": "N0",
+                "indices": [ { "const": 0.0 } ]
+              }
+            },
+            "right": { "param": "I0" }
+          }
+        },
+        "S_south": {
+          "bin_op": {
+            "op": "sub",
+            "left": {
+              "table_lookup": {
+                "table": "N0",
+                "indices": [ { "const": 1.0 } ]
+              }
+            },
+            "right": { "param": "I0" }
+          }
+        },
+        "S_east": {
+          "bin_op": {
+            "op": "sub",
+            "left": {
+              "table_lookup": {
+                "table": "N0",
+                "indices": [ { "const": 2.0 } ]
+              }
+            },
+            "right": { "param": "I0" }
+          }
+        },
+        "I_north": { "param": "I0" },
+        "I_south": { "param": "I0" },
+        "I_east": { "param": "I0" }
+      }
     },
-    "base_compartments": [ "S", "I", "R" ],
-    "transmission_transitions": [ "infection" ],
-    "infectious_compartments": [ "I" ]
+    "output": {
+      "times": { "regular": { "start": 0.0, "step": 1.0, "end": 365.0 } },
+      "format": "tsv",
+      "trajectory": true,
+      "observations": true
+    },
+    "simulation": {
+      "t_start": 0.0,
+      "t_end": 365.0,
+      "time_semantics": "continuous",
+      "dt": null,
+      "rng_seed": null
+    },
+    "scenarios": [
+      {
+        "name": "baseline",
+        "label": "baseline",
+        "params": { "beta": 0.3, "gamma": 0.1, "I0": 5.0 },
+        "enable": [],
+        "disable": [],
+        "t_end": null
+      }
+    ],
+    "model_structure": {
+      "dimensions": [
+        { "name": "patch", "values": [ "north", "south", "east" ] }
+      ],
+      "compartment_dims": {
+        "S": [ "patch" ],
+        "I": [ "patch" ],
+        "R": [ "patch" ]
+      },
+      "base_compartments": [ "S", "I", "R" ],
+      "transmission_transitions": [ "infection" ],
+      "infectious_compartments": [ "I" ]
+    }
   }
 }

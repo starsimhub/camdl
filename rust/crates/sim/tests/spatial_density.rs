@@ -111,7 +111,7 @@ fn test_density_matches_step_one_sir_demography() {
 fn test_density_matches_step_one_two_patch() {
     let path = "../../../ocaml/golden/sir_two_patch.ir.json";
     let model = match std::fs::read_to_string(path) {
-        Ok(json) => match serde_json::from_str::<ir::Model>(&json) {
+        Ok(json) => match ir::from_str(&json) {
             Ok(m) => m, Err(e) => { eprintln!("  skip: {}", e); return; }
         },
         Err(_) => { eprintln!("  skip: not found"); return; }
@@ -148,7 +148,7 @@ fn test_density_matches_step_one_polio_spatial_5() {
     sim::eval_stats::set_allow_degenerate_rates(true);
     let path = "../../../ocaml/golden/polio_spatial_5.ir.json";
     let model = match std::fs::read_to_string(path) {
-        Ok(json) => match serde_json::from_str::<ir::Model>(&json) {
+        Ok(json) => match ir::from_str(&json) {
             Ok(m) => m,
             Err(e) => { eprintln!("  skipping: cannot parse {}: {}", path, e); return; }
         },
@@ -384,7 +384,7 @@ fn test_step_one_zero_infection_flow() {
 
     let path = "tests/fixtures/seir_spatial_5.ir.json";
     let model = match std::fs::read_to_string(path) {
-        Ok(json) => serde_json::from_str::<ir::Model>(&json).unwrap(),
+        Ok(json) => ir::from_str(&json).unwrap(),
         Err(_) => { eprintln!("skip"); return; }
     };
     let mut model = model;

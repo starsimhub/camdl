@@ -326,8 +326,12 @@ pub fn load_model(path: &str) -> Result<(ir::Model, String), String> {
         std::fs::read_to_string(path)
             .map_err(|e| format!("cannot read {}: {}", path, e))?
     };
-    let model: ir::Model = serde_json::from_str(&json)
-        .map_err(|e| format!("parse error: {}", e))?;
+    // gh#audit-C8. Use envelope-aware from_str so version mismatches
+    // surface as a typed IrError rather than a serde shape error
+    // somewhere deep in the model tree. Hint text in IrError points
+    // the user at the right rebuild target.
+    let model: ir::Model = ir::from_str(&json)
+        .map_err(|e| format!("IR load error from {}: {}", path, e))?;
     // RC1 in 2026-04-19 engine review: run the structural integrity
     // battery on every load. Catches silent-wrong-IR emitted by the
     // compiler (unknown references, missing ODE, duplicate names,
@@ -797,8 +801,9 @@ pub fn run_simulation(run: &SimRun) -> Result<(Trajectory, ir::Model), String> {
 
     let src = std::fs::read_to_string(&ir_path_resolved)
         .map_err(|e| format!("cannot read {}: {}", ir_path_resolved, e))?;
-    let mut model: ir::Model = serde_json::from_str(&src)
-        .map_err(|e| format!("IR parse error: {}", e))?;
+    // gh#audit-C8. Envelope-aware load (see load_model above).
+    let mut model: ir::Model = ir::from_str(&src)
+        .map_err(|e| format!("IR load error from {}: {}", ir_path_resolved, e))?;
     // RC1 in 2026-04-19 engine review.
     ir::validate::validate(&model).map_err(|errs| {
         let mut msg = format!("IR validation failed ({} error(s)):\n", errs.len());

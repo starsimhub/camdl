@@ -37,7 +37,7 @@ fn golden_path(name: &str) -> String {
 fn load_branching() -> (ir::Model, CompiledModel) {
     let contents = std::fs::read_to_string(golden_path("branching_si_symp_asym"))
         .expect("read fixture");
-    let mut model: ir::Model = serde_json::from_str(&contents).unwrap();
+    let mut model: ir::Model = ir::from_str(&contents).unwrap();  // gh#audit-C8
     if let Some(preset) = model.presets.first() {
         for p in &mut model.parameters {
             if let Some(&v) = preset.params.get(&p.name) {

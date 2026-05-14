@@ -1,83 +1,33 @@
 {
-  "name": "sir_coupling",
-  "version": "0.3",
-  "time_unit": "days",
-  "description": null,
-  "compartments": [
-    { "name": "S_young", "kind": "integer" },
-    { "name": "S_old", "kind": "integer" },
-    { "name": "I_young", "kind": "integer" },
-    { "name": "I_old", "kind": "integer" },
-    { "name": "R_young", "kind": "integer" },
-    { "name": "R_old", "kind": "integer" }
-  ],
-  "transitions": [
-    {
-      "name": "infection_young",
-      "stoichiometry": [ [ "S_young", -1 ], [ "I_young", 1 ] ],
-      "rate": {
-        "bin_op": {
-          "op": "mul",
-          "left": {
-            "bin_op": {
-              "op": "mul",
-              "left": { "param": "beta" },
-              "right": { "pop": "S_young" }
-            }
-          },
-          "right": {
-            "bin_op": {
-              "op": "add",
-              "left": {
-                "bin_op": {
-                  "op": "div",
-                  "left": {
-                    "bin_op": {
-                      "op": "mul",
-                      "left": {
-                        "table_lookup": {
-                          "table": "C_age",
-                          "indices": [ { "const": 0.0 } ]
-                        }
-                      },
-                      "right": { "pop": "I_young" }
-                    }
-                  },
-                  "right": { "pop_sum": [ "S_young", "I_young", "R_young" ] }
-                }
-              },
-              "right": {
-                "bin_op": {
-                  "op": "div",
-                  "left": {
-                    "bin_op": {
-                      "op": "mul",
-                      "left": {
-                        "table_lookup": {
-                          "table": "C_age",
-                          "indices": [ { "const": 1.0 } ]
-                        }
-                      },
-                      "right": { "pop": "I_old" }
-                    }
-                  },
-                  "right": { "pop_sum": [ "S_old", "I_old", "R_old" ] }
-                }
-              }
-            }
-          }
-        }
-      },
-      "metadata": {
-        "origin_kind": "transmission",
-        "source_compartment": "S_young",
-        "dest_compartment": "I_young"
-      },
-      "rate_grad": {
-        "beta": {
+  "ir_version": "0.4",
+  "validated_by": "ocaml-compiler-v0.4",
+  "model": {
+    "name": "sir_coupling",
+    "version": "0.3",
+    "time_unit": "days",
+    "description": null,
+    "compartments": [
+      { "name": "S_young", "kind": "integer" },
+      { "name": "S_old", "kind": "integer" },
+      { "name": "I_young", "kind": "integer" },
+      { "name": "I_old", "kind": "integer" },
+      { "name": "R_young", "kind": "integer" },
+      { "name": "R_old", "kind": "integer" }
+    ],
+    "transitions": [
+      {
+        "name": "infection_young",
+        "stoichiometry": [ [ "S_young", -1 ], [ "I_young", 1 ] ],
+        "rate": {
           "bin_op": {
             "op": "mul",
-            "left": { "pop": "S_young" },
+            "left": {
+              "bin_op": {
+                "op": "mul",
+                "left": { "param": "beta" },
+                "right": { "pop": "S_young" }
+              }
+            },
             "right": {
               "bin_op": {
                 "op": "add",
@@ -122,75 +72,77 @@
               }
             }
           }
-        }
-      }
-    },
-    {
-      "name": "infection_old",
-      "stoichiometry": [ [ "S_old", -1 ], [ "I_old", 1 ] ],
-      "rate": {
-        "bin_op": {
-          "op": "mul",
-          "left": {
+        },
+        "metadata": {
+          "origin_kind": "transmission",
+          "source_compartment": "S_young",
+          "dest_compartment": "I_young"
+        },
+        "rate_grad": {
+          "beta": {
             "bin_op": {
               "op": "mul",
-              "left": { "param": "beta" },
-              "right": { "pop": "S_old" }
-            }
-          },
-          "right": {
-            "bin_op": {
-              "op": "add",
-              "left": {
-                "bin_op": {
-                  "op": "div",
-                  "left": {
-                    "bin_op": {
-                      "op": "mul",
-                      "left": {
-                        "table_lookup": {
-                          "table": "C_age",
-                          "indices": [ { "const": 2.0 } ]
-                        }
-                      },
-                      "right": { "pop": "I_young" }
-                    }
-                  },
-                  "right": { "pop_sum": [ "S_young", "I_young", "R_young" ] }
-                }
-              },
+              "left": { "pop": "S_young" },
               "right": {
                 "bin_op": {
-                  "op": "div",
+                  "op": "add",
                   "left": {
                     "bin_op": {
-                      "op": "mul",
+                      "op": "div",
                       "left": {
-                        "table_lookup": {
-                          "table": "C_age",
-                          "indices": [ { "const": 3.0 } ]
+                        "bin_op": {
+                          "op": "mul",
+                          "left": {
+                            "table_lookup": {
+                              "table": "C_age",
+                              "indices": [ { "const": 0.0 } ]
+                            }
+                          },
+                          "right": { "pop": "I_young" }
                         }
                       },
-                      "right": { "pop": "I_old" }
+                      "right": {
+                        "pop_sum": [ "S_young", "I_young", "R_young" ]
+                      }
                     }
                   },
-                  "right": { "pop_sum": [ "S_old", "I_old", "R_old" ] }
+                  "right": {
+                    "bin_op": {
+                      "op": "div",
+                      "left": {
+                        "bin_op": {
+                          "op": "mul",
+                          "left": {
+                            "table_lookup": {
+                              "table": "C_age",
+                              "indices": [ { "const": 1.0 } ]
+                            }
+                          },
+                          "right": { "pop": "I_old" }
+                        }
+                      },
+                      "right": { "pop_sum": [ "S_old", "I_old", "R_old" ] }
+                    }
+                  }
                 }
               }
             }
           }
         }
       },
-      "metadata": {
-        "origin_kind": "transmission",
-        "source_compartment": "S_old",
-        "dest_compartment": "I_old"
-      },
-      "rate_grad": {
-        "beta": {
+      {
+        "name": "infection_old",
+        "stoichiometry": [ [ "S_old", -1 ], [ "I_old", 1 ] ],
+        "rate": {
           "bin_op": {
             "op": "mul",
-            "left": { "pop": "S_old" },
+            "left": {
+              "bin_op": {
+                "op": "mul",
+                "left": { "param": "beta" },
+                "right": { "pop": "S_old" }
+              }
+            },
             "right": {
               "bin_op": {
                 "op": "add",
@@ -235,155 +187,211 @@
               }
             }
           }
+        },
+        "metadata": {
+          "origin_kind": "transmission",
+          "source_compartment": "S_old",
+          "dest_compartment": "I_old"
+        },
+        "rate_grad": {
+          "beta": {
+            "bin_op": {
+              "op": "mul",
+              "left": { "pop": "S_old" },
+              "right": {
+                "bin_op": {
+                  "op": "add",
+                  "left": {
+                    "bin_op": {
+                      "op": "div",
+                      "left": {
+                        "bin_op": {
+                          "op": "mul",
+                          "left": {
+                            "table_lookup": {
+                              "table": "C_age",
+                              "indices": [ { "const": 2.0 } ]
+                            }
+                          },
+                          "right": { "pop": "I_young" }
+                        }
+                      },
+                      "right": {
+                        "pop_sum": [ "S_young", "I_young", "R_young" ]
+                      }
+                    }
+                  },
+                  "right": {
+                    "bin_op": {
+                      "op": "div",
+                      "left": {
+                        "bin_op": {
+                          "op": "mul",
+                          "left": {
+                            "table_lookup": {
+                              "table": "C_age",
+                              "indices": [ { "const": 3.0 } ]
+                            }
+                          },
+                          "right": { "pop": "I_old" }
+                        }
+                      },
+                      "right": { "pop_sum": [ "S_old", "I_old", "R_old" ] }
+                    }
+                  }
+                }
+              }
+            }
+          }
         }
+      },
+      {
+        "name": "recovery_young",
+        "stoichiometry": [ [ "I_young", -1 ], [ "R_young", 1 ] ],
+        "rate": {
+          "bin_op": {
+            "op": "mul",
+            "left": { "param": "gamma" },
+            "right": { "pop": "I_young" }
+          }
+        },
+        "metadata": {
+          "origin_kind": "intrinsic",
+          "source_compartment": "I_young",
+          "dest_compartment": "R_young"
+        },
+        "rate_grad": { "gamma": { "pop": "I_young" } }
+      },
+      {
+        "name": "recovery_old",
+        "stoichiometry": [ [ "I_old", -1 ], [ "R_old", 1 ] ],
+        "rate": {
+          "bin_op": {
+            "op": "mul",
+            "left": { "param": "gamma" },
+            "right": { "pop": "I_old" }
+          }
+        },
+        "metadata": {
+          "origin_kind": "intrinsic",
+          "source_compartment": "I_old",
+          "dest_compartment": "R_old"
+        },
+        "rate_grad": { "gamma": { "pop": "I_old" } }
+      }
+    ],
+    "ode_equations": [],
+    "time_functions": [],
+    "tables": [
+      {
+        "name": "C_age",
+        "values": [
+          { "const": 10.0 },
+          { "const": 3.0 },
+          { "const": 3.0 },
+          { "const": 7.0 }
+        ],
+        "out_of_bounds": "error"
+      }
+    ],
+    "interventions": [],
+    "observations": [],
+    "parameters": [
+      {
+        "name": "beta",
+        "value": null,
+        "bounds": [ 0.001, 0.5 ],
+        "prior": null,
+        "hierarchical": null,
+        "transform": null,
+        "initial_value": null,
+        "param_kind": "rate",
+        "param_dim": null
+      },
+      {
+        "name": "gamma",
+        "value": null,
+        "bounds": [ 0.001, 1.0 ],
+        "prior": null,
+        "hierarchical": null,
+        "transform": null,
+        "initial_value": null,
+        "param_kind": "rate",
+        "param_dim": null
+      },
+      {
+        "name": "N0",
+        "value": null,
+        "bounds": [ 100.0, 100000.0 ],
+        "prior": null,
+        "hierarchical": null,
+        "transform": null,
+        "initial_value": null,
+        "param_kind": "count",
+        "param_dim": null
+      },
+      {
+        "name": "I0",
+        "value": null,
+        "bounds": [ 1.0, 1000.0 ],
+        "prior": null,
+        "hierarchical": null,
+        "transform": null,
+        "initial_value": null,
+        "param_kind": "count",
+        "param_dim": null
+      }
+    ],
+    "initial_conditions": {
+      "parameterized": {
+        "S_young": {
+          "bin_op": {
+            "op": "sub",
+            "left": { "param": "N0" },
+            "right": { "param": "I0" }
+          }
+        },
+        "S_old": { "param": "N0" },
+        "I_young": { "param": "I0" }
       }
     },
-    {
-      "name": "recovery_young",
-      "stoichiometry": [ [ "I_young", -1 ], [ "R_young", 1 ] ],
-      "rate": {
-        "bin_op": {
-          "op": "mul",
-          "left": { "param": "gamma" },
-          "right": { "pop": "I_young" }
-        }
-      },
-      "metadata": {
-        "origin_kind": "intrinsic",
-        "source_compartment": "I_young",
-        "dest_compartment": "R_young"
-      },
-      "rate_grad": { "gamma": { "pop": "I_young" } }
+    "output": {
+      "times": { "regular": { "start": 0.0, "step": 1.0, "end": 50.0 } },
+      "format": "tsv",
+      "trajectory": true,
+      "observations": true
     },
-    {
-      "name": "recovery_old",
-      "stoichiometry": [ [ "I_old", -1 ], [ "R_old", 1 ] ],
-      "rate": {
-        "bin_op": {
-          "op": "mul",
-          "left": { "param": "gamma" },
-          "right": { "pop": "I_old" }
-        }
+    "simulation": {
+      "t_start": 0.0,
+      "t_end": 50.0,
+      "time_semantics": "continuous",
+      "dt": null,
+      "rng_seed": null
+    },
+    "scenarios": [
+      {
+        "name": "baseline",
+        "label": "default",
+        "params": { "beta": 0.05, "gamma": 0.1, "N0": 1000.0, "I0": 10.0 },
+        "enable": [],
+        "disable": [],
+        "t_end": 50.0
       },
-      "metadata": {
-        "origin_kind": "intrinsic",
-        "source_compartment": "I_old",
-        "dest_compartment": "R_old"
-      },
-      "rate_grad": { "gamma": { "pop": "I_old" } }
+      {
+        "name": "high_coupling",
+        "label": "high coupling  (strong cross-mixing)",
+        "params": { "beta": 0.09, "gamma": 0.1, "N0": 1000.0, "I0": 5.0 },
+        "enable": [],
+        "disable": [],
+        "t_end": 50.0
+      }
+    ],
+    "model_structure": {
+      "dimensions": [ { "name": "age", "values": [ "young", "old" ] } ],
+      "compartment_dims": { "S": [ "age" ], "I": [ "age" ], "R": [ "age" ] },
+      "base_compartments": [ "S", "I", "R" ],
+      "transmission_transitions": [ "infection" ],
+      "infectious_compartments": [ "I" ]
     }
-  ],
-  "ode_equations": [],
-  "time_functions": [],
-  "tables": [
-    {
-      "name": "C_age",
-      "values": [
-        { "const": 10.0 },
-        { "const": 3.0 },
-        { "const": 3.0 },
-        { "const": 7.0 }
-      ],
-      "out_of_bounds": "error"
-    }
-  ],
-  "interventions": [],
-  "observations": [],
-  "parameters": [
-    {
-      "name": "beta",
-      "value": null,
-      "bounds": [ 0.001, 0.5 ],
-      "prior": null,
-      "hierarchical": null,
-      "transform": null,
-      "initial_value": null,
-      "param_kind": "rate",
-      "param_dim": null
-    },
-    {
-      "name": "gamma",
-      "value": null,
-      "bounds": [ 0.001, 1.0 ],
-      "prior": null,
-      "hierarchical": null,
-      "transform": null,
-      "initial_value": null,
-      "param_kind": "rate",
-      "param_dim": null
-    },
-    {
-      "name": "N0",
-      "value": null,
-      "bounds": [ 100.0, 100000.0 ],
-      "prior": null,
-      "hierarchical": null,
-      "transform": null,
-      "initial_value": null,
-      "param_kind": "count",
-      "param_dim": null
-    },
-    {
-      "name": "I0",
-      "value": null,
-      "bounds": [ 1.0, 1000.0 ],
-      "prior": null,
-      "hierarchical": null,
-      "transform": null,
-      "initial_value": null,
-      "param_kind": "count",
-      "param_dim": null
-    }
-  ],
-  "initial_conditions": {
-    "parameterized": {
-      "S_young": {
-        "bin_op": {
-          "op": "sub",
-          "left": { "param": "N0" },
-          "right": { "param": "I0" }
-        }
-      },
-      "S_old": { "param": "N0" },
-      "I_young": { "param": "I0" }
-    }
-  },
-  "output": {
-    "times": { "regular": { "start": 0.0, "step": 1.0, "end": 50.0 } },
-    "format": "tsv",
-    "trajectory": true,
-    "observations": true
-  },
-  "simulation": {
-    "t_start": 0.0,
-    "t_end": 50.0,
-    "time_semantics": "continuous",
-    "dt": null,
-    "rng_seed": null
-  },
-  "scenarios": [
-    {
-      "name": "baseline",
-      "label": "default",
-      "params": { "beta": 0.05, "gamma": 0.1, "N0": 1000.0, "I0": 10.0 },
-      "enable": [],
-      "disable": [],
-      "t_end": 50.0
-    },
-    {
-      "name": "high_coupling",
-      "label": "high coupling  (strong cross-mixing)",
-      "params": { "beta": 0.09, "gamma": 0.1, "N0": 1000.0, "I0": 5.0 },
-      "enable": [],
-      "disable": [],
-      "t_end": 50.0
-    }
-  ],
-  "model_structure": {
-    "dimensions": [ { "name": "age", "values": [ "young", "old" ] } ],
-    "compartment_dims": { "S": [ "age" ], "I": [ "age" ], "R": [ "age" ] },
-    "base_compartments": [ "S", "I", "R" ],
-    "transmission_transitions": [ "infection" ],
-    "infectious_compartments": [ "I" ]
   }
 }

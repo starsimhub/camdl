@@ -303,7 +303,8 @@ mod tests {
         let s = std::fs::read_to_string(concat!(
             env!("CARGO_MANIFEST_DIR"), "/../../../ir/golden/sir_basic.ir.json"))
             .expect("read sir_basic.ir.json");
-        serde_json::from_str::<Model>(&s).expect("parse sir_basic")
+        // gh#audit-C8. Use envelope-aware deserializer.
+        crate::from_str(&s).expect("parse sir_basic")
     }
 
     #[test]

@@ -1,188 +1,192 @@
 {
-  "name": "sir_placebo_ekrng",
-  "version": "0.3",
-  "time_unit": "days",
-  "description": "SIR + inert placebo transition for EKRNG order-independence test",
-  "compartments": [
-    {
-      "name": "S",
-      "kind": "integer"
-    },
-    {
-      "name": "I",
-      "kind": "integer"
-    },
-    {
-      "name": "R",
-      "kind": "integer"
-    }
-  ],
-  "transitions": [
-    {
-      "name": "infection",
-      "stoichiometry": [
-        [
-          "S",
-          -1
+  "ir_version": "0.4",
+  "validated_by": "hand-curated-ir-golden",
+  "model": {
+    "name": "sir_placebo_ekrng",
+    "version": "0.3",
+    "time_unit": "days",
+    "description": "SIR + inert placebo transition for EKRNG order-independence test",
+    "compartments": [
+      {
+        "name": "S",
+        "kind": "integer"
+      },
+      {
+        "name": "I",
+        "kind": "integer"
+      },
+      {
+        "name": "R",
+        "kind": "integer"
+      }
+    ],
+    "transitions": [
+      {
+        "name": "infection",
+        "stoichiometry": [
+          [
+            "S",
+            -1
+          ],
+          [
+            "I",
+            1
+          ]
         ],
-        [
-          "I",
-          1
-        ]
-      ],
-      "rate": {
-        "bin_op": {
-          "op": "mul",
-          "left": {
-            "bin_op": {
-              "op": "mul",
-              "left": {
-                "param": "beta"
-              },
-              "right": {
-                "pop": "S"
+        "rate": {
+          "bin_op": {
+            "op": "mul",
+            "left": {
+              "bin_op": {
+                "op": "mul",
+                "left": {
+                  "param": "beta"
+                },
+                "right": {
+                  "pop": "S"
+                }
+              }
+            },
+            "right": {
+              "bin_op": {
+                "op": "div",
+                "left": {
+                  "pop": "I"
+                },
+                "right": {
+                  "pop_sum": [
+                    "S",
+                    "I",
+                    "R"
+                  ]
+                }
               }
             }
-          },
-          "right": {
-            "bin_op": {
-              "op": "div",
-              "left": {
-                "pop": "I"
-              },
-              "right": {
-                "pop_sum": [
-                  "S",
-                  "I",
-                  "R"
-                ]
-              }
+          }
+        },
+        "metadata": null
+      },
+      {
+        "name": "recovery",
+        "stoichiometry": [
+          [
+            "I",
+            -1
+          ],
+          [
+            "R",
+            1
+          ]
+        ],
+        "rate": {
+          "bin_op": {
+            "op": "mul",
+            "left": {
+              "param": "gamma"
+            },
+            "right": {
+              "pop": "I"
             }
           }
-        }
+        },
+        "metadata": null
       },
-      "metadata": null
-    },
-    {
-      "name": "recovery",
-      "stoichiometry": [
-        [
-          "I",
-          -1
+      {
+        "name": "placebo",
+        "stoichiometry": [
+          [
+            "S",
+            -1
+          ],
+          [
+            "S",
+            1
+          ]
         ],
-        [
-          "R",
-          1
-        ]
-      ],
-      "rate": {
-        "bin_op": {
-          "op": "mul",
-          "left": {
-            "param": "gamma"
-          },
-          "right": {
-            "pop": "I"
+        "rate": {
+          "param": "epsilon"
+        },
+        "metadata": {
+          "origin_kind": "placebo",
+          "source_compartment": null,
+          "dest_compartment": null
+        }
+      }
+    ],
+    "ode_equations": [],
+    "time_functions": [],
+    "tables": [],
+    "interventions": [],
+    "observations": [],
+    "parameters": [
+      {
+        "name": "beta",
+        "value": 0.3,
+        "prior": null,
+        "transform": null,
+        "initial_value": null
+      },
+      {
+        "name": "gamma",
+        "value": 0.1,
+        "prior": null,
+        "transform": null,
+        "initial_value": null
+      },
+      {
+        "name": "I0",
+        "value": 10.0,
+        "prior": null,
+        "transform": null,
+        "initial_value": null
+      },
+      {
+        "name": "epsilon",
+        "value": 1E-10,
+        "prior": null,
+        "transform": null,
+        "initial_value": null
+      }
+    ],
+    "initial_conditions": {
+      "parameterized": {
+        "S": {
+          "bin_op": {
+            "op": "sub",
+            "left": {
+              "const": 1000.0
+            },
+            "right": {
+              "param": "I0"
+            }
           }
+        },
+        "I": {
+          "param": "I0"
+        },
+        "R": {
+          "const": 0.0
+        }
+      }
+    },
+    "output": {
+      "times": {
+        "regular": {
+          "start": 0.0,
+          "step": 1.0,
+          "end": 100.0
         }
       },
-      "metadata": null
+      "format": "tsv",
+      "trajectory": true,
+      "observations": false
     },
-    {
-      "name": "placebo",
-      "stoichiometry": [
-        [
-          "S",
-          -1
-        ],
-        [
-          "S",
-          1
-        ]
-      ],
-      "rate": {
-        "param": "epsilon"
-      },
-      "metadata": {
-        "origin_kind": "placebo",
-        "source_compartment": null,
-        "dest_compartment": null
-      }
+    "simulation": {
+      "t_start": 0.0,
+      "t_end": 100.0,
+      "time_semantics": "continuous",
+      "dt": null,
+      "rng_seed": 42
     }
-  ],
-  "ode_equations": [],
-  "time_functions": [],
-  "tables": [],
-  "interventions": [],
-  "observations": [],
-  "parameters": [
-    {
-      "name": "beta",
-      "value": 0.3,
-      "prior": null,
-      "transform": null,
-      "initial_value": null
-    },
-    {
-      "name": "gamma",
-      "value": 0.1,
-      "prior": null,
-      "transform": null,
-      "initial_value": null
-    },
-    {
-      "name": "I0",
-      "value": 10.0,
-      "prior": null,
-      "transform": null,
-      "initial_value": null
-    },
-    {
-      "name": "epsilon",
-      "value": 1e-10,
-      "prior": null,
-      "transform": null,
-      "initial_value": null
-    }
-  ],
-  "initial_conditions": {
-    "parameterized": {
-      "S": {
-        "bin_op": {
-          "op": "sub",
-          "left": {
-            "const": 1000.0
-          },
-          "right": {
-            "param": "I0"
-          }
-        }
-      },
-      "I": {
-        "param": "I0"
-      },
-      "R": {
-        "const": 0.0
-      }
-    }
-  },
-  "output": {
-    "times": {
-      "regular": {
-        "start": 0.0,
-        "step": 1.0,
-        "end": 100.0
-      }
-    },
-    "format": "tsv",
-    "trajectory": true,
-    "observations": false
-  },
-  "simulation": {
-    "t_start": 0.0,
-    "t_end": 100.0,
-    "time_semantics": "continuous",
-    "dt": null,
-    "rng_seed": 42
   }
 }
