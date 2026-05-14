@@ -836,6 +836,19 @@ pub fn csmc_as(
     for s in 0..n_substeps {
         let t = t_start + s as f64 * dt;
 
+        // gh#audit-H8. Cache the pre-resample particle state for
+        // ancestor sampling. The previous code saved prev_counts AFTER
+        // the resampling shuffle (line 868-871), which categoricalised
+        // the ancestor weight over a post-resample-relabelled ensemble
+        // rather than the canonical pre-step ensemble. On observation-
+        // tight steps with heterogeneous pre-step states (spatial
+        // models with very different patch prevalences), the wrong
+        // ancestor index could be selected. The IM6 fix at line 925
+        // dropped log_weights from the sum to mask part of the issue,
+        // but the state mismatch persisted. Capturing the pre-resample
+        // counts here closes that loop.
+        let prev_counts_for_ancestor: Vec<Vec<i64>> = counts.clone();
+
         // ── 1. Resample free particles (ancestor selection from prev weights) ──
         // On non-observation substeps, weights are uniform → systematic
         // resampling is identity. Skip resampling in that case.
@@ -929,9 +942,21 @@ pub fn csmc_as(
         {
             ancestor_log_w.fill(f64::NEG_INFINITY);
             for j in 0..n_particles {
+                // gh#audit-H8. Use the pre-resample state cache, not
+                // the post-resample prev_counts. CSMC ancestor
+                // sampling is supposed to categoricalise over the
+                // pre-step particle ensemble; the post-resample
+                // prev_counts permutes that ensemble silently.
+                // Reference slot j_ref keeps its corrected
+                // counts_before via prev_counts[j_ref] above.
+                let counts_before_substep = if j == j_ref {
+                    &prev_counts[j_ref]  // already corrected to ref_rec.counts_before
+                } else {
+                    &prev_counts_for_ancestor[j]
+                };
                 let td = log_transition_density_substep(
                     model,
-                    &prev_counts[j],
+                    counts_before_substep,
                     &ref_rec.flows,
                     &ref_rec.gammas,
                     params,
