@@ -584,6 +584,45 @@ pub fn run_stage(
     }
     drop(nuts_diag);
 
+    // gh#audit-H4. CSMC diagnostics from each chain's post-burn-in sweeps:
+    //   - DegenerateAncestorSampling: pct > 10% (matches the previous
+    //     log::warn! threshold at pgas.rs:970, S4 in the proposal).
+    //   - LowTrajectoryRenewal: < 10% mean post-burn-in (canonical PGAS
+    //     "stuck reference trajectory" signal).
+    // Aggregated across post-burn-in sweeps within a chain (per-sweep
+    // would generate noise; the aggregate is the actionable signal).
+    for (_chain_id, sweeps, _rates) in &all_results {
+        if sweeps.is_empty() { continue; }
+        let mut total_n_degenerate: usize = 0;
+        let mut total_n_substeps:   usize = 0;
+        let mut renewal_sum:        f64   = 0.0;
+        let mut renewal_n:          usize = 0;
+        for sw in sweeps {
+            total_n_degenerate += sw.csmc_diag.n_degenerate;
+            total_n_substeps   += sw.csmc_diag.n_substeps;
+            renewal_sum        += sw.csmc_diag.trajectory_renewal;
+            renewal_n          += 1;
+        }
+        if total_n_substeps > 0 {
+            let pct = total_n_degenerate as f64 / total_n_substeps as f64 * 100.0;
+            if pct > 10.0 {
+                collector.push(DiagnosticKind::DegenerateAncestorSampling {
+                    pct,
+                    n_degenerate: total_n_degenerate,
+                    n_substeps:   total_n_substeps,
+                });
+            }
+        }
+        if renewal_n > 0 {
+            let mean_renewal = renewal_sum / renewal_n as f64;
+            if mean_renewal < 0.10 {
+                collector.push(DiagnosticKind::LowTrajectoryRenewal {
+                    renewal: mean_renewal,
+                });
+            }
+        }
+    }
+
     // Write summary JSON
     write_summary(stage_dir, &all_results, &config, &diagnostics)?;
 

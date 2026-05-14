@@ -1312,6 +1312,49 @@ pub fn run_chains_with_per_chain_params(
         }
     }
 
+    // gh#audit-H4. LowESSAtMLE — wired from the clean-eval
+    // FilterStats already aggregated per chain. Threshold: ess_min < 5%
+    // of n_particles at the MLE θ̂. The MLE is exactly the regime
+    // where ESS *should* be highest; if it isn't, the filter is
+    // struggling at the point estimate and the loglik estimate has
+    // wide variance. ParamNearBound: any chain's clean-eval θ̂ within
+    // 1% of an estimated parameter's bounds (when bounds exist).
+    let n_eval_particles = config.loglik_eval.n_particles;
+    let ess_threshold = 0.05 * n_eval_particles as f64;
+    for chain in &loglik_eval_outcome.per_chain {
+        let fs = &chain.filter_stats;
+        if fs.ess_min.is_finite() && fs.ess_min < ess_threshold {
+            collector.push(DiagnosticKind::LowESSAtMLE {
+                ess_mean:    fs.ess_mean,
+                ess_min:     fs.ess_min,
+                n_particles: n_eval_particles,
+            });
+        }
+        for spec in config.estimated_params.iter() {
+            let v = chain.theta[spec.index];
+            let (lo, hi) = (spec.lower, spec.upper);
+            let span = hi - lo;
+            // Skip when bounds are not informative (zero span or
+            // unbounded sentinels). Both finite + span > 0 is the
+            // meaningful case for "near a bound."
+            if span > 0.0 && lo.is_finite() && hi.is_finite() {
+                let near_lo = (v - lo) / span;
+                let near_hi = (hi - v) / span;
+                if near_lo < 0.01 {
+                    collector.push(DiagnosticKind::ParamNearBound {
+                        param: spec.name.clone(), value: v, bound: lo,
+                        bound_type: "lower".to_string(),
+                    });
+                } else if near_hi < 0.01 {
+                    collector.push(DiagnosticKind::ParamNearBound {
+                        param: spec.name.clone(), value: v, bound: hi,
+                        bound_type: "upper".to_string(),
+                    });
+                }
+            }
+        }
+    }
+
     ChainResults {
         results,
         best_chain,
