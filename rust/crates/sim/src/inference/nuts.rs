@@ -242,7 +242,21 @@ pub fn nuts_step(
         n_accept_steps += n_as;
 
         if !stop_prime && n_prime > 0 {
-            let accept_prob = n_prime as f64 / (n_valid + n_prime) as f64;
+            // gh#audit-H1. Hoffman & Gelman (2014) Algorithm 6 line 4
+            // (slice-NUTS uniform-acceptance combine):
+            //   p_accept = min(n_prime / n_valid, 1)
+            // The previous form `n_prime / (n_valid + n_prime)` was
+            // close to Algorithm 3's biased-toward-newer-subtree
+            // combine and was undocumented — non-standard and a real
+            // departure from H&G. The Alg-6 form is the canonical
+            // slice-NUTS combine for the doubling-tree termination
+            // scheme this implementation uses (cf. nuts.rs:323 slice
+            // indicator).
+            let accept_prob = if n_valid == 0 {
+                1.0
+            } else {
+                (n_prime as f64 / n_valid as f64).min(1.0)
+            };
             if rng.uniform() < accept_prob {
                 z_proposal = z_prime;
                 log_p_proposal = log_p_prime;
