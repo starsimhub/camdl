@@ -27,7 +27,7 @@ model.camdl ──→ camdlc ──→ model.ir.json
 | **Modelling**         | Compartments, stratification (age, space, risk), contact matrices, Erlang staging, forcing functions, interventions, events, balance constraints, scenarios                |
 | **Simulation**        | Gillespie SSA, tau-leap, chain-binomial (Euler-multinomial), ODE (RK4). Extra-demographic stochasticity via `overdispersed()`. Deterministic flows via `deterministic()`. |
 | **Inference**         | IF2 (MLE), PGAS with NUTS (Bayesian posterior), bootstrap particle filter, 1D/2D profiles. Source-to-source autodiff: compiler emits gradient expressions, enabling HMC. |
-| **Fitting workflow**  | `camdl fit scout → refine → validate → pgas` pipeline driven by `fit.toml`. IF2 finds the MLE, PGAS characterizes the posterior with exact complete-data likelihood + NUTS gradient proposals. Parallel chains, random starts, R-hat/ESS diagnostics, posterior trajectory output. |
+| **Fitting workflow**  | Declarative `fit.toml` (named stages → `camdl fit run`). IF2 finds the MLE; PGAS+NUTS characterises the Bayesian posterior with exact complete-data likelihood + analytical gradients from the compiler. Mandatory convergence gates between stages, Richardson dt-convergence audit after every fit, content-addressable provenance. |
 | **Experiments**       | Multi-scenario seed ensembles, Sobol sensitivity analysis, parameter sweeps. Content-addressable output with caching.                                                     |
 | **Model comparison**  | Prequential scoring (elpd, CRPS, PIT) + paired Δ table via `camdl compare`. |
 
@@ -38,22 +38,27 @@ model.camdl ──→ camdlc ──→ model.ir.json
 ```bash
 make build       # build both OCaml and Rust
 make install     # copy binaries to ~/.local/bin
-make test        # full test suite (28 tests)
+make test        # OCaml + Rust + integration (~800 tests in this repo)
 ```
+
+`make install` is required after every rebuild — `camdl` checks the
+on-PATH `camdlc` hash matches its own and refuses to run on a mismatch.
 
 ## Quick start
 
 ```bash
+# Survey the likelihood surface before fitting
+camdl survey he2010_london.camdl --n-points 500 --render
+
 # Simulate an SIR model
 camdl simulate ocaml/golden/sir_basic.camdl \
   --param beta=0.3 --param gamma=0.1 --param N0=1000 --param I0=10 \
   --output traj.tsv
 
-# Fit a model to data
-camdl fit scout fit.toml
-camdl fit refine fit.toml --starts-from fit/output/scout/
-camdl fit validate fit.toml --starts-from fit/output/refine/
-camdl fit status fit.toml
+# Fit a model to data — single declarative pipeline
+camdl fit run fit.toml                    # all stages in order
+camdl fit run fit.toml --stage scout      # one stage
+camdl fit status fit.toml                 # colored summary
 
 # Run a parameter sweep / scenario batch
 camdl batch run sweep.toml
@@ -105,7 +110,8 @@ contains only flat compartments and fully-resolved rates.
 
 ```
 compartments { S, E, I, R }
-stratify(by = age, values = [child, adult])
+dimensions { age = [child, adult] }
+stratify(by = age)
 
 let N_local[a in age] = S[a] + E[a] + I[a] + R[a]
 
@@ -155,8 +161,11 @@ observations {
 (Gamma-Poisson, He et al. 2010). `deterministic(rate)` uses rounding instead of
 Poisson draws. `t` is the current simulation time.
 
-Forcing function types: `sinusoidal`, `periodic` (with range-based schedules
-`on = [7:100, 115:199]`), `piecewise`, `interpolated` (cubic spline or linear).
+Forcing function types: `sinusoidal`, `periodic` (range-based schedules
+`on = [7:100, 115:199]`), `piecewise`, `interpolated` (linear or cubic
+spline), `fourier` (truncated Fourier series), `periodic_spline`
+(periodic B-spline via de Boor — cross-validated bit-identical against
+pomp 6.4 and `scipy.interpolate.BSpline`).
 
 ### More language features
 
@@ -240,38 +249,71 @@ Parallel 1D and 2D profile likelihoods with indicatif progress bars.
 
 ### Fit workflow
 
-The structured fitting pipeline, driven by `fit.toml`:
+The fitting pipeline is one declarative file (`fit.toml`) driven by
+`camdl fit run`. Stages are named and chained inside the TOML; the CLI
+runs them all by default, or one at a time via `--stage`:
 
 ```bash
-# MLE via IF2
-camdl fit scout    fit.toml                          # random starts, landscape discovery
-camdl fit refine   fit.toml --starts-from scout/     # convergent IF2 from best scouts
-camdl fit validate fit.toml --starts-from refine/    # profiles + precise pfilter at MLE
-
-# Bayesian posterior via PGAS
-camdl fit pgas     fit.toml --starts-from validate/  # Gibbs sampler with NUTS proposals
-camdl fit pgas     fit.toml                          # random starts (no prior stage)
-camdl fit pgas     fit.toml --no-nuts                # fall back to MH-within-Gibbs
-
-camdl fit status   fit.toml                          # colored summary of all stages
+camdl fit run fit.toml                    # all stages, in order
+camdl fit run fit.toml --stage scout      # one stage only
+camdl fit run fit.toml --resume --stage pgas  # extend a completed PGAS run
+camdl fit status fit.toml                 # colored summary of all stages
+camdl fit summary <fit-dir>               # Â / gate verdict / MLE table
 ```
 
-**Scout → Refine → Validate** finds the MLE via IF2 (iterated filtering).
-**PGAS** (Particle Gibbs with Ancestor Sampling) characterizes the Bayesian
-posterior. Each Gibbs sweep alternates exact parameter updates (complete-data
-log-likelihood, no PF noise) with CSMC-AS trajectory updates. NUTS
-(No-U-Turn Sampler) proposes parameters jointly using analytical gradients
-from the compiler's source-to-source autodiff.
+Stage entries declare `algorithm` + `backend` explicitly:
 
-PGAS features: parallel chains with random starts, Robbins-Monro adaptive
-proposals, diagonal mass matrix adaptation, R-hat/ESS convergence
-diagnostics, per-sweep trajectory renewal tracking, posterior trajectory
-output (`n_trajectories` in fit.toml).
+```toml
+[stages.scout]
+algorithm   = "if2"            # iterated filtering MLE
+backend     = "chain_binomial"
+init_method = "lhs"            # Latin-hypercube starts (scale-aware)
 
-**Out-of-sample validation:** Add `[holdout]` to fit.toml with holdout data
-files. Scout/refine never see holdout data. Validate reports separate
-train/holdout logliks. Use `camdl data split cases.tsv --at-time 5474` to
-produce train/holdout files.
+[stages.refine]
+algorithm   = "pgas"           # Bayesian posterior via PGAS+NUTS
+backend     = "chain_binomial"
+starts_from = "scout"
+
+[stages.validate]
+algorithm  = "pfilter"         # held-out predictive log-likelihood
+particles  = 4000
+replicates = 8
+```
+
+`camdl fit methods` lists the supported `(algorithm, backend)` pairs.
+
+**IF2** ([Ionides et al. 2015](https://doi.org/10.1073/pnas.1410597112))
+finds the MLE via iterated filtering with cooled perturbations.
+
+**PGAS+NUTS** ([Lindsten et al. 2014](https://jmlr.org/papers/v15/lindsten14a.html);
+[Hoffman & Gelman 2014](https://jmlr.org/papers/v15/hoffman14a.html))
+characterises the Bayesian posterior. Each Gibbs sweep alternates exact
+parameter updates (complete-data log-likelihood — no PF noise) with
+CSMC-AS trajectory updates. NUTS proposes parameters jointly using
+**analytical gradients** the OCaml compiler emits source-to-source as
+`rate_grad` IR fields. No autodiff tape, no JAX dependency.
+
+PGAS features: parallel chains, Robbins-Monro adaptive MH, diagonal
+mass-matrix adaptation, R-hat/ESS convergence diagnostics, per-sweep
+trajectory renewal tracking, posterior trajectory output
+(`n_trajectories` in fit.toml).
+
+**Convergence gates** sit between stages and fail the pipeline rather
+than passing a bad fit through. Scout's gate is two-legged: per-parameter
+chain agreement (Gelman–Rubin-style on IF2 per-iteration parameter means)
+plus a decibans-spread check on chain-level log-likelihoods at high
+particle count. Both legs must pass.
+
+**Richardson dt-convergence check** runs after every fit: re-evaluate the
+loglik on a halving ladder of integrator steps (`dt`, `dt/2`, `dt/4`)
+and refuse to bless a fit whose likelihood is still drifting. Catches
+integration-step pathology that synthetic-recovery tests miss (the same
+`dt` on both sides cancels the bias).
+
+**Out-of-sample validation:** add `[holdout]` to fit.toml with holdout
+data files. Scout / refine never see holdout data; validate reports
+separate train / holdout logliks. Use `camdl data split cases.tsv
+--at-time 5474` to produce train/holdout files.
 
 Specification: [`docs/camdl-inference-spec.md`](docs/camdl-inference-spec.md)
 
@@ -350,12 +392,21 @@ camdlc inspect model.camdl --summary
 ## Testing
 
 ```bash
-make test          # all OCaml + Rust + integration tests (28 tests)
+make test          # OCaml + Rust + integration (~800 tests in this repo)
 make build         # build both languages
 ```
 
-CI runs on every push: OCaml compiler tests, Rust unit tests, clippy (warnings =
-errors), golden file regeneration + diff check, and the full integration suite.
+CI runs on every push: OCaml compiler tests, Rust unit tests, clippy
+(warnings = errors), golden file regeneration + diff check, and the
+full integration suite.
+
+**External oracles run as CI gates.** Where camdl overlaps with reference
+implementations, regression matters: the periodic-B-spline forcing
+agrees with both pomp 6.4 (R) and `scipy.interpolate.BSpline` (Python)
+within 10⁻¹² across a 200-point grid; the He et al. (2010) London
+measles MLE recovers pomp's published values within particle-filter
+Monte Carlo error; the bare SIR final-size hits the
+Kermack–McKendrick closed form. CI blocks merges if camdl drifts.
 
 ---
 
@@ -372,6 +423,22 @@ errors), golden file regeneration + diff check, and the full integration suite.
 | [`docs/user-features.md`](docs/user-features.md)                 | Feature catalog with pomp comparison |
 | [`docs/intro.md`](docs/intro.md)                                 | DSL tutorial                         |
 | [`docs/debugging.md`](docs/debugging.md)                         | Debugging with `camdl eval`          |
+| [`AGENTS.md`](AGENTS.md)                                         | Briefing for AI coding agents working with camdl |
+
+**Using camdl from a downstream project with an AI coding agent?** Start
+with [`AGENTS.md`](AGENTS.md). It covers the canonical workflow, error /
+diagnostic interpretation, when to stop and ask the human, and a
+shallow-clone recipe for pinning the docs locally so the agent can read the
+language spec offline at version-matched cost (~5 MB):
+
+```bash
+git clone --depth 1 --filter=blob:none --sparse \
+    https://github.com/vsbuffalo/camdl .camdl-source
+cd .camdl-source && git sparse-checkout set docs ocaml/golden && cd ..
+```
+
+Add `.camdl-source/` to your project's `.gitignore`; sync with
+`git -C .camdl-source pull`.
 
 ---
 
@@ -380,20 +447,26 @@ errors), golden file regeneration + diff check, and the full integration suite.
 ```
 ocaml/
   lib/compiler/        Lexer, parser, expander (AST → flat IR)
-  lib/ir/              OCaml IR types + serialization
+  lib/ir/              OCaml IR types + serialization (incl.
+                       source-to-source autodiff for rate gradients)
   bin/camdlc.ml        Compiler CLI
   golden/              .camdl fixtures + compiled .ir.json
   test/                Compiler unit + golden tests
 rust/
-  crates/ir/           IR types + serde
-  crates/sim/          Simulation backends + propensity evaluator
-                       + inference (PF, IF2, PGAS, NUTS, PMMH, obs_loglik)
-  crates/observe/      Observation model (likelihood sampling/scoring)
+  crates/ir/           IR types + serde + envelope (version handshake)
+  crates/sim/          Simulation backends (Gillespie, tau-leap,
+                       chain-binomial, ODE) + propensity evaluator
+                       + inference (PF, IF2, PGAS+NUTS, PMMH,
+                       obs_loglik, prequential)
   crates/io/           TSV read/write
-  crates/cli/          CLI: simulate, pfilter, if2, profile, fit,
-                       experiment, voi, eval, serve
+  crates/cli/          camdl: simulate, batch, fit, pfilter, if2,
+                       profile, survey, eval, data, list, show, cat,
+                       compare, label, compile, check, inspect
 ir/
-  schema.json          IR schema (contract between OCaml and Rust)
+  VERSION              Canonical IR schema version (read at compile time
+                       by Rust via include_str!; emitted by OCaml in
+                       every IR envelope)
+  schema.json          IR schema documentation
   golden/              Canonical IR files (Rust test surface)
 docs/                  Specifications and guides
 examples/              Complete worked examples with params + data
@@ -402,14 +475,31 @@ benches/               Criterion benchmarks + performance lab notebook
 
 ## Architecture
 
-The **IR is fully expanded**: the OCaml compiler performs all stratification,
-coupling expansion, and let-binding inlining. The Rust backend sees only flat
-compartments, transitions, and expression ASTs.
+The **IR is fully expanded**: the OCaml compiler performs all
+stratification, coupling expansion, and let-binding inlining. The Rust
+backend sees only flat compartments, transitions, and expression ASTs.
 
-The **expression language** is pure and first-order:
-`Const | Param | Pop | PopSum | Time | BinOp | UnOp | Cond | TimeFunc | TableLookup`.
-Evaluated in bounded time at each simulation step.
+The **expression language** is pure, total, and first-order:
+`Const | Param | Pop | PopSum | Time | Dt | BinOp | UnOp | Cond | TimeFunc | TableLookup | Projected`.
+Evaluated in bounded time at each simulation step. Same property that
+makes dim-checking tractable also makes source-to-source autodiff a
+~30-line OCaml pattern match — exact ∇ log ℒ at one expression-tree
+walk per step, no autodiff tape.
+
+The **IR contract** is enforced via a version envelope
+(`{ ir_version, validated_by, model }`) — Rust's deserializer rejects
+mismatched schemas at the boundary, so OCaml/Rust drift fails CI rather
+than producing wrong-but-parseable simulations.
 
 **Common Random Numbers**: same seed → identical trajectory. Used for
-counterfactual scenario comparisons where pre-intervention trajectories are
-byte-identical.
+counterfactual scenario comparisons where pre-intervention trajectories
+are byte-identical.
+
+**Strict-mode runtime.** Rate-evaluation degeneracies (division by zero,
+NaN/Inf from `Pow`, sqrt of negative, binomial overshoot) produce typed
+errors by default — `SimError::NumericalCollapse` and `NegativeCount`.
+Inference layers catch per-particle-recoverable errors and convert to
+−Inf log-likelihood for the offending particle (resampling kills it,
+the chain continues). Forward simulation halts. Pass
+`--allow-degenerate-rates` to restore the legacy silent-zero on rare
+legitimate cases.
