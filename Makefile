@@ -16,7 +16,20 @@ OCAML_GOLDENS := $(wildcard ocaml/golden/*.camdl)
 
 build: build-ocaml build-rust
 
-build-ocaml:
+# gh#audit-C8 follow-up. ir/VERSION is the canonical IR schema version
+# (Rust reads it via include_str! at compile time). OCaml's dune project
+# root is `ocaml/`, which puts ir/VERSION outside dune's source tree —
+# so we generate a tiny .ml constant module from the file *before* dune
+# runs, guaranteeing both languages bake the same value at build time.
+# The generated file is .gitignore'd; bumping ir/VERSION + `make build`
+# re-emits it.
+OCAML_IR_VERSION_GEN := ocaml/lib/ir/ir_version_generated.ml
+
+$(OCAML_IR_VERSION_GEN): ir/VERSION
+	@printf '(* GENERATED from ir/VERSION by Makefile — do not edit. *)\nlet value = "%s"\n' \
+	    "$$(tr -d '[:space:]' < ir/VERSION)" > $@
+
+build-ocaml: $(OCAML_IR_VERSION_GEN)
 	cd ocaml && dune build
 
 build-rust:

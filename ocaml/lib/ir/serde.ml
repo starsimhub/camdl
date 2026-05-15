@@ -1009,11 +1009,11 @@ let model_of_json (j : Yojson.Safe.t) : model =
         });
   }
 
-(* gh#audit-C8. IR schema version. Must stay in sync with the
-   `ir/VERSION` file at the repo root; the Rust side reads that file
-   via `include_str!`. Bump this in lock-step with any breaking IR
-   change (see CLAUDE.md "Changing the IR schema"). *)
-let ir_version = "0.4"
+(* gh#audit-C8. IR schema version baked at build time from `ir/VERSION`
+   via the dune rule in this directory's `dune` file. Single source of
+   truth: bumping `ir/VERSION` updates both OCaml (this constant) and
+   Rust (envelope.rs's `include_str!`) on the next build. *)
+let ir_version = Ir_version_generated.value
 
 (* gh#audit-C8. Producer marker emitted in the IR envelope. Rust's
    validate.rs checks the marker; if present, can skip OCaml-mirrored

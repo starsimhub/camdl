@@ -5,6 +5,9 @@
 **Compartmental Model Description Language** — a DSL and toolchain for
 stochastic compartmental epidemic models. Write the math, not the code.
 
+Developed at the [Institute for Disease Modeling](https://www.idmod.org/)
+(IDM), Gates Foundation.
+
 An OCaml compiler expands `.camdl` model specifications into a flat JSON
 intermediate representation. A Rust backend simulates, fits, and analyzes them.
 
@@ -507,11 +510,20 @@ rust/
                        profile, survey, eval, data, list, show, cat,
                        compare, label, compile, check, inspect
 ir/
-  VERSION              Canonical IR schema version (read at compile time
-                       by Rust via include_str!; emitted by OCaml in
-                       every IR envelope)
-  schema.json          IR schema documentation
-  golden/              Canonical IR files (Rust test surface)
+  VERSION              Canonical IR schema version. Single source of
+                       truth: Rust reads it via include_str! at compile
+                       time; OCaml reads it via a Makefile-generated
+                       constant module (ocaml/lib/ir/ir_version_generated.ml,
+                       gitignored). Bump this and `make build` to break
+                       the IR contract.
+  schema.json          IR schema reference (note: documents the inner
+                       Model only — the on-wire shape is wrapped in the
+                       envelope { ir_version, validated_by, model }
+                       defined by rust/crates/ir/src/envelope.rs).
+                       Currently stale relative to v0.4; the proposal
+                       to generate it from OCaml is open (see C8).
+  golden/              Canonical IR files (Rust test surface,
+                       envelope-wrapped)
 docs/                  Specifications and guides
 examples/              Complete worked examples with params + data
 benches/               Criterion benchmarks + performance lab notebook
