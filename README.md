@@ -5,6 +5,9 @@
 **Compartmental Model Description Language** — a DSL and toolchain for
 stochastic compartmental epidemic models. Write the math, not the code.
 
+Developed at the [Institute for Disease Modeling](https://www.idmod.org/)
+(IDM), Gates Foundation.
+
 An OCaml compiler expands `.camdl` model specifications into a flat JSON
 intermediate representation. A Rust backend simulates, fits, and analyzes them.
 
