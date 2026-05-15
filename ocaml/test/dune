@@ -1,13 +1,16 @@
 (test
  (name test_ir_roundtrip)
+ (modules test_ir_roundtrip)
  (libraries ir alcotest))
 
 (test
  (name test_compiler)
+ (modules test_compiler)
  (libraries compiler ir alcotest)
  (deps (source_tree ../golden)))
 
 (test
  (name test_dimcheck)
+ (modules test_dimcheck)
  (libraries compiler ir alcotest qcheck-core qcheck-alcotest)
  (deps (source_tree ../golden)))

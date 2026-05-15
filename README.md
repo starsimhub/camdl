@@ -33,16 +33,60 @@ model.camdl ──→ camdlc ──→ model.ir.json
 
 ---
 
-## Build
+## Install
+
+### Prerequisites
+
+camdl has two language runtimes. You need both available before
+`make build` will work:
+
+- **OCaml ≥ 5.2 + opam.** macOS: `brew install opam`. Linux: see
+  [opam.ocaml.org/doc/Install.html](https://opam.ocaml.org/doc/Install.html).
+  Then create a switch:
+
+  ```bash
+  opam init -y                    # first-time only
+  opam switch create 5.2.0        # match what CI uses
+  eval $(opam env)
+  ```
+
+- **Rust stable** via rustup ([rustup.rs](https://rustup.rs/)):
+  `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`,
+  then `rustup default stable`.
+
+- **Make + git + python3** (only needed for `make update-golden` and the
+  integration test driver — usually already installed).
+
+Once-after-cloning, install the OCaml package dependencies declared in
+`ocaml/*.opam`:
 
 ```bash
-make build       # build both OCaml and Rust
-make install     # copy binaries to ~/.local/bin
+cd ocaml
+opam install . --deps-only --with-test --yes
+cd ..
+```
+
+This fetches `dune`, `menhir`, `yojson`, `fmt`, `alcotest`, and the
+qcheck stack. Skipping it produces errors like `Library "yojson" not
+found` or `Program menhir not found in the tree or in PATH` — those
+mean the opam install step hasn't run, not that the build is broken.
+
+### Build
+
+```bash
+make build       # builds both OCaml and Rust
+make install     # copies camdl + camdlc to ~/.local/bin
 make test        # OCaml + Rust + integration (~800 tests in this repo)
 ```
 
 `make install` is required after every rebuild — `camdl` checks the
 on-PATH `camdlc` hash matches its own and refuses to run on a mismatch.
+The post-install message warns if another `camdl` (e.g. a leftover
+`cargo install`) is shadowing on PATH.
+
+Make sure `~/.local/bin` is on your PATH; on most shells that means
+adding `export PATH="$HOME/.local/bin:$PATH"` to `~/.zshrc` or
+`~/.bashrc`.
 
 ## Quick start
 
