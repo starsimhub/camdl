@@ -93,23 +93,33 @@ adding `export PATH="$HOME/.local/bin:$PATH"` to `~/.zshrc` or
 
 ## Quick start
 
-```bash
-# Survey the likelihood surface before fitting
-camdl survey he2010_london.camdl --n-points 500 --render
+These run as written from a fresh clone:
 
-# Simulate an SIR model
+```bash
+# Compile + dim-check a model
+camdl check ocaml/golden/sir_basic.camdl
+
+# Simulate it
 camdl simulate ocaml/golden/sir_basic.camdl \
   --param beta=0.3 --param gamma=0.1 --param N0=1000 --param I0=10 \
   --output traj.tsv
 
-# Fit a model to data — single declarative pipeline
-camdl fit run fit.toml                    # all stages in order
-camdl fit run fit.toml --stage scout      # one stage
-camdl fit status fit.toml                 # colored summary
+# Inspect compiled structure
+camdl inspect ocaml/golden/sir_basic.camdl --summary
+```
 
-# Run a parameter sweep / scenario batch
-camdl batch run sweep.toml
-camdl batch status sweep.toml
+To go beyond the goldens — fitting your own model to data, mapping the
+likelihood surface with `camdl survey`, running scenario sweeps with
+`camdl batch run` — see the canonical workflow in
+[`AGENTS.md`](AGENTS.md#canonical-workflow-follow-this-order). The
+typical loop is:
+
+```bash
+camdl check model.camdl                   # dim-check
+camdl simulate model.camdl --param ...    # sanity-check trajectory
+camdl survey model.camdl --fit fit.toml   # likelihood landscape
+camdl fit run fit.toml                    # all inference stages
+camdl fit summary <fit-dir>               # R̂ / ESS / MLE table
 ```
 
 ---
